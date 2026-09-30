@@ -80,7 +80,12 @@ import {
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
-import { REALISTIC_STRUCTURE_MESHES } from './realistic-budget';
+import {
+  REALISTIC_REMOTE_RIDERS,
+  REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_STRUCTURE_MESHES,
+} from './realistic-budget';
+import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import { BUILDING_ROLES, BUILDING_VARIANTS, BUILT_KINDS, buildingPlan } from './buildings';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
@@ -108,6 +113,8 @@ import {
   RealisticStructureBelts,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
+  realisticRemoteSplit,
+  STYLISED_RIDER_SLOTS,
   gpuFinished,
   programsLinked,
   SCATTER_INSTANCE_CAPACITY,
@@ -2642,6 +2649,42 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     belt.dispose();
   });
 
+  it('draws a whole room of other riders as more instances of the same four meshes — #783', () => {
+    expect(STYLISED_RIDER_SLOTS).toBe(3 + MAXIMUM_DRAWN_SET);
+    const belt = new RiderBelt();
+    const room = Array.from({ length: MAXIMUM_DRAWN_SET }, (_, index) =>
+      riderAt({ z: 5 + index }, {}, 0, 'remote'),
+    );
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), ...room]);
+    expect(belt.group.children).toHaveLength(4);
+    const { bodies, torsos, cranksets, limbs } = belt.meshes;
+    for (const mesh of [bodies, torsos, cranksets]) expect(mesh.count).toBe(2 + MAXIMUM_DRAWN_SET);
+    expect(limbs.count).toBe((2 + MAXIMUM_DRAWN_SET) * LEG_BONE_COUNT);
+    // A remote rider wears the blue kit untinted: told apart from the pacer.
+    expect(tintOf(bodies, 2)).not.toEqual(tintOf(bodies, 1));
+    belt.dispose();
+  });
+
+  it('draws the nearest remote riders realistically in the realistic world, the next stylised, and no more — #783', () => {
+    const remotes = Array.from({ length: 60 }, (_, index) =>
+      riderAt({ z: 60 - index }, {}, 0, 'remote'),
+    );
+    const split = realisticRemoteSplit([riderAt(), riderAt({ z: 3 }, {}, 0, 'bot'), ...remotes]);
+    expect(split.realistic.map((m) => m.kind)).toEqual([
+      'rider',
+      'bot',
+      ...Array<string>(REALISTIC_REMOTE_RIDERS).fill('remote'),
+    ]);
+    // The nearest two, whatever order they arrived in.
+    expect(split.realistic.slice(2).map((m) => m.z)).toEqual([1, 2]);
+    expect(split.stylised).toHaveLength(REALISTIC_REMOTE_STYLISED_RIDERS);
+    expect(split.stylised.map((m) => m.z)).toEqual(
+      Array.from({ length: REALISTIC_REMOTE_STYLISED_RIDERS }, (_, i) => i + 3),
+    );
+    // With no room there is nothing for the stylised belt in the realistic world.
+    expect(realisticRemoteSplit([riderAt()]).stylised).toEqual([]);
+  });
+
   it('carries a colour on every vertex, which is what keeps it one material', () => {
     const belt = new RiderBelt();
     for (const mesh of [
@@ -2675,8 +2718,9 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     // that grew its buffers on the frame a ghost appeared would allocate in the
     // render loop, which is #240's NFR-3.
     const belt = new RiderBelt();
-    expect(belt.meshes.bodies.instanceMatrix.count).toBe(3);
-    expect(belt.meshes.limbs.instanceMatrix.count).toBe(3 * LEG_BONE_COUNT);
+    // #783: every rider a room's interest set can hold, as well as the three.
+    expect(belt.meshes.bodies.instanceMatrix.count).toBe(STYLISED_RIDER_SLOTS);
+    expect(belt.meshes.limbs.instanceMatrix.count).toBe(STYLISED_RIDER_SLOTS * LEG_BONE_COUNT);
     expect(belt.meshes.bodies.count).toBe(0);
     belt.dispose();
   });
@@ -2688,9 +2732,9 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     // a zero-length colour buffer and silently drops all three.
     const belt = new RiderBelt();
     for (const mesh of [belt.meshes.bodies, belt.meshes.cranksets]) {
-      expect(mesh.instanceColor?.count).toBe(3);
+      expect(mesh.instanceColor?.count).toBe(STYLISED_RIDER_SLOTS);
     }
-    expect(belt.meshes.limbs.instanceColor?.count).toBe(3 * LEG_BONE_COUNT);
+    expect(belt.meshes.limbs.instanceColor?.count).toBe(STYLISED_RIDER_SLOTS * LEG_BONE_COUNT);
     belt.dispose();
   });
 

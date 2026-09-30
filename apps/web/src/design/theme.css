@@ -3139,6 +3139,16 @@ p > label + input[type='file'] {
   white-space: nowrap;
 }
 
+/* #783: the room's one control, "Follow" — a 44 px secondary button like the
+   side camera's Stop, its whole name visually hidden past the word shown.
+   ⚠️ NOT measured at the ride's nine viewports: no browser harness here rides
+   in a room yet, so where it lands beside the sound row on a phone is owed to
+   #733's device check, stated rather than claimed. */
+.oyl-hud__follow {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
 .oyl-hud__control {
   flex: 1;
   background: var(--oyl-color-hud-surface);

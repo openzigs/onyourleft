@@ -203,6 +203,40 @@ export interface ChasedGap {
   readonly outcome?: GhostOutcome | undefined;
 }
 
+/**
+ * The room, on the HUD — #783: how many other riders are near, and the gap to
+ * ONE rider the rider chose. **Never a list, and never an order**: ADR 0021
+ * D-6 and ADR 0028 D-7.7 forbid a ranked list during a ride, and ruling Q8
+ * (2026-09-28) is "only the gap to one chosen rider". A count says nothing
+ * about who is ahead of whom.
+ */
+export interface RoomHud {
+  /** How many other riders are drawn near this one — the interest set's size. */
+  readonly nearby: number;
+  /** The one rider the rider chose to follow, or `undefined` until they choose. */
+  readonly chosen?: ChosenRider | undefined;
+}
+
+/** The one rider followed. @see RoomHud */
+export interface ChosenRider {
+  /**
+   * What they are called on the HUD. ⚠️ Only ever the room's public projection
+   * of the athlete (#774, ADR 0028 D-6.5) — and until a room publishes one
+   * (#784, #785), `Rider N`, which names a seat and no person.
+   */
+  readonly label: string;
+  /** Signed as `pacer/gap.ts` signs it: positive when they are ahead. */
+  readonly gap: PacerGap;
+  /**
+   * Their power-to-weight, when the room publishes one — ruling Q17
+   * (2026-09-28): **W/kg only, never watts**, beside another rider's name.
+   * There is deliberately no field here that could carry watts: a frame
+   * carries neither power nor mass (`@onyourleft/protocol`), and this type is
+   * the whole of what the HUD may say about another rider.
+   */
+  readonly wattsPerKilogram?: number | undefined;
+}
+
 /** Everything the HUD needs. */
 export interface HudInput {
   readonly state: GameState;
@@ -222,6 +256,12 @@ export interface HudInput {
    * under the pacer's label — see {@link gapReadings}.
    */
   readonly chases?: readonly ChasedGap[] | undefined;
+  /**
+   * The room, on a ride in one — #783. Absent on every other ride, so a ride
+   * with no room reads exactly as it did. Chosen at the start of the ride and
+   * held for it, so its fields never appear or vanish mid-ride.
+   */
+  readonly room?: RoomHud | undefined;
   /**
    * Which units the rider reads in (#238).
    *
@@ -328,8 +368,46 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
     ...gapReadings(input),
+    ...roomReadings(input.room),
     ...wind,
   ];
+}
+
+/**
+ * The room's two fields — #783: the one chosen rider's gap, and how many are
+ * near. After the gaps and before the wind, so every other field keeps its
+ * index on a room ride. @see RoomHud
+ */
+function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
+  if (room === undefined) return [];
+  const chosen = room.chosen;
+  const followed: HudReading =
+    chosen === undefined
+      ? { key: 'room-rider', label: 'Following', value: NO_READING, unit: '', stale: false }
+      : withPowerToWeight(timeGap('room-rider', chosen.label, chosen.gap), chosen.wattsPerKilogram);
+  return [
+    followed,
+    {
+      key: 'room-nearby',
+      label: 'Nearby',
+      value: String(Math.max(0, Math.floor(room.nearby))),
+      unit: room.nearby === 1 ? 'rider' : 'riders',
+      stale: false,
+    },
+  ];
+}
+
+/**
+ * Ruling Q17: beside another rider's name, W/kg and never watts — added to the
+ * phrase under the gap, one decimal, and only when the room published one.
+ */
+function withPowerToWeight(reading: HudReading, wattsPerKilogram: number | undefined): HudReading {
+  if (wattsPerKilogram === undefined || !Number.isFinite(wattsPerKilogram)) return reading;
+  const ratio = `${wattsPerKilogram.toFixed(1)} W/kg`;
+  return {
+    ...reading,
+    detail: reading.detail === undefined ? ratio : `${reading.detail}, ${ratio}`,
+  };
 }
 
 /**
@@ -378,16 +456,29 @@ function gapReading(chase: ChasedGap): HudReading {
   // test can name the one it means. `HudPanel` uses the key as its React key.
   const key = `gap-${chase.to}`;
   const label = LABELS[chase.to];
-  if (chase.outcome !== undefined) {
-    // ⚠️ Before every other branch, including the stationary one. A rider who
-    // has stopped pedalling still gets a settled result, where the live gap
-    // would be a dash — the result does not depend on anybody's current speed
-    // and pretending it is unknown would hide something that is known.
-    const { value, detail } = SETTLED[chase.outcome];
-    // `word` because all three of these are — see {@link HudReading.word} for
-    // what a word does to a 7 rem grid track at 2.5 rem.
-    return { key, label, value, unit: '', detail, stale: false, word: true };
-  }
+  // ⚠️ The outcome before every other branch, including the stationary one. A
+  // rider who has stopped pedalling still gets a settled result, where the
+  // live gap would be a dash — the result does not depend on anybody's current
+  // speed and pretending it is unknown would hide something that is known.
+  return chase.outcome === undefined
+    ? timeGap(key, label, chase.gap)
+    : settledGap(key, label, chase.outcome);
+}
+
+/** A settled race's word where the number was — #259. @see SETTLED */
+function settledGap(key: string, label: string, outcome: GhostOutcome): HudReading {
+  // `word` because all three of these are — see {@link HudReading.word} for
+  // what a word does to a 7 rem grid track at 2.5 rem.
+  const { value, detail } = SETTLED[outcome];
+  return { key, label, value, unit: '', detail, stale: false, word: true };
+}
+
+/**
+ * A live gap in seconds under `label`, the direction in words about the
+ * thing the label names — #255, and since #783 the room's chosen rider too.
+ */
+function timeGap(key: string, label: string, gap: PacerGap): HudReading {
+  const chase = { gap };
   const seconds = chase.gap.seconds;
   if (seconds === undefined) {
     // A stationary rider is closing no gap at all, and any number here would be

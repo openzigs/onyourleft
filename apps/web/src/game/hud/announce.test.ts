@@ -324,8 +324,27 @@ describe('priority is an ORDER, not a politeness', () => {
     ]);
     // #551: the three safety statuses, then the side camera's lost link —
     // spoken to everyone, and ranked below the climb (see below).
-    expect(ALWAYS_SPOKEN).toEqual([...PRIORITY.slice(0, 3), 'side-camera-lost']);
+    // #782: and the room's lost connection, for the same reason.
+    expect(ALWAYS_SPOKEN).toEqual([...PRIORITY.slice(0, 3), 'side-camera-lost', 'room-lost']);
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
+  });
+
+  it('ranks the room’s lost connection below the side camera and above every reading, and says it with announcements off — #782', () => {
+    const room = PRIORITY.indexOf('room-lost');
+    expect(room).toBe(PRIORITY.indexOf('side-camera-lost') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(room).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+    const { said } = run(
+      [
+        {
+          now: 0,
+          events: [{ kind: 'room-lost', text: 'Room connection lost: reconnecting.' }],
+        },
+      ],
+      { ...DEFAULT_ANNOUNCEMENTS, enabled: false },
+    );
+    expect(said).toEqual(['Room connection lost: reconnecting.']);
   });
 
   it('puts a climb ahead below the safety events and above every reading — #399', () => {

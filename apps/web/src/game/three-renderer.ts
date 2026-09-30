@@ -396,9 +396,12 @@ import {
 import {
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
+  REALISTIC_REMOTE_RIDERS,
+  REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
+import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import {
   FOLIAGE_TINT,
   MASONRY_TINT,
@@ -560,16 +563,60 @@ const RIDER_TINTS: Record<RiderMarker['kind'], number> = {
   rider: 0xffffff,
   bot: 0xc2410c,
   ghost: 0x64748b,
+  // #783: another real rider in a room wears the blue kit untinted — a rider
+  // in blue, where the pacer is orange over it and the ghost is grey.
+  remote: 0xffffff,
 };
 
 /**
- * The three, in the order {@link RiderBelt} reserves instance slots for.
- *
- * ⚠️ **Derived from the tints rather than typed out**, so a fourth marker kind
- * added to `port.ts` lands here automatically and gets a tint or a compile
- * error rather than being silently undrawn.
+ * How many riders the stylised belts can draw at once — #783: the rider, the
+ * pacer, the ghost, and every other rider a room's interest set can hold
+ * (`net/interest.ts` §`MAXIMUM_DRAWN_SET`, K ≤ 100 plus the hysteresis). All
+ * of them are instances of the SAME four meshes, so this is a capacity and not
+ * a draw call: `game.browser.spec.ts` §"#783" counts the calls with the room
+ * full and holds them at `SCENE_DRAW_CALLS`.
  */
-const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
+export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
+
+/**
+ * Which remote riders a realistic frame draws, and how — #783, the rule the
+ * issue asks to be stated. The rider, the pacer and the ghost are the
+ * realistic world's own; of the remote riders, the
+ * `realistic-budget.ts` §`REALISTIC_REMOTE_RIDERS` nearest to the rider wear
+ * the realistic body too, the next §`REALISTIC_REMOTE_STYLISED_RIDERS` are
+ * drawn by the STYLISED belt, and the rest are not drawn in this world at all
+ * — which is what keeps the frame inside §`REALISTIC_FRAME_TRIANGLES` (the
+ * arithmetic is there). Nearest by straight-line distance from the rider's
+ * own marker; internal to the renderer, and never shown as an order.
+ *
+ * ⚠️ **A realistic frame mixes the two worlds' riders here, and only here**,
+ * which ADR 0026 D-3 otherwise forbids: #783 names exactly this ("drawn with
+ * the stylised rider or an impostor, per a stated rule") so that #681's pack
+ * of realistic riders stays blocked on the tablet's measurement.
+ * `three-renderer.test.ts` §"#783" holds the split; the browser gate's
+ * realistic load counts the triangles it leaves a frame.
+ */
+export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
+  readonly realistic: readonly RiderMarker[];
+  readonly stylised: readonly RiderMarker[];
+} {
+  const own = markers.find((marker) => marker.kind === 'rider');
+  const local = markers.filter((marker) => marker.kind !== 'remote');
+  const far = (marker: RiderMarker): number =>
+    own === undefined ? 0 : Math.hypot(marker.x - own.x, marker.y - own.y, marker.z - own.z);
+  const remote = markers
+    .filter((marker) => marker.kind === 'remote')
+    .map((marker) => ({ marker, far: far(marker) }))
+    .sort((a, b) => a.far - b.far)
+    .map((each) => each.marker);
+  return {
+    realistic: [...local, ...remote.slice(0, REALISTIC_REMOTE_RIDERS)],
+    stylised: remote.slice(
+      REALISTIC_REMOTE_RIDERS,
+      REALISTIC_REMOTE_RIDERS + REALISTIC_REMOTE_STYLISED_RIDERS,
+    ),
+  };
+}
 
 /**
  * The kit each kind wears UNDER its tint — #623. The rider wears the house kit
@@ -587,6 +634,7 @@ const RIDER_KITS: Readonly<Record<RiderMarker['kind'], RiderKit>> = {
   rider: HOUSE_KIT,
   bot: PACER_KIT,
   ghost: PACER_KIT,
+  remote: PACER_KIT,
 };
 
 /**
@@ -2582,7 +2630,7 @@ export class RiderBelt {
    * so that case is caught twice over — the clear stays because two riders can
    * swap slots at the same place on the same frame.
    */
-  readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
+  readonly #posed = new Float64Array(STYLISED_RIDER_SLOTS * POSE_KEY.length).fill(Number.NaN);
   /** Which kind is in which slot, as one string, so a change is one compare. */
   #layout = '';
   /** The kit each kind wears, the rider's their own choice. @see setRiderKit */
@@ -2608,7 +2656,8 @@ export class RiderBelt {
   readonly #roll = new Quaternion();
 
   constructor() {
-    const riders = RIDDEN_KINDS.length;
+    // #783: every rider a room can put on the road, as instances. @see STYLISED_RIDER_SLOTS
+    const riders = STYLISED_RIDER_SLOTS;
     // #623: each rider wears its own kind's kit under its tint. @see RIDER_KITS
     withKitPerInstance(this.#materials.lit);
     withKitPerInstance(this.#materials.flat);
@@ -2740,7 +2789,7 @@ export class RiderBelt {
     let casters = 0;
     let posed = false;
     for (const marker of drawn) {
-      if (slot >= RIDDEN_KINDS.length) {
+      if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
       posed = this.#placeOne(slot, marker) || posed;
@@ -3022,7 +3071,7 @@ export class ContactShadowBelt {
   }
 
   constructor() {
-    this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, RIDDEN_KINDS.length);
+    this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, STYLISED_RIDER_SLOTS);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.count = 0;
     // For `RiderBelt`'s reason: every rider is within metres of the camera.
@@ -3059,7 +3108,7 @@ export class ContactShadowBelt {
     }
     let slot = 0;
     for (const marker of markers) {
-      if (slot >= RIDDEN_KINDS.length) {
+      if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
       if (!placeContactShadow(marker, sun, this.#shadow)) {
@@ -3207,10 +3256,10 @@ export class RiderSilhouetteBelt {
       new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]), 3),
     );
     geometry.setIndex([0, 2, 1, 0, 3, 2]);
-    this.#throws = new InstancedBufferAttribute(new Float32Array(RIDDEN_KINDS.length * 2), 2);
+    this.#throws = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS * 2), 2);
     this.#throws.setUsage(DynamicDrawUsage);
     geometry.setAttribute('oylThrow', this.#throws);
-    this.#mesh = new InstancedMesh(geometry, this.#material, RIDDEN_KINDS.length);
+    this.#mesh = new InstancedMesh(geometry, this.#material, STYLISED_RIDER_SLOTS);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.count = 0;
     this.#mesh.frustumCulled = false;
@@ -3255,7 +3304,7 @@ export class RiderSilhouetteBelt {
     }
     let slot = 0;
     for (const marker of markers) {
-      if (slot >= RIDDEN_KINDS.length) {
+      if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
       if (!silhouetteThrow(marker, sun, this.#throw)) {
@@ -9218,7 +9267,8 @@ export class RealisticRiderBelt {
       constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
     );
     const helmetSource = helmetOf(body);
-    const riders = RIDDEN_KINDS.length;
+    // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
+    const riders = 3 + REALISTIC_REMOTE_RIDERS;
     const bicycle = realisticBicycleMeshes(maps, riders);
     this.#frame = bicycle.frame;
     this.#rubber = bicycle.rubber;
@@ -10231,6 +10281,28 @@ export function realisticBicycleTriangles(): number {
 }
 
 /**
+ * The triangles ONE stylised rider submits — its bicycle and body, upper body,
+ * crankset and four leg segments — #783, for `realistic-budget.ts`
+ * §`REALISTIC_REMOTE_STYLISED_RIDERS`' arithmetic, which draws remote riders
+ * past the nearest two with the stylised rider in the realistic world.
+ *
+ * @test-facing held by `realistic-budget.test.ts` §"#783"
+ */
+export function stylisedRiderTriangles(): number {
+  const belt = new RiderBelt();
+  const { bodies, torsos, cranksets, limbs } = belt.meshes;
+  const count = (geometry: BufferGeometry): number =>
+    (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
+  const total =
+    count(bodies.geometry) +
+    count(torsos.geometry) +
+    count(cranksets.geometry) +
+    count(limbs.geometry) * LEG_BONE_COUNT;
+  belt.dispose();
+  return total;
+}
+
+/**
  * How much darker than its neighbour a part of a realistic building is drawn,
  * by what it is made of — #500. A plinth, a ridge and a door wear the same
  * photograph as the wall, the roof or the frame beside them
@@ -11025,6 +11097,23 @@ export function realisticSilhouetteOf(view: GameView): RiderSilhouette | undefin
   return view instanceof ThreeGameView ? view.realisticSilhouette : undefined;
 }
 
+/** #783's browser-gate controls. @see remoteRiderControlOf */
+export type RemoteRiderControl = 'none' | 'each-own-mesh' | 'no-realistic-rule';
+
+/**
+ * #783's two controls, for the browser gate and nothing else: `'each-own-mesh'`
+ * draws every remote rider in a rider belt of its own — four draw calls each,
+ * which the stylised draw-call assertion must then catch — and
+ * `'no-realistic-rule'` hands a realistic frame's remote riders all to the
+ * stylised belt, which the triangle assertion must then catch.
+ *
+ * @test-facing called by `game-harness.ts`; nothing in the render path sets a
+ * control
+ */
+export function remoteRiderControlOf(view: GameView, control: RemoteRiderControl): void {
+  if (view instanceof ThreeGameView) view.setRemoteControl(control);
+}
+
 /**
  * Draws a view's realistic riders, or leaves them out while their shadows are
  * still cast — #626: the browser gate reads a shadow the rider would otherwise
@@ -11543,6 +11632,14 @@ class ThreeGameView implements GameView {
    */
   readonly #riders = new RiderBelt();
   /**
+   * #783's browser-gate controls, and nothing the product sets: every remote
+   * rider in a mesh of its own, or the realistic world's rule for them off.
+   * @see remoteRiderControlOf
+   */
+  #remoteControl: RemoteRiderControl = 'none';
+  /** The belts the `'each-own-mesh'` control draws remote riders in, one each. */
+  readonly #ownMeshes: RiderBelt[] = [];
+  /**
    * The kit the rider chose, as {@link riderKitFor} answered for it — #623.
    * Held here as well as on the belts because the realistic belt is built
    * later, when a world has loaded, and must be dressed then too.
@@ -11829,10 +11926,22 @@ class ThreeGameView implements GameView {
       frame.terrain.mesh,
       frame.world.sun,
     );
-    this.#realistic?.riders.place(frame.markers);
+    // #783: a realistic frame draws the nearest remote riders realistically,
+    // the next few stylised, and no more. @see realisticRemoteSplit
+    const realisticFrame = this.#drawing === 'realistic';
+    const split =
+      realisticFrame && this.#remoteControl !== 'no-realistic-rule'
+        ? realisticRemoteSplit(frame.markers)
+        : undefined;
+    this.#realistic?.riders.place(split?.realistic ?? frame.markers);
     // #679: the gantries at the lines in reach, and none anywhere else.
     this.#realistic?.gantries.update(frame.lines);
-    this.#updateMarkers(frame.markers);
+    this.#updateMarkers(
+      split?.stylised ??
+        (realisticFrame
+          ? frame.markers.filter((marker) => marker.kind === 'remote')
+          : frame.markers),
+    );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
   }
@@ -11984,7 +12093,10 @@ class ThreeGameView implements GameView {
     }
     const drawing = realistic ? this.#realistic : undefined;
     this.#scatter.setShown(!realistic);
-    this.#riders.setShown(!realistic);
+    // #783: shown in both worlds — in the realistic one it draws only the
+    // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
+    // with none. @see #updateMarkers
+    this.#riders.setShown(true);
     this.#skyDome.mesh.visible = !realistic;
     this.#realistic?.setShown(realistic);
     this.#realistic?.grounding.setShown(realistic && this.#groundBlobsShown);
@@ -12346,6 +12458,7 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
+    for (const belt of this.#ownMeshes) belt.dispose();
     this.#contactShadows.dispose();
     this.#shadowCatcher.geometry.dispose();
     this.#shadowCatcher.material.dispose();
@@ -12524,10 +12637,32 @@ class ThreeGameView implements GameView {
   }
 
   #updateMarkers(markers: readonly RiderMarker[]): void {
+    if (this.#remoteControl === 'each-own-mesh') {
+      // #783's control: the shape a room would cost if each rider were a mesh.
+      const remote = markers.filter((marker) => marker.kind === 'remote');
+      this.#riders.place(markers.filter((marker) => marker.kind !== 'remote'));
+      while (this.#ownMeshes.length < remote.length) {
+        const belt = new RiderBelt();
+        belt.addTo(this.#scene);
+        this.#ownMeshes.push(belt);
+      }
+      this.#ownMeshes.forEach((belt, index) => {
+        const one = remote[index];
+        belt.place(one === undefined ? [] : [one]);
+      });
+      return;
+    }
+    for (const belt of this.#ownMeshes) belt.hide();
     // #368. One call for all three, and a frame that carries none draws none —
     // `RiderBelt.place` sets every mesh's count from what it was handed, so
-    // there is no "hide the ones that went" pass left to forget.
+    // there is no "hide the ones that went" pass left to forget. #783: and for
+    // a room's riders, as more instances of the same four meshes.
     this.#riders.place(markers);
+  }
+
+  /** @see remoteRiderControlOf */
+  setRemoteControl(control: RemoteRiderControl): void {
+    this.#remoteControl = control;
   }
 
   /**

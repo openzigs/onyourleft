@@ -577,3 +577,65 @@ describe('the world is drawn between the two most recent steps — #323', () => 
     });
   });
 });
+
+describe('correcting toward a room — #782', () => {
+  /** Two identical rides, one corrected at 10 s; the odometers every step after. */
+  /** The hilly setup's air and mass on a level road, so 20 m further on is the same road. */
+  function levelRoute(): SimulationSetup {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 100; index += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (index * 10) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(10),
+      });
+    }
+    return { ...hillyRoute(), profile: routeProfile(points) };
+  }
+
+  function twoRides(error: number): { plain: number[]; corrected: number[] } {
+    const plain = new GameSimulation(levelRoute());
+    const corrected = new GameSimulation(levelRoute());
+    const out = { plain: [] as number[], corrected: [] as number[] };
+    for (let ms = 0; ms <= 20_000; ms += 50) {
+      if (ms === 10_000) corrected.correctToward(error);
+      plain.advanceTo(ms, PEDALLING);
+      corrected.advanceTo(ms, PEDALLING);
+      out.plain.push(plain.state.ride.distance);
+      out.corrected.push(corrected.state.ride.distance);
+    }
+    return out;
+  }
+
+  it('converges on the room’s position over CORRECTION_SECONDS, and then rides on', () => {
+    const { plain, corrected } = twoRides(20);
+    const at = (ms: number): number => ms / 50;
+    // Nothing moves before it is asked.
+    expect(corrected[at(9_950)]).toBe(plain[at(9_950)]);
+    // Half way through the two seconds, half the correction: 22 of its 40 steps, 0.5 m each.
+    expect((corrected[at(11_000)] as number) - (plain[at(11_000)] as number)).toBeCloseTo(11, 6);
+    // All of it by the end, and exactly that from then on — the physics is untouched.
+    expect((corrected[at(12_050)] as number) - (plain[at(12_050)] as number)).toBeCloseTo(20, 6);
+    expect((corrected[at(20_000)] as number) - (plain[at(20_000)] as number)).toBeCloseTo(20, 6);
+  });
+
+  it('never moves the rider backwards along the route when the room has them behind', () => {
+    const { corrected } = twoRides(-500);
+    for (let i = 1; i < corrected.length; i += 1) {
+      expect(corrected[i] as number).toBeGreaterThanOrEqual(corrected[i - 1] as number);
+    }
+    // Held, not reversed: the correction stayed within what each step rode.
+    expect(corrected.at(-1) as number).toBeGreaterThanOrEqual(0);
+  });
+
+  it('is off on a ride with no room', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    expect(simulation.correcting).toBe(false);
+    simulation.correctToward(20);
+    expect(simulation.correcting).toBe(true);
+    for (let ms = 0; ms <= 3_000; ms += 50) simulation.advanceTo(ms, PEDALLING);
+    expect(simulation.correcting).toBe(false);
+  });
+});

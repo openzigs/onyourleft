@@ -104,6 +104,17 @@ import {
 } from './rider';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
+import type { RoomConnection, RoomPort } from '../net/room-port';
+import {
+  nextToFollow,
+  ROOM_LOST_SPOKEN,
+  ROOM_NOTICE_LABEL,
+  roomFrame,
+  roomNotice,
+  roomRideState,
+  type RoomFrame,
+  type RoomRideState,
+} from './room-ride';
 import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
@@ -338,6 +349,21 @@ export interface GameViewProps {
    * starts a ride through the real shell and reads the HUD, which pins it.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * Other real riders — #782, #783: the room port `main.tsx` builds
+   * (`net/room-port.ts`). A ride joins a room only when it also has a
+   * {@link roomId}; without one, or with no instance, it rides exactly as it
+   * did before rooms existed (ADR 0036 D-3: a rider with no instance loses
+   * nothing).
+   */
+  readonly room?: RoomPort | undefined;
+  /**
+   * Which room a ride joins. ⚠️ **Nothing in the product supplies one yet** —
+   * entering a room by its code is #784's — so today only a test and the
+   * browser gate ride in a room; the port is wired so that #784 is a field
+   * and not a seam.
+   */
+  readonly roomId?: string | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -781,6 +807,18 @@ export function GameView(props: GameViewProps): JSX.Element {
    * construction rather than of a guard somebody has to keep.
    */
   const gradientRef = useRef<GradientSession | undefined>(undefined);
+  /**
+   * The room this ride is in, while it is in one — #782. A ref for
+   * {@link gradientRef}'s reason: the loop reads it every frame, and its
+   * `status()` is read during the render the tick schedules.
+   */
+  const roomRef = useRef<RoomConnection | undefined>(undefined);
+  /** What the room frame remembers between frames. @see room-ride.ts */
+  const roomStateRef = useRef<RoomRideState>(roomRideState());
+  /** The last room frame, for the render the tick schedules. */
+  const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
+  /** Whether the room's lost connection has been said, so it is said once per loss. */
+  const roomLostSaidRef = useRef(false);
 
   const port = props.port;
 
@@ -820,6 +858,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #782: leave the room — its socket, its reconnects and its hold on the
+    // screen-off service go with the ride.
+    roomRef.current?.leave();
+    roomRef.current = undefined;
+    roomFrameRef.current = undefined;
     // #447: the ride is over, so the audio may stop running — unless a workout
     // is still running on the Ride screen's session, whose tone `rejoin`
     // expects to find awake. Read NOW, not at the start of the ride: the
@@ -1002,6 +1045,34 @@ export function GameView(props: GameViewProps): JSX.Element {
         found.control === undefined
           ? undefined
           : createGradientSession({ profile, control: found.control });
+      // #782: join the room, when this ride has one. After the last await, so a
+      // rider who left while the trainer was asked joins nothing. The mass is
+      // for the ticket alone (ADR 0028 D-1) and goes nowhere near the renderer.
+      roomRef.current?.leave();
+      roomRef.current = undefined;
+      roomFrameRef.current = undefined;
+      roomLostSaidRef.current = false;
+      if (props.room !== undefined && props.roomId !== undefined && port !== undefined) {
+        const sensorsNow = port;
+        roomStateRef.current = roomRideState();
+        roomRef.current = props.room.join({
+          roomId: props.roomId,
+          // #782's review (N5): the weight the rider DECLARED, or none. A
+          // rider with none is not ticketed at a default (ADR 0028 D-1: the
+          // room races the declared mass); the room refuses as
+          // `no-declared-mass` and the HUD asks for a weight.
+          declaredMassKilograms: riderMassFor(props.riderMass).assumed
+            ? undefined
+            : riderMassFor(props.riderMass).mass,
+          sample: () => {
+            const now = sensorsNow.readSensors();
+            return {
+              powerWatts: now.rider.live ? now.rider.power : undefined,
+              cadenceRpm: now.cadence.live ? now.cadence.value : undefined,
+            };
+          },
+        });
+      }
       // ⚠️ The simulation's own state rather than `atStartLine(profile)`, which
       // is what this used to be. The two agreed about the rider and could not
       // agree about the bot — `atStartLine` takes a profile and knows nothing
@@ -1021,7 +1092,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       lockRef.current = lock;
     },
-    [port, props.screenLock, props.riderMass, props.kitColour, props.trainer, soundsOut],
+    [
+      port,
+      props.screenLock,
+      props.riderMass,
+      props.kitColour,
+      props.trainer,
+      props.room,
+      props.roomId,
+      soundsOut,
+    ],
   );
 
   const start = useCallback(
@@ -1202,6 +1282,14 @@ export function GameView(props: GameViewProps): JSX.Element {
       // legs describing different instants.
       const sensors = port.readSensors();
       simulation.advanceTo(at, sensors.rider);
+      // #782, #783: the room — a correction toward it when a new frame says
+      // so (never backwards, `simulation.ts` §`correctToward`), and the other
+      // riders to draw. Nothing here writes to the trainer: the gradient
+      // below is still the rider's own road.
+      const room = roomRef.current;
+      const roomNow =
+        room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
+      roomFrameRef.current = roomNow;
       // ⚠️ **Before the render and from the same `at`**, so the cranks the
       // frame draws are the cranks that belong to it. `bicycle.ts` holds the
       // rule: they turn exactly when the HUD shows a cadence number, at exactly
@@ -1307,6 +1395,14 @@ export function GameView(props: GameViewProps): JSX.Element {
       // lost then is said on resume. In both the notice (or, once the pairing
       // has ended, the actions panel's line) is on the screen for a rider who
       // can see it; `docs/validation/0003` is where the spoken half is checked.
+      // #782: the room's connection going, said once per loss (`announce.ts` rank 5a′).
+      const roomLost = room?.status().kind === 'lost';
+      if (roomLost && !roomLostSaidRef.current) {
+        roomLostSaidRef.current = true;
+        events.push({ kind: 'room-lost', text: ROOM_LOST_SPOKEN });
+      } else if (!roomLost) {
+        roomLostSaidRef.current = false;
+      }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
       sideLostRef.current = sideCameraLost(side);
@@ -1359,7 +1455,15 @@ export function GameView(props: GameViewProps): JSX.Element {
       // `elapsed` is derived from the simulation's origin, so it is exactly
       // monotonic and in seconds — `GradientSession.sample` is where that
       // reasoning lives, because the conversion is there.
-      gradientRef.current?.sample(simulation.state.elapsed, simulation.state.ride.distance);
+      //
+      // #782: while the rider is being corrected toward a room, the grade may
+      // change by at most `net/correction.ts`
+      // §`CORRECTION_GRADE_STEP_PERCENT_PER_SECOND` a second.
+      gradientRef.current?.sample(
+        simulation.state.elapsed,
+        simulation.state.ride.distance,
+        simulation.correcting,
+      );
 
       // #323's interpolation, on the frames that are drawn: `drawnAt` blends the
       // last two simulation steps at THIS instant, so a frame drawn at 20 fps
@@ -1403,6 +1507,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           // #625: whether that angle is being turned by a reading — the body
           // rocks exactly while the HUD shows a cadence. @see cadenceTurns
           pedalling: pedallingRef.current,
+          // #783: the room's drawn riders — where they are, and nothing else.
+          ...(roomNow === undefined ? {} : { remoteRiders: roomNow.remoteRiders }),
         });
         if (prepared) {
           view.render(frame);
@@ -1636,6 +1742,21 @@ export function GameView(props: GameViewProps): JSX.Element {
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
+        // #783: a count and ONE chosen gap on a room ride, never a list.
+        {...(roomRef.current === undefined
+          ? {}
+          : { room: roomFrameRef.current?.hud ?? { nearby: 0 } })}
+        onFollowNext={
+          roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
+            ? undefined
+            : () => {
+                const memory = roomStateRef.current;
+                memory.following = nextToFollow(
+                  memory.following,
+                  roomFrameRef.current?.remoteRiders ?? [],
+                );
+              }
+        }
         paused={phase === 'paused'}
         // #400: the mute and the volume, on the ride's own screen — SC 1.4.2.
         // Only for a rider who turned sounds on: there is nothing to mute
@@ -1762,6 +1883,13 @@ export function GameView(props: GameViewProps): JSX.Element {
               {SIDE_CAMERA_ON_RIDE_TEXT.lost}
             </StatusMessage>
           ) : undefined,
+          // #782: the room lost, gone or refused, in words — never a silent
+          // freeze. After the side camera, in `announce.ts`'s order.
+          roomNotice(roomRef.current?.status()) === undefined ? undefined : (
+            <StatusMessage key="room" tone="warning" label={ROOM_NOTICE_LABEL}>
+              {roomNotice(roomRef.current?.status())}
+            </StatusMessage>
+          ),
           // #647: the ride being recorded may stop if the screen goes off.
           // After the side camera, in `announce.ts`'s order (`screen-off-risk`
           // is rank 5b). Not `live`: the HUD's one region says it.

@@ -928,3 +928,58 @@ describe('which readings are drawn large (#423)', () => {
     ).toBe('secondary');
   });
 });
+
+describe('the room on the HUD — #783', () => {
+  const chosen = (seconds: number, wattsPerKilogram?: number) => {
+    const start = atStartLine(route());
+    const moving = {
+      ...start,
+      ride: { ...start.ride, distance: metres(100), speed: metresPerSecond(10) },
+    };
+    return {
+      label: 'Rider 4',
+      gap: pacerGap(gapAgainst(moving, 100 + seconds * 10)),
+      ...(wattsPerKilogram === undefined ? {} : { wattsPerKilogram }),
+    };
+  };
+
+  it('adds nothing to a ride with no room, so every field keeps its place', () => {
+    expect(hudReadings(baseInput()).map((reading) => reading.key)).not.toContain('room-nearby');
+  });
+
+  it('shows a count near and the gap to ONE chosen rider, after the gaps and before the wind', () => {
+    const readings = hudReadings({ ...baseInput(), room: { nearby: 3, chosen: chosen(12) } });
+    const keys = readings.map((reading) => reading.key);
+    expect(keys.indexOf('room-rider')).toBe(keys.indexOf('gap') + 1);
+    expect(readings.find((r) => r.key === 'room-nearby')).toMatchObject({
+      label: 'Nearby',
+      value: '3',
+      unit: 'riders',
+    });
+    expect(readings.find((r) => r.key === 'room-rider')).toMatchObject({
+      label: 'Rider 4',
+      value: '12',
+      unit: 's',
+      detail: 'ahead of you',
+    });
+  });
+
+  it('shows a dash until the rider chooses somebody to follow', () => {
+    const readings = hudReadings({ ...baseInput(), room: { nearby: 0 } });
+    expect(readings.find((r) => r.key === 'room-rider')).toMatchObject({
+      label: 'Following',
+      value: NO_READING,
+    });
+    expect(readings.find((r) => r.key === 'room-nearby')?.value).toBe('0');
+  });
+
+  it('puts W/kg beside another rider’s name, and never watts (ruling Q17)', () => {
+    const reading = hudReadings({
+      ...baseInput(),
+      room: { nearby: 1, chosen: chosen(-8, 3.24) },
+    }).find((r) => r.key === 'room-rider');
+    expect(reading?.detail).toBe('behind you, 3.2 W/kg');
+    const text = `${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
+    expect(text).not.toMatch(/\d\s*W(?!\/kg)\b/);
+  });
+});
