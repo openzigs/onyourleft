@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Two-way sync with an instance (#776): pull what this device is missing,
- * then push what the instance is missing.
+ * Two-way sync with an instance (#776): bring this device and the instance to
+ * the same rides, write-ups and side-camera reports, **with this device's
+ * changes winning** — the device copy is canonical (ADR 0036 D-3).
  *
  * ## What this module does NOT do: talk to the network
  *
@@ -13,23 +14,52 @@
  * in the shipped client calls this, so a rider connected to no instance sees no
  * sync, no sync error and no request (#776's last criterion).
  *
- * ## Pull — a new device, or a reinstall
+ * ## The sync base: telling a change here from a change there
  *
- * 1. Page through the instance's manifest (`GET /v1/sync/manifest`), from the
- *    start every time. A cursor kept between syncs would skip an item whose
- *    local write failed last time; the full walk costs one request per page.
- * 2. For each live ACTIVITY this device does not hold — by its activity id,
- *    and by the file's hash for a ride this device itself imported — fetch the
- *    signed record and the original file, and **verify the signature and the
- *    file's hash BEFORE anything is written** (ADR 0014 D-6). A record that
- *    does not verify is not written, and the report names which of D-6's
- *    answers it got.
- * 3. Import the file through the SAME path a rider's own import takes
- *    (`transfer/import-batch.ts`), under the record's own activity id, so the
- *    ride library reads it exactly as it reads any other ride.
- * 4. Then each write-up and side-camera report whose ride is on this device,
- *    written through the store's own validating writes. A tombstoned ACTIVITY
- *    is deleted here, which takes its write-up and report with it.
+ * Two copies that differ say nothing about which one changed, and #893's
+ * review found both ways that goes wrong: a ride the rider deleted here was
+ * pulled straight back (B1), and a write-up replaced here was overwritten by
+ * the instance's older copy (B2). So the device keeps a **base** — what it and
+ * the instance agreed on at the last sync, one row per ride and per item
+ * (`packages/store` §`SyncBaseRecord`) — and each side's change is its copy
+ * against the base. A base row outlives its ride on purpose: it is the
+ * device's record that a synced ride was deleted here.
+ *
+ * ## The rules, thing by thing
+ *
+ * 1. Read the whole manifest (`GET /v1/sync/manifest`), from the start every
+ *    time — a cursor kept between syncs would skip an item whose local write
+ *    failed last time — and the whole base.
+ * 2. **A live ride on the instance.** On this device (by its activity id, or
+ *    by the file's hash for a ride this device itself imported): remembered.
+ *    Not on this device, and in the base: **the rider deleted it here**, so it
+ *    is deleted on the instance — its write-up and report first, then the ride
+ *    — and never pulled back. Not on this device and never synced: pulled —
+ *    the signed record and the original file are fetched, and **the signature
+ *    and the file's hash are verified BEFORE anything is written** (ADR 0014
+ *    D-6); a record that does not verify is not written, and the report names
+ *    which of D-6's answers it got. The file is imported through the SAME path
+ *    a rider's own import takes (`transfer/import-batch.ts`), under the
+ *    record's own activity id, so the ride library reads it like any other.
+ * 3. **A tombstoned ride** — deleted on another device — is deleted here, with
+ *    its write-up and report. (Whether an unsigned tombstone should be able to
+ *    do that is an owner question on #893.)
+ * 4. **A local ride the instance lacks** is written out as FIT by the export
+ *    path (`transfer/export-activity.ts`), signed by this device's key, its
+ *    record kept locally, and sent to `POST /v1/sync/records` — idempotent, so
+ *    a push that did not hear its answer is simply sent again.
+ * 5. **Each write-up and side-camera report of a ride on this device**, as
+ *    JSON with the device's own athlete id left out (every device's local
+ *    athlete is `local`):
+ *    - the same on both sides: remembered;
+ *    - here and unchanged since the base, and the instance's copy moved:
+ *      another device replaced it, so it is pulled;
+ *    - changed here, never synced, or gone from the instance: **pushed**, so
+ *      the instance stores exactly the device's screened copy (#776's
+ *      addition);
+ *    - not here at all (the store cannot remove an item and keep its ride):
+ *      pulled.
+ * 6. The base forgets a ride neither side holds any more.
  *
  * ⚠️ **A pulled record is not kept on this device.** `packages/store`'s
  * `putActivityRecord` refuses a record signed by a key that is not THIS
@@ -38,17 +68,10 @@
  * device keeps the ride. Pushing skips a pulled ride by its file hash, so it
  * is never signed a second time by the device that pulled it.
  *
- * ## Push
- *
- * Every local ride whose file the instance does not hold: a ride with no
- * signed record is written out as FIT by the export path (`transfer/export-
- * activity.ts`), signed by this device's key, its record kept locally, and the
- * two sent to `POST /v1/sync/records` — which is idempotent, so a push that
- * did not hear its answer is simply sent again. Then each write-up and
- * side-camera report, as JSON with the device's own athlete id left out
- * (every device's local athlete is `local`), sent only when its digest differs
- * from the manifest's — so the instance stores exactly the device's screened
- * copy (#776's addition).
+ * ⚠️ **An erased device is a fresh device.** `deleteAthlete` takes the base
+ * with everything else, so the next sync pulls rather than deletes: erasing
+ * this device does not erase the instance's copy. That is the account's own
+ * deletion (`DELETE /v1/account`, #35).
  *
  * Goals, notes and reference documents (#836) are carried by the instance
  * already; this module pushes them when #836 gives the device something to
@@ -75,6 +98,7 @@ import type {
   AthleteId,
   RideWriteUpRecord,
   SideCameraReportRecord,
+  SyncBaseRecord,
 } from '@onyourleft/store';
 
 import { exportActivity } from '../transfer/export-activity';
@@ -93,7 +117,7 @@ export interface SyncTransport {
   bytes(path: string): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
 }
 
-/** What sync needs of the local store: the transfer screen's port, and six writes and reads. */
+/** What sync needs of the local store: the transfer screen's port, and nine writes and reads. */
 export type SyncStore = TransferStore &
   Pick<
     ActivityStore,
@@ -103,6 +127,9 @@ export type SyncStore = TransferStore &
     | 'putRideWriteUp'
     | 'getSideCameraReport'
     | 'putSideCameraReport'
+    | 'putSyncBase'
+    | 'listSyncBase'
+    | 'deleteSyncBase'
   >;
 
 export interface SyncDependencies {
@@ -143,6 +170,8 @@ export interface SyncReport {
   readonly pushed: number;
   readonly itemsPulled: number;
   readonly itemsPushed: number;
+  /** Rides deleted on this device since the last sync, now deleted on the instance too. */
+  readonly deletedOnInstance: number;
   readonly deleted: number;
   readonly failures: readonly SyncFailure[];
 }
@@ -203,7 +232,14 @@ function itemBody(record: RideWriteUpRecord | SideCameraReportRecord): string {
   return JSON.stringify({ ...record, athleteId: undefined });
 }
 
-/** Pull what the instance holds and this device does not, then push the reverse. */
+/** The map key of one thing of a ride's, in the manifest and in the base alike. */
+const keyOf = (kind: string, key: string): string => `${kind}\u0000${key}`;
+
+/**
+ * Bring this device and the instance to the same rides, write-ups and
+ * side-camera reports, with **this device's changes winning** (ADR 0036 D-3).
+ * See the module header for the rule, thing by thing.
+ */
 export async function syncWithInstance(dependencies: SyncDependencies): Promise<SyncReport> {
   const { transport, store, athleteId, sha256 } = dependencies;
   const failures: SyncFailure[] = [];
@@ -212,89 +248,242 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let itemsPulled = 0;
   let itemsPushed = 0;
   let deleted = 0;
+  let deletedOnInstance = 0;
 
   const manifest = await readManifest(transport);
-  const live = manifest.filter((entry) => !entry.deleted);
+  const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
+  const base = new Map(
+    (await store.listSyncBase(athleteId)).map((row) => [keyOf(row.kind, row.key), row]),
+  );
+  const remember = async (row: Omit<SyncBaseRecord, 'athleteId'>): Promise<void> => {
+    const known = base.get(keyOf(row.kind, row.key));
+    if (
+      known?.activityId === row.activityId &&
+      known.localDigest === row.localDigest &&
+      known.remoteDigest === row.remoteDigest
+    ) {
+      return;
+    }
+    const record: SyncBaseRecord = { athleteId, ...row };
+    await store.putSyncBase(record);
+    base.set(keyOf(row.kind, row.key), record);
+  };
+  /** Forget a ride's base row and its items' — the ride is gone on both sides. */
+  const forgetRide = async (content: string, activity: string): Promise<void> => {
+    for (const [kind, key] of [
+      ['activity', content],
+      ...ITEM_KINDS.map((each) => [each, activity] as const),
+    ] as const) {
+      if (base.delete(keyOf(kind, key))) await store.deleteSyncBase(athleteId, kind, key);
+    }
+  };
+  const localRide = async (
+    id: string | null,
+    content: string,
+  ): Promise<ActivityRecord | undefined> =>
+    (id === null ? undefined : await store.getActivity(athleteId, id as ActivityId)) ??
+    (await store.findActivityByOriginalFileHash(athleteId, content));
 
-  // --- Pull: rides ---------------------------------------------------------
-  for (const entry of live.filter((each) => each.kind === 'activity')) {
-    const id = entry.activityId as ActivityId | null;
-    if (id !== null && (await store.getActivity(athleteId, id)) !== undefined) continue;
-    if ((await store.findActivityByOriginalFileHash(athleteId, entry.key)) !== undefined) continue;
+  // --- Rides the instance holds ----------------------------------------------
+  for (const entry of manifest) {
+    if (entry.kind !== 'activity' || entry.deleted) continue;
+    const ride = await localRide(entry.activityId, entry.key);
+    const known = base.get(keyOf('activity', entry.key));
+    if (ride !== undefined) {
+      await remember({
+        kind: 'activity',
+        key: entry.key,
+        activityId: ride.id,
+        localDigest: entry.key,
+        remoteDigest: entry.key,
+      });
+      continue;
+    }
+    if (known !== undefined) {
+      // Synced before, and not on this device now: the rider deleted it HERE.
+      // Delete it there — its items first, so a failure part way leaves the
+      // ride for the next sync to finish rather than orphaned items.
+      const outcome = await deleteRideOnInstance(transport, entry.key, known.activityId);
+      if (outcome === 'deleted') {
+        deletedOnInstance += 1;
+        await forgetRide(entry.key, known.activityId);
+      } else {
+        failures.push({ kind: 'activity', key: entry.key, reason: outcome });
+      }
+      continue;
+    }
     const outcome = await pullRide(dependencies, entry.key);
-    if (outcome === 'pulled') pulled += 1;
-    else failures.push({ kind: 'activity', key: entry.key, reason: outcome });
+    if (typeof outcome === 'string') {
+      failures.push({ kind: 'activity', key: entry.key, reason: outcome });
+      continue;
+    }
+    pulled += 1;
+    await remember({
+      kind: 'activity',
+      key: entry.key,
+      activityId: outcome.activityId,
+      localDigest: entry.key,
+      remoteDigest: entry.key,
+    });
   }
 
-  // --- Pull: a ride deleted on another device -------------------------------
-  for (const entry of manifest.filter((each) => each.deleted && each.kind === 'activity')) {
-    const id = entry.activityId as ActivityId | null;
-    const ride =
-      (id === null ? undefined : await store.getActivity(athleteId, id)) ??
-      (await store.findActivityByOriginalFileHash(athleteId, entry.key));
+  // --- A ride deleted on another device ---------------------------------------
+  for (const entry of manifest) {
+    if (entry.kind !== 'activity' || !entry.deleted) continue;
+    const ride = await localRide(entry.activityId, entry.key);
     if (ride !== undefined && (await store.deleteActivity(athleteId, ride.id))) deleted += 1;
-  }
-
-  // --- Pull: write-ups and side-camera reports -----------------------------
-  for (const entry of live) {
-    if (entry.kind !== 'write-up' && entry.kind !== 'side-camera-report') continue;
-    const activity = entry.key as ActivityId;
-    if ((await store.getActivity(athleteId, activity)) === undefined) continue;
-    const local = await localItem(store, athleteId, entry.kind, activity);
-    if (local !== undefined && (await hex(utf8(itemBody(local)), sha256)) === entry.digest) {
-      continue;
-    }
-    const answer = await transport.json(
-      'GET',
-      `/v1/sync/items/${entry.kind}/${encodeURIComponent(entry.key)}`,
-    );
-    if (answer.status !== 200) {
-      failures.push({ kind: entry.kind, key: entry.key, reason: codeOf(answer.body) });
-      continue;
-    }
-    try {
-      const body = JSON.parse((answer.body as { body: string }).body) as object;
-      const record = { ...body, athleteId, activityId: activity };
-      if (entry.kind === 'write-up') await store.putRideWriteUp(record as RideWriteUpRecord);
-      else await store.putSideCameraReport(record as SideCameraReportRecord);
-      itemsPulled += 1;
-    } catch {
-      failures.push({ kind: entry.kind, key: entry.key, reason: 'not-stored' });
-    }
+    const known = base.get(keyOf('activity', entry.key));
+    if (known !== undefined) await forgetRide(entry.key, known.activityId);
   }
 
   // --- Push: rides -----------------------------------------------------------
   const onInstance = new Set(
     manifest.filter((entry) => entry.kind === 'activity').map((entry) => entry.key),
   );
-  const digests = new Map(live.map((entry) => [`${entry.kind}\u0000${entry.key}`, entry.digest]));
   const rides = await localRides(store, athleteId);
+  const onDevice = new Set<string>(rides);
   for (const id of rides) {
     const outcome = await pushRide(dependencies, id, onInstance);
-    if (outcome === 'pushed') pushed += 1;
-    else if (outcome !== 'held') failures.push({ kind: 'activity', key: id, reason: outcome });
-  }
-
-  // --- Push: write-ups and side-camera reports --------------------------------
-  for (const id of rides) {
-    for (const kind of ['write-up', 'side-camera-report'] as const) {
-      const local = await localItem(store, athleteId, kind, id);
-      if (local === undefined) continue;
-      const body = itemBody(local);
-      if (digests.get(`${kind}\u0000${id}`) === (await hex(utf8(body), sha256))) continue;
-      const answer = await transport.json(
-        'POST',
-        `/v1/sync/items/${kind}/${encodeURIComponent(id)}`,
-        {
-          body,
-        },
-      );
-      if (answer.status === 200) itemsPushed += 1;
-      else failures.push({ kind, key: id, reason: codeOf(answer.body) });
+    if (typeof outcome !== 'string') {
+      pushed += 1;
+      await remember({
+        kind: 'activity',
+        key: outcome.content,
+        activityId: id,
+        localDigest: outcome.content,
+        remoteDigest: outcome.content,
+      });
+    } else if (outcome !== 'held') {
+      failures.push({ kind: 'activity', key: id, reason: outcome });
     }
   }
 
-  return { pulled, pushed, itemsPulled, itemsPushed, deleted, failures };
+  // --- Write-ups and side-camera reports, three ways -------------------------
+  for (const id of rides) {
+    for (const kind of ITEM_KINDS) {
+      const entry = remote.get(keyOf(kind, id));
+      const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+      const known = base.get(keyOf(kind, id));
+      const local = await localItem(store, athleteId, kind, id);
+      if (local === undefined) {
+        // Nothing here — the store has no way to remove an item and keep its
+        // ride, so this is an item another device made. Take it.
+        if (remoteDigest === null) continue;
+        const outcome = await pullItem(dependencies, kind, id);
+        if (outcome === 'pulled') {
+          itemsPulled += 1;
+          await rememberItem(kind, id, remoteDigest);
+        } else {
+          failures.push({ kind, key: id, reason: outcome });
+        }
+        continue;
+      }
+      const body = itemBody(local);
+      const localDigest = await hex(utf8(body), sha256);
+      if (remoteDigest === localDigest) {
+        await remember({ kind, key: id, activityId: id, localDigest, remoteDigest });
+        continue;
+      }
+      if (known !== undefined && known.localDigest === localDigest && remoteDigest !== null) {
+        // Unchanged here since the last sync. If the instance's copy moved,
+        // another device replaced it: take that. If not, the two already agree
+        // — a pulled item need not serialise back to the bytes it came in.
+        if (remoteDigest === known.remoteDigest) continue;
+        const outcome = await pullItem(dependencies, kind, id);
+        if (outcome === 'pulled') {
+          itemsPulled += 1;
+          await rememberItem(kind, id, remoteDigest);
+        } else {
+          failures.push({ kind, key: id, reason: outcome });
+        }
+        continue;
+      }
+      // Changed here, never synced, or gone from the instance: this device's
+      // copy is canonical (ADR 0036 D-3), so it is what the instance keeps.
+      const answer = await transport.json(
+        'POST',
+        `/v1/sync/items/${kind}/${encodeURIComponent(id)}`,
+        { body },
+      );
+      if (answer.status === 200) {
+        itemsPushed += 1;
+        await remember({ kind, key: id, activityId: id, localDigest, remoteDigest: localDigest });
+      } else {
+        failures.push({ kind, key: id, reason: codeOf(answer.body) });
+      }
+    }
+  }
+
+  // --- The base forgets what neither side holds any more ---------------------
+  for (const row of [...base.values()]) {
+    if (row.kind !== 'activity' || remote.has(keyOf('activity', row.key))) continue;
+    if (!onDevice.has(row.activityId)) await forgetRide(row.key, row.activityId);
+  }
+
+  return { pulled, pushed, itemsPulled, itemsPushed, deleted, deletedOnInstance, failures };
+
+  /** The base for an item just pulled: the copy as this device now reads it. */
+  async function rememberItem(kind: ItemKind, id: ActivityId, remoteDigest: string): Promise<void> {
+    const kept = await localItem(store, athleteId, kind, id);
+    if (kept === undefined) return;
+    const localDigest = await hex(utf8(itemBody(kept)), sha256);
+    await remember({ kind, key: id, activityId: id, localDigest, remoteDigest });
+  }
+}
+
+/** The two item kinds, in the order a sync visits them. */
+const ITEM_KINDS: readonly ItemKind[] = ['write-up', 'side-camera-report'];
+
+/**
+ * Delete a ride on the instance: its write-up and side-camera report, then the
+ * ride (whose file the instance collects unless another rider sent the same
+ * bytes). `not_found` is success — somebody got there first. Answers `deleted`
+ * or the instance's error code.
+ */
+async function deleteRideOnInstance(
+  transport: SyncTransport,
+  content: string,
+  activity: string,
+): Promise<string> {
+  for (const [kind, key] of [
+    ...ITEM_KINDS.map((each) => [each, activity] as const),
+    ['activity', content] as const,
+  ]) {
+    const answer = await transport.json(
+      'DELETE',
+      `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
+    );
+    if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
+      return codeOf(answer.body);
+    }
+  }
+  return 'deleted';
+}
+
+/**
+ * One write-up or report from the instance, written through the store's own
+ * validating write. Answers `pulled`, an instance error code, or `not-stored`.
+ */
+async function pullItem(
+  dependencies: SyncDependencies,
+  kind: ItemKind,
+  activity: ActivityId,
+): Promise<string> {
+  const { transport, store, athleteId } = dependencies;
+  const answer = await transport.json(
+    'GET',
+    `/v1/sync/items/${kind}/${encodeURIComponent(activity)}`,
+  );
+  if (answer.status !== 200) return codeOf(answer.body);
+  try {
+    const body = JSON.parse((answer.body as { body: string }).body) as object;
+    const record = { ...body, athleteId, activityId: activity };
+    if (kind === 'write-up') await store.putRideWriteUp(record as RideWriteUpRecord);
+    else await store.putSideCameraReport(record as SideCameraReportRecord);
+    return 'pulled';
+  } catch {
+    return 'not-stored';
+  }
 }
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -315,7 +504,10 @@ function localItem(
  * `pulled`, or why not: an instance error code, one of ADR 0014 D-6's
  * verification answers (`RecordVerification`'s status), or an import code.
  */
-async function pullRide(dependencies: SyncDependencies, content: string): Promise<string> {
+async function pullRide(
+  dependencies: SyncDependencies,
+  content: string,
+): Promise<{ readonly activityId: ActivityId } | string> {
   const { transport, store, athleteId, sha256, verifier } = dependencies;
   const recordAnswer = await transport.json('GET', `/v1/sync/records/${content}`);
   if (recordAnswer.status !== 200) return codeOf(recordAnswer.body);
@@ -351,20 +543,22 @@ async function pullRide(dependencies: SyncDependencies, content: string): Promis
     timeZone: claims.startedAtTimeZone,
   });
   const [outcome] = report.outcomes;
-  return outcome?.kind === 'imported' || outcome?.kind === 'duplicate'
-    ? 'pulled'
-    : (outcome?.code ?? 'not-stored');
+  if (outcome?.kind === 'imported') return { activityId: claims.activityId as ActivityId };
+  if (outcome?.kind === 'duplicate') {
+    return { activityId: outcome.activityId ?? (claims.activityId as ActivityId) };
+  }
+  return outcome?.code ?? 'not-stored';
 }
 
 /**
  * One local ride to the instance, unless it holds the file already. Answers
- * `pushed`, `held`, or why not.
+ * the content hash it pushed, `held`, or why not.
  */
 async function pushRide(
   dependencies: SyncDependencies,
   id: ActivityId,
   onInstance: ReadonlySet<string>,
-): Promise<string> {
+): Promise<{ readonly content: string } | string> {
   const { transport, store, athleteId, sha256 } = dependencies;
   const kept = await store.getActivityRecord(athleteId, id);
   if (kept !== undefined && onInstance.has(toHex(parseContentHash(kept.record.contentHash)))) {
@@ -403,7 +597,9 @@ async function pushRide(
     record,
     file: toBase64(bytes),
   });
-  return answer.status === 200 ? 'pushed' : codeOf(answer.body);
+  return answer.status === 200
+    ? { content: toHex(parseContentHash(contentHash)) }
+    : codeOf(answer.body);
 }
 
 /** The claims a ride's record makes: #62's list row, and never a coordinate. */

@@ -212,6 +212,46 @@ function libraryRows(harness: StoreHarness) {
 
 const RIDES = ['nominal-outdoor-ride.fit', 'paused-laps.fit', 'indoor-trainer-no-position.fit'];
 
+/** A device signed in to the instance, and the sync it runs. */
+async function signedInDevice(url: string, origin: string, names: readonly string[]) {
+  const on = device(url);
+  const ids = await importRides(on, names);
+  const signedIn = await signInToInstance(signInDependencies(origin, on));
+  on.transport.setToken(signedIn.sessionToken);
+  const sync = () => on.harness.write((store) => syncWithInstance(syncDependencies(on, store)));
+  return { on, ids, sync };
+}
+
+/** A second device, linked to the first's athlete with a code the first minted. */
+async function linkedDevice(url: string, origin: string, first: Device) {
+  const code = await first.transport.sync.json('POST', '/v1/auth/link-codes');
+  const on = device(url);
+  const linked = await linkThisDevice(
+    signInDependencies(origin, on),
+    (code.body as { linkCode: string }).linkCode,
+  );
+  on.transport.setToken(linked.sessionToken);
+  const sync = () => on.harness.write((store) => syncWithInstance(syncDependencies(on, store)));
+  return { on, sync };
+}
+
+/** The instance's whole manifest, as the device it is asked through sees it. */
+async function manifestOf(on: Device) {
+  const answer = await on.transport.sync.json('GET', '/v1/sync/manifest?limit=200');
+  return (
+    answer.body as {
+      items: { kind: string; key: string; deleted: boolean; activityId: string | null }[];
+    }
+  ).items;
+}
+
+/** One item as the instance holds it, parsed — or `undefined` where it holds none. */
+async function instanceItem(on: Device, kind: string, key: string) {
+  const answer = await on.transport.sync.json('GET', `/v1/sync/items/${kind}/${key}`);
+  if (answer.status !== 200) return undefined;
+  return JSON.parse((answer.body as { body: string }).body) as Record<string, unknown>;
+}
+
 describe('two-way sync through the real instance (#776)', () => {
   it('device A pushes three rides and a write-up; a new device B pulls them and reads them in its library after a reload', async () => {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
@@ -352,5 +392,104 @@ describe('two-way sync through the real instance (#776)', () => {
     const report = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
     expect(report.deleted).toBe(1);
     expect(await libraryRows(b.harness)).toEqual([]);
+  }, 60_000);
+
+  // #893's review, B1: the device is canonical (ADR 0036 D-3), so a ride the
+  // rider deleted HERE is deleted there — and never pulled back.
+  it('does not pull back a ride deleted on this device, and deletes it on the instance with its write-up', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [gone, kept] = a.ids;
+    await a.on.harness.write((store) => store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!)));
+    expect(await a.sync()).toMatchObject({ pushed: 2, itemsPushed: 1, failures: [] });
+
+    // The Activities screen's delete (`ActivitiesView.tsx`), and a re-sync of
+    // the SAME device.
+    await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
+    const report = await a.sync();
+    expect(report).toMatchObject({ pulled: 0, deletedOnInstance: 1, failures: [] });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
+
+    // The instance holds a tombstone for the ride and its write-up, and the
+    // other ride untouched.
+    const manifest = await manifestOf(a.on);
+    const ride = manifest.find((entry) => entry.kind === 'activity' && entry.activityId === null);
+    expect(ride?.deleted).toBe(true);
+    expect(manifest.find((entry) => entry.kind === 'write-up' && entry.key === gone)?.deleted).toBe(
+      true,
+    );
+    expect(
+      manifest
+        .filter((entry) => entry.kind === 'activity' && !entry.deleted)
+        .map((e) => e.activityId),
+    ).toEqual([kept]);
+
+    // Again: nothing to do, and nothing comes back.
+    expect(await a.sync()).toMatchObject({
+      pulled: 0,
+      pushed: 0,
+      deletedOnInstance: 0,
+      failures: [],
+    });
+    expect(await libraryRows(a.on.harness)).toHaveLength(1);
+
+    // And a fresh device pulls only the ride the rider kept.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+    expect((await libraryRows(b.on.harness)).map((row) => row.id)).toEqual([kept]);
+  }, 60_000);
+
+  // #893's review, B2: a write-up or report replaced HERE is what the instance
+  // ends with, and the instance's older copy does not come back over it.
+  it('keeps a write-up and a side-camera report replaced on this device, and the instance ends with them', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const [id] = a.ids;
+    await a.on.harness.write(async (store) => {
+      await store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!, 1));
+      await store.putSideCameraReport(sideCameraReportFor(LOCAL_ATHLETE, id!, 1));
+    });
+    expect(await a.sync()).toMatchObject({ itemsPushed: 2, failures: [] });
+
+    // A new write-up (#805 replaces on every ask) and a new report, here.
+    await a.on.harness.write(async (store) => {
+      await store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!, 2));
+      await store.putSideCameraReport(sideCameraReportFor(LOCAL_ATHLETE, id!, 2));
+    });
+    const report = await a.sync();
+    expect(report).toMatchObject({ itemsPulled: 0, itemsPushed: 2, failures: [] });
+
+    // The device still holds what the rider made, read after a reload…
+    expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, id!))).toEqual(
+      rideWriteUpFor(LOCAL_ATHLETE, id!, 2),
+    );
+    expect(
+      await a.on.harness.read((store) => store.getSideCameraReport(LOCAL_ATHLETE, id!)),
+    ).toEqual(sideCameraReportFor(LOCAL_ATHLETE, id!, 2));
+    // …and so does the instance.
+    expect((await instanceItem(a.on, 'write-up', id!))?.templateVersion).toBe('1.2');
+    expect((await instanceItem(a.on, 'side-camera-report', id!))?.summary).toBe(
+      sideCameraReportFor(LOCAL_ATHLETE, id!, 2).summary,
+    );
+    // Nothing moves on the next sync.
+    expect(await a.sync()).toMatchObject({ itemsPulled: 0, itemsPushed: 0, failures: [] });
+
+    // The other direction still works: another device replaces the write-up,
+    // and this device — unchanged since — takes it.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, itemsPulled: 2, failures: [] });
+    await b.on.harness.write((store) =>
+      store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!, 3)),
+    );
+    expect(await b.sync()).toMatchObject({ itemsPushed: 1, itemsPulled: 0, failures: [] });
+    expect(await a.sync()).toMatchObject({ itemsPulled: 1, itemsPushed: 0, failures: [] });
+    expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, id!))).toEqual(
+      rideWriteUpFor(LOCAL_ATHLETE, id!, 3),
+    );
   }, 60_000);
 });
