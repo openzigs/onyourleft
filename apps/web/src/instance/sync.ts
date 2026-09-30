@@ -128,8 +128,11 @@
  *      then the delete is not sent, and the newer text is pulled back, so a
  *      delete never silently takes words typed elsewhere;
  *    - tombstoned on the instance, and unchanged here since the base:
- *      another device deleted it, so it is deleted here — rule 3's choice
- *      for a ride, and the owner question on #893 is the same one;
+ *      another device deleted it, so it is deleted here. ⚠️ **Not rule 3's
+ *      choice for a ride** since #898: the owner's ruling that a tombstone
+ *      never deletes a device's copy is about rides. A text deleted here this
+ *      way is one this device had not changed since the base, so no word typed
+ *      HERE is lost — and a text changed here is pushed back instead;
  *    - otherwise the three ways of rule 5: the same is remembered, a change
  *      only there is pulled, a change here (or a copy the instance lacks) is
  *      pushed — ⚠️ **and a change on BOTH sides keeps both** (#924, the
