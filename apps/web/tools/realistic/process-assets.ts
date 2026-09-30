@@ -11,7 +11,8 @@
  *
  * Runs headless Blender (`-b --factory-startup --python`) for every derived
  * file in `sources.ts` §`OUTPUTS`, copies the verbatim ones across, and prints
- * each file's size, SHA-256 and the report its script wrote. `BLENDER`
+ * each file's size, SHA-256 and the report its script wrote. With `--check`
+ * the report is held too: `sources.ts` §`EXPECTED_REPORTS` (#900). `BLENDER`
  * overrides where Blender is; the default is where the macOS app puts it.
  *
  * ## Blender is a tool, never a dependency
@@ -82,6 +83,7 @@ import {
   OUTPUTS,
   PINNED_BLENDER,
   PINNED_KTX,
+  reportFaults,
   shippedFiles,
   TEXTURE_SCRIPT,
   type InputLock,
@@ -240,6 +242,9 @@ function main(): void {
       console.log(
         `${output.file}: ${seconds} s ${report === undefined ? '' : JSON.stringify(report)}`,
       );
+      // The run's report, as well as its bytes (#900 item 2): a run that made
+      // the same bytes by a different road is not the run on record.
+      if (check) different.push(...reportFaults(output.file, report));
     }
     for (const file of files) {
       const made = join(scratch, file);
