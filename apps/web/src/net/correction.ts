@@ -22,12 +22,20 @@
  *
  * ⚠️ **And over {@link explainableMetres} it is ignored** (#922): the most
  * the two could have come apart since the frame before, at the faster of
- * the room's speed for this rider and the local one. Before #922 there was a
- * floor and no ceiling, so a room — buggy or hostile — could move the rider
- * any distance along the route with one frame. A frame that far out leaves
- * the local odometer alone. After a legitimate drop the frames are far apart
- * and so is the bound: 55 s at 10 m/s is 550 m, and a correction that size
- * still goes through.
+ * the local speed and the speed the room reports — the latter admitted only
+ * as far as the local speed makes it plausible ({@link admittedRoomSpeed}).
+ * Before #922 there was a floor and no ceiling, so a room — buggy or
+ * hostile — could move the rider any distance along the route with one
+ * frame. A frame that far out leaves the local odometer alone. After a
+ * legitimate drop the frames are far apart and so is the bound: 55 s at
+ * 10 m/s is 550 m, and a correction that size still goes through.
+ *
+ * ⚠️ **The room does not choose its own ceiling** (#928's review). A room
+ * reporting the wire's maximum, 100 m/s, is read as reporting at most
+ * {@link admittedRoomSpeed} of the local speed, so it moves a rider riding at
+ * 10 m/s by at most about 50 m a frame at 1 Hz rather than about 300 m. What
+ * it can still do is move the rider by that much, frame after frame — as far
+ * as a rider going a quarter faster, plus 2 m/s, would have gone.
  *
  * ## How it is applied — `simulation.ts` §`correctToward`
  *
@@ -72,6 +80,34 @@ export const CORRECTION_SECONDS = 2;
  * write is still one the driver would have made.
  */
 export const CORRECTION_GRADE_STEP_PERCENT_PER_SECOND = 1;
+
+/**
+ * How much faster than the local simulation the room may say this rider is
+ * going and be believed: **25 %, plus 2 m/s**. The room re-simulates the same
+ * reported power through the same physics (ADR 0028 D-2 rule 5), so an honest
+ * room's speed differs from the local one only by the half second a report
+ * takes to reach it: a hard sprint gains well under 1 m/s in that time, which
+ * the 2 m/s covers from a standstill, and the quarter covers a descent, where
+ * speed changes fastest. Chosen, not measured on a person.
+ */
+export const ROOM_SPEED_ALLOWANCE_SHARE = 0.25;
+export const ROOM_SPEED_ALLOWANCE_METRES_PER_SECOND = 2;
+
+/**
+ * The room's reported speed for this rider, as far as the local speed can
+ * explain it (#922, #928's review): never more than
+ * `local × (1 + {@link ROOM_SPEED_ALLOWANCE_SHARE}) + {@link ROOM_SPEED_ALLOWANCE_METRES_PER_SECOND}`.
+ */
+export function admittedRoomSpeed(
+  roomMetresPerSecond: number,
+  localMetresPerSecond: number,
+): number {
+  const local = Math.max(0, localMetresPerSecond);
+  return Math.min(
+    roomMetresPerSecond,
+    local * (1 + ROOM_SPEED_ALLOWANCE_SHARE) + ROOM_SPEED_ALLOWANCE_METRES_PER_SECOND,
+  );
+}
 
 /**
  * How far the local odometer and the room's may have come apart since the
@@ -122,7 +158,10 @@ export function roomErrorMetres(
   const roomNow = room.distanceMetres + room.speedMetresPerSecond * carried;
   const error = roomNow - local.distanceMetres;
   if (!Number.isFinite(error) || Math.abs(error) <= CORRECTION_THRESHOLD_METRES) return undefined;
-  const faster = Math.max(room.speedMetresPerSecond, local.speedMetresPerSecond);
+  const faster = Math.max(
+    local.speedMetresPerSecond,
+    admittedRoomSpeed(room.speedMetresPerSecond, local.speedMetresPerSecond),
+  );
   const since = (nowMs - local.sinceLocalMs) / 1000;
   if (!(Math.abs(error) <= explainableMetres(faster, since))) return undefined;
   return error;

@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { CORRECTION_THRESHOLD_METRES, explainableMetres, roomErrorMetres } from './correction';
+import {
+  admittedRoomSpeed,
+  CORRECTION_THRESHOLD_METRES,
+  explainableMetres,
+  roomErrorMetres,
+} from './correction';
 
 /** The local simulation at `metres`, going `speed`, with the frame before at `sinceMs`. */
 const local = (metres: number, speed = 0, sinceMs = -60_000) => ({
@@ -45,10 +50,9 @@ describe('how far a room may move the rider — #922', () => {
   });
 
   it('still corrects a few hundred metres after a legitimate 55 s drop', () => {
-    // No frame for 55 s; the room coasted the rider at its own speed while
-    // the local simulation had them stopped, or the other way round.
+    // No frame for 55 s, and the two came apart by 550 m at 10 m/s, either way.
     const room = { distanceMetres: 1_550, speedMetresPerSecond: 10, atLocalMs: 65_000 };
-    expect(roomErrorMetres(room, local(1_000, 0, 10_000), 65_000)).toBeCloseTo(550, 9);
+    expect(roomErrorMetres(room, local(1_000, 10, 10_000), 65_000)).toBeCloseTo(550, 9);
     expect(
       roomErrorMetres(
         { ...room, distanceMetres: 1_000, speedMetresPerSecond: 0 },
@@ -67,11 +71,33 @@ describe('how far a room may move the rider — #922', () => {
       speedMetresPerSecond: 10,
       atLocalMs: 2_000,
     });
-    expect(roomErrorMetres(room(bound), local(1_000, 3, 1_000), 2_000)).toBeCloseTo(bound, 9);
-    expect(roomErrorMetres(room(bound + 0.01), local(1_000, 3, 1_000), 2_000)).toBeUndefined();
+    expect(roomErrorMetres(room(bound), local(1_000, 8, 1_000), 2_000)).toBeCloseTo(bound, 9);
+    expect(roomErrorMetres(room(bound + 0.01), local(1_000, 8, 1_000), 2_000)).toBeUndefined();
     // A rider going faster locally than the room says explains the same.
     expect(
       roomErrorMetres({ ...room(-bound), speedMetresPerSecond: 0 }, local(1_000, 10, 1_000), 2_000),
     ).toBeCloseTo(-bound, 9);
+  });
+
+  it('does not let the room choose its own ceiling — #928 review', () => {
+    // A room reporting the wire's 100 m/s for a rider riding at 10 m/s is
+    // believed to 10 × 1.25 + 2 = 14.5 m/s, and no further.
+    expect(admittedRoomSpeed(100, 10)).toBeCloseTo(14.5, 9);
+    expect(admittedRoomSpeed(9, 10)).toBe(9);
+    // And from a standstill, to 2 m/s.
+    expect(admittedRoomSpeed(100, 0)).toBe(2);
+    const bound = explainableMetres(14.5, 1);
+    const room = (ahead: number) => ({
+      distanceMetres: 1_000 + ahead,
+      speedMetresPerSecond: 100,
+      // Carried nowhere: the frame describes now.
+      atLocalMs: 2_000,
+    });
+    expect(roomErrorMetres(room(bound), local(1_000, 10, 1_000), 2_000)).toBeCloseTo(bound, 9);
+    // 300 m in a second: what 100 m/s would have explained, refused.
+    expect(roomErrorMetres(room(300), local(1_000, 10, 1_000), 2_000)).toBeUndefined();
+    expect(roomErrorMetres(room(bound + 0.01), local(1_000, 10, 1_000), 2_000)).toBeUndefined();
+    // On the first frame of a ride, 110 s in, a stopped rider cannot be carried 11 km.
+    expect(roomErrorMetres(room(11_000), local(1_000, 0, -108_000), 2_000)).toBeUndefined();
   });
 });
