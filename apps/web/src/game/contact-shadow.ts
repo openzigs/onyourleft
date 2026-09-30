@@ -60,8 +60,11 @@
  * 0002 Part T, so a STYLISED ride starts on the map rung and draws this only
  * after the ladder's first step down, which takes the map for the rest of that
  * ride (`quality.ts` §`keepsShadowMap`). It is still what every other rung
- * draws, what the realistic world draws, and what a device that turned the map
- * off draws.
+ * draws and what a device that turned the map off draws.
+ *
+ * ⚠️ **Not in the realistic world since #626**: there the riders cast a
+ * bike-shaped silhouette on the same rungs instead (`rider-silhouette.ts`),
+ * through the same sun and the same {@link CASTS_CONTACT_SHADOW}.
  *
  * Pure: no `three`, no clock, no DOM. `three-seam.test.ts` keeps it that way.
  */

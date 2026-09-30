@@ -547,6 +547,19 @@ in one file:
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
   in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
+**Views load per navigation group since [#674](https://github.com/openzigs/onyourleft/issues/674).**
+Home, the shell, the route table and the not-found page are in the entry chunk; every other view is
+in one chunk per group (Ride, History, Routes, More), one module each under `src/shell/lazy/`,
+loaded with a literal `import()` through `src/shell/lazy-view.tsx`. While a group arrives, `main`
+holds a one-line loading status under the route's own `h1`, so the focus the shell puts on `main`
+survives the view replacing it; a chunk that cannot be fetched says so with a Reload control, which
+is also ADR 0027's left-behind tab. `main.tsx` preloads every group once Home is idle, and a group
+already in memory renders without suspending, because React holds a fallback on screen for about
+300 ms once it has shown one. The precache needs no edit: it is derived from the build (#406).
+`apps/web/tools/bundle/entry-graph.ts` fails `pnpm run build` if any view a group module names is in
+the entry chunk's static graph, and `offline.browser.spec.ts` opens a route in every group with the
+network off.
+
 [#307](https://github.com/openzigs/onyourleft/issues/307) gave that design system the three things
 it did not have, and each is checkable rather than a matter of taste:
 
@@ -1238,9 +1251,11 @@ That is why D-9 puts the rule at capture and why the check on it is a refusal ra
 in this repository as `apps/instance`; [ADR 0037](adr/0037-instance-runtime-hosting-and-transport.md)
 decided how it is built. [#767](https://github.com/openzigs/onyourleft/issues/767) scaffolded it and
 [#36](https://github.com/openzigs/onyourleft/issues/36) gave it an API contract and an error model.
-**What it does today is small on purpose**: it answers four metadata routes and nothing else. No
-account, no sync and no room exists yet — #772, #776 and #779/#780 build them. The database (#769)
-and the blob store (#770) exist since #842 and nothing calls them yet; see "Storage" below.
+**What it does today is small on purpose**: four metadata routes, and — since #855 (#772, #773,
+#774) — the identity routes under `/v1/auth/`, which a handler serves only when it is HANDED an
+identity service over a store. The Node entry point is not handed one yet (see "Identity" below),
+so a running instance still answers the metadata alone. No sync and no reachable room exists yet
+— #776 and #780 build them.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1300,9 +1315,45 @@ because the only other answer is `main`, which is not what is running.
 | Proof | A round-trip harness whose read cannot be served by the writing connection, run red against three broken stores; athlete scoping enumerated from the port's keys over three athletes; erasure against every table with a foreign key to `athlete`, found in the schema, with every reference between two athlete-scoped tables carrying `athlete_id` on both sides (#842 review: a session could name another athlete's key and block that erasure); two writer THREADS with no `SQLITE_BUSY` escaping, and a busy-timeout-0 control that must see one | `src/store/testing/`, `src/store/*.test.ts` |
 | Blobs | Content-addressed by SHA-256 (Web Crypto, so portable): `put`/`get`/`has`/`delete`, a key refused unless it is 64 lowercase hex characters, before any path or URL is made. Local disk by default (write to `incoming/`, fsync, rename — a `SIGKILL` mid-write leaves nothing under the final name), an in-memory fake, and S3-compatible over `fetch` with its own SigV4 (reproducing AWS's worked example). One conformance suite runs all three; the bucket half only when `OYL_INSTANCE_S3_*` is set | `src/blob/` |
 
-⚠️ **Nothing calls either yet.** `main.ts` opens no database, and the Docker image copies `src/`
-without installing `node_modules`, so a route that imports the store needs the image to install
-`kysely` first — the first consumer's work (#772, #37, #776).
+⚠️ **The identity routes are the store's first consumer (#855), and `main.ts` still opens no
+database.** The Docker image copies `src/` without installing `node_modules`, so the entry point
+cannot import `kysely` until the image installs it — #780's work, with the box's database path.
+Until then the handler is built without an identity and every identity route answers
+`unavailable` (503).
+
+#### Identity (#772, #773, #774)
+
+An athlete on an instance is **a set of device keys** and nothing else — no password anywhere
+(ruling Q12). Each key is a device's ADR 0014 key, which keeps signing that device's records
+unchanged; the instance only ever verifies.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web)
+    participant I as Instance
+    D->>I: POST /v1/auth/challenge {publicKey}
+    I-->>D: {nonce, expiresAt (+60 s)}
+    D->>D: sign RFC 8785 {purpose:"oyl-auth-v1", instanceOrigin, nonce, publicKey, issuedAt}
+    D->>I: POST /v1/auth/session {statement, signature}
+    I-->>D: {sessionToken (shown once), expiresAt, athleteId, recoveryCodes (first time only)}
+    D->>I: POST /v1/rooms/{roomId}/ticket (Bearer)
+    I-->>D: {ticket (one room, one hello, 30 s)}
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |
+| Refusals, in order | `wrong_purpose`, `wrong_instance`, `challenge_unknown` / `challenge_used` / `challenge_expired` (the nonce is spent before the signature is checked, so a replay of a whole request is `challenge_used`), `bad_signature`, `key_revoked`. Each is its own code | `apps/instance/src/auth/identity.ts` |
+| Secrets at rest | The SHA-256 of every secret handed out — session tokens, recovery codes, link codes, email-recovery tokens — never the secret. A test searches the database file, its WAL and its index for each one | `src/auth/`, migration `0004-identity` |
+| Registration | The first key an instance sees registers an athlete, where registration is `open` (the default until #775 adds its modes); the answer carries ten one-time recovery codes, once | `identity.ts` §`register` |
+| Rooms | A **ticket**, never the session token, in the hello: minted against a live session for one room, spent on admission, 30 s. Kept in memory by the process that runs the room; `TicketBook.admitterFor(roomId)` is the room core's `Admit` (#779). #781's Durable Object adapter plugs it in when it lands | `src/auth/tickets.ts` |
+| Other devices | A signed-in device mints a 5-minute, single-use **link code**; the new device signs `oyl-link-v1` with its OWN key. Revoking a key revokes its sessions and unspent link codes; the last key needs a recovery code the athlete holds (checked, not spent). A revoked key's records stay valid (ADR 0014 D-6) | `identity.ts` |
+| Every device lost | A recovery code, or — only where the operator hands the identity a mail transport — an emailed single-use link (30 minutes). With email recovery off, no address is accepted or stored | `identity.ts` §`recover`, §`requestEmailRecovery` |
+| What other riders see | ONE projection, `publicAthlete`: the id and the display name. Every `athlete` column is classified public or private and a test reads the migrated table's columns; a declared mass travels only in a ticket and reaches no other rider | `src/auth/public-athlete.ts` |
+| Display names | 1–32 scalar values after NFC; control, bidirectional and invisible characters refused, each by name. At most three changes a day; every earlier name is kept for moderation (#789) | `packages/domain/src/identity/display-name.ts`, `display_name_change` |
+| Rate limits | In memory, fixed windows: a challenge per key and per address (the address from the adapter, never logged). Behind a proxy the address is the proxy's — #775's to weigh | `src/auth/rate-limit.ts` |
+| The client half | `apps/web/src/instance/sign-in.ts`: the local athlete first, then the device key, then challenge → sign → session, and the instance's athlete id kept on the device. It takes its transport as a parameter and names no `fetch`: #777 supplies the one module allowed to call an instance, after #778's disclosures | `apps/web/src/instance/` |
+| Across platforms | `apps/web/browser/identity.browser.spec.ts`: the browser signs with the app's own non-extractable key in IndexedDB, and a real instance running in the spec's process verifies it, with a flipped signature byte and another instance's origin as controls | the browser gate |
 
 #### The API contract (#36)
 
@@ -1310,12 +1361,13 @@ without installing `node_modules`, so a route that imports the store needs the i
 |---|---|---|
 | The specification | OpenAPI 3.1, **generated** from the route table the handler dispatches on, committed as `apps/instance/openapi.json` and served at `GET /openapi.json`. `src/openapi.test.ts` fails when the committed file is not what the table generates, and calls every route through the real listener to check its body against the declared schema | `src/routes.ts`, `src/openapi.ts` |
 | Errors | One shape, `{ "error": { "code", "message", "fields"? } }`. `code` is stable and machine-readable; `message` is a fixed sentence per code and **never carries a value from the request** — ADR 0004 D widened to every field, because the instance cannot tell where a stranger's client put a coordinate. Another athlete's resource is `not_found`, never a 403 | `src/errors.ts` |
-| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
+| Codes | `validation_failed` 400 (with `fields`, each naming a field and a problem), `unauthenticated` 401, `not_found` 404, `method_not_allowed` 405 (with `Allow`), `payload_too_large` 413, `rate_limited` 429, `internal` 500 — and since #855 identity's: the seven sign-in refusals and `code_unknown` / `code_used` / `code_expired` (401), `registration_closed` 403, `key_in_use` and `last_device` 409, `unavailable` 503. Several codes share a status, and the specification names every code a status can carry. Adding a code is an addition; renaming one is breaking | `src/errors.ts` §`ERROR_STATUS` |
 | An unhandled exception | `internal`, with no message, stack or path; the log gets the error's **name** alone | `src/handler.ts`, `src/log.ts` |
 | Request bodies | Bounded before routing: a declared length over the limit is refused unread, and an undeclared one is read only up to the limit | `src/handler.ts` §`boundedBody` |
 | Pagination | **Keyset, never offset**: a list is ordered by (sort key, id) and a page is the next `limit` rows after an opaque cursor. Every row present when a listing begins is returned exactly once however many are inserted between pages; an offset control in the test shows the failure it prevents. `limit` defaults to 50 and is at most 200 | `src/pagination.ts` |
 
-**Versioning.** The four metadata routes — `/health`, `/source`, `/openapi.json`,
+**Versioning.** The identity routes live under `/v1/` (#772's diagram named `/auth/…`; these are
+those paths, versioned). The four metadata routes — `/health`, `/source`, `/openapi.json`,
 `/licences/third-party.txt` — are unversioned and only ever gain fields. The API a client syncs
 through lives under `/v1/` from its first route (#776). **A breaking change is `/v2/` served beside
 `/v1/`, never an edit to `/v1/`**, because anyone can run an instance and a third party implements
@@ -1323,10 +1375,9 @@ against this contract (#36's revision block): a change that would break a strang
 breaking whether or not this repository's own client notices. `info.version` in the specification is
 the API's version, not the package's.
 
-⚠️ **What the contract does not have yet, and who owes it.** `unauthenticated` and `rate_limited` are
-defined and their shape is tested, but no route produces either: authentication is #772's and a rate
-limiter is not built. No route takes input yet, so a validation failure is produced only by the
-pagination parser, which no route calls until #776's first list. #36 stays open for those.
+⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
+pagination parser still has no caller until #776's first list.
 
 ### The realistic world: what is built, and how a rider chooses it
 
@@ -1588,6 +1639,7 @@ share one.
 | [0031](adr/0031-model-licences-and-the-hosted-model-hole.md) | Model licences — committed weights are already covered by `ASSET001`–`ASSET007`, a hosted model is in no closure at all, and the bring-your-own-key path works because this client names no vendor | #380 |
 | [0032](adr/0032-external-data-for-the-game-world.md) | **No external data source for the trainer game's world** — every candidate in #248's table ruled on, and the terrain beside the road stays synthesised from the route's own elevations. ⚠️ **Not a gap in this list**: 0029, 0030 and 0031 are live reservations held by the camera-decision work ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381)) in a parallel pull request, and a written ADR cannot be renumbered. Also carries [#376](https://github.com/openzigs/onyourleft/issues/376)'s street-level-imagery ruling rather than sending it to a second ADR | #248 |
 | [0033](adr/0033-side-camera-link.md) | **The side-camera link**: the tablet drives a tripod phone over a WebRTC data channel with host candidates only, **signalled by two QR codes, with no server**. This is conditional on [#532](https://github.com/openzigs/onyourleft/issues/532), with an encrypted Android socket as the decided fallback. No picture is kept on either device, and cross-session differences are allowed only when the framing check passes. Supersedes, narrowly, ADR 0002 F's *"never in the browser"*, ADR 0029 D-6's WebRTC row, ADR 0029 D-2's per-ride keep on this path, and ADR 0030 D-3's *"same session"* sentence | #527 |
+| [0034](adr/0034-lucide-icons.md) | **Icons come from Lucide**: `lucide-react` pinned exactly, named imports from the package root only (a lint rule refuses `lucide-react/dynamic`, `DynamicIcon` and every subpath, and the build fails when it carries more Lucide icon modules than the source imports), an icon is decoration beside a visible word, and **no other runtime UI dependency is admitted by it** | #673 |
 | [0035](adr/0035-model-written-ride-write-ups.md) | **A ride write-up written by the rider's own model**: free text, riding position included, outside ADR 0030's vocabularies **for model text only**. The owner accepts the medical-device risk spike 0008 sets out; a runtime screen built from `no-absolute-angles`' matchers withholds a write-up whole, after one rewrite; never a picture, nothing reaches a trainer. Supersedes, narrowly, ADR 0030 D-2, D-3 as a rule of wording and D-8's one-vocabulary-file bullet, and ADR 0033 D-6's *"discarded when the report is made"*. Carries the owner-approved framing, policy and hosted-consent wording | #796 |
 | [0036](adr/0036-a-self-hostable-instance-server-now.md) | **A full, self-hostable instance server now**: owner decision D6 is lifted on the owner's ruling of 2026-09-28, the server is `apps/instance`, and the device stays canonical — four invariants, the first held by `no-network.test.ts`. Names every place D6 was load-bearing and who changes it, lifts ADR 0028 D-0's last block, and puts the AGPL-3.0 §13 offer at `GET /source` | #762 |
 | [0037](adr/0037-instance-runtime-hosting-and-transport.md) | **The instance's runtime, hosting, database and transport**: Node 24 on the box, a portable core with a self-host and a Durable Object adapter, WebSocket with compression off by default, ingest 2 Hz and fan-out 1 Hz, SQLite through Kysely on `node:sqlite`, a tested `down` for every migration, and the owner's home machine behind a Cloudflare Tunnel first. Discharges ADR 0005 F's and J's deferrals | #763 |
@@ -1662,14 +1714,14 @@ still a proposal.
 | 0031 | #380 — model licences, committed and hosted | [Written](adr/0031-model-licences-and-the-hosted-model-hole.md). The **only** one of #377's four Phase A documents that leaves nothing to the owner. **D-1** records that committed weights are a solved problem — [#339](https://github.com/openzigs/onyourleft/issues/339)'s `ASSETS.toml` discovery walks for binaries by **content**, so a `.tflite`, `.onnx`, `.task`, `.safetensors` or `.gguf` is inside `ASSET001`–`ASSET007` the day it lands with no edit to the checker — and #328's *"`DEP001` will not catch them because they are not a dependency"* is superseded by a comment pointing here. The real subject is the hole: **every licence gate in this repository is built on the lockfile or the working tree, and a hosted model is in neither** (D-3). ⚠️ **Neither [ADR 0015](adr/0015-dependency-licences.md)'s nor [ADR 0023](adr/0023-cc-by-assets-and-attribution.md)'s list is widened, and that is the decision**: every admissible class is already in them and every refused one fails `ASSET004`'s fail-closed branch, so widening a list to name a licence that must be refused would be the opposite of what fail-closed is for. **D-4** is the genuinely hard ruling — bring-your-own-key is **permitted**, and what makes it a rider's relationship rather than this project's is that the client ships **no vendor name, no list, no default endpoint and no vendor-specific request shaping**, which is a design consequence of targeting the OpenAI-compatible shape a local Ollama already serves. **D-5** refuses **Kimi K3 by name** with its §2 and §3 quoted from the licence **file** read first-hand on 2026-09-22 — and records the two clauses that cut in its favour (§2's MaaS carve-out for embedded end-user products, §4(a)'s internal-use exemption) rather than only the ones that do not. **D-7 deliberately writes no script rule**: there is no committed weights file and no hosted call, so a rule would pass vacuously from the day it landed — the *"guard that cannot fire"* shape, and worse than usual because a vacuous **licence** check reads as a licence check performed. It names the two triggers that make one owed instead. **D-8** is the one new obligation: a **quantised** weights file is a DERIVED asset under [ADR 0026](adr/0026-realistic-game-world.md) D-5, so `ASSET007`'s `input`, `inputsha256`, `script` and `tool` all apply — and quantising a Llama 4 release still produces a Llama-4-licensed file, because conversion is not laundering. |
 | 0032 | #248 — external data for the game world | [Written](adr/0032-external-data-for-the-game-world.md). ⚠️ This table had no row for it until #527, although the index above had one. That is the same gap #431 found for 0024 and 0025. |
 | 0033 | #527 — the side-camera link | [Written](adr/0033-side-camera-link.md), 2026-09-25. **Accepted, with the transport conditional on a measurement** ([#532](https://github.com/openzigs/onyourleft/issues/532)) and all three of its outcomes decided, so the result is recorded by an appended amendment rather than a new ADR. **It supersedes four sentences in three ADRs, each narrowly**, and each of those ADRs gains an amendment pointing here. ⚠️ **ADR 0029 D-5 is deliberately NOT superseded**: the 30-second camera adds a sentence beside D-5's and does not reverse any part of it. ⚠️ **It records a finding rather than fixing it**: `no-network.test.ts` does not match `RTCPeerConnection`, so the gate under the privacy policy cannot see the primitive this ADR permits. D-9 sets the order in which #529 must fix that. |
-| 0034 | #673 — adopting Lucide for icons | **Reserved, not written.** #673's title names "ADR 0034" and #796 left it alone on 2026-09-28 rather than race it: a written ADR cannot be renumbered, and a gap costs nothing. |
+| 0034 | #673 — adopting Lucide for icons | [Written](adr/0034-lucide-icons.md), 2026-09-29, in bundle [#857](https://github.com/openzigs/onyourleft/issues/857). ⚠️ It was **reserved** from 2026-09-28, when #796 left it alone rather than race it; a reviewer who remembers this row saying *"Reserved, not written"* is reading the old file. |
 | 0035 | #796 — a ride write-up written by the rider's own model | [Written](adr/0035-model-written-ride-write-ups.md), 2026-09-28. **Accepted on the owner's rulings on #795 and #796**, which it quotes verbatim, and it records the owner **accepting** the risk [spike 0008](spikes/0008-eu-uk-medical-device-read.md) §4.3 describes rather than concluding the product is outside it. ⚠️ **It supersedes for text a MODEL writes and for nothing else**: every rule of ADR 0030 still binds app-authored text, and `side-report.ts` and its wording are unchanged. ADR 0030 and ADR 0033 each gained an amendment pointing here. ⚠️ **The hosted consent wording it quotes is NOT pre-filed as an ADR 0029 amendment**: that lands with [#803](https://github.com/openzigs/onyourleft/issues/803). |
 | 0036 | #762 — a full self-hostable instance server now | [Written](adr/0036-a-self-hostable-instance-server-now.md), 2026-09-29. ⚠️ **0036 to 0039 were reserved together, in the one pull request that wrote all four** (bundle [#825](https://github.com/openzigs/onyourleft/issues/825)), so four branches could not race for "the next free number" — the collision `CLAUDE.md` §7 records twice. 0034 was left alone for #673. |
 | 0037 | #763 — the instance's runtime, hosting, database and transport | [Written](adr/0037-instance-runtime-hosting-and-transport.md), 2026-09-29, in the same pull request as 0036. |
 | 0038 | #764 — drafting in the first multiplayer release | [Written](adr/0038-drafting-in-the-first-multiplayer-release.md), 2026-09-29, in the same pull request as 0036. |
 | 0039 | #765 — racing another rider's ghost, on consent | [Written](adr/0039-racing-another-riders-ghost-on-consent.md), 2026-09-29, in the same pull request as 0036. |
 
-**The next free number is 0040.** 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 is reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and not written. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
+**The next free number is 0040.** 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 was reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and is written since 2026-09-29 ([ADR 0034](adr/0034-lucide-icons.md), bundle [#857](https://github.com/openzigs/onyourleft/issues/857)) — a reviewer who remembers this sentence calling it *"not written"* is reading the old file. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
 2026-09-22** — 0029, 0030 and 0031 were taken by the camera-decision work ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381))
 in a pull request opened the same day as #248's and #330's, and 0032 was taken by #248. ⚠️ **This sentence said *"the next free
 number is 0029"* and that 0021 was a live reservation, and both stopped being true on 2026-09-22**;

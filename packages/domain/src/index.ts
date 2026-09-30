@@ -233,6 +233,15 @@ export { canonicalBytes, canonicalJson } from './identity/canonical';
 
 export { bytesEqual, fromHex, isHexOfLength, toHex } from './identity/hex';
 export { utf8Encode } from './identity/utf8';
+export type { DevicePurpose, DeviceStatement } from './identity/device-statement';
+export {
+  AUTH_PURPOSE,
+  deviceStatementBytes,
+  LINK_PURPOSE,
+  RECOVER_PURPOSE,
+} from './identity/device-statement';
+export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
+export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 
 export type {
   Keystore,

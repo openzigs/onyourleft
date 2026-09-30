@@ -65,11 +65,17 @@ async function migrationsOnDisk(): Promise<[string, Partial<InstanceMigration>][
  */
 const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete: `INSERT INTO athlete VALUES ('a', 'A', 1, 'active')`,
-  device_key: `INSERT INTO device_key VALUES ('key-a', 'a', 2, NULL)`,
+  device_key: `INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-a', 'a', 2, NULL)`,
   session: `INSERT INTO session VALUES ('${'0'.repeat(64)}', 'a', 'key-a', 3, NULL)`,
   activity_record: `INSERT INTO activity_record VALUES ('a', '${'1'.repeat(64)}', x'00ff', 4)`,
   room: `INSERT INTO room VALUES ('room', 'race', 'private', '${'2'.repeat(64)}', 1)`,
   result: `INSERT INTO result VALUES ('room', 'a', 1000, 0)`,
+  auth_challenge: `INSERT INTO auth_challenge VALUES ('${'3'.repeat(64)}', 'key-b', 5, NULL)`,
+  recovery_code: `INSERT INTO recovery_code VALUES ('${'4'.repeat(64)}', 'a', 6, NULL)`,
+  link_code: `INSERT INTO link_code VALUES ('${'5'.repeat(64)}', 'a', 'key-a', 7, NULL)`,
+  display_name_change: `INSERT INTO display_name_change (athlete_id, previous_name, changed_at) VALUES ('a', 'Old', 8)`,
+  recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
+  email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
 };
 
 interface Snapshot {

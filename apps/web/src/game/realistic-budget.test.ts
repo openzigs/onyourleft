@@ -52,6 +52,7 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
+  REALISTIC_RIDER_SILHOUETTE_BYTES,
   REALISTIC_TEXTURE_MEMORY_BYTES,
   REALISTIC_TEXTURE_PIXELS,
   REALISTIC_TREE_LEVELS,
@@ -516,7 +517,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       mipmapped: true,
     });
     expect(banners).toBeLessThanOrEqual(2 ** 20);
-    const total = compressed + skyBytes() + banners;
+    // #626: and the riders' silhouette, made at runtime at its own ceiling.
+    const total = compressed + skyBytes() + REALISTIC_RIDER_SILHOUETTE_BYTES + banners;
     const before = decoded + skyBytes();
     const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
     const tablet = (facts: Ktx2Facts): number =>

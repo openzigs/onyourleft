@@ -172,6 +172,10 @@ export default defineConfig({
         // the page cannot be discovered to be broken on the one afternoon
         // somebody has the hardware — see `capture.browser.spec.ts`.
         capture: 'browser/capture.html',
+        // #772: a statement signed by this browser's WebCrypto, with the app's
+        // own non-extractable device key, verified by the Node instance the
+        // spec runs. `identity-harness.ts` says what it does not prove.
+        identity: 'browser/identity.html',
         reflow: 'browser/reflow.html',
       },
     },

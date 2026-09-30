@@ -29,6 +29,7 @@ import { stubAnalysis } from '../src/analysis/testing';
 import { stubActivity } from '../src/detail/testing';
 import { idleSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point.
@@ -139,6 +140,8 @@ async function run(): Promise<void> {
       loadCoveredTime: seconds(3600),
     }),
   }));
+  // #674: the view groups first, so every view renders on the render that asks.
+  await viewGroupsLoaded();
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>

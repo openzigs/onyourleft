@@ -596,6 +596,23 @@ export const REALISTIC_RIDER_SURFACES = {
 } as const;
 
 /**
+ * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
+ * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
+ * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
+ * no mipmaps (`rider-silhouette.ts` §`SILHOUETTE_TEXTURE_BYTES`) — and adds no
+ * build byte: it is made from the rider when a view builds its realistic
+ * world, never committed.
+ *
+ * ⚠️ **No triangles in the frame and no draw call**: two triangles a rider in
+ * the one instanced draw the round blob was, which the realistic world no
+ * longer draws.
+ *
+ * @test-facing held by `rider-silhouette.test.ts` and
+ * `realistic-budget.test.ts`; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
+
+/**
  * The most bytes the realistic set may add to the build — and so to the APK,
  * where `capacitor.config.ts` copies all of `dist` (ADR 0026 D-7): **40 MiB**.
  *

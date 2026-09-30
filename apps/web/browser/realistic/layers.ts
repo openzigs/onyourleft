@@ -71,6 +71,7 @@ import {
   RealisticStructureBelts,
   RealisticVegetationBelt,
   RiderBelt,
+  RiderSilhouetteBelt,
   ScatterBelt,
   SkyDome,
   TerrainBelt,
@@ -143,6 +144,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],
+  // #626: the realistic riders' bike-shaped shadow, in place of the blob.
+  [RiderSilhouetteBelt, 'riders'],
   [GroundBlobBelt, 'grounding'],
   [WorldLamps, 'always'],
   // Its four inner belts are `ScatterBelt`s; this, the outer call, owns them.

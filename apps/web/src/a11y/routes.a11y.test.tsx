@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createSegment,
@@ -72,7 +72,13 @@ import { answerTwoPanes } from '../testing/panes';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefForSelection } from '../shell/routes';
 
-import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
+import {
+  accessibleName,
+  auditAccessibility,
+  formatViolations,
+  keyboardReachableElements,
+  tabbableElements,
+} from './audit';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
 const THEME = readFileSync(
@@ -513,7 +519,10 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
       for (const details of queryAll(document, 'details')) {
         details.setAttribute('open', '');
       }
-      const tabbable = new Set(tabbableElements(document));
+      // #698: a radio that is not its group's tab stop is reached by an arrow
+      // key from the one that is, so it counts as reachable when that stop is
+      // in the tab order — which `keyboardReachableElements` answers.
+      const tabbable = new Set(keyboardReachableElements(document));
       const controls = queryAll(
         document,
         'a[href], button, input, select, textarea, [role="button"]',
@@ -665,6 +674,23 @@ describe('criterion 5 — focus is managed on navigation', () => {
     expect(accessibleName(main as Element)).toBe(routeById('devices').title);
   });
 
+  it('keeps focus on main once a view in a lazy chunk replaces its fallback — #674', async () => {
+    // Every group but Home arrives in a chunk of its own, so the render that
+    // navigates shows `ViewLoading` first. Focus goes to `main` on that render;
+    // what is asserted is that it is STILL there, and still names the page,
+    // once the view has replaced the fallback — which holds because the
+    // `Suspense` boundary is inside `main`, under the `h1`, and never around it.
+    await open('/');
+    for (const destination of [routeById('workouts'), routeById('segments'), routeById('about')]) {
+      await navigateTo(destination);
+      expect(document.querySelector('[data-oyl-view-loading]')).toBeNull();
+      expect(document.querySelector('main')?.textContent).not.toContain('Loading this page');
+      const main = document.querySelector('main');
+      expect(document.activeElement, `focus left main on ${destination.id}`).toBe(main);
+      expect(accessibleName(main as Element)).toBe(destination.title);
+    }
+  });
+
   it('does not steal focus on first render, which would make the skip link unreachable', async () => {
     await open('/');
     expect(document.activeElement).toBe(document.body);
@@ -686,11 +712,27 @@ describe('criterion 5 — focus is managed on navigation', () => {
     // would land on the not-found page. Both halves are asserted because
     // getting the focus right while breaking the route would look like a pass.
     await open('/about');
-    const skip = tabbableElements(document)[0];
-    await activateWithKeyboard(skip as HTMLElement);
+    // jsdom implements no `scrollIntoView`; the browser half of the scroll is
+    // `list-detail.browser.spec.ts` §"#723" and `shell.browser.spec.ts` §"#726".
+    const scrolled = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrolled,
+    });
+    try {
+      const skip = tabbableElements(document)[0];
+      await activateWithKeyboard(skip as HTMLElement);
 
-    expect(document.activeElement).toBe(document.querySelector('main'));
-    expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);
+      expect(document.activeElement).toBe(document.querySelector('main'));
+      expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);
+      // #726: the jump the link's `#main` names, onto `main` itself, and not
+      // only the focus move — which scrolls nothing when `main` already reaches
+      // into the viewport, however far down the page is.
+      expect(scrolled.mock.contexts).toEqual([document.querySelector('main')]);
+      expect(scrolled).toHaveBeenCalledWith({ block: 'start' });
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
   });
 });
 

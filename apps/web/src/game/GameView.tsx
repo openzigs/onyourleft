@@ -55,7 +55,7 @@ import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal
 import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
-import { advanceCrank } from './bicycle';
+import { advanceCrank, cadenceTurns } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
@@ -731,6 +731,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * the rider is.
    */
   const crankRef = useRef<number>(0);
+  /** Whether a cadence reading turned {@link crankRef} on the last frame — #625. */
+  const pedallingRef = useRef<boolean>(false);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
   /**
    * Whether a press on *Ride* is still on its way to a ride — #509.
@@ -1207,6 +1209,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // rather than an invented rate.
       const sinceLastFrame = at - lastFrameAt;
       crankRef.current = advanceCrank(crankRef.current, sensors.cadence, sinceLastFrame / 1000);
+      pedallingRef.current = cadenceTurns(sensors.cadence);
       // ⚠️ Before `setState`, so the render it schedules already has the answer.
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
@@ -1397,6 +1400,9 @@ export function GameView(props: GameViewProps): JSX.Element {
           // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
           // reads this back off the frame the renderer was handed.
           crankAngle: crankRef.current,
+          // #625: whether that angle is being turned by a reading — the body
+          // rocks exactly while the HUD shows a cadence. @see cadenceTurns
+          pedalling: pedallingRef.current,
         });
         if (prepared) {
           view.render(frame);
