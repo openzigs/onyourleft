@@ -181,6 +181,37 @@ export const COLOUR_TOKENS = {
   dangerBorder: '#a83232',
 
   /*
+   * THE ILLUSTRATION PALETTE — #936, the menus' house style (epic #935, the
+   * owner's D-1: flat geometric art drawn from code and painted with tokens).
+   *
+   * ⚠️ **Decoration, never text, and never the only carrier of a state.** Art
+   * is `aria-hidden` and the words beside it say everything it shows, so no
+   * illustration colour owes SC 1.4.3 against another. What each DOES owe is a
+   * pair against whatever text or control a later screen draws OVER it — the
+   * hero's title on the sky, a card's title where it overlaps the far hill, a
+   * primary button standing on the near hill, and the focus ring landing on
+   * any of them — and those pairs are in {@link CONTRAST_REQUIREMENTS}. A
+   * screen that draws a new kind of text or control over art adds its pair
+   * there first.
+   *
+   * The five are a landscape read back to front — sky, far hill, near hill,
+   * road — with the sun apart from it. {@link ILLUSTRATION_DEPTH} is that
+   * order, and it moves the way the elevation ramp does (#672): nearer is
+   * DARKER in the light palette (aerial perspective pales what is far) and
+   * LIGHTER in the dark one, where the far hills sink into the night.
+   */
+  /** The sky behind a scene. The one illustration colour text sits on most. */
+  illoSky: '#cfe4ef',
+  /** The sun. Small, warm, and nothing is drawn over it but a focus ring. */
+  illoSun: '#f4c65a',
+  /** The hills on the horizon, paler than the near ones. */
+  illoHillFar: '#a7d3a3',
+  /** The hill in front, which a primary control may stand on. */
+  illoHillNear: '#7db678',
+  /** The road ribbon, the nearest thing in the scene. */
+  illoRoad: '#6f726c',
+
+  /*
    * The ride HUD (#94), which is the one surface in this app that is drawn over
    * something we do not control.
    *
@@ -303,6 +334,11 @@ export const DARK_COLOUR_TOKENS = {
   dangerSurface: '#3a1818',
   dangerInk: '#f4b8b8',
   dangerBorder: '#d46a6a',
+  illoSky: '#152637',
+  illoSun: '#9a7a30',
+  illoHillFar: '#1d3a2b',
+  illoHillNear: '#2f5d3b',
+  illoRoad: '#5f6a63',
 } as const satisfies Record<ThemedColourToken, string>;
 
 /**
@@ -405,6 +441,25 @@ export const ELEVATION_SURFACES: readonly ElevationSurface[] = [
 ];
 
 /**
+ * The illustration palette's landscape, back to front (#936). Each layer is
+ * nearer than the one before it, so it moves the way {@link
+ * ELEVATION_DIRECTION} says a raised surface does: darker in the light
+ * palette, lighter in the dark. `illoSun` is not in it — a light source is not
+ * a layer of ground. `tokens.test.ts` holds the order in both palettes, and a
+ * visible step between neighbours ({@link MINIMUM_ILLUSTRATION_STEP}).
+ */
+export const ILLUSTRATION_DEPTH = ['illoSky', 'illoHillFar', 'illoHillNear', 'illoRoad'] as const;
+
+/**
+ * The smallest contrast ratio two adjacent layers of {@link ILLUSTRATION_DEPTH}
+ * may have: past this, a hill and the sky behind it are one flat shape. A
+ * legibility floor of this design system's own — decoration owes WCAG nothing
+ * here — and wider than {@link MINIMUM_ELEVATION_STEP}, because a hill's edge
+ * is a curve across a small drawing rather than the edge of a large panel.
+ */
+export const MINIMUM_ILLUSTRATION_STEP = 1.2;
+
+/**
  * The smallest contrast ratio two adjacent elevation levels may have.
  *
  * WCAG states no requirement for surface-against-surface, because neither is
@@ -470,6 +525,7 @@ export const TYPE_SCALE_STEPS = {
   lg: 1,
   xl: 2,
   xxl: 3,
+  display: 4,
   metric: 6,
 } as const satisfies Record<string, number>;
 
@@ -493,6 +549,13 @@ export const FONT_SIZE_TOKENS = {
   /** Step 3. The title of the view. */
   xxl: '1.953125rem',
   /**
+   * Step 4 (#936). A hero title on a menu — the one line on a screen that says
+   * what the screen is for, set above the view title on the same ladder. The
+   * owner's D-5 on #935: `system-ui` at a heavier weight, and no font file;
+   * `theme.css` §`.oyl-display` is the rule that sets both.
+   */
+  display: '2.44140625rem',
+  /**
    * A live ride metric, read from two metres away while pedalling.
    *
    * #49's eighth acceptance criterion asks for a **stated** minimum size for
@@ -511,6 +574,64 @@ export const FONT_SIZE_TOKENS = {
    */
   metric: '3.814697265625rem',
 } as const satisfies Record<string, string>;
+
+/**
+ * The menus' motion (#936), in milliseconds — the one place a duration is
+ * written. Epic #935's principle 4: motion is short, explains a change, and is
+ * optional. `short` is feedback on a press; `medium` is a change of place — a
+ * card opening into its detail. **Nothing may run longer than `medium`**:
+ * `theme.a11y.test.ts` fails on any duration literal above it in `theme.css`.
+ *
+ * ⚠️ Two readers, one number each. CSS reads {@link MOTION_TOKENS}, and
+ * Motion — the animation library [ADR 0041](../../../../docs/adr/0041-motion-for-menu-animation.md)
+ * admits, installed by #945 — reads {@link MOTION_FOR_SCRIPT}. Both are written
+ * out and `tokens.test.ts` derives each from these, so the stylesheet and a
+ * script animation cannot be two speeds.
+ */
+export const MOTION_DURATION_MS = {
+  short: 120,
+  medium: 200,
+} as const satisfies Record<string, number>;
+
+/**
+ * The one easing curve (#936): a cubic Bézier's four control numbers, which
+ * is the form CSS's `cubic-bezier()` and Motion's `ease` array both take. It
+ * decelerates hard into place — a thing that arrives, rather than one that
+ * bounces — and it overshoots nothing, so no frame puts an element outside the
+ * box it ends in.
+ */
+export const MOTION_EASING = {
+  standard: [0.2, 0, 0, 1],
+} as const satisfies Record<string, readonly [number, number, number, number]>;
+
+/**
+ * The motion tokens as `theme.css` declares them — `--oyl-motion-short`,
+ * `--oyl-motion-medium` and `--oyl-motion-ease-standard`. Written out, and
+ * `tokens.test.ts` requires them to equal what {@link MOTION_DURATION_MS} and
+ * {@link MOTION_EASING} say, for the reason {@link FONT_SIZE_TOKENS} gives.
+ *
+ * Every transition in the stylesheet reads these, so the
+ * `prefers-reduced-motion` and `update: slow` blocks collapse every one of them
+ * and a slower one cannot be written without a literal the gate refuses.
+ */
+export const MOTION_TOKENS = {
+  short: '120ms',
+  medium: '200ms',
+  easeStandard: 'cubic-bezier(0.2, 0, 0, 1)',
+} as const satisfies Record<string, string>;
+
+/**
+ * The same motion as Motion reads it: `duration` in SECONDS and `ease` as the
+ * Bézier array — `<m.div transition={MOTION_FOR_SCRIPT.medium}>`. A script
+ * animation takes one of these and never a number of its own.
+ */
+export const MOTION_FOR_SCRIPT = {
+  short: { duration: 0.12, ease: MOTION_EASING.standard },
+  medium: { duration: 0.2, ease: MOTION_EASING.standard },
+} as const satisfies Record<
+  keyof typeof MOTION_DURATION_MS,
+  { readonly duration: number; readonly ease: readonly number[] }
+>;
 
 /**
  * A pair of colours that end up against each other, and what it must clear.
@@ -728,6 +849,32 @@ const LINK_STATE_WORDS: Readonly<Record<LinkStateToken, string>> = {
  * which `contrast.a11y.test.ts` §"every link state is paired with every link
  * surface" is what notices.
  */
+/** Every illustration colour (#936) — the five `illo*` tokens, in one list. */
+export const ILLUSTRATION_TOKENS = [
+  'illoSky',
+  'illoSun',
+  'illoHillFar',
+  'illoHillNear',
+  'illoRoad',
+] as const satisfies readonly ThemedColourToken[];
+
+/** One of {@link ILLUSTRATION_TOKENS}. */
+export type IllustrationToken = (typeof ILLUSTRATION_TOKENS)[number];
+
+/**
+ * What the focus ring measures on each illustration colour, per palette —
+ * `contrast.a11y.test.ts` holds each, both ways (#307's erosion rule).
+ */
+const ILLUSTRATION_FOCUS_MEASURED: Readonly<
+  Record<IllustrationToken, Readonly<Record<Theme, number>>>
+> = {
+  illoSky: { light: 13.31, dark: 12.72 },
+  illoSun: { light: 10.88, dark: 3.34 },
+  illoHillFar: { light: 10.4, dark: 10.26 },
+  illoHillNear: { light: 7.35, dark: 6.31 },
+  illoRoad: { light: 3.58, dark: 4.66 },
+};
+
 const LINK_CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = LINK_STATE_TOKENS.flatMap(
   (state) =>
     LINK_SURFACES.filter(
@@ -1166,4 +1313,47 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
 
   // #661: every link state on every link surface.
   ...LINK_CONTRAST_REQUIREMENTS,
+
+  /*
+   * #936: what a menu draws OVER an illustration colour. Art is decoration and
+   * owes nothing against itself (see `illoSky` above); these are the text and
+   * controls later screens (#938 onwards) place on it, and the focus ring,
+   * which lands on whatever art is behind a focused control. A new kind of
+   * text or control over art declares its pair here before it is drawn.
+   */
+  {
+    foreground: 'ink',
+    background: 'illoSky',
+    minimum: AA_TEXT,
+    measured: { light: 13.31, dark: 12.72 },
+    where: 'a hero title drawn on the sky of a menu illustration',
+  },
+  {
+    foreground: 'inkMuted',
+    background: 'illoSky',
+    minimum: AA_TEXT,
+    measured: { light: 5.44, dark: 7.42 },
+    where: 'the line under a hero title, on the sky',
+  },
+  {
+    foreground: 'ink',
+    background: 'illoHillFar',
+    minimum: AA_TEXT,
+    measured: { light: 10.4, dark: 10.26 },
+    where: 'a card title where it overlaps the far hills',
+  },
+  {
+    foreground: 'accent',
+    background: 'illoHillNear',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 3.3, dark: 3.9 },
+    where: 'the edge of a primary button standing on the near hill (WCAG 2.2 SC 1.4.11)',
+  },
+  ...ILLUSTRATION_TOKENS.map((token): ContrastRequirement => ({
+    foreground: 'focus',
+    background: token,
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: ILLUSTRATION_FOCUS_MEASURED[token],
+    where: `the focus ring of a control over art, where it lands on ${token} (WCAG 2.2 SC 2.4.13)`,
+  })),
 ];

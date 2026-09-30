@@ -24,6 +24,8 @@ import {
   COLOUR_TOKENS,
   DARK_COLOUR_TOKENS,
   FONT_SIZE_TOKENS,
+  MOTION_DURATION_MS,
+  MOTION_TOKENS,
   SPACE_TOKENS,
 } from '../design/tokens';
 
@@ -89,6 +91,7 @@ describe('theme.css and tokens.ts cannot drift', () => {
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
     ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
+    ['motion', MOTION_TOKENS as Record<string, string>],
   ])('declares exactly the %s tokens in `:root`, with the same values', (prefix, tokens) => {
     const declared = declarationsWithPrefix(prefix, blockOf(LIGHT_BLOCK));
     expect(Object.fromEntries([...declared].sort())).toEqual(
@@ -114,7 +117,9 @@ describe('theme.css and tokens.ts cannot drift', () => {
       .replace(blockOf(LIGHT_BLOCK), '')
       .replace(blockOf(DARK_BLOCK), '')
       .replace(blockOf(HUD_BLOCK), '');
-    expect([...outside.matchAll(/--oyl-(?:color|space|font-size)-[a-z0-9-]+\s*:/g)]).toEqual([]);
+    expect([...outside.matchAll(/--oyl-(?:color|space|font-size|motion)-[a-z0-9-]+\s*:/g)]).toEqual(
+      [],
+    );
   });
 
   it('pins the HUD to the light palette: every page colour token, at its light value (#672)', () => {
@@ -178,6 +183,7 @@ describe('every token is painted by something', () => {
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
     ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
+    ['motion', MOTION_TOKENS as Record<string, string>],
   ])('has a rule reading each %s token', (prefix, tokens) => {
     const unread = Object.keys(tokens)
       .map((token) => customProperty(prefix, token))
@@ -281,6 +287,86 @@ describe('the stylesheet keeps the promises the checks depend on', () => {
     // claim rather than a behaviour, and this is what stops it becoming one
     // again if the transitions are ever removed.
     expect(themeCss).toMatch(/\n\s*transition:/);
+  });
+});
+
+/**
+ * The motion ceiling (#936): no duration in the stylesheet above
+ * {@link MOTION_DURATION_MS}' `medium`, 200 ms — epic #935's principle 4.
+ *
+ * Every time literal in a `transition`, `transition-duration`, `animation` or
+ * `animation-duration` declaration, and in a `--oyl-motion-*` token (a token
+ * of 300 ms would otherwise walk round a check that reads only the properties
+ * that use it), converted to milliseconds. `var(…)` references are removed
+ * first: a token is checked where it is declared, not where it is read.
+ */
+function durationsOver(css: string, ceilingMs: number): string[] {
+  const declarations = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+  const found: string[] = [];
+  for (const [, property, value] of declarations.matchAll(
+    /(-{0,2}[a-z][a-z-]*)\s*:\s*([^;{}]+);/gi,
+  )) {
+    const name = (property ?? '').toLowerCase();
+    if (!/^(?:transition|animation)(?:-duration)?$|^--oyl-motion-/.test(name)) continue;
+    const bare = (value ?? '').replaceAll(/var\([^)]*\)/g, '');
+    for (const [literal, amount, unit] of bare.matchAll(/(\d*\.?\d+)(ms|s)\b/gi)) {
+      const ms = Number(amount) * ((unit ?? '').toLowerCase() === 's' ? 1000 : 1);
+      if (ms > ceilingMs) found.push(`${name}: ${literal}`);
+    }
+  }
+  return found;
+}
+
+describe('no motion runs longer than 200 ms (#936)', () => {
+  const ceiling = MOTION_DURATION_MS.medium;
+
+  it('sets the ceiling at 200 ms and holds every duration token under it', () => {
+    expect(ceiling).toBe(200);
+    for (const [name, ms] of Object.entries(MOTION_DURATION_MS)) {
+      expect(ms, `${name} is ${String(ms)} ms`).toBeLessThanOrEqual(ceiling);
+    }
+  });
+
+  it('finds no duration literal above it anywhere in theme.css', () => {
+    expect(durationsOver(themeCss, ceiling)).toEqual([]);
+  });
+
+  it('finds one when there is one — the check can fail', () => {
+    // The fixture #936 asks for, and the three other places a slow duration
+    // could be written: a shorthand in seconds, a longhand, and a token.
+    expect(durationsOver('.a {\n  transition: opacity 300ms ease;\n}', ceiling)).toEqual([
+      'transition: 300ms',
+    ]);
+    expect(durationsOver('.a {\n  animation: spin 0.3s linear 2;\n}', ceiling)).toEqual([
+      'animation: 0.3s',
+    ]);
+    expect(durationsOver('.a {\n  transition-duration: 250ms;\n}', ceiling)).toEqual([
+      'transition-duration: 250ms',
+    ]);
+    expect(durationsOver(':root {\n  --oyl-motion-medium: 300ms;\n}', ceiling)).toEqual([
+      '--oyl-motion-medium: 300ms',
+    ]);
+  });
+
+  it('passes what the ceiling allows, and what the reduced-motion blocks write', () => {
+    expect(
+      durationsOver(
+        '.a {\n  transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1);\n  ' +
+          'transition-duration: 0.01ms !important;\n  animation-delay: 5s;\n}',
+        ceiling,
+      ),
+    ).toEqual([]);
+  });
+
+  it('reads every transition in theme.css from a motion token, never a number', () => {
+    // "Durations are declared, not scattered" (#936): a transition written
+    // with its own 150 ms passes the ceiling and still escapes the token a
+    // later change to the house style would move.
+    const declarations = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    const scattered = [...declarations.matchAll(/\n\s*(transition|animation)\s*:\s*([^;]+);/g)]
+      .map(([, property, value]) => `${property ?? ''}: ${(value ?? '').trim()}`)
+      .filter((declaration) => /\d(?:ms|s)\b/.test(declaration));
+    expect(scattered).toEqual([]);
   });
 });
 

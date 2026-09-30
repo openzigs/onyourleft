@@ -52,6 +52,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
 import {
   COLOUR_TOKENS,
+  FONT_SIZE_TOKENS,
+  ILLUSTRATION_TOKENS,
   PLATFORM_CHECK_MARK,
   THEMES,
   paletteColours,
@@ -2269,4 +2271,189 @@ test.describe('#667 — the select opts into a styled picker and stays a select'
       expect((await state(page)).appearance).toBe('auto');
     });
   }
+});
+
+/*
+ * #936 — the menus' house style, on the existing shell load
+ * (`?illustration=specimens`, `shell-harness.tsx` §IllustrationSpecimens).
+ *
+ * Three claims, each read back from the engine:
+ *
+ * - every illustration colour is painted, in both palettes, as the token says;
+ * - the display step lays out at 320×256 without a sideways scroll — with the
+ *   wrap stripped off as the control, which must scroll;
+ * - under `prefers-reduced-motion: reduce` and under `update: slow`, the
+ *   specimen's transition does not run — `document.getAnimations()` finds
+ *   none running two frames after it is triggered. The CONTROL is the same
+ *   page with that `@media` block deleted through the CSSOM, under the same
+ *   emulated preference, and it must find at least one: without it, a
+ *   transition that never started at all would pass.
+ */
+const ILLUSTRATION_PAGE = '/shell.html?illustration=specimens';
+
+async function openIllustration(page: Page, url = ILLUSTRATION_PAGE): Promise<void> {
+  await page.goto(url);
+  await page.waitForSelector('html[data-oyl-shell-ready]');
+  expect(
+    await page.locator('[data-oyl-illo]').count(),
+    'the illustration specimens did not render — see shell-harness.tsx §IllustrationSpecimens',
+  ).toBe(ILLUSTRATION_TOKENS.length);
+}
+
+/**
+ * Lets the specimen arrive, waits two animation frames, and returns what is
+ * still running and how long that took. Two frames is past a transition the
+ * motion blocks collapse to 0.01 ms and well inside one of 200 ms.
+ */
+async function runningAfterArrival(
+  page: Page,
+): Promise<{ readonly running: number; readonly elapsed: number }> {
+  return page.evaluate(async () => {
+    const specimen = document.querySelector<HTMLElement>('[data-oyl-motion-specimen]');
+    if (specimen === null) throw new Error('no motion specimen on the page');
+    // The state before arrival is computed, so the change below is a change.
+    const before = getComputedStyle(specimen).opacity;
+    if (before !== '0') throw new Error(`the specimen starts at opacity ${before}, not 0`);
+    const started = performance.now();
+    specimen.dataset['oylEntered'] = 'true';
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+    return {
+      running: document.getAnimations().filter((animation) => animation.playState === 'running')
+        .length,
+      elapsed: performance.now() - started,
+    };
+  });
+}
+
+/**
+ * The page with the `update: slow` block applied — `shell-harness.tsx`
+ * §forceSlowUpdate says why it is forced through the CSSOM rather than
+ * emulated: the pinned Chromium emulates no `update` feature.
+ */
+const SLOW_UPDATE_PAGE = `${ILLUSTRATION_PAGE}&update=slow`;
+
+for (const theme of THEMES) {
+  test.describe(`#936 — the illustration palette is painted (${theme})`, () => {
+    test.use({ viewport: { width: 390, height: 844 }, colorScheme: theme });
+
+    test('every illustration colour, as its token says, and the drawing is decoration', async ({
+      page,
+    }) => {
+      await openIllustration(page);
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      const read = await page.evaluate(() =>
+        [...document.querySelectorAll<SVGElement>('[data-oyl-illo]')].map((shape) => ({
+          token: shape.dataset['oylIllo'] ?? '',
+          fill: getComputedStyle(shape).fill,
+        })),
+      );
+      expect(read.map(({ token }) => token).sort()).toEqual([...ILLUSTRATION_TOKENS].sort());
+      for (const { token, fill } of read) {
+        expect(fill, `${token} in the ${theme} palette`).toBe(rgbOf(token as ColourToken, theme));
+      }
+      const drawing = page.locator('[data-oyl-illustration-drawing]');
+      await expect(drawing).toHaveAttribute('aria-hidden', 'true');
+      expect(await drawing.evaluate((svg) => svg.textContent?.trim() ?? '')).toBe('');
+    });
+  });
+}
+
+test.describe('#936 — the display step at 320×256', () => {
+  test.use({ viewport: { width: 320, height: 256 } });
+
+  test('is the display token at a heavier weight, and the page does not scroll sideways', async ({
+    page,
+  }) => {
+    await openIllustration(page);
+    const read = await page.locator('[data-oyl-display]').evaluate((heading) => {
+      const style = getComputedStyle(heading);
+      return {
+        fontSize: Number.parseFloat(style.fontSize),
+        fontWeight: Number(style.fontWeight),
+        headingOverflow: heading.scrollWidth - heading.clientWidth,
+        right: heading.getBoundingClientRect().right,
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      };
+    });
+    // Chromium reports 39.0626px for 2.44140625rem: its layout unit is 1/64 px.
+    expect(read.fontSize).toBeCloseTo(Number.parseFloat(FONT_SIZE_TOKENS.display) * 16, 2);
+    expect(read.fontWeight).toBeGreaterThanOrEqual(700);
+    expect(read.headingOverflow, 'the heading’s text runs past its own box').toBeLessThanOrEqual(0);
+    expect(read.right).toBeLessThanOrEqual(read.clientWidth);
+    expect(read.scrollWidth, 'the document scrolls sideways at 320 px').toBeLessThanOrEqual(
+      read.clientWidth,
+    );
+  });
+
+  test('the control — without the wrap, the heading’s long word runs off the page', async ({
+    page,
+  }) => {
+    await openIllustration(page);
+    const overflow = await page.locator('[data-oyl-display]').evaluate((heading) => {
+      heading.style.overflowWrap = 'normal';
+      return heading.scrollWidth - heading.clientWidth;
+    });
+    expect(
+      overflow,
+      'the heading fits at 320 px without `overflow-wrap`, so the case above measured nothing',
+    ).toBeGreaterThan(0);
+  });
+});
+
+test.describe('#936 — the menus’ motion collapses when it should', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the apparatus — with no preference, the specimen’s transition runs', async ({ page }) => {
+    await openIllustration(page);
+    const { running, elapsed } = await runningAfterArrival(page);
+    test
+      .info()
+      .annotations.push({ type: 'two frames took', description: `${elapsed.toFixed(1)} ms` });
+    expect(running).toBeGreaterThanOrEqual(1);
+  });
+
+  test('under prefers-reduced-motion: reduce, nothing is running', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openIllustration(page);
+    expect((await runningAfterArrival(page)).running).toBe(0);
+  });
+
+  test('the control — with the reduced-motion block deleted, the same page moves', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openIllustration(page, `${ILLUSTRATION_PAGE}&motion-rule-off=prefers-reduced-motion`);
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
+      'the harness removed no prefers-reduced-motion block, so this is not the control',
+    ).toBe('1');
+    expect((await runningAfterArrival(page)).running).toBeGreaterThanOrEqual(1);
+  });
+
+  test('under update: slow, nothing is running', async ({ page }) => {
+    await openIllustration(page, SLOW_UPDATE_PAGE);
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylSlowUpdateForced']),
+      'the harness applied no update: slow block, so this case would measure nothing',
+    ).toBe('1');
+    expect((await runningAfterArrival(page)).running).toBe(0);
+  });
+
+  test('the control — with the update: slow block deleted, the same page moves', async ({
+    page,
+  }) => {
+    await openIllustration(page, `${SLOW_UPDATE_PAGE}&motion-rule-off=update`);
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
+      'the harness removed no update block, so this is not the control',
+    ).toBe('1');
+    expect((await runningAfterArrival(page)).running).toBeGreaterThanOrEqual(1);
+  });
 });
