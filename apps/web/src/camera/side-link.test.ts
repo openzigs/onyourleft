@@ -281,6 +281,115 @@ describe('pairing, through both codes', () => {
     expect(tablet.control.sideControlState().ended).toBe('link-lost');
   });
 
+  it('lets nothing the phone says overtake its secret: a lost secret ends the pairing unanswered, never as not-our-phone — #568', async () => {
+    // #568 as reported: the tablet heard the phone's first REPORT before its
+    // secret, and D-4 ended a genuine pairing as an intruder. Here the
+    // engine loses the phone's secret wherever it is sent from, and delivers
+    // everything after it. Before #568's third fix the phone sent its report
+    // and its heartbeat straight after the secret, so one of them reached the
+    // tablet first.
+    const context = setUp({ losesAnsweringEndsFirstControlMessage: true });
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    await context.pass(SILENCE_IS_LOST_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBe('unanswered');
+    // The secret was sent, and it is ALL the phone sent: nothing it could say
+    // after it was said before the tablet had welcomed it.
+    expect(phoneControl?.sent.map((text) => (JSON.parse(text) as { t: string }).t)).toEqual([
+      'hello',
+    ]);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
+  it('says nothing after its secret until the tablet has welcomed it, and is welcomed again every heartbeat until heard — #568', async () => {
+    const { port, network, pass } = setUp();
+    const tablet = await offer(port);
+    const tabletControl = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    if (tabletControl === undefined) {
+      throw new Error('no control channel');
+    }
+    // The tablet's welcomes are lost; its pings are not.
+    const send = tabletControl.send.bind(tabletControl);
+    let welcomesLost = 0;
+    tabletControl.send = (data) => {
+      if (typeof data === 'string' && data.includes('"welcome"')) {
+        welcomesLost += 1;
+        return;
+      }
+      send(data);
+    };
+    const phone = await answer(port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    // Proved on the tablet, and the phone still unwelcomed: it holds its report.
+    phone.link.reportToTablet({ state: 'framing' });
+    await pass(2 * HEARTBEAT_MILLISECONDS);
+    expect(welcomesLost).toBeGreaterThanOrEqual(2);
+    expect(phoneControl?.sent.map((text) => (JSON.parse(text) as { t: string }).t)).toEqual([
+      'hello',
+    ]);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    expect(
+      phone.link.sendPictureToTablet({ sequence: 0, milliseconds: 0, bytes: cleanFrameBytes() }),
+    ).toBe('no-link');
+    // The next welcome gets through, and only then does the phone speak.
+    tabletControl.send = send;
+    await pass(HEARTBEAT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    phone.link.reportToTablet({ state: 'framing' });
+    await flushSideLink();
+    expect(tablet.control.sideControlState()).toMatchObject({ phone: 'framing', ended: undefined });
+  });
+
+  it('takes a command from a proved tablet as its welcome, when every welcome was lost — #568', async () => {
+    const { port, network } = setUp();
+    const tablet = await offer(port);
+    const tabletControl = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
+    if (tabletControl === undefined) {
+      throw new Error('no control channel');
+    }
+    const send = tabletControl.send.bind(tabletControl);
+    tabletControl.send = (data) => {
+      if (!(typeof data === 'string' && data.includes('"welcome"'))) {
+        send(data);
+      }
+    };
+    const phone = await answer(port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    tablet.control.commandSideCamera('start');
+    await flushSideLink();
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    expect(tablet.control.sideControlState().command).toEqual({
+      kind: 'start',
+      status: 'acknowledged',
+    });
+  });
+
+  it('ends the phone’s link on anything but a ping before it has sent its secret — #568', async () => {
+    const { port, network } = setUp();
+    const tablet = await offer(port);
+    network.drop();
+    const phone = await answer(port, tablet.offerCode);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    network.restore();
+    // Only a tablet that has proved the phone welcomes it, and it cannot
+    // have proved a phone that has not sent its secret.
+    network.peers[1]?.channels.find((c) => c.label === CONTROL_CHANNEL)?.deliver('{"t":"welcome"}');
+    await flushSideLink();
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
   it('says nothing until the tablet has spoken, and answers its repeated opening ping', async () => {
     const context = setUp();
     const tablet = await offer(context.port);
@@ -310,13 +419,18 @@ describe('pairing, through both codes', () => {
   it('stops its opening ping once the phone has proved itself — one ping a heartbeat, not two (#573)', async () => {
     const { network, pass } = await paired();
     const control = network.peers[0]?.channels.find((c) => c.label === CONTROL_CHANNEL);
-    const pings = (): number => (control?.sent ?? []).filter((m) => m === '{"t":"ping"}').length;
+    // A heartbeat is a `ping`, or a `welcome` until the phone is heard (#568).
+    const pings = (): number =>
+      (control?.sent ?? []).filter((m) => m === '{"t":"ping"}' || m === '{"t":"welcome"}').length;
     const before = pings();
     const heartbeats = 10;
     await pass(heartbeats * HEARTBEAT_MILLISECONDS);
     // The heartbeat alone. With the opening ping left running beside it, the
     // tablet would send twice this for the whole pairing.
     expect(pings() - before).toBe(heartbeats);
+    // And once the phone has been heard, it is a ping again: the welcome is
+    // repeated only until it is known to have landed (#568).
+    expect(control?.sent.at(-1)).toBe('{"t":"ping"}');
   });
 
   it('lets go of the channel’s open handler when it ends, and an open after the end sends nothing (#573)', async () => {

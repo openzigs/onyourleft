@@ -722,3 +722,36 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   tablet. **D-3 stands**: the owner confirmed on
   [#796](https://github.com/openzigs/onyourleft/issues/796) that position is analysed over the whole
   session only, and nothing joins the summary to a section or a reading of the ride.
+- **2026-09-30** — **The phone says nothing after its secret until the tablet has acknowledged it, so
+  no message can reach the tablet before the secret. D-4 is unchanged; nothing before the secret is
+  tolerated.** [#568](https://github.com/openzigs/onyourleft/issues/568)'s title is the tablet
+  hearing the phone's first *report* before its `hello`. `control` is ordered (D-3), so a message can
+  only arrive ahead of the secret if the secret itself never arrives; the 2026-09-26 and 2026-09-27
+  entries above close the two windows in which the engine was found or read to drop it. Neither shows
+  it cannot be dropped anywhere else, and whenever it was, the phone's next message — a report the
+  moment its screen paired it, or a heartbeat a second later — was the first the tablet heard, and
+  D-4 ended a genuine pairing as *not our phone*. The owner's direction on 2026-09-30 was to make
+  that ordering impossible rather than to relax the first-message rule. What changes:
+  - **The tablet sends a `welcome` once it has verified the secret**, and repeats it as its
+    heartbeat in place of `ping` until it hears the phone again. It carries nothing. It is D-3's
+    *"Acknowledgements — of what the phone sent"* row, of the secret; the message set is otherwise
+    unchanged. A phone that receives one before it has sent its secret ends the link, because no
+    honest tablet can have verified a secret it has not been sent.
+  - **The phone sends nothing after its secret until it hears that welcome** — not a report, an
+    acknowledgement, a heartbeat or a picture — and only then calls the link `connected`. A command,
+    a framing reference or a verdict heard first is taken as the welcome, because the tablet sends
+    those only once it has proved the phone; its welcome was lost, not skipped.
+  - **A lost secret now ends the pairing as `unanswered`**, three seconds after `control` opened, by
+    the 2026-09-27 entry's own bound, telling the rider to pair again, instead of as *not our phone*.
+  - **What stands.** The secret is still the phone's first message; anything else first still ends
+    the pairing before another byte is read; a second `hello` is still `broken`, and the phone never
+    repeats its secret, because one that was late rather than lost would then arrive twice. Nothing
+    the tablet sends before proof carries anything. A picture on `frames` before proof still ends the
+    pairing; it cannot be sent before the welcome now, and was taken only while filming before.
+  - **Cost.** One more message before the phone is `connected`, a round trip of spike 0012's
+    72–158 ms. A tablet and a phone on builds from either side of this change cannot pair: the older
+    end refuses the other's message as one D-3 does not list, which is D-4's rule working as written.
+  `camera/side-link.ts` §"Why the phone says nothing more until it is welcomed" is the record, and
+  `side-link.test.ts` reproduces the lost secret with `testing.ts`
+  §`losesAnsweringEndsFirstControlMessage`: on the code before this entry the tablet ended that
+  pairing as `not-our-phone`.

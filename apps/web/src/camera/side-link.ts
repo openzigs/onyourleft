@@ -22,6 +22,9 @@
  * 5. **The phone proves it read the offer**, in answer to that: its first
  *    message is the secret. Anything else first, or a wrong secret, and the
  *    tablet ends the pairing before it reads another byte (D-4).
+ * 6. **The tablet welcomes it**, once the secret is verified, and the phone
+ *    says nothing more until it has heard that — so nothing it says can reach
+ *    the tablet before its secret did.
  *
  * ## Why the phone waits to be spoken to
  *
@@ -52,6 +55,36 @@
  * repeats in case one is lost all the same. D-4 is unchanged: the secret is
  * still the phone's first message, and nothing the tablet sends before proof
  * carries anything.
+ *
+ * ## Why the phone says nothing more until it is welcomed
+ *
+ * #568, a third time. The two fixes here stop the engine dropping the secret
+ * in the two windows the source reading found. Neither shows a secret CANNOT
+ * be lost anywhere else, and whenever it is, the old order made the fault
+ * look like an intruder: the phone sent its secret and went straight on — a
+ * `state` report the moment the screen paired it, a heartbeat a second later
+ * — on the same ordered channel, so the first thing the tablet heard was the
+ * report, and D-4 ended a genuine pairing as `not-our-phone`. That is the
+ * message #568 is titled after, and it is not a race between two messages,
+ * because `control` is ordered: a message can only reach the tablet ahead of
+ * the secret if the secret itself never arrives. (`frames` is a second,
+ * unordered channel, but a picture is taken only while filming, which only a
+ * `start` from a tablet that has proved the phone begins.)
+ *
+ * So the race is made impossible rather than tolerated. The tablet sends a
+ * `welcome` — carrying nothing — once it has verified the secret, and repeats
+ * it as its heartbeat until it hears the phone again. The phone sends nothing
+ * after its secret, not a report, an acknowledgement, a heartbeat or a
+ * picture, until it hears a `welcome` or a message only a tablet that has
+ * proved it sends (a command, a reference, a verdict: its welcome was lost,
+ * not skipped); only then is it `connected`. A lost secret now leaves the
+ * phone silent, the tablet ends the pairing as `unanswered` three seconds
+ * after `control` opened, and the rider pairs again, told the truth. D-4 is
+ * unchanged, and strengthened on the phone's side: the first thing the tablet
+ * accepts is still the verified secret, nothing arrives before it, and a
+ * second `hello` is still `broken` — the phone never repeats its secret,
+ * because a secret that was late rather than lost would then arrive twice.
+ * `testing.ts` §`losesAnsweringEndsFirstControlMessage` reproduces it.
  *
  * ## A channel that hears and cannot answer
  *
@@ -526,6 +559,13 @@ export class TabletSideLink implements SideCameraControlPort {
   #cancelInvite: (() => void) | undefined;
   /** Whether `control` has opened — there was a path, whatever happens next (#568). */
   #opened = false;
+  /**
+   * Whether the phone has been heard since it proved itself. Until it has, the
+   * heartbeat is a `welcome` rather than a `ping`, so a lost welcome does not
+   * leave the phone silent for good (#568, §"Why the phone says nothing more
+   * until it is welcomed").
+   */
+  #heardSinceProof = false;
   #nextCommand = 0;
   #lastHeard = 0;
   #ended: SidePairingEnd | undefined;
@@ -703,6 +743,7 @@ export class TabletSideLink implements SideCameraControlPort {
       this.#end('broken');
       return;
     }
+    this.#heardSinceProof = true;
     this.#heard();
     for (const listener of [...this.#pictureListeners]) {
       listener(picture);
@@ -749,6 +790,9 @@ export class TabletSideLink implements SideCameraControlPort {
         this.#proved = true;
         this.#cancelInvite?.();
         this.#cancelInvite = undefined;
+        // #568: the phone says nothing after its secret until it hears this,
+        // so nothing it says can reach this tablet before the secret did.
+        this.#send({ t: 'welcome' });
         this.#heard();
         this.#cancels.push(
           this.#timers.every(() => {
@@ -765,6 +809,7 @@ export class TabletSideLink implements SideCameraControlPort {
       this.#end('broken');
       return;
     }
+    this.#heardSinceProof = true;
     this.#heard();
     this.#apply(message);
   }
@@ -825,7 +870,10 @@ export class TabletSideLink implements SideCameraControlPort {
   }
 
   #beat(): void {
-    this.#send({ t: 'ping' });
+    // A `welcome` until the phone has been heard since it proved itself: the
+    // first may have been lost, and a phone that never hears one says nothing
+    // at all (#568). It carries no more than a ping.
+    this.#send(this.#heardSinceProof ? { t: 'ping' } : { t: 'welcome' });
     if (this.#timers.clock() - this.#lastHeard >= SILENCE_IS_LOST_MILLISECONDS) {
       this.#setLost(true);
     }
@@ -969,6 +1017,12 @@ export class PhoneSideLink implements SideCameraLinkPort {
   /** Whether the secret has been sent — the first thing this phone says (#568). */
   #greeted = false;
   /**
+   * Whether the tablet has said it verified the secret — its `welcome`, or a
+   * message only a tablet that has proved this phone sends. Until then this
+   * phone says nothing after its secret (#568).
+   */
+  #welcomed = false;
+  /**
    * Whether the bound on a `control` channel that hears the tablet and says
    * it cannot answer is running (§"A channel that hears and cannot answer").
    */
@@ -1104,12 +1158,21 @@ export class PhoneSideLink implements SideCameraLinkPort {
 
   /**
    * D-4: the secret first, before anything else this phone says — sent in
-   * answer to the first thing the tablet says (#568), and only then is the
-   * link `connected` and the heartbeat started.
+   * answer to the first thing the tablet says (#568). Nothing follows it
+   * until the tablet has welcomed this phone ({@link #welcome}).
    */
   #greet(): void {
     this.#greeted = true;
     this.#send({ t: 'hello', k: this.#secret });
+  }
+
+  /**
+   * The tablet has verified the secret: only now is the link `connected`, the
+   * heartbeat started and a report, an acknowledgement or a picture sent —
+   * so none of them can reach the tablet before the secret did (#568).
+   */
+  #welcome(): void {
+    this.#welcomed = true;
     this.#cancels.push(
       this.#timers.every(() => {
         this.#beat();
@@ -1126,6 +1189,13 @@ export class PhoneSideLink implements SideCameraLinkPort {
       this.endSideLink();
       return;
     }
+    if (!this.#greeted && message.t !== 'ping') {
+      // Before the secret, an honest tablet has said nothing but its opening
+      // ping: it welcomes, commands and shares only once it has proved this
+      // phone, which it cannot have done yet (#568).
+      this.endSideLink();
+      return;
+    }
     if (this.#channel?.readyState !== 'open') {
       this.#unanswerable();
       if (!this.#greeted) {
@@ -1137,6 +1207,16 @@ export class PhoneSideLink implements SideCameraLinkPort {
     }
     if (!this.#greeted) {
       this.#greet();
+      return;
+    }
+    if (!this.#welcomed) {
+      if (message.t === 'ping') {
+        // One of the opening pings, sent before the tablet had the secret.
+        return;
+      }
+      // A `welcome`, or a command or a share, which the tablet sends only
+      // once it has verified the secret — so its welcome was lost, not skipped.
+      this.#welcome();
     }
     this.#heard();
     switch (message.t) {
@@ -1157,6 +1237,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
         this.#emit({ kind: 'verdict', verdict: message.verdict });
         return;
       case 'ping':
+      case 'welcome':
         return;
     }
   }
@@ -1210,9 +1291,11 @@ export class PhoneSideLink implements SideCameraLinkPort {
   /** Never throws: on a lost link there is nobody to tell (the port's rule). */
   #send(message: PhoneMessage): void {
     const channel = this.#channel;
-    // Nothing before the secret (D-4): a report made before the tablet has
-    // spoken is dropped, as one made before the channel opens always was.
-    if (channel?.readyState !== 'open' || (!this.#greeted && message.t !== 'hello')) {
+    // Nothing before the secret (D-4), and nothing after it until the tablet
+    // has welcomed this phone (#568): a report made before then is dropped, as
+    // one made before the channel opens always was, and `side-camera.ts`
+    // reports again on `connected`.
+    if (channel?.readyState !== 'open' || (!this.#welcomed && message.t !== 'hello')) {
       return;
     }
     try {
