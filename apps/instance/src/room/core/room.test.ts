@@ -395,6 +395,52 @@ describe('rejoin — #16’s epic criterion', () => {
     expect(sentTo(refused, 9)).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
   });
 
+  it('rides a held seat on at 0 W every tick — it neither freezes nor keeps the last power (from #840’s review)', () => {
+    // ADR 0028 D-2 rule 1: a dropped rider is ADVANCED at 0 W. The rejoin
+    // test above reads the position after the hold, so a held seat that was
+    // never ridden would pass it; this reads every tick of the hold.
+    const room = runningRace(['ann', 'bob']);
+    for (let t = 0; t < 10; t += 1) second(room, t, { 1: 400, 2: 200 });
+    room.disconnect(1, 10 * SECOND);
+    let distance = distanceOf(room, 0);
+    let speed = room.view().seats[0]?.speedMetresPerSecond ?? 0;
+    expect(speed).toBeGreaterThan(5);
+    for (let t = 10; t < 15; t += 1) {
+      const out = second(room, t, { 2: 200 });
+      const seat = room.view().seats[0];
+      expect(seat?.state).toBe('held');
+      // It moved (it was not frozen)…
+      expect(seat?.distanceMetres).toBeGreaterThan(distance);
+      // …and slowed, as a rider at 0 W on the flat does (it was not held at 400 W).
+      expect(seat?.speedMetresPerSecond).toBeLessThan(speed);
+      expect(lastFrame(out, 2).riders[0]?.flags ?? 0).toBe(FLAG_COASTING);
+      distance = seat?.distanceMetres ?? 0;
+      speed = seat?.speedMetresPerSecond ?? 0;
+    }
+  });
+
+  it('does not let a race rider back in once the window ran out between ticks — the receive-side expiry', () => {
+    // No tick and no disconnect falls between the drop and the hello, so the
+    // only thing that can expire the seat is `receive` itself.
+    const room = runningRace(['ann', 'bob'], { rejoinWindowMs: 5_000 });
+    second(room, 0, { 1: 300, 2: 300 });
+    room.disconnect(1, 1 * SECOND);
+    const late = room.receive(9, helloText('ticket-ann'), 1 * SECOND + 5_001);
+    expect(sentTo(late, 9)).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+    expect(closed(late)).toEqual([9]);
+    expect(room.view().seats.find((s) => s.riderId === 0)?.state).toBe('dnf');
+    // Control: inside the window, the same hello gets the seat back.
+    const control = runningRace(['ann', 'bob'], { rejoinWindowMs: 5_000 });
+    second(control, 0, { 1: 300, 2: 300 });
+    control.disconnect(1, 1 * SECOND);
+    expect(
+      sentTo(control.receive(9, helloText('ticket-ann'), 1 * SECOND + 4_999), 9)[0],
+    ).toMatchObject({
+      type: 'welcome',
+      riderId: 0,
+    });
+  });
+
   it('in a group ride, past the window, gives the seat up: a later hello is a new rider at the start', () => {
     const room = testRoom({ kind: 'ride', countdownMs: 0, rejoinWindowMs: 5_000 });
     room.receive(1, helloText('ticket-ann'), 0);
@@ -462,6 +508,22 @@ describe('a race — lobby, countdown, running, finished', () => {
     expect(sentTo(room.receive(8, helloText('ticket-new'), 99 * SECOND), 8)).toEqual([
       { type: 'refuse', reason: 'room-closed' },
     ]);
+  });
+
+  it('orders two riders who cross in the SAME tick by where in it they crossed, not by seat (from #840’s review)', () => {
+    // Bob is rider 1 and rides 10 W harder, so over 100 m he is a fraction of
+    // a metre ahead: both cross in one tick, Bob earlier in it. An order by
+    // tick alone would fall back to the seat and put Ann first.
+    const course = { ...FLAT_COURSE, lengthMetres: 100 };
+    const room = runningRace(['ann', 'bob'], { course });
+    let crossedIn: number[] = [];
+    for (let t = 0; t < 60 && room.view().phase !== 'finished'; t += 1) {
+      second(room, t, { 1: 300, 2: 310 });
+      const finished = room.view().seats.filter((s) => s.state === 'finished');
+      if (finished.length > 0 && crossedIn.length === 0) crossedIn = finished.map((s) => s.riderId);
+    }
+    expect(crossedIn).toEqual([0, 1]);
+    expect(room.view().finishOrder).toEqual([1, 0]);
   });
 
   it('does not finish a rider for anybody else’s crossing, and cuts the field off after the first finisher', () => {

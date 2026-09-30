@@ -1378,6 +1378,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         const frame = sceneFrame({
           profile: chosen.profile,
           origin,
+          // #679: the board before a line reads in the rider's own units.
+          units: unitsRef.current,
           state: simulation.state,
           riderDistance: drawn.riderDistance,
           // #237: the bot's odometer, from the state the simulation just

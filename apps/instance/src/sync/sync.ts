@@ -170,6 +170,12 @@ export interface AccountExport {
     readonly displayName: string;
     readonly createdAt: number;
     readonly registrationState: string;
+    /** When a moderator suspended the account, or `null` (#83). */
+    readonly suspendedAt: number | null;
+    /** When a moderator hid the display name, or `null` (#83). */
+    readonly displayNameHiddenAt: number | null;
+    /** When the rider confirmed they are 18 or over, or `null` (#775). */
+    readonly adultConfirmedAt: number | null;
   };
   readonly displayNameChanges: readonly {
     readonly previousName: string;
@@ -203,6 +209,19 @@ export interface AccountExport {
     readonly finishMs: number | null;
     readonly flags: number;
   }[];
+  /** The athletes this one blocked (#83): the id they gave, whether or not anybody holds it. */
+  readonly blocks: readonly { readonly blockedAthleteId: string; readonly createdAt: number }[];
+  /**
+   * The reports this athlete made (#83), and how each was decided — but not
+   * WHICH moderator decided it: that is the moderators', not the reporter's.
+   */
+  readonly reports: readonly {
+    readonly targetAthleteId: string;
+    readonly reason: string;
+    readonly createdAt: number;
+    readonly closedAt: number | null;
+    readonly outcome: string | null;
+  }[];
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
@@ -212,6 +231,9 @@ export const EXPORT_LEAVES_OUT: readonly string[] = [
   'Session tokens, recovery codes, link codes and email-recovery tokens: the instance keeps only a hash of each, and a hash is of no use to you.',
   'Items you deleted: the instance keeps only that they were deleted, so your other devices can delete them too.',
   'Other riders’ results in the rooms you rode in: they are theirs.',
+  'Invitations you minted as a moderator, and an email address waiting to be confirmed: the instance keeps only a hash of each code, and a hash is of no use to you.',
+  'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
+  'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
 ];
 
 export interface Sync {
@@ -383,6 +405,9 @@ export function createSync(options: SyncOptions): Sync {
             displayName: athlete.displayName,
             createdAt: athlete.createdAt,
             registrationState: athlete.registrationState,
+            suspendedAt: athlete.suspendedAt,
+            displayNameHiddenAt: athlete.displayNameHiddenAt,
+            adultConfirmedAt: athlete.adultConfirmedAt,
           },
           displayNameChanges: (await store.listDisplayNameChanges(caller.athleteId)).map(
             (change) => ({ previousName: change.previousName, changedAt: change.changedAt }),
@@ -400,6 +425,17 @@ export function createSync(options: SyncOptions): Sync {
             roomId: result.roomId,
             finishMs: result.finishMs,
             flags: result.flags,
+          })),
+          blocks: (await store.listBlocks(caller.athleteId)).map((block) => ({
+            blockedAthleteId: block.blockedAthleteId,
+            createdAt: block.createdAt,
+          })),
+          reports: (await store.listReports(caller.athleteId)).map((report) => ({
+            targetAthleteId: report.targetAthleteId,
+            reason: report.reason,
+            createdAt: report.createdAt,
+            closedAt: report.closedAt,
+            outcome: report.outcome,
           })),
           notIncluded: EXPORT_LEAVES_OUT,
         },

@@ -15,6 +15,25 @@
  * hides what an environment map does.
  *
  * Latitude 51.5°, the fixtures' latitude, for the same sun.
+ *
+ * ## Which way it faces — #702
+ *
+ * The sun stands at one azimuth in every world (`world.ts`
+ * §`SUN_AZIMUTH_DEGREES`, 225°, the south-west), and this route meanders
+ * ±25° about due north — so every frame it holds looks **110° to 160° away
+ * from the sun**, and the sun's side of the sky, of the fog and of every lit
+ * tree is behind the rider for the whole soak. {@link Facing} turns the WHOLE
+ * route about its first point, which is what `?facing=` on the page asks for:
+ * `sun` so it meanders about the sun's own azimuth, `away` so it meanders
+ * about the opposite one. Absent, it is not turned at all and not one
+ * coordinate moves — `route.test.ts` pins its digest, because the Part Z steps
+ * and the Part AH triangle and draw-call rows were all taken on it.
+ *
+ * ⚠️ **The route turns, not the sun**: the renderer, the sun and the product
+ * are untouched, and a turned route is the same road — the same elevations,
+ * the same seed (`scatter.ts` §`scatterSeed` reads the first point and the
+ * length, which a turn about the first point keeps), and so the same valley,
+ * lake, bridge and walls, which `route.test.ts` holds for each facing.
  */
 
 import {
@@ -26,6 +45,8 @@ import {
   type RoutePoint,
   type RouteProfile,
 } from '@onyourleft/domain';
+
+import { SUN_AZIMUTH_DEGREES } from '../../src/game/world';
 
 const LATITUDE = 51.5;
 const METRES_PER_DEGREE = 111_320;
@@ -69,8 +90,24 @@ export function realisticHeading(along: number): number {
   return 0.45 * Math.sin((along / 700) * Math.PI * 2);
 }
 
-/** The route, as the product profiles it. */
-export function realisticRoute(): RouteProfile {
+/** Which way `?facing=` holds the route: towards the sun, or directly away from it — #702. */
+export type Facing = 'sun' | 'away';
+
+/**
+ * How far the whole route is turned for a facing, radians clockwise from
+ * north: the sun's azimuth for `sun`, the opposite one for `away`, so the
+ * route's mean heading — due north, unturned — points there.
+ */
+export function facingTurn(facing: Facing): number {
+  const degrees = facing === 'sun' ? SUN_AZIMUTH_DEGREES : SUN_AZIMUTH_DEGREES - 180;
+  return (degrees * Math.PI) / 180;
+}
+
+/**
+ * The route, as the product profiles it — turned to `facing` if one is given,
+ * and otherwise exactly the route every Part Z and Part AH row was taken on.
+ */
+export function realisticRoute(facing?: Facing): RouteProfile {
   const points: RoutePoint[] = [];
   let east = 0;
   let north = 0;
@@ -88,5 +125,56 @@ export function realisticRoute(): RouteProfile {
     east += Math.sin(heading) * step;
     north += Math.cos(heading) * step;
   }
-  return routeProfile(points);
+  return routeProfile(facing === undefined ? points : turned(points, facingTurn(facing)));
+}
+
+/**
+ * `points` turned clockwise, seen from above, by `radians` about the first of
+ * them — a rotation of the SPHERE about the axis through that point and the
+ * Earth's centre, which moves no point's distance from any other.
+ *
+ * ⚠️ Not the meander's heading plus a turn, which was tried first: this
+ * route's steps are laid out with one metres-per-degree of longitude, so the
+ * same steps pointed another way are a few metres longer or shorter over
+ * 4 km, the length rounds to another metre, `scatter.ts` §`scatterSeed` is
+ * another seed, and the lake moved 150 m and its wet shore left the frames
+ * Part Z holds — `route.test.ts` caught it. A rotation of the sphere keeps
+ * every distance, so the profile, the seed and the world beside the road are
+ * the unturned route's, turned.
+ */
+function turned(points: readonly RoutePoint[], radians: number): RoutePoint[] {
+  const first = points[0];
+  if (first === undefined) return [];
+  const axis = unit(first.position.latitude, first.position.longitude);
+  // Clockwise seen from outside the sphere is a negative right-handed turn.
+  const cos = Math.cos(-radians);
+  const sin = Math.sin(-radians);
+  return points.map((point) => {
+    const v = unit(point.position.latitude, point.position.longitude);
+    const dot = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
+    const cross = [
+      axis[1] * v[2] - axis[2] * v[1],
+      axis[2] * v[0] - axis[0] * v[2],
+      axis[0] * v[1] - axis[1] * v[0],
+    ] as const;
+    // Rodrigues' rotation formula.
+    const r = [0, 1, 2].map(
+      (i) =>
+        (v[i] as number) * cos + (cross[i] as number) * sin + (axis[i] as number) * dot * (1 - cos),
+    ) as [number, number, number];
+    return {
+      position: geographicPosition(
+        degreesLatitude((Math.asin(Math.max(-1, Math.min(1, r[2]))) * 180) / Math.PI),
+        degreesLongitude((Math.atan2(r[1], r[0]) * 180) / Math.PI),
+      ),
+      elevation: point.elevation,
+    };
+  });
+}
+
+/** The unit vector to a latitude and longitude, in degrees. */
+function unit(latitude: number, longitude: number): readonly [number, number, number] {
+  const phi = (latitude * Math.PI) / 180;
+  const lambda = (longitude * Math.PI) / 180;
+  return [Math.cos(phi) * Math.cos(lambda), Math.cos(phi) * Math.sin(lambda), Math.sin(phi)];
 }

@@ -107,6 +107,7 @@ describe('the activity reads (#38)', () => {
         athleteId: rider!.athleteId,
         deviceKey: rider!.device.publicKey,
         tokenSha256: '',
+        standing: 'active' as const,
       };
       const page = await sync.activities(caller, new URLSearchParams());
       expect(page.ok && page.value.items.map((item) => item.claims)).toEqual([body.record.claims]);
@@ -159,7 +160,12 @@ describe('the activity reads (#38)', () => {
       queries.length = 0;
       const sync = createSync({ store: counted, blobs: createMemoryBlobStore() });
       const page = await sync.activities(
-        { athleteId: anna!.athleteId, deviceKey: anna!.device.publicKey, tokenSha256: '' },
+        {
+          athleteId: anna!.athleteId,
+          deviceKey: anna!.device.publicKey,
+          tokenSha256: '',
+          standing: 'active',
+        },
         new URLSearchParams('limit=100'),
       );
       expect(page.ok && page.value.items.length).toBe(100);

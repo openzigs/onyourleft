@@ -30,7 +30,8 @@ import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
-import { createIdentity, type Identity, type IdentityOptions } from './identity.ts';
+import type { InstanceProbes } from '../route-kit.ts';
+import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
 export const TEST_ORIGIN = 'https://ride.example';
@@ -96,6 +97,8 @@ export interface IdentityInstance {
   readonly path: string;
   /** Mail an email-recovery link would have sent, when email recovery is on. */
   readonly mail: { address: string; token: string }[];
+  /** Mail a link confirming a recovery address would have sent (#865). */
+  readonly confirmations: { address: string; token: string }[];
   /** POST or GET a JSON body; answers the status and the parsed body. */
   call(
     method: string,
@@ -125,7 +128,8 @@ export interface IdentityInstance {
 
 export async function startIdentityInstance(
   options: Partial<Omit<IdentityOptions, 'store' | 'origin' | 'now' | 'emailRecovery'>> & {
-    emailRecovery?: boolean;
+    /** `'failing'`: email recovery on, with a mail transport that rejects every send. */
+    emailRecovery?: boolean | 'failing';
     /**
      * What the identity sees in place of the real store — for putting a
      * check-then-write race in a known order, which two concurrent calls in
@@ -138,6 +142,8 @@ export async function startIdentityInstance(
     blobStoreSeenBy?: (blobs: BlobStore) => BlobStore;
     /** The largest request body, in bytes. 16 KiB unless a test needs files. */
     bodyLimitBytes?: number;
+    /** What `/ready`, `/metrics` and a room's start answer (#780). */
+    probes?: InstanceProbes;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -145,18 +151,40 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
-  const { emailRecovery, storeSeenBy, syncStoreSeenBy, blobStoreSeenBy, bodyLimitBytes, ...rest } =
-    options;
+  const confirmations: { address: string; token: string }[] = [];
+  const {
+    emailRecovery,
+    storeSeenBy,
+    probes,
+    syncStoreSeenBy,
+    blobStoreSeenBy,
+    bodyLimitBytes,
+    ...rest
+  } = options;
   const identity = createIdentity({
+    // The identity tests predate registration modes (#775) and register
+    // riders as they sign in; a test of a mode names it. The default an
+    // instance really starts with is `approval`, asserted in registration.test.ts.
+    registration: 'open',
+    // Every test rider signs in from one loopback address, so the per-address
+    // registration limit (#775) would be what these tests measured. A test of
+    // that limit sets it.
+    limits: { ...DEFAULT_LIMITS, registrationPerAddress: { limit: 10_000, windowMs: 60_000 } },
     ...rest,
     store: storeSeenBy === undefined ? store : storeSeenBy(store),
     origin: TEST_ORIGIN,
     now: () => clock.ms,
-    ...(emailRecovery === true
+    ...(emailRecovery === true || emailRecovery === 'failing'
       ? {
           emailRecovery: {
             send: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
               mail.push({ address, token });
+              return Promise.resolve();
+            },
+            confirm: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
+              confirmations.push({ address, token });
               return Promise.resolve();
             },
           },
@@ -174,6 +202,7 @@ export async function startIdentityInstance(
     identity,
     sync,
     config: { bodyLimitBytes: bodyLimitBytes ?? 16_384 },
+    ...(probes === undefined ? {} : { probes }),
   });
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
@@ -207,6 +236,7 @@ export async function startIdentityInstance(
     mail,
     blobs,
     sync,
+    confirmations,
     call,
     nonceFor,
     signIn: async (device, extra = {}) => {

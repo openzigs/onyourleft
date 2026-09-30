@@ -477,6 +477,21 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
 export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
+ * The most triangles the start and finish gantries may add to a frame:
+ * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
+ * worst frame before #617 freed more. Spent only within
+ * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
+ * The worst a frame carries is two gantries and a board — a point-to-point
+ * route shorter than the reach, whose start and finish are both in view —
+ * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, and by
+ * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the
+ * WebGL entry points
+ */
+export const REALISTIC_GANTRY_TRIANGLES = 1_000;
+
+/**
  * The most GPU texture memory the realistic set may hold, estimated: **160 MiB**,
  * under half the 355 MiB all-on estimate #457 drew on the tablet.
  *

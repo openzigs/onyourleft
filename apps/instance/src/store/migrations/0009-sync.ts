@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0005 (#37, #776): the sync manifest.
+ * Migration 0009 (#37, #776): the sync manifest.
  *
  * **`sync_item`** is one row for every thing an athlete has synced to this
  * instance — a signed activity record (#37), and the data classes #776's

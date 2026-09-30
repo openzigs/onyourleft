@@ -22,11 +22,14 @@
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
  * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — and since #622 its air, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, comma-separated; default none |
+ * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
  * name, and a table of numbers cannot show that it did.
  */
+
+import type { Facing } from './route';
 
 /**
  * The layers `?layers=` can switch off — #616. What each one holds, in both
@@ -87,6 +90,11 @@ export interface RealisticPageConfig {
   readonly layersOff: readonly Layer[];
   /** #619's levers switched off, in {@link LEVERS}' order, each at most once. */
   readonly leversOff: readonly Lever[];
+  /**
+   * Which way the route is turned — #702. `undefined` is the route unturned,
+   * the one every Part Z and Part AH row was taken on.
+   */
+  readonly facing: Facing | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -100,6 +108,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   panel: true,
   layersOff: [],
   leversOff: [],
+  facing: undefined,
 };
 
 const KNOWN = new Set([
@@ -112,6 +121,7 @@ const KNOWN = new Set([
   'panel',
   'layers',
   'levers',
+  'facing',
 ]);
 
 /**
@@ -204,6 +214,7 @@ export function parseConfig(search: string): RealisticPageConfig {
     panel: oneOf('panel', ['1', '0'] as const, '1') === '1',
     layersOff: layersFrom(params.get('layers')),
     leversOff: leversFrom(params.get('levers')),
+    facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
   };
 }
 
@@ -223,6 +234,7 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.leversOff.length > 0) {
     params.set('levers', config.leversOff.map((lever) => `-${lever}`).join(','));
   }
+  if (config.facing !== undefined) params.set('facing', config.facing);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

@@ -8,6 +8,13 @@
  * sync store (`sync: true`); every one reads `context.caller` for the athlete
  * and nothing from the request. The rules are `sync.ts`'s.
  *
+ * Every one declares `reaches: 'own'` (#83's choke point,
+ * `moderation/choke-point.test.ts`): none takes an athlete from its path or
+ * body, and none reads another athlete's data, so none asks `canSee`. The
+ * account export and erasure alone admit an athlete awaiting approval (#775),
+ * so a rider can always take their data out and delete it; the rest answer
+ * such a caller `registration_pending`, like every other session route.
+ *
  * ⚠️ **Every response here carries `cache-control: no-store`**, and not
  * because a route remembered to: the handler sets it on EVERY response
  * (`handler.ts` §`ALWAYS`). A private activity served with a publicly
@@ -99,8 +106,11 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/account/export',
     operationId: 'exportAccount',
+    reaches: 'own',
+    // A rider awaiting approval (#775) may still take their data out and erase it (#35).
+    admitsPending: true,
     summary:
-      'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names and your results. Says what it leaves out, and why.',
+      'Everything this instance holds about you, machine-readable: every activity’s signed record and the address of its original file — your own true track, unobfuscated — every item as you sent it, your public keys, your names, your results, your blocks and the reports you made. Says what it leaves out, and why.',
     ...SESSION,
     errors: ['unauthenticated', 'not_found'],
     response: {
@@ -108,7 +118,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results` and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports` and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),
@@ -117,6 +127,9 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'DELETE',
     path: '/v1/account',
     operationId: 'eraseAccount',
+    reaches: 'own',
+    // A rider awaiting approval (#775) may still take their data out and erase it (#35).
+    admitsPending: true,
     summary:
       'Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure.',
     ...SESSION,
@@ -131,6 +144,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/sync/manifest',
     operationId: 'getSyncManifest',
+    reaches: 'own',
     summary:
       'Everything you have synced, tombstones included, in the order it arrived: `?limit=` (1–200) and `?cursor=`, a (receivedAt, id) position — so paging while other devices sync repeats nothing and skips nothing that was there.',
     ...SESSION,
@@ -159,6 +173,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/sync/records/{content}',
     operationId: 'getSignedRecord',
+    reaches: 'own',
     summary:
       'One of your signed records, by the SHA-256 of its file. A device verifies it, and the file, before it writes anything.',
     ...SESSION,
@@ -174,6 +189,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/sync/items/{kind}/{key}',
     operationId: 'putSyncItem',
+    reaches: 'own',
     summary:
       'Store a write-up, a side-camera report (its pose summary inside), a goal, a note or a reference document, exactly as the device sends it. The device’s copy is canonical: a later put replaces it.',
     ...SESSION,
@@ -197,6 +213,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/sync/items/{kind}/{key}',
     operationId: 'getSyncItem',
+    reaches: 'own',
     summary: 'One of your items, byte for byte as it was sent.',
     ...SESSION,
     errors: ['unauthenticated', 'not_found'],
@@ -217,6 +234,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'DELETE',
     path: '/v1/sync/items/{kind}/{key}',
     operationId: 'deleteSyncItem',
+    reaches: 'own',
     summary:
       'Delete one of your items — or, as `activity`, a ride by its content hash, its file with it unless another rider sent the same bytes. A tombstone stays in the manifest so your other devices learn of it.',
     ...SESSION,
@@ -235,6 +253,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/sync/records',
     operationId: 'ingestRecord',
+    reaches: 'own',
     summary:
       'Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and stored only if every check passes. The same file sent again answers the first record.',
     ...SESSION,
@@ -266,6 +285,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/sync/files/{content}',
     operationId: 'getOriginalFile',
+    reaches: 'own',
     summary:
       'The original activity file, byte for byte, as it was sent: the rider’s own true track, unobfuscated. Only to an athlete who holds a record of it.',
     ...SESSION,
@@ -283,6 +303,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/activities',
     operationId: 'listActivities',
+    reaches: 'own',
     summary:
       'Your activities, newest first: `?limit=` (1–200, default 50) and `?cursor=` from the page before. One query a page, and stable while activities are added.',
     ...SESSION,
@@ -301,6 +322,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/activities/{content}',
     operationId: 'getActivity',
+    reaches: 'own',
     summary:
       'One of your activities, by the SHA-256 of its file: what its record claims, and the signed record itself.',
     ...SESSION,
@@ -316,6 +338,7 @@ export const SYNC_ROUTES: readonly Route[] = [
     method: 'GET',
     path: '/v1/activities/{content}/streams',
     operationId: 'getActivityStreams',
+    reaches: 'own',
     summary:
       'One of your activities’ samples — power, heart rate, cadence, speed, altitude and distance, never a position — in full, or at `?points=` (2–10 000) for a chart: each point the mean of its share of the ride, a gap left as `null`.',
     ...SESSION,

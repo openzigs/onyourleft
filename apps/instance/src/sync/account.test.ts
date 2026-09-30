@@ -134,6 +134,47 @@ describe('exporting an account (#35)', () => {
     }
   });
 
+  it('exports the blocks and the reports the athlete made (#83), and not who decided a report', async () => {
+    const setup = await syncWorld(2);
+    world = setup.world;
+    const [anna, ben] = setup.riders;
+    const nobody = 'f'.repeat(32);
+    expect((await authorised(world, anna!.token, 'POST', `/v1/blocks/${nobody}`)).status).toBe(204);
+    expect(
+      (
+        await authorised(world, anna!.token, 'POST', '/v1/reports', {
+          athleteId: ben!.athleteId,
+          reason: 'Abusive display name',
+        })
+      ).status,
+    ).toBe(204);
+
+    const exported: AccountExport = await readJson(
+      await authorised(world, anna!.token, 'GET', '/v1/account/export'),
+    );
+    expect(exported.blocks.map(({ createdAt, ...rest }) => [typeof createdAt, rest])).toEqual([
+      ['number', { blockedAthleteId: nobody }],
+    ]);
+    expect(exported.reports.map(({ createdAt, ...rest }) => [typeof createdAt, rest])).toEqual([
+      [
+        'number',
+        {
+          targetAthleteId: ben!.athleteId,
+          reason: 'Abusive display name',
+          closedAt: null,
+          outcome: null,
+        },
+      ],
+    ]);
+    expect(exported.athlete).toMatchObject({ suspendedAt: null, displayNameHiddenAt: null });
+    // Ben's own export says nothing of the report about him: it is Anna's.
+    const bens: AccountExport = await readJson(
+      await authorised(world, ben!.token, 'GET', '/v1/account/export'),
+    );
+    expect(bens.reports).toEqual([]);
+    expect(JSON.stringify(bens)).not.toContain(anna!.athleteId);
+  });
+
   it('exports nothing of another athlete’s', async () => {
     const setup = await syncWorld(3);
     world = setup.world;

@@ -1,9 +1,0 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-#
-# What the image never needs: the tests, their support, and anything installed.
-node_modules
-src/**/*.test.ts
-src/**/*-testing.ts
-tools
-vitest.config.ts
-tsconfig.json

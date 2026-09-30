@@ -10,7 +10,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { MIGRATIONS } from '../src/store/migrations/index.ts';
+
 const TOOL = fileURLToPath(new URL('./migrate.ts', import.meta.url));
+/** Read from the registry, so a new migration does not make this test stale (#865). */
+const NAMES = Object.keys(MIGRATIONS);
+const LAST = NAMES.at(-1) as string;
 
 let directory: string | undefined;
 afterEach(async () => {
@@ -30,18 +35,20 @@ describe('tools/migrate.ts (#769)', () => {
 
     const latest = migrate(path, 'latest');
     expect(latest.status, latest.out).toBe(0);
-    expect(latest.out).toMatch(/latest: 5 migration\(s\) changed/);
-    expect(latest.out).toMatch(/applied: 0001-[^\n]*, 0005-sync\n/);
+    expect(latest.out).toContain(`latest: ${NAMES.length} migration(s) changed`);
+    expect(latest.out).toContain(`applied: ${NAMES.join(', ')}\n`);
     expect(latest.out).toMatch(/ {2}result: 0 row\(s\)/);
 
     const down = migrate(path, 'down');
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
-    expect(down.out).not.toMatch(/0005-sync/);
+    expect(down.out).not.toContain(LAST);
+    expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
+    // The newest migration (0009, #776) is the one that creates `sync_item`.
     expect(down.out).not.toMatch(/ {2}sync_item:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
-    expect(up.out).toMatch(/0005-sync/);
+    expect(up.out).toContain(LAST);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

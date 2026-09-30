@@ -34,6 +34,20 @@ export interface AthleteTable {
   readonly display_name: string;
   readonly created_at: number;
   readonly registration_state: string;
+  /** When a moderator suspended the account, or `null` (#83). Added by migration 0007. */
+  readonly suspended_at: number | null;
+  /** When a moderator hid the display name, or `null` (#83). Added by migration 0007. */
+  readonly display_name_hidden_at: number | null;
+  /**
+   * When the rider confirmed they are 18 or over, or `null` (#775, ruling Q5).
+   * A confirmation's date, never a birth date. Added by migration 0008.
+   */
+  readonly adult_confirmed_at: number | null;
+  /**
+   * When the account became active — registered active, or approved — or
+   * `null` while it never has (#775). Added by migration 0008.
+   */
+  readonly activated_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */
@@ -79,6 +93,20 @@ export interface RoomTable {
   readonly physics_version: number;
 }
 
+/** What a room is ridden on, as the room core needs it (#780, migration 0005). */
+export interface RoomCourseTable {
+  readonly room_id: string;
+  readonly length_metres: number;
+  /** JSON: `[[fromMetres, percent], …]`, the first from 0, ascending. */
+  readonly grades: string;
+  readonly riding_position: 'upright' | 'hoods' | 'drops';
+  readonly capacity: number | null;
+  readonly countdown_ms: number | null;
+  readonly rejoin_window_ms: number | null;
+  /** Unix seconds: when this race left its lobby. It is never a lobby again. */
+  readonly race_started_at: number | null;
+}
+
 /** One athlete's result in one room. */
 export interface ResultTable {
   readonly room_id: string;
@@ -121,7 +149,10 @@ export interface DisplayNameChangeTable {
   readonly changed_at: number;
 }
 
-/** An athlete's address for email recovery — only where the operator enabled it (#773). */
+/**
+ * An athlete's address for email recovery — only where the operator enabled
+ * it (#773), and only once the athlete confirmed it (#865).
+ */
 export interface RecoveryEmailTable {
   readonly athlete_id: string;
   readonly address: string;
@@ -135,11 +166,63 @@ export interface EmailRecoveryTokenTable {
   readonly used_at: number | null;
 }
 
+/**
+ * An address an athlete gave, waiting to be confirmed (#865), and the SHA-256
+ * of the mailed token. Added by migration 0006.
+ */
+export interface RecoveryEmailConfirmationTable {
+  readonly token_sha256: string;
+  readonly athlete_id: string;
+  readonly address: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
+/** One athlete blocking another (#83): the blocker's row. */
+export interface BlockTable {
+  readonly athlete_id: string;
+  /** No foreign key: `eraseAthlete` removes the rows naming an erased athlete (migration 0007). */
+  readonly blocked_athlete_id: string;
+  readonly created_at: number;
+}
+
+/** A report (#83): the reporter's row. */
+export interface ReportTable {
+  readonly id: Generated<number>;
+  readonly athlete_id: string;
+  readonly target_athlete_id: string;
+  readonly reason: string;
+  readonly created_at: number;
+  readonly closed_at: number | null;
+  readonly closed_by_athlete_id: string | null;
+  readonly outcome: string | null;
+}
+
+/** One moderator action (#83). Append-only: the schema refuses an UPDATE or a DELETE. */
+export interface ModerationLogTable {
+  readonly id: Generated<number>;
+  readonly actor_athlete_id: string;
+  readonly action: string;
+  readonly target_athlete_id: string | null;
+  readonly report_id: number | null;
+  readonly reason: string;
+  readonly at: number;
+}
+
+/** A single-use invitation a moderator minted, as its SHA-256 (#775). */
+export interface InviteCodeTable {
+  readonly code_sha256: string;
+  /** The moderator who minted it. */
+  readonly athlete_id: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
 /** What kind of thing a sync item is (#37, #776). */
 export type SyncKind =
   'activity' | 'write-up' | 'side-camera-report' | 'goal' | 'note' | 'document';
 
-/** One thing an athlete synced, or its tombstone (#776). Added by migration 0005. */
+/** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
   readonly seq: Generated<number>;
   readonly athlete_id: string;
@@ -160,6 +243,7 @@ export interface InstanceDatabase {
   readonly session: SessionTable;
   readonly activity_record: ActivityRecordTable;
   readonly room: RoomTable;
+  readonly room_course: RoomCourseTable;
   readonly result: ResultTable;
   readonly auth_challenge: AuthChallengeTable;
   readonly recovery_code: RecoveryCodeTable;
@@ -167,5 +251,10 @@ export interface InstanceDatabase {
   readonly display_name_change: DisplayNameChangeTable;
   readonly recovery_email: RecoveryEmailTable;
   readonly email_recovery_token: EmailRecoveryTokenTable;
+  readonly recovery_email_confirmation: RecoveryEmailConfirmationTable;
+  readonly block: BlockTable;
+  readonly report: ReportTable;
+  readonly moderation_log: ModerationLogTable;
+  readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
 }

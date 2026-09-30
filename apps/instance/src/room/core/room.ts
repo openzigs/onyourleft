@@ -108,6 +108,12 @@ export interface SeatView {
   readonly distanceMetres: number;
   readonly speedMetresPerSecond: number;
   readonly flags: number;
+  /**
+   * A finisher's crossing, in ticks from the start: the tick plus the share of
+   * it before the line (what the finish order sorts by). `null` for anybody
+   * who has not finished. The Node adapter persists it as the result (#780).
+   */
+  readonly finishedAtTicks: number | null;
 }
 
 export interface RoomView {
@@ -507,6 +513,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
           distanceMetres: seat.ride.distance,
           speedMetresPerSecond: seat.ride.speed,
           flags: flagsOf(seat),
+          finishedAtTicks: seat.state === 'finished' ? seat.finishedAt : null,
         })),
         finishOrder: finishOrder(),
       };

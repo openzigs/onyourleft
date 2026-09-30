@@ -16,6 +16,7 @@ import {
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
+import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
 
 /**
@@ -129,7 +130,132 @@ function send(
   });
 }
 
+/** The owner's device, named to the world as a moderator (#83). */
+let moderator: TestDevice;
+
+async function moderatorToken(world: IdentityInstance): Promise<string> {
+  return (await world.signIn(moderator)).body.sessionToken as string;
+}
+
+/** Another rider, signed in: their id. */
+async function anotherAthlete(world: IdentityInstance): Promise<string> {
+  return (await world.signIn(await testDevice())).body.athleteId as string;
+}
+
+async function moderatorAction(world: IdentityInstance, path: string): Promise<Response> {
+  const target = await anotherAthlete(world);
+  return send(
+    world,
+    'POST',
+    `/v1/moderation/athletes/${target}/${path}`,
+    await moderatorToken(world),
+    {
+      reason: 'Checked against the rules',
+    },
+  );
+}
+
+/** A rider awaiting approval (#775), written beneath the routes: this world registers openly. */
+async function pendingAthlete(world: IdentityInstance): Promise<string> {
+  const device = await testDevice();
+  const athleteId = `pending-${device.publicKey.slice(0, 16)}`;
+  await world.freshRead((store) =>
+    store.registerAthlete({
+      athlete: {
+        id: athleteId,
+        displayName: 'Pending',
+        createdAt: 1,
+        registrationState: 'pending',
+      },
+      key: { publicKey: device.publicKey, athleteId, addedAt: 1, revokedAt: null },
+      recoveryCodeSha256s: [],
+    }),
+  );
+  return athleteId;
+}
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  getAccount: async (world) =>
+    send(world, 'GET', '/v1/auth/account', (await signedIn(world)).token),
+  confirmAdult: async (world) =>
+    send(world, 'POST', '/v1/auth/adult', (await signedIn(world)).token, { confirmed: true }),
+  listPendingRegistrations: async (world) => {
+    await pendingAthlete(world);
+    return send(world, 'GET', '/v1/moderation/registrations', await moderatorToken(world));
+  },
+  approveRegistration: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/registrations/${await pendingAthlete(world)}/approve`,
+      await moderatorToken(world),
+      { reason: 'Known to the club' },
+    ),
+  refuseRegistration: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/registrations/${await pendingAthlete(world)}/refuse`,
+      await moderatorToken(world),
+      { reason: 'Spam account' },
+    ),
+  createInvite: async (world) =>
+    send(world, 'POST', '/v1/moderation/invites', await moderatorToken(world), {
+      reason: 'For the Tuesday group',
+    }),
+  listBlocks: async (world) => send(world, 'GET', '/v1/blocks', (await signedIn(world)).token),
+  blockAthlete: async (world) =>
+    send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, (await signedIn(world)).token),
+  unblockAthlete: async (world) =>
+    send(
+      world,
+      'DELETE',
+      `/v1/blocks/${await anotherAthlete(world)}`,
+      (await signedIn(world)).token,
+    ),
+  reportAthlete: async (world) =>
+    send(world, 'POST', '/v1/reports', (await signedIn(world)).token, {
+      athleteId: await anotherAthlete(world),
+      reason: 'Abusive display name',
+    }),
+  listOpenReports: async (world) =>
+    send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
+  dismissReport: async (world) => {
+    const target = await anotherAthlete(world);
+    await send(world, 'POST', '/v1/reports', (await signedIn(world)).token, {
+      athleteId: target,
+      reason: 'Abusive display name',
+    });
+    const token = await moderatorToken(world);
+    const queue = (await (await send(world, 'GET', '/v1/moderation/reports', token)).json()) as {
+      reports: { reportId: number; targetAthleteId: string }[];
+    };
+    const report = queue.reports.find((each) => each.targetAthleteId === target);
+    return send(
+      world,
+      'POST',
+      `/v1/moderation/reports/${String(report?.reportId)}/dismiss`,
+      token,
+      {
+        reason: 'Not against the rules',
+      },
+    );
+  },
+  suspendAthlete: (world) => moderatorAction(world, 'suspend'),
+  unsuspendAthlete: async (world) => {
+    const target = await anotherAthlete(world);
+    const token = await moderatorToken(world);
+    await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
+      reason: 'Cheating',
+    });
+    return send(world, 'POST', `/v1/moderation/athletes/${target}/unsuspend`, token, {
+      reason: 'Appeal upheld',
+    });
+  },
+  hideDisplayName: (world) => moderatorAction(world, 'hide-display-name'),
+  getModerationLog: async (world) =>
+    send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
+
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {
       publicKey: (await testDevice()).publicKey,
@@ -204,8 +330,23 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       recoveryCode: code,
     });
   },
+  startRoom: async (world) =>
+    send(world, 'POST', '/v1/rooms/room-1/start', (await signedIn(world)).token),
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
+  setRecoveryEmail: async (world) =>
+    send(world, 'POST', '/v1/auth/recovery-email', (await signedIn(world)).token, {
+      address: 'bea@example.org',
+    }),
+  confirmRecoveryEmail: async (world) => {
+    const { token } = await signedIn(world);
+    await world.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'cat@example.org' },
+    });
+    const mailed = world.confirmations.at(-1)?.token;
+    return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
+  },
   ...SYNC_HAPPY_CALLS,
 };
 
@@ -213,8 +354,26 @@ describe('every route answers with the shape its entry declares', () => {
   let instance: TestInstance;
   let world: IdentityInstance;
   beforeAll(async () => {
-    instance = await startTestInstance();
-    world = await startIdentityInstance({ emailRecovery: true });
+    // Probes that answer as a healthy instance with metrics on, so /ready and
+    // /metrics answer their success; a probe-less instance is the other half.
+    const probes = {
+      ready: () =>
+        assessReadiness({
+          database: () => Promise.resolve(true),
+          migrations: () => Promise.resolve('at-head' as const),
+          rooms: () => true,
+        }),
+      metrics: (authorization: string | null) =>
+        Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
+      startRoom: () => Promise.resolve('started' as const),
+    };
+    instance = await startTestInstance({ probes });
+    moderator = await testDevice();
+    world = await startIdentityInstance({
+      emailRecovery: true,
+      probes,
+      moderators: { owner: moderator.publicKey },
+    });
   });
   afterAll(async () => {
     await instance.listening.close();
@@ -252,6 +411,8 @@ describe('every route answers with the shape its entry declares', () => {
     async (_, route) => {
       const call = HAPPY_CALLS[route.operationId];
       if (call === undefined) throw new Error(`no happy call for ${route.operationId}`);
+      // A minute on, so every call has the per-address challenge allowance to itself.
+      world.clock.ms += 60_000;
       const response = await call(world);
       if (route.response.contentType === 'none') {
         expect(response.status, await response.clone().text()).toBe(204);
