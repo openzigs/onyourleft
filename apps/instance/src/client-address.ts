@@ -14,33 +14,42 @@
  * ## When the header is believed
  *
  * Only when the operator named the header (`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`)
- * **and** the socket's peer is a loopback or private address — where a
- * proxy the operator runs would be. A request straight from the internet
- * carries whatever header its sender typed, so from a public peer the header
- * is ignored and the peer is the address. ⚠️ A client on the operator's own
- * private network can set the header and be believed; that network is the
- * operator's to trust or not.
+ * **and** the socket's peer is a proxy the operator trusts: a loopback
+ * address, or one of the exact addresses in `OYL_INSTANCE_TRUSTED_PROXIES`.
+ * Anything else carries whatever header its sender typed, so from any other
+ * peer the header is ignored and the peer is the address.
+ *
+ * ⚠️ **Until #891's review any PRIVATE peer was believed**, and a reviewer who
+ * remembers that is reading the old file. A port Docker publishes with `-p`
+ * reaches the container from the bridge gateway (`172.17.0.1`), and on Docker
+ * Desktop every published connection does — so any client on the internet
+ * arrived "from a private address" and chose its own rate-limit bucket. An
+ * operator whose proxy is on another address names it; publishing the port
+ * on `127.0.0.1` only (`docs/moderation.md`) is what keeps that address the
+ * proxy's alone.
  *
  * Pure, and naming nothing of Node, so the Durable Object adapter (#781) can
  * use it with `CF-Connecting-IP` too — it MUST pass a real address, or every
  * rider there shares one bucket as well.
  */
 
-/** Whether `address` is loopback or private: IPv4 10/8, 172.16/12, 192.168/16, 127/8; IPv6 ::1, fc00::/7, fe80::/10. */
-export function isLocalAddress(address: string): boolean {
-  const v4 = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/i.exec(address);
-  if (v4 !== null) {
-    const first = Number(v4[1]);
-    const second = Number(v4[2]);
-    return (
-      first === 10 ||
-      first === 127 ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168)
-    );
-  }
-  const v6 = address.toLowerCase();
-  return v6 === '::1' || /^f[cd][0-9a-f]{0,2}:/.test(v6) || /^fe[89ab][0-9a-f]?:/.test(v6);
+/** Whether `address` is loopback: IPv4 127/8 (also IPv4-mapped), or IPv6 `::1`. */
+export function isLoopbackAddress(address: string): boolean {
+  const v4 = /^(?:::ffff:)?(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/i.exec(address);
+  if (v4 !== null) return Number(v4[1]) === 127;
+  return address.toLowerCase() === '::1';
+}
+
+/** An address as it is compared: lower case, an IPv4-mapped IPv6 address as its IPv4. */
+export function normalisedAddress(address: string): string {
+  const lower = address.trim().toLowerCase();
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(lower);
+  return mapped?.[1] ?? lower;
+}
+
+/** Whether `text` looks like one IP address, for configuration. */
+export function isAddress(text: string): boolean {
+  return /^[0-9A-Fa-f:.]{2,45}$/.test(text) && (text.includes('.') || text.includes(':'));
 }
 
 /** A header value that is one IP address, or `undefined`. */
@@ -51,15 +60,21 @@ function oneAddress(value: string | null): string | undefined {
 }
 
 /**
- * The client's address: the named header's, when the peer is local and the
- * header holds one address; otherwise the peer's. `null` when neither is known.
+ * The client's address: the named header's, when the peer is a trusted proxy
+ * — loopback, or one of `trustedProxies` — and the header holds one address;
+ * otherwise the peer's. `null` when neither is known.
  */
 export function clientAddress(
   peer: string | null,
   headers: Headers,
   trustedHeader: string | null,
+  trustedProxies: readonly string[] = [],
 ): string | null {
-  if (trustedHeader !== null && peer !== null && isLocalAddress(peer)) {
+  if (
+    trustedHeader !== null &&
+    peer !== null &&
+    (isLoopbackAddress(peer) || trustedProxies.includes(normalisedAddress(peer)))
+  ) {
     const forwarded = oneAddress(headers.get(trustedHeader));
     if (forwarded !== undefined) return forwarded;
   }

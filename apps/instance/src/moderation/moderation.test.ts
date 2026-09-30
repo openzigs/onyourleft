@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../store/node-sqlite.ts';
-import { DEFAULT_MODERATION_LIMITS } from './moderation.ts';
+import { DEFAULT_MODERATION_LIMITS, MAXIMUM_BLOCKS } from './moderation.ts';
 import { codeOf, startModerationWorld, type ModerationWorld } from './moderation-testing.ts';
 
 let world: ModerationWorld | undefined;
@@ -54,8 +54,44 @@ describe('blocking (#83)', () => {
     const bea = await w.rider();
     await w.as(anna, 'POST', `/v1/blocks/${bea.athleteId}`);
     expect(
-      await w.freshRead((store) => store.blockedEitherWay(bea.athleteId, anna.athleteId)),
+      await w.freshRead(
+        async (store) => (await store.sight(bea.athleteId, anna.athleteId))?.blocked,
+      ),
     ).toBe(true);
+  });
+});
+
+describe('blocks of anybody, bounded (#891)', () => {
+  it('stores a block of an id nobody holds, and lists it back', async () => {
+    const w = await start();
+    const anna = await w.rider();
+    const nobody = 'e'.repeat(32);
+    expect((await w.as(anna, 'POST', `/v1/blocks/${nobody}`)).status).toBe(204);
+    expect(await w.freshRead((store) => store.listBlocks(anna.athleteId))).toEqual([
+      expect.objectContaining({ blockedAthleteId: nobody }),
+    ]);
+  });
+
+  it(`holds an account to ${String(MAXIMUM_BLOCKS)} blocks, counting only its own`, async () => {
+    const w = await start();
+    const anna = await w.rider();
+    const bea = await w.rider();
+    const ids = Array.from({ length: MAXIMUM_BLOCKS }, (_, each) =>
+      each.toString(16).padStart(32, '0'),
+    );
+    await w.freshRead(async (store) => {
+      for (const id of ids) await store.putBlock(anna.athleteId, id, 1);
+    });
+    const over = await w.as(anna, 'POST', `/v1/blocks/${'e'.repeat(32)}`);
+    expect(over.status).toBe(400);
+    expect(codeOf(over.body)).toBe('validation_failed');
+    // Blocking one already held is not a new row, and is answered as before.
+    expect((await w.as(anna, 'POST', `/v1/blocks/${ids[0]!}`)).status).toBe(204);
+    expect(await w.freshRead((store) => store.listBlocks(anna.athleteId))).toHaveLength(
+      MAXIMUM_BLOCKS,
+    );
+    // Another rider's allowance is their own.
+    expect((await w.as(bea, 'POST', `/v1/blocks/${'e'.repeat(32)}`)).status).toBe(204);
   });
 });
 
@@ -101,6 +137,24 @@ describe('reports (#83)', () => {
     // And the window moves on.
     w.clock.ms += DEFAULT_MODERATION_LIMITS.reportWindowSeconds * 1000;
     expect((await report(anna)).status).toBe(204);
+  });
+
+  it('stores a report about nobody closed, so it spends the allowance and never reaches the queue (#891)', async () => {
+    const w = await start();
+    const anna = await w.rider();
+    const nobody = 'e'.repeat(32);
+    expect(
+      (await w.as(anna, 'POST', '/v1/reports', { athleteId: nobody, reason: 'Spam' })).status,
+    ).toBe(204);
+    expect(await w.freshRead((store) => store.listReports(anna.athleteId))).toEqual([
+      expect.objectContaining({
+        targetAthleteId: nobody,
+        closedAt: seconds(w),
+        closedByAthleteId: null,
+        outcome: 'no_such_athlete',
+      }),
+    ]);
+    expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
   });
 
   it('refuses a report with no reason, naming the field and not echoing the value', async () => {
@@ -176,6 +230,14 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect((await w.as(bea, 'GET', '/v1/auth/session')).body).toEqual({
       athleteId: bea.athleteId,
       displayName: 'Bea',
+    });
+    // The SAME name again is not new content, and stays hidden (#891's review).
+    expect(
+      (await w.as(bea, 'POST', '/v1/auth/display-name', { displayName: 'Bea' })).status,
+    ).toBeLessThan(300);
+    expect((await w.as(anna, 'GET', `/v1/athletes/${bea.athleteId}`)).body).toEqual({
+      athleteId: bea.athleteId,
+      displayName: 'Rider',
     });
     await w.as(bea, 'POST', '/v1/auth/display-name', { displayName: 'Bee' });
     expect((await w.as(anna, 'GET', `/v1/athletes/${bea.athleteId}`)).body).toEqual({
@@ -310,7 +372,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(1);
   });
 
-  it('refuses a moderator acting on a moderator, and logs nothing it did not do', async () => {
+  it('refuses a moderator acting on a moderator, changes nothing, and logs the attempt (#891)', async () => {
     const w = await start();
     for (const [actor, target] of [
       [w.deputy, w.owner],
@@ -344,7 +406,53 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       {},
     );
     expect(noReason.status).toBe(400);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([]);
+    // Each refused attempt is logged as refused; the 404 and the 400 are not.
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual(
+      [
+        [w.deputy, w.owner],
+        [w.owner, w.deputy],
+        [w.owner, w.owner],
+      ].map(([actor, target]): unknown =>
+        expect.objectContaining({
+          action: 'refused_suspend',
+          actorAthleteId: actor!.athleteId,
+          targetAthleteId: target!.athleteId,
+          reason: 'Because',
+        }),
+      ),
+    );
+    for (const moderator of [w.owner, w.deputy]) {
+      expect(
+        (await w.freshRead((store) => store.getAthlete(moderator.athleteId)))?.suspendedAt,
+      ).toBeNull();
+    }
+  });
+
+  it('refuses a moderator dismissing a report about themselves, logs it, and lets the other moderator decide (#891)', async () => {
+    const w = await start();
+    const anna = await w.rider('Anna');
+    await w.as(anna, 'POST', '/v1/reports', { athleteId: w.deputy.athleteId, reason: 'Rude' });
+    const [report] = await w.freshRead((store) => store.listOpenReports());
+    const path = `/v1/moderation/reports/${String(report!.id)}/dismiss`;
+
+    const own = await w.as(w.deputy, 'POST', path, { reason: 'Nothing in it' });
+    expect(own.status).toBe(409);
+    expect(codeOf(own.body)).toBe('moderation_not_applicable');
+    expect(await w.freshRead((store) => store.listOpenReports())).toHaveLength(1);
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+      expect.objectContaining({
+        action: 'refused_dismiss_report',
+        actorAthleteId: w.deputy.athleteId,
+        targetAthleteId: w.deputy.athleteId,
+        reportId: report!.id,
+        reason: 'Nothing in it',
+      }),
+    ]);
+
+    expect((await w.as(w.owner, 'POST', path, { reason: 'Not against the rules' })).status).toBe(
+      200,
+    );
+    expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
   });
 
   it('refuses every moderator action to an ordinary rider, and logs nothing', async () => {

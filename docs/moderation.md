@@ -27,7 +27,16 @@ registration, nobody could ever approve the first account. If you revoke the nam
 the role until the setting names another key.
 
 A moderator cannot act on a moderator. The owner and the deputy cannot suspend each other or hide
-each other's names, and neither can act on themselves. If the deputy has to go, change the setting.
+each other's names, and neither can act on themselves. Neither can dismiss a report **about
+themselves**: the other moderator decides it. Each such attempt changes nothing, and it **is** written
+to the moderation log, as `refused_suspend`, `refused_dismiss_report` and so on, so you can see who
+tried. If the deputy has to go, change the setting.
+
+⚠️ **If you signed in before you set your key**, your account registered like anybody else's: with
+approval-required registration it is waiting for approval, and nobody may approve a moderator. So
+the next time a device holding a named key signs in to an account that is waiting, the instance
+activates it and writes `activate_moderator_key` to the log. Set the setting, restart, and sign in
+again.
 
 ## Who can join: the registration modes
 
@@ -59,16 +68,32 @@ be varied.** Someone with many IPv4 addresses, or a larger IPv6 range, gets an a
 What makes a new identity cost something is the approval queue. The limit only slows how fast one
 address can fill that queue.
 
+⚠️ **This limit, and the sign-in limits, are kept in memory, so restarting the instance resets
+them.** Counting them in the database would mean storing each rider's address beside their account,
+and the instance never stores or logs an address. The report limit is different: it is counted from
+the reports in the database, so a restart does not reset it.
+
 ### Behind a proxy or a tunnel
 
 Behind a Cloudflare Tunnel, or any proxy on your machine, every request comes from the proxy. A
 per-address limit would then be **one shared bucket for everybody**: one busy client could stop
 everyone else from signing up. Set `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` to the header your proxy
 puts the rider's address in. For Cloudflare that is `cf-connecting-ip`, and the project's Docker
-image already sets it. The instance reads that header only when the connection comes from a
-loopback or private address, which is where your proxy is. From anywhere else it ignores the
-header, because anybody could have typed it. ⚠️ A device on your own private network can set the
-header and be believed.
+image already sets it. The instance reads that header only when the connection comes from a proxy
+you trust. From anywhere else it ignores the header, because anybody could have typed it.
+
+A proxy you trust is **loopback** (`127.0.0.1`, `::1`) or an address you list in
+`OYL_INSTANCE_TRUSTED_PROXIES`, separated by commas, written as the connection reports it. If you
+list nothing, only loopback is trusted.
+
+⚠️ **In Docker, publish the port on `127.0.0.1` only**, as in
+`docker run -p 127.0.0.1:8787:8787 …`. A port Docker publishes reaches the container from the bridge
+gateway, usually `172.17.0.1`, whoever sent it. On Docker Desktop every published connection does.
+If `cloudflared` runs on the host, that gateway is the address to list:
+`OYL_INSTANCE_TRUSTED_PROXIES=172.17.0.1`. That is safe only when the port is published on
+`127.0.0.1`, so that nothing but a process on your machine can arrive from it. Published on every
+interface, anybody on the internet would arrive from the gateway and choose their own rate-limit
+bucket.
 
 ## Public rooms: who may join
 
@@ -78,16 +103,18 @@ a rider which ones they meet):
 - it is approved, and not suspended;
 - the rider has confirmed they are **18 or over** (ruling Q5). Only the confirmation and its date
   are stored. **No date of birth is ever asked for or kept**;
-- it is at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS` days old (7 if you set nothing);
+- it has been **active** for at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS` days (7 if you
+  set nothing). The days count from when it was approved, or from when it registered if it
+  registered active. Days spent waiting for approval do not count;
 - it has synced at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES` rides (3 if you set nothing).
 
 ## What a rider can do
 
 | Action | What happens |
 |---|---|
-| **Block** a rider | Neither rider can see or reach the other, whoever blocked whom. The blocked rider is not told: every request they make about the blocker gets exactly the answer a request about nobody gets. |
+| **Block** a rider | Neither rider can see or reach the other, whoever blocked whom. The blocked rider is not told: every request they make about the blocker gets exactly the answer a request about nobody gets. A block is kept for any well-formed id, whether or not anybody holds it, so a rider's own list of blocks says nothing about who exists. A rider can hold at most 1,000 blocks. |
 | **Unblock** | Removes the rider's own block. It cannot remove a block the other rider made. |
-| **Report** a rider | Sends the rider's id and a reason (up to 1,000 characters) to your queue. A rider can make at most **5 reports an hour**. A rider can report someone they have blocked. The answer is the same whether or not that rider exists. |
+| **Report** a rider | Sends the rider's id and a reason (up to 1,000 characters) to your queue. A rider can make at most **5 reports an hour**, and a report about an id nobody holds counts toward the 5 like any other. It is kept, closed as `no_such_athlete`, and never reaches your queue. A rider can report someone they have blocked. The answer is the same whether or not that rider exists. |
 
 ## What a moderator can do
 
@@ -99,7 +126,7 @@ does not happen.
 |---|---|---|
 | Read the report queue | `GET /v1/moderation/reports` | Every report not yet decided, oldest first: who reported whom, why, and when. |
 | Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. |
-| Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a new name, because a new name is new content. |
+| Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
 | Lift a suspension | `POST /v1/moderation/athletes/{id}/unsuspend` | The rider can sign in again and is visible again. |
 | Read the log | `GET /v1/moderation/log` | Every action ever taken, oldest first. |
@@ -124,6 +151,9 @@ It also means **do not write a rider's personal details into a reason**. Write w
 Erasure deletes a rider's own reports and blocks, and every block that other riders made of them.
 Reports other riders made **about** them stay in your queue, so you can still decide them.
 
+⚠️ **Migrating the database back past migration 0005 would delete the log**, so `migrate … down`
+refuses to undo 0005 while the log holds a single entry, and changes nothing.
+
 ## What a suspension does not do
 
 - **It does not delete anything.** The rider's rides, keys and history stay on the instance and on
@@ -136,7 +166,7 @@ Reports other riders made **about** them stay in your queue, so you can still de
   holds their rides. If they ask for a copy of what only the instance holds, lifting the suspension
   is the one way to give it to them today.
 - **It does not stop a new identity.** A device key costs nothing to make. What a new identity has
-  to get past is your registration mode (below): with approval-required registration, a banned
+  to get past is your registration mode (above): with approval-required registration, a banned
   rider with a new key is back in your queue, not back on your instance.
 
 ## What you cannot do, yet

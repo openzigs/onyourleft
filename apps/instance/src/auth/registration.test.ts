@@ -202,6 +202,77 @@ describe('the four registration modes (#775)', () => {
   });
 });
 
+describe('a moderator’s key named AFTER its account registered (#891’s review)', () => {
+  it('activates the pending account at its next sign-in, and logs it — a rider’s pending account stays pending', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-owner-late-'));
+    const path = join(directory, 'instance.sqlite');
+    const store = await openSqlStore(path);
+    cleanups.push(async () => {
+      await store.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    let ms = 1_790_000_000_000;
+    const owner = await testDevice();
+    const rider = await testDevice();
+    const identityWith = (moderators: { owner?: string }) =>
+      createIdentity({
+        store,
+        origin: TEST_ORIGIN,
+        now: () => ms,
+        registration: 'approval',
+        moderators,
+        limits: { ...DEFAULT_LIMITS, registrationPerAddress: { limit: 100, windowMs: 60_000 } },
+      });
+    const signIn = async (identity: ReturnType<typeof createIdentity>, device: TestDevice) => {
+      ms += 60_000;
+      const challenge = await identity.challenge(device.publicKey, null);
+      if (!challenge.ok) throw new Error(challenge.code);
+      const signed = await identity.signIn(await device.statement(challenge.value.nonce), {}, null);
+      if (!signed.ok) throw new Error(signed.code);
+      return signed.value;
+    };
+
+    // The operator has not set OYL_INSTANCE_OWNER_KEY yet: the owner waits.
+    const before = identityWith({});
+    const first = await signIn(before, owner);
+    expect(first.registrationState).toBe('pending');
+    const riderFirst = await signIn(before, rider);
+    expect(riderFirst.registrationState).toBe('pending');
+
+    // The setting is set, and the instance restarted.
+    const after = identityWith({ owner: owner.publicKey });
+    const again = await signIn(after, owner);
+    expect(again.athleteId).toBe(first.athleteId);
+    expect(again.registrationState).toBe('active');
+    expect((await signIn(after, rider)).registrationState).toBe('pending');
+
+    const fresh = await openSqlStore(path);
+    try {
+      expect(await fresh.getAthlete(first.athleteId)).toMatchObject({
+        registrationState: 'active',
+        activatedAt: Math.floor(ms / 1000) - 60,
+      });
+      expect(await fresh.listModerationLog()).toEqual([
+        expect.objectContaining({
+          action: 'activate_moderator_key',
+          actorAthleteId: first.athleteId,
+          targetAthleteId: first.athleteId,
+        }),
+      ]);
+    } finally {
+      await fresh.close();
+    }
+    // And the owner can now moderate: the rider waiting is theirs to approve.
+    expect(
+      (
+        await after.moderation.act(first.athleteId, 'approve_registration', riderFirst.athleteId, {
+          reason: 'Known',
+        })
+      ).ok,
+    ).toBe(true);
+  });
+});
+
 describe('the approval queue (#775): the owner and the deputy decide, and the log records it', () => {
   it('lists pending riders, approves one and refuses another, each decision logged', async () => {
     const w = await start('approval');
@@ -262,9 +333,12 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
         reason: 'Advertising',
       },
     ]);
-    expect((await w.freshRead((store) => store.getAthlete(anna)))?.registrationState).toBe(
-      'active',
-    );
+    expect(await w.freshRead((store) => store.getAthlete(anna))).toMatchObject({
+      registrationState: 'active',
+      // Active from when it was approved, which is what an account's age counts from (#891).
+      activatedAt: Math.floor(w.clock.ms / 1000),
+    });
+    expect((await w.freshRead((store) => store.getAthlete(spam)))?.activatedAt).toBeNull();
     expect((await w.as(w.owner, 'GET', '/v1/moderation/registrations')).body).toEqual({
       registrations: [],
     });
@@ -464,6 +538,35 @@ describe('public rooms need an eligible account (#775)', () => {
       reason: 'Cheating',
     });
     expect((await ticket()).status).toBe(401);
+  });
+
+  it('counts the account’s age from its approval, not its registration (#891’s review)', async () => {
+    const w = await start('approval');
+    const session = await w.signIn(await testDevice(), { confirmsAdult: true });
+    const athleteId = session.body.athleteId as string;
+    const token = session.body.sessionToken as string;
+    await w.freshRead(async (store) => {
+      for (const n of [1, 2, 3]) {
+        await store.putActivityRecord({
+          athleteId,
+          contentSha256: String(n).repeat(64),
+          signedRecord: new Uint8Array([n]),
+          receivedAt: 1,
+        });
+      }
+    });
+    const week = 7 * 24 * 60 * 60 * 1000;
+    w.clock.ms += week; // a week waiting in the queue
+    await w.as(w.owner, 'POST', `/v1/moderation/registrations/${athleteId}/approve`, {
+      reason: 'Known',
+    });
+    expect((await w.call('GET', '/v1/auth/account', { token })).body).toMatchObject({
+      publicRooms: { eligible: false, reasons: ['account-too-new'] },
+    });
+    w.clock.ms += week;
+    expect((await w.call('GET', '/v1/auth/account', { token })).body).toMatchObject({
+      publicRooms: { eligible: true, reasons: [] },
+    });
   });
 });
 

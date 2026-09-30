@@ -1398,7 +1398,7 @@
     "/v1/blocks/{athleteId}": {
       "post": {
         "operationId": "blockAthlete",
-        "summary": "Block an athlete: neither of you sees or reaches the other, whoever blocked whom. Answers the same whether or not the athlete exists.",
+        "summary": "Block an athlete: neither of you sees or reaches the other, whoever blocked whom. Answers the same whether or not the athlete exists, and is kept for any well-formed id. An account may hold 1000 blocks.",
         "parameters": [
           {
             "name": "athleteId",
@@ -1418,6 +1418,9 @@
         "responses": {
           "204": {
             "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"

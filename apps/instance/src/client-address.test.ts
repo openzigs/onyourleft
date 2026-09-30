@@ -2,8 +2,8 @@
 
 /**
  * Which address a per-address limit counts (#775's carried points): the
- * proxy's header, believed from a local peer only, and an IPv6 client by its
- * /64.
+ * proxy's header, believed from loopback or a proxy the operator named only
+ * (#891's review), and an IPv6 client by its /64.
  */
 
 import { connect } from 'node:net';
@@ -11,7 +11,7 @@ import { connect } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { addressKey } from './auth/rate-limit.ts';
-import { clientAddress, isLocalAddress } from './client-address.ts';
+import { clientAddress, isLoopbackAddress } from './client-address.ts';
 import type { Handler } from './handler.ts';
 import { listen, type Listening } from './node-listener.ts';
 
@@ -20,18 +20,28 @@ const headers = (value?: string): Headers =>
   new Headers(value === undefined ? {} : { [HEADER]: value });
 
 describe('clientAddress', () => {
-  it('reads the named header from a local peer — a proxy the operator runs', () => {
-    for (const peer of [
-      '127.0.0.1',
-      '::1',
-      '::ffff:127.0.0.1',
-      '10.0.0.3',
-      '172.17.0.2',
-      '192.168.1.9',
-      'fd00::2',
-    ]) {
+  it('reads the named header from a loopback peer — a proxy on the same machine', () => {
+    for (const peer of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1']) {
       expect(clientAddress(peer, headers('203.0.113.9'), HEADER), peer).toBe('203.0.113.9');
     }
+  });
+
+  it('ignores the header from a private peer the operator did not name — Docker’s bridge gateway included (#891)', () => {
+    for (const peer of ['172.17.0.1', '10.0.0.3', '192.168.1.9', 'fd00::2', 'fe80::1']) {
+      expect(clientAddress(peer, headers('198.51.100.1'), HEADER), peer).toBe(peer);
+    }
+  });
+
+  it('reads the header from a proxy the operator named, however the peer is spelled', () => {
+    const trusted = ['172.17.0.1', 'fd00::2'];
+    expect(clientAddress('172.17.0.1', headers('203.0.113.9'), HEADER, trusted)).toBe(
+      '203.0.113.9',
+    );
+    expect(clientAddress('::ffff:172.17.0.1', headers('203.0.113.9'), HEADER, trusted)).toBe(
+      '203.0.113.9',
+    );
+    expect(clientAddress('FD00::2', headers('203.0.113.9'), HEADER, trusted)).toBe('203.0.113.9');
+    expect(clientAddress('172.17.0.2', headers('203.0.113.9'), HEADER, trusted)).toBe('172.17.0.2');
   });
 
   it('ignores the header from a public peer, who could have typed it', () => {
@@ -47,12 +57,11 @@ describe('clientAddress', () => {
     expect(clientAddress(null, headers('203.0.113.9'), HEADER)).toBeNull();
   });
 
-  it('knows a local address from a public one', () => {
-    expect(isLocalAddress('172.15.255.255')).toBe(false);
-    expect(isLocalAddress('172.16.0.0')).toBe(true);
-    expect(isLocalAddress('172.31.255.255')).toBe(true);
-    expect(isLocalAddress('fe80::1')).toBe(true);
-    expect(isLocalAddress('2001:db8::1')).toBe(false);
+  it('knows loopback from everything else', () => {
+    expect(isLoopbackAddress('127.255.255.255')).toBe(true);
+    expect(isLoopbackAddress('128.0.0.1')).toBe(false);
+    expect(isLoopbackAddress('10.0.0.1')).toBe(false);
+    expect(isLoopbackAddress('::2')).toBe(false);
   });
 });
 

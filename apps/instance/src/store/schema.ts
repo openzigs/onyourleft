@@ -43,6 +43,11 @@ export interface AthleteTable {
    * A confirmation's date, never a birth date. Added by migration 0006.
    */
   readonly adult_confirmed_at: number | null;
+  /**
+   * When the account became active — registered active, or approved — or
+   * `null` while it never has (#775). Added by migration 0006.
+   */
+  readonly activated_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */

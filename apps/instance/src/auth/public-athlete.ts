@@ -42,6 +42,8 @@ export const ATHLETE_COLUMNS: Readonly<Record<string, ColumnClass>> = {
   display_name_hidden_at: 'private',
   // #775: a confirmation's date, never a birth date, and nobody else's business.
   adult_confirmed_at: 'private',
+  // #891's review: when a moderator approved the account is theirs and the rider's.
+  activated_at: 'private',
 };
 
 /** What another rider may see of an athlete. */

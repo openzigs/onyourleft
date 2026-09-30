@@ -35,6 +35,7 @@ const result = readConfig({
   publicRoomMinAccountDays: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS,
   publicRoomMinRides: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES,
   clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
+  trustedProxies: process.env.OYL_INSTANCE_TRUSTED_PROXIES,
 });
 
 if (!result.ok) {
@@ -54,6 +55,7 @@ const listening = await listen(handler, {
   host: config.host,
   port: config.port,
   clientAddressHeader: config.clientAddressHeader,
+  trustedProxies: config.trustedProxies,
 });
 logEvent(log, 'listening', {
   url: listening.url,

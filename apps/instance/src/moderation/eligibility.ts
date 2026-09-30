@@ -20,8 +20,10 @@
  *   the confirmation and its date are stored. No date of birth is ever asked
  *   for or kept;
  * - `account-too-new` — at least {@link PublicRoomThresholds.minimumAccountDays}
- *   whole days since the account was created, counted in seconds, so the
- *   boundary is exact;
+ *   whole days since the account became ACTIVE — registered active, or
+ *   approved — counted in seconds, so the boundary is exact. Not since it was
+ *   created (#891's review): days spent waiting for approval are days nobody
+ *   had vouched for it, and an account never active is always too new;
  * - `too-few-rides` — at least {@link PublicRoomThresholds.minimumCompletedRides}
  *   rides synced to this instance.
  *
@@ -49,8 +51,8 @@ export interface EligibilityFacts {
   readonly registrationState: string;
   readonly suspendedAt: number | null;
   readonly adultConfirmedAt: number | null;
-  /** Unix seconds. */
-  readonly createdAt: number;
+  /** When the account became active, Unix seconds, or `null` if it never has. */
+  readonly activatedAt: number | null;
   /** Rides synced to this instance. */
   readonly completedRides: number;
 }
@@ -75,7 +77,10 @@ export function publicRoomEligibility(
   if (facts.registrationState !== 'active') reasons.push('not-approved');
   if (facts.suspendedAt !== null) reasons.push('suspended');
   if (facts.adultConfirmedAt === null) reasons.push('not-confirmed-adult');
-  if (now - facts.createdAt < thresholds.minimumAccountDays * DAY_SECONDS) {
+  if (
+    facts.activatedAt === null ||
+    now - facts.activatedAt < thresholds.minimumAccountDays * DAY_SECONDS
+  ) {
     reasons.push('account-too-new');
   }
   if (facts.completedRides < thresholds.minimumCompletedRides) reasons.push('too-few-rides');

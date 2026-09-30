@@ -41,7 +41,9 @@
  *
  * A key the operator named as the owner's or the deputy's registers active in
  * every mode, or approval-required registration could never approve its
- * first rider. New registrations are limited per client address
+ * first rider — and a PENDING account signing in with one (the key was named
+ * after the account registered) is activated there and then, and logged,
+ * because no moderator may approve a moderator (#891's review). New registrations are limited per client address
  * (`rate-limit.ts` §`addressKey`), and a refused or suspended athlete's every
  * key is refused at sign-in.
  *
@@ -334,6 +336,13 @@ export function createIdentity(options: IdentityOptions): Identity {
   const limits = options.limits ?? DEFAULT_LIMITS;
   const registration = options.registration ?? DEFAULT_REGISTRATION;
   const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
+  // ⚠️ In memory, like every limit below and unlike the report limit
+  // (`moderation.ts`, counted from the store): a restart — or, under the
+  // Durable Object adapter, an eviction — hands every address a fresh
+  // allowance (#891's review). Counting registrations from the database would
+  // mean storing each rider's address beside their account, which this
+  // instance deliberately never does (`log.ts`); what bounds identities is
+  // approval, which a restart does not reset. `docs/moderation.md` says so.
   const registrations = createRateLimiter(limits.registrationPerAddress, now);
   const mailer = options.emailRecovery;
   const perKey = createRateLimiter(limits.challengePerKey, now);
@@ -562,6 +571,22 @@ export function createIdentity(options: IdentityOptions): Identity {
       // D-6.2, #775). Told to the athlete themselves, and to nobody else.
       if (athlete.suspendedAt !== null) return refuse('account_suspended');
       if (athlete.registrationState === 'refused') return refuse('registration_refused');
+      let registrationState = athlete.registrationState;
+      // The owner signed in before the operator set their key, so registered
+      // pending — and nobody may approve a moderator, so nothing could ever
+      // let them in (#891's review). A key the operator now names activates
+      // its pending account at sign-in, logged like any moderator action.
+      if (registrationState === 'pending' && moderatorKey(proof.value)) {
+        const activated = await store.moderate({
+          action: 'activate_moderator_key',
+          actorAthleteId: athlete.id,
+          targetAthleteId: athlete.id,
+          reportId: null,
+          reason: 'Signed in with a device key the operator named as a moderator’s.',
+          at: seconds(),
+        });
+        if (activated.outcome === 'applied') registrationState = 'active';
+      }
       const session = await openSession(key);
       return {
         ok: true,
@@ -570,7 +595,7 @@ export function createIdentity(options: IdentityOptions): Identity {
           athleteId: athlete.id,
           displayName: athlete.displayName,
           registered: false,
-          registrationState: athlete.registrationState,
+          registrationState,
         },
       };
     },

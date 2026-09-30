@@ -26,6 +26,15 @@
  * unblocking and reporting answer `204` whether or not the athlete named
  * exists, so none of them can be used to find out that a block is there.
  *
+ * ⚠️ **And so does everything those writes leave behind** (#891's review).
+ * A block is stored for ANY well-formed id, so `GET /v1/blocks` echoes back
+ * what the caller asked for and says nothing about who exists; and a report
+ * about nobody is stored too — closed as it is made, so it never reaches the
+ * moderators' queue — so it counts toward the reporter's hourly allowance
+ * exactly as a report about a rider who blocked them does. Before that review
+ * the list and the rate limit each told a rider that an athlete they could
+ * not see existed. `choke-point.test.ts` holds both with ONE caller.
+ *
  * ## The moderators
  *
  * The instance's operator names two DEVICE KEYS, the owner's and a deputy's
@@ -34,7 +43,15 @@
  * before they have registered — which approval-required registration (#775)
  * needs, or nobody could ever approve anybody. A moderator's every action goes
  * through {@link SqlStore.moderate}, which applies it and appends it to the
- * append-only log in one transaction; a moderator may not act on a moderator.
+ * append-only log in one transaction; a moderator may not act on a moderator,
+ * and may not dismiss a report about themselves. Such an attempt changes
+ * nothing and IS logged, as `refused_<action>`, so the owner can see a deputy
+ * who tried to act on them.
+ *
+ * A pending account whose key the operator names later — the owner signed in
+ * before `OYL_INSTANCE_OWNER_KEY` was set — is activated at its next sign-in,
+ * logged as `activate_moderator_key` (`auth/identity.ts`), because nobody
+ * could approve a moderator otherwise.
  */
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
@@ -69,12 +86,29 @@ export const DEFAULT_MODERATION_LIMITS: ModerationLimits = {
 /** The longest reason a report or a moderator action may give, in characters. */
 export const MAXIMUM_REASON_LENGTH = 1000;
 
+/**
+ * How many blocks one athlete may hold. A block is stored for any well-formed
+ * id, whether or not anybody holds it, so without a bound one account could
+ * fill the database. Counted over the caller's own rows, so reaching it says
+ * nothing about anybody else.
+ */
+export const MAXIMUM_BLOCKS = 1000;
+
+/** What a report about an id nobody holds is closed as, the moment it is made. */
+export const NO_SUCH_ATHLETE_OUTCOME = 'no_such_athlete';
+
 export type ModerationResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly code: ErrorCode; readonly fields?: readonly FieldProblem[] };
 
-/** The actions a moderator takes on an athlete (a report is dismissed by its own route). */
-export type AthleteAction = Exclude<ModerationActionKind, 'dismiss_report'>;
+/**
+ * The actions a moderator takes on an athlete. A report is dismissed by its
+ * own route, and `activate_moderator_key` is the instance's, not a moderator's.
+ */
+export type AthleteAction = Exclude<
+  ModerationActionKind,
+  'dismiss_report' | 'activate_moderator_key'
+>;
 
 export interface Moderation {
   /** THE choke point: may `viewerId` see, or act on, `subjectId`? */
@@ -82,7 +116,7 @@ export interface Moderation {
   /** The role the athlete holds, if any. */
   roleOf(athleteId: string): Promise<ModeratorRole | undefined>;
 
-  block(athleteId: string, target: string): Promise<void>;
+  block(athleteId: string, target: string): Promise<ModerationResult<null>>;
   unblock(athleteId: string, target: string): Promise<void>;
   blocks(athleteId: string): Promise<readonly string[]>;
   report(athleteId: string, target: unknown, reason: unknown): Promise<ModerationResult<null>>;
@@ -145,6 +179,25 @@ export function createModeration(options: ModerationOptions): Moderation {
     return undefined;
   }
 
+  /** A moderator tried to act on a moderator: refused, changed nothing, and logged. */
+  async function refusedOnModerator(
+    action: ModerationActionKind,
+    moderatorId: string,
+    target: string | null,
+    reportId: number | null,
+    reason: string,
+  ): Promise<ModerationResult<never>> {
+    await store.logRefusedAction({
+      action,
+      actorAthleteId: moderatorId,
+      targetAthleteId: target,
+      reportId,
+      reason,
+      at: seconds(),
+    });
+    return refuse('moderation_not_applicable');
+  }
+
   function logged(
     outcome: Awaited<ReturnType<SqlStore['moderate']>>,
   ): ModerationResult<{ logId: number }> {
@@ -154,21 +207,33 @@ export function createModeration(options: ModerationOptions): Moderation {
 
   return {
     async canSee(viewerId, subjectId) {
-      const subject = await store.getAthlete(subjectId);
-      if (subject === undefined) return false;
+      // ONE query whatever the answer (#891's review): nobody, suspended and
+      // blocked cost the same, so the time an answer takes does not say which.
+      const sight = await store.sight(viewerId, subjectId);
+      if (sight === undefined) return false;
       if (viewerId === subjectId) return true;
-      if (subject.registrationState !== 'active' || subject.suspendedAt !== null) return false;
-      return !(await store.blockedEitherWay(viewerId, subjectId));
+      return sight.registrationState === 'active' && sight.suspendedAt === null && !sight.blocked;
     },
 
     roleOf,
 
     async block(athleteId, target) {
-      // Stored only for an athlete that exists, and answered the same either
-      // way: the caller learns nothing about who is here.
-      if (target === athleteId || !ATHLETE_ID.test(target)) return;
-      if ((await store.getAthlete(target)) === undefined) return;
+      // Stored for ANY well-formed id, whether or not anybody holds it, and
+      // never asked whether they do: `GET /v1/blocks` then lists exactly what
+      // the caller asked for, and tells them nothing about who is here.
+      if (target === athleteId || !ATHLETE_ID.test(target)) return { ok: true, value: null };
+      const held = await store.listBlocks(athleteId);
+      if (held.some((each) => each.blockedAthleteId === target)) return { ok: true, value: null };
+      if (held.length >= MAXIMUM_BLOCKS) {
+        return refuse('validation_failed', [
+          {
+            field: 'athleteId',
+            problem: `this account already blocks ${String(MAXIMUM_BLOCKS)} athletes, the most one may`,
+          },
+        ]);
+      }
       await store.putBlock(athleteId, target, seconds());
+      return { ok: true, value: null };
     },
 
     async unblock(athleteId, target) {
@@ -195,20 +260,22 @@ export function createModeration(options: ModerationOptions): Moderation {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
       }
       const at = seconds();
-      // Counted from the store, so a restart does not hand anybody a fresh allowance.
+      // Counted from the store, so a restart does not hand anybody a fresh
+      // allowance — and counting EVERY report, whoever it names (#891's review).
       const recent = (await store.listReports(athleteId)).filter(
         (each) => each.createdAt > at - limits.reportWindowSeconds,
       );
       if (recent.length >= limits.reportsPerWindow) return refuse('rate_limited');
-      // A report about nobody is not stored, and is answered the same.
-      if ((await store.getAthlete(target)) !== undefined) {
-        await store.putReport({
-          athleteId,
-          targetAthleteId: target,
-          reason: checked.reason,
-          createdAt: at,
-        });
-      }
+      // A report about nobody is stored too, so it spends the allowance as any
+      // other does; it is closed as it is made, so no moderator ever sees it.
+      const exists = (await store.getAthlete(target)) !== undefined;
+      await store.putReport({
+        athleteId,
+        targetAthleteId: target,
+        reason: checked.reason,
+        createdAt: at,
+        ...(exists ? {} : { closedAs: NO_SUCH_ATHLETE_OUTCOME }),
+      });
       return { ok: true, value: null };
     },
 
@@ -231,8 +298,11 @@ export function createModeration(options: ModerationOptions): Moderation {
         reportId = fields.reportId as number;
       }
       // Nobody moderates a moderator, themselves included: the owner and the
-      // deputy cannot suspend each other, or hide each other's name.
-      if ((await roleOf(target)) !== undefined) return refuse('moderation_not_applicable');
+      // deputy cannot suspend each other, or hide each other's name. The
+      // attempt is logged, and changes nothing.
+      if ((await roleOf(target)) !== undefined) {
+        return refusedOnModerator(action, moderatorId, target, reportId, checked.reason);
+      }
       return logged(
         await store.moderate({
           action,
@@ -251,6 +321,18 @@ export function createModeration(options: ModerationOptions): Moderation {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
       }
       if (!/^[1-9][0-9]{0,15}$/.test(reportId)) return refuse('not_found');
+      // A moderator does not decide a report about themselves (#891's review):
+      // the other moderator may. Refused, and logged, as `act` refuses.
+      const report = (await store.listOpenReports()).find((each) => each.id === Number(reportId));
+      if (report?.targetAthleteId === moderatorId) {
+        return refusedOnModerator(
+          'dismiss_report',
+          moderatorId,
+          moderatorId,
+          report.id,
+          checked.reason,
+        );
+      }
       return logged(
         await store.moderate({
           action: 'dismiss_report',

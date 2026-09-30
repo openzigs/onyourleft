@@ -123,15 +123,16 @@ export const MODERATION_ROUTES: readonly Route[] = [
         'blocking must work against anybody, a rider who already blocked you included; it answers 204 whether or not the athlete exists, so it tells nobody about a block',
     },
     summary:
-      'Block an athlete: neither of you sees or reaches the other, whoever blocked whom. Answers the same whether or not the athlete exists.',
+      'Block an athlete: neither of you sees or reaches the other, whoever blocked whom. Answers the same whether or not the athlete exists, and is kept for any well-formed id. An account may hold 1000 blocks.',
     identity: true,
     auth: 'session',
-    errors: ['unauthenticated'],
+    errors: ['unauthenticated', 'validation_failed'],
     response: { contentType: 'none' },
-    handle: async (context) => {
-      await moderationOf(context).block(callerId(context), context.params.athleteId ?? '');
-      return noContent();
-    },
+    handle: async (context) =>
+      answer(
+        await moderationOf(context).block(callerId(context), context.params.athleteId ?? ''),
+        () => noContent(),
+      ),
   },
   {
     method: 'DELETE',

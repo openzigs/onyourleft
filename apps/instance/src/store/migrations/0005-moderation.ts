@@ -20,7 +20,9 @@
  *   foreign key to `athlete` on purpose: erasing an account does not erase
  *   what a moderator did to it, or the audit trail would be something a
  *   suspended rider could delete (`sql-store.erasure.test.ts` states the
- *   exception, and `docs/moderation.md` tells an operator).
+ *   exception, and `docs/moderation.md` tells an operator). And `down` is
+ *   refused while the log holds a single entry, so migrating back past 0005
+ *   cannot delete it either.
  * - **`athlete.suspended_at`** — when the account was suspended, or `null`.
  * - **`athlete.display_name_hidden_at`** — a moderator hid the display name
  *   (#83's "hide content"): other riders see the default name until the
@@ -88,7 +90,22 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     begin select raise(abort, 'moderation_log is append-only'); end`.execute(db);
 }
 
+/** What `down` throws when the audit log holds anything (#891's review). */
+export class ModerationLogNotEmptyError extends Error {
+  override readonly name = 'ModerationLogNotEmptyError';
+}
+
 export async function down(db: Kysely<unknown>): Promise<void> {
+  // ⚠️ Undoing this migration drops the moderation log, which the rest of
+  // #83 promises nobody can delete. So it is refused while the log records
+  // anything: an operator who really means to lose it deletes the database,
+  // which is at least not something `migrate down` does for them in passing.
+  const logged = await sql<{ n: number }>`select count(*) as n from moderation_log`.execute(db);
+  if (Number(logged.rows[0]?.n ?? 0) > 0) {
+    throw new ModerationLogNotEmptyError(
+      'Migration 0005 cannot be undone: the moderation log holds entries, and undoing it would delete them. Nothing was changed.',
+    );
+  }
   await sql`drop trigger moderation_log_no_delete`.execute(db);
   await sql`drop trigger moderation_log_no_update`.execute(db);
   await db.schema.dropTable('moderation_log').execute();

@@ -123,7 +123,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putActivityRecord: { notAScopedRead: 'a write' },
   putRoom: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
-  blockedEitherWay: {
+  sight: {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
@@ -132,6 +132,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
+  logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
   confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },

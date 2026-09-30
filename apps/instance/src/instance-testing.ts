@@ -26,6 +26,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     moderators: {},
     publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
     clientAddressHeader: null,
+    trustedProxies: [],
     ...overrides,
   };
 }

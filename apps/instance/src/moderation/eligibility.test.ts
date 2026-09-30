@@ -19,7 +19,7 @@ const ELIGIBLE: EligibilityFacts = {
   registrationState: 'active',
   suspendedAt: null,
   adultConfirmedAt: CREATED + 60,
-  createdAt: CREATED,
+  activatedAt: CREATED,
   completedRides: 3,
 };
 const NOW = CREATED + 7 * DAY;
@@ -37,6 +37,18 @@ describe('publicRoomEligibility (#775)', () => {
       eligible: false,
       reasons: ['account-too-new'],
     });
+  });
+
+  it('counts the age from activation, not creation: a week pending is not a week old (#891)', () => {
+    const approvedLate = { ...ELIGIBLE, activatedAt: CREATED + 7 * DAY };
+    expect(publicRoomEligibility(approvedLate, THRESHOLDS, NOW).reasons).toEqual([
+      'account-too-new',
+    ]);
+    expect(publicRoomEligibility(approvedLate, THRESHOLDS, NOW + 7 * DAY).eligible).toBe(true);
+    expect(
+      publicRoomEligibility({ ...ELIGIBLE, activatedAt: null }, THRESHOLDS, NOW + 365 * DAY)
+        .reasons,
+    ).toEqual(['account-too-new']);
   });
 
   it('refuses one ride short, and admits at the threshold', () => {
@@ -82,7 +94,7 @@ describe('publicRoomEligibility (#775)', () => {
           registrationState: 'pending',
           suspendedAt: 1,
           adultConfirmedAt: null,
-          createdAt: CREATED,
+          activatedAt: null,
           completedRides: 0,
         },
         THRESHOLDS,

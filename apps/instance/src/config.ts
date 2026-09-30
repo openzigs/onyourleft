@@ -34,7 +34,10 @@
  *   thresholds (`moderation/eligibility.ts`).
  * - **`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`**: the header a proxy the operator
  *   runs puts the rider's address in (`cf-connecting-ip` behind a Cloudflare
- *   Tunnel). Believed only from a local peer: `client-address.ts`.
+ *   Tunnel). Believed only from a trusted proxy: `client-address.ts`.
+ * - **`OYL_INSTANCE_TRUSTED_PROXIES`**: the proxies that header is believed
+ *   from, as exact addresses separated by commas. Loopback is always trusted;
+ *   unset means loopback alone (#891's review).
  *
  * ⚠️ **Neither set is a refusal to start, not a default.** An instance that does
  * not know which source it is would have to offer the repository's `main`,
@@ -42,6 +45,7 @@
  * accept. Failing at start-up is the only place that is cheap.
  */
 
+import { isAddress, normalisedAddress } from './client-address.ts';
 import {
   DEFAULT_PUBLIC_ROOM_THRESHOLDS,
   type PublicRoomThresholds,
@@ -83,6 +87,7 @@ export interface RawConfig {
   readonly publicRoomMinAccountDays?: string | undefined;
   readonly publicRoomMinRides?: string | undefined;
   readonly clientAddressHeader?: string | undefined;
+  readonly trustedProxies?: string | undefined;
 }
 
 /** A configuration the instance can start with. */
@@ -100,6 +105,11 @@ export interface Config {
   readonly publicRooms: PublicRoomThresholds;
   /** The header a local proxy puts the client's address in, lower case, or `null`. */
   readonly clientAddressHeader: string | null;
+  /**
+   * The proxies the header is believed from besides loopback, each as
+   * `client-address.ts` §`normalisedAddress` writes it. Empty: loopback only.
+   */
+  readonly trustedProxies: readonly string[];
 }
 
 export type ConfigResult =
@@ -218,6 +228,20 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  const trustedProxies: string[] = [];
+  if (present(raw.trustedProxies)) {
+    for (const entry of raw.trustedProxies.split(',').map((each) => each.trim())) {
+      if (isAddress(entry)) {
+        trustedProxies.push(normalisedAddress(entry));
+      } else {
+        problems.push(
+          'OYL_INSTANCE_TRUSTED_PROXIES must be IP addresses separated by commas, each written exactly as the connection reports it.',
+        );
+        break;
+      }
+    }
+  }
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
@@ -233,6 +257,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       moderators,
       publicRooms,
       clientAddressHeader,
+      trustedProxies,
     },
   };
 }

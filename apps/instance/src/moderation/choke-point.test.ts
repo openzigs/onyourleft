@@ -17,7 +17,19 @@
  * - every route that names an athlete in its path or its body and says it
  *   reaches only its caller's own data fails, so a new route cannot put an
  *   athlete id somewhere and skip the question;
- * - every exempt route has an entry here saying what holds it instead.
+ * - every exempt route has an entry here saying what holds it instead;
+ * - every PATH PARAMETER of every route is either the athlete it declares it
+ *   reaches, or named in {@link NOT_AN_ATHLETE} with what it names instead —
+ *   so a new route that names a rider `{riderId}` or `{followee}` fails here
+ *   rather than passing as `own` because its name does not say "athlete"
+ *   (#891's review).
+ *
+ * ⚠️ **The "answers alike" routes are called by ONE caller**, about a rider
+ * who blocked them and about nobody, and what they leave behind is read back
+ * by that same caller: their list of blocks, and their report allowance.
+ * Until #891's review each probe had a fresh caller, which is exactly what
+ * hid two oracles — a block of nobody was not listed, and a report about
+ * nobody did not spend the allowance.
  *
  * ⚠️ The instance has, today, ONE route that reads another athlete — their
  * public profile. #83 lists a feed, comments, kudos, follower lists,
@@ -78,6 +90,16 @@ const EXEMPT: Readonly<
   },
 };
 
+/**
+ * Every path parameter that does NOT name an athlete, and what it names. A
+ * parameter no entry here names, and no route declares it reaches, fails.
+ */
+const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
+  roomId: 'a room; who may enter it is the ticket’s rule, and blocking inside it is #789’s',
+  publicKey: 'one of the CALLER’s own device keys; the store scopes the revocation to them',
+  reportId: 'a report, read and decided only on the moderators’ routes',
+};
+
 /** An athlete id nobody holds, shaped like one that somebody might. */
 const NOBODY = 'f'.repeat(32);
 
@@ -107,6 +129,20 @@ describe('the route table declares whom every route reaches (#83)', () => {
           : [];
       for (const name of [...params, ...fields]) {
         expect(namesAnAthlete(name), `${route.operationId}: ${name}`).toBe(false);
+      }
+    }
+  });
+
+  it('knows what every path parameter of every route names — an athlete it declares, or something else (#891)', () => {
+    for (const route of ROUTES) {
+      const params = [...route.path.matchAll(/\{([A-Za-z]+)\}/g)].map((match) => match[1] ?? '');
+      for (const name of params) {
+        const declared =
+          (isAthleteReach(route.reaches) && route.reaches.athlete === name) ||
+          // A moderators' route and an exempt route reach athletes by design,
+          // and say so; their `athleteId` is that athlete.
+          ((route.reaches === 'moderation' || isExempt(route.reaches)) && name === 'athleteId');
+        expect(declared || name in NOT_AN_ATHLETE, `${route.operationId}: {${name}}`).toBe(true);
       }
     }
   });
@@ -229,20 +265,84 @@ describe('every path a blocked athlete could use is refused, as though nobody we
     Object.entries(EXEMPT).flatMap(([operation, rule]) =>
       'answersAlike' in rule ? [[operation, rule.answersAlike] as const] : [],
     ),
-  )('%s answers alike about a blocker, a blocked rider and nobody', async (operation, request) => {
-    const route = ROUTES.find((each) => each.operationId === operation);
-    if (route === undefined) throw new Error(operation);
-    // A fresh caller each time, so a report's rate limit is not what differs.
-    const answers = [];
-    for (const subject of [NOBODY, blocksViewer.athleteId, blockedByViewer.athleteId]) {
+  )(
+    '%s answers ONE caller alike about a blocker, a blocked rider and nobody',
+    async (operation, request) => {
+      const route = ROUTES.find((each) => each.operationId === operation);
+      if (route === undefined) throw new Error(operation);
+      // ONE caller for all three (#891's review): whatever the first request
+      // leaves behind is there when the next is answered.
       const caller = await world.rider();
       await world.as(blocksViewer, 'POST', `/v1/blocks/${caller.athleteId}`);
       await world.as(caller, 'POST', `/v1/blocks/${blockedByViewer.athleteId}`);
-      const { path, body } = request(subject);
-      answers.push(await world.as(caller, route.method, path, body));
+      const answers = [];
+      for (const subject of [NOBODY, blocksViewer.athleteId, blockedByViewer.athleteId]) {
+        const { path, body } = request(subject);
+        answers.push(await world.as(caller, route.method, path, body));
+      }
+      expect(answers[0]?.status).toBeLessThan(300);
+      expect(answers[1]).toEqual(answers[0]);
+      expect(answers[2]).toEqual(answers[0]);
+    },
+  );
+
+  describe('what ONE caller reads back afterwards says nothing either (#891)', () => {
+    /** A caller whom `blocksViewer` has blocked, as `viewer` is. */
+    async function blockedCaller(): Promise<Rider> {
+      const caller = await world.rider();
+      expect((await world.as(blocksViewer, 'POST', `/v1/blocks/${caller.athleteId}`)).status).toBe(
+        204,
+      );
+      return caller;
     }
-    expect(answers[0]?.status).toBeLessThan(300);
-    expect(answers[1]).toEqual(answers[0]);
-    expect(answers[2]).toEqual(answers[0]);
+
+    it('lists a block of a rider who blocked the caller exactly as a block of nobody', async () => {
+      const caller = await blockedCaller();
+      for (const subject of [blocksViewer.athleteId, NOBODY]) {
+        expect((await world.as(caller, 'POST', `/v1/blocks/${subject}`)).status).toBe(204);
+      }
+      const listed = await world.as(caller, 'GET', '/v1/blocks');
+      expect(listed).toEqual({
+        status: 200,
+        body: { athleteIds: [blocksViewer.athleteId, NOBODY].sort() },
+      });
+      // And the rider who blocked them is still nobody to the caller.
+      expect(await world.as(caller, 'GET', `/v1/athletes/${blocksViewer.athleteId}`)).toEqual(
+        await world.as(caller, 'GET', `/v1/athletes/${NOBODY}`),
+      );
+    });
+
+    it('unblocks, and lists afterwards, the blocker and nobody alike', async () => {
+      const caller = await blockedCaller();
+      for (const subject of [blocksViewer.athleteId, NOBODY]) {
+        await world.as(caller, 'POST', `/v1/blocks/${subject}`);
+      }
+      const unblocked = [];
+      for (const subject of [blocksViewer.athleteId, NOBODY]) {
+        unblocked.push(await world.as(caller, 'DELETE', `/v1/blocks/${subject}`));
+      }
+      expect(unblocked[1]).toEqual(unblocked[0]);
+      expect((await world.as(caller, 'GET', '/v1/blocks')).body).toEqual({ athleteIds: [] });
+    });
+
+    it.each([
+      ['the blocker, then nobody', () => [blocksViewer.athleteId, NOBODY]],
+      ['nobody, then the blocker', () => [NOBODY, blocksViewer.athleteId]],
+    ] as const)(
+      'spends one report allowance on %s, and the 429 lands in the same place',
+      async (_order, subjects) => {
+        const caller = await blockedCaller();
+        const report = (athleteId: string) =>
+          world.as(caller, 'POST', '/v1/reports', { athleteId, reason: 'Abusive display name' });
+        const answers = [];
+        // Three about a rider the caller can see, then the two in question,
+        // then one more: the allowance is five an hour.
+        for (let each = 0; each < 3; each += 1) answers.push(await report(unrelated.athleteId));
+        for (const subject of subjects()) answers.push(await report(subject));
+        answers.push(await report(unrelated.athleteId));
+        expect(answers.map((answer) => answer.status)).toEqual([204, 204, 204, 204, 204, 429]);
+        expect(answers[3]).toEqual(answers[4]);
+      },
+    );
   });
 });

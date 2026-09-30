@@ -21,6 +21,7 @@ describe('readConfig', () => {
         moderators: {},
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
+        trustedProxies: [],
       },
     });
   });
@@ -107,5 +108,20 @@ describe('readConfig', () => {
     const set = readConfig({ commit: COMMIT, clientAddressHeader: 'CF-Connecting-IP' });
     expect(set.ok && set.config.clientAddressHeader).toBe('cf-connecting-ip');
     expect(readConfig({ commit: COMMIT, clientAddressHeader: 'a header' }).ok).toBe(false);
+  });
+
+  it('reads the trusted proxies as exact addresses, and refuses anything else (#891)', () => {
+    const set = readConfig({
+      commit: COMMIT,
+      trustedProxies: ' 172.17.0.1, ::FFFF:10.0.0.2 ,fd00::1',
+    });
+    expect(set.ok && set.config.trustedProxies).toEqual(['172.17.0.1', '10.0.0.2', 'fd00::1']);
+    for (const bad of ['172.17.0.0/16', 'proxy.local', '172.17.0.1,,10.0.0.1']) {
+      const refused = readConfig({ commit: COMMIT, trustedProxies: bad });
+      expect(refused.ok, bad).toBe(false);
+      expect(refused.ok ? '' : refused.problems.join(' '), bad).toContain(
+        'OYL_INSTANCE_TRUSTED_PROXIES',
+      );
+    }
   });
 });

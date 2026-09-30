@@ -168,12 +168,22 @@ describe('blocks (#83)', () => {
       }
       await store.putBlock(ATHLETE_A, ATHLETE_B, 2);
     });
-    expect(await h.read((store) => store.blockedEitherWay(ATHLETE_A, ATHLETE_B))).toBe(true);
-    expect(await h.read((store) => store.blockedEitherWay(ATHLETE_B, ATHLETE_A))).toBe(true);
-    expect(await h.read((store) => store.blockedEitherWay(ATHLETE_A, ATHLETE_C))).toBe(false);
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_B))?.blocked)).toBe(
+      true,
+    );
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_B, ATHLETE_A))?.blocked)).toBe(
+      true,
+    );
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_C))?.blocked)).toBe(
+      false,
+    );
     expect(await h.write((store) => store.deleteBlock(ATHLETE_B, ATHLETE_A))).toBe(false);
-    expect(await h.read((store) => store.blockedEitherWay(ATHLETE_A, ATHLETE_B))).toBe(true);
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_B))?.blocked)).toBe(
+      true,
+    );
     expect(await h.write((store) => store.deleteBlock(ATHLETE_A, ATHLETE_B))).toBe(true);
-    expect(await h.read((store) => store.blockedEitherWay(ATHLETE_A, ATHLETE_B))).toBe(false);
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_B))?.blocked)).toBe(
+      false,
+    );
   });
 });

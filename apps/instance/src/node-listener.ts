@@ -100,11 +100,14 @@ export function listen(
     host,
     port,
     clientAddressHeader = null,
+    trustedProxies = [],
   }: {
     readonly host: string;
     readonly port: number;
     /** The header a local proxy puts the client's address in (#775), or `null`. */
     readonly clientAddressHeader?: string | null;
+    /** The proxies the header is believed from besides loopback (#891's review). */
+    readonly trustedProxies?: readonly string[];
   },
 ): Promise<Listening> {
   const server = createServer((incoming, outgoing) => {
@@ -118,11 +121,12 @@ export function listen(
     // The client's address, for the per-address rate limits (#772, #775). It
     // is never logged (`log.ts`). Behind a proxy the operator runs, the
     // socket's peer is the proxy for everybody, so the header the operator
-    // named is read instead — from a local peer only (`client-address.ts`).
+    // named is read instead — from a trusted proxy only (`client-address.ts`).
     const address = clientAddress(
       incoming.socket.remoteAddress ?? null,
       request.headers,
       clientAddressHeader,
+      trustedProxies,
     );
     handler(request, { address })
       .catch(() => errorResponse('internal'))
