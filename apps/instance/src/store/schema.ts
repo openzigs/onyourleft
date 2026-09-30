@@ -220,7 +220,7 @@ export interface InviteCodeTable {
 
 /** What kind of thing a sync item is (#37, #776). */
 export type SyncKind =
-  'activity' | 'write-up' | 'side-camera-report' | 'goal' | 'note' | 'document';
+  'activity' | 'write-up' | 'ride-summary' | 'side-camera-report' | 'goal' | 'note' | 'document';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
@@ -234,6 +234,37 @@ export interface SyncItemTable {
   readonly body: Uint8Array | null;
   readonly received_at: number;
   readonly deleted_at: number | null;
+}
+
+/**
+ * One synced item the history index has cut into passages, or found nothing
+ * to cut (#835, ADR 0040). Added by migration 0010.
+ */
+export interface HistorySourceTable {
+  readonly athlete_id: string;
+  readonly source_kind: SyncKind;
+  readonly source_key: string;
+  /** The `sync_item.digest` of the body the passages were cut from. */
+  readonly source_digest: string;
+  readonly model: string;
+  readonly convention: string;
+  readonly outcome: 'indexed' | 'empty' | 'too-long' | 'picture';
+  readonly passages: number;
+  readonly indexed_at: number;
+}
+
+/** One passage of the history index and its vector (#835, ADR 0040 D-4). Added by migration 0010. */
+export interface HistoryPassageTable {
+  readonly athlete_id: string;
+  readonly source_kind: SyncKind;
+  readonly source_key: string;
+  readonly ordinal: number;
+  readonly passage: string;
+  readonly model: string;
+  readonly dimension: number;
+  readonly convention: string;
+  /** Little-endian `Float32`, unit length. */
+  readonly vector: Uint8Array;
 }
 
 /** Every table, by name. */
@@ -257,4 +288,6 @@ export interface InstanceDatabase {
   readonly moderation_log: ModerationLogTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
+  readonly history_source: HistorySourceTable;
+  readonly history_passage: HistoryPassageTable;
 }

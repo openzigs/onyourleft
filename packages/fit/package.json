@@ -20,7 +20,7 @@
     "@onyourleft/domain": "workspace:*"
   },
   "devDependencies": {
-    "fit-file-parser": "5.0.2",
+    "fit-file-parser": "6.1.2",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }

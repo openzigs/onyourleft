@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { clientAddress } from './client-address.ts';
-import { readConfig } from './config.ts';
+import { readConfig, readHistorySettings } from './config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
 
@@ -51,5 +51,47 @@ describe('deploy/home/compose.yaml — the rider’s address behind the tunnel',
     expect(clientAddress('172.30.87.3', sent, clientAddressHeader, trustedProxies)).toBe(
       '172.30.87.3',
     );
+  });
+});
+
+/** One service's block of the file: from its name to the next line at the same indent. */
+function service(name: string): string {
+  const start = COMPOSE.search(new RegExp(`^  ${name}:\\s*$`, 'm'));
+  if (start < 0) return '';
+  const rest = COMPOSE.slice(start + 1);
+  const end = rest.search(/^ {2}[a-z#]|^[a-z]/m);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
+describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)', () => {
+  const ollama = service('ollama');
+
+  it('runs Ollama only with the history profile, pinned by digest', () => {
+    expect(ollama).toMatch(/profiles: \['history'\]/);
+    expect(ollama).toMatch(/image: ollama\/ollama:[0-9.]+@sha256:[0-9a-f]{64}/);
+  });
+
+  it('publishes no port for it, and exposes none: its API has no authentication', () => {
+    expect(ollama).not.toBe('');
+    // Every uncommented line of the service, so a comment naming ports is not a finding.
+    const lines = ollama.split('\n').filter((line) => !/^\s*#/.test(line));
+    expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
+    // And no service in the file publishes one at all, the debugging line aside.
+    const published = COMPOSE.split('\n').filter((line) => /^\s*ports:/.test(line));
+    expect(published).toStrictEqual([]);
+  });
+
+  it('is reached by a service name the instance accepts as local', () => {
+    const settings = readHistorySettings({ embeddingUrl: 'http://ollama:11434' });
+    expect(settings.kind).toBe('on');
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_EMBEDDING_URL: \$\{OYL_INSTANCE_EMBEDDING_URL:-\}/);
+  });
+
+  it('names no embedding model under a non-OSI licence (ADR 0040 D-5)', () => {
+    const env = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    for (const text of [COMPOSE, env]) expect(text).not.toMatch(/gemma/i);
   });
 });

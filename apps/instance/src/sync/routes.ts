@@ -98,7 +98,7 @@ const activityProperties = { contentSha256: string, receivedAt: integer, claims:
 
 const kindSchema: Schema = {
   type: 'string',
-  enum: ['activity', 'write-up', 'side-camera-report', 'goal', 'note', 'document'],
+  enum: ['activity', 'write-up', 'ride-summary', 'side-camera-report', 'goal', 'note', 'document'],
 };
 
 export const SYNC_ROUTES: readonly Route[] = [
@@ -118,7 +118,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations` and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),

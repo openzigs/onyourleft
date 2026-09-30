@@ -58,6 +58,12 @@ services:
       # local debugging, arrives from somewhere else and is counted as itself.
       OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
       OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10
+      # The history index (#835, ADR 0040): http://ollama:11434 with the
+      # `ollama` service below running; empty, and the index is off.
+      OYL_INSTANCE_EMBEDDING_URL: ${OYL_INSTANCE_EMBEDDING_URL:-}
+      OYL_INSTANCE_EMBEDDING_MODEL: ${OYL_INSTANCE_EMBEDDING_MODEL:-}
+      OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX: ${OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX:-}
+      OYL_INSTANCE_EMBEDDING_QUERY_PREFIX: ${OYL_INSTANCE_EMBEDDING_QUERY_PREFIX:-}
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the
@@ -83,6 +89,31 @@ services:
     networks:
       default:
         ipv4_address: 172.30.87.10
+
+  # The history index's embedding model (#835, ADR 0040 D-5, D-6): a local
+  # Ollama, which the instance reaches by this service's name. Only with the
+  # `history` profile (COMPOSE_PROFILES=history in .env) and started by hand
+  # once — `docker compose up -d ollama`, then
+  # `docker compose exec ollama ollama pull nomic-embed-text` — because
+  # deploy.sh starts the instance, the tunnel and the backup and nothing else.
+  #
+  # ⚠️ NO `ports:`, EVER, and never the tunnel's target: Ollama's API has NO
+  # AUTHENTICATION, so a published port is an open model server for anybody
+  # who can reach it. The instance is the only thing that talks to it, over
+  # this project's own network. Pinned by digest: `docker buildx imagetools
+  # inspect ollama/ollama:0.34.4`, read 2026-09-30. MIT. Its weights are
+  # pulled into the `models` volume, not into the image.
+  #
+  # A GPU is optional — embedding on the processor is enough at a rider's
+  # scale. On Windows, Docker Desktop passes through an NVIDIA GPU only, on
+  # the WSL2 backend: add `deploy.resources.reservations.devices` with
+  # `driver: nvidia` and `capabilities: [gpu]` (docs/self-hosting/home-machine.md).
+  ollama:
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+    profiles: ['history']
+    restart: unless-stopped
+    volumes:
+      - models:/root/.ollama
 
   # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
   # second directory on the box, and a copy of it OFF the box — a USB drive
@@ -120,5 +151,9 @@ networks:
         - subnet: 172.30.87.0/24
 
 volumes:
-  # The one volume: the SQLite database and the blobs.
+  # The SQLite database and the blobs: the one volume that is backed up.
   data:
+  # The embedding model's weights (#835): downloaded again with
+  # `ollama pull`, so not backed up. The history index itself is in `data`,
+  # and is made again from the synced items if it is ever lost (ADR 0040 D-1).
+  models:

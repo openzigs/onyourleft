@@ -348,6 +348,18 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
   },
   ...SYNC_HAPPY_CALLS,
+  searchHistory: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', '/v1/sync/items/note/note-1', token, {
+      body: JSON.stringify({ text: 'Hill repeats on Thursday felt strong.' }),
+    });
+    await world.history.idle();
+    return send(world, 'POST', '/v1/history/search', token, {
+      query: 'hill repeats',
+      limit: 6,
+      characters: 5_400,
+    });
+  },
 };
 
 describe('every route answers with the shape its entry declares', () => {

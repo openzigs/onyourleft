@@ -6,6 +6,7 @@ import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
 import type { ClientInfo, InstanceProbes } from './route-kit.ts';
+import type { History } from './history/history.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 
@@ -108,6 +109,11 @@ export interface HandlerOptions {
    * every route that needs it answers `unavailable`, as for identity.
    */
   readonly sync?: Sync;
+  /**
+   * The history index (#835, ADR 0040). Absent, every route that needs it
+   * answers `unavailable`, and a device's analysis runs without history.
+   */
+  readonly history?: History;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -252,6 +258,9 @@ export function createHandler(options: HandlerOptions): Handler {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
     if (matched.sync === true && options.sync === undefined) return errorResponse('unavailable');
+    if (matched.history === true && options.history === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -285,6 +294,7 @@ export function createHandler(options: HandlerOptions): Handler {
       identity,
       caller,
       sync: options.sync,
+      history: options.history,
       probes: options.probes,
     });
   }
