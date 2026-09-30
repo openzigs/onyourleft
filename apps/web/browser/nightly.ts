@@ -40,9 +40,11 @@ export interface NightlyCheck {
   /** The describe's title, exactly. */
   readonly describe: string;
   /**
-   * What it cost the required job, measured on the runner (run 36634388848,
-   * `main` at 6bd316f, AMD EPYC 9V45) — the load it pays for, since its cases
-   * read one shared load and take milliseconds each.
+   * What it cost, measured on the runner — the load it pays for, since its
+   * cases read one shared load and take milliseconds each. Run 36634388848
+   * (`main` at 6bd316f, AMD EPYC 9V45), except the two realistic loads, which
+   * are #870's (R2) run 36651030916 (#879 at b79879e) — about 10 s more
+   * each than #866's own nightly run 36646905533 read them (91 s and 72 s).
    */
   readonly seconds: string;
   /** Why it is not a safety gate. */
@@ -61,7 +63,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'game.browser.spec.ts',
     describe: 'the realistic world — ADR 0026',
-    seconds: '69 s: the `?realistic` load',
+    seconds: '101 s: the `?realistic` load',
     why:
       'how the opt-in realistic world looks and what it costs. The DEFAULT world’s halves of ' +
       'its cases — #501’s shader compile and D-7’s "fetches none of the realistic set" — are ' +
@@ -82,7 +84,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'game.browser.spec.ts',
     describe: 'the trees’ levels of detail in the realistic world — #617',
-    seconds: '56 s: the `?realistic&trees` load',
+    seconds: '82 s: the `?realistic&trees` load',
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
       'since #870, #630’s far-band light and foliage breeze, which are appearance.',

@@ -83,41 +83,56 @@ export interface BannerAtlas {
  * schema: `glyphs { repeated fontstack = 1 }`, `fontstack { name = 1; range =
  * 2; repeated glyph = 3 }`, `glyph { id = 1; bitmap = 2; width = 3; height =
  * 4; left = 5 (sint); top = 6 (sint); advance = 7 }`.
+ *
+ * ⚠️ **Bounded by the buffer, not by what the file says** (#879's review):
+ * every read stops at the bytes there are, every declared length is refused
+ * when it runs past the message holding it, and a number longer than ten
+ * bytes is refused — so a truncated or corrupted range throws at once, where
+ * it used to walk off the end of the buffer until it reached a length the
+ * file had made up (2³⁵ bytes did not return in a minute).
  */
 export function readGlyphRange(bytes: Uint8Array): ReadonlyMap<number, BannerGlyph> {
   const glyphs = new Map<number, BannerGlyph>();
+  const end = bytes.length;
   let at = 0;
   const varint = (limit: number): number => {
     let value = 0;
     let scale = 1;
-    for (;;) {
-      if (at >= limit) throw new Error('a glyph range ends inside a number');
+    for (let read = 0; read < 10; read += 1) {
+      if (at >= Math.min(limit, end)) throw new Error('a glyph range ends inside a number');
       const byte = bytes[at] as number;
       at += 1;
       value += (byte & 0x7f) * scale;
       if (byte < 0x80) return value;
       scale *= 0x80;
     }
+    throw new Error('a glyph range holds a number longer than ten bytes');
+  };
+  /** Refuses a length that runs past the message holding it. */
+  const within = (length: number, limit: number): number => {
+    if (length > Math.min(limit, end) - at) {
+      throw new Error('a glyph range declares a length past the end of what holds it');
+    }
+    return length;
   };
   const skip = (wire: number, limit: number): void => {
     if (wire === 0) varint(limit);
     else if (wire === 2) {
       // Read the length FIRST: `at += varint(…)` would add it to the offset
       // from before the length was read.
-      const length = varint(limit);
+      const length = within(varint(limit), limit);
       at += length;
-    } else if (wire === 1) at += 8;
-    else if (wire === 5) at += 4;
+    } else if (wire === 1) at += within(8, limit);
+    else if (wire === 5) at += within(4, limit);
     else throw new Error(`a glyph range holds a field of wire type ${String(wire)}`);
   };
-  const end = bytes.length;
   while (at < end) {
     const header = varint(end);
     if (header !== 1 * 8 + 2) {
       skip(header % 8, end);
       continue;
     }
-    const stackLength = varint(end);
+    const stackLength = within(varint(end), end);
     const stackEnd = at + stackLength;
     while (at < stackEnd) {
       const inner = varint(stackEnd);
@@ -125,7 +140,7 @@ export function readGlyphRange(bytes: Uint8Array): ReadonlyMap<number, BannerGly
         skip(inner % 8, stackEnd);
         continue;
       }
-      const glyphLength = varint(stackEnd);
+      const glyphLength = within(varint(stackEnd), stackEnd);
       const glyphEnd = at + glyphLength;
       const glyph = {
         id: 0,
@@ -140,7 +155,7 @@ export function readGlyphRange(bytes: Uint8Array): ReadonlyMap<number, BannerGly
         const key = varint(glyphEnd);
         const field = Math.floor(key / 8);
         if (key % 8 === 2) {
-          const length = varint(glyphEnd);
+          const length = within(varint(glyphEnd), glyphEnd);
           if (field === 2) glyph.bitmap = bytes.slice(at, at + length);
           at += length;
         } else if (key % 8 === 0) {

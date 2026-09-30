@@ -12,6 +12,7 @@ import {
   PATCH_CELL_METRES,
   PATCH_TONE,
   ROAD_PATCH_FLOATS,
+  SURFACE_WEAR_ALLOWANCE,
   UNWORN_ROAD_CONTRAST,
   WHEEL_TRACK_LIGHTEN,
   WHEEL_TRACK_OFFSETS_METRES,
@@ -24,12 +25,19 @@ import { COLUMN_OFFSETS, ROAD_COLUMNS, corridorOrigin, roadCorridor } from './te
 import { photographicRoadMaterial } from './three-renderer';
 
 describe('the road’s wear — #628', () => {
-  it('cannot spend more of the gradient cue than 3.97 : 1 down to 3.5 : 1', () => {
-    // The worst a factor of 1 ± w does: the climb lightened, the descent darkened.
+  it('cannot spend more of the gradient cue than the measured 3.889 : 1 down to 3.5 : 1', () => {
+    // The worst the colour terms' 1 ± w and the surface's allowance 1 ± a do
+    // together: the climb lightened by both, the descent darkened by both.
     const w = MAXIMUM_WEAR_SHARE;
-    expect((UNWORN_ROAD_CONTRAST * (1 - w)) / (1 + w)).toBeGreaterThanOrEqual(
-      WORN_ROAD_CONTRAST_FLOOR,
-    );
+    const a = SURFACE_WEAR_ALLOWANCE;
+    const worst = (UNWORN_ROAD_CONTRAST * (1 - w) * (1 - a)) / ((1 + w) * (1 + a));
+    expect(worst).toBeGreaterThanOrEqual(WORN_ROAD_CONTRAST_FLOOR);
+    expect(worst).toBeCloseTo(3.519, 3);
+    // The starting point is the browser gate's own read-back with the wear
+    // off (3.889 on this tree, #879's review), not the 3.97 read before #626 —
+    // from which the old 0.06 clamp's worst case was 3.449, under the floor.
+    expect(UNWORN_ROAD_CONTRAST).toBe(3.889);
+    expect((UNWORN_ROAD_CONTRAST * (1 - 0.06)) / (1 + 0.06)).toBeLessThan(WORN_ROAD_CONTRAST_FLOOR);
     // And no single term is already past the clamp on its own.
     for (const term of [WHEEL_TRACK_LIGHTEN, DUST_LIGHTEN, ...PATCH_TONE.map(Math.abs)]) {
       expect(term).toBeLessThanOrEqual(MAXIMUM_WEAR_SHARE);

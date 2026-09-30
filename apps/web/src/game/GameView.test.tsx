@@ -63,9 +63,9 @@ import { UnitsProvider } from '../units/context';
 import { START_WORD, toGoText } from './gantry-wording';
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
-function testRoute(): RidableRoute {
+function testRoute(samples = 200): RidableRoute {
   const points: RoutePoint[] = [];
-  for (let index = 0; index <= 200; index += 1) {
+  for (let index = 0; index <= samples; index += 1) {
     points.push({
       position: geographicPosition(
         degreesLatitude(51.5 + (index * 10) / 111_320),
@@ -1205,7 +1205,7 @@ describe('GameView — the lines read in the rider’s own units (#679)', () => 
     mounted = await mount(
       <UnitsProvider units="imperial">
         <GameView
-          port={pedallingPort(testRoute(), undefined, () => LIVE_CADENCE)}
+          port={pedallingPort(testRoute(195), undefined, () => LIVE_CADENCE)}
           renderer={() => Promise.resolve(capturingRenderer(frames))}
           now={() => nowMs}
         />
@@ -1216,7 +1216,8 @@ describe('GameView — the lines read in the rider’s own units (#679)', () => 
     await pump(4, CRANK_FRAME_MS);
     const texts = new Set(frames.flatMap((frame) => frame.lines.map((line) => line.stand.text)));
     expect(texts.has(START_WORD)).toBe(true);
-    // The test route is 2 km: a mile before its end is within reach of its start.
+    // A 1.95 km route: a mile before its end, 341 m on, is within
+    // `LINE_DRAW_AHEAD_METRES` (375) of its start.
     expect(texts.has(toGoText('imperial'))).toBe(true);
     expect(texts.has(toGoText('metric'))).toBe(false);
   });

@@ -399,6 +399,25 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   }, 120_000);
 
+  it('loads the world with no banners when the glyph range cannot be read — #879', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const at = (url: string): string => `${ORIGIN}${url}`;
+    const glyphs = vi.fn((): Promise<Uint8Array> => Promise.reject(new Error('Failed to fetch')));
+    await expect(
+      renderer.loadRealisticWorld({
+        model: (url) => inner.model(at(url)),
+        texture: (url) => inner.texture(at(url)),
+        sky: (url) => inner.sky(at(url)),
+        glyphs,
+        dispose: inner.dispose,
+      }),
+    ).resolves.toEqual({ loaded: true });
+    expect(glyphs).toHaveBeenCalledTimes(1);
+    expect(renderer.realisticWorldLoaded()).toBe(true);
+  }, 120_000);
+
   it('on a desktop that offers only the BC formats, is compressed but neither ASTC nor ETC2', async () => {
     // What the browser gate sees on CI: SwiftShader on Linux offers ASTC and
     // ETC as well, and `KTX2Loader.detectSupport` turns both off there, on

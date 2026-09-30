@@ -1258,9 +1258,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         instance colour at all
     src/game/road-wear.ts, ground-blend.ts, foliage-light.ts
                         the realistic world's surfaces (#870: #628, #627, #630)
-                        — where the road is worn and by how much (every term
-                        clamped to 0.06, solved against the gradient cue's
-                        3.5 : 1), which surface the ground is by verge, slope
+                        — where the road is worn and by how much (every colour
+                        term clamped to 0.04, solved from the 3.889 : 1 the
+                        road reads with the wear off, with 0.01 left for the
+                        wheel track's specular term, to keep 3.5 : 1 — ⚠️ the
+                        first cut solved 0.06 from a stale 3.97, whose worst
+                        case was 3.449, #879's review), which surface the
+                        ground is by verge, slope
                         and tree line, and the far band's light and the
                         foliage's breeze. ⚠️ **The breeze is VISUAL and reads
                         no rider's wind** (#326), runs on the ride's clock, and
@@ -1273,7 +1277,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         one), every word in ONE module, lettered at load from
                         the map's own `0-255.pbf`: no font, no binary and no
                         ASSETS.toml row of their own. ⚠️ A distance on a
-                        board is `units/format.ts`', never typed
+                        board is `units/format.ts`', never typed. ⚠️ Every
+                        barrier piece stands on the DRAWN road at its own
+                        route distance (`PlacedStand.boxes`), never along the
+                        line's tangent, which on a 60 m circuit put one on the
+                        centre line (#879's review); a banner that cannot be
+                        lettered costs the banners, never the realistic world
+                        (`three-renderer.ts` §`bannersOf`)
     src/game/route-fixtures-testing.ts
                         routes built from arithmetic for the landform, the water
                         and the settlements to be asserted over — a hill, a

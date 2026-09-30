@@ -14,14 +14,18 @@ import {
   GANTRY_LEG_CLEARANCE_METRES,
   GANTRY_LEG_METRES,
   LINE_DRAW_AHEAD_METRES,
+  LINE_DRAW_BEHIND_METRES,
   lineStands,
   standBoxes,
   standPoint,
+  boxPoint,
+  type PlacedBox,
   type PlacedStand,
 } from './gantry';
 import { FINISH_WORD, LAP_WORD, START_WORD, toGoText } from './gantry-wording';
 import {
   circuitRoute,
+  hairpinRoute,
   hillRoute,
   lakeValleyRoute,
   northRoute,
@@ -31,7 +35,13 @@ import { sceneFrame } from './scene';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { SCATTER_VERGE_METRES, STRUCTURE_KINDS, type StructureKind } from './scatter';
 import { atStartLine } from './simulation';
-import { corridorOrigin, ROAD_WIDTH_METRES } from './terrain';
+import {
+  corridorOrigin,
+  ROAD_WIDTH_METRES,
+  VIEW_AHEAD_METRES,
+  VIEW_BEHIND_METRES,
+  type CorridorPoint,
+} from './terrain';
 import { GantryBelt } from './three-renderer';
 import { bannerAtlas, readGlyphRange } from './banner-atlas';
 import { bannerCells } from './gantry-wording';
@@ -116,7 +126,7 @@ describe('the start and finish gantries — #679', () => {
     expect(third[0]?.z).toBeCloseTo(first[0]?.z ?? Number.NaN, 3);
   });
 
-  it('stands its legs outside both edges, and its beam above the road on a climb', () => {
+  it('stands its legs outside both edges, and its lowest point above the road on a climb', () => {
     const legs = standBoxes('gantry').filter(
       (box) => box.role === 'metal' && box.width === GANTRY_LEG_METRES,
     );
@@ -127,20 +137,144 @@ describe('the start and finish gantries — #679', () => {
         9,
       );
     }
-    // On #458's 10 % climb, at a line: the road rises by half the beam's depth
-    // at its far side, and the underside still clears the headroom less that.
+    // The gantry's underside over the carriageway is its LOWEST part there —
+    // the banner's bottom edge, which hangs below the beam (#879's review:
+    // this used to measure the beam alone, at 5 m, over a banner down to 4).
     const beam = standBoxes('gantry').find((box) => box.width > ROAD_WIDTH_METRES);
     expect(beam).toBeDefined();
-    const underside = (beam?.up ?? 0) - (beam?.height ?? 0) / 2;
-    expect(underside).toBe(GANTRY_HEADROOM_METRES);
-    const rise = 0.1 * ((beam?.depth ?? 0) / 2);
-    expect(underside - rise).toBeGreaterThan(4.9);
+    const beamUnderside = (beam?.up ?? 0) - (beam?.height ?? 0) / 2;
+    const banner = bannerPlace('gantry');
+    const bannerBottom = banner.up - banner.height / 2;
+    const lowest = Math.min(beamUnderside, bannerBottom);
+    expect(lowest).toBeCloseTo(GANTRY_HEADROOM_METRES, 9);
+    expect(bannerBottom).toBeLessThan(beamUnderside);
+    // On #458's 10 % climb, at a line: the road rises toward the banner's side
+    // by 10 % of how far it hangs from the line, and the banner still clears
+    // the stated headroom less that.
+    const rise = 0.1 * Math.abs(banner.along);
+    expect(bannerBottom - rise).toBeGreaterThan(GANTRY_HEADROOM_METRES - 0.05);
+    // And the whole banner is below the beam's top and above the road: it hangs from it.
+    expect(banner.up + banner.height / 2).toBeCloseTo((beam?.up ?? 0) + (beam?.height ?? 0) / 2, 9);
     // The barriers on the verge: past the edge, inside the scatter's clear band.
     for (const box of standBoxes('gantry').filter((each) => each.role === 'barrier')) {
       const inner = Math.abs(box.across) - box.width / 2;
       expect(inner).toBeGreaterThan(ROAD_WIDTH_METRES / 2);
       expect(inner + box.width).toBeLessThan(ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES);
     }
+  });
+
+  it('keeps every line’s barriers on road the frame draws', () => {
+    const reach = Math.max(
+      ...standBoxes('gantry').map((box) => Math.abs(box.along) + box.depth / 2),
+    );
+    expect(LINE_DRAW_AHEAD_METRES + reach).toBeLessThan(VIEW_AHEAD_METRES);
+    expect(LINE_DRAW_BEHIND_METRES + reach).toBeLessThan(VIEW_BEHIND_METRES);
+  });
+
+  describe('on a bend, every box stands clear of the DRAWN carriageway — #879', () => {
+    type Point = { readonly x: number; readonly z: number };
+    /** The least distance from a point to the frame's drawn centreline, as a polyline. */
+    const fromCentre = (frame: ReturnType<typeof sceneFrame>, point: Point): number => {
+      let least = Number.POSITIVE_INFINITY;
+      const centre = frame.corridor.centre;
+      for (let index = 0; index + 1 < centre.length; index += 1) {
+        const a = centre[index] as CorridorPoint;
+        const b = centre[index + 1] as CorridorPoint;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const squared = dx * dx + dz * dz;
+        const t =
+          squared === 0
+            ? 0
+            : Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.z - a.z) * dz) / squared));
+        least = Math.min(least, Math.hypot(point.x - (a.x + dx * t), point.z - (a.z + dz * t)));
+      }
+      return least;
+    };
+    /** A box's four footprint corners, in the frame it was placed in. */
+    const corners = (placed: PlacedBox): Point[] =>
+      [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ].map(([a = 0, b = 0]) => {
+        const at = boxPoint(placed, placed.box.across + (a * placed.box.width) / 2, 0);
+        return {
+          x: at.x + placed.headingX * ((b * placed.box.depth) / 2),
+          z: at.z + placed.headingZ * ((b * placed.box.depth) / 2),
+        };
+      });
+    /** The same boxes as they were placed before #879's review: along the line's tangent. */
+    const onTheTangent = (line: PlacedStand): PlacedBox[] =>
+      standBoxes(line.stand.kind).map((box) => {
+        const at = standPoint(line, 0, 0, box.along);
+        return { box, x: at.x, y: at.y, z: at.z, headingX: line.headingX, headingZ: line.headingZ };
+      });
+    /** A hairpin's own points, from half-way round its bend: a start line in the bend. */
+    const hairpinStart = (): RouteProfile => {
+      const hairpin = hairpinRoute(20);
+      const points: RoutePoint[] = hairpin.positions.map((position, index) => ({
+        position,
+        elevation: hairpin.elevations[index],
+      }));
+      // 40 straight points, then the arc: start a third of the way round it.
+      return routeProfile(points.slice(44), { loop: false });
+    };
+    /** The worst inner face of any box, near any line of the route, both ways round. */
+    const worst = (
+      route: RouteProfile,
+      boxesOf: (line: PlacedStand) => readonly PlacedBox[],
+    ): number => {
+      const total = route.totalDistance as number;
+      let least = Number.POSITIVE_INFINITY;
+      let looked = 0;
+      // Just past a start, near a finish or a lap line, and a line at the far
+      // end of its reach.
+      for (const rider of [5, total - 30, total - LINE_DRAW_AHEAD_METRES + 1]) {
+        const frame = frameAt(route, rider);
+        for (const line of frame.lines.filter((each) => each.stand.kind === 'gantry')) {
+          for (const placed of boxesOf(line)) {
+            // Only what stands at the road's side: the beam spans it overhead.
+            if (placed.box.width > ROAD_WIDTH_METRES) continue;
+            looked += 1;
+            for (const corner of corners(placed))
+              least = Math.min(least, fromCentre(frame, corner));
+          }
+        }
+      }
+      expect(looked).toBeGreaterThan(0);
+      return least;
+    };
+    const HALF = ROAD_WIDTH_METRES / 2;
+
+    it.each([
+      ['circuitRoute(200)', () => circuitRoute(200)],
+      ['circuitRoute(100)', () => circuitRoute(100)],
+      ['circuitRoute(60)', () => circuitRoute(60)],
+      ['a start inside hairpinRoute(20)', hairpinStart],
+    ])('on %s', (name, build) => {
+      const route = build();
+      const shipped = worst(route, (line) => line.boxes);
+      console.info(
+        `#679 ${name}: nearest box corner ${shipped.toFixed(2)} m from the drawn centreline`,
+      );
+      // Outside the carriageway. ⚠️ Not the barrier's full 0.31 m inner
+      // margin on the smallest loops: a loop shorter than the corridor is
+      // drawn twice over, its near stretch from the smoothed 2 m pieces and
+      // its far one from the route's own points, which on a 60 m circuit lie
+      // about 0.2 m outside the smoothed line — and a barrier is measured
+      // against both.
+      expect(shipped).toBeGreaterThan(HALF);
+    });
+
+    it('and the tangent placement it replaced does not (the control)', () => {
+      // The review's measurement, reproduced: a 60 m circuit put a barrier on
+      // the centre line, and a 200 m one inside the lane.
+      expect(worst(circuitRoute(60), onTheTangent)).toBeLessThan(HALF);
+      expect(worst(circuitRoute(200), onTheTangent)).toBeLessThan(HALF);
+      expect(worst(hairpinStart(), onTheTangent)).toBeLessThan(HALF);
+    });
   });
 
   it('keeps every scatter item, structure and water surface off a gantry and its barriers', () => {
@@ -181,13 +315,13 @@ describe('the start and finish gantries — #679', () => {
       return true;
     };
     const boxesOf = (line: PlacedStand): Corner[][] =>
-      standBoxes(line.stand.kind).map((box) =>
+      line.boxes.map((placed) =>
         rectangle(
-          standPoint(line, box.across, 0, box.along),
-          { x: -line.headingZ, z: line.headingX },
-          { x: line.headingX, z: line.headingZ },
-          box.width / 2,
-          box.depth / 2,
+          boxPoint(placed, placed.box.across, 0),
+          { x: -placed.headingZ, z: placed.headingX },
+          { x: placed.headingX, z: placed.headingZ },
+          placed.box.width / 2,
+          placed.box.depth / 2,
         ),
       );
     const outlineOf = (item: {

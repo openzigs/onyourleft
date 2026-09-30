@@ -25,8 +25,10 @@
  * ## Clear of the carriageway, and of everything else
  *
  * Every leg stands {@link GANTRY_LEG_CLEARANCE_METRES} outside the road's
- * edge, the beam's underside is {@link GANTRY_HEADROOM_METRES} above the road
- * at the line, and the barriers stand on the verge, which `scatter.ts` keeps
+ * edge, its underside — the banner's bottom edge — is
+ * {@link GANTRY_HEADROOM_METRES} above the road at the line, and the barriers
+ * stand on the verge, each piece on the DRAWN road at its own distance
+ * (§`PlacedStand.boxes`), which `scatter.ts` keeps
  * three metres of clear ground beside (`SCATTER_VERGE_METRES`) — so nothing
  * scattered can meet them, and `gantry.test.ts` holds the structures and the
  * water off them on the fixture routes.
@@ -62,8 +64,13 @@ export const GANTRY_LEG_CLEARANCE_METRES = 0.9;
 /** A leg's side, square: **0.35 m**. */
 export const GANTRY_LEG_METRES = 0.35;
 
-/** The beam's underside above the road at the line: **5 m**, a lorry's height with room. */
-export const GANTRY_HEADROOM_METRES = 5;
+/**
+ * The gantry's UNDERSIDE above the road at the line — its lowest point over
+ * the carriageway, which is the banner's bottom edge: **4 m**. ⚠️ Not the
+ * beam's: the banner hangs a metre below it, and until #879's review this
+ * constant was the beam's 5 m while the banner came down to 4.
+ */
+export const GANTRY_HEADROOM_METRES = 4;
 
 /** The beam's depth (along the road) and height: **0.4 m** and **0.5 m**. */
 export const GANTRY_BEAM_DEPTH_METRES = 0.4;
@@ -72,6 +79,10 @@ export const GANTRY_BEAM_HEIGHT_METRES = 0.5;
 /** The banner under the beam, facing the rider: **6 m** wide and **1.5 m** tall. */
 export const BANNER_WIDTH_METRES = 6;
 export const BANNER_HEIGHT_METRES = 1.5;
+
+/** The beam's underside: the banner's top, less the beam it hangs from — **5 m**. */
+export const GANTRY_BEAM_UNDERSIDE_METRES =
+  GANTRY_HEADROOM_METRES + BANNER_HEIGHT_METRES - GANTRY_BEAM_HEIGHT_METRES;
 
 /** How far outside the road's edge a barrier stands, to its middle: **0.35 m** — on the verge. */
 export const BARRIER_OFFSET_METRES = 0.35;
@@ -90,12 +101,16 @@ export const BOARD_HEIGHT_METRES = 0.8;
 export const BOARD_POST_METRES = 2.6;
 
 /**
- * How far ahead of the rider a line is drawn: **400 m** — about where a 6 m
- * banner is a dozen pixels wide on the tablet, and short of the corridor's
- * 460 m — and behind: **30 m**, which the chase camera's 4.5 m cannot see
- * past but a rider who has just crossed a line looks back through.
+ * How far ahead of the rider a line is drawn: **375 m** — the corridor's
+ * `VIEW_AHEAD_METRES` (400) less the barriers' reach and a little, so every
+ * barrier piece of a line in reach stands on road the frame actually draws
+ * (#879's review: at 400 the far pieces fell off the corridor's end, and were
+ * carried on along its last heading, which on a bend is the carriageway) —
+ * and behind: **30 m**, which the chase camera's 4.5 m cannot see past but a
+ * rider who has just crossed a line looks back through; its barriers reach
+ * about 50 m back, inside the corridor's 60.
  */
-export const LINE_DRAW_AHEAD_METRES = 400;
+export const LINE_DRAW_AHEAD_METRES = 375;
 export const LINE_DRAW_BEHIND_METRES = 30;
 
 /** How far past the start the board before the finish must stand, or there is none: **50 m**. */
@@ -140,9 +155,8 @@ export function lineStands(profile: RouteProfile, units: UnitSystem): readonly L
   return stands;
 }
 
-/** A stand placed in the corridor's frame, for this frame. */
-export interface PlacedStand {
-  readonly stand: LineStand;
+/** A point on the drawn road's centreline and the road's direction there. */
+export interface RoadFrame {
   /** On the drawn road's centreline, local metres. */
   readonly x: number;
   readonly y: number;
@@ -150,6 +164,29 @@ export interface PlacedStand {
   /** The road's direction there, a unit vector in the ground plane. */
   readonly headingX: number;
   readonly headingZ: number;
+}
+
+/**
+ * One box of a stand, placed: the frame it is built in — the DRAWN road at the
+ * box's own route distance, facing along the road there — and the box, whose
+ * `across` and `up` are measured from that frame and whose `along` has been
+ * spent finding it.
+ */
+export interface PlacedBox extends RoadFrame {
+  readonly box: StandBox;
+}
+
+/** A stand placed in the corridor's frame, for this frame. */
+export interface PlacedStand extends RoadFrame {
+  readonly stand: LineStand;
+  /**
+   * Every box it is built from, each on the drawn road at its OWN route
+   * distance. ⚠️ Not offset along the line's tangent: a barrier 20 m from the
+   * line on a 200 m circuit would then stand d²/2R ≈ 1 m nearer the centre,
+   * inside the carriageway (#879's review) — and on a 60 m circuit on the
+   * centre line itself.
+   */
+  readonly boxes: readonly PlacedBox[];
 }
 
 /**
@@ -183,25 +220,68 @@ export function linesNear(
       // corridor's points are clamped onto it while their odometers go on.
       const at = onCorridor(centre, profile.loop ? along : stand.distance, profile.loop);
       if (at === undefined) continue;
-      placed.push({ stand, ...at });
+      const from = profile.loop ? along : stand.distance;
+      const boxes = standBoxes(stand.kind).map((box): PlacedBox =>
+        box.along === 0
+          ? { box, ...at }
+          : { box, ...alongDrawnRoad(centre, from + box.along, profile.loop) },
+      );
+      placed.push({ stand, ...at, boxes });
     }
   }
   return placed;
+}
+
+/**
+ * The drawn road at a distance, and — past either end of the corridor, where
+ * nothing is drawn — the road's straight continuation from that end. Never
+ * undefined, for a box: a barrier past a point-to-point route's finish stands
+ * on the road's line carried on, as it did before.
+ */
+function alongDrawnRoad(
+  centre: readonly CorridorPoint[],
+  along: number,
+  byOdometer: boolean,
+): RoadFrame {
+  const found = onCorridor(centre, along, byOdometer);
+  if (found !== undefined) return found;
+  const at = (point: CorridorPoint): number => (byOdometer ? point.along : point.distance);
+  let first: { readonly here: CorridorPoint; readonly next: CorridorPoint } | undefined;
+  let last: { readonly here: CorridorPoint; readonly next: CorridorPoint } | undefined;
+  for (let index = 0; index + 1 < centre.length; index += 1) {
+    const here = centre[index] as CorridorPoint;
+    const next = centre[index + 1] as CorridorPoint;
+    if (Math.hypot(next.x - here.x, next.z - here.z) === 0 || at(next) === at(here)) continue;
+    first ??= { here, next };
+    last = { here, next };
+  }
+  if (first === undefined || last === undefined) {
+    const only = centre[0] as CorridorPoint;
+    return { x: only.x, y: only.y, z: only.z, headingX: 0, headingZ: 1 };
+  }
+  const before = along < at(first.here);
+  const piece = before ? first : last;
+  const end = before ? piece.here : piece.next;
+  const dx = piece.next.x - piece.here.x;
+  const dz = piece.next.z - piece.here.z;
+  const span = Math.hypot(dx, dz);
+  const perMetre = span / (at(piece.next) - at(piece.here));
+  const beyond = (along - at(end)) * perMetre;
+  const rise = (piece.next.y - piece.here.y) / span;
+  return {
+    x: end.x + (dx / span) * beyond,
+    y: end.y + rise * beyond,
+    z: end.z + (dz / span) * beyond,
+    headingX: dx / span,
+    headingZ: dz / span,
+  };
 }
 
 function onCorridor(
   centre: readonly CorridorPoint[],
   along: number,
   byOdometer: boolean,
-):
-  | {
-      readonly x: number;
-      readonly y: number;
-      readonly z: number;
-      readonly headingX: number;
-      readonly headingZ: number;
-    }
-  | undefined {
+): RoadFrame | undefined {
   // The last piece of road with length, for the end of a point-to-point route:
   // the corridor clamps its points onto the route's end, so past it every
   // piece has none, and the line is where the last real one ends.
@@ -279,7 +359,7 @@ export function standBoxes(kind: LineStand['kind']): readonly StandBox[] {
     ];
   }
   const legAcross = HALF_ROAD + GANTRY_LEG_CLEARANCE_METRES + GANTRY_LEG_METRES / 2;
-  const top = GANTRY_HEADROOM_METRES + GANTRY_BEAM_HEIGHT_METRES;
+  const top = GANTRY_BEAM_UNDERSIDE_METRES + GANTRY_BEAM_HEIGHT_METRES;
   const boxes: StandBox[] = [
     ...[-1, 1].map((side): StandBox => ({
       across: side * legAcross,
@@ -293,7 +373,7 @@ export function standBoxes(kind: LineStand['kind']): readonly StandBox[] {
     })),
     {
       across: 0,
-      up: GANTRY_HEADROOM_METRES + GANTRY_BEAM_HEIGHT_METRES / 2,
+      up: GANTRY_BEAM_UNDERSIDE_METRES + GANTRY_BEAM_HEIGHT_METRES / 2,
       along: 0,
       width: 2 * legAcross + GANTRY_LEG_METRES,
       height: GANTRY_BEAM_HEIGHT_METRES,
@@ -344,7 +424,7 @@ export function bannerPlace(kind: LineStand['kind']): {
   }
   return {
     across: 0,
-    up: GANTRY_HEADROOM_METRES + GANTRY_BEAM_HEIGHT_METRES - BANNER_HEIGHT_METRES / 2,
+    up: GANTRY_HEADROOM_METRES + BANNER_HEIGHT_METRES / 2,
     // Just in front of the beam's rider-side face, so it is not inside it.
     along: -(GANTRY_BEAM_DEPTH_METRES / 2 + 0.02),
     width: BANNER_WIDTH_METRES,
@@ -367,5 +447,22 @@ export function standPoint(
     x: placed.x - placed.headingZ * across + placed.headingX * along,
     y: placed.y + up,
     z: placed.z + placed.headingX * across + placed.headingZ * along,
+  };
+}
+
+/**
+ * A point of a placed box's own frame in the corridor's: `across` along the
+ * road's normal there, `up` straight up — the box's `along` has already been
+ * spent finding the frame (§`PlacedStand.boxes`).
+ */
+export function boxPoint(
+  placed: PlacedBox,
+  across: number,
+  up: number,
+): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: placed.x - placed.headingZ * across,
+    y: placed.y + up,
+    z: placed.z + placed.headingX * across,
   };
 }

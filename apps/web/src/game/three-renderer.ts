@@ -351,9 +351,15 @@ import {
 } from './realistic-assets';
 import { REALISTIC_TRANSCODER_DIRECTORY } from './transcoder-files';
 import { LABEL_FONT } from '../map/basemap';
-import { BANNER_CELLS, bannerAtlas, readGlyphRange, type BannerAtlas } from './banner-atlas';
+import {
+  BANNER_CELLS,
+  bannerAtlas,
+  readGlyphRange,
+  type BannerAtlas,
+  type BannerCell,
+} from './banner-atlas';
 import { bannerCells } from './gantry-wording';
-import { bannerPlace, standBoxes, standPoint, type PlacedStand, type StandBox } from './gantry';
+import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import {
   FOLIAGE_SWAY_METRES,
   FOLIAGE_WAVES,
@@ -5834,12 +5840,14 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
   try {
     const sky = texture(() => loaders.sky(realisticUrl(REALISTIC_SKY)));
     // #679: the map's own glyph range, for the gantries' banners.
+    // ⚠️ A glyph range that cannot be read costs the banners and nothing else
+    // (#879's review): it resolves to nothing rather than failing the world.
     const glyphs =
       loaders.glyphs === undefined
         ? Promise.resolve(undefined)
         : started(() =>
             (loaders.glyphs as (url: string) => Promise<Uint8Array>)(BANNER_GLYPHS_URL),
-          );
+          ).catch(() => undefined);
     const road = {
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal))),
@@ -6040,7 +6048,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // this released first and lost both, which `realistic-renderer.test.ts`
     // §"never half a world" caught.
     const glyphBytes = await glyphs;
-    const banners = glyphBytes === undefined ? undefined : bannerTextureOf(glyphBytes);
+    const banners = bannersOf(glyphBytes);
     if (banners !== undefined) loaded.textures.push(banners.texture);
     const previous = realisticWorld;
     realisticWorld = {
@@ -7500,11 +7508,14 @@ const BANNER_GLYPHS_URL = `${import.meta.env.BASE_URL}glyphs/${LABEL_FONT}/0-255
  * because a banner is seen from 400 m. 512 × 1024 bytes: 0.67 MiB with its
  * mips, under #679's 1 MiB. @see banner-atlas.ts
  */
-function bannerTextureOf(glyphRange: Uint8Array): {
+function bannerTextureOf(
+  glyphRange: Uint8Array,
+  cells: readonly BannerCell[],
+): {
   readonly atlas: BannerAtlas;
   readonly texture: DataTexture;
 } {
-  const atlas = bannerAtlas(readGlyphRange(glyphRange), bannerCells());
+  const atlas = bannerAtlas(readGlyphRange(glyphRange), cells);
   const texture = new DataTexture(
     atlas.coverage,
     atlas.width,
@@ -7517,6 +7528,27 @@ function bannerTextureOf(glyphRange: Uint8Array): {
   texture.unpackAlignment = 1;
   texture.needsUpdate = true;
   return { atlas, texture };
+}
+
+/**
+ * The banners, or none — #679, and #879's review. The banners are decoration:
+ * a range that is absent, malformed, or lacks a glyph a word needs costs a
+ * gantry its lettering (`GantryBelt` draws no banner without an atlas) and
+ * never the realistic world a rider chose, which is what a throw here used to
+ * cost. Nothing is logged: the product logs nothing, and the gantry itself is
+ * the visible sign. `banner-atlas.test.ts` builds the atlas through it, and
+ * holds a malformed range and an undrawable word to no banners.
+ */
+export function bannersOf(
+  glyphRange: Uint8Array | undefined,
+  cells: readonly BannerCell[] = bannerCells(),
+): { readonly atlas: BannerAtlas; readonly texture: DataTexture } | undefined {
+  if (glyphRange === undefined) return undefined;
+  try {
+    return bannerTextureOf(glyphRange, cells);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The gantries' colours: galvanised steel, a white barrier, and the banner. This repository's own. */
@@ -7611,9 +7643,10 @@ export class GantryBelt {
     let banners = 0;
     if (this.#shown && this.#switchedOn) {
       for (const line of lines) {
-        for (const box of standBoxes(line.stand.kind)) {
+        for (const placed of line.boxes) {
+          const box = placed.box;
           if (boxes >= GANTRY_BOX_CAPACITY) break;
-          this.#placeBox(boxes, line, box);
+          this.#placeBox(boxes, placed);
           this.#colour.setHex(box.role === 'barrier' ? GANTRY_BARRIER : GANTRY_METAL);
           this.#boxes.setColorAt(boxes, this.#colour);
           boxes += 1;
@@ -7655,9 +7688,10 @@ export class GantryBelt {
     this.#banners.visible = banners > 0;
   }
 
-  /** One box: its axes are the stand's, scaled by its size. */
-  #placeBox(slot: number, line: PlacedStand, box: StandBox): void {
-    const at = standPoint(line, box.across, box.up, box.along);
+  /** One box: its axes are the road's at its own distance, scaled by its size. */
+  #placeBox(slot: number, line: PlacedBox): void {
+    const box = line.box;
+    const at = boxPoint(line, box.across, box.up);
     // The same right-handed frame as the banner's — right, up, toward the
     // rider — so no box is drawn inside out.
     this.#matrix.set(
@@ -8654,7 +8688,11 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
       side: DoubleSide,
     }),
   );
-  const wear = { patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS), on: 1 };
+  const wear = {
+    patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS),
+    on: 1,
+    colour: 1,
+  };
   ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
@@ -8665,6 +8703,12 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
     shader.uniforms['roadWear'] = {
       get value(): number {
         return wear.on;
+      },
+    };
+    // #879: the colour terms alone, for the browser gate's surface-only read.
+    shader.uniforms['roadWearColour'] = {
+      get value(): number {
+        return wear.colour;
       },
     };
     shader.vertexShader = shader.vertexShader
@@ -8733,7 +8777,10 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
  * §`roadPatchUniforms`) and whether wear is drawn at all. Keyed by material
  * because a view builds its own road material with its drawing.
  */
-const ROAD_WEAR = new WeakMap<Material, { readonly patches: Float32Array; on: number }>();
+const ROAD_WEAR = new WeakMap<
+  Material,
+  { readonly patches: Float32Array; on: number; colour: number }
+>();
 
 /** The road's across-position attribute's name — #628. @see writeRoadAcross */
 const ROAD_ACROSS_ATTRIBUTE = 'oylAcross';
@@ -8752,6 +8799,7 @@ vRoadWorld = (modelMatrix * vec4(position, 1.0)).xz;
 const ROAD_WEAR_FRAGMENT_PARS = /* glsl */ `
 uniform vec4 roadPatches[${String(MAXIMUM_ROAD_PATCHES * 2)}];
 uniform float roadWear;
+uniform float roadWearColour;
 varying float vRoadAcross;
 varying vec2 vRoadWorld;
 `;
@@ -8786,9 +8834,9 @@ ${WHEEL_TRACK_OFFSETS_METRES.map(
       * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
     oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;
   }
-  float oylCarriageway = 1.0 + clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
+  float oylCarriageway = 1.0 + roadWearColour * clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
   float oylPaint = smoothstep(0.35, 0.55, dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
-  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear
+  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
     * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3);
   diffuseColor.rgb *= mix(oylCarriageway, oylFaded, oylPaint);
   oylTrackShare = oylTrack * (1.0 - oylPaint);
@@ -11293,12 +11341,15 @@ export function groundBlendOf(view: GameView, verge: number, rock: number, scree
  * Takes the realistic road's wear off, or puts it back — #628. The browser
  * gate's control: with the wear off, the wheel track must read back no
  * different from the lane's middle, or the difference the gate measured was
- * the photograph's own grain and the light.
+ * the photograph's own grain and the light. `'surface'` keeps only what a
+ * wheel track does to the roughness and the relief — the specular term, which
+ * the colour clamp does not reach (#879's review) — so the gate can read it
+ * against `road-wear.ts` §`SURFACE_WEAR_ALLOWANCE`.
  *
  * @test-facing the browser gate's control switch, read by `game-harness.ts`;
  * the product never turns the wear off.
  */
-export function roadWearOf(view: GameView, on: boolean): void {
+export function roadWearOf(view: GameView, on: boolean | 'surface'): void {
   if (view instanceof ThreeGameView) view.roadWear(on);
 }
 
@@ -12072,9 +12123,11 @@ class ThreeGameView implements GameView {
   }
 
   /** @see roadWearOf */
-  roadWear(on: boolean): void {
+  roadWear(on: boolean | 'surface'): void {
     const wear = this.#realistic === undefined ? undefined : ROAD_WEAR.get(this.#realistic.road);
-    if (wear !== undefined) wear.on = on ? 1 : 0;
+    if (wear === undefined) return;
+    wear.on = on === false ? 0 : 1;
+    wear.colour = on === true ? 1 : 0;
   }
 
   /** @see waterFresnelOf */

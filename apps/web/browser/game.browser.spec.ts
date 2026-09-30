@@ -61,7 +61,7 @@ import {
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
-import { WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
+import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
 
@@ -759,10 +759,10 @@ const WATER_FRESNEL_CEILING = 1.05;
 /**
  * #628: how much lighter a wheel track must read than its lane's middle, as a
  * share of relative luminance after the light and AgX — **0.01** — and the
- * most it may: **0.08**. `road-wear.ts` §`WHEEL_TRACK_LIGHTEN` asks for 0.05
- * of the diffuse colour and the wear's clamp allows 0.06; AgX and the track's
- * flatter relief bring that to about 0.025 read back (2.47 % on a Mac,
- * 2026-09-29), and the same two strips read −0.09 % with the wear off — the
+ * most it may: **0.08**. `road-wear.ts` §`WHEEL_TRACK_LIGHTEN` asks for 0.04
+ * of the diffuse colour, the wear's clamp; AgX and the track's flatter relief
+ * bring that to 1.69 % read back (a Mac, 2026-09-29, #879; 2.47 % at #628's
+ * first 0.05), and the same two strips read −0.09 % with the wear off — the
  * control holds that under the floor.
  */
 const WHEEL_TRACK_FLOOR = 0.01;
@@ -3376,8 +3376,8 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       MINIMUM_TINT_CONTRAST_RATIO,
     );
     // #628: and WITH the wear on, the road keeps most of its margin — 3.5 of
-    // the 3.97 it read before, which `road-wear.ts` §`MAXIMUM_WEAR_SHARE` is
-    // solved against.
+    // the 3.889 it reads with the wear off, which `road-wear.ts`
+    // §`MAXIMUM_WEAR_SHARE` is solved against (with the surface's allowance).
     expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
       WORN_ROAD_CONTRAST_FLOOR,
     );
@@ -3412,6 +3412,38 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // The control: with the wear off the same two strips read alike, so the
     // difference above is the wear and not the grain, the sheen or the angle.
     expect(Math.abs(control)).toBeLessThan(WHEEL_TRACK_FLOOR);
+    // #879: what the colour clamp does not reach — the track's roughness and
+    // relief, through the specular term — on the two tints the cue is between.
+    // Each is read against the same strips with the wear OFF, so the
+    // photograph's grain under them divides out.
+    const bySlope = new Map(roadWear.slopes.map((reading) => [reading.slope, reading]));
+    const moved = (slope: 'climb' | 'descent', mode: 'surface' | 'worn'): number => {
+      const reading = bySlope.get(slope);
+      if (reading === undefined) throw new Error(`no ${slope} read`);
+      return (
+        share(reading[mode].track, reading[mode].middle) -
+        share(reading.off.track, reading.off.middle)
+      );
+    };
+    for (const slope of ['climb', 'descent'] as const) {
+      console.log(
+        `the wheel track on the steepest ${slope}: its surface alone ` +
+          `${(moved(slope, 'surface') * 100).toFixed(2)} %, the whole wear ` +
+          `${(moved(slope, 'worn') * 100).toFixed(2)} %`,
+      );
+    }
+    // The allowance the arithmetic spends, the WRONG way for the cue — a
+    // lighter climb or a darker descent — and a ceiling the other way.
+    expect(moved('climb', 'surface')).toBeLessThan(SURFACE_WEAR_ALLOWANCE);
+    expect(moved('descent', 'surface')).toBeGreaterThan(-SURFACE_WEAR_ALLOWANCE);
+    for (const slope of ['climb', 'descent'] as const) {
+      expect(Math.abs(moved(slope, 'surface'))).toBeLessThan(WHEEL_TRACK_CEILING);
+    }
+    // Its controls, that the strips are on the wheel track and the switch took
+    // effect: on the descent the whole wear reads the track lighter, and on the
+    // climb the surface alone reads it darker by more than the grain's spread.
+    expect(moved('descent', 'worn')).toBeGreaterThan(WHEEL_TRACK_FLOOR);
+    expect(moved('climb', 'surface')).toBeLessThan(-WHEEL_TRACK_FLOOR);
   });
 
   test('blends the ground: a steep bank reads as rock where level grass beside it does not — #627', async ({

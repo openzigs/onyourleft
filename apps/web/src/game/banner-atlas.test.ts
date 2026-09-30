@@ -15,6 +15,7 @@ import {
   readGlyphRange,
 } from './banner-atlas';
 import { bannerCells, bannerTexts, toGoText } from './gantry-wording';
+import { bannersOf } from './three-renderer';
 
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
 const RANGE = join(PUBLIC, 'glyphs', 'Roboto-Regular', '0-255.pbf');
@@ -32,13 +33,30 @@ describe('the banners’ lettering — #679', () => {
   });
 
   it('rasterises exactly the wording module’s list, and nothing it does not name', () => {
-    const atlas = bannerAtlas(glyphs, bannerCells());
-    expect(new Set(atlas.rasterised)).toEqual(new Set(bannerTexts()));
-    expect(atlas.rasterised).toHaveLength(bannerTexts().length);
-    // The control: a string the wording module does not name, added to the
-    // atlas's cells, makes the two lists differ.
-    const extra = bannerAtlas(glyphs, [...bannerCells(), { main: 'ANY OTHER WORDS' }]);
-    expect(new Set(extra.rasterised)).not.toEqual(new Set(bannerTexts()));
+    // Through the renderer's own path (`three-renderer.ts` §`bannersOf`, which
+    // the realistic load calls), so a cell the renderer adds is caught here.
+    const atlas = bannersOf(new Uint8Array(readFileSync(RANGE)))?.atlas;
+    expect(atlas).toBeDefined();
+    expect(new Set(atlas?.rasterised)).toEqual(new Set(bannerTexts()));
+    expect(atlas?.rasterised).toHaveLength(bannerTexts().length);
+    // The control: a string the wording module does not name, handed to the
+    // same path, makes the two lists differ.
+    const extra = bannersOf(new Uint8Array(readFileSync(RANGE)), [
+      ...bannerCells(),
+      { main: 'ANY OTHER WORDS' },
+    ])?.atlas;
+    expect(new Set(extra?.rasterised)).not.toEqual(new Set(bannerTexts()));
+  });
+
+  it('costs the banners, and nothing else, when the range is unreadable — #879', () => {
+    const whole = new Uint8Array(readFileSync(RANGE));
+    // The control: the real range letters them.
+    expect(bannersOf(whole)).toBeDefined();
+    expect(bannersOf(undefined)).toBeUndefined();
+    expect(bannersOf(whole.subarray(0, Math.floor(whole.length / 2)))).toBeUndefined();
+    expect(bannersOf(new Uint8Array([0x0a, 0x80]))).toBeUndefined();
+    // A word the range has no glyph for.
+    expect(bannersOf(whole, [{ main: 'ĀĒ' }])).toBeUndefined();
   });
 
   it('carries the board before a line in both systems, from units/format.ts', () => {
@@ -77,6 +95,30 @@ describe('the banners’ lettering — #679', () => {
     const digest = (): string =>
       createHash('sha256').update(bannerAtlas(glyphs, bannerCells()).coverage).digest('hex');
     expect(digest()).toBe(digest());
+  });
+
+  it.each([
+    // A fontstack claiming 2²⁸ and 2³⁵ bytes in a six- and seven-byte file:
+    // #879's review measured the first at 2.8 s and the second past a minute.
+    ['a fontstack longer than the file (2²⁸)', [0x0a, 0x80, 0x80, 0x80, 0x80, 0x01]],
+    ['a fontstack longer than the file (2³⁵)', [0x0a, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01]],
+    ['a glyph longer than its fontstack', [0x0a, 0x03, 0x1a, 0x7f, 0x00]],
+    ['a bitmap longer than its glyph', [0x0a, 0x04, 0x1a, 0x02, 0x12, 0x7f]],
+    ['a skipped field longer than its fontstack', [0x0a, 0x02, 0x12, 0x7f]],
+    ['a fixed field past the end', [0x0a, 0x02, 0x09, 0x00]],
+    ['a number of eleven bytes', [...Array.from({ length: 11 }, () => 0xff), 0x01]],
+    ['a number cut off by the end', [0x0a, 0x80]],
+  ])('refuses %s, at once', (_name, input) => {
+    const started = performance.now();
+    expect(() => readGlyphRange(new Uint8Array(input))).toThrow(/glyph range/);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('refuses a truncated copy of the real range rather than reading past it', () => {
+    const whole = new Uint8Array(readFileSync(RANGE));
+    expect(() => readGlyphRange(whole.subarray(0, Math.floor(whole.length / 2)))).toThrow(
+      /glyph range/,
+    );
   });
 
   it('refuses a character the range cannot draw, rather than leaving a hole', () => {

@@ -15,18 +15,34 @@
  *
  * `terrain.ts` tints the carriageway by signed gradient against
  * `MINIMUM_TINT_CONTRAST_RATIO` (3 : 1), and the realistic read-back of the
- * steepest climb against the steepest descent was **3.97 : 1** before this
- * issue (`three-renderer.ts` §`ROAD_SHEEN`). Wear lightens and darkens the
- * surface, so it spends that margin, and #628 keeps **3.5 : 1**. The worst a
- * multiplicative wear factor `1 ± w` can do is lighten the climb and darken the
- * descent, which divides the ratio by `(1 + w) / (1 − w)`:
+ * steepest climb against the steepest descent is **3.889 : 1** with the wear
+ * off, on this tree ({@link UNWORN_ROAD_CONTRAST}). Wear lightens and darkens
+ * the surface, so it spends that margin, and #628 keeps **3.5 : 1**.
  *
- *     3.97 · (1 − w) / (1 + w) ≥ 3.5   ⇔   w ≤ 0.47 / 7.47 = 0.0629
+ * Two things spend it. The COLOUR terms — a multiplicative factor `1 ± w` on
+ * the diffuse colour — do their worst by lightening the climb and darkening
+ * the descent, dividing the ratio by `(1 + w) / (1 − w)`. And the wheel
+ * track's ROUGHNESS and RELIEF change the specular term, which no colour clamp
+ * reaches; that is given an allowance `a` of its own
+ * ({@link SURFACE_WEAR_ALLOWANCE}, 0.01), spent the same worst way round, and
+ * the browser gate reads it back on both slopes. So
  *
- * so every term together is clamped to {@link MAXIMUM_WEAR_SHARE}, 0.06, in the
- * shader — a clamp rather than a sum of bounds, so a patch lying on a wheel
- * track cannot add up past it. `road-wear.test.ts` holds that arithmetic, and
- * the browser gate reads the ratio back with wear on.
+ *     3.889 · (1 − w)(1 − a) / ((1 + w)(1 + a)) ≥ 3.5
+ *       ⇔   (1 − w) / (1 + w) ≥ 0.9181   ⇔   w ≤ 0.0427
+ *
+ * and every colour term together is clamped to {@link MAXIMUM_WEAR_SHARE},
+ * 0.04, in the shader — a clamp rather than a sum of bounds, so a patch lying
+ * on a wheel track cannot add up past it. At both limits the worst case is
+ * **3.519 : 1**. `road-wear.test.ts` holds that arithmetic, and the browser
+ * gate reads the ratio back with wear on.
+ *
+ * ⚠️ **Until #879's review this was solved from 3.97**, a figure read before
+ * #626 moved the road's light, with no allowance for the specular term: its
+ * 0.06 clamp let the worst case fall to 3.889 · 0.94 / 1.06 = 3.449, under the
+ * floor it claimed to keep. The gate passed because its probe spots do not
+ * land on that worst combination. Measured on 2026-09-29 (a Mac, SwiftShader):
+ * the surface terms alone DARKEN the climb's track by 3.05 % — which widens the
+ * cue — and the descent's by 0.16 %, inside the allowance.
  *
  * ## Where a patch is
  *
@@ -57,10 +73,10 @@ const HALF_ROAD = ROAD_WIDTH_METRES / 2;
 export const CARRIAGEWAY_HALF_METRES = HALF_ROAD - EDGE_LINE_WIDTH_METRES;
 
 /**
- * The most every wear term together may lighten or darken the carriageway, as
- * a share: **0.06**. @see the file header for the arithmetic.
+ * The most every colour wear term together may lighten or darken the
+ * carriageway, as a share: **0.04**. @see the file header for the arithmetic.
  */
-export const MAXIMUM_WEAR_SHARE = 0.06;
+export const MAXIMUM_WEAR_SHARE = 0.04;
 
 /**
  * The climb/descent read-back #628 keeps, as a contrast ratio: **3.5**.
@@ -71,12 +87,28 @@ export const MAXIMUM_WEAR_SHARE = 0.06;
 export const WORN_ROAD_CONTRAST_FLOOR = 3.5;
 
 /**
- * What the realistic road read back before any wear: **3.97 : 1**, measured
- * by the browser gate at `ROAD_SHEEN` 0.25 (`three-renderer.ts`).
+ * What the realistic road reads back with the wear off: **3.889 : 1**,
+ * measured by the browser gate (`game.browser.spec.ts` §"keeps the road one
+ * draw call", which prints it on every run) on 2026-09-29, and reproduced by
+ * #879's review. ⚠️ It was 3.97 before #626 and this constant said so; re-read
+ * it from that line when the road's light moves.
  *
  * @test-facing the measured starting point of the arithmetic in the header.
  */
-export const UNWORN_ROAD_CONTRAST = 3.97;
+export const UNWORN_ROAD_CONTRAST = 3.889;
+
+/**
+ * How far the wheel track's roughness and relief may move a pixel the wrong
+ * way for the gradient cue — lighten the steepest climb, or darken the
+ * steepest descent — through the specular term, as a share: **0.01**. The
+ * colour clamp ({@link MAXIMUM_WEAR_SHARE}) does not reach that term, so the
+ * header's arithmetic spends this on it, and the browser gate reads it back on
+ * both slopes (`game.browser.spec.ts` §"wears the road"). Measured: the climb
+ * −3.05 % (the harmless way) and the descent −0.16 %.
+ *
+ * @test-facing the arithmetic in `road-wear.test.ts` and the browser gate's bound.
+ */
+export const SURFACE_WEAR_ALLOWANCE = 0.01;
 
 /**
  * Where the tyres run, across the road, in metres from the centre line —
@@ -91,8 +123,8 @@ export const WHEEL_TRACK_HALF_WIDTH_METRES = 0.25;
 /** Over how many metres a wheel track's edge fades out: **0.2**. */
 export const WHEEL_TRACK_EDGE_METRES = 0.2;
 
-/** How much lighter a wheel track is, as a share: **0.05**. Polished, not painted. */
-export const WHEEL_TRACK_LIGHTEN = 0.05;
+/** How much lighter a wheel track is, as a share: **0.04**. Polished, not painted. */
+export const WHEEL_TRACK_LIGHTEN = 0.04;
 
 /**
  * How much of the normal map's relief a wheel track keeps: **0.35**, because
@@ -104,8 +136,8 @@ export const WHEEL_TRACK_ROUGHNESS = 0.85;
 /** How wide the dusty band inside each edge line is, in metres: **0.45**. */
 export const DUST_BAND_METRES = 0.45;
 
-/** How much lighter the dust is, as a share: **0.05**. */
-export const DUST_LIGHTEN = 0.05;
+/** How much lighter the dust is, as a share: **0.04**. */
+export const DUST_LIGHTEN = 0.04;
 
 /**
  * How much of its brightness the paint may lose where it is most worn: **0.3**.
@@ -128,10 +160,10 @@ export const PATCH_LENGTH_METRES: readonly [number, number] = [1.2, 4.5];
 export const PATCH_WIDTH_METRES: readonly [number, number] = [0.9, 2.8];
 
 /**
- * How much darker or lighter a patch is, as a share: **−0.05** to **+0.04** —
+ * How much darker or lighter a patch is, as a share: **−0.04** to **+0.035** —
  * fresh asphalt is darker, an old patch paler. Inside {@link MAXIMUM_WEAR_SHARE}.
  */
-export const PATCH_TONE: readonly [number, number] = [-0.05, 0.04];
+export const PATCH_TONE: readonly [number, number] = [-0.04, 0.035];
 
 /**
  * How many patches the shader is handed at most: **8**. A corridor is 460 m,
