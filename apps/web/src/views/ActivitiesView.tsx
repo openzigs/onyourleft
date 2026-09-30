@@ -157,38 +157,72 @@ function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOp
  * of three. An update made in a LAYOUT effect is flushed before the browser
  * paints, so the width is read here first and the observer only follows later
  * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
- * from navigation and fails on a table before cards.
+ * from navigation and fails on a table before cards — which guards the
+ * synchronous first read above, and not the choice of a layout effect over an
+ * ordinary one: nothing has shown that it tells the two apart (#690).
  *
  * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
  * stays a table. A width of nought is read as "not laid out" rather than as a
  * phone, because jsdom reports nought for every box and a real container of
  * nought width has nothing to lay out.
  */
-function useLibraryLayout(present: boolean): [RefObject<HTMLDivElement | null>, LibraryLayout] {
+function useLibraryLayout(
+  present: boolean,
+  selected: string | undefined,
+): [RefObject<HTMLDivElement | null>, LibraryLayout] {
   const container = useRef<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState<LibraryLayout>('table');
+  /** The container's content width now, as a layout, or nothing while it is hidden. */
+  const measure = useCallback((): void => {
+    const element = container.current;
+    if (element === null || typeof ResizeObserver !== 'function') return;
+    const width = contentWidth(element);
+    if (width > 0) setLayout(libraryLayout(width, rootRem()));
+  }, []);
   useLayoutEffect(() => {
     const element = container.current;
     if (element === null || typeof ResizeObserver !== 'function') {
       return undefined;
     }
-    const rem = (): number =>
-      Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-    const initial = contentWidth(element);
-    if (initial > 0) {
-      setLayout(libraryLayout(initial, rem()));
-    }
+    measure();
     const observer = new ResizeObserver((entries) => {
       const width = entries[entries.length - 1]?.contentRect.width;
-      setLayout(libraryLayout(width, rem()));
+      // ⚠️ #738: a width of NOTHING is a hidden list, not a narrow one, and is
+      // ignored as the first measurement above ignores it. On one pane the
+      // list is `hidden` while an item is chosen; the observer reported 0,
+      // the list became cards, and on the way back it was drawn as cards and
+      // then as a table once the observer saw its width again — re-creating
+      // the item's link after `ListDetail` had already focused it, so focus
+      // fell to the page (list-detail.browser.spec.ts, 800×1280, CI run
+      // 36412215912). Keeping the last layout means the link focus returns
+      // to is the one that stays.
+      if (width === undefined || !(width > 0)) return;
+      setLayout(libraryLayout(width, rootRem()));
     });
     observer.observe(element);
     return () => {
       observer.disconnect();
     };
     // Re-attached when a library arrives: with none, there is no container.
-  }, [present]);
+  }, [present, measure]);
+  // ⚠️ And measured again whenever the choice changes (#758). On one pane the
+  // list is `hidden` while a ride is chosen, so it can come back at a width it
+  // never had while shown: a phone opened at a ride's own address, or turned
+  // with the ride open. The observer would see the new width only after
+  // `ListDetail`'s passive effect had returned focus to the old layout's link,
+  // and the redraw dropped it. This layout effect runs in the commit that
+  // removes `hidden`, and its update is flushed before any passive effect, so
+  // focus returns to the link that stays. Its own effect since #864: the
+  // observer above is not torn down and made again on every choice.
+  useLayoutEffect(() => {
+    measure();
+  }, [selected, measure]);
   return [container, layout];
+}
+
+/** The root font size in pixels: what a `rem` is. */
+function rootRem(): number {
+  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
 }
 
 /** The content-box width a `ResizeObserver` would report as `contentRect.width`. */
@@ -221,7 +255,7 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
   const [armed, setArmed] = useState<string | undefined>(undefined);
   const [reloads, setReloads] = useState(0);
   const units = useUnits();
-  const [container, layout] = useLibraryLayout(library !== undefined);
+  const [container, layout] = useLibraryLayout(library !== undefined, selected);
   const listCaptionId = useId();
 
   const load = useCallback(async (): Promise<void> => {

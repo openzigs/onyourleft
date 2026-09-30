@@ -89,7 +89,7 @@ import type {
   SidePoseOutcome,
 } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
-import { sideReportFrom } from './side-report';
+import { sideSessionFrom } from './side-report';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
 import type { SideCameraControlPort } from './side-pairing-port';
 
@@ -251,6 +251,7 @@ export class SideAnalysis implements SideAnalysisPort {
     model: 'waiting',
     posed: 0,
     noRider: 0,
+    noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
     unreadable: 0,
     skipped: 0,
     framing: 'checking',
@@ -383,7 +384,14 @@ export class SideAnalysis implements SideAnalysisPort {
         this.#check();
         return;
       case 'no-rider':
-        this.#set({ model: 'ready', noRider: this.#state.noRider + 1 });
+        this.#set({
+          model: 'ready',
+          noRider: this.#state.noRider + 1,
+          noRiderBecause: {
+            ...this.#state.noRiderBecause,
+            [outcome.cause]: this.#state.noRiderBecause[outcome.cause] + 1,
+          },
+        });
         return;
       case 'unreadable':
         this.#set({ model: 'ready', unreadable: this.#state.unreadable + 1 });
@@ -423,9 +431,11 @@ export class SideAnalysis implements SideAnalysisPort {
     const framing = this.#state.framing === 'checking' ? 'not-checked' : this.#state.framing;
     this.#set({ finished: true, framing });
     this.#keepReference(framing);
-    // #388: the report's sentences, and nothing they were made from, go to
-    // the ride this session filmed. The samples stay here, in memory only.
-    this.#report?.endSideReportSession(sideReportFrom(this.#poses.kept, this.#state));
+    // #388: the report's sentences go to the ride this session filmed, and
+    // since #801 the differences they were chosen from go with them (ADR 0035
+    // D-6). The samples themselves stay here, in memory only.
+    const { report, summary } = sideSessionFrom(this.#poses.kept, this.#state);
+    this.#report?.endSideReportSession(report, summary);
   }
 
   /**

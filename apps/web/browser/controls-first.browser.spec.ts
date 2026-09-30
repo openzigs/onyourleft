@@ -82,9 +82,9 @@
  * run over the same live DOM, closed and open. This is the first time that
  * model has been held against a browser rather than against itself — and it
  * found one difference, which is not about `<details>`: a browser makes a
- * named radio group ONE tab stop, and the model counts every radio (#698). The
- * spec pins that difference apart from the sequence and compares the rest
- * exactly. And one about layout: Chromium gives the content of a CLOSED
+ * named radio group ONE tab stop, and the model counted every radio. #698
+ * taught the model radio groups, so the whole sequence is compared, and
+ * Settings' units group is in it. And one about layout: Chromium gives the content of a CLOSED
  * `<details>` a full-size box — see `reflow-harness.tsx` §`laidOut`.
  *
  * ## What it does NOT prove
@@ -202,7 +202,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
   // with it the "More about your kit" that explained the choice.
-  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world'],
+  // #839: 'Words to mask' tucks what is masked and what masking cannot do
+  // under its "More about"; where it is kept stays above the form.
+  settings: ['Units', 'Your weight', 'Announcements', 'Sounds', 'Game world', 'Words to mask'],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import'],
 };
@@ -451,7 +453,7 @@ async function tuckedLink(page: Page): Promise<{ summary: string; link: string }
 
 async function tabModel(
   page: Page,
-): Promise<{ readonly stops: string[]; readonly radiosWithinAGroup: string[] }> {
+): Promise<{ readonly stops: string[]; readonly radios: number }> {
   const model = await page.evaluate(() => window.__oylTabModel?.());
   if (model === undefined) throw new Error('the harness published no tab model');
   return model;
@@ -498,10 +500,14 @@ test.describe('#666 — a tucked link is not in the tab order until its summary 
     expect(closed, 'real Chromium and tabbableElements disagree, closed').toEqual(
       modelClosed.stops,
     );
-    // The one difference, pinned (#698): Settings' units are a radio group,
-    // which a browser makes ONE tab stop and the model counts radio by radio.
-    // When the model learns radio groups this list empties and this goes.
-    expect(modelClosed.radiosWithinAGroup.length).toBeGreaterThan(0);
+    // #698: Settings' units are a radio group, which a browser makes ONE tab
+    // stop. The model does too now, so the comparison above covers it — this
+    // says there was a group to compare, and that it met more than one radio.
+    expect(modelClosed.radios, 'Settings has no radio group to compare').toBeGreaterThan(1);
+    expect(
+      closed.filter((key) => key.startsWith('input#oyl-units-')),
+      'Tab should stop once on the units group',
+    ).toHaveLength(1);
 
     await page.locator('[data-oyl-probe="tucked"] > summary').click();
     const opened = await tabThroughMain(page);

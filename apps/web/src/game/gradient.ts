@@ -305,6 +305,15 @@ const HELD_AFTER_LETTING_GO =
   'The hills are no longer being sent: this app has stopped driving the trainer.';
 
 /**
+ * The trainer this ride was driving has been detached — forgotten, or its
+ * pairing undone — and is not connected to this app any more (#732). Promises
+ * nothing about the next gradient, and says nothing about resistance: whether
+ * the machine let go is what `ride/controller.ts` §`unpair` tells the rider.
+ */
+const HELD_AFTER_DISCONNECT =
+  'The hills are no longer being sent: this trainer is not connected to this app any more.';
+
+/**
  * What a rider is told about a refused gradient.
  *
  * Deliberately not the raw error: a `SensorError` message names a GATT
@@ -334,6 +343,8 @@ function faultText(error: unknown): string {
         return HELD_WHILE_LETTING_GO;
       case 'let-go':
         return HELD_AFTER_LETTING_GO;
+      case 'disconnected':
+        return HELD_AFTER_DISCONNECT;
     }
   }
   const message = error instanceof Error ? error.message : String(error);

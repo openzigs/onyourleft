@@ -1,8 +1,10 @@
 # ADR 0005 decision D. `apps/*` is AGPL-3.0-or-later, `packages/*` is
 # Apache-2.0, and the licence boundary is the directory itself.
 #
-# There is deliberately no `apps/api` entry: Phase 1 has no server (owner
-# decision D6). The glob will pick one up when #7 adds it in Phase 3.
+# `apps/*` picks up `apps/instance`, the self-hostable instance server
+# (ADR 0036, #767), with no entry of its own. There is no `apps/api`: that was
+# the name owner decision D6 forbade, and ADR 0036 lifted D6 for a server
+# called `apps/instance` instead.
 packages:
   - 'apps/*'
   - 'packages/*'
@@ -12,7 +14,17 @@ packages:
 # optional dependencies, which is the path pnpm actually installs, so the script
 # has nothing left to do. Denied rather than left undecided: an install script
 # runs arbitrary code with the developer's privileges before any lint or test
-# gate sees the package, and this is the one dependency in the workspace that
-# asks for that.
+# gate sees the package, and until #781 this was the one dependency in the
+# workspace that asked for that.
+#
+# workerd (#781) ships a postinstall script too, and it has nothing to do here
+# either: the runtime is the platform package pnpm installs as an optional
+# dependency (`@cloudflare/workerd-<os>-<arch>`), `require('workerd').default`
+# already names it, and the script only re-links that binary over the package's
+# JavaScript shim or, where the optional dependency is missing, downloads it
+# from npm — a network fetch at install time that nothing here asks for. It is
+# a devDependency of apps/instance for the Durable Object adapter's local
+# suite and ships in nothing.
 allowBuilds:
   unrs-resolver: false
+  workerd: false

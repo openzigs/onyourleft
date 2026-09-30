@@ -14,7 +14,7 @@ tools write into the app, which no package in part 1 accounts for.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (40 packages)
+Part 1 — in the app (41 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.2 — MIT
@@ -38,6 +38,7 @@ Part 1 — in the app (40 packages)
   json-stringify-pretty-compact 4.0.0 — MIT
   jsqr 1.4.0 — Apache-2.0
   kdbush 4.1.0 — ISC
+  lucide-react 1.48.0 — ISC
   maplibre-gl 6.10.0 — BSD-3-Clause
   minimist 1.2.8 — MIT
   murmurhash-js 1.0.0 — MIT

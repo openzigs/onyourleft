@@ -162,10 +162,11 @@ function LiveRide({
   const snapshot = useRideSnapshot(controller);
   const thresholdPower = useThresholdPower(analysis);
   const sideCamera = useSideCamera(sidePairing);
-  // #655: read once, at mount, from the device — as `RideAnnouncer` reads it
-  // (`WorkoutPanel` hands it no other storage here), so the two agree on
-  // which of them answers a held *Set*.
-  const [announcementsOn] = useState(() => readAnnouncementPreference(deviceStorage()).enabled);
+  // #655: which of two voices answers a held *Set* — the ERG form's, or the
+  // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
+  // both (#740): until then `RideAnnouncer` read it again for itself, and the
+  // two agreed only because both read this device's storage in one mount pass.
+  const [announcements] = useState(() => readAnnouncementPreference(deviceStorage()));
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -221,7 +222,9 @@ function LiveRide({
           164 px under that fold, and upright each came off the workout's
           *Ride*. Now the metric cards are what a notice moves — readings, not
           controls. With any one notice they are still on the screen in the
-          pinned Chromium (2.1 px above that fold at the least, on a Mac); with
+          pinned Chromium (2.1 px above that fold at the least, on a Mac, and
+          −22.7 px on the CI runner's fonts until #671's header — +1.3 px
+          since; #740 holds their FIRST row to the 50 px floor); with
           every notice this screen can stand at once they are not, and neither
           is the last notice. `rideview.browser.spec.ts` §"#692" publishes both,
           and `theme.css` §`.oyl-ride` has the table.
@@ -276,7 +279,7 @@ function LiveRide({
           workoutOwnsTarget={snapshot.workout !== undefined}
           // #655: which voice answers a held *Set* — the form's, or the
           // ride's one region. Read where `RideAnnouncer` reads it.
-          announcementsOn={announcementsOn}
+          announcementsOn={announcements.enabled}
         />
         <WorkoutPanel
           trainer={snapshot.trainer}
@@ -290,6 +293,8 @@ function LiveRide({
           sideCamera={sideCamera.state}
           // #647: …and, once, that the ride may stop if the screen goes off.
           keepAliveFailed={snapshot.keepAliveFailed}
+          // #740: the choice read above, so the region and the ERG form agree.
+          announcementPreference={announcements}
           onStart={(record) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI

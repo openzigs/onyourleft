@@ -580,7 +580,7 @@ describe('driving the phone, on the tablet', () => {
 describe('what the tablet says about the pictures — #530', () => {
   /** A pairing whose tablet looks at pictures with a model that answers `outcome`. */
   async function analysing(
-    outcome: SidePoseOutcome = { kind: 'no-rider' },
+    outcome: SidePoseOutcome = { kind: 'no-rider', cause: 'said-nobody' },
     place?: 'tablet' | 'computer',
   ) {
     const context = await tablet({
@@ -634,6 +634,7 @@ describe('what the tablet says about the pictures — #530', () => {
         model: 'ready',
         posed: 0,
         noRider: 3,
+        noRiderBecause: { 'said-nobody': 3, 'too-few-points': 0, implausible: 0 },
         unreadable: 0,
         skipped: 0,
         framing: 'no-reference',
@@ -647,7 +648,7 @@ describe('what the tablet says about the pictures — #530', () => {
   });
 
   it('says the pictures go to the rider’s computer when that is where they go — #553', async () => {
-    const { send } = await analysing({ kind: 'no-rider' }, 'computer');
+    const { send } = await analysing({ kind: 'no-rider', cause: 'said-nobody' }, 'computer');
     const shown = (): string =>
       document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
     expect(shown()).toContain('sent on to your computer');
@@ -659,6 +660,7 @@ describe('what the tablet says about the pictures — #530', () => {
         model: 'ready',
         posed: 0,
         noRider: 2,
+        noRiderBecause: { 'said-nobody': 2, 'too-few-points': 0, implausible: 0 },
         unreadable: 0,
         skipped: 0,
         framing: 'no-reference',
@@ -666,6 +668,40 @@ describe('what the tablet says about the pictures — #530', () => {
       }),
     );
     expect(shown()).toContain('Pictures sent to your computer');
+    expect(shown()).toContain('Your computer said nobody was there in 2,');
+  });
+
+  it('says why the computer’s answers came to nobody, cause by cause — #761', async () => {
+    const { send } = await analysing({ kind: 'no-rider', cause: 'implausible' }, 'computer');
+    const shown = (): string =>
+      document.querySelector('[data-oyl-side-pictures]')?.textContent ?? '';
+    await send(3);
+    expect(shown()).toContain(
+      'Your computer said nobody was there in 0, found too little of you to use in 0, ' +
+        'and placed points no one on a bicycle could have in 3. This tablet uses none of those answers.',
+    );
+  });
+
+  it('says nothing about causes on the tablet, or before the computer has said nobody', () => {
+    const base = {
+      model: 'ready',
+      posed: 1,
+      noRider: 0,
+      noRiderBecause: { 'said-nobody': 0, 'too-few-points': 0, implausible: 0 },
+      unreadable: 0,
+      skipped: 0,
+      framing: 'no-reference',
+      finished: false,
+    } as const;
+    expect(sidePicturesText({ ...base, place: 'computer' })).not.toContain('Your computer said');
+    expect(
+      sidePicturesText({
+        ...base,
+        place: 'tablet',
+        noRider: 1,
+        noRiderBecause: { 'said-nobody': 1, 'too-few-points': 0, implausible: 0 },
+      }),
+    ).not.toContain('said nobody');
   });
 
   it('says the computer stopped being sent pictures when it could not be reached — #553', async () => {

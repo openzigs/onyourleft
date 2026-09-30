@@ -153,7 +153,7 @@ assert_red() {
 
 assert_says() {
   local name="$1" expected="$2"
-  if printf '%s' "${out}" | grep -qF -- "${expected}"; then
+  if grep -qF -- "${expected}" <<< "${out}"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
@@ -163,7 +163,7 @@ assert_says() {
 
 assert_silent_about() {
   local name="$1" unexpected="$2"
-  if printf '%s' "${out}" | grep -qF -- "${unexpected}"; then
+  if grep -qF -- "${unexpected}" <<< "${out}"; then
     fail=$((fail + 1))
     printf 'FAIL: %s\n  expected NOT to mention: %s\n  got:\n%s\n\n' "${name}" "${unexpected}" "${out}"
   else
@@ -1492,6 +1492,37 @@ TS
 run_check
 assert_red '#447: a comment in a held export does not hold another up'
 assert_says '#447: the input is reported' '`RIDER_HEIGHT` is marked `@test-facing`'
+
+# --- An app with no page: its manifest's `main` is its entry (#767) -------------
+# The instance server has no index.html. Without this its `*-port.ts` files
+# would be watched and every one reported as reached by nothing.
+new_fixture
+write apps/instance/package.json <<'JSON'
+{"name":"@onyourleft/instance","private":true,"main":"./src/main.ts"}
+JSON
+write apps/instance/src/main.ts <<'TS'
+import { openStore } from './store-port.ts';
+openStore();
+TS
+write apps/instance/src/store-port.ts <<'TS'
+export function openStore(): void {}
+TS
+run_check
+assert_green "an instance port its manifest's main reaches passes"
+
+new_fixture
+write apps/instance/package.json <<'JSON'
+{"name":"@onyourleft/instance","private":true,"main":"./src/main.ts"}
+JSON
+write apps/instance/src/main.ts <<'TS'
+export {};
+TS
+write apps/instance/src/store-port.ts <<'TS'
+export function openStore(): void {}
+TS
+run_check
+assert_red 'an instance port its main does not reach fails'
+assert_says 'and names it' 'WIRE001 apps/instance/src/store-port.ts'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

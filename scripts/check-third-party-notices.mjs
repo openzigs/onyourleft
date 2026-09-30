@@ -252,6 +252,28 @@ function normalised(text) {
     .replace(/\s+$/, '');
 }
 
+/**
+ * The workspace packages that are SERVERS, and the notices document each one
+ * serves (#767).
+ *
+ * ⚠️ **A server is not in the app's union.** The app's document is what a
+ * rider's device carries; an instance's dependencies (#769's query builder,
+ * #780's WebSocket library) run on somebody's server and ship in no APK, so
+ * listing them in the app's credits would claim the app includes software it
+ * does not. Each server gets its own document instead, generated here over the
+ * same closure reader and gated by the same comparison, and served by the
+ * instance itself (`apps/instance/src/routes.ts`, `GET /licences/third-party.txt`)
+ * — which is where AGPL-3.0 and the permissive licences it includes ask for the
+ * notices to go: with the program its users interact with.
+ *
+ * A server's closure is its own plus that of every workspace package its
+ * manifest names, because `pnpm licenses list --filter` does not follow a
+ * workspace link (the reason `distributedUnion` is a union at all).
+ */
+export const SERVERS = [{ directory: 'apps/instance', document: 'apps/instance/third-party.txt' }];
+
+const isServer = (directory) => SERVERS.some((server) => server.directory === directory);
+
 /** Code-point order, so the document cannot depend on the machine's locale. */
 const byCodePoint = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -259,9 +281,16 @@ const byCodePoint = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
  * The union of every workspace package's distributed closure, one entry per
  * `name@version`, each with the directory pnpm installed it in.
  */
-export function distributedUnion(root) {
+export function distributedUnion(root, { only } = {}) {
   const union = new Map();
   for (const workspacePackage of discoverPackages(root)) {
+    // The app's union is every package that is not a server; a server's is
+    // the packages `only` names.
+    if (
+      only === undefined ? isServer(workspacePackage.directory) : !only.has(workspacePackage.name)
+    ) {
+      continue;
+    }
     for (const dependency of readClosure(root, workspacePackage.name, true)) {
       dependency.versions.forEach((version, index) => {
         const key = `${dependency.name}@${version}`;
@@ -369,6 +398,98 @@ function entry({ name, version, licence, part, sections }) {
   }
   lines.push('');
   return lines.join('\n');
+}
+
+/**
+ * The workspace packages a server's notices cover: the server, and every
+ * workspace package its manifest names, transitively.
+ */
+function serverPackages(root, server) {
+  const byDirectory = new Map(discoverPackages(root).map((entry) => [entry.directory, entry.name]));
+  const byName = new Map([...byDirectory].map(([directory, name]) => [name, directory]));
+  const found = new Set();
+  const queue = [byDirectory.get(server.directory)];
+  while (queue.length > 0) {
+    const name = queue.pop();
+    if (name === undefined || found.has(name)) continue;
+    found.add(name);
+    const manifest = readJson(root, join(byName.get(name), 'package.json'));
+    for (const [dependency, range] of Object.entries(manifest.dependencies ?? {})) {
+      if (String(range).startsWith('workspace:')) queue.push(dependency);
+    }
+  }
+  return found;
+}
+
+/**
+ * A server's own notices document, or the problems that stop it being built.
+ *
+ * Deliberately stricter than the app's: there is no reviewed list of packages
+ * that ship no licence file, so one of those is NOT003 until somebody adds a
+ * server's equivalent of `apps/web/third-party-notices.json` — which is a
+ * decision to make with the package in front of you, not a default.
+ */
+export function renderServerNotices(root, server) {
+  const packages = serverPackages(root, server);
+  if (packages.size === 0) {
+    return {
+      problems: [`NOT002 no workspace package is at ${server.directory}, which SERVERS names.`],
+    };
+  }
+  let union;
+  try {
+    union = distributedUnion(root, { only: packages });
+  } catch (error) {
+    return { problems: [`NOT002 the closure could not be read: ${error.message}`] };
+  }
+  const problems = [];
+  const entries = [];
+  for (const dependency of union) {
+    const files = licenceFiles(dependency.directory);
+    if (files.length === 0) {
+      problems.push(
+        `NOT003 ${dependency.name}@${dependency.version} ships no LICENSE, LICENCE, COPYING or ` +
+          `NOTICE file (looked in ${dependency.directory ?? '(pnpm gave no path)'}), and ` +
+          `${server.directory} has no reviewed list saying where its notice comes from.`,
+      );
+      continue;
+    }
+    entries.push(
+      entry({
+        name: dependency.name,
+        version: dependency.version,
+        licence: dependency.licence || '(none declared)',
+        part: 'in the instance',
+        sections: files.map((file) => ({
+          heading: `${file} (from the package)`,
+          text: normalised(readFileSync(join(dependency.directory, file), 'utf8')),
+        })),
+      }),
+    );
+  }
+  if (problems.length > 0) return { problems };
+  const document = [
+    'THIRD-PARTY SOFTWARE IN THIS ON YOUR LEFT INSTANCE',
+    '',
+    'This instance server includes software written by other people, each part',
+    "under its own licence. This document reproduces every one of those licences'",
+    'notices, as the packages themselves ship them. The instance itself is',
+    'AGPL-3.0-or-later, and GET /source says where its source is.',
+    '',
+    'Generated from the installed dependency tree by',
+    'scripts/check-third-party-notices.mjs. Do not edit it by hand.',
+    '',
+    `In the instance (${String(union.length)} packages)`,
+    ...(union.length > 0
+      ? union.map(
+          (dependency) =>
+            `  ${dependency.name} ${dependency.version} — ${dependency.licence || '(none declared)'}`,
+        )
+      : ['  (none — the instance runs on Node alone)']),
+    '',
+    ...entries,
+  ].join('\n');
+  return { problems: [], document, packages: union.length };
 }
 
 /**
@@ -854,17 +975,27 @@ export function thirdPartyNotices({ root, write = false, assumeInstalled = false
 
   const rendered = renderNotices(root);
   if (rendered.problems.length > 0) return { problems: rendered.problems };
+  const servers = SERVERS.map((server) => ({ server, ...renderServerNotices(root, server) }));
+  const serverProblems = servers.flatMap((server) => server.problems);
+  if (serverProblems.length > 0) return { problems: serverProblems };
 
   const summary =
     `${String(rendered.packages)} packages, ${String(rendered.bundled)} build tools ` +
-    `and ${String(rendered.libraries)} native libraries`;
+    `and ${String(rendered.libraries)} native libraries` +
+    servers
+      .map((server) => `; ${String(server.packages)} packages in ${server.server.directory}`)
+      .join('');
   const outputs = [
     { file: DOCUMENT, text: `${rendered.document}\n` },
     { file: CONTENTS, text: `${rendered.contents}\n` },
+    ...servers.map((server) => ({ file: server.server.document, text: `${server.document}\n` })),
   ];
   if (write) {
     for (const output of outputs) writeFileSync(join(root, output.file), output.text);
-    return { problems: [], summary: `wrote ${DOCUMENT} and ${CONTENTS}: ${summary}` };
+    return {
+      problems: [],
+      summary: `wrote ${outputs.map((output) => output.file).join(', ')}: ${summary}`,
+    };
   }
 
   const problems = [];
@@ -879,7 +1010,10 @@ export function thirdPartyNotices({ root, write = false, assumeInstalled = false
     problems.push(drift(output.file, committed, output.text));
   }
   if (problems.length > 0) return { problems };
-  return { problems: [], summary: `both files are what the generator writes: ${summary}` };
+  return {
+    problems: [],
+    summary: `all ${String(outputs.length)} files are what the generator writes: ${summary}`,
+  };
 }
 
 /** A NOT006 message that says which packages moved, then where the text did. */

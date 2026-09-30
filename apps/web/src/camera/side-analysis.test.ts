@@ -24,6 +24,15 @@ import type { SidePose, SidePoseEstimator, SidePoseOutcome } from './side-analys
 import type { SidePicture } from './side-link-pictures';
 import type { SideCameraControlPort, SideControlState } from './side-pairing-port';
 import type { SideReport } from './side-report';
+import type { SideSessionSummary } from './side-session-summary';
+import type { UntrustedText } from './model-answer';
+import { sidePoseFromAnswer } from './computer-pose';
+import {
+  ISSUE_761_BLANK_ANSWERS,
+  ISSUE_761_NOISE_ANSWERS,
+  SPIKE_0016_BLANK_ANSWERS,
+  SPIKE_0016_NOISE_ANSWERS,
+} from './model-answers-testing';
 import { SIDE_REPORT_TOO_SHORT } from './side-report-wording';
 import { cleanFrameBytes } from './testing';
 
@@ -211,10 +220,24 @@ describe('each picture, as it arrives', () => {
   it('counts a picture with nobody in it, and one that would not read, apart', async () => {
     const { link, model, analysis } = setUp();
     link.picture();
-    await model.answer({ kind: 'no-rider' });
+    await model.answer({ kind: 'no-rider', cause: 'said-nobody' });
     link.picture();
     await model.answer({ kind: 'unreadable' });
     expect(analysis.sideAnalysisState()).toMatchObject({ posed: 0, noRider: 1, unreadable: 1 });
+    expect(analysis.poseSamples()).toEqual([]);
+  });
+
+  it('counts each picture with nobody in it by why, and the causes sum to the count — #761', async () => {
+    const { link, model, analysis } = setUp();
+    for (const cause of ['said-nobody', 'implausible', 'implausible', 'too-few-points'] as const) {
+      link.picture();
+      await model.answer({ kind: 'no-rider', cause });
+    }
+    expect(analysis.sideAnalysisState()).toMatchObject({
+      posed: 0,
+      noRider: 4,
+      noRiderBecause: { 'said-nobody': 1, 'too-few-points': 1, implausible: 2 },
+    });
     expect(analysis.poseSamples()).toEqual([]);
   });
 });
@@ -544,6 +567,7 @@ describe('the post-ride report (#388)', () => {
     const link = scriptedControl();
     const model = scriptedModel();
     const ended: (SideReport | undefined)[] = [];
+    const poses: (SideSessionSummary | undefined)[] = [];
     let begun = 0;
     const analysis = new SideAnalysis({
       control: link.control,
@@ -552,18 +576,19 @@ describe('the post-ride report (#388)', () => {
         beginSideReportSession: () => {
           begun += 1;
           return {
-            endSideReportSession: (report) => {
+            endSideReportSession: (report, pose) => {
               ended.push(report);
+              poses.push(pose);
             },
           };
         },
       },
     });
-    return { link, model, analysis, ended, begun: () => begun };
+    return { link, model, analysis, ended, poses, begun: () => begun };
   }
 
   it('opens a report session with the pairing and hands it the report when the pairing ends', async () => {
-    const { link, model, ended, begun } = withReports();
+    const { link, model, ended, poses, begun } = withReports();
     expect(begun()).toBe(1);
     link.picture();
     await model.answer();
@@ -573,6 +598,8 @@ describe('the post-ride report (#388)', () => {
     // One picture is far too short a session to compare: the report says so,
     // in words — and it IS a report, handed over, rather than nothing.
     expect(ended).toStrictEqual([{ summary: SIDE_REPORT_TOO_SHORT, observations: [] }]);
+    // Nothing was compared, so there is no pose summary — not one of zeros (#801).
+    expect(poses).toStrictEqual([undefined]);
   });
 
   it('hands over sentences and nothing they were made from', async () => {
@@ -591,5 +618,108 @@ describe('the post-ride report (#388)', () => {
     link.set({ ended: 'ended-here' });
     await settle();
     expect(ended).toStrictEqual([undefined]);
+  });
+});
+
+describe('only plausible poses reach the pose summary (#761, #801)', () => {
+  /** Spike 0016's pictures are 256 × 192. */
+  const ASPECT = 256 / 192;
+
+  /** Spike 0016's drawn rider, as the computer would answer it: a pose #761's check passes. */
+  const RIDER_ANSWER = JSON.stringify({
+    rider: true,
+    nearSide: 'right',
+    landmarks: {
+      ear: [169 / 256, 43 / 192],
+      shoulder: [160 / 256, 55 / 192],
+      elbow: [172 / 256, 75 / 192],
+      wrist: [186 / 256, 90 / 192],
+      hip: [105 / 256, 85 / 192],
+      knee: [135 / 256, 110 / 192],
+      ankle: [128 / 256, 150 / 192],
+      heel: [122 / 256, 152 / 192],
+      toe: [142 / 256, 152 / 192],
+    },
+  });
+
+  /**
+   * A seven-minute session on the rider's computer, every answer read by the
+   * real `sidePoseFromAnswer` — the path #761's check is on — in turn from
+   * `answers`, and what the report session was handed when it ended.
+   */
+  async function computerSession(answers: readonly string[]) {
+    const link = scriptedControl();
+    let asked = 0;
+    const ended: { report: SideReport | undefined; pose: SideSessionSummary | undefined }[] = [];
+    const analysis = new SideAnalysis({
+      control: link.control,
+      place: 'computer',
+      estimator: () => ({
+        estimateSidePose: async () => {
+          const said = answers[asked % answers.length] ?? '';
+          asked += 1;
+          return Promise.resolve(sidePoseFromAnswer(said as UntrustedText, ASPECT));
+        },
+        closeSidePoseModel: () => undefined,
+      }),
+      reports: {
+        beginSideReportSession: () => ({
+          endSideReportSession: (report, pose) => {
+            ended.push({ report, pose });
+          },
+        }),
+      },
+    });
+    for (let picture = 0; picture < 7 * 60 * 5; picture += 1) {
+      link.picture();
+      await settle();
+    }
+    link.set({ phone: 'stopped' });
+    await settle();
+    return { ended, state: analysis.sideAnalysisState() };
+  }
+
+  it.each([
+    ['spike 0016’s blank pictures', SPIKE_0016_BLANK_ANSWERS],
+    ['spike 0016’s noise pictures', SPIKE_0016_NOISE_ANSWERS],
+    ['#761’s blank pictures', ISSUE_761_BLANK_ANSWERS],
+    ['#761’s noise pictures', ISSUE_761_NOISE_ANSWERS],
+  ])('keeps no summary for %s', async (_what, answers) => {
+    const { ended, state } = await computerSession(answers);
+    expect(state.posed).toBe(0);
+    expect(ended).toHaveLength(1);
+    expect(ended[0]?.report).toBeDefined();
+    expect(ended[0]?.pose).toBeUndefined();
+  });
+
+  it('keeps one for the drawn rider — the control that shows the harness can make a summary', async () => {
+    const { ended } = await computerSession([RIDER_ANSWER]);
+    expect(ended[0]?.pose?.source).toBe('computer');
+    expect(ended[0]?.pose?.posed).toBe(7 * 60 * 5);
+    expect(Object.keys(ended[0]?.pose?.differences ?? {}).length).toBeGreaterThan(0);
+  });
+
+  it('counts a turned-away pose as nobody, never as a pose the statistics read', async () => {
+    // One implausible noise answer for every three drawn-rider answers.
+    const implausible = SPIKE_0016_NOISE_ANSWERS.find((each) => {
+      const read = sidePoseFromAnswer(each as UntrustedText, ASPECT);
+      return read.kind === 'no-rider' && read.cause === 'implausible';
+    });
+    expect(implausible).toBeDefined();
+    const { ended, state } = await computerSession([
+      RIDER_ANSWER,
+      RIDER_ANSWER,
+      RIDER_ANSWER,
+      implausible ?? '',
+    ]);
+    const total = 7 * 60 * 5;
+    expect(state.noRiderBecause.implausible).toBe(total / 4);
+    expect(ended[0]?.pose?.posed).toBe((total * 3) / 4);
+    expect(ended[0]?.pose?.noRider).toBe(total / 4);
+    // Every kept difference is the drawn rider's, who did not move: nothing
+    // the turned-away answers placed reached the thirds.
+    for (const difference of Object.values(ended[0]?.pose?.differences ?? {})) {
+      expect(difference).toBeCloseTo(0, 9);
+    }
   });
 });

@@ -19,6 +19,7 @@ import {
   resetFixtureIds,
   rideFor,
   sideCameraReportFor,
+  rideWriteUpFor,
   routeFor,
   seedAthletes,
   signedRecordFor,
@@ -37,8 +38,13 @@ import {
   verifyRecordSignature,
   watts,
 } from '@onyourleft/domain';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  HOSTED_MODEL_STORAGE_KEY,
+  readHostedModel,
+  writeHostedModel,
+} from '../camera/hosted-model';
 import { coordinatesIn, insideZone } from '../privacy/boundaries';
 
 import {
@@ -50,6 +56,7 @@ import {
   accountManifest,
   cameraFrameFileName,
   exportEverything,
+  RIDE_WRITE_UP_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
   type AccountExportCursor,
@@ -151,6 +158,39 @@ function manifestOf(files: readonly DownloadableFile[]): Record<string, unknown>
     unknown
   >;
 }
+
+describe('the hosted model’s key is in no file the export writes — #518', () => {
+  const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('exports a whole account from a device holding a key, and the key is not in it', async () => {
+    const rows = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => rows.get(key) ?? null,
+      setItem: (key: string, value: string) => void rows.set(key, value),
+      removeItem: (key: string) => void rows.delete(key),
+    });
+    expect(
+      writeHostedModel({ address: 'https://models.example.invalid', model: 'm', key: KEY }),
+    ).toBe(true);
+    // The device really holds it, through the path the Camera screen reads —
+    // or this would pass over an empty `localStorage`.
+    expect(rows.has(HOSTED_MODEL_STORAGE_KEY)).toBe(true);
+    expect(readHostedModel()?.key).toBe(KEY);
+
+    await seedLibrary(2);
+    const { files } = await runExport();
+    expect(files.length).toBeGreaterThan(2);
+    for (const file of files) {
+      const text = new TextDecoder().decode(file.bytes);
+      expect(text, file.fileName).not.toContain(KEY);
+      expect(text, file.fileName).not.toContain('models.example.invalid');
+    }
+  });
+});
 
 describe('exporting everything', () => {
   it('produces one file per ride plus a manifest', async () => {
@@ -1012,7 +1052,35 @@ describe('exporting the side camera’s reports (#388)', () => {
     expect(entry?.['sideCameraReport']).toStrictEqual({
       summary: report.summary,
       observations: report.observations,
+      // #801: the pose summary, every field named — and a kind the session
+      // did not compare is absent from `differences`, not a zero.
+      pose: {
+        differences: report.pose?.differences,
+        posed: report.pose?.posed,
+        noRider: report.pose?.noRider,
+        unreadable: report.pose?.unreadable,
+        source: report.pose?.source,
+      },
     });
+    const kinds = Object.keys(
+      (entry?.['sideCameraReport'] as { pose: { differences: object } }).pose.differences,
+    );
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(kinds.length).toBeLessThan(5);
+  });
+
+  it('writes a report’s pose summary as null, not nothing, when the session compared nothing (#801)', async () => {
+    const { written } = await seedLibrary(1);
+    const filmed = written[0]?.ride;
+    expect(filmed).toBeDefined();
+    if (filmed === undefined) {
+      return;
+    }
+    const report = { ...sideCameraReportFor(ATHLETE_A, filmed.id), pose: null };
+    await harness.write(async (store) => store.putSideCameraReport(report));
+    const { files } = await runExport();
+    const entry = entries(files).find((each) => each['activityId'] === filmed.id);
+    expect(entry?.['sideCameraReport']).toHaveProperty('pose', null);
   });
 
   it('writes null, not nothing, for a ride that was not filmed', async () => {
@@ -1029,6 +1097,15 @@ describe('exporting the side camera’s reports (#388)', () => {
    * the database directly, past the store's own validation on the way in.
    */
   async function corruptReportRow(ride: ActivityId): Promise<void> {
+    await corruptRow('sideCameraReports', ride, { observations: ['x'.repeat(10_000)] });
+  }
+
+  /** {@link corruptReportRow}, for any per-ride table and any overwrite. */
+  async function corruptRow(
+    tableName: string,
+    ride: ActivityId,
+    overwrite: Record<string, unknown>,
+  ): Promise<void> {
     await harness.discard();
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const opening = indexedDB.open(harness.databaseName);
@@ -1041,12 +1118,12 @@ describe('exporting the side camera’s reports (#388)', () => {
     });
     try {
       await new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction('sideCameraReports', 'readwrite');
-        const table = transaction.objectStore('sideCameraReports');
+        const transaction = database.transaction(tableName, 'readwrite');
+        const table = transaction.objectStore(tableName);
         const reading = table.get(ride);
         reading.onsuccess = () => {
           const row = reading.result as Record<string, unknown>;
-          table.put({ ...row, observations: ['x'.repeat(10_000)] });
+          table.put({ ...row, ...overwrite });
         };
         transaction.oncomplete = () => {
           resolve();
@@ -1098,6 +1175,108 @@ describe('exporting the side camera’s reports (#388)', () => {
       expect.objectContaining({ summary: expect.any(String) as unknown }),
     );
   });
+
+  describe('a ride’s write-up (#800, #801)', () => {
+    it('carries it in that ride’s entry, every field named, read through the real store', async () => {
+      const { written } = await seedLibrary(2);
+      const analysed = written[1]?.ride;
+      expect(analysed).toBeDefined();
+      if (analysed === undefined) {
+        return;
+      }
+      const writeUp = rideWriteUpFor(ATHLETE_A, analysed.id);
+      await harness.write(async (store) => store.putRideWriteUp(writeUp));
+      const { files } = await runExport();
+      const entry = entries(files).find((each) => each['activityId'] === analysed.id);
+      expect(entry?.['rideWriteUp']).toStrictEqual({
+        text: writeUp.text,
+        templateId: writeUp.templateId,
+        templateVersion: writeUp.templateVersion,
+        source: writeUp.source,
+        includedPose: writeUp.includedPose,
+        missingSections: writeUp.missingSections,
+        writtenAt: writeUp.writtenAt,
+      });
+    });
+
+    it('writes null, not nothing, for a ride no model was asked about', async () => {
+      await seedLibrary(2);
+      const { files } = await runExport();
+      for (const entry of entries(files)) {
+        expect(entry).toHaveProperty('rideWriteUp', null);
+      }
+    });
+
+    it('says a write-up it cannot read is there, and carries nothing of it', async () => {
+      const { written } = await seedLibrary(2);
+      const analysed = written[0]?.ride;
+      if (analysed === undefined) {
+        throw new Error('no ride');
+      }
+      await harness.write(async (store) =>
+        store.putRideWriteUp(rideWriteUpFor(ATHLETE_A, analysed.id)),
+      );
+      await corruptRow('rideWriteUps', analysed.id, { text: 'zzzz\u0007' });
+      await expect(
+        harness.read(async (store) => store.getRideWriteUp(ATHLETE_A, analysed.id)),
+      ).rejects.toThrow();
+      const { files, report } = await runExport();
+      expect(report.exported).toBe(2);
+      const entry = entries(files).find((each) => each['activityId'] === analysed.id);
+      expect(entry?.['rideWriteUp']).toStrictEqual({ unreadable: RIDE_WRITE_UP_UNREADABLE });
+      expect(JSON.stringify(entry)).not.toContain('zzzz');
+    });
+
+    it('carries no other athlete’s write-up', async () => {
+      await seedLibrary(1);
+      const theirs = rideFor(ATHLETE_B);
+      await harness.write(async (store) => {
+        await store.putActivity(theirs);
+        await store.putRideWriteUp(rideWriteUpFor(ATHLETE_B, theirs.id));
+      });
+      const { files } = await runExport();
+      const text = new TextDecoder().decode(
+        files.find((file) => file.fileName === MANIFEST_FILE_NAME)?.bytes,
+      );
+      expect(text).not.toContain(ATHLETE_B);
+    });
+  });
+
+  /**
+   * #816, from #819's review: both readers narrow their catch to
+   * `StoreDecodeError` and rethrow anything else, and nothing tested the
+   * rethrow. A plain `Error` is the store or this client being broken, and an
+   * export that swallowed it would list the ride as having no report.
+   */
+  it.each(['getSideCameraReport', 'getRideWriteUp'] as const)(
+    'does not swallow an error from %s that is not a row it cannot decode',
+    async (method) => {
+      await seedLibrary(1);
+      const broken = new Error('the store is broken');
+      await expect(
+        harness.read(async (store) =>
+          exportEverything({
+            store: new Proxy(store, {
+              get(target, property, receiver) {
+                if (property === method) {
+                  return () => Promise.reject(broken);
+                }
+                const value: unknown = Reflect.get(target, property, receiver);
+                if (typeof value !== 'function') {
+                  return value;
+                }
+                const call = value as (...args: unknown[]) => unknown;
+                return (...args: unknown[]) => call.apply(target, args);
+              },
+            }),
+            athleteId: ATHLETE_A,
+            format: 'gpx',
+            onFile: () => undefined,
+          }),
+        ),
+      ).rejects.toBe(broken);
+    },
+  );
 
   it('carries no other athlete’s report', async () => {
     await seedLibrary(1);

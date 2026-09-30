@@ -7,7 +7,7 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **eighteen** fakes here, and there are eighteen on purpose: a harness
+ * There are **twenty-one** fakes here, and there are twenty-one on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
@@ -15,7 +15,7 @@
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
  * #93's, the twelfth with #238's, the thirteenth with #325's, the
  * fourteenth with #384's, the fifteenth with #528's, the sixteenth with #530's, the
- * seventeenth with #388's and the eighteenth with #623's, which is the rule this file exists to enforce: a new
+ * seventeenth with #388's, the eighteenth with #623's — and later ones with #800 and #839 — which is the rule this file exists to enforce: a new
  * path may not ship without a fake proving the harness catches its failure.
  *
  * ⚠️ **The fourteenth breaks a DELETE, and every one before it breaks a write
@@ -47,7 +47,8 @@
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
- * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
+ * | `lastWordDroppedStoreFactory` | *wrong layer* — a layer above dropped the last entry of the rider's masked-word list on its way in | the call answers with the whole list, and a fresh connection reads one word short — the one the rider typed last, which is then sent to a hosted model unmasked |
+| `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
@@ -83,6 +84,8 @@ import type {
   FramingReferenceRecord,
   RouteRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
+  SyncBaseRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -124,6 +127,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
+    setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
     getAthlete: async (id) => real.getAthlete(id),
@@ -186,6 +190,11 @@ function bindStore(real: ActivityStore): PersistentStore {
     deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
     putSideCameraReport: async (record) => real.putSideCameraReport(record),
     getSideCameraReport: async (owner, activity) => real.getSideCameraReport(owner, activity),
+    putRideWriteUp: async (record) => real.putRideWriteUp(record),
+    getRideWriteUp: async (owner, activity) => real.getRideWriteUp(owner, activity),
+    putSyncBase: async (record) => real.putSyncBase(record),
+    listSyncBase: async (owner) => real.listSyncBase(owner),
+    deleteSyncBase: async (owner, kind, key) => real.deleteSyncBase(owner, kind, key),
   };
 }
 
@@ -280,6 +289,14 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putSideCameraReport: (record: SideCameraReportRecord) => {
           memory.set(`side-report:${record.activityId}`, record);
+          return Promise.resolve();
+        },
+        putRideWriteUp: (record: RideWriteUpRecord) => {
+          memory.set(`write-up:${record.activityId}`, record);
+          return Promise.resolve();
+        },
+        putSyncBase: (record: SyncBaseRecord) => {
+          memory.set(`sync-base:${record.kind}:${record.key}`, record);
           return Promise.resolve();
         },
       };
@@ -911,6 +928,38 @@ export function misfiledKitColourStoreFactory(): StoreFactory {
 }
 
 /**
+ * A repository whose masked-word write **drops the last entry on its way in**
+ * — the twenty-first fake, for #839.
+ *
+ * *Wrong layer*: the write is real, to the real row, in a transaction that
+ * commits, and the call answers with the list the rider saved — so the screen
+ * says "Saved" and shows every word. What lands is one short, and the word
+ * missing is the one the rider added last: exactly the entry they were
+ * thinking about, now sent to a hosted model in the clear.
+ *
+ * ⚠️ **Why the round trip must compare the whole list.** A read that checked
+ * only that a list came back, or only its first entry, passes against this.
+ * The red/green pair is in `activity-store.masked-words.test.ts`.
+ */
+export function lastWordDroppedStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteMaskedWords: async (id: AthleteId, words: readonly string[]) => {
+          const written = await real.setAthleteMaskedWords(id, words.slice(0, -1));
+          return written === undefined ? undefined : { ...written, maskedWords: [...words] };
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
  * A repository that **reports an erase as complete and leaves the rows behind**.
  *
  * The fourteenth fake, for #384's kept camera frames, and it is the one whose
@@ -1054,6 +1103,108 @@ export function lastSentenceDroppedReportStoreFactory(): StoreFactory {
             ...record,
             observations: record.observations.slice(0, -1),
           }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose side-camera report put **drops the pose summary**.
+ *
+ * The eighteenth fake, for #800's pose summary. It stands for a layer above
+ * the store that rebuilt the report from the fields it knew before version 13
+ * — `summary` and `observations` — and answered the new required field with
+ * `null`, the value every report written before version 13 legitimately has.
+ * Every write succeeds, every sentence comes back exact, and the row reads as
+ * "no pose summary kept", which is a real state: only a round trip that
+ * compares the summary itself notices the rider's numbers are gone.
+ * `assertSideCameraReportRoundTrip` compares `pose` field by field;
+ * `ride-write-up-store.test.ts` is the red/green pair.
+ */
+export function poselessReportStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putSideCameraReport: async (record: SideCameraReportRecord): Promise<void> =>
+          real.putSideCameraReport({
+            athleteId: record.athleteId,
+            activityId: record.activityId,
+            summary: record.summary,
+            observations: record.observations,
+            pose: null,
+          }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose write-up put **acknowledges a second write-up and keeps
+ * the first**.
+ *
+ * The nineteenth fake, for #800's write path and CLAUDE.md §5's *wrong time*:
+ * the owner's ruling 7 on #795 is that a new analysis replaces the saved one,
+ * and this store answers the new one with success and goes on holding the old
+ * — so the ride page shows last week's words under today's press, with the
+ * right ride, the right athlete and well-formed text. A single-write test is
+ * indistinguishable from the real store. Only a round trip that writes TWO
+ * write-ups and compares what comes back with the second notices, which is
+ * what `assertRideWriteUpRoundTrip` does on a harness that already holds one.
+ * `ride-write-up-store.test.ts` is the red/green pair.
+ */
+export function firstWriteUpStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRideWriteUp: async (record: RideWriteUpRecord): Promise<void> => {
+          if ((await real.getRideWriteUp(record.athleteId, record.activityId)) !== undefined) {
+            // Reported as success, and nothing is written.
+            return;
+          }
+          await real.putRideWriteUp(record);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose ride delete **takes the ride's sync base with it**.
+ *
+ * The twentieth fake, for #776's sync base and #893's review (B1). It stands
+ * for the tidy-minded cascade a reader of `deleteActivity` would add: "a row
+ * about a ride that is gone is an orphan, delete it too". Every write
+ * succeeds, every base row reads back while its ride exists — and the one
+ * thing the base is FOR, remembering that this device deleted a synced ride,
+ * is gone at the moment it matters, so the next sync pulls the ride back.
+ * `assertSyncBaseRoundTrip` deletes the ride between the write and the read;
+ * `sync-base-store.test.ts` is the red/green pair.
+ */
+export function cascadingSyncBaseStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        deleteActivity: async (owner, id) => {
+          for (const row of await real.listSyncBase(owner)) {
+            if (row.activityId === id) await real.deleteSyncBase(owner, row.kind, row.key);
+          }
+          return real.deleteActivity(owner, id);
+        },
       };
     },
     destroy: async (name) => {

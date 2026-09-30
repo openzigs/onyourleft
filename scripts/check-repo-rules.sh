@@ -43,6 +43,8 @@
 #   XML003  no CDATA section left unclosed -- the construct that used to switch
 #           XML001 and XML002 off for the rest of the file (#229)
 #   XML004  no processing instruction left unclosed (#229)
+#   SH001   no shell script pipes into `grep -q`, which under `pipefail` can
+#           read a match as "no match" (#743)
 #   ASSET001 every committed binary is named in ASSETS.toml (#339)
 #   ASSET002 every path ASSETS.toml names is really there (#339)
 #   ASSET003 every named file reproduces its recorded SHA-256 (#339)
@@ -412,7 +414,7 @@ if [ -d "${ROOT}/docs/adr" ]; then
   while IFS= read -r adr; do
     [ -n "${adr}" ] || continue
     base="$(basename "${adr}")"
-    if ! printf '%s' "${base}" | grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
+    if ! grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$' <<< "${base}"; then
       report ADR002 "docs/adr/${base}: filename must be NNNN-kebab-case.md"
       continue
     fi
@@ -700,15 +702,19 @@ check_adr_sections() {
     body="$(strip_fences "${adr}")"
 
     # ⚠️ A HERE-STRING rather than `printf ... | grep -q`, and this one cost a
-    # red CI run. `grep -q` exits at the first match and closes the pipe; an ADR
-    # here is hundreds of lines, so it exceeds the pipe buffer and the producer
-    # gets EPIPE. This script runs under `set -o pipefail`, so the PIPELINE then
-    # reports the producer's failure -- and the `if` reads as "no match" for a
-    # document that matched. It is invisible on macOS, where `printf` is a
-    # builtin that does not fail the same way; on the Ubuntu runner it reported
-    # `printf: write error: Broken pipe` and then said six ADRs with a Status
-    # line had none. The two other `| grep -q` pipelines in this file are safe
-    # only because they pipe a FILENAME, which the buffer absorbs whole.
+    # red CI run. `grep -q` exits at the first match and closes the pipe, and a
+    # producer still writing then dies of SIGPIPE; this script runs under
+    # `set -o pipefail`, so the PIPELINE reports the producer's failure -- and
+    # the `if` reads as "no match" for a document that matched. ⚠️ It is NOT
+    # about the pipe buffer, which is what this comment said until #743: on
+    # Linux bash's `printf` builtin writes a multi-line argument one LINE per
+    # `write(2)`, so ANY producer of two or more lines can still be writing
+    # when grep exits on a match that is not on its last line. How often that
+    # loses the race depends on the scheduler, which is why it passed on a Mac
+    # and on the Ubuntu runner reported `printf: write error: Broken pipe` and
+    # then said six ADRs with a Status line had none. Only a producer of ONE
+    # line is safe, and since #743 no `| grep -q` is left in scripts/ at all:
+    # SH001 below refuses one, so this is not a rule anybody has to remember.
     for section in ${ADR_REQUIRED_SECTIONS}; do
       hint=""
       if grep -qE "^##[[:space:]]+${section}([[:space:]]*$|[[:space:]]|:)" <<< "${body}"; then
@@ -794,7 +800,7 @@ check_spikes() {
     [ -n "${spike}" ] || continue
     found=$((found + 1))
     base="$(basename "${spike}")"
-    if ! printf '%s' "${base}" | grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
+    if ! grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$' <<< "${base}"; then
       report SPIKE002 "${SPIKE_DIR}/${base}: filename must be NNNN-kebab-case.md (CLAUDE.md section 7)"
       continue
     fi
@@ -851,7 +857,7 @@ check_no_key_material() {
     [ -n "${file}" ] || continue
     base="$(basename "${file}")"
     relative="${file#"${ROOT}"/}"
-    if printf '%s' "${base}" | grep -qE "${KEY_MATERIAL_NAMES}"; then
+    if grep -qE "${KEY_MATERIAL_NAMES}" <<< "${base}"; then
       report REL001 "${relative}: looks like signing key material; keys belong in CI secrets and never in the repository (#95)"
     fi
   done < <(repo_files | sort)
@@ -1260,6 +1266,81 @@ check_xml_comments() {
 }
 
 check_xml_comments
+
+# --- SH001: no shell pipeline into `grep -q` (#743) ---------------------------
+#
+# `producer | grep -q pattern` under `set -o pipefail` is a race. `grep -q`
+# exits at its first match and closes the pipe; a producer still writing then
+# dies of SIGPIPE, and `pipefail` makes the PIPELINE report that death -- so a
+# MATCH reads as "no match". On Linux bash's `printf` builtin writes a
+# multi-line argument one line per `write(2)`, so any producer of two or more
+# lines can lose the race whenever the match is not on its last line. It is not
+# a question of the pipe buffer, which is what this repository believed until
+# #743.
+#
+# ⚠️ The NEGATED form is the one that matters. `! printf ... | grep -q x`, and
+# every "the output must NOT say x" assertion built on it, turns a lost race into
+# a silent PASS: a fixture suite reports a rule as working when it checked
+# nothing -- this repository's recurring "guard that cannot fire" shape. The
+# positive form is a flaky false FAIL on a busy runner. #741 fixed one in
+# check-env-example.sh after it went red on main; #743 found about thirty more
+# in the checkers' own suites.
+#
+# The remedy is a here-string, `grep -q pattern <<< "${text}"`, which has no
+# second process to kill. Every `| grep -q` is refused, a one-line producer
+# included: telling a one-line producer from a many-line one needs the value at
+# run time, and an allowlist of the "safe" ones is the list this repository
+# keeps learning grows until the rule stops firing. `--quiet` is the same flag.
+# A comment line may name the pipeline, so this file and its suite can explain
+# it; the pattern is assembled from pieces so that no line here is a finding.
+SH001_PIPE='|'
+SH001_PATTERN="(^|[^|])\\${SH001_PIPE}[[:space:]]*grep[[:space:]]([^|]*[[:space:]])?(-[a-zA-Z]*q|--quiet)"
+#
+# ⚠️ The pattern reads one line at a time, so a pipe that ENDS a line escaped
+# it until #758: `x=$(printf a |` with `grep -q a)` on the next line. The
+# second pass below reads a `grep -q` that OPENS a line whose last code line
+# before it ends in a single pipe -- blank and comment lines between are
+# skipped, as bash skips them. A pipe that opens the grep's own line, after a
+# backslash continuation, is the pattern above's; a pipe FOLLOWED by a
+# backslash continuation is this pass's too (#864), which drops the backslash
+# before it asks whether the line ends in a pipe.
+SH001_GREP_OPENS="^[[:space:]]*grep[[:space:]]([^|]*[[:space:]])?(-[a-zA-Z]*q|--quiet)"
+# A bracket, never a backslash: `awk -v` processes escapes in the value, and
+# `\|` came out as a bare `|` -- an alternation that matched every line.
+SH001_PIPE_ENDS="(^|[^|])[${SH001_PIPE}][[:space:]]*$"
+
+# Every `grep -q` line in "$1" that a trailing pipe on the line before feeds,
+# as `number:text`.
+sh001_trailing_pipes() {
+  awk -v opens="${SH001_GREP_OPENS}" -v ends="${SH001_PIPE_ENDS}" '
+    /^[[:space:]]*(#|$)/ { next }
+    piped && $0 ~ opens { print NR ":" $0 }
+    {
+      # A backslash continuation after the pipe (#864) joins the next line
+      # just the same: `x=$(printf a |` then a backslash, then `grep -q a)`.
+      line = $0
+      sub(/[[:space:]]*\\[[:space:]]*$/, "", line)
+      piped = (line ~ ends)
+    }
+  ' "$1"
+}
+
+check_no_pipe_into_grep_quiet() {
+  local file relative number text
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    relative="${file#"${ROOT}"/}"
+    while IFS=: read -r number text; do
+      [ -n "${number}" ] || continue
+      # A comment line, and only a line that IS a comment: a glob here would
+      # also skip any indented line with a `#` anywhere in it (`${#array[@]}`).
+      [[ "${text}" =~ ^[[:space:]]*# ]] && continue
+      report SH001 "${relative}:${number}: a pipeline into \`grep -q\`; under \`pipefail\` grep's early exit can kill the producer with SIGPIPE and turn a match into \"no match\" -- read a here-string instead: grep -q ... <<< \"\${text}\" (#743)"
+    done < <(grep -nE "${SH001_PATTERN}" "${file}"; sh001_trailing_pipes "${file}")
+  done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name '*.sh' -print | sort)
+}
+
+check_no_pipe_into_grep_quiet
 
 # --- ASSET001..ASSET005: provenance for every committed binary ----------------
 #

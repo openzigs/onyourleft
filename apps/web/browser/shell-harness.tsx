@@ -67,6 +67,7 @@ import { sidePairingPort } from '../src/camera/side-link';
 import { Button } from '../src/design/Button';
 import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
+import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -740,4 +741,5 @@ function main(): void {
   document.documentElement.setAttribute(READY_ATTRIBUTE, 'true');
 }
 
-main();
+// #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
+void viewGroupsLoaded().then(main);

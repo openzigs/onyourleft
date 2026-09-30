@@ -343,7 +343,15 @@ h3:first-child {
 .oyl-skip-link {
   position: absolute;
   left: var(--oyl-space-sm);
-  top: var(--oyl-space-sm);
+  /*
+   * Below the status bar (#726). The link has no positioned ancestor, so it is
+   * placed against the initial containing block and NOT below `body`'s
+   * safe-area padding: with the tablet's 36 px top inset a bare
+   * `--oyl-space-sm` put its top 28 px under the status bar, which a device
+   * draws over the WebView. `shell.browser.spec.ts` §"#726" measures it with
+   * the insets applied to the engine.
+   */
+  top: calc(var(--oyl-space-sm) + var(--oyl-safe-top));
   z-index: 10;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
   background: var(--oyl-color-canvas);
@@ -818,6 +826,16 @@ h3:first-child {
   min-height: 2.75rem;
 }
 
+/*
+ * The list's heading opens its pane (#730). The skip link comes before it in
+ * the DOM, so the heading is not `:first-child` at two panes and kept the
+ * 40 px `h2` gap — the list's heading sat 40 px below the detail's on every
+ * list–detail route. `list-detail.browser.spec.ts` §"#730" holds them level.
+ */
+.oyl-pane-skip + h2 {
+  margin-top: 0;
+}
+
 /* One item of a pane's list: its link, and a line of facts. */
 .oyl-pane-list {
   list-style: none;
@@ -1034,6 +1052,18 @@ h3:first-child {
  * because the clearance is measured, and the table is kept because it is the
  * argument for the query.
  */
+/*
+ * Where the header does NOT stick, a fragment jump — the skip link, and the
+ * focus move on every route change — scrolls `main` to the top of the
+ * viewport, which is under the status bar when the top inset is non-zero
+ * (#726): with the tablet's 36 px the `h1` landed 24 px down, its top 12 px
+ * under the bar. The inset is the margin; it is 0 px in any desktop browser.
+ * The sticky query below replaces it with a margin that clears the header too.
+ */
+.oyl-main {
+  scroll-margin-top: var(--oyl-safe-top);
+}
+
 @media (min-width: 64rem) and (min-height: 40rem) {
   .oyl-header {
     position: sticky;
@@ -1685,12 +1715,29 @@ a.oyl-button {
  * collapses with the notice's own — and leaves the numbers themselves —
  * `MetricGrid.tsx` §`MINIMUM_PRIMARY_METRIC_REM` — exactly the size they were.
  * Measured in the pinned Chromium on a Mac: the cards end 2.1 px above that
- * fold rather than 45.9 under it. `rideview.browser.spec.ts` §"#692"
- * publishes where they end at every tablet, and holds the tightening.
+ * fold rather than 45.9 under it. ⚠️ **That is the Mac's figure, and on the CI
+ * runner's fonts it was −22.7 px** (run 36416451402) — one standing notice put
+ * the lower row under the fold. #671's smaller header gave 24 px back: on
+ * `main` at `ca300c9` CI reads +1.3 px at 1280×800 in the shell and +14.1 px
+ * at 1024×720 with *No notification* (run 36450645172), a Mac +26.1 and
+ * +38.9. So since #740 the FIRST row — the readings a rider looks at first —
+ * is held to the 50 px floor with any one notice standing, and the whole list
+ * is published and not bounded (`rideview.browser.spec.ts` §"#692"). Whether
+ * the lower row is on a real tablet's fonts is #733's to answer.
  *
  * A notice beside the heading (#647's) is not a child of the group and does
  * not count: it costs the cards its height less the heading's, which is what
  * it always cost them.
+ *
+ * ⚠️ **"While a notice stands" is narrower than what the selector matches**
+ * (#740, #692's review). `RideControls` renders a fragment, so every
+ * `StatusMessage` it shows is a direct child of the group too — the stop's
+ * armed *Confirm*, the stopped ride's notice, the idle *No sensors* — and so
+ * is the side camera's line while it is only *filming*. The cards tighten
+ * for those as well; a rider who arms *Stop* sees them step in by the small
+ * step. Harmless, because the cards sit below every control, and kept rather
+ * than narrowed with a marker: each of those is a line of height above the
+ * cards, which is what the tightening pays for.
  */
 .oyl-ride__group--live:has(> .oyl-status, > .oyl-ride__side-camera) > .oyl-metric-grid {
   gap: var(--oyl-space-sm);
@@ -2537,6 +2584,69 @@ p > label + input[type='file'] {
 }
 
 /*
+ * A model's write-up on a ride's page (#805).
+ *
+ * The controls wrap in a row with room between them, like the Ride screen's.
+ * An ask control that cannot act while a write-up runs carries `aria-disabled`
+ * rather than `disabled`, for the picker's reason above, and looks the way the
+ * picker's does.
+ *
+ * The write-up itself is ONE text node: `pre-wrap` keeps the paragraphs a
+ * model wrote as newlines, and `overflow-wrap: anywhere` breaks a string with
+ * no break opportunity — a long URL, say — rather than letting it scroll a
+ * phone's page sideways (SC 1.4.10; `browser/reflow.browser.spec.ts` walks
+ * the populated fixture's long write-up at 320 px).
+ */
+.oyl-write-up__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-write-up-section .oyl-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  border-color: var(--oyl-color-border);
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * The rider's words to mask (#839, `athlete/MaskedWordsPanel.tsx`). One row an
+ * entry, its Remove beside it and wrapping under it on a narrow screen, and
+ * the entry itself broken anywhere — a rider may list an unbreakable village
+ * name, which would otherwise scroll a phone's page sideways (SC 1.4.10).
+ */
+.oyl-masked-words__list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-masked-words__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-masked-words__word {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.oyl-write-up__text {
+  margin-inline: 0;
+  padding-inline-start: var(--oyl-space-md);
+  border-inline-start: 4px solid var(--oyl-color-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
  * The OpenStreetMap credit.
  *
  * Muted but not hidden, and deliberately not smaller than the body text: ODbL
@@ -3106,6 +3216,24 @@ p > label + input[type='file'] {
 .oyl-hud__control:focus-visible {
   outline: 3px solid var(--oyl-color-hud-ink);
   outline-offset: 2px;
+}
+
+/* #748: EVERY keyboard focus ring on the HUD is the HUD's own ink, not only
+   the `.oyl-hud__control`s'. The mute toggle, the volume and the side
+   camera's Stop took the page's `:focus-visible`, and `.oyl-hud` pins
+   `--oyl-color-focus` to its light value, #141b1a — drawn 2 px outside the
+   control onto `hudSurface`, #10161c: 1.04:1, a ring nobody could see (WCAG
+   2.2 SC 2.4.7, 2.4.13). `hudInk` on `hudSurface` is 17.07:1, declared in
+   `tokens.ts` as the ring's own pair. A notice keeps the page's ring: it has
+   its own light surface, which is where its ring lands. Read back off the
+   engine, with this rule deleted as the control, by
+   `browser/hud-focus.browser.spec.ts`. */
+.oyl-hud :focus-visible {
+  outline-color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud .oyl-status :focus-visible {
+  outline-color: var(--oyl-color-focus);
 }
 
 /* A notice is an exception, so it is set as compactly as it can be read: the

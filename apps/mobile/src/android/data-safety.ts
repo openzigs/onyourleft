@@ -69,7 +69,7 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row but two is `collected: false`, and that is a statement about
+ * ⚠️ Every row but four is `collected: false`, and that is a statement about
  * the PRODUCT, not a convenience: Phase 1 has no server, no account and no
  * analytics (CLAUDE.md §1, owner decision D6). Play's definition of
  * "collected" is data transferred off the device; a ride the athlete exports
@@ -95,6 +95,12 @@ export interface DataSafetyAnswer {
  * remembers "every row but one" is reading the old file: the ride map's tile
  * requests' IP addresses are visible in the tile host's analytics for up to
  * 7 days, which is not ephemeral processing. See the row.
+ *
+ * ⚠️ **Since #804 the two health rows are collected too**, and a reviewer who
+ * remembers "every row but two" is reading the old file: the post-ride ask
+ * sends a ride's numbers to the rider's own computer on a press. See the rows.
+ * ⚠️ **Since #803 they are SHARED as well**: the same ask can go to a hosted
+ * model on the rider's own key, which is a third party.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -168,16 +174,53 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
+    // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers `collected: false` "because nothing transmits it"
+    // is reading the old file: the post-ride ask sends a ride's heart rate, as
+    // numbers, to the rider's own computer when they press the button on the
+    // ride's page (ADR 0035 D-9 B). That is transmission off the device, so it
+    // is collected, on the Photos row's reasoning; `shared: false` and
+    // `optional: true` on the same words — the destination is the rider's own
+    // computer, the transfer is a specific user-initiated action, and nothing
+    // is set up by default.
+    //
+    // ⚠️ **Re-answered by #803, and the answer CHANGED — shared: true.** A
+    // reviewer who remembers `shared: false` is reading #804's file. The
+    // hosted model on the rider's own key is now sent a ride's heart rate when
+    // the rider asks for an analysis on the hosted source (the owner's ruling 4
+    // on #795: *"health and fitness data shared with a third party the rider
+    // chose"*; ADR 0035 D-9 C; ADR 0029's 2026-09-29 amendment). That service
+    // is a third party — not the rider's own machine — so this is SHARING in
+    // Play's sense, and #803's criterion, written from that ruling, files it
+    // as shared rather than arguing Play's user-initiated exemption for a
+    // third party. Still optional: off by default,
+    // separately consented, and off again whenever the app is opened.
     dataType: 'Health and fitness — health info',
-    collected: false,
-    shared: false,
-    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85); not collected because nothing transmits it',
+    collected: true,
+    shared: true,
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'heart rate from a BLE strap, stored locally. In scope of the Health apps policy because it advances gameplay (#85). When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s heart rate — as numbers, section by section — is sent to the source they chose: one computer the rider configured at an address on their own network and switched on, the same computer and rules as the Photos row; or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default, nothing is sent until the press, and nothing is sent in the background. It is not sent to this project, which runs no server',
   },
   {
+    // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers "#518: the row the hosted path would move, and it
+    // has not moved yet" is reading the old file. The post-ride ask sends a
+    // ride's power, cadence, weight, watts per kilogram, threshold power and
+    // length, section by section, to the rider's OWN computer on the press
+    // (ADR 0035 D-9 B). Collected, not shared, optional — the health-info
+    // row's reasoning, and the Photos row's.
+    //
+    // ⚠️ **Re-answered by #803, and the answer CHANGED — shared: true**, on
+    // the health-info row's reasoning: the hosted model on the rider's own key
+    // is now sent these numbers when the rider asks for an analysis on the
+    // hosted source (ruling 4 on #795; ADR 0035 D-9 C).
     dataType: 'Health and fitness — fitness info',
-    collected: false,
-    shared: false,
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally',
+    collected: true,
+    shared: true,
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project, which runs no server. No position, altitude, date or identifier is sent on either path',
   },
   {
     dataType: 'Personal info',
@@ -216,9 +259,14 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // exempts a transfer *"based on a specific user-initiated action, where
     // the user reasonably expects the data to be shared"*, which a press of
     // "Send one picture" to an address the rider typed is. ⚠️ **ADR 0029's
-    // amendment names `shared: yes` for the HOSTED path**, which is a third
-    // party by any reading — that path is not built (the address rule refuses
-    // anything off the rider's own network), and building it re-files this row.
+    // body names `shared: yes` for a HOSTED path carrying pictures, and since
+    // #518 there IS a hosted path — which is never sent a picture.** The owner
+    // ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted model
+    // on the rider's own key, *"NUMBERS ONLY and never a picture"*, and in
+    // terms that Photos and videos stays `shared: false`.
+    // `apps/web/src/camera/hosted-transport.test.ts` §"a picture cannot reach
+    // it" holds that by type, at run time and by what the modules can name, so
+    // this row is unchanged by the hosted path, and its `why` says so.
     //
     // **`optional: true`**: off until the rider sets up a computer and
     // switches it on, and the app works in full without it.
@@ -264,7 +312,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
   },
   {
     dataType: 'Device or other IDs',

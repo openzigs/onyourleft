@@ -233,6 +233,87 @@ const platformIsolation = (extraPatterns = []) => ({
   ],
 });
 
+/**
+ * The instance's SQL driver and query builder, by name (#769). Only
+ * `apps/instance/src/store/` may import them — see the block that uses this.
+ */
+const SQL_DRIVER_IMPORT_PATTERNS = [
+  {
+    group: ['node:sqlite', 'sqlite', 'kysely', 'kysely/*', 'better-sqlite3', 'sqlite3'],
+    message:
+      'Only apps/instance/src/store/ may name the SQL driver or Kysely (#769, ADR 0037 D-2). Use the SqlStore port.',
+  },
+];
+
+/**
+ * The instance's Node adapter, by file name (#852): the entry point, the HTTP
+ * listener, the `node:sqlite` driver and the disk blob store, plus tests and
+ * test support, which run on Node by definition. Everything else under
+ * `apps/instance/src/` mounts unchanged under `workerd` (ADR 0037 D-2).
+ */
+const INSTANCE_NODE_ADAPTER_FILES = [
+  'apps/instance/src/main.ts',
+  'apps/instance/src/serve.ts',
+  'apps/instance/src/node-listener.ts',
+  'apps/instance/src/operator/cli.ts',
+  'apps/instance/src/operator/run.ts',
+  'apps/instance/src/room/node/router.ts',
+  'apps/instance/src/room/node/worker.ts',
+  'apps/instance/src/room/node/worker-main.ts',
+  'apps/instance/src/instance.ts',
+  'apps/instance/src/node-imports.ts',
+  'apps/instance/src/operator/commands.ts',
+  'apps/instance/src/store/backup.ts',
+  'apps/instance/src/store/serving.ts',
+  'apps/instance/src/store/node-sqlite.ts',
+  'apps/instance/src/blob/disk-blob-store.ts',
+  'apps/instance/src/**/*.test.ts',
+  'apps/instance/src/**/*-testing.ts',
+  'apps/instance/src/**/testing/**',
+];
+
+/** Node-only globals the instance core may not name (#852). */
+const INSTANCE_NODE_ONLY_GLOBALS = [
+  'Buffer',
+  'process',
+  'require',
+  'module',
+  'exports',
+  '__dirname',
+  '__filename',
+  'global',
+  'setImmediate',
+  'clearImmediate',
+];
+
+const INSTANCE_NODE_ONLY_MESSAGE =
+  'The instance core mounts unchanged under workerd, which has no Node globals (ADR 0037 D-2, #852). Take what you need as a parameter, or put Node-only code in an adapter file and name it in the ignores of eslint.config.js’s instance block.';
+
+/**
+ * The same names reached as a property of the global object (#864):
+ * `globalThis.process`, `self.Buffer`, `window.require`. `no-restricted-globals`
+ * reads identifiers only, so a member expression passed it.
+ */
+const INSTANCE_NODE_ONLY_PROPERTIES = ['globalThis', 'window', 'self', 'global'].flatMap((object) =>
+  INSTANCE_NODE_ONLY_GLOBALS.map((property) => ({
+    object,
+    property,
+    message: INSTANCE_NODE_ONLY_MESSAGE,
+  })),
+);
+
+/**
+ * A Node builtin, in either spelling, imported by the instance core (#864) —
+ * the same derived list the platform-isolated packages use.
+ */
+const INSTANCE_NODE_IMPORT_PATTERNS = [
+  {
+    group: ['node:*', ...NODE_BUILTIN_SPECIFIERS],
+    message:
+      'The instance core mounts unchanged under workerd, which loads no Node builtin (ADR 0037 D-2, #864). Put Node-only code in an adapter file and name it in the ignores of eslint.config.js’s instance block.',
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -484,6 +565,18 @@ export default tseslint.config(
     },
   },
 
+  // --- packages/protocol is the race-room wire format, and platform-free ------
+  // #768. The same bytes are decoded in a browser, in the Android WebView and
+  // in a room under Node or `workerd`, so it takes packages/domain's isolation
+  // verbatim. `packages/protocol/tsconfig.json` is the closure; this is the
+  // fast duplicate, and it is what makes a `WebSocket` or a `fetch` in `src/`
+  // fail lint as well as typecheck. The transport belongs to the adapters
+  // (`apps/instance`, `apps/web`), never to the format.
+  {
+    files: ['packages/protocol/**/*.{ts,tsx}'],
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
   // --- packages/physics is pure computation, and pure means deterministic -----
   // #88's package is a model, not a service: docs/architecture.md gives it
   // "Power → speed, as separately testable terms" and forbids it any rendering,
@@ -532,6 +625,206 @@ export default tseslint.config(
         },
       ],
     },
+  },
+
+  // --- The instance's database driver stays behind its port -----------------
+  // #769. `apps/instance/src/store/` is the one place the instance names its
+  // SQL driver (`node:sqlite`) or its query builder (Kysely): the core has to
+  // mount unchanged under a Durable Object (ADR 0037 D-2), whose SQLite is
+  // reached another way, so a handler that imported the driver would have
+  // chosen the platform. Everything else asks the `SqlStore` port. The two
+  // SQLite packages ADR 0037 D-5 named and did not adopt are listed too, so
+  // taking one of them is a change here rather than a quiet import.
+  //
+  // ⚠️ It comes BEFORE the room core's block, which sets the same rule for its
+  // own files and so replaces this one there: flat config keeps the last
+  // setting of a rule. The room core carries these patterns in its own list.
+  {
+    files: ['apps/instance/**/*.ts'],
+    ignores: ['apps/instance/src/store/**'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: SQL_DRIVER_IMPORT_PATTERNS,
+        },
+      ],
+    },
+  },
+
+  // --- The instance's core names no Node-only global (#852) -----------------
+  // ADR 0037 D-2: the room, the API handler and pagination are mounted
+  // unchanged by a Node adapter and by a Durable Object under `workerd`, which
+  // has no `Buffer`, no `process` and no `require`. A handler that reached for
+  // one would typecheck (the wide `tsconfig.json` carries `@types/node`), pass
+  // every Node test, and fail only under `workerd` — whose suite is local-only.
+  // So this is the half that runs on every pull request.
+  //
+  // What is exempt is the NODE ADAPTER, by name, and nothing by directory:
+  // the entry point, the HTTP listener, the `node:sqlite` driver and the disk
+  // blob store — plus tests and test support, which run on Node by
+  // definition. A new adapter file is added here on purpose; a new core file
+  // is covered without anyone editing this. The platform-neutral globals the
+  // handler is written against (`fetch`, `Request`, `Response`, `Headers`,
+  // `crypto`) are NOT listed: `workerd` has them.
+  //
+  // ⚠️ It comes BEFORE the room core's block, which sets the same rule and so
+  // replaces this one under `src/room/core/`; that block's own list already
+  // carries every name here but `module`, `exports` and `clearImmediate`,
+  // which its `lib`-narrowed tsconfig makes compile errors anyway.
+  //
+  // #864: a bare name is not the only spelling. `globalThis.process` and
+  // `globalThis.Buffer` are MEMBER expressions, which `no-restricted-globals`
+  // never looks at (probed: 0 errors before), so the same names are refused as
+  // properties of every object that is the global one — and the room core's
+  // block, which replaces `no-restricted-properties` under `src/room/core/`,
+  // carries the same entries. And a `node:` IMPORT, which no global rule can
+  // see, is refused here too, derived from `builtinModules` exactly as the
+  // platform-isolated packages derive it: until #864 it was caught only by the
+  // local `workerd` suite.
+  {
+    files: ['apps/instance/src/**/*.ts'],
+    ignores: INSTANCE_NODE_ADAPTER_FILES,
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...INSTANCE_NODE_ONLY_GLOBALS.map((name) => ({
+          name,
+          message: INSTANCE_NODE_ONLY_MESSAGE,
+        })),
+      ],
+      'no-restricted-properties': ['error', ...INSTANCE_NODE_ONLY_PROPERTIES],
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [...INSTANCE_NODE_IMPORT_PATTERNS, ...SQL_DRIVER_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  // The same import rule for `src/store/`, WITHOUT the SQL patterns: that
+  // directory is the one place Kysely may be named (#769), and flat config
+  // keeps the last setting of a rule, so the block above had to leave it out.
+  {
+    files: ['apps/instance/src/store/**/*.ts'],
+    ignores: INSTANCE_NODE_ADAPTER_FILES,
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: INSTANCE_NODE_IMPORT_PATTERNS },
+      ],
+    },
+  },
+
+  // --- The room core is pure: time arrives as a parameter (#779) ------------
+  // `apps/instance/src/room/core/` is mounted unchanged by a Node adapter
+  // (#780) and a Durable Object (#781), ADR 0037 D-2, and its determinism test
+  // — the same calls give byte-identical frames — means something only while
+  // it reads no clock. `tsconfig.room-core.json` is the closure for the
+  // platform (no `lib` but ES2024, no `types`); this is the fast duplicate,
+  // plus the ECMAScript clock and the timers no `lib` narrowing can remove,
+  // and the socket library by name.
+  {
+    files: ['apps/instance/src/room/core/**/*.ts'],
+    rules: {
+      ...platformIsolation([
+        {
+          group: ['ws', 'ws/*'],
+          message:
+            'The room core names no socket library: the adapter owns the socket (ADR 0037 D-2).',
+        },
+        ...SQL_DRIVER_IMPORT_PATTERNS,
+      ]),
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'The room core names no platform API: an adapter owns the socket and the timer (ADR 0037 D-2, #779).',
+        })),
+        ...[
+          'Date',
+          'setTimeout',
+          'setInterval',
+          'setImmediate',
+          'queueMicrotask',
+          'performance',
+        ].map((name) => ({
+          name,
+          message:
+            'The room core reads no clock and schedules nothing: time arrives as a parameter, as in the recording engine (#45, #779).',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'The room core is deterministic: the same calls give byte-identical frames (#779).',
+        },
+        // #864: this block replaces the instance core's `no-restricted-properties`
+        // here, so it carries the same `globalThis.process` refusals.
+        ...INSTANCE_NODE_ONLY_PROPERTIES,
+      ],
+    },
+  },
+
+  // --- Lucide: named imports from the package root, and nothing else --------
+  // #673, ADR 0034 D-2. `lucide-react/dynamic` maps every icon in the set to a
+  // lazy import, so a single `DynamicIcon` puts all of them in the build and —
+  // because the precache is derived from the build (#406) — in every rider's
+  // first download. The package declares no `exports` map, so every file under
+  // it is importable by path; refusing every subpath is what closes
+  // `lucide-react/dist/esm/DynamicIcon.mjs` as well as the documented one.
+  //
+  // ⚠️ Flat config keeps the LAST setting of a rule for a file, so a later block
+  // that sets `@typescript-eslint/no-restricted-imports` for any file under
+  // `apps/web` silently drops these bans there (#871, from #868's review). Such
+  // a block restates these entries rather than replacing them.
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'lucide-react',
+              importNames: ['DynamicIcon', 'dynamicIconImports', 'iconNames'],
+              message:
+                'Import each Lucide icon by name (ADR 0034 D-2): a dynamic icon puts the whole set in the build and the precache.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['lucide-react/*'],
+              message:
+                'Import Lucide icons by name from `lucide-react` itself (ADR 0034 D-2). `lucide-react/dynamic` and its siblings put the whole set in the build and the precache.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // --- The Durable Object adapter runs under workerd, not Node (#781) -------
+  // `apps/instance/src/room/durable-object/` is loaded by `workerd` with no
+  // Node compatibility flag, so a `node:` import or a `process` there is a
+  // load error at run time. `tsconfig.durable-object.json` is the closure (no
+  // `lib` but ES2024, no `types`); this is the fast duplicate. The runtime's
+  // own `Response` and `WebSocketPair` are reached in one place,
+  // `worker-under-test.ts`, through `globalThis` and the ports in
+  // `platform.ts`, so no bare platform global is needed here. The tests and
+  // the `*-testing.ts` fakes run in Node, under Vitest, and are exempt.
+  {
+    files: ['apps/instance/src/room/durable-object/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/*-testing.ts'],
+    rules: platformIsolation([
+      {
+        group: ['ws', 'ws/*'],
+        message:
+          'The Durable Object adapter uses the platform’s WebSocket, never `ws` (ADR 0037 D-2).',
+      },
+    ]),
   },
 
   // --- The announcer's core is pure: time arrives as a parameter -------------

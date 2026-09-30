@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * A model server on the rider's computer, as a `fetch` double — test support
+ * for the post-ride ask (#804). It answers every step of the analysis
+ * template by what the request asks for: a section's note for a
+ * `section_notes` step, a note for a `position_notes` step, and the summary
+ * text it was given for anything else. A step with no `response_format` hint —
+ * every hosted step (#803) — is read by the reply form its prompt spells out,
+ * so the same server stands behind the hosted transport's `send` too.
+ *
+ * Every reply carries {@link REPLY_MARKER} OUTSIDE the field the runner reads
+ * (`choices[0].message.content`) — in the envelope, and in a reasoning field
+ * beside the content — so a test can prove nothing of a raw reply but its
+ * validated field reaches a saved row or the page.
+ */
+
+import type { AnalysisSend } from '../camera/http-body';
+import type { RunnerClock } from './runner';
+
+/** Planted in every reply, outside the field the runner reads. */
+export const REPLY_MARKER = 'RAW-REPLY-MARKER-804';
+
+/** One request the server was sent, as parsed JSON. */
+export type ModelServerRequest = Readonly<Record<string, unknown>>;
+
+export interface ModelServer {
+  readonly send: AnalysisSend;
+  /** Every request, in order. */
+  readonly requests: ModelServerRequest[];
+  /** What the summary step answers from now on. */
+  summary: string;
+}
+
+function contentOf(request: ModelServerRequest): string {
+  const messages = request.messages as readonly { readonly content: string }[] | undefined;
+  return messages?.[1]?.content ?? '';
+}
+
+function schemaNameOf(request: ModelServerRequest): string | undefined {
+  const format = request.response_format as
+    { readonly json_schema?: { readonly name?: string } } | undefined;
+  return format?.json_schema?.name;
+}
+
+/**
+ * The step a prompt asks for, read off the reply form its last lines spell
+ * out — for a request with no `response_format` hint, which is every hosted
+ * step (#803).
+ */
+function formNameOf(prompt: string): string | undefined {
+  if (/in exactly this form: \{"section":\d+,"notes"/.test(prompt)) {
+    return 'section_notes';
+  }
+  return prompt.includes('in exactly this form: {"notes"') ? 'position_notes' : undefined;
+}
+
+/** How a {@link modelServer} answers, beyond its summary. */
+export interface ModelServerOptions {
+  /**
+   * Plant {@link REPLY_MARKER} as an extra key beside `notes` inside every
+   * structured step's content as well — #805, carried from #831's review. The
+   * acceptors take exactly the keys their contract names and refuse the rest
+   * (`template.ts` §`jsonObject`), so every such step is a failed one and the
+   * marker can reach nothing.
+   */
+  readonly extraKey?: boolean;
+}
+
+/** A server answering every step. `summary` is the summary step's reply. */
+export function modelServer(
+  summary = 'A steady ride, evenly paced from start to finish.',
+  options: ModelServerOptions = {},
+): ModelServer {
+  const extra = options.extraKey === true ? { remark: REPLY_MARKER } : {};
+  const requests: ModelServerRequest[] = [];
+  const server: ModelServer = {
+    requests,
+    summary,
+    send: async (_url, init) => {
+      const request = JSON.parse(
+        typeof init?.body === 'string' ? init.body : '{}',
+      ) as ModelServerRequest;
+      requests.push(request);
+      // A hosted step carries no `response_format` hint (#803), so where
+      // there is none the step is read off the prompt's own reply form.
+      const name = schemaNameOf(request) ?? formNameOf(contentOf(request));
+      let content: string;
+      if (name === 'section_notes') {
+        const section = Number(/"section":(\d+)/.exec(contentOf(request))?.[1] ?? '0');
+        content = JSON.stringify({
+          section,
+          notes: `Section ${String(section)} was steady.`,
+          ...extra,
+        });
+      } else if (name === 'position_notes') {
+        content = JSON.stringify({ notes: 'Posture held steady.', ...extra });
+      } else {
+        content = server.summary;
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: REPLY_MARKER,
+            choices: [
+              {
+                message: { content, reasoning_content: REPLY_MARKER },
+                finish_reason: 'stop',
+              },
+            ],
+            system_fingerprint: REPLY_MARKER,
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  };
+  return server;
+}
+
+/** A clock whose waits never elapse: every step here is settled by the server. */
+export const STILL_CLOCK: RunnerClock = {
+  now: () => 0,
+  delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
+};

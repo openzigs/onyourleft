@@ -622,6 +622,8 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       cameraFrames: 0,
       framingReferences: 0,
       sideCameraReports: 0,
+      rideWriteUps: 0,
+      syncBases: 0,
     });
 
     // Re-create the athlete before reading. If the cascade had left the rows
@@ -681,6 +683,8 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       cameraFrames: 0,
       framingReferences: 0,
       sideCameraReports: 0,
+      rideWriteUps: 0,
+      syncBases: 0,
     });
   });
 

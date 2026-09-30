@@ -505,6 +505,50 @@
       ]
     },
     {
+      "id": "gravelly_sand",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/gravelly_sand",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-09-29",
+      "authors": "Dario Barresi (All)",
+      "files": [
+        {
+          "path": "gravelly_sand_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravelly_sand/gravelly_sand_diff_1k.jpg",
+          "bytes": 1062525,
+          "sha256": "bc1624594ce807f04eaa023f6f9df93ffefd20904570cd46ca302b954ef80eec"
+        },
+        {
+          "path": "gravelly_sand_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/gravelly_sand/gravelly_sand_nor_gl_1k.jpg",
+          "bytes": 1387739,
+          "sha256": "7ccb08525d46520a6d00262f4f73483b3569cc6cbc2908da069f033290d1c2f8"
+        }
+      ]
+    },
+    {
+      "id": "rocks_ground_05",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/rocks_ground_05",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-09-29",
+      "authors": "Rob Tuytel (All)",
+      "files": [
+        {
+          "path": "rocks_ground_05_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocks_ground_05/rocks_ground_05_diff_1k.jpg",
+          "bytes": 756710,
+          "sha256": "7dc4eb1e511588238368c5af73cd38bba528f02f4dff941da8282963c15b325d"
+        },
+        {
+          "path": "rocks_ground_05_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocks_ground_05/rocks_ground_05_nor_gl_1k.jpg",
+          "bytes": 1387386,
+          "sha256": "5ee17fa20945e535e748b8ed9a9239d940644aec4b5421340c8bfb58537c7210"
+        }
+      ]
+    },
+    {
       "id": "makehuman",
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",

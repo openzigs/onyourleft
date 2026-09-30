@@ -31,6 +31,12 @@
  * with the overview — one point lookup, no picture and no number on the row —
  * and rendered by `detail/SideCameraSection.tsx`, only for a ride that has one.
  *
+ * ## A model's write-up (#804, #805)
+ *
+ * Below it, on every ride: the write-up saved with the ride, read with the
+ * overview and screened again before it is shown, and the press that asks the
+ * rider's model for a new one. `detail/RideWriteUpSection.tsx` is all of it.
+ *
  * ## The shared view
  *
  * The rider's own track is shown whole. ADR 0004 decision E and #51's export
@@ -61,11 +67,14 @@ import {
   loadOwnTrack,
   loadSharedTrack,
   loadTrace,
+  readWriteUp,
   type RideOverview,
   type Trace,
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
 import { SideCameraSection } from '../detail/SideCameraSection';
+import { RideWriteUpSection } from '../detail/RideWriteUpSection';
+import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import {
   CHART_POINTS,
   DEFAULT_SERIES,
@@ -125,6 +134,12 @@ export interface ActivityDetailViewProps {
    * `SettingsView`'s `announcements` prop has.
    */
   readonly preferences?: PreferenceStorage | undefined;
+  /**
+   * The post-ride ask (#804), or `undefined` for none — and then no control is
+   * offered, and `detail/RideWriteUpSection.tsx` says where one is set up
+   * (#805). `ride-analysis/RideWriteUpControl.tsx` is the press.
+   */
+  readonly writeUp?: RideAnalysisPort | undefined;
 }
 
 /**
@@ -165,6 +180,7 @@ export function ActivityDetailView({
   map,
   basemap,
   preferences,
+  writeUp,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -352,7 +368,7 @@ export function ActivityDetailView({
     );
   }
 
-  const { activity, streams, laps, sideCamera } = state.overview;
+  const { activity, streams, laps, sideCamera, writeUp: savedWriteUp } = state.overview;
   const available = streams?.channels ?? [];
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
 
@@ -529,6 +545,22 @@ export function ActivityDetailView({
         report renders nothing here at all.
       */}
       <SideCameraSection sideCamera={sideCamera} />
+
+      {/*
+        #804, #805. A model's write-up of this ride, on every ride's page and
+        below the side camera's report, never in place of it (ADR 0035 D-3):
+        the saved one, screened again, and the press that asks for a new one.
+        It sends nothing until that is pressed. With no model set up it is
+        one sentence and a link.
+      */}
+      <RideWriteUpSection
+        port={writeUp}
+        activityId={activity.id}
+        initial={savedWriteUp}
+        reread={async () =>
+          port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
+        }
+      />
 
       {activity.hasPosition ? (
         <>

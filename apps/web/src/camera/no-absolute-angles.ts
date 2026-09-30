@@ -19,6 +19,11 @@
  *
  * ## What it forbids
  *
+ * ⚠️ **The matchers are in `angle-claims.ts` since #798**, which imports
+ * nothing so that the model write-up screen (`write-up-screen.ts`) can ship
+ * them without shipping the TypeScript compiler this file needs. The list
+ * below is what they match; change it THERE, and both uses move together.
+ *
  * 1. **A degree sign** in any text — D-3: *"The scan is for a degree sign, the
  *    word `degrees`, and a formatter that renders one, anywhere under
  *    `apps/web/src`."* A degree sign followed by `C` or `F` is a temperature
@@ -50,8 +55,11 @@
  * A soft hyphen (U+00AD), a zero-width space, non-joiner or joiner
  * (U+200B–U+200D) or a word joiner (U+2060) inside a word renders as nothing
  * and splits the word for `\b` — `'val\u00adgus'` reads as a banned word and
- * used to pass (#564). Every text is matched with them removed, and `&shy;`,
- * `&zwj;` and `&zwnj;` are decoded so the same rule reaches them in JSX.
+ * used to pass (#564). Since #798 the directional marks, embeddings,
+ * overrides and isolates and the byte-order mark are removed too
+ * (`angle-claims.ts` §`INVISIBLE`). Every text is matched with them removed,
+ * and `&shy;`, `&zwj;` and `&zwnj;` are decoded so the same rule reaches them
+ * in JSX.
  *
  * ## A JSX element is also read whole
  *
@@ -101,6 +109,15 @@
 
 import ts from 'typescript';
 
+import {
+  type AngleClaimKind,
+  angleClaimKinds,
+  decodeCharacterReferences,
+  visibleText,
+} from './angle-claims';
+
+export { decodeCharacterReferences };
+
 /** One piece of rendered text that breaks the rule. */
 export interface AngleClaimFinding {
   readonly file: string;
@@ -108,131 +125,6 @@ export interface AngleClaimFinding {
   readonly line: number;
   readonly text: string;
   readonly rule: 'degree sign' | 'degree word' | 'degree formatter' | 'frontal plane';
-}
-
-/**
- * A degree sign — or either of its two look-alikes, `º` (U+00BA) and `˚`
- * (U+02DA) — that is not the start of a temperature unit; or a number followed
- * by the abbreviation `deg`.
- */
-const DEGREE_SIGN = /[\u00b0\u00ba\u02da\u2070\u1d52\u2218](?![CF]\b)/;
-
-/**
- * The abbreviation, after a number. Case-insensitive, unlike
- * {@link DEGREE_SIGN}: that one is case-SENSITIVE on purpose, so that only a
- * capital `C` or `F` after the sign reads as a temperature and `142°c` does
- * not slip past as one (#564).
- */
-const DEGREE_ABBREVIATION = /\d\s*deg\b/i;
-
-/**
- * The characters a rider cannot see and a regular expression can: the soft
- * hyphen (U+00AD), the zero-width space, non-joiner and joiner
- * (U+200B–U+200D) and the word joiner (U+2060). One inside a word splits it
- * for `\b` and for nobody reading it (#564), so every text is matched with
- * them removed.
- */
-const INVISIBLE = /[\u00ad\u200b-\u200d\u2060]/g;
-
-/** The word, singular or plural, whole. */
-const DEGREE_WORD = /\bdegrees?\b/i;
-
-/**
- * The frontal plane, in the words a sentence about it would use. Whole words,
- * case-insensitive; the list is every term ADR 0030 D-4's rule names and
- * D-8's word list, plus the forms a rider would read ("knees tracking", "hips
- * rocking", "side-to-side", "your shoulders were less level").
- */
-const FRONTAL_PLANE = new RegExp(
-  '\\b(?:' +
-    [
-      'valgus',
-      'varus',
-      'ab(?:duct(?:ion|ed|s)?)',
-      'ad(?:duct(?:ion|ed|s)?)',
-      'knees?\\s+track(?:s|ing|ed)?',
-      '(?:hip|hips|pelvis|pelvic)\\s+drop(?:s|ping|ped)?',
-      'sway(?:s|ing|ed)?',
-      'rock(?:s|ing|ed)?\\s+hips?',
-      'hips?\\s+rock(?:s|ing|ed)?',
-      'side[\\s-]to[\\s-]side',
-      // D-4: "foot eversion", and the other direction of the same rotation.
-      'eversion',
-      // Inversion only of a foot or an ankle (#564): bare, it is a
-      // temperature inversion or a colour inversion as often as a body.
-      '(?:foot|feet|ankles?)\\s+inversion',
-      'inversion\\s+(?:of|at|in)\\s+(?:the\\s+|your\\s+|their\\s+)?(?:foot|feet|ankles?)',
-      'evert(?:s|ed|ing)?',
-      'invert(?:s|ed|ing)?\\s+(?:foot|feet|ankles?)',
-      '(?:foot|feet|ankles?)\\s+invert(?:s|ed|ing)?',
-      // D-4: "shoulder levelness", in the shapes a sentence would take.
-      // "shoulder levelness", "your shoulders were possibly less level",
-      // "the shoulders were less level": up to three words between, so an
-      // adverb cannot walk it past. Only a ROAD's shoulder is excused — "the
-      // road shoulder is level with the verge", "the hard shoulder" — because
-      // that is tarmac (#564). A body's shoulder needs no possessive: an
-      // earlier narrowing to "your|their|…" let "Shoulders stayed level"
-      // through (#587's review).
-      '(?<!(?:road|hard)\\s+)shoulders?\\s+(?:[a-z]+\\s+){0,3}(?:un)?level(?:ness)?',
-      'level\\s+shoulders?',
-      'uneven\\s+shoulders?',
-      '(?:pelvi[cs]|hips?|shoulders?)\\s+tilt(?:s|ing|ed)?',
-      // D-4: "lateral sway", and any other lateral movement of a body — but
-      // not of the camera, its stand or the picture, which a framing
-      // instruction may well describe (#564). The bicycle is NOT excused: a
-      // bike rocking under a rider is the rider's frontal plane. ⚠️ Nor is a
-      // bare "frame", which in a cycling app is the bicycle's as often as the
-      // picture's (#587's review): "the camera frame" and "the picture frame"
-      // are still excused, by the word before it.
-      'lateral(?:ly)?\\s+(?:sway|movement|motion|shift|tilt|drop)(?!\\s+of\\s+(?:the\\s+|your\\s+)?(?:camera|phone|tablet|tripod|stand|picture|image|view|screen|road))',
-      'frontal',
-    ].join('|') +
-    ')\\b',
-  'i',
-);
-
-/**
- * The named character references this rule decodes — the signs it forbids and
- * their look-alikes, plus the few that could split a word it forbids. Looked
- * up in lower case, so `&DEG;` counts as `&deg;` does: a browser reads named
- * references case-sensitively, and this over-reads on purpose, because a ban
- * that errs is one a reviewer reads rather than one a rider does.
- */
-const NAMED_REFERENCES: Readonly<Record<string, string>> = {
-  deg: '\u00b0',
-  ordm: '\u00ba',
-  nbsp: ' ',
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  // The invisible ones (#564): each renders as nothing, so each can split a
-  // word. Decoded here so that INVISIBLE removes them.
-  shy: '\u00ad',
-  zwj: '\u200d',
-  zwnj: '\u200c',
-};
-
-/**
- * `text` with its HTML character references decoded — named ones from
- * {@link NAMED_REFERENCES}, and decimal or hexadecimal ones for any code point,
- * in any case and with any number of leading zeros. A reference this cannot
- * decode is left as it was.
- */
-export function decodeCharacterReferences(text: string): string {
-  return text.replace(
-    /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]*));/gi,
-    (whole, hex: string | undefined, decimal: string | undefined, name: string | undefined) => {
-      if (name !== undefined) {
-        return NAMED_REFERENCES[name.toLowerCase()] ?? whole;
-      }
-      const code = hex !== undefined ? parseInt(hex, 16) : parseInt(decimal ?? '', 10);
-      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
-        ? String.fromCodePoint(code)
-        : whole;
-    },
-  );
 }
 
 /**
@@ -444,18 +336,25 @@ function jsxElementTextsOf(parsed: ts.SourceFile): readonly JsxElementParts[] {
   return found;
 }
 
-/** The rule `text` breaks, if any — matched with the invisible characters removed. */
+/** The scan's name for each kind of claim `angle-claims.ts` finds. */
+const RULE_OF_KIND: Readonly<Record<AngleClaimKind, AngleClaimFinding['rule']>> = {
+  'angle-sign': 'degree sign',
+  'angle-word': 'degree word',
+  'body-sideways': 'frontal plane',
+};
+
+/**
+ * The rule `text` breaks, if any — matched with the invisible characters
+ * removed. The matchers are `angle-claims.ts`'s, shared with the run-time
+ * write-up screen (#798); the formatter is this scan's own, because only
+ * source hands `Intl.NumberFormat` a unit.
+ */
 function ruleBroken(text: string): AngleClaimFinding['rule'] | undefined {
-  const visible = text.replace(INVISIBLE, '');
-  return visible.trim().toLowerCase() === 'degree'
-    ? 'degree formatter'
-    : DEGREE_SIGN.test(visible) || DEGREE_ABBREVIATION.test(visible)
-      ? 'degree sign'
-      : DEGREE_WORD.test(visible)
-        ? 'degree word'
-        : FRONTAL_PLANE.test(visible)
-          ? 'frontal plane'
-          : undefined;
+  if (visibleText(text).trim().toLowerCase() === 'degree') {
+    return 'degree formatter';
+  }
+  const [first] = angleClaimKinds(text);
+  return first === undefined ? undefined : RULE_OF_KIND[first];
 }
 
 /** Every absolute-angle or frontal-plane claim in one file's rendered text. */

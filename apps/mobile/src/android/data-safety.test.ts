@@ -205,9 +205,40 @@ describe('the declaration filed on Play', () => {
       answer.dataType.startsWith('Health and fitness'),
     );
     expect(health.length).toBeGreaterThanOrEqual(2);
-    for (const answer of health) {
-      expect(answer.collected, answer.dataType).toBe(false);
+  });
+
+  it('answers both health rows as collected, optional and SHARED — #804, #803', () => {
+    // #804's press sends a ride's heart rate, power and cadence, as numbers,
+    // to the rider's own computer — collected. #803 sends the same to a hosted
+    // model on the rider's own key, a third party the rider chose — shared
+    // (the owner's ruling 4 on #795), re-filed in the same pull request.
+    for (const dataType of [
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+    ]) {
+      const answer = DATA_SAFETY_DECLARATION.find((row) => row.dataType === dataType);
+      expect(answer, dataType).toBeDefined();
+      expect(answer?.collected, dataType).toBe(true);
+      expect(answer?.shared, dataType).toBe(true);
+      expect(answer?.optional, dataType).toBe(true);
+      expect(answer?.purposes, dataType).toStrictEqual(['App functionality']);
+      expect(answer?.why, dataType).toContain('#804');
+      expect(answer?.why, dataType).toContain('their own network');
+      expect(answer?.why, dataType).toContain('#803');
+      expect(answer?.why, dataType).toContain('hosted model service the rider chose');
     }
+  });
+
+  it('says the climb a ride analysis sends is a difference, not an altitude — #847', () => {
+    // The row declares no location, and says no altitude is sent. A total
+    // climb is a height, so the row says what kind: #848's review asked for
+    // it in words rather than left for a reviewer to infer.
+    const fitness = DATA_SAFETY_DECLARATION.find(
+      (row) => row.dataType === 'Health and fitness — fitness info',
+    );
+    expect(fitness?.why).toContain('total climb (the height gained over the section');
+    expect(fitness?.why).toContain('a difference between two heights and never an altitude');
+    expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
   });
 
   it('answers the photos row as collected, optional and not shared — #387', () => {
@@ -246,14 +277,22 @@ describe('the declaration filed on Play', () => {
     expect(photos?.shared).toBe(false);
   });
 
-  it('collects nothing else — the map and the camera, and nothing more', () => {
+  it('collects nothing else — the map, the camera and the post-ride ask, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,
     );
-    expect(collected).toStrictEqual(['Location — approximate location', 'Photos and videos']);
-    for (const answer of DATA_SAFETY_DECLARATION) {
-      expect(answer.shared, answer.dataType).toBe(false);
-    }
+    expect(collected).toStrictEqual([
+      'Location — approximate location',
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'Photos and videos',
+    ]);
+    // Shared: the health rows alone, since #803. Photos and videos, and every
+    // location row, stay `shared: false` — the hosted path is never sent a
+    // picture and nothing it is sent carries a coordinate.
+    expect(
+      DATA_SAFETY_DECLARATION.filter((answer) => answer.shared).map((answer) => answer.dataType),
+    ).toStrictEqual(['Health and fitness — health info', 'Health and fitness — fitness info']);
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {

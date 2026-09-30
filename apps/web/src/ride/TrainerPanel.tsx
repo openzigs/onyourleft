@@ -329,27 +329,6 @@ export function TrainerPanel({
         rider did not ask for; putting an answer they did ask for behind a
         routine sentence's window would delay it for no one's benefit.
       */}
-      {/*
-        #655: a *Set* the stall rescue held — the answer to the rider's own
-        press, in the slot *Refused* takes (the two never stand together: a
-        press clears the refusal). Keyed on the press, so a second *Set* of
-        the same number is a new message rather than no change. `live` only
-        with announcements off: on, the ride's one region says it
-        (`RideAnnouncer.tsx`), and a second voice would say it twice. The
-        rescue notice above names the pending target too; this line is what
-        answers the press.
-      */}
-      {trainer.ergHeld === undefined ? null : (
-        <StatusMessage
-          key={trainer.ergHeld.press}
-          tone="info"
-          label={HELD_LABEL}
-          live={!announcementsOn && trainer.ergHeld.press !== heldAtMount}
-        >
-          {heldSentence(trainer.ergHeld.target)}
-        </StatusMessage>
-      )}
-
       {trainer.refusal === undefined ? null : (
         <StatusMessage tone="danger" label="Refused" live>
           {trainer.refusal}
@@ -432,6 +411,33 @@ export function TrainerPanel({
                 </p>
               )}
             </form>
+          )}
+          {/*
+            #655: a *Set* the stall rescue held — the answer to the rider's own
+            press. Keyed on the press, so a second *Set* of the same number is
+            a new message rather than no change. `live` only with announcements
+            off: on, the ride's one region says it (`RideAnnouncer.tsx`), and a
+            second voice would say it twice. The rescue notice above names the
+            pending target too; this line is what answers the press.
+
+            ⚠️ **UNDER the form since #740, and a reviewer who remembers it
+            above, in the slot *Refused* takes, is reading the old file.**
+            There it pushed *End ERG* — the control the Eased sentence itself
+            names — 11.7 px UNDER the fold on the owner's tablet in the Android
+            shell and to 20.5 px at 1024×720 (`rideview.html?erg=held`, the
+            first fixture to render a manual rescue). #692's rule: nothing
+            whose height changes during a ride sits above a ride control in its
+            column. Right after *Set target*, it is still where the eye is.
+          */}
+          {trainer.ergHeld === undefined ? null : (
+            <StatusMessage
+              key={trainer.ergHeld.press}
+              tone="info"
+              label={HELD_LABEL}
+              live={!announcementsOn && trainer.ergHeld.press !== heldAtMount}
+            >
+              {heldSentence(trainer.ergHeld.target)}
+            </StatusMessage>
           )}
         </div>
       )}

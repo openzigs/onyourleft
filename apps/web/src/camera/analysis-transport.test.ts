@@ -17,6 +17,7 @@ import {
   MAXIMUM_PICTURE_BYTES,
   riderAnalysisPort,
   riderAnalysisSource,
+  riderModelStepSource,
   type AnalysisSend,
   type NativeAnalysisPost,
   type NativeAnalysisReply,
@@ -380,6 +381,64 @@ describe('which way a picture leaves — #553 review', () => {
     const source = await riderAnalysisSource(
       true,
       async () => Promise.resolve(async () => Promise.resolve(READY)),
+      () => current,
+    );
+    expect(source()).toBeDefined();
+    current = undefined;
+    expect(source()).toBeUndefined();
+  });
+});
+
+describe('which way a ride’s numbers leave — #804', () => {
+  const STEP = {
+    kind: 'summary',
+    system: 'You write a short summary.',
+    user: 'The ride was 62 minutes.',
+    maximumTokens: 1024,
+    temperature: 0.2,
+  } as const;
+  const READY: NativeAnalysisReply = {
+    status: 200,
+    body: JSON.stringify({ choices: [{ message: { content: 'ready' }, finish_reason: 'stop' }] }),
+  };
+
+  it('inside the shell, goes through the native request and never through fetch', async () => {
+    const natives: NativeAnalysisRequest[] = [];
+    const native: NativeAnalysisPost = async (sending) => {
+      natives.push(sending);
+      return Promise.resolve(READY);
+    };
+    const { send, sent: fetched } = recordingSend(() => modelReply('ready'));
+    const source = await riderModelStepSource(
+      true,
+      async () => Promise.resolve(native),
+      () => endpoint(),
+      send,
+    );
+    const reply = await source()?.runModelStep(STEP, new AbortController().signal);
+    expect(reply).toEqual({ kind: 'answered', text: 'ready', finish: 'stop' });
+    expect(fetched).toHaveLength(0);
+    expect(natives).toHaveLength(1);
+  });
+
+  it('in a browser, never loads the native request and goes through fetch', async () => {
+    let loaded = 0;
+    const loadNative = async (): Promise<NativeAnalysisPost> => {
+      loaded += 1;
+      return Promise.reject(new Error('a browser must not load Capacitor'));
+    };
+    const { send, sent: fetched } = recordingSend(() => modelReply('ready'));
+    const source = await riderModelStepSource(false, loadNative, () => endpoint(), send);
+    await source()?.runModelStep(STEP, new AbortController().signal);
+    expect(loaded).toBe(0);
+    expect(fetched).toHaveLength(1);
+  });
+
+  it('reads the endpoint again on every call, and builds nothing with none', async () => {
+    let current: AnalysisEndpoint | undefined = endpoint();
+    const source = await riderModelStepSource(
+      false,
+      async () => Promise.reject(new Error('unused')),
       () => current,
     );
     expect(source()).toBeDefined();

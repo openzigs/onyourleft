@@ -1,0 +1,21 @@
+{
+  // The instance server (ADR 0036, #767). Node is its platform, so it gets
+  // Node's types and no DOM: `Request`, `Response` and `Headers` come from
+  // `@types/node`'s globals, which is the same WHATWG API the fetch-style
+  // handler is written against.
+  //
+  // ⚠️ It runs as TypeScript with no build step — `node src/main.ts`, Node 24's
+  // own type stripping — so two settings the other packages do not need:
+  // relative imports name the `.ts` file (`allowImportingTsExtensions`), and
+  // nothing may need emitting (`erasableSyntaxOnly`: no `enum`, no parameter
+  // property, no `namespace`), because Node strips types and transforms nothing.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/**/*.ts", "tools/**/*.ts", "vitest.config.ts", "vitest.workerd.config.ts"]
+}

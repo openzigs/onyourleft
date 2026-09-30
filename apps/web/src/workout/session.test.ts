@@ -744,9 +744,14 @@ describe('a target held back by one of the game handle’s holds — #729', () =
       'That target was held back: this app asked the trainer to let go so it can be forgotten.',
     ],
     ['let-go', 'No more targets are being sent: this app has stopped driving the trainer.'],
+    // #732.
+    [
+      'disconnected',
+      'No more targets are being sent: this trainer is not connected to this app any more.',
+    ],
   ] as const)('words %s for the rider', async (hold, sentence) => {
     const { trainer } = await loop();
-    const reason = 'the ride controller has let the trainer go';
+    const reason = 'the ride controller was disposed and writes nothing again';
     const session = createWorkoutSession({
       timeline: expandWorkout(workout([steady(60, 1.0)])),
       thresholdPower: THRESHOLD,

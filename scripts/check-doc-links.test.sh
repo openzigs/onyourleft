@@ -62,7 +62,7 @@ assert_violation() {
   out="$(bash "${CHECKER}" "${root}" 2>&1)"
   status=$?
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}"; then
+     && grep -qF -- "${needle}" <<< "$(grep "^${rule}: " <<< "${out}")"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else

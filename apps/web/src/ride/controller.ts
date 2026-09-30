@@ -114,7 +114,7 @@ import type { RideNotificationPermissionPort } from './notification-permission-p
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { TargetHeldBack } from './held-back';
-import { createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
+import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
 
 /** Which channel each metric on the screen reads from. */
@@ -669,7 +669,15 @@ const TRAINER_BEING_FORGOTTEN = 'the trainer is being forgotten';
  * Why a game's gradient is refused once the controller has let go (#695).
  * A {@link TargetHeldBack} since #728, for the same reason as the one above.
  */
-const RIDE_CONTROLLER_DISPOSED = 'the ride controller has let the trainer go';
+const RIDE_CONTROLLER_DISPOSED = 'the ride controller was disposed and writes nothing again';
+
+/**
+ * Why a game's gradient is refused once its trainer has been detached — #732.
+ * The client the handle wrote through is closed, so the trainer is not
+ * connected to this app any more; whether it was let go is `unpair`'s to say,
+ * and #729 took that claim out of every sentence here.
+ */
+const TRAINER_DETACHED = 'the trainer is no longer connected to this app';
 
 /**
  * What a finished ride needs to become an activity — #14's fourth criterion,
@@ -1293,6 +1301,12 @@ export function createRideController(options: RideControllerOptions): RideContro
   const choosing = new Set<Set<DeviceId>>();
   /** The control clients being let go before their device is forgotten. */
   const leaving = new Set<TrainerControl>();
+  /**
+   * The control clients {@link detach} has closed — #732. A game's handle
+   * outlives the pairing it was taken from, and a closed client's own error is
+   * a `not-connected` the rider would read as a refusal.
+   */
+  const detached = new WeakSet<TrainerControl>();
   let clock: UnixSeconds = now();
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
@@ -1551,6 +1565,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   const endManualErg = (): void => {
     manual?.erg.close();
     manual = undefined;
+    // #758 (#655's nit): the answer describes the writer just closed. Kept, it
+    // came back on the next rescue whose pending target was the same number.
+    held = undefined;
   };
 
   /** The hand-set target's writer over this control, built on first use. */
@@ -2087,6 +2104,9 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     if (manual !== undefined && manual.client === entry.trainer?.control) {
       endManualErg();
+    }
+    if (entry.trainer !== undefined) {
+      detached.add(entry.trainer.control);
     }
     entry.trainer?.control.close();
     entry.trainer = undefined;
@@ -2842,9 +2862,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         const outcome = await manualErgFor(client, connection).set(target);
         if (outcome.kind === 'failed') {
           refusal = describe(outcome.error);
-        } else if (outcome.kind === 'deferred') {
+        } else if (answersHeld(outcome)) {
           // #655: the press is answered. Nothing is written here — the writer
-          // has already kept it as the pending target.
+          // has already kept it as the pending target. Not a *Set* that was
+          // waiting when the rescue began (#740): the rescue's notice names it.
           heldPresses += 1;
           held = { target, press: heldPresses };
         }
@@ -2885,6 +2906,12 @@ export function createRideController(options: RideControllerOptions): RideContro
             return Promise.reject(
               new TargetHeldBack('letting-go-to-forget', TRAINER_BEING_FORGOTTEN),
             );
+          }
+          // #732: Forget has finished, and the client this handle holds is
+          // closed. Unreachable while `GameView` stops its session before
+          // Forget can be pressed; typed so that it stays true if it is not.
+          if (detached.has(client)) {
+            return Promise.reject(new TargetHeldBack('disconnected', TRAINER_DETACHED));
           }
           // #718's second review, #721 — @see mustWaitForForget. Per write,
           // like a workout's targets, because the game holds this for the

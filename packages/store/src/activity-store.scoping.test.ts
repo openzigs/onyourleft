@@ -101,6 +101,8 @@ import type {
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
+  SyncBaseRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -116,6 +118,8 @@ import {
   chunksOf,
   framingReferenceFor,
   sideCameraReportFor,
+  rideWriteUpFor,
+  syncBaseFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -168,6 +172,8 @@ interface World {
   readonly frame: CameraFrameRecord;
   readonly reference: FramingReferenceRecord;
   readonly report: SideCameraReportRecord;
+  readonly writeUp: RideWriteUpRecord;
+  readonly syncBase: SyncBaseRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -231,6 +237,12 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const reference = framingReferenceFor(owner);
   // #388. Different sentences per athlete, on this athlete's own ride.
   const report = sideCameraReportFor(owner, ride.id);
+  // #800. Different text per athlete, on this athlete's own ride.
+  const writeUp = rideWriteUpFor(owner, ride.id);
+  // #776 (#893's review). Different digests per athlete. The item row's key is
+  // the ride's id, and the ACTIVITY row's key is a content hash — the same
+  // shape two riders who sent the same file would share.
+  const syncBase = syncBaseFor(owner, ride.id, 'write-up');
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -251,6 +263,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putCameraFrame(frame);
     await store.putFramingReference(reference);
     await store.putSideCameraReport(report);
+    await store.putRideWriteUp(writeUp);
+    await store.putSyncBase(syncBase);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -271,6 +285,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     frame,
     reference,
     report,
+    writeUp,
+    syncBase,
   };
 }
 
@@ -709,6 +725,45 @@ const PROBES: readonly ScopingProbe[] = [
       // first row for the ride id could not pass by coincidence.
       const theirsRead = await store.getSideCameraReport(theirs.owner, theirs.ride.id);
       expect(theirsRead?.summary).toBe(theirs.report.summary);
+      // #800. The pose summary is somebody's numbers, and it comes back with
+      // its own report and no one else's.
+      expect(read?.pose).toStrictEqual(mine.report.pose);
+      expect(theirsRead?.pose).toStrictEqual(theirs.report.pose);
+    },
+  },
+  {
+    member: 'getRideWriteUp',
+    leaks:
+      'a model’s write-up of somebody else’s ride — and, where the pose summary was sent, of their body',
+    async run(store, mine, theirs) {
+      const read = await store.getRideWriteUp(mine.owner, mine.ride.id);
+      expect(read?.text).toBe(mine.writeUp.text);
+      // Their ride asked for as ME answers nothing: scoped on the athlete as
+      // well as the ride, never on the ride alone.
+      await expect(store.getRideWriteUp(mine.owner, theirs.ride.id)).resolves.toBeUndefined();
+      const theirsRead = await store.getRideWriteUp(theirs.owner, theirs.ride.id);
+      expect(theirsRead?.text).toBe(theirs.writeUp.text);
+    },
+  },
+  {
+    member: 'listSyncBase',
+    leaks:
+      'which rides another athlete synced and deleted, and the digests of their write-ups — a sync of mine would then push deletes of their rides',
+    async run(store, mine) {
+      const rows = await store.listSyncBase(mine.owner);
+      expect(rows).toStrictEqual([mine.syncBase]);
+    },
+  },
+  {
+    member: 'deleteSyncBase',
+    leaks:
+      "another athlete's record of what they synced, so their next sync pulls back a ride they deleted",
+    async run(store, mine, theirs) {
+      // Their key, asked for as ME: nothing of theirs goes, and the answer says so.
+      await expect(
+        store.deleteSyncBase(mine.owner, theirs.syncBase.kind, theirs.syncBase.key),
+      ).resolves.toBe(false);
+      await expect(store.listSyncBase(theirs.owner)).resolves.toStrictEqual([theirs.syncBase]);
     },
   },
 ];

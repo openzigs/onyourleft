@@ -108,7 +108,7 @@ jobs:
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
       #
-      # ⚠️ One step below, `Checks, concurrently`, runs twenty-two §4a commands
+      # ⚠️ One step below, `Checks, concurrently`, runs twenty-six §4a commands
       # AT ONCE through scripts/run-concurrently.sh (#651), and a reviewer who
       # remembers one step per command is reading the old file. The job is one job on purpose
       # -- see the Browser gate step -- so using more than one of the runner's
@@ -117,9 +117,16 @@ jobs:
       # by itself, fails the step if ANY command failed, and prints each failed
       # command's whole output again at the end. Its own suite runs first,
       # before anything is trusted to it: a runner that swallowed a failure
-      # would make that step twenty-two gates removed, and look green.
+      # would make that step twenty-six gates removed, and look green.
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
+
+      # Which CPU this run landed on (#866, #864). ubuntu-latest is served by
+      # more than one CPU model at different speeds, and a step's duration
+      # means nothing without it. Not a §4a command; CLAUDE.md section 4c
+      # records it beside the apt-source step, the other one.
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
 
       # --- The workspace toolchain, from here down (CLAUDE.md section 4a) ------
 
@@ -231,6 +238,12 @@ jobs:
       #   what counts as an accessibility test from paths and from
       #   package.json's own script, so it has a suite.
       #
+      #   check:test-split -- #852. `test:coverage` leaves the heaviest files
+      #   out and `test:uninstrumented` runs exactly them; this asks Vitest
+      #   what each selects and fails on a file in neither run or in both. It
+      #   lists files and runs no test, so it has no case timeout to miss. Its
+      #   suite, for the reason every checker here has one.
+      #
       #   check:wiring -- #278. Every other gate looks INSIDE a unit, and five
       #   defects in one week were a correct, unit-tested, typechecked, linted
       #   unit wired to nothing: no device could be paired on Android at all
@@ -274,6 +287,18 @@ jobs:
       #   runner, with the passwordless sudo ubuntu-latest grants. It is mostly
       #   a ~170 MB download, which is why it is here rather than on its own.
       #
+      #   instance image -- #767/#771. Builds apps/instance/Dockerfile, waits
+      #   for the image's own healthcheck to answer /health INSIDE the
+      #   container, and requires /source to name the commit (AGPL-3.0 s13).
+      #   Mostly a pull of the digest-pinned base image and a few COPY layers,
+      #   so it is waiting rather than working and belongs here. The instance's
+      #   Vitest project needs no step: it is one more project in the Vitest
+      #   run below (CLAUDE.md section 4c says what that cost). ⚠️ The pull is
+      #   from Docker Hub, the one registry this job needs that nothing else
+      #   does; a Docker Hub outage turns this red as IMG004, which names the
+      #   registry rather than the Dockerfile (#841, CLAUDE.md section 4c).
+      #   Its suite fakes `docker` on PATH and needs no Docker.
+      #
       # Every one of these is also what it was before #651 in every other way:
       # the same command, and its failure fails the job. Most checkers need
       # Node, which is why none of them is in `check:repo`, the bare-clone set.
@@ -301,6 +326,8 @@ jobs:
           'lint' 'pnpm run lint'
           'typecheck' 'pnpm run typecheck'
           'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
+          'test split' 'pnpm run check:test-split'
+          'test split checker tests' 'bash scripts/check-test-split.test.sh'
           'wiring' 'pnpm run check:wiring'
           'wiring checker tests' 'bash scripts/check-wiring.test.sh'
           'cost model' 'pnpm run check:cost-model'
@@ -310,6 +337,8 @@ jobs:
           'dependency licences' 'pnpm run check:licences'
           'build' 'pnpm run build'
           'playwright install' 'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium'
+          'instance image' 'bash scripts/check-instance-image.sh'
+          'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
 
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest
@@ -419,8 +448,25 @@ jobs:
       # page's load passed its case's 60 s, and two Vitest cases that take
       # 3.5 to 4.4 s alone passed their 5 s. Two gates that go red because of
       # each other are not two gates.
+      #
+      # ⚠️ Since #852 it is NOT the whole suite. The two heaviest files -- the
+      # #545 near-field rides and the FIT decode fuzz -- spent about 300 s of
+      # this step's summed test time under V8's instrumentation, which slows
+      # their hot loops about three times, so `test:coverage` excludes them
+      # and the step below runs them with none. They gate exactly as before;
+      # the coverage REPORT stops counting what those two files alone execute,
+      # which section 5 says is a signal and not a gate. `check:test-split`,
+      # in the concurrent step above, is what stops the two lists coming apart
+      # -- a file in neither run is a file CI never runs. ⚠️ Since #866 those
+      # two files run in the NIGHTLY workflow, not in this job (below).
       - name: Tests and coverage report
         run: pnpm run test:coverage
+
+      # ⚠️ The other half of #852's split, `test:uninstrumented`, is NOT here
+      # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is
+      # not a required check and cannot block a merge. A reviewer who remembers
+      # a `Tests outside coverage` step here is reading the old file.
+      # `check:test-split`, above, still fails a file in neither Vitest run.
 
       # --- The browser gate (#63) ----------------------------------------------
       #
@@ -437,7 +483,10 @@ jobs:
       # cannot block is not a gate.
       #
       # Builds the harness and drives it; CLAUDE.md section 4a documents both
-      # halves as one command. ⚠️ Since #651 it stops ITSELF before this job's
+      # halves as one command. ⚠️ Since #866 it runs the `chromium` and `game`
+      # projects only: the describes tagged `@nightly` (apps/web/browser/
+      # nightly.ts, a reviewed list, all of them the opt-in realistic world)
+      # run in .github/workflows/nightly.yml, which cannot block a merge. ⚠️ Since #651 it stops ITSELF before this job's
       # timeout (`playwright.config.ts` §`GATE_BUDGET_MS`), so a hang is
       # reported by name rather than cancelled in silence.
       - name: Browser gate

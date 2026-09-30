@@ -253,9 +253,108 @@ function tabStops(root: Document | Element, disclosed: boolean): HTMLElement[] {
  *   `<summary>`, or one outside any `<details>`, is ordinary content per the
  *   HTML standard's list of focusable areas, and is excluded unless it carries
  *   a `tabindex` of its own — see {@link isDetailsSummary}.
+ * - **A named radio group is one stop (#698)** — the checked radio, or the
+ *   first when none is checked — see {@link oneStopPerRadioGroup}. The others
+ *   are reached by arrow key, which {@link keyboardReachableElements} answers.
  */
 export function tabbableElements(root: Document | Element): HTMLElement[] {
-  return tabStops(root, false);
+  return oneStopPerRadioGroup(tabStops(root, false));
+}
+
+/**
+ * Everything a keyboard can put focus on as the page is drawn: the tab stops,
+ * and the radios an arrow key reaches from their group's stop (#698).
+ *
+ * The question "is this control reachable by keyboard?" is wider than "is it a
+ * tab stop?" for exactly one kind of control. A radio that is not its group's
+ * stop is never reached by Tab, and is reached by an arrow key from the one
+ * that is — so it is reachable when, and only when, its group has a stop.
+ *
+ * ⚠️ **A grouped radio with `tabindex="-1"` is counted as UNREACHABLE (#864)**,
+ * even when its group has a stop. The candidates are the tab stops, and a
+ * negative `tabindex` takes an element out of them before the group is
+ * considered — whether an arrow key would still land on it differs between
+ * engines and is not modelled here. That is the conservative direction: a
+ * control this answers "unreachable" for fails the audit rather than passing
+ * it, so the cost of the simplification is a false finding, never a missed one.
+ */
+export function keyboardReachableElements(root: Document | Element): HTMLElement[] {
+  const candidates = tabStops(root, false);
+  const stops = oneStopPerRadioGroup(candidates);
+  const radioStops = stops.filter(isGroupedRadio);
+  return candidates.filter(
+    (element) =>
+      stops.includes(element) ||
+      (isGroupedRadio(element) && radioStops.some((stop) => inSameRadioGroup(stop, element))),
+  );
+}
+
+/**
+ * A radio button in a radio group: HTML's "radio button group" needs a
+ * non-empty `name`, so a radio with none is a group of one and is its own stop.
+ */
+function isGroupedRadio(element: Element): element is HTMLInputElement {
+  return (
+    element.tagName === 'INPUT' &&
+    (element.getAttribute('type') ?? '').toLowerCase() === 'radio' &&
+    (element.getAttribute('name') ?? '') !== ''
+  );
+}
+
+/**
+ * What puts two radios in one group, per the HTML standard: the same `name`,
+ * the same form owner (or both none) and the same tree.
+ */
+function inSameRadioGroup(a: HTMLInputElement, b: HTMLInputElement): boolean {
+  return a.name === b.name && a.form === b.form && a.getRootNode() === b.getRootNode();
+}
+
+/**
+ * The group of a grouped radio: every radio in its tree it shares one with,
+ * whatever the `root` a caller asked about, because a checked radio outside
+ * that root still decides which of these is the stop.
+ */
+function radioGroupOf(radio: HTMLInputElement): HTMLInputElement[] {
+  const tree = radio.getRootNode() as ParentNode;
+  return [...tree.querySelectorAll<HTMLInputElement>('input')].filter(
+    (other) => isGroupedRadio(other) && inSameRadioGroup(other, radio),
+  );
+}
+
+/**
+ * A named radio group is ONE tab stop, as a browser makes it (#698) — the
+ * model used to list every radio, and Chromium stops once per group.
+ *
+ * This is Chromium's own rule (`RadioInputType::IsKeyboardFocusable`), which
+ * the HTML standard leaves to the platform: a radio is a stop when it is
+ * checked, or when nothing in its group is checked — and never when the stop
+ * before it in the sequence is a radio of the same group, because Tab always
+ * leaves the group. So with one radio checked, that radio is the stop and no
+ * other; with none checked, the first radio the sequence meets is (the last,
+ * going backwards, which a forward order does not model). A group whose radios
+ * are split by some other control is met twice, and stops twice, as it does in
+ * the browser.
+ */
+function oneStopPerRadioGroup(candidates: HTMLElement[]): HTMLElement[] {
+  const stops: HTMLElement[] = [];
+  for (const element of candidates) {
+    if (isGroupedRadio(element)) {
+      const group = radioGroupOf(element);
+      if (!element.checked && group.some((radio) => radio.checked)) {
+        continue;
+      }
+      const previous = stops.at(-1);
+      if (
+        previous !== undefined &&
+        isGroupedRadio(previous) &&
+        inSameRadioGroup(previous, element)
+      ) {
+        continue;
+      }
+    }
+    stops.push(element);
+  }
+  return stops;
 }
 
 function textOf(element: Element): string {
@@ -687,26 +786,83 @@ const listStructure: Rule = (doc) =>
       html: snippet(child),
     }));
 
+/**
+ * The landmark roles this rule compares, each with the tag that carries it
+ * implicitly, and whether that tag is the landmark even with no name.
+ *
+ * HTML-AAM maps `nav` and `aside` to their landmark roles unconditionally, and
+ * `section` and `form` only when they have an accessible name — so an unnamed
+ * `nav` IS a navigation landmark and an unnamed `section` is no region (#864).
+ */
+const COMPARED_LANDMARKS: readonly (readonly [
+  role: string,
+  tag: string,
+  landmarkWhenUnnamed: boolean,
+])[] = [
+  ['navigation', 'nav', true],
+  ['complementary', 'aside', true],
+  ['region', 'section', false],
+  ['form', 'form', false],
+];
+
+function distinguishableViolation(
+  element: Element,
+  kind: string,
+  name: string,
+): AccessibilityViolation {
+  return {
+    rule: 'landmarks-are-distinguishable',
+    message:
+      `There is more than one ${kind} and this one is ${name === '' ? 'unnamed' : `named "${name}" like another`}. ` +
+      'A landmark list with two identical entries is a list you cannot navigate by.',
+    html: snippet(element),
+  };
+}
+
+/**
+ * Two landmarks of one role that a reader cannot tell apart.
+ *
+ * By TAG, as it always was: every `nav`, `aside`, `section` and `form`
+ * against the others of its tag. And since #690 by ROLE as well:
+ * `design/ScrollTable.tsx` makes every table a `div` with `role="region"`, and
+ * two tables captioned alike were two region landmarks of one name that a
+ * rule reading tags alone never saw. An element that declares a landmark role
+ * on another tag is compared with the others of that role, and with every
+ * element of the tag that carries it implicitly and IS that landmark — every
+ * `nav` and `aside`, named or not, but only a NAMED `section` or `form`: an
+ * unnamed `section` is not a region landmark at all (HTML-AAM), so it is not
+ * held against one (#864).
+ */
 const landmarksAreDistinguishable: Rule = (doc) => {
   const violations: AccessibilityViolation[] = [];
-  for (const tag of ['nav', 'aside', 'section', 'form']) {
-    const landmarks = [...doc.querySelectorAll(tag)].filter(
-      (element) => !isHiddenFromAssistiveTechnology(element),
-    );
-    if (landmarks.length < 2) {
+  const visible = (element: Element): boolean => !isHiddenFromAssistiveTechnology(element);
+  for (const [role, tag, landmarkWhenUnnamed] of COMPARED_LANDMARKS) {
+    const landmarks = [...doc.querySelectorAll(tag)].filter(visible);
+    const names = landmarks.map((element) => landmarkName(element).toLowerCase());
+    if (landmarks.length >= 2) {
+      landmarks.forEach((element, index) => {
+        const name = names[index] ?? '';
+        if (name === '' || names.indexOf(name) !== index) {
+          violations.push(distinguishableViolation(element, `\`${tag}\``, name));
+        }
+      });
+    }
+
+    const declared = [...doc.querySelectorAll(`[role="${role}"]:not(${tag})`)].filter(visible);
+    const implicitNames = names.filter((name) => name !== '');
+    // ⚠️ Until #864 this counted NAMED implicit landmarks only, which is right
+    // for `section` and `form` and wrong for `nav` and `aside`: an unnamed
+    // `<nav>` beside an unnamed `<div role="navigation">` is two navigation
+    // landmarks a reader cannot tell apart, and gave no violation.
+    const implicitCount = landmarkWhenUnnamed ? landmarks.length : implicitNames.length;
+    if (declared.length === 0 || declared.length + implicitCount < 2) {
       continue;
     }
-    const names = landmarks.map((element) => landmarkName(element).toLowerCase());
-    landmarks.forEach((element, index) => {
-      const name = names[index] ?? '';
-      if (name === '' || names.indexOf(name) !== index) {
-        violations.push({
-          rule: 'landmarks-are-distinguishable',
-          message:
-            `There is more than one \`${tag}\` and this one is ${name === '' ? 'unnamed' : `named "${name}" like another`}. ` +
-            'A landmark list with two identical entries is a list you cannot navigate by.',
-          html: snippet(element),
-        });
+    const declaredNames = declared.map((element) => landmarkName(element).toLowerCase());
+    declared.forEach((element, index) => {
+      const name = declaredNames[index] ?? '';
+      if (name === '' || declaredNames.indexOf(name) !== index || implicitNames.includes(name)) {
+        violations.push(distinguishableViolation(element, `\`${role}\` landmark`, name));
       }
     });
   }

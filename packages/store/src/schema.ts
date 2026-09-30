@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **12** since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **14** since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -87,10 +87,23 @@
  * re-import: the account export carries each ride's report in the manifest
  * entry for that ride (ADR 0004 E).
  *
+ * ⚠️ **Version 13 is #800, and it is the first bump that IS a record
+ * migration.** It adds `rideWriteUps` — one model write-up per ride — and it
+ * changes the shape of every existing `sideCameraReports` row: each gains a
+ * required `pose`, the side-camera session's pose summary (differences only),
+ * `null` where none was kept. So `SCHEMA_MIGRATIONS` holds its first entry,
+ * `migrations.ts` §`SIDE_REPORT_POSE_SUMMARY`, and `ActivityStore` hands it to
+ * Dexie as version 13's `.upgrade()`. Its rollback is tested as a pure `up` /
+ * `down` pair on a fixture and executed against a real version-12 database in
+ * `migrations.test.ts`.
+ *
+ * ⚠️ **Version 14 is the sync base (#776, after #893's review)**, additive
+ * again: a new store, `syncBases`, and no existing record's shape changes.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 14;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -154,6 +167,20 @@ export const TABLE = {
    * number. Keyed by the activity, read by the athlete and the activity.
    */
   sideCameraReports: 'sideCameraReports',
+  /**
+   * #800: at most one row per ride — a model's write-up of it, as it passed
+   * the runtime screen (#798). Plain text and the template it followed; no
+   * model name, address, key or raw reply. Keyed by the activity, so a new
+   * analysis replaces the saved one; read by the athlete and the activity.
+   */
+  rideWriteUps: 'rideWriteUps',
+  /**
+   * #776, after #893's review: what this device and its instance agreed on at
+   * the last sync, one row per ride and per item of a ride — two digests, no
+   * body. Keyed by the athlete, the kind and the key together, and outliving
+   * the ride it names on purpose (`records.ts` §`SyncBaseRecord`).
+   */
+  syncBases: 'syncBases',
 } as const;
 
 /**
@@ -307,6 +334,19 @@ export const INDEX = {
   sideCameraReportByAthleteAndActivity: '[athleteId+activityId]',
   /** #388: `deleteAthlete`'s cascade. */
   sideCameraReportByAthlete: 'athleteId',
+  /**
+   * #800: `getRideWriteUp` — the athlete-scoped point lookup, so there is no
+   * read of a write-up that is not also told whose ride it is.
+   */
+  rideWriteUpByAthleteAndActivity: '[athleteId+activityId]',
+  /** #800: `deleteAthlete`'s cascade. */
+  rideWriteUpByAthlete: 'athleteId',
+  /**
+   * `listSyncBase` and `deleteAthlete`'s cascade. The primary key is
+   * `[athleteId+kind+key]`, so `deleteSyncBase` is scoped by construction:
+   * there is no key that names a row without naming whose it is.
+   */
+  syncBaseByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -687,6 +727,43 @@ export const STORES_V12: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 13 — #800's ride write-ups, added beside the seventeen stores that
+ * exist, and the version whose `.upgrade()` gives every side-camera report its
+ * pose summary field (`migrations.ts` §`SIDE_REPORT_POSE_SUMMARY`).
+ *
+ * `sideCameraReports` is **not** re-declared: the new field is not indexed, so
+ * its key path and indexes are unchanged. What changes is every row's shape,
+ * and that is the migration's job rather than the schema string's.
+ *
+ * Keyed on `activityId`, for {@link STORES_V12}'s reason: a second write-up
+ * for one ride replaces the first, and every read goes through
+ * {@link INDEX.rideWriteUpByAthleteAndActivity}.
+ */
+export const STORES_V13: Readonly<Record<string, string>> = {
+  // The seventeen stores of versions 1 to 12 are inherited unchanged.
+  [TABLE.rideWriteUps]: [
+    'activityId',
+    INDEX.rideWriteUpByAthlete,
+    INDEX.rideWriteUpByAthleteAndActivity,
+  ].join(', '),
+};
+
+/**
+ * Version 14 — the sync base (#776, after #893's review), added beside the
+ * eighteen stores that exist. Additive: a new store, no existing shape
+ * touched, so `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export →
+ * downgrade → re-import like every additive version's, and it loses nothing
+ * that matters: a device with no base syncs as a device that never synced.
+ *
+ * ⚠️ The primary key is compound and leads with the athlete, so no row can be
+ * named — read, replaced or deleted — without naming whose it is.
+ */
+export const STORES_V14: Readonly<Record<string, string>> = {
+  // The eighteen stores of versions 1 to 13 are inherited unchanged.
+  [TABLE.syncBases]: ['[athleteId+kind+key]', INDEX.syncBaseByAthlete].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -700,4 +777,6 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V10,
   STORES_V11,
   STORES_V12,
+  STORES_V13,
+  STORES_V14,
 ];

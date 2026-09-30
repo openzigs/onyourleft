@@ -35,7 +35,7 @@ function memoryStorage(): EndpointStorage & { readonly rows: Map<string, string>
 }
 
 const TABLET: SidePoseEstimator = {
-  estimateSidePose: async () => Promise.resolve({ kind: 'no-rider' }),
+  estimateSidePose: async () => Promise.resolve({ kind: 'no-rider', cause: 'said-nobody' }),
   closeSidePoseModel: () => undefined,
 };
 
@@ -134,6 +134,7 @@ describe('chooseSideAnalyser', () => {
     expect(estimator).not.toBe(TABLET);
     expect(await estimator.estimateSidePose(sizedFrameBytes(640, 480))).toEqual({
       kind: 'no-rider',
+      cause: 'said-nobody',
     });
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toContain(JSON.stringify(ANALYSIS_PROMPTS['side-pose']).slice(1, 40));

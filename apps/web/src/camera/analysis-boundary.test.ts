@@ -26,6 +26,26 @@ const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TRANSPORT = join('camera', 'analysis-transport.ts');
 
 /**
+ * #518: the hosted transport, and the body reader both transports share. An
+ * exact list, not the `camera/` directory: a file beside them that named a
+ * `Response` would still be a finding.
+ */
+const MAY_NAME_HTTP_TYPES: readonly string[] = [
+  TRANSPORT,
+  join('camera', 'hosted-transport.ts'),
+  join('camera', 'http-body.ts'),
+  // #802: the ride analysis's step port to the rider's own computer. It builds
+  // the request the one `fetch` in `analysis-transport.ts` sends, and cannot
+  // live in that module, which carries pictures by design
+  // (`no-picture-reachable.test.ts`).
+  join('ride-analysis', 'own-computer-step.ts'),
+  // #804: test support, never shipped — a model server as a `fetch` double,
+  // which has to build the `Response` a server would. Named by path, so a
+  // production module beside it that named one would still be a finding.
+  join('ride-analysis', 'model-server-testing.ts'),
+];
+
+/**
  * The service worker handles its OWN requests and responses — `offline/` is
  * the other place a `Response` is legitimately a value, and it has nothing to
  * do with the analysis. Listed by directory because a worker is not a seam
@@ -44,10 +64,15 @@ const CANCELLATION_TYPES = /(?<![\w.$])(?:AbortSignal|AbortController)\b/;
 /** The modules on the near side of the port. */
 const ABOVE_THE_TRANSPORT = [
   join('camera', 'analysis-port.ts'),
+  // #799: the picture-free half of the port, split out of it.
+  join('camera', 'model-answer.ts'),
   join('camera', 'analysis-endpoint.ts'),
   join('camera', 'analysis-response.ts'),
   join('camera', 'useAnalysis.ts'),
   join('camera', 'session.ts'),
+  join('camera', 'hosted-port.ts'),
+  join('camera', 'hosted-model.ts'),
+  join('camera', 'useHostedCheck.ts'),
   join('views', 'CameraView.tsx'),
 ];
 
@@ -86,6 +111,13 @@ describe('the scan itself', () => {
     expect(CANCELLATION_TYPES.test(code(TRANSPORT))).toBe(true);
   });
 
+  it('finds every module it exempts, so the list cannot outlive them', () => {
+    for (const path of MAY_NAME_HTTP_TYPES) {
+      expect(sources()).toContain(path);
+      expect(HTTP_TYPES.test(code(path)), path).toBe(true);
+    }
+  });
+
   it('does not fire on a comment that names one', () => {
     expect(HTTP_TYPES.test(stripComments('// a Response never leaves\nconst x = 1;'))).toBe(false);
   });
@@ -94,7 +126,7 @@ describe('the scan itself', () => {
 describe('no HTTP type escapes the transport', () => {
   it('names none of them anywhere else in the client, the service worker aside', () => {
     const findings = sources()
-      .filter((path) => path !== TRANSPORT)
+      .filter((path) => !MAY_NAME_HTTP_TYPES.includes(path))
       .filter((path) => path.split(/[/\\]/)[0] !== WORKER_DIRECTORY)
       .filter((path) => HTTP_TYPES.test(code(path)));
     expect(findings).toStrictEqual([]);

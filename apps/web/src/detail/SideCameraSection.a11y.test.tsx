@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 function report(observations: readonly string[], summary: string): SideCameraReportRecord {
-  return { athleteId: ATHLETE, activityId: RIDE, summary, observations };
+  return { athleteId: ATHLETE, activityId: RIDE, summary, observations, pose: null };
 }
 
 async function openWith(sideCamera: SideCameraReportRecord | 'unreadable'): Promise<void> {

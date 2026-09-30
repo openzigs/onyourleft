@@ -40,7 +40,8 @@ import {
   platformControllerChanges,
   type UpdateWatcher,
 } from './offline/update';
-import { AppShell } from './shell/AppShell';
+import { AppShell, VIEW_GROUPS } from './shell/AppShell';
+import { preloadViewGroups } from './shell/lazy-view';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
@@ -54,7 +55,17 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
-import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
+import {
+  riderAnalysisPort,
+  riderAnalysisSource,
+  riderModelStepSource,
+} from './camera/analysis-transport';
+import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
+import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
+import { hostedStepPort } from './ride-analysis/hosted-step';
+import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
+import { hostedModelPort } from './camera/hosted-transport';
+import { readMaskingGuard } from './ride-analysis/hosted-mask';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
@@ -89,6 +100,7 @@ import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
+import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -645,6 +657,7 @@ function buildTransferPort(): TransferPort | undefined {
     save: saveWithAnchor,
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
     theme: themeEraser(window),
+    hostedModel: hostedModelEraser(),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
@@ -685,6 +698,14 @@ function buildAthleteMassPort(): AthleteMassPort {
  * gives.
  */
 function buildAthleteKitColourPort(): AthleteKitColourPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * The rider's words to mask (#839), over the same connection. The hosted
+ * transport reads the same row for every request (`buildCameraController`).
+ */
+function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
@@ -746,6 +767,47 @@ async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalys
     async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
     readAnalysisEndpoint,
   );
+}
+
+/**
+ * The post-ride ask (#804): one press on a ride's page runs the analysis agent
+ * on the rider's own computer and saves the screened write-up with the ride.
+ *
+ * ⚠️ **The step port is built by `riderModelStepSource`, not here**, for the
+ * reason `buildRiderAnalysis` gives: inside the Android shell it must be the
+ * native request, and that choice has to be somewhere a test can see it.
+ * The hosted model (#803) is the second source, and the rider's own computer
+ * is offered first when both are set up (ruling 7). It is offered only while
+ * the rider has turned it on since the app was opened and a service is saved,
+ * and every step goes through `CameraController.askHostedModel`, which checks
+ * the hosted consent again — `ride-analysis/hosted-step.ts`. With no camera
+ * there is no controller to hold that consent, so there is no hosted source.
+ *
+ * The camera's consent is read at the press, not now: it is held in memory
+ * and turned on on the Camera screen, and the pose summary goes into the
+ * input only while it covers the camera (the owner's ruling 5 on #795).
+ */
+async function buildRideAnalysis(camera: CameraController | undefined): Promise<RideAnalysisPort> {
+  const nativeShell = isNativeShell(platformCapacitor());
+  const computer = await riderModelStepSource(
+    nativeShell,
+    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
+    readAnalysisEndpoint,
+  );
+  return createRideAnalysis({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    computer,
+    ...(camera === undefined
+      ? {}
+      : { hosted: () => hostedStepPort(camera, () => readHostedModel() !== undefined) }),
+    // #839: the preview masks with the same guard the transport reads.
+    hostedGuard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
+    nativeShell,
+    cameraConsented: () => camera?.state().consent.local ?? false,
+    clock: platformRunnerClock(),
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+  });
 }
 
 /**
@@ -813,8 +875,20 @@ async function buildCameraController(
   // #387. The rider's own computer — `analysis` is looked up on every press
   // rather than once, so switching it off on the Camera screen stops the next
   // request. With nothing saved it answers `undefined` and nothing can be sent.
+  // #518. The rider's hosted service, looked up on every press as well, and
+  // reached only after the rider has turned it on since the app was opened —
+  // `CameraController.askHostedModel` checks that first. It is sent a
+  // question, never a picture, and it is an `https:` origin, so the WebView's
+  // own `fetch` carries it on both platforms.
+  // #839. Every hosted request is masked with the rider's own guard — their
+  // word list and privacy zones, read afresh for each request — and a
+  // request whose guard cannot be read is not sent.
+  const hosted = (): ReturnType<typeof hostedModelPort> =>
+    hostedModelPort(readHostedModel(), {
+      guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
+    });
   if (!isNativeShell(platformCapacitor())) {
-    return new CameraController({ port, keep, analysis });
+    return new CameraController({ port, keep, analysis, hosted });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -830,6 +904,7 @@ async function buildCameraController(
     port,
     keep,
     analysis,
+    hosted,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
   });
 }
@@ -839,6 +914,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
   const camera = await buildCameraController(riderAnalysis);
+  const rideAnalysis = await buildRideAnalysis(camera);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -910,6 +986,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
+          maskedWords={buildMaskedWordsPort()}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
@@ -922,6 +999,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           transfer={buildTransferPort()}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
+          rideAnalysis={rideAnalysis}
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}
           match={buildMatchPort()}
@@ -955,6 +1033,16 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // reads the registration's `waiting` and `installing` workers when it is
   // made, which is exactly when it was made before this change.
   draw(undefined);
+  // #674: every group but Home is a chunk of its own. Loading them once the
+  // browser is idle after the first paint keeps them off Home's critical path
+  // and off the rider's first press of Ride, which would otherwise show
+  // "Loading this page…" for React's reveal throttle (`shell/lazy-view.tsx`
+  // §`lazyView`). A failure here is swallowed and asked again on the visit —
+  // on every later visit too, since #871 (`lazyView` §"Why a failed view is
+  // rebuilt").
+  afterFirstPaint(() => {
+    preloadViewGroups(VIEW_GROUPS);
+  });
   const registered = await workerRegistration;
   const update = buildUpdateWatcher(registered, rideController);
   if (registered.kind === 'registered') {
@@ -973,6 +1061,18 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   }
   if (update !== undefined) {
     draw(update);
+  }
+}
+
+/**
+ * Run `work` once the browser is idle, or after two seconds whatever happens —
+ * `requestIdleCallback`'s own `timeout`. Where it is absent, a plain timer.
+ */
+function afterFirstPaint(work: () => void): void {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(work, { timeout: 2000 });
+  } else {
+    window.setTimeout(work, 1000);
   }
 }
 

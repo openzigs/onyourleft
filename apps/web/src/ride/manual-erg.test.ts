@@ -25,6 +25,7 @@ import { connectSimulatedTrainer } from '@onyourleft/sensors/protocol/testing';
 import { describe, expect, it } from 'vitest';
 
 import {
+  answersHeld,
   createManualErg,
   RESTORE_FIRST_GAP_SECONDS,
   RESTORE_RETRIES,
@@ -254,6 +255,8 @@ describe('a stall under a hand-set target is rescued — #567', () => {
     const eased = targetWrites().length;
     const outcome = await erg.set(watts(120));
     expect(outcome.kind).toBe('deferred');
+    // #740: pressed while the rescue held, so the press is answered.
+    expect(answersHeld(outcome)).toBe(true);
     expect(targetWrites()).toHaveLength(eased);
     expect(erg.rescue()).toMatchObject({ target: 150, holding: 'relief', pending: 120 });
     // Pedalling well again for less than a whole window: still the rescue's.
@@ -620,7 +623,12 @@ describe('probe C — a rider target WAITING behind another when the stall begin
     void rig.erg.set(watts(200));
     const waiting = rig.erg.set(watts(210));
     await pedalHeld(rig.erg, 5, [5, 5, 5, 5]);
-    expect((await waiting).kind).toBe('deferred');
+    const deferred = await waiting;
+    expect(deferred.kind).toBe('deferred');
+    // #740 (#655's review, N4): the rescue BEGAN with 210 pending, so its own
+    // notice already says "Your new target of 210 W will be set once …", and
+    // the press is not answered a second time with the same clause.
+    expect(answersHeld(deferred)).toBe(false);
     // The rescue names only the accepted 150 while 200 is in flight.
     expect(rig.erg.rescue()).toMatchObject({ target: 150, holding: 'floor', pending: 210 });
     rig.held.shift()?.accept();

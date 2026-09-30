@@ -103,10 +103,11 @@ new_fixture() {
   tmp="$(mktemp -d)"
   mkdir -p "${tmp}/bin" "${tmp}/fake/prod" "${tmp}/fake/all" "${tmp}/LICENSES" \
     "${tmp}/apps/web/public/licences" "${tmp}/apps/web/src/credits" "${tmp}/apps/mobile" \
-    "${tmp}/packages/store"
+    "${tmp}/packages/store" "${tmp}/apps/instance"
+  printf '{"name":"@onyourleft/instance","dependencies":{}}\n' > "${tmp}/apps/instance/package.json"
   cp "${REPO_ROOT}/LICENSES/Apache-2.0.txt" "${tmp}/LICENSES/Apache-2.0.txt"
-  printf '[{"name":"root","path":"%s"},{"name":"@onyourleft/web","path":"%s/apps/web"},{"name":"@onyourleft/store","path":"%s/packages/store"}]\n' \
-    "${tmp}" "${tmp}" "${tmp}" > "${tmp}/fake/workspace.json"
+  printf '[{"name":"root","path":"%s"},{"name":"@onyourleft/web","path":"%s/apps/web"},{"name":"@onyourleft/store","path":"%s/packages/store"},{"name":"@onyourleft/instance","path":"%s/apps/instance"}]\n' \
+    "${tmp}" "${tmp}" "${tmp}" "${tmp}" > "${tmp}/fake/workspace.json"
 
   cat > "${tmp}/bin/pnpm" <<'PNPM'
 #!/usr/bin/env bash
@@ -181,8 +182,8 @@ ok() { printf 'ok   %s\n' "$1"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n%s\n' "$1" "${2:-${out}}"; fail=$((fail + 1)); }
 
 assert_exit() { if [ "${code}" -eq "$2" ]; then ok "$1"; else bad "$1 -- expected exit $2, got ${code}"; fi; }
-assert_says() { if printf '%s' "${out}" | grep -qF -- "$2"; then ok "$1"; else bad "$1 -- output lacks: $2"; fi; }
-assert_silent() { if printf '%s' "${out}" | grep -qF -- "$2"; then bad "$1 -- output has: $2"; else ok "$1"; fi; }
+assert_says() { if grep -qF -- "$2" <<< "${out}"; then ok "$1"; else bad "$1 -- output lacks: $2"; fi; }
+assert_silent() { if grep -qF -- "$2" <<< "${out}"; then bad "$1 -- output has: $2"; else ok "$1"; fi; }
 assert_document_has() {
   if grep -qF -- "$2" "${tmp}/${DOCUMENT}" 2>/dev/null; then ok "$1"; else bad "$1 -- document lacks: $2" "$(cat "${tmp}/${DOCUMENT}" 2>/dev/null)"; fi
 }
@@ -297,12 +298,12 @@ printf 'the licence of twice two\n' > "${TWO_B}/LICENSE"
 closure @onyourleft/web "{$(entry MIT react 19.0.0 "${REACT}"),\"MIT twice\":[{\"name\":\"twice\",\"versions\":[\"1.0.0\",\"2.0.0\"],\"paths\":[\"${TWO_A}\",\"${TWO_B}\"],\"license\":\"MIT\"}]}"
 generate
 assert_exit 'generates with one package at two versions' 0
-if entry_block twice 1.0.0 | grep -qF 'the licence of twice one' && ! entry_block twice 1.0.0 | grep -qF 'twice two'; then
+if grep -qF 'the licence of twice one' <<< "$(entry_block twice 1.0.0)" && ! grep -qF 'twice two' <<< "$(entry_block twice 1.0.0)"; then
   ok 'notices version 1 with the text from version 1'"'"'s own directory'
 else
   bad 'notices version 1 with the text from version 1'"'"'s own directory' "$(entry_block twice 1.0.0)"
 fi
-if entry_block twice 2.0.0 | grep -qF 'the licence of twice two' && ! entry_block twice 2.0.0 | grep -qF 'twice one'; then
+if grep -qF 'the licence of twice two' <<< "$(entry_block twice 2.0.0)" && ! grep -qF 'twice one' <<< "$(entry_block twice 2.0.0)"; then
   ok 'and version 2 with the text from version 2'"'"'s'
 else
   bad 'and version 2 with the text from version 2'"'"'s' "$(entry_block twice 2.0.0)"
@@ -611,6 +612,67 @@ rm "${tmp}/apps/web/node_modules/vite"
 generate
 assert_exit 'a bundler that cannot be resolved fails rather than noticing nothing' 1
 assert_says 'as NOT008' 'NOT008 vite could not be resolved'
+
+# --- A server's notices are its own (#767) ---------------------------------------------
+
+INSTANCE_DOCUMENT='apps/instance/third-party.txt'
+
+new_fixture
+generate
+assert_exit 'a server with nothing in its closure still gets its document' 0
+if grep -qF '(none — the instance runs on Node alone)' "${tmp}/${INSTANCE_DOCUMENT}" 2>/dev/null; then
+  ok 'and it says the instance includes nothing'
+else
+  bad 'and it says the instance includes nothing' "$(cat "${tmp}/${INSTANCE_DOCUMENT}" 2>/dev/null)"
+fi
+
+new_fixture
+WS="$(package ws 8.22.0)"
+printf 'The MIT License -- the ws copy\n' > "${WS}/LICENSE"
+closure @onyourleft/instance "{$(entry MIT ws 8.22.0 "${WS}")}"
+generate
+assert_exit 'a server dependency generates' 0
+assert_document_lacks "the server's dependency is NOT in the app's notices" 'Name: ws'
+if grep -qF 'The MIT License -- the ws copy' "${tmp}/${INSTANCE_DOCUMENT}"; then
+  ok "it is in the instance's own document, with its licence text"
+else
+  bad "it is in the instance's own document, with its licence text" "$(cat "${tmp}/${INSTANCE_DOCUMENT}")"
+fi
+run --assume-installed
+assert_exit 'and the check agrees with what it wrote' 0
+assert_says 'and counts it apart from the app' '1 packages in apps/instance'
+printf 'edited by hand\n' >> "${tmp}/${INSTANCE_DOCUMENT}"
+run --assume-installed
+assert_exit "an instance document that drifted fails" 1
+assert_says 'as NOT006, naming it' "NOT006 ${INSTANCE_DOCUMENT}"
+
+# A workspace package the server depends on brings its closure into the
+# server's document, because pnpm does not follow the link.
+new_fixture
+printf '{"name":"@onyourleft/instance","dependencies":{"@onyourleft/store":"workspace:*"}}\n' \
+  > "${tmp}/apps/instance/package.json"
+printf '{"name":"@onyourleft/store"}\n' > "${tmp}/packages/store/package.json"
+generate
+assert_exit 'a server using a workspace package generates' 0
+if grep -qF 'Name: dexie' "${tmp}/${INSTANCE_DOCUMENT}"; then
+  ok "the workspace package's closure is in the server's document"
+else
+  bad "the workspace package's closure is in the server's document" "$(cat "${tmp}/${INSTANCE_DOCUMENT}")"
+fi
+
+new_fixture
+BARE="$(package bare-server-dep 1.0.0)"
+closure @onyourleft/instance "{$(entry MIT bare-server-dep 1.0.0 "${BARE}")}"
+generate
+assert_exit 'a server dependency with no licence file fails closed' 1
+assert_says 'as NOT003, naming the server' 'has no reviewed list saying where its notice comes from'
+
+new_fixture
+printf '[{"name":"root","path":"%s"},{"name":"@onyourleft/web","path":"%s/apps/web"},{"name":"@onyourleft/store","path":"%s/packages/store"}]\n' \
+  "${tmp}" "${tmp}" "${tmp}" > "${tmp}/fake/workspace.json"
+generate
+assert_exit 'a server SERVERS names that is not in the workspace fails rather than noticing nothing' 1
+assert_says 'as NOT002' 'NOT002 no workspace package is at apps/instance'
 
 # --- Deterministic --------------------------------------------------------------------
 

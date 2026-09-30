@@ -24,6 +24,7 @@ import {
   auditAccessibility,
   formatViolations,
   isHiddenFromAssistiveTechnology,
+  keyboardReachableElements,
   tabbableElements,
 } from './audit';
 
@@ -356,6 +357,96 @@ describe('tabbableElements', () => {
 });
 
 /**
+ * The tab order through a radio group (#698).
+ *
+ * Chromium makes a named radio group ONE tab stop — the checked radio, or the
+ * first when none is checked — and `controls-first.browser.spec.ts` holds the
+ * model to real Tab presses on Settings. These fixtures pin each branch.
+ */
+describe('tabbableElements and a radio group (#698)', () => {
+  function tabOrder(body: string): string[] {
+    return tabbableElements(documentWith(body)).map((element) => element.id);
+  }
+
+  function reachable(body: string): string[] {
+    return keyboardReachableElements(documentWith(body)).map((element) => element.id);
+  }
+
+  const GROUP = (checked: 'a' | 'b' | 'c' | '') => `
+    <button id="before" type="button">Before</button>
+    <input id="a" type="radio" name="units" ${checked === 'a' ? 'checked' : ''} />
+    <input id="b" type="radio" name="units" ${checked === 'b' ? 'checked' : ''} />
+    <input id="c" type="radio" name="units" ${checked === 'c' ? 'checked' : ''} />
+    <button id="after" type="button">After</button>
+  `;
+
+  it('stops on the checked radio and on no other', () => {
+    expect(tabOrder(GROUP('b'))).toEqual(['before', 'b', 'after']);
+  });
+
+  it('stops on the first radio when none is checked', () => {
+    expect(tabOrder(GROUP(''))).toEqual(['before', 'a', 'after']);
+  });
+
+  it('keeps every radio with no name, which is a group of one', () => {
+    expect(tabOrder('<input id="x" type="radio" /><input id="y" type="radio" checked />')).toEqual([
+      'x',
+      'y',
+    ]);
+  });
+
+  it('keeps one stop per group when two groups sit side by side', () => {
+    expect(
+      tabOrder(`
+        <input id="m" type="radio" name="units" checked /><input id="i" type="radio" name="units" />
+        <input id="l" type="radio" name="lap" /><input id="r" type="radio" name="lap" />
+      `),
+    ).toEqual(['m', 'l']);
+  });
+
+  it('keeps apart two groups of one name in two forms', () => {
+    expect(
+      tabOrder(`
+        <form><input id="p" type="radio" name="units" checked /><input id="q" type="radio" name="units" /></form>
+        <form><input id="s" type="radio" name="units" /><input id="t" type="radio" name="units" /></form>
+      `),
+    ).toEqual(['p', 's']);
+  });
+
+  it('stops twice on an unchecked group another control splits, as Chromium does', () => {
+    expect(
+      tabOrder(`
+        <input id="a" type="radio" name="units" />
+        <button id="between" type="button">Between</button>
+        <input id="b" type="radio" name="units" />
+      `),
+    ).toEqual(['a', 'between', 'b']);
+  });
+
+  it('takes a disabled first radio out, and the next one is the stop', () => {
+    expect(
+      tabOrder(`
+        <input id="a" type="radio" name="units" disabled />
+        <input id="b" type="radio" name="units" />
+      `),
+    ).toEqual(['b']);
+  });
+
+  it('reaches the rest of a group by arrow key once its stop is tabbable', () => {
+    expect(reachable(GROUP('b'))).toEqual(['before', 'a', 'b', 'c', 'after']);
+  });
+
+  it('reaches no radio of a group whose checked radio is out of the tab order', () => {
+    expect(
+      reachable(`
+        <input id="a" type="radio" name="units" />
+        <input id="b" type="radio" name="units" checked tabindex="-1" />
+      `),
+    ).toEqual([]);
+  });
+});
+
+/**
  * The tab order through a `<details>` disclosure (#665).
  *
  * A closed `<details>` renders its first `<summary>` and nothing else, so no
@@ -596,6 +687,75 @@ describe('landmark naming follows ARIA rather than the generic name algorithm', 
          <nav aria-labelledby="blank" aria-label="Secondary"><ul><li><a href="#/about">About</a></li></ul></nav>`,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('landmarks-are-distinguishable reads a declared role as well as a tag — #690', () => {
+  const region = (caption: string, id: string): string =>
+    `<div role="region" tabindex="0" aria-labelledby="${id}"><table><caption id="${id}">${caption}</caption><tr><td>1</td></tr></table></div>`;
+
+  it('fires on two table regions captioned alike', () => {
+    expect(rulesFiredBy(`${CLEAN_BODY}${region('Laps', 'a')}${region('Laps', 'b')}`)).toContain(
+      'landmarks-are-distinguishable',
+    );
+  });
+
+  it('accepts two table regions captioned apart', () => {
+    expect(rulesFiredBy(`${CLEAN_BODY}${region('Laps', 'a')}${region('Efforts', 'b')}`)).toEqual(
+      [],
+    );
+  });
+
+  it('fires on a table region named like a named section', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<section aria-label="Laps"><p>x</p></section>${region('Laps', 'a')}`,
+      ),
+    ).toContain('landmarks-are-distinguishable');
+  });
+
+  it('does not hold an unnamed section, which is no landmark, against one table region', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<section><h2>Laps</h2></section>${region('Laps', 'a')}`),
+    ).toEqual([]);
+  });
+
+  it('does not count an unnamed section, so a lone unnamed region is not one of two', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<section><h2>Laps</h2></section><div role="region"><p>x</p></div>`,
+      ),
+    ).not.toContain('landmarks-are-distinguishable');
+  });
+
+  it('fires on an unnamed nav beside an unnamed navigation role — #864', () => {
+    // An unnamed `nav` is a navigation landmark (HTML-AAM), unlike an unnamed
+    // `section`, so the declared role is the second of two with no name.
+    const body = CLEAN_BODY.replace('<nav aria-label="Primary">', '<nav>');
+    expect(rulesFiredBy(`${body}<div role="navigation"><a href="#/">Ride</a></div>`)).toContain(
+      'landmarks-are-distinguishable',
+    );
+  });
+
+  it('fires on an unnamed aside beside an unnamed complementary role — #864', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<aside><p>x</p></aside><div role="complementary"><p>y</p></div>`),
+    ).toContain('landmarks-are-distinguishable');
+  });
+
+  it('accepts one unnamed nav beside one NAMED navigation role — #864', () => {
+    const body = CLEAN_BODY.replace('<nav aria-label="Primary">', '<nav>');
+    expect(
+      rulesFiredBy(`${body}<div role="navigation" aria-label="Pages"><a href="#/">Ride</a></div>`),
+    ).toEqual([]);
+  });
+
+  it('fires on two navigation roles named alike, whatever their tags', () => {
+    expect(
+      rulesFiredBy(
+        `${CLEAN_BODY}<div role="navigation" aria-label="Primary"><a href="#/">Ride</a></div>`,
+      ),
+    ).toContain('landmarks-are-distinguishable');
   });
 });
 

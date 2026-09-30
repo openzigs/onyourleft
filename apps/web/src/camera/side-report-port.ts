@@ -9,7 +9,8 @@
  * `side-analysis.ts` opens a {@link SideReportSession} when a pairing's
  * analysis begins and ends it with the report's sentences when the pairing
  * ends. `side-report-keeper.ts` is the implementation: it works out which ride
- * the session filmed and saves the sentences against it.
+ * the session filmed and saves the sentences — and, since #801, the pose
+ * summary — against it.
  *
  * ## Why a `*-port.ts`
  *
@@ -23,14 +24,19 @@
  */
 
 import type { SideReport } from './side-report';
+import type { SideSessionSummary } from './side-session-summary';
 
 /** One pairing's report, on its way to the ride it filmed. */
 export interface SideReportSession {
   /**
    * The pairing has ended. `report` is its sentences, or `undefined` when there
-   * was nothing to report (a pairing that never filmed). Called at most once.
+   * was nothing to report (a pairing that never filmed). `pose` is the pose
+   * summary made in the same pass (#801), or `undefined` when nothing was
+   * compared; it goes where the sentences go, by the same rule. Required
+   * rather than optional, so a caller that forgets it is a compile error
+   * rather than a ride saved without its summary. Called at most once.
    */
-  endSideReportSession(report: SideReport | undefined): void;
+  endSideReportSession(report: SideReport | undefined, pose: SideSessionSummary | undefined): void;
 }
 
 /** What `side-analysis.ts` asks of whatever keeps its reports. */

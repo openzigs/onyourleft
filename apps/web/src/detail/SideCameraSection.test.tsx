@@ -55,7 +55,7 @@ function report(
   observations: readonly string[],
   summary: string = SIDE_REPORT_OBSERVED,
 ): SideCameraReportRecord {
-  return { athleteId: ATHLETE, activityId: RIDE, summary, observations };
+  return { athleteId: ATHLETE, activityId: RIDE, summary, observations, pose: null };
 }
 
 /**
@@ -219,6 +219,7 @@ describe('read back from the real store (CLAUDE.md §5)', () => {
           activityId: ride.id,
           summary: SIDE_REPORT_OBSERVED,
           observations: OBSERVED,
+          pose: null,
         }),
       );
       const store = openActivityStore(harness.databaseName);
@@ -251,6 +252,7 @@ describe('read back from the real store (CLAUDE.md §5)', () => {
           activityId: ride.id,
           summary: SIDE_REPORT_OBSERVED,
           observations: OBSERVED,
+          pose: null,
         }),
       );
       const store = openActivityStore(harness.databaseName);
@@ -266,6 +268,7 @@ describe('read back from the real store (CLAUDE.md §5)', () => {
           });
           return store.getSideCameraReport(owner, id);
         },
+        getRideWriteUp: async (owner, id) => store.getRideWriteUp(owner, id),
       };
       try {
         const section = await open({ athleteId: ATHLETE_A, store: slow }, ride.id);

@@ -9,6 +9,8 @@
  * together.
  */
 
+import { cpus } from 'node:os';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -35,6 +37,7 @@ import {
   rollRatePerMetre,
   solvedLine,
   steadyTurnLean,
+  type RacingLine,
 } from './racing-line';
 import { RIDER_HALF_WIDTH_METRES } from './bicycle';
 import {
@@ -339,14 +342,21 @@ describe('the lean is smoothed over distance — #499 criterion 6', () => {
   });
 });
 
+/** @see the #734 note on the cost case below */
+const MAXIMUM_COST_RATIO = 25;
+
 describe('its cost — #499', () => {
-  /** A thousand kilometres of winding road: nothing in the store bounds a route's length. */
-  function longWindingRoute(): RouteProfile {
+  /**
+   * `kilometres` of winding road — the same road for every length, so the
+   * shorter is the start of the longer. Nothing in the store bounds a route's
+   * length.
+   */
+  function longWindingRoute(kilometres: number): RouteProfile {
     const points: RoutePoint[] = [];
     let x = 0;
     let z = 0;
     let heading = 0;
-    for (let index = 0; index < 100_000; index += 1) {
+    for (let index = 0; index < kilometres * 100; index += 1) {
       heading += 0.3 * Math.sin(index / 7) * Math.sin(index / 53);
       x += 10 * Math.sin(heading);
       z += 10 * Math.cos(heading);
@@ -361,22 +371,76 @@ describe('its cost — #499', () => {
     return routeProfile(points);
   }
 
-  it('solves a 1 000 km route once, in bounded time, and keeps it on the road', () => {
-    const route = longWindingRoute();
+  /** One solve, and how long it took in milliseconds. */
+  function timedSolve(route: RouteProfile): { readonly line: RacingLine; readonly took: number } {
     const started = performance.now();
     const line = solvedLine(route, GAUSS_NEWTON_STEPS);
-    const took = performance.now() - started;
-    // Printed, because it is the figure #499 asks to be recorded. It said
-    // "about 0.8 s"; re-measured for #588 with this case run alone, median of
-    // five on one machine: 0.83 s before #546, 1.09 s after it took the steps
-    // from 30 to 40, and 0.69 s since #588 — under the coverage run 2.90 s,
-    // 3.74 s and 2.80 s, and 13.1 s on CI's coverage run for #546's merge.
-    // Re-measured for #586 the same way: 0.67 s (0.667–0.679 s over five).
-    // #640 took the steps from 40 to 80: 0.69 s (0.66–0.71 s) at 40 and
-    // 1.29 s (1.28–1.42 s) at 80, median of five, run alone, 2026-09-27.
-    // The bound is a hang detector, not a performance claim.
-    console.info(`racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms`);
-    expect(took).toBeLessThan(30_000);
+    return { line, took: performance.now() - started };
+  }
+
+  /**
+   * ⚠️ **What this claims, since #734: the solve's cost grows LINEARLY with
+   * the route, and a reviewer who remembers "under 30 s" here is reading the
+   * old file.** It asserted `took < 30 000` ms and called that a hang
+   * detector. Under `test:coverage` on CI it read 12.2 s to 27.2 s over
+   * thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515) —
+   * 27.2 s on 36374954481, 91 % of the bound, on the slower of the two
+   * runners — so it was measuring the runner and coverage's counters as much
+   * as the solver: the same code took 1.3 s run alone on a Mac and 5.6 s under
+   * coverage there. And it could not detect a hang at all, because a
+   * synchronous case is judged only once it returns (CLAUDE.md §4c).
+   *
+   * #734 did two things, and #751 asked which:
+   *
+   * 1. **Made the work cheaper.** `racing-line.ts` §`bandedSolve` peels its
+   *    edge rows out of the four hottest loops, `linearise` writes its
+   *    three-by-three out, and §`solvePinned` visits a LIST of the pinned
+   *    samples instead of scanning every sample to skip the free ones — to
+   *    the bit, which the digests below hold. Measured on one Mac, median of
+   *    three, this case alone: 5.59 s to 3.80 s under coverage (−32 %), and
+   *    1.41 s to 1.31 s without it.
+   * 2. **Restructured what is timed.** The bound is now a RATIO — a 1 000 km
+   *    solve against a 100 km solve of the start of the same road, in the
+   *    same process under the same instrumentation — so the runner and the
+   *    coverage counters divide out. Linear cost is 10; a solver that went
+   *    quadratic in the route's length would read about 100.
+   *
+   * The 100 km route is solved TWICE and the second is used, so the ratio is
+   * not flattered by the smaller solve paying for the JIT's warm-up.
+   * `MAXIMUM_COST_RATIO` is 25: two and a half times linear, and at least
+   * twice every ratio CI has printed under coverage. Measured on #751's pull
+   * request, `test:coverage` on the slower runner (AMD EPYC 7763), run
+   * 36467880376: **9.54** on attempt 1 (15 462 ms against 1 621 ms) and
+   * **9.13** on attempt 2 (15 601 ms against 1 709 ms) — 38 % and 37 % of the
+   * bound. Locally on an Apple M4 Pro: 9.3 to 10.0, with and without coverage.
+   * The 1 000 km solve itself took 12.2 s to 27.2 s under coverage on CI
+   * before #734 and 15.5 s on both of those runs. The case prints its own
+   * figures on every run, with the CPU it ran on.
+   *
+   * ⚠️ **What it no longer catches: a uniform slow-down.** A change that made
+   * every sample three times dearer leaves the ratio at 10. The old bound could
+   * catch that only on a fast runner — at 27.2 s it had 10 % left — so nothing
+   * reliable was given up, but nothing here is a speed claim in seconds.
+   */
+  it('solves a 1 000 km route once, at a cost linear in its length, and keeps it on the road', () => {
+    const shorter = longWindingRoute(100);
+    const route = longWindingRoute(1_000);
+    timedSolve(shorter);
+    const warm = timedSolve(shorter);
+    const { line, took } = timedSolve(route);
+    const ratio = took / warm.took;
+    const samples = route.positions.length / shorter.positions.length;
+    // Printed, because it is the figure #499 asks to be recorded, and #734's
+    // ratio beside it with the CPU, because which runner a job lands on is the
+    // first thing to know about a timing.
+    console.info(
+      `racing line: ${String(route.positions.length)} samples in ${took.toFixed(0)} ms; ` +
+        `${String(shorter.positions.length)} in ${warm.took.toFixed(0)} ms; ` +
+        `ratio ${ratio.toFixed(2)} for ${samples.toFixed(2)} times the samples; ` +
+        `${cpus()[0]?.model ?? 'unknown CPU'}`,
+    );
+    expect(samples).toBeGreaterThan(9.5);
+    expect(ratio).toBeLessThan(MAXIMUM_COST_RATIO);
     expect(peak(Array.from(line.offsets))).toBeLessThanOrEqual(LINE_LIMIT_METRES);
   }, 60_000);
 

@@ -683,3 +683,42 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     itself, which this defect cannot strand. D-3 lists two channels, both made by the tablet, and
     the tablet accepts none from the phone; changing that is D-3's to decide, not an amendment's.
     The rider pairs again.
+- **2026-09-28** — **The 2026-09-26 entry's *"what the computer is asked"* is no longer the
+  question it describes, and its reader no longer accepts a pose on shape alone.**
+  [#761](https://github.com/openzigs/onyourleft/issues/761), from
+  [spike 0016](../spikes/0016-live-in-ride-coaching.md) §5.4: #553's `side-pose` question opened
+  *"This picture shows a person riding a bicycle"*, and on the spike's six blank and six noise
+  pictures `gemma3:4b` answered `"rider":true` every time; the reader took one blank and four
+  noise answers as poses, which the post-ride report would have compared. What changes, decided by
+  #761's implementation and recorded here for the owner to overturn, as the 2026-09-26 entry was:
+  - **The question asks first whether anyone is there**, and says to answer `{"rider":false}` when
+    the model is not sure (`analysis-port.ts` §`ANALYSIS_PROMPTS`). Re-run on 2026-09-28 with the
+    same model, pictures and request, all fourteen blank and noise answers said
+    `{"rider":false}`; the drawn rider was still answered `"rider":true`.
+  - **A pose must be one a person on a bicycle could make** (`pose-plausibility.ts`): the
+    shoulder, hip, knee and ankle present; head above shoulder above hip; the ankle below the hip
+    and the knee; the knee bent short of 170°; thigh, shin and trunk in proportion. It holds the
+    computer's answers only, never the tablet's own model. ⚠️ **Read by it, none of the 22
+    poses the model placed on the drawn rider survives** — 19 of them put the hip above the
+    shoulder — so on this evidence a general vision model gives the report nothing, and the report
+    says the pictures could not be read, rather than comparing positions nobody was in.
+  - **`no-rider` carries why** — the model said nobody, placed too few points, or placed an
+    implausible pose — and the tablet's screen counts each on the computer path.
+  - **The computer path stays offered**, off by default behind D-11's own consent sentence. The
+    shape it asks for is this repository's own, so a pose server of the rider's own can answer it
+    directly; that is the use it is for, and a vision model's guesses now fail closed.
+  - **The report does not say its poses came from the computer.** What reaches it has passed the
+    check, the tablet's own model is no better measured (#385), so naming one source would imply
+    the other was validated; and a report is saved as sentences under the store's 400-character
+    limit, which the longest summary with a source sentence appended would pass. The screen during
+    the session already says where every picture went.
+
+- **2026-09-28** — **D-6's *"What is kept"* row is superseded in its last clause, *"and discarded
+  when the report is made"*, by [ADR 0035](0035-model-written-ride-write-ups.md) D-6**, on the
+  owner's ruling on [#795](https://github.com/openzigs/onyourleft/issues/795): a pose summary is
+  to be kept with the ride, from the pull request that first stores one: differences only, per sagittal kind, with comparability, counts and source —
+  owned by the athlete, removed by the erase, carried in the export and listed in the privacy
+  policy. ⚠️ **D-6's rule about pictures is untouched**: no picture is stored or shown on the
+  tablet. **D-3 stands**: the owner confirmed on
+  [#796](https://github.com/openzigs/onyourleft/issues/796) that position is analysed over the whole
+  session only, and nothing joins the summary to a section or a reading of the ride.

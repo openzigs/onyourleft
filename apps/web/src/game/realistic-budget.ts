@@ -477,6 +477,21 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
 export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
+ * The most triangles the start and finish gantries may add to a frame:
+ * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
+ * worst frame before #617 freed more. Spent only within
+ * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
+ * The worst a frame carries is two gantries and a board — a point-to-point
+ * route shorter than the reach, whose start and finish are both in view —
+ * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, and by
+ * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the
+ * WebGL entry points
+ */
+export const REALISTIC_GANTRY_TRIANGLES = 1_000;
+
+/**
  * The most GPU texture memory the realistic set may hold, estimated: **160 MiB**,
  * under half the 355 MiB all-on estimate #457 drew on the tablet.
  *
@@ -579,6 +594,23 @@ export const REALISTIC_RIDER_SURFACES = {
   /** The undressed `rider.glb`, bytes, as #623 found it. */
   buildBefore: 1_789_800,
 } as const;
+
+/**
+ * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
+ * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
+ * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
+ * no mipmaps (`rider-silhouette.ts` §`SILHOUETTE_TEXTURE_BYTES`) — and adds no
+ * build byte: it is made from the rider when a view builds its realistic
+ * world, never committed.
+ *
+ * ⚠️ **No triangles in the frame and no draw call**: two triangles a rider in
+ * the one instanced draw the round blob was, which the realistic world no
+ * longer draws.
+ *
+ * @test-facing held by `rider-silhouette.test.ts` and
+ * `realistic-budget.test.ts`; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
 
 /**
  * The most bytes the realistic set may add to the build — and so to the APK,

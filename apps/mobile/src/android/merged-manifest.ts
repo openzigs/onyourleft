@@ -296,6 +296,12 @@ export const REVIEWED_FEATURES: readonly ReviewedFeature[] = [
     contributor: 'ours',
     why: '#383. Declared optional so that adding CAMERA does not make this app uninstallable on a device with no camera — the feature is off by default and a rider need never turn it on. A ride, a trainer and every sensor work exactly as before on such a device',
   },
+  {
+    name: 'android.hardware.bluetooth_le',
+    required: 'false',
+    contributor: 'merged-in',
+    why: '#749. @capacitor-community/bluetooth-le 8.3.0 declares it in its own android/src/main/AndroidManifest.xml, named by manifest-merger-debug-report.txt on 2026-09-28. Accepted as it arrives: BLE is the app’s whole sensor path, and required="false" keeps the app installable on a device with no BLE, where the Devices screen says Bluetooth is unavailable rather than the store hiding the app. A library release that flips it to true, or drops the attribute (which Android reads as true), fails the required assertion above',
+  },
 ];
 
 /** One reviewed `<permission>` DEFINITION in the shipped manifest. */

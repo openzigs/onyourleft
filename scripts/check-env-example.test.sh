@@ -75,7 +75,7 @@ assert_violation() {
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^ENV001: " | grep -qF "${needle}"; then
+     && grep -qF "${needle}" <<< "$(grep "^ENV001: " <<< "${out}")"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else

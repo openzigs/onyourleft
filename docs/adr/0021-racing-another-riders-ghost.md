@@ -364,3 +364,23 @@ ADR 0007 takes toward its own claim readings.
 - **#331 ships a cross-rider ghost without D-7 being answered.** Then D-1 was written and ignored,
   which is `CLAUDE.md` §4j's failure shape in a domain no gate reaches. ⚠️ **Nothing mechanical
   checks any decision in this ADR**, D-6 included, and a reviewer noticing is the entire mechanism.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-29** — **D-7 is answered: the owner chose Option B, and D-1 is superseded by
+  [ADR 0039](0039-racing-another-riders-ghost-on-consent.md).** The owner's ruling of 2026-09-28 on
+  [#16](https://github.com/openzigs/onyourleft/issues/16): *"#331 is unblocked for rides the owner
+  explicitly shared for racing: consent, trimmed of privacy zones. This needs a superseding ADR to
+  ADR 0021 and ADR 0007 D4 that accepts the patent risk (spike 0005)."* ADR 0039 quotes Option B's cost
+  from D-7's table verbatim and states that [ADR 0007](0007-patent-posture.md) D5 step 1 is **not**
+  met. ⚠️ **What this does to the rest of this ADR**: **D-4's seven constraints and D-5's privacy
+  rules now bind** — D-4 was written as conditions on a permission that did not exist, and ADR 0039
+  D-3 pairs each with where a reviewer of [#331](https://github.com/openzigs/onyourleft/issues/331)
+  checks it. **D-5.3's order binds**: [#793](https://github.com/openzigs/onyourleft/issues/793)'s
+  consent-scoped store test lands and is proved red first, and only then may #331 touch
+  `activity-store.ghost-scope.test.ts`, never in the same pull request. **D-6 stands.** D-2 and D-3
+  stand as the reading, unchanged: nothing about the patents was re-read. A ghost is still never
+  placed in a live room (D-4.5). The *Constraints* table's row saying #331 is **blocked** by D-1 is no
+  longer true; #331 is blocked by #793 and #776 instead.

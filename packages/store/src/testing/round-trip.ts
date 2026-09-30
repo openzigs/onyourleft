@@ -41,7 +41,9 @@ import type {
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
+  RideWriteUpRecord,
   RouteRecord,
+  SyncBaseRecord,
   SegmentEndpointRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -716,6 +718,132 @@ export async function assertSideCameraReportRoundTrip(
       throw new RoundTripFailure(
         `sideCameraReport.observations[${String(index)}]: is not the sentence kept`,
       );
+    }
+  }
+  assertSamePose(report.pose, read.pose);
+  return read;
+}
+
+/**
+ * The pose summary, field by field — #800. `fakes.ts`
+ * §`poselessReportStoreFactory` returns `null`, which is a real state, so a
+ * check that only asked whether a report came back cannot see it.
+ *
+ * ⚠️ Names the field and never the number: it is a measurement of a body.
+ */
+function assertSamePose(
+  kept: SideCameraReportRecord['pose'],
+  read: SideCameraReportRecord['pose'],
+): void {
+  if (kept === null || read === null) {
+    if (kept !== read) {
+      throw new RoundTripFailure(
+        kept === null
+          ? 'sideCameraReport.pose: a summary came back where none was kept'
+          : 'sideCameraReport.pose: the summary kept did not come back',
+      );
+    }
+    return;
+  }
+  const keptKinds = Object.keys(kept.differences).sort();
+  const readKinds = Object.keys(read.differences).sort();
+  if (keptKinds.join() !== readKinds.join()) {
+    throw new RoundTripFailure('sideCameraReport.pose.differences: different kinds came back');
+  }
+  for (const kind of keptKinds as (keyof typeof kept.differences)[]) {
+    if (!Object.is(read.differences[kind], kept.differences[kind])) {
+      throw new RoundTripFailure(
+        `sideCameraReport.pose.differences.${kind}: is not the difference kept`,
+      );
+    }
+  }
+  for (const field of ['posed', 'noRider', 'unreadable', 'source'] as const) {
+    if (read[field] !== kept[field]) {
+      throw new RoundTripFailure(`sideCameraReport.pose.${field}: is not the value kept`);
+    }
+  }
+}
+
+/**
+ * Keeps a ride's write-up, closes every connection, and reads it back through
+ * `getRideWriteUp` — the read the ride detail screen uses (#800, #804).
+ *
+ * ⚠️ **Run it on a harness that already holds a write-up for the same ride**
+ * and it is also the test of "a new analysis replaces the saved one": `fakes.ts`
+ * §`firstWriteUpStoreFactory` answers the second put with success and keeps the
+ * first, and every field is compared so that nothing of the first can pass.
+ *
+ * ⚠️ The failure names the field, never the text: it is a model's words about
+ * somebody's ride.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertRideWriteUpRoundTrip(
+  harness: StoreHarness,
+  writeUp: RideWriteUpRecord,
+): Promise<RideWriteUpRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putRideWriteUp(writeUp),
+    async (store) => store.getRideWriteUp(writeUp.athleteId, writeUp.activityId),
+  );
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the write-up for ${writeUp.activityId} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (read.athleteId !== writeUp.athleteId || read.activityId !== writeUp.activityId) {
+    throw new RoundTripFailure('rideWriteUp: the write-up that came back is for another ride');
+  }
+  for (const field of [
+    'text',
+    'templateId',
+    'templateVersion',
+    'source',
+    'includedPose',
+    'writtenAt',
+  ] as const) {
+    if (read[field] !== writeUp[field]) {
+      throw new RoundTripFailure(`rideWriteUp.${field}: is not the value kept`);
+    }
+  }
+  if (read.missingSections.join() !== writeUp.missingSections.join()) {
+    throw new RoundTripFailure('rideWriteUp.missingSections: is not the list kept');
+  }
+  return read;
+}
+
+/**
+ * Keeps a sync base row, **deletes the ride it names**, closes every
+ * connection, and reads the athlete's base back through `listSyncBase` — the
+ * read a sync makes (#776, #893's review).
+ *
+ * The delete is the point: a base row is the device's memory that a synced
+ * ride was deleted here, so it has to be there AFTER the ride is gone.
+ * `fakes.ts` §`cascadingSyncBaseStoreFactory` answers every write and loses
+ * the row with the ride; `memoryWriteStoreFactory` never writes it.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertSyncBaseRoundTrip(
+  harness: StoreHarness,
+  base: SyncBaseRecord,
+): Promise<SyncBaseRecord> {
+  const rows = await harness.roundTrip(
+    async (store) => {
+      await store.putSyncBase(base);
+      await store.deleteActivity(base.athleteId, base.activityId);
+    },
+    async (store) => store.listSyncBase(base.athleteId),
+  );
+  const read = rows.find((row) => row.kind === base.kind && row.key === base.key);
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the sync base for ${base.kind} ${base.key} was kept and reported success, and after its ride was deleted a fresh connection cannot see it`,
+    );
+  }
+  for (const field of ['athleteId', 'activityId', 'localDigest', 'remoteDigest'] as const) {
+    if (read[field] !== base[field]) {
+      throw new RoundTripFailure(`syncBase.${field}: is not the value kept`);
     }
   }
   return read;

@@ -45,7 +45,9 @@ pound agreement's definitions are exported from this package and nowhere else:
 [`src/length.ts`](src/length.ts), and `KILOGRAMS_PER_POUND` in [`src/mass.ts`](src/mass.ts) since
 [#325](https://github.com/openzigs/onyourleft/issues/325). Each is exact; `mass.ts` records what it
 deliberately leaves out, including the stone, and why that is a change to the shape of a measurement
-rather than a constant.
+rather than a constant. Since [#809](https://github.com/openzigs/onyourleft/issues/809) `mass.ts`
+also holds `wattsPerKilogram(power, mass)`, the one place a power becomes watts per kilogram of the
+rider (never rider plus bicycle), so no client writes `power / mass` itself.
 
 ### Three of those choices are worth reading twice
 

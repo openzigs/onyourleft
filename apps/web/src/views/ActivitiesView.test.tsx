@@ -57,6 +57,7 @@ afterEach(async () => {
   await harness?.destroy();
   harness = undefined;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function summary(id: string, overrides: Partial<ActivitySummary> = {}): ActivitySummary {
@@ -424,6 +425,33 @@ function observerReporting(width: number): void {
   );
 }
 
+/**
+ * A `ResizeObserver` that reports each width in turn, once each, when asked to
+ * observe — a list shown at one width and then hidden (#738).
+ */
+function observerReportingInTurn(widths: readonly number[]): void {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      readonly #callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.#callback = callback;
+      }
+      observe(): void {
+        for (const width of widths) {
+          this.#callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], this);
+        }
+      }
+      disconnect(): void {
+        // Nothing to release.
+      }
+      unobserve(): void {
+        // Nothing to release.
+      }
+    },
+  );
+}
+
 /** jsdom's root font size, which is the browser default. */
 const REM = 16;
 
@@ -492,6 +520,79 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
 
     expect(document.body.textContent).toContain('Nothing recorded yet');
     expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+  });
+
+  // #738: on one pane the list is `hidden` while a ride is chosen, and a
+  // hidden box measures nothing. Read as a narrow list it became cards, and on
+  // the way back the table was drawn again after focus had returned to a card.
+  it('keeps its layout when the list is hidden and measures a width of nothing — #738', async () => {
+    observerReportingInTurn([TABLE_FROM_REM * REM, 0]);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
+    expect(rowText()).toHaveLength(2);
+  });
+
+  it('measures the list again, before the paint, when it is shown after a choice — #758', async () => {
+    // A phone at a ride's own address: the list starts `hidden`, measures
+    // nothing, and stays the table it started as. On Back it used to be drawn
+    // as that table, and then as cards once the observer saw its width —
+    // re-creating the ride's link after `ListDetail` had returned focus to it.
+    // The observer here reports nothing, so only a synchronous measurement on
+    // the change of choice can make it cards by the time `rerender` returns.
+    observerReportingInTurn([]);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { width: this.closest('[hidden]') === null ? 300 : 0 } as DOMRect;
+    });
+    const library = stubLibrary(OWNER, rides);
+    mounted = await mount(<ActivitiesView library={library} selected="outdoor" />);
+    await settle();
+    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).not.toBeNull();
+
+    await mounted.rerender(<ActivitiesView library={library} />);
+
+    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).toBeNull();
+    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
+  });
+
+  it('keeps one ResizeObserver while the choice changes — #864', async () => {
+    // Re-measuring on a change of choice is its own layout effect: the
+    // observer is made when the library arrives and not again per choice.
+    let made = 0;
+    let released = 0;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor() {
+          made += 1;
+        }
+        observe(): void {
+          // Reports nothing: the layout here comes from the measurement.
+        }
+        disconnect(): void {
+          released += 1;
+        }
+        unobserve(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    const library = stubLibrary(OWNER, rides);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+    const before = made;
+    const releasedBefore = released;
+    expect(before).toBeGreaterThan(0);
+
+    await mounted.rerender(<ActivitiesView library={library} selected="outdoor" />);
+    await mounted.rerender(<ActivitiesView library={library} />);
+    await mounted.rerender(<ActivitiesView library={library} selected="indoor" />);
+
+    expect(made).toBe(before);
+    expect(released).toBe(releasedBefore);
   });
 
   it('puts the table in a focusable region named by its caption', async () => {

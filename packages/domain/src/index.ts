@@ -97,7 +97,7 @@ export { FEET_PER_MILE, METRES_PER_FOOT, METRES_PER_MILE } from './length';
 // pounds is a conversion, and every conversion in this program goes through
 // this package. See `mass.ts` for what is deliberately absent from it.
 
-export { KILOGRAMS_PER_POUND } from './mass';
+export { KILOGRAMS_PER_POUND, wattsPerKilogram } from './mass';
 
 // --- Geodesy: distance on the earth's surface -------------------------------
 //
@@ -233,6 +233,15 @@ export { canonicalBytes, canonicalJson } from './identity/canonical';
 
 export { bytesEqual, fromHex, isHexOfLength, toHex } from './identity/hex';
 export { utf8Encode } from './identity/utf8';
+export type { DevicePurpose, DeviceStatement } from './identity/device-statement';
+export {
+  AUTH_PURPOSE,
+  deviceStatementBytes,
+  LINK_PURPOSE,
+  RECOVER_PURPOSE,
+} from './identity/device-statement';
+export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
+export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 
 export type {
   Keystore,

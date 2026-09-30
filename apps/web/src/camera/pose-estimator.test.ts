@@ -74,7 +74,7 @@ describe('one picture to the worker', () => {
     expect(new Uint8Array(sent?.message.picture ?? new ArrayBuffer(0))[0]).toBe(whole[100]);
     expect(sent?.transfer).toEqual([sent?.message.picture]);
     worker.reply({ id: sent?.message.id, kind: 'landmarks', width: 256, height: 256, values: [] });
-    await expect(outcome).resolves.toEqual({ kind: 'no-rider' });
+    await expect(outcome).resolves.toEqual({ kind: 'no-rider', cause: 'said-nobody' });
   });
 
   it('matches each reply to its picture by id', async () => {
@@ -85,7 +85,7 @@ describe('one picture to the worker', () => {
     const [a, b] = worker.posted.map((post) => post.message.id);
     worker.reply({ id: b, kind: 'unreadable' });
     worker.reply({ id: a, kind: 'landmarks', width: 1, height: 1, values: [] });
-    await expect(first).resolves.toEqual({ kind: 'no-rider' });
+    await expect(first).resolves.toEqual({ kind: 'no-rider', cause: 'said-nobody' });
     await expect(second).resolves.toEqual({ kind: 'unreadable' });
   });
 });

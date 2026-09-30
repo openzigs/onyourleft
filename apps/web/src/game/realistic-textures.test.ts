@@ -276,13 +276,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const renderer = await loadedOn(TABLET);
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
-    // Non-vacuity: the whole set — four surface maps, fourteen structure maps,
+    // Non-vacuity: the whole set — eight surface maps (#627's verge and rock
+    // among them), fourteen structure maps,
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three
     // uploads once.
     const images =
-      4 +
+      8 +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
@@ -290,13 +291,24 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
         (sum, model) =>
           sum +
           modelFacts(join(PUBLIC, 'realistic', model.file)).images.length +
-          (model.impostor === undefined ? 0 : 1),
+          (model.impostor === undefined ? 0 : 1) +
+          // #630: its normal strip.
+          (model.impostorNormals === undefined ? 0 : 1),
         0,
       );
     expect(worn.length).toBeGreaterThanOrEqual(40);
     expect(worn.length).toBe(images);
     expect(new Set(worn.map((texture) => texture.role))).toEqual(
-      new Set(['road', 'ground', 'structure', 'model', 'impostor', 'bicycle', 'rider']),
+      new Set([
+        'road',
+        'ground',
+        'structure',
+        'model',
+        'impostor',
+        'impostor-normals',
+        'bicycle',
+        'rider',
+      ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
     for (const texture of worn) {
@@ -385,6 +397,25 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       }),
     ).resolves.toEqual({ loaded: true });
     expect(dispose).toHaveBeenCalledTimes(1);
+  }, 120_000);
+
+  it('loads the world with no banners when the glyph range cannot be read — #879', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const at = (url: string): string => `${ORIGIN}${url}`;
+    const glyphs = vi.fn((): Promise<Uint8Array> => Promise.reject(new Error('Failed to fetch')));
+    await expect(
+      renderer.loadRealisticWorld({
+        model: (url) => inner.model(at(url)),
+        texture: (url) => inner.texture(at(url)),
+        sky: (url) => inner.sky(at(url)),
+        glyphs,
+        dispose: inner.dispose,
+      }),
+    ).resolves.toEqual({ loaded: true });
+    expect(glyphs).toHaveBeenCalledTimes(1);
+    expect(renderer.realisticWorldLoaded()).toBe(true);
   }, 120_000);
 
   it('on a desktop that offers only the BC formats, is compressed but neither ASTC nor ETC2', async () => {
@@ -656,4 +687,341 @@ describe('the dressed rider — #623', () => {
       true,
     );
   }, 120_000);
+});
+
+/**
+ * The realistic rider moves like a rider — #625, on the real MakeHuman body
+ * posed by the real belt. Read in world space off each bone's `matrixWorld`,
+ * because this file names no `three` type (`three-seam.test.ts`).
+ */
+describe('the realistic rider moves like a rider — #625', () => {
+  type Riders = NonNullable<ReturnType<Renderer['realisticRidersOfLoadedWorld']>>;
+  interface Posed {
+    readonly name: string;
+    readonly world: readonly number[];
+    readonly local: readonly number[];
+  }
+  const HALF_PI = Math.PI / 2;
+
+  /** Every bone of the rider's body, posed by one frame, copied out. */
+  function posed(
+    riders: Riders,
+    crankAngle: number,
+    pedalling: number,
+    rideSeconds: number,
+  ): ReadonlyMap<string, Posed> {
+    riders.place([
+      {
+        kind: 'rider',
+        x: 0,
+        y: 0,
+        z: 0,
+        headingX: 0,
+        headingZ: 1,
+        lean: 0,
+        bodyLean: 0,
+        pedalling,
+        rideSeconds,
+        crankAngle,
+      },
+    ]);
+    const body = riders.bodies[0];
+    if (body === undefined) throw new Error('no body');
+    const bones = new Map<string, Posed>();
+    for (const bone of body.skeleton.bones) {
+      bones.set(bone.name, {
+        name: bone.name,
+        world: [...bone.matrixWorld.elements],
+        local: bone.quaternion.toArray(),
+      });
+    }
+    return bones;
+  }
+
+  const bone = (pose: ReadonlyMap<string, Posed>, name: string): Posed => {
+    const found = pose.get(name);
+    if (found === undefined) throw new Error(`no bone ${name}`);
+    return found;
+  };
+  const at = (pose: ReadonlyMap<string, Posed>, name: string): readonly number[] =>
+    bone(pose, name).world.slice(12, 15);
+  const distance = (a: readonly number[], b: readonly number[]): number =>
+    Math.hypot((a[0] ?? 0) - (b[0] ?? 0), (a[1] ?? 0) - (b[1] ?? 0), (a[2] ?? 0) - (b[2] ?? 0));
+  /** The largest angle, in degrees, between a bone's world axes in two poses. */
+  const turned = (a: Posed, b: Posed): number =>
+    Math.max(
+      ...[0, 4, 8].map((column) => {
+        const u = a.world.slice(column, column + 3);
+        const v = b.world.slice(column, column + 3);
+        const dot = u.reduce((sum, each, i) => sum + each * (v[i] ?? 0), 0);
+        const cosine = dot / (Math.hypot(...u) * Math.hypot(...v));
+        return (Math.acos(Math.min(1, Math.max(-1, cosine))) * 180) / Math.PI;
+      }),
+    );
+  const shoulders = (pose: ReadonlyMap<string, Posed>): number =>
+    ((at(pose, 'upperarm01L')[0] ?? 0) + (at(pose, 'upperarm01R')[0] ?? 0)) / 2;
+
+  it('rocks the shoulders from side to side half a stroke apart, and not at all with no cadence', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    // The bicycle faces +Z, so across it is world X.
+    const rocked =
+      shoulders(posed(riders, HALF_PI, 1, 0)) - shoulders(posed(riders, 3 * HALF_PI, 1, 0));
+    const still =
+      shoulders(posed(riders, HALF_PI, 0, 0)) - shoulders(posed(riders, 3 * HALF_PI, 0, 0));
+    console.log(
+      `#625: the shoulders half a stroke apart — ${(Math.abs(rocked) * 100).toFixed(2)} cm ` +
+        `pedalling, ${(Math.abs(still) * 100).toFixed(3)} cm with no cadence`,
+    );
+    expect(Math.abs(rocked)).toBeGreaterThan(0.025);
+    // Toward the downstroke: +X's pedal is going down at a quarter turn.
+    expect(rocked).toBeGreaterThan(0);
+    expect(Math.abs(still)).toBeLessThan(1e-9);
+  }, 120_000);
+
+  it('holds the pelvis, the back, the head and the ankles exactly as before with no cadence', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    // At a breath's zero, so nothing but the stroke could move them.
+    const a = posed(riders, HALF_PI, 0, 0);
+    const b = posed(riders, 3 * HALF_PI, 0, 0);
+    for (const name of ['root', 'pelvisL', 'pelvisR', 'spine05', 'neck01', 'head']) {
+      expect(turned(bone(a, name), bone(b, name)), name).toBeLessThan(1e-4);
+    }
+    // No ankling: each foot keeps its rest turn against its shin.
+    for (const name of ['footL', 'footR']) {
+      expect(bone(a, name).local, name).toEqual(bone(b, name).local);
+    }
+    // …where pedalling turns every one of them.
+    const c = posed(riders, HALF_PI, 1, 0);
+    const d = posed(riders, 3 * HALF_PI, 1, 0);
+    for (const name of ['pelvisL', 'pelvisR', 'spine05']) {
+      expect(turned(bone(c, name), bone(d, name)), name).toBeGreaterThan(2);
+    }
+    // The pelvis's two halves turn about their own heads, which is one rigid
+    // roll only because the two heads are one point: the body's middle.
+    expect(distance(at(c, 'pelvisL'), at(c, 'pelvisR'))).toBeLessThan(0.01);
+    for (const name of ['footL', 'footR']) {
+      expect(bone(c, name).local, name).not.toEqual(bone(d, name).local);
+    }
+  }, 120_000);
+
+  it('keeps the hands on the bar, the feet on the pedals and the head level while the body rocks and breathes', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    let furthestHand = 0;
+    let furthestFoot = 0;
+    let headTurn = 0;
+    let backTurn = 0;
+    // The two peaks of the rock, at the two peaks of a breath.
+    for (const crank of [HALF_PI, 3 * HALF_PI]) {
+      for (const breath of [0.5, 1.5]) {
+        const still = posed(riders, crank, 0, 0);
+        const moving = posed(riders, crank, 1, breath);
+        for (const name of ['wristL', 'wristR']) {
+          furthestHand = Math.max(furthestHand, distance(at(still, name), at(moving, name)));
+        }
+        for (const name of ['footL', 'footR']) {
+          furthestFoot = Math.max(furthestFoot, distance(at(still, name), at(moving, name)));
+        }
+        headTurn = Math.max(headTurn, turned(bone(still, 'head'), bone(moving, 'head')));
+        backTurn = Math.max(backTurn, turned(bone(still, 'spine05'), bone(moving, 'spine05')));
+      }
+    }
+    console.log(
+      `#625: hands ${(furthestHand * 1000).toFixed(2)} mm, feet ${(furthestFoot * 1000).toFixed(2)} mm ` +
+        `off where they were; the head turned ${headTurn.toFixed(3)}° while the back turned ${backTurn.toFixed(2)}°`,
+    );
+    expect(furthestHand).toBeLessThan(0.002);
+    expect(furthestFoot).toBeLessThan(0.002);
+    // The bound: the head within half a degree of level while the back moves
+    // by the rock and the breath together.
+    expect(headTurn).toBeLessThan(0.5);
+    expect(backTurn).toBeGreaterThan(2);
+  }, 120_000);
+
+  it('is posed from the ride’s clock, never the wall’s — the same ride time at two wall times is the same body', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-29T10:00:00Z'));
+      const first = posed(riders, 1.1, 1, 12.5);
+      vi.setSystemTime(new Date('2026-09-29T10:00:07.321Z'));
+      vi.advanceTimersByTime(7_321);
+      const second = posed(riders, 1.1, 1, 12.5);
+      for (const [name, each] of first) {
+        expect(bone(second, name).world, name).toEqual(each.world);
+      }
+      // Non-vacuity: the RIDE's clock is read — half a breath on, the back moves.
+      const later = posed(riders, 1.1, 1, 12.5 + 1);
+      expect(turned(bone(first, 'spine05'), bone(later, 'spine05'))).toBeGreaterThan(0.5);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 120_000);
+});
+
+/**
+ * The realistic riders' bike-shaped shadow — #626, from the real rider's own
+ * silhouette. The shape is measured by how much of its own bounding rectangle
+ * (along and across the bicycle) the covered region fills: a solid ellipse
+ * fills π/4 of it, whatever its throw, and a bicycle's shadow — two wheels, a
+ * frame triangle, a body, and the gaps between them — much less.
+ *
+ * ⚠️ **Not by its aspect, which #626's criterion named, and the table this
+ * prints is why**: a cast shadow is long ALONG THE SUN'S THROW whatever casts
+ * it, so the silhouette's and the round blob's aspects agree to within a few
+ * tenths at every heading (1.1 : 1 against 1.0 : 1 with the sun abeam, 4.8 : 1
+ * against 4.6 : 1 with it behind). An aspect gate would pass or fail with the
+ * heading, never with the shape.
+ */
+describe('the realistic riders’ bike-shaped shadow — #626', () => {
+  const HEADINGS = [0, 45, 90, 135, 180, 225, 270, 315];
+  const ELEVATIONS = [55, 70];
+  const STEP = 0.02;
+
+  /** `world.ts`'s sun at an elevation: from its one azimuth, 225°. */
+  function sunAt(elevationDegrees: number): { x: number; y: number; z: number } {
+    const up = (elevationDegrees * Math.PI) / 180;
+    const azimuth = (225 * Math.PI) / 180;
+    return {
+      x: -Math.cos(up) * Math.sin(azimuth),
+      y: Math.sin(up),
+      z: Math.cos(up) * Math.cos(azimuth),
+    };
+  }
+
+  function riderFacing(degrees: number, kind: 'rider' | 'ghost' = 'rider') {
+    const heading = (degrees * Math.PI) / 180;
+    return {
+      kind,
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: -Math.sin(heading),
+      headingZ: Math.cos(heading),
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+    } as const;
+  }
+
+  /** How much of its own bounding rectangle a covered set fills, and its aspect along the bicycle. */
+  function shapeOf(
+    covered: (across: number, along: number) => boolean,
+    area: { acrossMin: number; acrossMax: number; alongMin: number; alongMax: number },
+  ): { fill: number; aspect: number; squareMetres: number } {
+    let count = 0;
+    let [acrossLow, acrossHigh, alongLow, alongHigh] = [Infinity, -Infinity, Infinity, -Infinity];
+    for (let a = area.acrossMin; a <= area.acrossMax; a += STEP) {
+      for (let c = area.alongMin; c <= area.alongMax; c += STEP) {
+        if (!covered(a, c)) continue;
+        count += 1;
+        acrossLow = Math.min(acrossLow, a);
+        acrossHigh = Math.max(acrossHigh, a);
+        alongLow = Math.min(alongLow, c);
+        alongHigh = Math.max(alongHigh, c);
+      }
+    }
+    const squareMetres = count * STEP * STEP;
+    const box = (acrossHigh - acrossLow + STEP) * (alongHigh - alongLow + STEP);
+    return {
+      fill: count === 0 ? Number.NaN : squareMetres / box,
+      aspect: silhouettes.coveredAspect(covered, area, STEP),
+      squareMetres,
+    };
+  }
+
+  let silhouettes: typeof import('./rider-silhouette');
+  let shadows: typeof import('./contact-shadow');
+
+  it('is made from the rider and the bicycle that are drawn: their length, their height and their width', async () => {
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const { BICYCLE_LENGTH_METRES, RIDER_HEIGHT_METRES } = await import('./bicycle');
+    const silhouette = riders.silhouette();
+    const { zMin, zMax, height, reach } = silhouette.bounds;
+    console.log(`#626: the side view spans ${JSON.stringify(silhouette.bounds)}`);
+    // Tyre to tyre, within a tyre's width of the bicycle's own length.
+    expect(zMax - zMin).toBeGreaterThan(BICYCLE_LENGTH_METRES - 0.05);
+    expect(zMax - zMin).toBeLessThan(BICYCLE_LENGTH_METRES + 0.1);
+    // Up to the helmet, and across to the bars.
+    expect(height).toBeGreaterThan(RIDER_HEIGHT_METRES - 0.15);
+    expect(height).toBeLessThan(RIDER_HEIGHT_METRES + 0.2);
+    expect(reach).toBeGreaterThan(0.15);
+    expect(reach).toBeLessThan(0.4);
+    // The picture is a real share of itself: not empty, not solid.
+    let covered = 0;
+    for (let at = 0; at < silhouette.texels.length; at += 2)
+      if (silhouette.texels[at]) covered += 1;
+    const share = covered / (silhouette.texels.length / 2);
+    expect(share).toBeGreaterThan(0.1);
+    expect(share).toBeLessThan(0.6);
+  }, 120_000);
+
+  it('casts the shape of a bicycle at every heading, under both ends of the sun’s band — and the round blob does not', async () => {
+    silhouettes = await import('./rider-silhouette');
+    shadows = await import('./contact-shadow');
+    const renderer = await loadedOn(TABLET);
+    const riders = renderer.realisticRidersOfLoadedWorld();
+    if (riders === undefined) throw new Error('no world');
+    const silhouette = riders.silhouette();
+    const rows: string[] = [];
+    for (const elevation of ELEVATIONS) {
+      for (const heading of HEADINGS) {
+        const sun = sunAt(elevation);
+        const marker = riderFacing(heading);
+        const thrown = { x: 0, z: 0 };
+        expect(silhouettes.silhouetteThrow(marker, sun, thrown)).toBe(true);
+        const area = silhouettes.silhouetteFootprint(silhouette.bounds, thrown, {
+          acrossMin: 0,
+          acrossMax: 0,
+          alongMin: 0,
+          alongMax: 0,
+        });
+        const cast = shapeOf(
+          (a, c) => silhouettes.silhouetteCoverage(silhouette, thrown, a, c) > 0.5,
+          area,
+        );
+        // THE CONTROL: the blob this replaces, under the same sun, covered
+        // where it is at least half its middle's darkness, in its own frame.
+        const blob = { x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 };
+        expect(shadows.placeContactShadow(marker, sun, blob)).toBe(true);
+        const round = shapeOf(
+          (a, c) => (a / blob.halfAcross) ** 2 + (c / blob.halfAlong) ** 2 <= 0.66 ** 2,
+          {
+            acrossMin: -blob.halfAcross,
+            acrossMax: blob.halfAcross,
+            alongMin: -blob.halfAlong,
+            alongMax: blob.halfAlong,
+          },
+        );
+        rows.push(
+          `${String(elevation)}° sun, heading ${String(heading)}°: silhouette fills ` +
+            `${cast.fill.toFixed(2)} (aspect ${cast.aspect.toFixed(2)}, ${cast.squareMetres.toFixed(2)} m²); ` +
+            `blob ${round.fill.toFixed(2)} (aspect ${round.aspect.toFixed(2)})`,
+        );
+        expect(cast.fill).toBeLessThan(0.6);
+        // Not a speck: a whole rider's shadow.
+        expect(cast.squareMetres).toBeGreaterThan(0.3);
+        expect(round.fill).toBeGreaterThan(0.7);
+      }
+    }
+    console.log(`#626:\n${rows.join('\n')}`);
+  }, 120_000);
+
+  it('casts none for the ghost, and none under a sun on the horizon', async () => {
+    silhouettes = await import('./rider-silhouette');
+    const thrown = { x: 7, z: 7 };
+    expect(silhouettes.silhouetteThrow(riderFacing(0, 'ghost'), sunAt(60), thrown)).toBe(false);
+    expect(silhouettes.silhouetteThrow(riderFacing(0), { x: 1, y: 0, z: 0 }, thrown)).toBe(false);
+    expect(thrown).toEqual({ x: 7, z: 7 });
+  });
 });

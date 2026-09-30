@@ -231,9 +231,32 @@ function computerPicturesText(state: SideAnalysisState, looked: number): string 
       return (
         `Pictures sent to your computer and not kept here: ${String(looked)}, ` +
         `with you in ${String(state.posed)} of them. ` +
-        `Skipped because your computer was busy: ${String(state.skipped)}.`
+        `Skipped because your computer was busy: ${String(state.skipped)}.` +
+        computerNobodyText(state)
       );
   }
+}
+
+/**
+ * Why the computer's answers came to nobody, when any did — #761. ⚠️ About
+ * the computer's ANSWERS, never the body: which of them said nobody was there,
+ * which placed too little to use, and which placed points no person on a
+ * bicycle could have. The last is the one a rider can act on: it says their
+ * computer's model is guessing. That the tablet uses NONE of these answers is
+ * a sentence of its own, because as a trailing clause it read as applying to
+ * the last count only (#813).
+ */
+function computerNobodyText(state: SideAnalysisState): string {
+  if (state.noRider === 0) {
+    return '';
+  }
+  const because = state.noRiderBecause;
+  return (
+    ` Your computer said nobody was there in ${String(because['said-nobody'])}, ` +
+    `found too little of you to use in ${String(because['too-few-points'])}, ` +
+    `and placed points no one on a bicycle could have in ${String(because.implausible)}. ` +
+    'This tablet uses none of those answers.'
+  );
 }
 
 /** What the tablet says about the framing check (ADR 0033 D-7), by where it has got to. */
