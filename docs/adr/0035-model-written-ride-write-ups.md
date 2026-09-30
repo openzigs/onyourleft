@@ -594,3 +594,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   **A correction to the entry above's table.** It says the privacy policy's hosted section *"carries
   C's first two paragraphs"*. It carries C's headline and its first paragraph only; the test
   question is described in the policy's own words, under *What is sent*. The policy is not changed.
+- **2026-09-29** — **D-3's *"No vendor, model or service is named or defaulted"* no longer holds for
+  one model, and D-5 and D-7 will stop describing the program when the history step ships.**
+  [ADR 0040](0040-a-history-index-on-the-riders-instance.md) (#834) records the owner's rulings of
+  2026-09-29: the rider's instance keeps a searchable index of their write-ups, ride summaries,
+  goals, notes and documents, and its **embedding** model defaults to `nomic-embed-text` v1.5, run
+  on the rider's own machine. That is a narrow supersession of D-3's bullet for the embedding model
+  only (ADR 0040 D-5); for the model that **writes** a write-up, on either path, D-3 is unchanged.
+  Two further statements here are true today and become false with
+  [#835](https://github.com/openzigs/onyourleft/issues/835), and this entry is the pointer so a
+  reader is not surprised then: D-7's *"one step per section, one for position when there is a pose
+  summary, one for the summary"* gains a **history** step in a new template version (ADR 0040 D-8);
+  and D-5's *"never sent"* list, on the hosted path, stops covering text the rider typed — a goal,
+  note or document can name anything, and is masked by #839 rather than excluded (ADR 0040 D-9).
+  ⚠️ **Nothing is sent differently today**, and D-9's wordings stand until the pull request that
+  first sends history, which changes the consent, the privacy policy and Play Data Safety together.
+  D-4's screen, D-8 and the rest of D-5 are unchanged, and ADR 0040 applies D-4 to every retrieved
+  write-up.
