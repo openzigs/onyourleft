@@ -136,6 +136,10 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
           method,
           headers,
           ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+          // ⚠️ `redirect: 'error'` holds in the Android shell only while
+          // `capacitor.config.ts` leaves `CapacitorHttp` off: enabled, it
+          // patches `fetch` onto the native stack, which ignores this option
+          // (#892's review). Keep it off, or route this module around it.
           redirect: 'error',
           credentials: 'omit',
           referrerPolicy: 'no-referrer',

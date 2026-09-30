@@ -32,6 +32,8 @@ import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
+  /** The listener's own `http://127.0.0.1:<port>`. */
+  readonly url: string;
   call(
     method: string,
     path: string,
@@ -45,6 +47,7 @@ interface IdentityTesting {
   startIdentityInstance(options?: {
     config?: { name?: string | null };
     registration?: 'open' | 'closed';
+    originIsTheListener?: boolean;
   }): Promise<IdentityInstance>;
 }
 
@@ -82,6 +85,14 @@ function deviceStorage(): InstanceStorage & { readonly map: Map<string, string> 
     setItem: (key, value) => void map.set(key, value),
     removeItem: (key) => void map.delete(key),
   };
+}
+
+/** The bearer token a device holds, read the way the port keeps it: `{ origin, token }`. */
+function heldToken(storage: { readonly map: Map<string, string> }): string {
+  const kept = JSON.parse(storage.map.get(INSTANCE_SESSION_STORAGE_KEY) ?? 'null') as {
+    token?: unknown;
+  } | null;
+  return typeof kept?.token === 'string' ? kept.token : '';
 }
 
 /** Every request, handed to the instance's own handler — and counted. */
@@ -151,7 +162,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
 
     // Renamed on the instance, and the screen says so: it reads the instance,
     // not what the form was given.
-    const token = first.storage.map.get(INSTANCE_SESSION_STORAGE_KEY) ?? '';
+    const token = heldToken(first.storage);
     const renamed = await world.call('POST', '/v1/auth/display-name', {
       body: { displayName: 'Brigid' },
       token,
@@ -202,7 +213,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
     const world = await instance();
     const { port, storage } = device(wire(world));
     await port.connect(testing.TEST_ORIGIN, 'Anna');
-    const token = storage.map.get(INSTANCE_SESSION_STORAGE_KEY) ?? '';
+    const token = heldToken(storage);
     expect((await world.call('DELETE', '/v1/auth/session', { token })).status).toBe(204);
     expect(await port.current()).toEqual({ kind: 'signed-out', origin: testing.TEST_ORIGIN });
   });
@@ -258,6 +269,66 @@ describe('signing in, and what is shown after a reload — #777', () => {
   });
 });
 
+describe('what is sent, and what is kept — #892 review', () => {
+  it('sends a typed name on EVERY Connect, and the instance keeps it only when it registers', async () => {
+    // The policy, the Connect screen and the Data Safety Name row say this
+    // exactly: sent whenever one is typed, kept only by an instance that has
+    // not seen this device before. They used to say it was SENT only then.
+    const world = await instance();
+    const send = wire(world);
+    const { port } = device(send);
+    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.disconnect();
+    send.mockClear();
+
+    await port.connect(testing.TEST_ORIGIN, 'Brigid');
+    const sessionBodies = send.mock.calls
+      .filter(([url]) => String(url).endsWith('/v1/auth/session'))
+      .map(
+        ([, init]) => JSON.parse((init as RequestInit).body as string) as Record<string, unknown>,
+      );
+    expect(sessionBodies).toHaveLength(1);
+    expect(sessionBodies[0]?.displayName).toBe('Brigid');
+    // …and not kept: the instance had seen this device's key.
+    expect(await port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna' });
+  });
+
+  it('never sends one instance’s token to another, when the token’s write fails', async () => {
+    const first = await instance();
+    const second = await instance({ originIsTheListener: true });
+    const toFirst = wire(first);
+    const toSecond = wire(second);
+    const send: InstanceSend = (url, init) =>
+      url.startsWith(second.url) ? toSecond(url, init) : toFirst(url, init);
+    const storage = deviceStorage();
+    const { port } = device(send, storage);
+    expect((await port.connect(testing.TEST_ORIGIN, 'Anna')).kind).toBe('connected');
+    const firstToken = heldToken(storage);
+    expect(firstToken).not.toBe('');
+
+    // The device is full: the second sign-in writes the new address, and the
+    // token beside it cannot be written.
+    const setItem = storage.setItem.bind(storage);
+    storage.setItem = (key, value) => {
+      if (key === INSTANCE_SESSION_STORAGE_KEY)
+        throw new DOMException('full', 'QuotaExceededError');
+      setItem(key, value);
+    };
+    expect((await port.connect(second.url, 'Anna')).kind).toBe('refused');
+    expect(JSON.parse(storage.map.get(INSTANCE_ACCOUNT_STORAGE_KEY) ?? '{}')).toMatchObject({
+      origin: second.url,
+    });
+
+    toSecond.mockClear();
+    expect(await port.current()).toEqual({ kind: 'not-connected' });
+    expect(await port.devices()).toMatchObject({ kind: 'unavailable' });
+    const authorised = toSecond.mock.calls.filter(([, init]) =>
+      new Headers((init as RequestInit).headers).has('authorization'),
+    );
+    expect(authorised).toEqual([]);
+  });
+});
+
 describe('disconnecting — #777', () => {
   it('removes the token and the address, ends the session, and leaves every ride', async () => {
     const world = await instance();
@@ -270,7 +341,7 @@ describe('disconnecting — #777', () => {
     expect(before).toBe(3);
 
     await port.connect(testing.TEST_ORIGIN, 'Anna');
-    const token = storage.map.get(INSTANCE_SESSION_STORAGE_KEY) ?? '';
+    const token = heldToken(storage);
     expect(token).not.toBe('');
     expect(storage.map.has(INSTANCE_ACCOUNT_STORAGE_KEY)).toBe(true);
 

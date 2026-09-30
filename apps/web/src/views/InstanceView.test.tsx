@@ -24,6 +24,7 @@ import {
   DISCONNECT_KEEPS_RIDES,
   INSTANCE_KEPT_VISIBLE,
   INSTANCE_NO_PORT,
+  INSTANCE_RECEIVES,
   InstanceView,
   RECOVERY_CODES_LEAD,
 } from './InstanceView';
@@ -79,6 +80,20 @@ describe('the Connect screen — #777, #778', () => {
     ).toBeTruthy();
     // Nothing was asked of the instance but what this device holds.
     expect(scripted.calls).toEqual(['current']);
+  });
+
+  it('says when the name is sent and kept, and what a rider asks the operator for — #892 review', () => {
+    // What `instance-port.test.ts` measures against a real instance: a typed
+    // name is sent on every Connect and kept only on the first.
+    const said = INSTANCE_RECEIVES.join(' ');
+    expect(said).toContain('sent each time you press Connect with a name typed');
+    expect(said).toContain('keeps it only if it has not seen this device before');
+    expect(said).toContain('earlier names');
+    expect(said).toContain('Nothing else of yours');
+    expect(said).not.toContain('Nothing else from this version of the app');
+    // No screen removes what the instance holds: the sentence says whom to ask.
+    expect(DISCONNECT_KEEPS_RIDES).toContain('ask whoever runs the instance');
+    expect(DISCONNECT_KEEPS_RIDES).not.toContain('erased on the instance');
   });
 
   it('shows the names the instance holds after connecting, not the ones typed', async () => {

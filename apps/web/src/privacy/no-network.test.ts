@@ -1142,6 +1142,21 @@ function policySection(markdown: string, heading: string): string {
  * class is sent is `instance-port.ts`'s and its tests', and the wording is a
  * DRAFT awaiting the owner's approval (#880).
  */
+/**
+ * Deleting instructions the policy may not give, because nothing in this build
+ * carries them out (#892's review): no in-app screen removes a device or
+ * changes the name, and no instance route erases an account. If one is built,
+ * its phrase comes off this list in the same change that ships it.
+ */
+const UNBUILT_DELETION_PATHS: readonly string[] = [
+  'remove the device from your account on the instance',
+  'change it on the instance',
+  'erase your account on the instance',
+  'until you erase your account',
+  'until it is erased on the instance',
+  'erase it on the instance',
+];
+
 describe('the instance is disclosed, class by class — #778', () => {
   const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
   const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
@@ -1185,7 +1200,7 @@ describe('the instance is disclosed, class by class — #778', () => {
       'power, cadence, the weight you declare, and your display name',
       'the route of a group ride',
       // Ruling Q2.
-      "visible to that race's participants only, until you erase your account on the instance",
+      "visible to that race's participants only, until your account on the instance is erased",
       // #778's comment of 2026-09-29: Discord, what it receives, what others see.
       'it happens on discord',
       'discord receives your voice',
@@ -1196,6 +1211,53 @@ describe('the instance is disclosed, class by class — #778', () => {
       'disconnect makes this device forget the instance',
     ]) {
       expect(section, phrase).toContain(phrase);
+    }
+  });
+
+  it('says when the name is sent and when it is kept, and that earlier names are kept — #892 review', () => {
+    // `sign-in.ts` sends a typed name on EVERY Connect; the instance keeps it
+    // only when it registers the key (`instance-port.test.ts` measures both).
+    // The row used to say it was SENT only to an instance that had not seen
+    // the device.
+    expect(section).toContain('each time you press connect with a name typed');
+    expect(section).toContain('keeps it with your account only the first time it sees this device');
+    expect(section).not.toContain('when it has not seen this device before');
+    // Migration 0004's `display_name_change`.
+    expect(section).toContain('also keeps each earlier name, and when it changed');
+    expect(section).toContain('for moderation');
+  });
+
+  it('says what the project’s own instance and Cloudflare keep of an internet address — #892 review', () => {
+    // `apps/instance/src/log.ts` writes no address; the rate limiter holds one
+    // in memory for a window of at most an hour.
+    expect(section).toContain('does not write your address to its log or its database');
+    expect(section).toContain('in memory only, for at most an hour');
+    // The tile section's wording, for the same Cloudflare account.
+    expect(section).toContain('our cloudflare account can see for up to 7 days');
+    expect(section).not.toContain("the instance's operator decides how long it is kept");
+  });
+
+  it('offers only ways of deleting that this build has — #892 review', () => {
+    // No screen removes a device or changes the name, and no route erases an
+    // account (`SqlStore.eraseAthlete` has no production caller). A policy
+    // telling a rider to do those "on the instance" names paths that do not
+    // exist, so each such instruction is refused, here and across the policy.
+    const whole = normalised(policy);
+    for (const claim of UNBUILT_DELETION_PATHS) {
+      expect(whole, claim).not.toContain(claim);
+    }
+    // What IS true: disconnecting, and asking the operator — the maintainer,
+    // for the project's own instance, through the policy's contact route.
+    expect(section).toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain("ask the instance's operator");
+    expect(section).toContain("for the project's own instance, that is this project's maintainer");
+    expect(section).toContain('as described under contact below');
+    expect(normalised(policySection(policy, 'Contact'))).toContain('open an issue');
+  });
+
+  it('would find an unbuilt deletion path — the rule is not vacuous', () => {
+    for (const claim of UNBUILT_DELETION_PATHS) {
+      expect(normalised(`You can ${claim} whenever you like.`)).toContain(claim);
     }
   });
 

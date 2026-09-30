@@ -192,6 +192,11 @@ describe('what the About page claims about the network — #404, then #408', () 
     expect(text).toContain('unless you choose to connect to an instance');
     expect(text).toContain('Nothing is sent to us unless you connect to this project’s instance');
     expect(text).toContain('public key, the name other riders will see if you type one');
+    // #892's review: the browser sends its own headers too, so "nothing else"
+    // alone was not true. What the code guarantees is nothing else OF YOURS.
+    expect(text).toContain('your internet address and device or browser type');
+    expect(text).toContain('nothing else of yours: no ride, route, position or heart rate');
+    expect(text).not.toContain('from this version of the app, nothing else');
     expect(text).not.toContain('There is no account, no analytics and no server');
     const mounted = await mount(<AboutView />);
     const link = mounted.container.querySelector('a[href="#/settings/instance"]');

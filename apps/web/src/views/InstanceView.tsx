@@ -39,9 +39,9 @@ import type {
 /** What an instance receives from this app, in this version. Kept visible. */
 export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one and the instance has not seen this device before.',
-  'Your internet address, as any server you connect to sees it.',
-  'Nothing else from this version of the app: connecting sends no ride, route, position or heart rate.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. An instance keeps your earlier names there too, for moderation.',
+  'Your internet address and your device or browser type, as any server you connect to sees them.',
+  'Nothing else of yours: connecting sends no ride, route, position or heart rate.',
 ];
 
 export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';
@@ -69,9 +69,10 @@ export const VOICE_CHAT_IS_DISCORD =
 
 /** Disconnecting — #777's criterion, in words. Kept visible. */
 export const DISCONNECT_KEEPS_RIDES =
-  'Disconnecting removes the instance’s address and this device’s sign-in from this device. ' +
-  'Every ride stays on this device, and what the instance already holds stays there until it ' +
-  'is erased on the instance.';
+  'Disconnecting removes the instance’s address and this device’s sign-in from this device, and ' +
+  'ends the sign-in on the instance. Every ride stays on this device. What the instance already ' +
+  'holds stays there: this app cannot remove it, so ask whoever runs the instance. For the ' +
+  'project’s own instance, that is its maintainer, as the privacy policy’s Contact section says.';
 
 /** Every sentence this route must never tuck away, connected or not — #666. */
 export const INSTANCE_KEPT_VISIBLE: readonly string[] = [

@@ -169,6 +169,14 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // - **App functionality**: the request exists to draw the map; this
     //   project does not use the retained record.
     //
+    // - **The instance (#777, #892's review)**: a rider who connects sends
+    //   an instance their IP address with every request. The project's own
+    //   instance writes it nowhere (`apps/instance/src/log.ts`) and holds it
+    //   in memory for its rate limit only; Cloudflare Tunnel carries that
+    //   instance's traffic, so the same 7-day record exists for it. The row
+    //   was already `collected: true` for the tiles, so the answer does not
+    //   change; the words name both.
+    //
     // ⚠️ `apps/mobile/RELEASE.md` §8 re-checks before every tag that the
     // retention is still what this row and the privacy policy say — the plan
     // decides the period, and a Business plan keeps 31 days.
@@ -179,7 +187,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account',
+    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
   },
   {
     dataType: 'Location — precise location',
@@ -240,9 +248,11 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // ⚠️ **Split by #777, and the Name answer CHANGED — collected: true.** A
     // reviewer who remembers one `Personal info` row answering "there is no
     // account, no sign-in and no name" is reading the old file. A rider may
-    // connect to an instance and, when that instance has not seen the device
-    // before, type the name other riders will see; it is sent to that
-    // instance. Collected on #387's reasoning even for an instance the rider
+    // connect to an instance and type the name other riders will see; it is
+    // sent to that instance on every Connect with a name typed, and kept only
+    // when the instance has not seen the device before (#892's review: this
+    // said it was SENT only then, which `sign-in.ts` never did). A rename on
+    // the instance keeps each earlier name for moderation (migration 0004). Collected on #387's reasoning even for an instance the rider
     // runs themselves, and plainly so for the project's own instance, which is
     // ours. `shared: false`: the instance is the rider's or ours, and the
     // project's traffic passes through Cloudflare as our service provider.
@@ -253,7 +263,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality', 'Account management'],
-    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance when it has not seen this device before, and kept by it with the rider’s account. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
+    why: 'only when the rider connects to an instance (#777): the name other riders will see there, if they type one, sent to that instance each time the rider presses Connect with a name typed, and kept by it with the rider’s account only when it has not seen this device before. If the name is later changed on the instance, the instance also keeps each earlier name, and when it changed, with the account, for moderation. Nothing is sent until the rider types the instance’s address and presses Connect. An instance is one the rider chose — their own, or this project’s, whose traffic Cloudflare carries for us as our service provider. It is not kept on the device',
   },
   {
     // #777: the account an instance gives a rider, and the session that

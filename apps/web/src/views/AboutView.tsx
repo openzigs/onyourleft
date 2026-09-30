@@ -130,7 +130,8 @@ export function AboutView(): JSX.Element {
       <p>
         If you <a href={hrefFor(routeById('instance'))}>connect to an instance</a>, it is sent this
         device&rsquo;s public key, the name other riders will see if you type one, and your internet
-        address — and, from this version of the app, nothing else.
+        address and device or browser type, as any server sees them — and nothing else of yours: no
+        ride, route, position or heart rate.
       </p>
       <p>
         {/* target="_blank" so that following it inside the Android shell hands

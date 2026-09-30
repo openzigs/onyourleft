@@ -2268,7 +2268,11 @@ not.
   *"`apps/api`, or anything else server-shaped. Not 'not yet' — not in Phase 1 at all"* (owner
   decision D6), and a reviewer who remembers it is reading the old file.
 - **Any instance feature beyond metadata, on a RUNNING instance.** `apps/instance` answers
-  `/health`, `/source`, `/openapi.json` and `/licences/third-party.txt`; since #855 its route table
+  `/health`, `/source`, `/openapi.json`, `/licences/third-party.txt` and — since #777 —
+  `GET /instance`, the operator's `OYL_INSTANCE_NAME` or `null`, never a made-up default. ⚠️ **Every
+  answer carries `Access-Control-Allow-Origin: *` since #777**, and a preflight to a routed path
+  answers `204`, because the rider's app is always on another origin; it is safe only because the
+  instance reads no cookie and never sends `Allow-Credentials` (`src/handler.ts` argues it). Since #855 its route table
   also holds the identity routes (#772–#774), which answer `unavailable` because `main.ts` hands the
   handler no identity — no account on a running instance until #780 opens the store, no sync
   (#776), no room anybody can reach (#780). ⚠️ The room **core** exists since

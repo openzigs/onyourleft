@@ -32,7 +32,14 @@
  * An ORIGIN: a scheme, a host and a port. A path, a query, a fragment or a
  * user name in what the rider typed is refused rather than dropped, because an
  * address that means something other than what was typed is worse than one
- * that is refused. A bare host (`ride.example`) is read as `https://`.
+ * that is refused. A bare host (`ride.example`) is read as `https://`, and so
+ * is a bare host with a port (`localhost:8787`, `ride.example:8443`), which
+ * would otherwise parse as the scheme `localhost:` and be refused with a
+ * sentence about schemes.
+ *
+ * ⚠️ **The path is judged on the TEXT, not on `URL.pathname`.** `URL`
+ * normalises `/.`, `/..` and `/%2e` to `/`, so a check of the parsed path alone
+ * accepted all three as though nothing had been typed after the host.
  */
 
 /** An address this app may talk to. */
@@ -78,14 +85,35 @@ export function isLoopbackHost(hostname: string): boolean {
   return LOOPBACK_HOSTS.includes(hostname.toLowerCase());
 }
 
+/**
+ * `localhost:8787`, `ride.example:8443/` — a host and a port, with no scheme.
+ * Whatever follows the port is left for the path rule to refuse.
+ */
+const BARE_HOST_AND_PORT = /^[^\s:/?#\\@]+:\d+(?:[/?#\\]|$)/;
+
+/**
+ * Whether the text after `scheme:` is an authority and at most one `/`.
+ * Slashes and backslashes before the authority are the scheme's own (`URL`
+ * reads `\` as `/` in an `https:` address); anything after it but a lone `/`
+ * is a path, a query or a fragment.
+ */
+function nothingAfterTheHost(afterScheme: string): boolean {
+  const rest = afterScheme.replace(/^[/\\]*/, '');
+  const authorityEnds = rest.search(/[/\\?#]/);
+  const tail = authorityEnds === -1 ? '' : rest.slice(authorityEnds);
+  return tail === '' || tail === '/';
+}
+
 /** Decide whether this app may talk to the address a rider typed. */
 export function instanceAddress(typed: string): AddressDecision {
   const text = typed.trim();
   if (text === '') {
     return { kind: 'refused', why: 'empty' };
   }
-  // A bare host is read as https — never as http.
-  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;
+  // A bare host is read as https — never as http. So is a bare host with a
+  // port, which the scheme pattern alone would read as a scheme.
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) && !BARE_HOST_AND_PORT.test(text);
+  const withScheme = hasScheme ? text : `https://${text}`;
   let url: URL;
   try {
     url = new URL(withScheme);
@@ -107,8 +135,9 @@ export function instanceAddress(typed: string): AddressDecision {
     (url.pathname !== '/' && url.pathname !== '') ||
     url.search !== '' ||
     url.hash !== '' ||
-    // `URL` drops an empty `?` or `#`; the text did not.
-    /[?#]/.test(withScheme.slice(url.protocol.length + 2))
+    // `URL` drops an empty `?` or `#` and folds `/.`, `/..` and `/%2e` into
+    // `/`; the text did not, so what follows the host in the TEXT decides.
+    !nothingAfterTheHost(withScheme.slice(url.protocol.length))
   ) {
     return { kind: 'refused', why: 'not-just-an-address' };
   }

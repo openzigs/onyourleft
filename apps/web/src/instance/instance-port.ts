@@ -29,7 +29,8 @@
  *
  * So both are kept in this device's `localStorage`, under
  * `sign-in.ts` §`INSTANCE_ACCOUNT_STORAGE_KEY` (the address and the instance's
- * athlete id) and {@link INSTANCE_SESSION_STORAGE_KEY} (the token), and
+ * athlete id) and {@link INSTANCE_SESSION_STORAGE_KEY} (the token, beside the
+ * origin that issued it), and
  * **disconnecting removes both** — and nothing else: no ride, route or other
  * local row is touched, which `instance-port.test.ts` counts.
  *
@@ -58,8 +59,34 @@ import {
   signInToInstance,
 } from './sign-in';
 
-/** Where this device keeps its session token for the instance it is connected to. */
+/**
+ * Where this device keeps its session token for the instance it is connected
+ * to — as `{ origin, token }`, never the token alone.
+ *
+ * ⚠️ **The token carries the origin that issued it** (#892's review). The
+ * address and the token are two writes — `sign-in.ts` writes the account, then
+ * `connect` writes the token — so a second write that failed (a full store's
+ * `QuotaExceededError`) used to leave a NEW address beside an OLD token, and
+ * {@link InstancePort.current} would have sent one instance's bearer token to
+ * another. A token is used only for the origin it was issued by
+ * ({@link sessionTokenFor}); any other pairing is no sign-in at all.
+ */
 export const INSTANCE_SESSION_STORAGE_KEY = 'oyl.instance.session.v1';
+
+/** The token this device holds for `origin`, or `undefined` — never another origin's. */
+function sessionTokenFor(storage: InstanceStorage, origin: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(storage.getItem(INSTANCE_SESSION_STORAGE_KEY) ?? 'null');
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  const record = parsed as Record<string, unknown>;
+  return record.origin === origin && typeof record.token === 'string' && record.token !== ''
+    ? record.token
+    : undefined;
+}
 
 /** One of this athlete's device keys on the instance (#773). */
 export interface InstanceDevice {
@@ -107,9 +134,12 @@ export interface InstancePort {
   current(): Promise<InstanceState>;
   /**
    * Sign this device in to the instance at `address`, registering it there if
-   * the instance has never seen its key. `displayName` is sent only then, and
-   * only when it is not blank. An address {@link instanceAddress} refuses
-   * sends nothing.
+   * the instance has never seen its key. `displayName` is sent on every call
+   * where it is not blank, and the instance KEEPS it only when this sign-in
+   * registers the key — the instance cannot be asked whether it knows a key
+   * before it is sent one, so the app cannot send the name only then (#892's
+   * review). The policy and the screen say exactly this. An address
+   * {@link instanceAddress} refuses sends nothing.
    */
   connect(address: string, displayName: string): Promise<ConnectOutcome>;
   /** This athlete's devices on the instance (#773). */
@@ -263,8 +293,8 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
   /** The instance and the token this device holds, or `undefined` for neither. */
   function held(): { readonly http: InstanceHttp; readonly token: string } | undefined {
     const account = readInstanceAccount(storage);
-    const token = storage.getItem(INSTANCE_SESSION_STORAGE_KEY);
-    if (account === undefined || token === null || token === '') return undefined;
+    const token = account === undefined ? undefined : sessionTokenFor(storage, account.origin);
+    if (account === undefined || token === undefined) return undefined;
     try {
       return { http: instanceHttp(account.origin, dependencies.send), token };
     } catch {
@@ -334,7 +364,10 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
           },
           name === undefined ? {} : { displayName: name },
         );
-        storage.setItem(INSTANCE_SESSION_STORAGE_KEY, signedIn.sessionToken);
+        storage.setItem(
+          INSTANCE_SESSION_STORAGE_KEY,
+          JSON.stringify({ origin: decision.origin, token: signedIn.sessionToken }),
+        );
         return {
           kind: 'connected',
           ...(signedIn.recoveryCodes === undefined

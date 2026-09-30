@@ -153,6 +153,27 @@ describe('the declaration filed on Play', () => {
     expect(approximate?.why).toContain('does not use or share');
   });
 
+  it('names the instance’s traffic under approximate location, and when a name is sent — #892 review', () => {
+    const approximate = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Location — approximate location',
+    );
+    const name = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Personal info — Name',
+    );
+    // The instance sees the IP address too; what the project's own keeps, and
+    // Cloudflare's record of it, are said, not left to the tile clause.
+    expect(approximate?.why).toContain('Connecting to an instance (#777)');
+    expect(approximate?.why).toContain('does not write the address to its log or its database');
+    expect(approximate?.why).toContain('Cloudflare Tunnel');
+    // A typed name is sent on every Connect, kept only the first time.
+    expect(name?.why).toContain('each time the rider presses Connect with a name typed');
+    expect(name?.why).toContain('only when it has not seen this device before');
+    expect(name?.why).toContain('each earlier name');
+    expect(name?.why).not.toContain(
+      'sent to that instance when it has not seen this device before',
+    );
+  });
+
   it('rests approximate-not-precise on what is KEPT, not on a tile being an area — #559', () => {
     // #559's review: Play draws the line by area (precise < 3 km²) and a z15
     // tile is 0.64–1.23 km², so "a tile names an area, not a point" would make

@@ -62,6 +62,52 @@ describe('which instance addresses the app will talk to — #777', () => {
     }
   });
 
+  it('reads a bare host with a port as a host, not as a scheme — #892 review', () => {
+    // `localhost:8787` matches a scheme's shape; it used to be refused with
+    // "An instance address starts with https://".
+    expect(instanceAddress('localhost:8787')).toEqual({
+      kind: 'accepted',
+      origin: 'https://localhost:8787',
+      socketOrigin: 'wss://localhost:8787',
+    });
+    expect(instanceAddress('ride.example:8443/')).toMatchObject({
+      origin: 'https://ride.example:8443',
+    });
+    // What follows the port is still judged as a path.
+    expect(instanceAddress('ride.example:8443/v1')).toEqual({
+      kind: 'refused',
+      why: 'not-just-an-address',
+    });
+    // A real scheme is still a scheme.
+    expect(instanceAddress('mailto:rider@ride.example')).toEqual({
+      kind: 'refused',
+      why: 'not-a-web-address',
+    });
+  });
+
+  it('refuses a dot path that URL would fold into / — #892 review', () => {
+    // `new URL('https://ride.example/..').pathname` is `/`, so a check of the
+    // parsed path alone let each of these through as a bare origin.
+    for (const typed of [
+      'https://ride.example/.',
+      'https://ride.example/..',
+      'https://ride.example/%2e',
+      'https://ride.example/%2E%2E',
+      'https://ride.example\\.',
+      'ride.example/..',
+      'localhost:8787/.',
+    ]) {
+      expect(new URL(typed.includes('://') ? typed : `https://${typed}`).pathname, typed).toBe('/');
+      expect(instanceAddress(typed), typed).toEqual({
+        kind: 'refused',
+        why: 'not-just-an-address',
+      });
+    }
+    // One trailing slash is still nothing after the host.
+    expect(instanceAddress('https://ride.example/')).toMatchObject({ kind: 'accepted' });
+    expect(instanceAddress('https://ride.example:8443')).toMatchObject({ kind: 'accepted' });
+  });
+
   it('refuses nothing, nonsense and other schemes', () => {
     expect(instanceAddress('   ')).toEqual({ kind: 'refused', why: 'empty' });
     expect(instanceAddress('https://')).toEqual({ kind: 'refused', why: 'unreadable' });

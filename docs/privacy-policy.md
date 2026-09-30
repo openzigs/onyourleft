@@ -22,8 +22,9 @@ report, not a page view.
 **If you connect the app to an instance.** An instance is a server that lets riders ride together.
 You choose whether to connect, and to which one: nothing is sent to any instance until you type its
 address and press *Connect*. Connecting sends this device's public key, the name other riders will
-see if you type one, and — as with any server — your internet address. This version of the app
-sends no ride, route, position or heart rate to an instance. It is described under **An instance
+see if you type one, and — as with any server — your internet address and your device or browser
+type. Nothing else of yours: this version of the app sends no ride, route, position or heart rate to
+an instance. It is described under **An instance
 you connect to** below, class by class, with what each one will receive when the features that
 send it arrive.
 
@@ -130,8 +131,8 @@ Only these, and only when you do them:
   put it and it is then out of the app's hands.
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
 - **Signing in to an instance you chose to connect to.** This device's public key, the name other
-  riders will see if you type one, and your internet address. See **An instance you connect to**
-  above.
+  riders will see if you type one, and — as with any server — your internet address and your device
+  or browser type. See **An instance you connect to** above.
 - **A picture sent to your own computer, if you set one up and switch it on.** See **Pictures sent
   to your own computer** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
@@ -196,13 +197,13 @@ somewhere else.
 
 | Data | What leaves the device, and to whom | When | How to delete it |
 | --- | --- | --- | --- |
-| This device's public key | sent to the instance you connected to, which keeps it on your account there, with when it was added and last used | when you press *Connect*, and each time the app signs in again | remove the device from your account on the instance; *Disconnect* makes this device forget the instance |
-| The name other riders see | sent to that instance, if you typed one, when it has not seen this device before; it is kept there with your account | when you press *Connect* | change it on the instance; it goes when your account there is erased |
-| Your internet address | seen by the instance, and by Cloudflare on the way to the project's instance, as by any server you connect to | every time the app talks to the instance | the instance's operator decides how long it is kept |
+| This device's public key | sent to the instance you connected to, which keeps it on your account there, with when it was added and last used | when you press *Connect* | *Disconnect* makes this device forget the instance and ends this device's sign-in there, but the key stays on your account there. This version of the app cannot remove a device from your account: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| The name other riders see | sent to that instance each time you press *Connect* with a name typed. The instance keeps it with your account only the first time it sees this device, and ignores it after that. If your name there is ever changed, the instance also keeps each earlier name, and when it changed, with your account, for moderation | when you press *Connect* | this version of the app cannot change or remove it, or the earlier names: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
 | Your rides, including their positions | **not sent by this version of the app.** A later version that syncs rides ([#776](https://github.com/openzigs/onyourleft/issues/776)) will send a ride you choose to sync — its positions included, trimmed by your privacy zones where it is shared with anybody else — and this policy will say so, and be dated, before it does | not in this version | — |
 | In a room: power, cadence, the weight you declare, and your display name | **not sent by this version of the app.** When rooms arrive ([#782](https://github.com/openzigs/onyourleft/issues/782)) they go to the instance running the room, and on to the other riders in it, while you ride in it | not in this version | — |
 | The route of a group ride | **not sent by this version of the app.** When group rides arrive, the route the ride's creator chose is shared with the other riders in it | not in this version | — |
-| Race results | **not in this version.** When races arrive, a race's results are kept on the instance, visible to that race's participants only, until you erase your account on the instance | not in this version | erase your account on the instance |
+| Race results | **not in this version.** When races arrive, a race's results are kept on the instance, visible to that race's participants only, until your account on the instance is erased | not in this version | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
 | Your voice, in a room's voice chat | **never sent by this app.** Where an instance offers voice chat, it happens on **Discord**, a separate service you choose to use: Discord receives your voice, and other riders in the voice channel see your Discord username and picture. If you link your Discord account to your account on the instance, the instance keeps your Discord id with your account | only if you join the voice chat, or link your Discord account | leave the voice channel or unlink your Discord account; what Discord keeps is Discord's, under its own privacy policy |
 
 **Public rooms are for adults.** Where an instance offers public rooms — rooms anybody on that
@@ -215,7 +216,12 @@ Digital Services Act's notice-and-action mechanism is in place
 
 **Disconnecting.** *Disconnect* makes this device forget the instance's address and its sign-in to
 it, and asks the instance to end that sign-in. Every ride stays on this device. What the instance
-already holds stays there until it is erased on the instance.
+already holds stays there.
+
+**Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
+remove a device from your account on an instance, change or remove your name there, or erase your
+account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask as described under
+**Contact** below. For anybody else's instance, ask whoever runs it.
 
 ## A second phone you pair as a side camera
 
@@ -429,7 +435,8 @@ Some things an erase cannot reach, and the app says so before you press it: file
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
 sent to your own computer, which is a copy that computer holds, a question or a ride's numbers you
 sent to a service you chose, which is a copy that service holds, your account on an instance you
-connected to, and anything it received, which is a copy that instance holds, and Cloudflare's record of recent map requests —
+connected to, and anything it received, which is a copy that instance holds and which you ask its
+operator to erase (see **Deleting what an instance holds**), and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
 
