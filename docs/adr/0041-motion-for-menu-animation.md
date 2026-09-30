@@ -36,9 +36,10 @@
 — owner, on #936, 2026-09-30.
 
 The epic's research recommended the opposite (no dependency: CSS transitions and React 19.3's
-`<ViewTransition>`). The owner chose Motion. The owner's fallback, Tailwind CSS with Radix, was not
-taken: it would replace the token system and `theme.css` that the contrast and accessibility gates
-are built on.
+`<ViewTransition>`). The owner chose Motion. This ADR admits Motion and nothing else. The owner
+has also chosen Tailwind CSS v4 and Radix Primitives for the menus, built over the existing tokens
+([#950](https://github.com/openzigs/onyourleft/issues/950)); admitting them is #950's own ADR, not
+this one.
 
 ### What was measured, and read
 

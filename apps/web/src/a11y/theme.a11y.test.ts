@@ -362,9 +362,19 @@ describe('no motion runs longer than 200 ms (#936)', () => {
     // "Durations are declared, not scattered" (#936): a transition written
     // with its own 150 ms passes the ceiling and still escapes the token a
     // later change to the house style would move.
+    //
+    // The longhands count too (#951's review): `transition-duration: 150ms`
+    // escaped a check that read the shorthands alone. The one number allowed
+    // is the collapse the reduced-motion and slow-update blocks write,
+    // `0.01ms !important`, which is a switch rather than a duration.
     const declarations = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
-    const scattered = [...declarations.matchAll(/\n\s*(transition|animation)\s*:\s*([^;]+);/g)]
+    const scattered = [
+      ...declarations.matchAll(
+        /\n\s*((?:transition|animation)(?:-duration|-delay)?)\s*:\s*([^;]+);/g,
+      ),
+    ]
       .map(([, property, value]) => `${property ?? ''}: ${(value ?? '').trim()}`)
+      .filter((declaration) => !/-duration: 0\.01ms !important$/.test(declaration))
       .filter((declaration) => /\d(?:ms|s)\b/.test(declaration));
     expect(scattered).toEqual([]);
   });

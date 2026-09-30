@@ -840,15 +840,6 @@ const LINK_STATE_WORDS: Readonly<Record<LinkStateToken, string>> = {
   linkActive: 'a link being pressed',
 };
 
-/**
- * {@link LINK_CONTRAST_MEASURED} as requirements, one per state and surface.
- *
- * ⚠️ It spreads whatever the table holds rather than every state by every
- * surface, so a cell deleted from the table (a type error, and an `undefined`
- * under a runner that does not typecheck) is a pair missing from the list —
- * which `contrast.a11y.test.ts` §"every link state is paired with every link
- * surface" is what notices.
- */
 /** Every illustration colour (#936) — the five `illo*` tokens, in one list. */
 export const ILLUSTRATION_TOKENS = [
   'illoSky',
@@ -875,6 +866,15 @@ const ILLUSTRATION_FOCUS_MEASURED: Readonly<
   illoRoad: { light: 3.58, dark: 4.66 },
 };
 
+/**
+ * {@link LINK_CONTRAST_MEASURED} as requirements, one per state and surface.
+ *
+ * ⚠️ It spreads whatever the table holds rather than every state by every
+ * surface, so a cell deleted from the table (a type error, and an `undefined`
+ * under a runner that does not typecheck) is a pair missing from the list —
+ * which `contrast.a11y.test.ts` §"every link state is paired with every link
+ * surface" is what notices.
+ */
 const LINK_CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = LINK_STATE_TOKENS.flatMap(
   (state) =>
     LINK_SURFACES.filter(
