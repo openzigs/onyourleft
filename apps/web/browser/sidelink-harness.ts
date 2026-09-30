@@ -99,11 +99,10 @@ export interface SideLinkMeasurement {
   readonly answerAddresses: readonly string[];
   /**
    * Milliseconds from the tablet accepting the answer to the PHONE calling the
-   * link `connected` — which it does on hearing the tablet's opening ping and
-   * sending its secret in answer (#568). ⚠️ **It stops before that secret
-   * reaches the tablet**, so it is not the time to proof: the tablet's own
-   * state does not say when the phone proved itself, and the `framing` step
-   * that follows is the first one the proof gates (#573).
+   * link `connected` — which, since #568's third fix, it does on hearing the
+   * tablet's `welcome`, sent once the tablet has verified the secret. So it
+   * now INCLUDES the proof and one message back, where it used to stop at the
+   * phone's hearing the opening ping (#573).
    */
   readonly connectMilliseconds: number | undefined;
   /** The tablet's view after the phone said it was framing. */
