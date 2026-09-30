@@ -178,6 +178,26 @@ describe('signing in, and what is shown after a reload — #777', () => {
     ]);
   });
 
+  it('lists this athlete’s devices and nothing of any other athlete — three athletes (#773)', async () => {
+    const world = await instance();
+    const send = wire(world);
+    // Three devices, each its own key and so its own athlete on the instance.
+    const riders = [device(send), device(send), device(send)];
+    for (const rider of riders) {
+      expect((await rider.port.connect(testing.TEST_ORIGIN, '')).kind).toBe('connected');
+    }
+    const keys = await Promise.all(
+      riders.map(async (rider) => {
+        const listed = await rider.port.devices();
+        expect(listed.kind).toBe('listed');
+        return listed.kind === 'listed' ? listed.devices.map((each) => each.publicKey) : [];
+      }),
+    );
+    for (const own of keys) expect(own).toHaveLength(1);
+    // Three different keys: no athlete's list names another's device.
+    expect(new Set(keys.flat()).size).toBe(3);
+  });
+
   it('says so when the instance no longer accepts the session', async () => {
     const world = await instance();
     const { port, storage } = device(wire(world));
