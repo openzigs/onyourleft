@@ -79,15 +79,41 @@ export function sniffActivityFile(bytes: Uint8Array): ActivityFileKind | undefin
   }
   const text = utf8(bytes.subarray(0, 4096));
   if (text === undefined) return undefined;
-  // The first element that is not a declaration, a comment or a processing
-  // instruction is the root.
-  const root = /<([A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)[\s/>]/.exec(
-    text.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, ''),
-  )?.[1];
+  const root = rootElement(text);
   const local = root?.split(':').at(-1);
   if (local === 'gpx') return 'gpx';
   if (local === 'TrainingCenterDatabase') return 'tcx';
   return undefined;
+}
+
+/**
+ * The name of the first element that is not a comment, a processing
+ * instruction or a declaration — the document's root — or `undefined` when
+ * the text holds none. A scan rather than a regular expression over the whole
+ * text, so a comment that mentions `<gpx` is skipped as a comment.
+ */
+function rootElement(text: string): string | undefined {
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<', at);
+    if (open < 0) return undefined;
+    const skip: readonly [string, number] | undefined = text.startsWith('<!--', open)
+      ? ['-->', 4]
+      : text.startsWith('<?', open)
+        ? ['?>', 2]
+        : text.startsWith('<!', open)
+          ? ['>', 2]
+          : undefined;
+    if (skip === undefined) {
+      return /^<([A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)[\s/>]/.exec(
+        text.slice(open, open + 256),
+      )?.[1];
+    }
+    const [close, length] = skip;
+    const end = text.indexOf(close, open + length);
+    if (end < 0) return undefined;
+    at = end + close.length;
+  }
 }
 
 function utf8(bytes: Uint8Array): string | undefined {
