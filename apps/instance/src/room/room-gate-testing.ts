@@ -77,7 +77,11 @@ export async function startRoomGateInstance(): Promise<RoomGateInstance> {
 
   const port = await freePort();
   const origin = `http://127.0.0.1:${String(port)}`;
-  const server = readServerConfig({ database, origin, roomWorkers: '1' }, 1);
+  // The blobs in the same temporary directory: a room's route is kept there (#784).
+  const server = readServerConfig(
+    { database, blobs: join(directory, 'blobs'), origin, roomWorkers: '1' },
+    1,
+  );
   if (!server.ok) throw new Error(server.problems.join('; '));
   const instance: StartedInstance = await startInstance({
     config: testConfig({ port, registration: 'open' }),

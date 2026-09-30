@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
+import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
@@ -268,32 +269,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
+      // The rooms' join limit is keyed by address too (#784), under the same
+      // promise, so ONE sweep runs both, on every boundary either's windows end.
       const swept = identity;
-      const stopIdentity = sweepOnBoundaries(
+      const roomsSwept = rooms;
+      stopSweeping = sweepOnBoundaries(
         {
-          periodMs: swept.rateLimitSweepPeriodMs,
+          periodMs: sweepPeriodMs([
+            { limit: 1, windowMs: swept.rateLimitSweepPeriodMs },
+            { limit: 1, windowMs: roomsSwept.rateLimitSweepPeriodMs },
+          ]),
           run: () => {
             swept.sweepRateLimits();
-          },
-        },
-        options.sweepTimers,
-      );
-      // The rooms' join limit is keyed by address too (#784), under the same
-      // promise: held for at most an hour, forgotten at its window's end.
-      const roomsSwept = rooms;
-      const stopRooms = sweepOnBoundaries(
-        {
-          periodMs: roomsSwept.rateLimitSweepPeriodMs,
-          run: () => {
             roomsSwept.sweepRateLimits();
           },
         },
         options.sweepTimers,
       );
-      stopSweeping = () => {
-        stopIdentity();
-        stopRooms();
-      };
     }
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
