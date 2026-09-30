@@ -182,6 +182,33 @@ describe('the documents panel (#836)', () => {
     expect(listed()).toStrictEqual([]);
   });
 
+  it('says a failed remove failed, and still lists the document', async () => {
+    const memory = memoryRiderText(
+      [
+        {
+          athleteId: ATHLETE_A,
+          kind: 'document',
+          key: 'plan',
+          name: 'Base plan.md',
+          text: 'Three rides a week.',
+          savedAt: unixSeconds(1),
+        },
+      ],
+      ATHLETE_A,
+    );
+    await open(memory.port);
+    memory.failNext = new Error('the disk is locked');
+    const remove = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Remove Base plan.md',
+    );
+    if (remove === undefined) throw new Error('no remove control named for the document');
+    await activateWithKeyboard(remove);
+    await settle();
+    await settle();
+    expect(status()).toContain(documentsFailure('the disk is locked'));
+    expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
+  });
+
   it('offers no picker without a store, and says why', async () => {
     await open(undefined);
     expect(document.body.textContent).toContain(RIDER_TEXT_NO_STORE);
