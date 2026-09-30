@@ -22,7 +22,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('reads every parameter', () => {
     expect(
       parseConfig(
-        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky&levers=-texture-bias',
+        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky&levers=-texture-bias&facing=sun',
       ),
     ).toEqual({
       world: 'stylised',
@@ -34,7 +34,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       panel: false,
       layersOff: ['sky', 'water'],
       leversOff: ['texture-bias'],
+      facing: 'sun',
     });
+  });
+
+  it('turns the route towards the sun or away from it only when asked — #702', () => {
+    expect(parseConfig('').facing).toBeUndefined();
+    expect(parseConfig('?facing=sun').facing).toBe('sun');
+    expect(parseConfig('?facing=away').facing).toBe('away');
+    // A typo would otherwise hold the unturned route under the name of a turned one.
+    expect(() => parseConfig('?facing=south-west')).toThrow(/facing is one of sun, away/);
+    expect(() => parseConfig('?facing=')).toThrow(/facing is one of sun, away/);
   });
 
   it('switches off each of #619’s levers by name, once, in a fixed order, and refuses any other', () => {
@@ -96,6 +106,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       '?at=900&panel=0',
       '?layers=-impostors,-vegetation',
       '?rung=1&ladder=0&levers=-foliage-order,-texture-bias',
+      '?at=2550&facing=sun&levers=-air',
+      '?facing=away',
     ]) {
       const config = parseConfig(search);
       expect(parseConfig(configQuery(config))).toEqual(config);

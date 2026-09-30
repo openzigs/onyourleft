@@ -27,7 +27,9 @@ two runs keep the same cards.
 
 ## What it does, in order
 
-1. Import the Poly Haven glTF and keep ONE object -- a pack like
+1. Import the Poly Haven glTF, with the second copy of any triangle the scan
+   holds twice dropped first (#696, #687: the importer's own choice between
+   the two is not reproducible), and keep ONE object -- a pack like
    `fir_sapling_medium` holds three saplings, and each shipped variant is one
    of them. Stand it on the origin.
 2. Render eight orthographic views round the FULL scan onto one transparent
@@ -57,6 +59,7 @@ Everything measured goes into <report.json>.
 import hashlib
 import json
 import math
+import os
 import random
 import sys
 
@@ -64,6 +67,12 @@ import bmesh
 import bpy
 import numpy as np
 from mathutils import Vector
+
+# The one glTF import, beside this file. ⚠️ No bytecode, as `process_rider.py`
+# imports its kit: a `__pycache__` beside it is a binary `ASSET001` refuses.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gltf_import import import_scan  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
@@ -110,7 +119,12 @@ def is_foliage(material):
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath=IN_GLTF)
+# ⚠️ Through `gltf_import.py`, never `bpy.ops.import_scene.gltf` itself: a
+# triangle the scan holds TWICE is dropped there by a stable rule before
+# Blender sees it (#696, #687 -- `island_tree_02`'s wood has one, and which of
+# the two `mesh.validate()` keeps is not reproducible), and an import that
+# dropped anything else stops the run.
+repeated_triangles = import_scan(IN_GLTF)
 meshes = [o for o in bpy.data.objects if o.type == "MESH"]
 keep = [o for o in meshes if o.name == OBJECT or o.name.startswith(OBJECT + "_LOD")]
 if len(keep) != 1:
@@ -145,7 +159,12 @@ scene.cycles.use_adaptive_sampling = False
 dims = plant.dimensions.copy()
 height = dims.z
 width = max(dims.x, dims.y)
-report = {"sourceTriangles": source_tris, "heightMetres": height, "widthMetres": width}
+report = {
+    "sourceTriangles": source_tris,
+    "heightMetres": height,
+    "widthMetres": width,
+    "repeatedTrianglesDropped": repeated_triangles,
+}
 # The FULL scan's size, recorded in the file: the thinned cards are grown about
 # their own centres and can reach past it, so the runtime sizes a plant by
 # these rather than by the shipped mesh's bounding box -- which is also what
