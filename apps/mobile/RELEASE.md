@@ -14,9 +14,9 @@ which.
 | --- | --- |
 | `REL001` — no committed key material | **Enforced and tested.** `scripts/check-repo-rules.sh`, six fixtures, runs on every pull request |
 | `REL002` — target API floor | **Enforced and tested.** Eleven fixtures. ⚠️ Since #95 it reads **every** Gradle file under `android/`, not `variables.gradle` alone — §7 says what it used to miss |
-| `.github/workflows/release.yml` | **Run, and green.** Two `workflow_dispatch` runs on 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner — [35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484) and, with the verification step below, [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363). ⚠️ **Never run on a tag**: there is no `v*` tag and no GitHub Release |
+| `.github/workflows/release.yml` | **Run, and green.** Two `workflow_dispatch` runs on 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner — [35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484) and, with the verification step below, [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363) — and a third on 2026-09-17, after §10's alias migration, did the same on `main`: [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600). ⚠️ **Never run on a tag**: there is no `v*` tag and no GitHub Release (`gh run list --workflow release.yml`, read 2026-09-30: every run is a `workflow_dispatch`) |
 | The signing key | **In CI secrets, and used.** Nothing about the key is in this repository, which is `REL001`'s whole job |
-| The key alias | ⚠️ **The workflow reads a repository VARIABLE that is not set yet.** `release.yml` stopped reading `secrets.ANDROID_KEY_ALIAS` in [#338](https://github.com/openzigs/onyourleft/issues/338) — a secret's value is redacted from every log line that contains it and this one is the word `upload`. **Until somebody runs §10's two commands the next release run fails**, loudly and on purpose, rather than falling through to an unsigned build. §9 is why, §10 is the procedure |
+| The key alias | **A repository VARIABLE, set, and the secret deleted** — both on 2026-09-17. `release.yml` stopped reading `secrets.ANDROID_KEY_ALIAS` in [#338](https://github.com/openzigs/onyourleft/issues/338) — a secret's value is redacted from every log line that contains it and that one was the word `upload`. A `workflow_dispatch` run on `main` after the change, [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), signed and verified with the same certificate as before. ⚠️ **This row used to say the variable was "not set yet" and that "the next release run fails"; a reader who remembers that is reading the old file** (corrected 2026-09-30, #955). §9 is why, §10 is the procedure and its results |
 | The Play account decision | **Not taken.** It is an owner decision and §3 is what it needs |
 | A published privacy policy | **Written and linked.** [`docs/privacy-policy.md`](../../docs/privacy-policy.md), reachable from the app's About page. §4 |
 | The Health apps declaration | **Not filed.** It is a Play Console form and needs an account, which is §3 |
@@ -406,6 +406,14 @@ cells, in the shape `docs/validation/` uses, because the change that proves it
 is a change to this repository's Actions settings and no pull request can make
 it. §10 is also where the migration itself is written down.
 
+⚠️ **Since 2026-09-17 half of that is measured, and a reader who remembers the
+paragraph above as the whole story is reading the old file** (noted 2026-09-30,
+#955). With the secret deleted, run
+[35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600)
+shows `upload` unmasked everywhere §10 looks. What was NOT measured is the
+other half — the variable set and the secret still present — because both
+changes were made before any run read them.
+
 ### What happens to a build with no alias
 
 A keystore present and an empty alias is now a **hard failure** in the signing
@@ -431,17 +439,30 @@ app's identity: Android refuses an update signed by a different key, so a new
 key means every existing installation must be uninstalled first — and in a
 local-first app that is the rider's whole ride history.
 
-## 10. The alias migration — procedure, **not yet run**
+## 10. The alias migration — procedure, **run on 2026-09-17**
 
-**Status:** written 2026-09-17 with [#338](https://github.com/openzigs/onyourleft/issues/338).
-Every result cell is empty on purpose. **Not an ADR and not a spike**; it decides
-nothing, and it ages.
+**Status:** written 2026-09-17 with [#338](https://github.com/openzigs/onyourleft/issues/338),
+and run the same day. **Not an ADR and not a spike**; it decides nothing, and it
+ages.
 
-⚠️ **`release.yml` on `main` reads a variable that does not exist yet, so the
-next release run fails at the signing step** with `ANDROID_KEYSTORE_BASE64 is
-set and the ANDROID_KEY_ALIAS variable is empty`. That is the guard doing its
-job — the alternative was a fall-through to `assembleDebug`, which exits 0 and
-looks like a successful signed run. Running step 1 below clears it.
+⚠️ **This section used to be headed "not yet run", with every result cell empty
+and a warning that the next release run would fail at the signing step; a
+reader who remembers that is reading the old file** (corrected 2026-09-30,
+#955, from `gh variable list`, `gh secret list`, `gh run list --workflow
+release.yml` and the run logs). What the repository's settings say now:
+
+| Setting | State, read 2026-09-30 |
+| --- | --- |
+| Variable `ANDROID_KEY_ALIAS` | set, 2026-09-17 09:05:22 UTC |
+| Secret `ANDROID_KEY_ALIAS` | **absent**: the secrets are `ANDROID_KEYSTORE_BASE64` (2026-09-17 10:56:12), `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_PASSWORD` (2026-09-16) |
+
+⚠️ **The first run after the variable was set failed, and not at the guard.**
+[35203263648](https://github.com/openzigs/onyourleft/actions/runs/35203263648)
+(09:06 UTC) failed at *Assemble*: the keystore then in `ANDROID_KEYSTORE_BASE64`
+held no key under the alias the variable names. `ANDROID_KEYSTORE_BASE64` was
+set again at 10:56:12, and the run after it passed — with the same certificate
+digest as before, which step 3 below is the check for. Which keystore change
+was made is not in any log, and this document does not guess it.
 
 Needs somebody who can write the repository's Actions settings. It is two
 commands and a workflow run.
@@ -469,11 +490,11 @@ gh run view <run-id> --log | grep -nE '\*\*\*|signed=|SHA-256'
 
 | What to read | Expected | Result |
 | --- | --- | --- |
-| The signing step's name in the job list | `Decode the upload key, if this repository has one`, with no `***` | |
-| The artefact step's name | `actions/upload-artifact@043fb46d…`, with no `***` | |
-| `signed=` in the signing step | `signed=true`, **not** `signed=false` | |
-| The `Verify the artefact` step | `Signed as required, targeting API 36` | |
-| Run id | | |
+| The signing step's name in the job list | `Decode the upload key, if this repository has one`, with no `***` | as expected |
+| The artefact step's name | `actions/upload-artifact@043fb46d…`, with no `***` | as expected: `Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'` |
+| `signed=` in the signing step | `signed=true`, **not** `signed=false` | `SIGNED: true` in the environment of *Assemble* and *Verify the artefact*, which read that output (the line itself goes to `$GITHUB_OUTPUT`, not the log) |
+| The `Verify the artefact` step | `Signed as required, targeting API 36` | `Signed as required, targeting API 36.` |
+| Run id | | [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), `main`, `workflow_dispatch`, 2026-09-17 10:56 UTC, success |
 
 ⚠️ **The `signed=true` line is the one that cannot be skipped.** The unsigned
 fallback also exits 0 and also uploads an APK, so a run that quietly stopped
@@ -489,7 +510,7 @@ key, not of the pipeline.
 | Run | Certificate SHA-256 |
 | --- | --- |
 | Before — [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363), 2026-09-16 | `1e9206a0b8836da33abc98a484a282e8f4f416afbeefa5c5c8c87bc5f8ad9369` |
-| After — step 2 above | |
+| After — [35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), 2026-09-17 | `1e9206a0b8836da33abc98a484a282e8f4f416afbeefa5c5c8c87bc5f8ad9369` — **the same** |
 
 A certificate fingerprint is public by design: it travels inside every APK
 signed with the key. It is the password and the keystore that are secret, and
