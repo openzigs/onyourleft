@@ -55,6 +55,9 @@
 #   ASSET007 a DERIVED entry records everything its derivation needs --
 #           input, inputsha256, script and tool together, and modified -- and
 #           the script it names is committed (#430, ADR 0026 D-5)
+#   ASSET008 every vector or animation file under apps/ or packages/ -- an
+#           `.svg`, `.lottie` or `.riv`, or a Lottie `.json` -- is named in
+#           ASSETS.toml, text or not (#937)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -1379,12 +1382,15 @@ check_no_pipe_into_grep_quiet
 #   * "Binary" is decided by CONTENT: a NUL byte in the first
 #     ASSET_SNIFF_BYTES. That is git's own rule for the same question, and it
 #     is why `.glb`, `.png`, `.jar` and `.fit` are all found without being
-#     named. It also means a TEXT-format asset -- a `.gltf`, an `.obj`, an
-#     `.svg` -- is NOT discovered. Those are no worse off than before (LIC001's
-#     extension list never covered them either) and the manifest may name one
-#     voluntarily, which buys ASSET002/ASSET003/ASSET004 over it. Closing that
-#     half needs a rule about which text extensions are assets, which is the
-#     extension list this one exists to avoid; it is a separate decision.
+#     named. It also means a TEXT-format asset is NOT discovered by this rule.
+#     ⚠️ Since #937 the vector and animation half of that IS discovered, by
+#     ASSET008 below -- an `.svg`, `.lottie`, `.riv` or Lottie `.json` under
+#     `apps/` or `packages/` -- and a reviewer who remembers this line saying
+#     an `.svg` is undiscovered is reading the old file. A `.gltf` or an `.obj`
+#     still is not: those are no worse off than before (LIC001's extension
+#     list never covered them either), the manifest may name one voluntarily,
+#     which buys ASSET002/ASSET003/ASSET004 over it, and #937 deliberately did
+#     not reopen them.
 #   * A zero-byte file carries no NUL and is therefore text by this rule. It
 #     also carries nothing to licence. `packages/fit/fixtures/corpus/
 #     zero-length.fit` is named in the manifest anyway, because naming it is
@@ -1501,6 +1507,93 @@ asset_is_binary() {
   nuls="$(head -c "${ASSET_SNIFF_BYTES}" < "$1" 2>/dev/null \
     | LC_ALL=C tr -dc '\000' | wc -c | tr -d '[:space:]')"
   [ -n "${nuls}" ] && [ "${nuls}" != "0" ]
+}
+
+# --- ASSET008: a vector or animation file is an asset, text or not ------------
+#
+# #937. The NUL sniff above finds every BINARY and deliberately no text file,
+# so an `.svg` or a Lottie `.json` -- both text, both exactly what a
+# third-party illustration or animation kit ships -- passed every gate here
+# with no provenance at all: no SPDX header (LIC001/LIC002 do not scan either,
+# and a header in an SVG is not a licence record anyway), no manifest row and
+# no digest. This is the "separate decision" §Limits left open, taken for
+# VECTOR AND ANIMATION formats only. It is an extension list, which is the
+# thing ASSET001 exists to avoid, and it is one for a reason: a text file
+# carries no signal that it is somebody else's work, so what a rule can key on
+# is what KIND of file it is. It therefore fails open against a format it does
+# not name -- `.gltf` and `.obj` are still not discovered, on purpose (#937).
+#
+#   * `.svg`, `.lottie` and `.riv`, matched case-insensitively, whatever their
+#     content. A `.lottie` is a ZIP and a `.riv` is a binary, so this runs
+#     BEFORE the binary sniff: one file, one finding, and the finding that names
+#     the file's kind.
+#   * A `.json` only when it IS a Lottie document: its top-level object has a
+#     `"v"`, an `"fr"` and a `"layers"` key. Top-level is decided by a brace
+#     walk that skips strings (`asset_is_lottie` below), so a nested object that
+#     happens to carry those names is not one, and a `package.json` never is.
+#   * Under `apps/` and `packages/` only -- the two trees anything ships from --
+#     and through `repo_files`, so every GENERATED tree (`node_modules`, `dist`
+#     and the rest) is pruned exactly as it is for every other rule.
+#
+# Art this project draws IN CODE lives in a `.tsx` with an SPDX header and is
+# not matched. Naming a file in ASSETS.toml buys it ASSET002-ASSET004 like any
+# other entry, so a named `CC-BY-SA-4.0` SVG is still red, by ASSET004.
+asset_is_vector_name() {
+  case "$1" in
+    *.[sS][vV][gG] | *.[lL][oO][tT][tT][iI][eE] | *.[rR][iI][vV]) return 0 ;;
+  esac
+  return 1
+}
+
+# Whether a `.json` file is a Lottie document. A character walk in awk rather
+# than a grep for the three keys, because a grep cannot tell a top-level key
+# from one three objects down, nor a key from the same word inside a string
+# value. Depth counts `{` and `[` alike, so a key at depth 1 is a key of the
+# top-level OBJECT, and a document whose top level is an array has none.
+# LC_ALL=C so the walk is over bytes on every awk this runs under.
+asset_is_lottie() {
+  LC_ALL=C awk '
+    BEGIN { depth = 0; instr = 0; esc = 0; buf = ""; key = ""; v = 0; fr = 0; ly = 0 }
+    {
+      line = $0 "\n"; n = length(line)
+      for (i = 1; i <= n; i++) {
+        c = substr(line, i, 1)
+        if (instr) {
+          if (esc) { esc = 0; buf = buf c; continue }
+          if (c == "\\") { esc = 1; buf = buf c; continue }
+          if (c == "\"") { instr = 0; key = (depth == 1) ? buf : ""; continue }
+          buf = buf c; continue
+        }
+        if (c == "\"") { instr = 1; buf = ""; continue }
+        if (c == " " || c == "\t" || c == "\n" || c == "\r") continue
+        if (c == ":" && key != "") {
+          if (key == "v") v = 1; else if (key == "fr") fr = 1; else if (key == "layers") ly = 1
+          key = ""
+          if (v && fr && ly) exit
+          continue
+        }
+        key = ""
+        if (c == "{" || c == "[") depth++
+        else if (c == "}" || c == "]") depth--
+      }
+    }
+    END { exit !(v && fr && ly) }
+  ' < "$1" 2>/dev/null
+}
+
+# Whether ASSET008 is about this file at all: under apps/ or packages/, and a
+# vector or animation file by name, or a Lottie document by content.
+asset_is_vector() {
+  local relative="$1"
+  case "${relative}" in
+    apps/* | packages/*) ;;
+    *) return 1 ;;
+  esac
+  asset_is_vector_name "${relative}" && return 0
+  case "${relative}" in
+    *.[jJ][sS][oO][nN]) asset_is_lottie "${ROOT}/${relative}" ;;
+    *) return 1 ;;
+  esac
 }
 
 # --- Reading ASSETS.toml ------------------------------------------------------
@@ -1727,7 +1820,7 @@ asset_attribution_required() {
 check_assets() {
   local record kind line rest path licence sha absent derived script got relative errors=0
   local -a asset_paths=() asset_lines=()
-  local i named
+  local i named vector
 
   # ⚠️ ASSET005 first, and it returns. A manifest that is not there is not "no
   # entries": it is the gate removed. `check-env-example.sh` sets the precedent
@@ -1863,13 +1956,22 @@ check_assets() {
 
   while IFS= read -r file; do
     [ -n "${file}" ] || continue
-    asset_is_binary "${file}" || continue
     relative="${file#"${ROOT}"/}"
+    vector=0
+    if asset_is_vector "${relative}"; then
+      vector=1
+    elif ! asset_is_binary "${file}"; then
+      continue
+    fi
     named=0
     for (( i = 0; i < ${#asset_paths[@]}; i++ )); do
       if [ "${asset_paths[i]}" = "${relative}" ]; then named=1; break; fi
     done
     [ "${named}" -eq 1 ] && continue
+    if [ "${vector}" -eq 1 ]; then
+      report ASSET008 "${relative}: a vector or animation file that ${ASSET_MANIFEST_NAME} does not name; an illustration or animation is somebody's work until a row there says whose, under what licence, and with what digest (#937)"
+      continue
+    fi
     report ASSET001 "${relative}: a committed binary that ${ASSET_MANIFEST_NAME} does not name; no SPDX header can be put in it, so its licence, its source and its integrity are recorded there or nowhere (#339)"
   done < <(repo_files | sort)
 
