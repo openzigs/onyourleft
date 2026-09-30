@@ -44,6 +44,7 @@ import {
 } from '../instance/instance-transport';
 import {
   roomRouteFrom,
+  routeDigest,
   sharedRoomRoute,
   type RoomRouteRefusal,
   type RoomRouteSource,
@@ -61,6 +62,11 @@ export interface EnteredRoom {
   readonly code?: string | undefined;
   /** The road everybody in the room rides — read back from the room's own route. */
   readonly profile: RouteProfile;
+  /**
+   * The SHA-256 of that route's bytes — what the room's `welcome.routeRef`
+   * must name when this device joins it (`net/room-session.ts`).
+   */
+  readonly routeSha256: string;
 }
 
 /** Why a request about a room will not be answered as asked, however often it is asked. */
@@ -227,6 +233,8 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             ridingPosition: request.ridingPosition,
             code: made.code,
             profile: shared.profile,
+            // The bytes this device sent, digested here rather than taken from the answer.
+            routeSha256: await routeDigest(shared.gpx),
           },
         };
       } catch {
@@ -276,6 +284,8 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             kind: room.kind,
             ridingPosition: room.ridingPosition as RoomRidingPosition,
             profile,
+            // The route's bytes were just checked against this digest (`routeOf`).
+            routeSha256: room.routeSha256,
           },
         };
       } catch {

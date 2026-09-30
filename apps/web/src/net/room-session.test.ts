@@ -76,6 +76,41 @@ describe('joining a room — #782', () => {
     expect(s.status).toMatchObject({ kind: 'joined', riderId: 3 });
   });
 
+  it('checks the welcome’s routeRef against the route this device rides, and leaves a room riding other bytes — #784', async () => {
+    const riding = 'a'.repeat(64);
+    for (const [expected, joins] of [
+      [riding, true],
+      [undefined, true],
+      ['b'.repeat(64), false],
+    ] as const) {
+      const room = new ScriptedRoom();
+      const clock = new ManualClock();
+      const s = new RoomSession({
+        roomId: 'room-1',
+        link: room.link(),
+        timers: clock,
+        now: clock.now,
+        physicsVersion: PHYSICS_VERSION,
+        sample: () => ({ powerWatts: 200 }),
+        random: () => 0,
+        routeSha256: expected,
+      });
+      await flush();
+      room.accept();
+      room.welcome(3); // routeRef: 'a' × 64
+      if (joins) {
+        expect(s.status).toMatchObject({ kind: 'joined', riderId: 3 });
+        continue;
+      }
+      expect(s.status).toEqual({ kind: 'refused', reason: 'not-the-rooms-route' });
+      expect(room.socket.closedByClient).toBe(true);
+      // Left, and not retried: no report is sent and no second socket opened.
+      await clock.advance(30_000);
+      expect(room.sockets).toHaveLength(1);
+      expect(room.socket.sent.filter((m) => m.type === 'report')).toEqual([]);
+    }
+  });
+
   it('asks for no ticket for a room id no instance could route: refused, and never retried — #782 review (B1)', async () => {
     const room = new ScriptedRoom();
     const clock = new ManualClock();

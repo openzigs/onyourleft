@@ -162,8 +162,13 @@ export type RoomSessionStatus =
   /** The room said no, and will keep saying it. */
   | {
       readonly kind: 'refused';
-      /** `invalid-room`: an id no instance could route, refused before anything is sent. */
-      readonly reason: RefuseReason | TicketRefusal | 'replaced' | 'invalid-room';
+      /**
+       * `invalid-room`: an id no instance could route, refused before anything
+       * is sent. `not-the-rooms-route`: the room's `routeRef` is not the route
+       * this device rides (#784).
+       */
+      readonly reason:
+        RefuseReason | TicketRefusal | 'replaced' | 'invalid-room' | 'not-the-rooms-route';
     }
   /** Lost for longer than the room keeps a seat. */
   | { readonly kind: 'gone' }
@@ -180,6 +185,13 @@ export interface RoomSessionOptions {
   readonly physicsVersion: number;
   /** Read at every report. */
   readonly sample: () => RoomSample;
+  /**
+   * The SHA-256 of the route this device fetched and checked for the room
+   * (#784, `rooms/share.ts`). A welcome whose `routeRef` names other bytes is
+   * refused as `not-the-rooms-route`: the room would simulate a road this
+   * device is not drawing. Absent, the welcome's `routeRef` is not compared.
+   */
+  readonly routeSha256?: string | undefined;
   /** Told after every change of {@link RoomSession.status}. */
   readonly onChange?: (() => void) | undefined;
   /** 0 ≤ x < 1, for the backoff's jitter. `Math.random` in production. */
@@ -358,6 +370,17 @@ export class RoomSession {
         const message = decoded.message;
         switch (message.type) {
           case 'welcome': {
+            const expected = this.#options.routeSha256;
+            if (expected !== undefined && message.routeRef.sha256 !== expected) {
+              // Not a lost link to retry: the same room answers the same way.
+              this.#setStatus({ kind: 'refused', reason: 'not-the-rooms-route' });
+              this.#generation += 1;
+              this.#stopReporting();
+              const socket = this.#socket;
+              this.#socket = undefined;
+              socket?.close(1000, 'left');
+              return;
+            }
             this.#welcomes += 1;
             this.#attempt = 0;
             this.#ticketRefusals = 0;

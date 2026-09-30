@@ -553,7 +553,12 @@ export function GameView(props: GameViewProps): JSX.Element {
    * shown on the picker once the ride ends, and never before the room says so.
    */
   const [raceOver, setRaceOver] = useState<
-    | { readonly roomId: string; readonly finishers: number; readonly ownWatts: number | undefined }
+    | {
+        readonly roomId: string;
+        /** `undefined`: the rider left the race before the room said it was over (N5). */
+        readonly finishers: number | undefined;
+        readonly ownWatts: number | undefined;
+      }
     | undefined
   >(undefined);
   /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
@@ -1138,6 +1143,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         roomStateRef.current = roomRideState();
         roomRef.current = props.room.join({
           roomId,
+          // #784: the room's `welcome.routeRef` must be the route this device
+          // fetched and checked for it (`net/rooms-port.ts`), or it is left.
+          routeSha256:
+            entered !== undefined && entered.roomId === roomId ? entered.routeSha256 : undefined,
           // #782's review (N5): the weight the rider DECLARED, or none. A
           // rider with none is not ticketed at a default (ADR 0028 D-1: the
           // room races the declared mass); the room refuses as
@@ -1971,14 +1980,17 @@ export function GameView(props: GameViewProps): JSX.Element {
         }}
         onEnd={() => {
           // #785: a race the room said is over has a result, shown on the
-          // picker once the ride has ended — and only then.
+          // picker once the ride has ended — and only then. A race the rider
+          // left while it ran has one too, kept for them: the picker offers
+          // to ask for it, and the instance answers once the race is over
+          // (#785's review, N5).
           const over = roomRef.current?.race();
           const roomId = roomIdRef.current;
-          if (over?.kind === 'finished' && roomId !== undefined) {
+          if ((over?.kind === 'finished' || over?.kind === 'running') && roomId !== undefined) {
             const { wattSeconds, seconds } = raceWattsRef.current;
             setRaceOver({
               roomId,
-              finishers: over.order.length,
+              finishers: over.kind === 'finished' ? over.order.length : undefined,
               ownWatts: seconds > 0 ? wattSeconds / seconds : undefined,
             });
           }

@@ -1356,6 +1356,12 @@ describe('the instance is disclosed, class by class — #778', () => {
       'the route of a room you make',
       'a route that starts, ends or passes inside one of your privacy zones is refused before anything is sent',
       'the route is deleted from the instance when the room is over',
+      // #784's review (B2): every way a room is over, the unridden one's bound included.
+      'when nobody is riding in it a day after it was made, whether or not anybody ever joined it',
+      'when a race in it was interrupted because the instance restarted',
+      'or when you erase your account on that instance',
+      // #785's review (N2): no result while the race runs.
+      "nobody can see a race's result until every rider is across the line or out of the race",
       'the instance keeps only a fingerprint of a room',
       // Ruling Q2.
       "visible to that race's participants only, until your account on the instance is erased",

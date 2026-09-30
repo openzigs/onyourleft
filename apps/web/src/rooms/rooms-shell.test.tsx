@@ -28,11 +28,13 @@ import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../game/hud/announce-preference';
+import { ROOM_REFUSED_TEXT } from '../game/room-ride';
 import type { InstanceSocketEvents, OpenInstanceSocket } from '../instance/instance-transport';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
+import { ASK_FOR_RESULT_LABEL, RACE_LEFT_EARLY_TEXT, RACE_NOT_OVER_TEXT } from './RaceResult';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, submitForm, typeInto, type Mounted } from '../testing/mount';
@@ -236,6 +238,30 @@ describe('a group ride joined by its code — #784', () => {
     expect(reading('To go')).toMatch(/^2\.5/);
   });
 
+  it('leaves a room whose welcome names another route than the one fetched and checked — #784’s review (N1)', async () => {
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.offer('room-joined', 'group', gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    await joinByCode('ABCDE-FGHJK-MNPQR');
+    await press('Ride in the room');
+    await settle();
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: sha256.replace(/^./, sha256.startsWith('0') ? '1' : '0') },
+      roomConfig: {
+        kind: 'ride',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+      },
+    });
+    await frame(2);
+    expect(document.body.textContent).toContain(ROOM_REFUSED_TEXT['not-the-rooms-route']);
+  });
+
   it('rides one of the rider’s own routes ALONE, even while a room is entered', async () => {
     const instance = new ScriptedInstance();
     const { gpx, sha256 } = await roomRoute(2_500);
@@ -381,14 +407,48 @@ describe('a private race — #785', () => {
     expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).toBe('Go.');
   });
 
-  it('shows no result for a race the rider leaves before the room says it is over', async () => {
+  it('asks nothing for a race the rider leaves while it runs, and shows its result on a press once the instance has it — #785’s review (N5)', async () => {
     const { instance, sockets } = await inARace();
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(3);
     await press('End ride');
     await settle();
-    expect(document.body.textContent).not.toContain('Race result');
+    // Offered, and nothing asked: no list, no request.
+    expect(document.body.textContent).toContain(RACE_LEFT_EARLY_TEXT);
+    expect(document.querySelector('ol')).toBeNull();
     expect(instance.seen.some((each) => each.path.endsWith('/results'))).toBe(false);
+    // Asked while the race is still ridden: the instance withholds it, and says nothing more.
+    await press(ASK_FOR_RESULT_LABEL);
+    await settle();
+    expect(document.body.textContent).toContain(RACE_NOT_OVER_TEXT);
+    expect(document.querySelector('ol')).toBeNull();
+    // Asked once it is over: the room's own order.
+    instance.publish([
+      {
+        place: 1,
+        displayName: 'Ann',
+        you: false,
+        finishMs: 3_725_000,
+        wattsPerKilogram: 6.6,
+        flags: [],
+      },
+      {
+        place: 2,
+        displayName: 'Me',
+        you: true,
+        finishMs: 3_900_000,
+        wattsPerKilogram: 3.4,
+        flags: [],
+      },
+    ]);
+    await press(ASK_FOR_RESULT_LABEL);
+    await settle();
+    const rows = [...document.querySelectorAll('.oyl-race-result__rows li')].map(
+      (row) => row.textContent,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toContain('2nd You');
+    expect(instance.seen.filter((each) => each.path.endsWith('/results'))).toHaveLength(2);
   });
 
   it('shows no ordered result while the race runs, and the room’s own after it — W/kg beside others, every flag to everyone', async () => {

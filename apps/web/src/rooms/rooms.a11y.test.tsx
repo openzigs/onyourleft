@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import type { EnteredRoom, RaceResultRow, RoomsPort } from '../net/rooms-port';
 import { mount, settle, type Mounted } from '../testing/mount';
-import { RaceResult } from './RaceResult';
+import { RACE_LEFT_EARLY_TEXT, RaceResult } from './RaceResult';
 import { RoomPanel, type RoomPanelProps } from './RoomPanel';
 import { northProfile } from './rooms-testing';
 
@@ -49,6 +49,7 @@ const ENTERED: EnteredRoom = {
   ridingPosition: 'hoods',
   code: 'ABCDE-FGHJK-MNPQR',
   profile: northProfile(1_000),
+  routeSha256: 'a'.repeat(64),
 };
 
 function panel(overrides: Partial<RoomPanelProps>): RoomPanelProps {
@@ -96,5 +97,14 @@ describe('the room panel and a race’s result pass the accessibility audit — 
     await audited(<RaceResult rooms={ROOMS} roomId="room-1" finishers={2} ownWatts={210} />);
     expect(document.querySelectorAll('.oyl-race-result__rows li')).toHaveLength(3);
     expect(document.querySelector('[aria-current="true"]')?.textContent).toContain('You');
+  });
+
+  it('a race the rider left while it ran: what is kept for them, and the one control that asks', async () => {
+    await audited(
+      <RaceResult rooms={ROOMS} roomId="room-1" finishers={undefined} ownWatts={210} />,
+    );
+    expect(document.body.textContent).toContain(RACE_LEFT_EARLY_TEXT);
+    expect(document.querySelectorAll('button')).toHaveLength(1);
+    expect(document.querySelector('ol')).toBeNull();
   });
 });

@@ -80,9 +80,11 @@ export const ROOMS_UNREACHABLE_TEXT =
 export const ROOMS_WHAT_IS_SENT =
   'Making a room sends the route you choose — its roads and heights, not its name — to your ' +
   'instance, for the riders you share its code with. Anyone with the code can join. In the ' +
-  'room, your power goes to the instance while you ride and your weight once as you join; ' +
-  'the other riders see where you are on the road, and after a race its result: your name, ' +
-  'time and watts per kilogram. The route is deleted from the instance when the room is over.';
+  'room, your power and cadence go to the instance twice a second while you ride, and your ' +
+  'weight once as you join; the other riders see your name and where you are on the road, ' +
+  'and after a race its result: your name, place, time, watts per kilogram and any flag the ' +
+  'room raised for a figure past its limit. The route is deleted from the instance when the ' +
+  'room is over — at the latest a day after it was made, unless somebody is riding in it then.';
 
 export interface RoomPanelProps {
   /** `undefined` where this device has no instance to hold a room. */

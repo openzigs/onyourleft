@@ -224,6 +224,13 @@ describe('the declaration filed on Play', () => {
     expect(precise?.why).toContain('make a private room on');
     expect(precise?.why).toContain('refused before anything is sent');
     expect(precise?.why).toContain('deletes it when the room is over');
+    // #784's review (B1, B2): every way a room is over, the unridden one's bound
+    // and the maker's erasure included — the instance's rooms.ts does all five.
+    expect(precise?.why).toContain('nobody riding in it a day after it was made');
+    expect(precise?.why).toContain('the maker erasing their account there');
+    expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
+      'which erasing the account ends the room and deletes',
+    );
     // And still never the device's own location: no GPS fix, and a ride's positions never.
     expect(precise?.why).toContain('requests no GPS fix and never transmits a ride’s positions');
   });

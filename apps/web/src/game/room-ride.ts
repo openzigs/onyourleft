@@ -65,6 +65,8 @@ export const ROOM_REFUSED_TEXT: Readonly<
     'Set your weight in Settings to ride in a room: a room rides you at the weight you declare. ' +
     'You are riding on your own.',
   'invalid-room': 'That is not a room this app can join, so you are riding on your own.',
+  'not-the-rooms-route':
+    'The room is not riding the route this device fetched for it, so you are riding on your own.',
 };
 
 /** The label the HUD gives the room: never anything but this word. */

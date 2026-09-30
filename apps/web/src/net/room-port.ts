@@ -71,6 +71,12 @@ export interface RoomJoin {
   readonly declaredMassKilograms: number | undefined;
   /** Read at every report: the rider's power and cadence NOW. */
   readonly sample: () => RoomSample;
+  /**
+   * The SHA-256 of the route this device rides for the room — #784: the
+   * room's `welcome.routeRef` must name the same bytes, or the room is left.
+   * Absent for a room this device did not fetch a route for.
+   */
+  readonly routeSha256?: string | undefined;
 }
 
 /** One room, joined: kept joined until {@link RoomConnection.leave}. */
@@ -193,6 +199,7 @@ export function roomPortOver(
         now: options.now ?? (() => performance.now()),
         physicsVersion: PHYSICS_VERSION,
         sample: request.sample,
+        routeSha256: request.routeSha256,
         acceptFrame: options.acceptFrame,
         onChange: () => {
           // A session that has stopped trying no longer needs the screen off.

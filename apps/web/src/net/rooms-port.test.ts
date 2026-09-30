@@ -9,6 +9,7 @@ import {
   signedInStorage,
   zoneNorth,
 } from '../rooms/rooms-testing';
+import { routeDigest } from '../rooms/share';
 import { createRoomsPort } from './rooms-port';
 
 function port(
@@ -49,6 +50,8 @@ describe('making a room — #784', () => {
         kind: 'race',
         code: 'ABCDE-FGHJK-MNPQR',
       });
+      // The digest of the bytes THIS device sent — what the room's routeRef must name.
+      expect(answer.room.routeSha256).toBe(await routeDigest(body.gpx as string));
     }
   });
 
@@ -114,6 +117,8 @@ describe('joining a room by its code — #784', () => {
     if (answer.kind === 'joined') {
       expect(answer.room.code).toBeUndefined();
       expect(answer.room.profile.totalDistance).toBeGreaterThan(1_900);
+      // The digest the fetched route was checked against, for the welcome's routeRef.
+      expect(answer.room.routeSha256).toBe(sha256);
     }
   });
 
