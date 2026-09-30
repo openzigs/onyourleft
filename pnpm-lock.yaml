@@ -47,6 +47,9 @@ importers:
       '@onyourleft/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@onyourleft/fit':
+        specifier: workspace:*
+        version: link:../../packages/fit
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics

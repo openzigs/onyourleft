@@ -14,6 +14,7 @@ import {
   type TestDevice,
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
+import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
@@ -346,6 +347,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const mailed = world.confirmations.at(-1)?.token;
     return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
   },
+  ...SYNC_HAPPY_CALLS,
 };
 
 describe('every route answers with the shape its entry declares', () => {
@@ -419,8 +421,12 @@ describe('every route answers with the shape its entry declares', () => {
         const body: unknown = await response.json();
         expect(response.status, JSON.stringify(body)).toBe(200);
         expect(violations(body, route.response.schema)).toEqual([]);
+      } else if (route.response.contentType === 'application/octet-stream') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('application/octet-stream');
+        expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
       } else {
-        throw new Error('an identity route answers JSON or nothing');
+        throw new Error('an identity route answers JSON, bytes or nothing');
       }
     },
   );

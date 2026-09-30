@@ -308,7 +308,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         the device. ⚠️ It names NO `fetch` and nothing in the
                         shipped client calls it yet: its transport is a
                         parameter, and #777 is the one module allowed to call
-                        an instance, after #778's disclosures
+                        an instance, after #778's disclosures. Since #881
+                        (#776) it also holds `sync.ts`, two-way sync with an
+                        instance, under the same rule (no `fetch`, nothing in
+                        the shipped client calls it). ⚠️ **The device's change
+                        wins**, and a reviewer who remembers "pull, then push
+                        whatever differs" is reading #893's first draft, which
+                        pulled back a ride deleted here and overwrote a
+                        write-up replaced here: each copy is read against the
+                        device's SYNC BASE (`packages/store` §`SyncBaseRecord`,
+                        schema v14) — a synced ride missing here is deleted on
+                        the instance, a local item change is pushed, and only
+                        an item unchanged here whose instance copy moved is
+                        pulled
     src/home/           where the app opens (#428) — one bounded store read
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
@@ -1365,15 +1377,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`src/node-listener.ts`), run as TypeScript by Node 24
                         with no build step (`node src/main.ts`). It answers
                         `/health`, `/source` (AGPL-3.0 §13, ADR 0036 D-6),
-                        `/openapi.json` and `/licences/third-party.txt`, and
-                        nothing else yet. ⚠️ **One third-party runtime dependency since
+                        `/openapi.json` and `/licences/third-party.txt` on a
+                        running box; everything else in its route table —
+                        identity (#855) and sync (#881) — answers
+                        `unavailable` there (below). ⚠️ A reviewer who
+                        remembers "and nothing else yet" is reading the old
+                        file. ⚠️ **One third-party runtime dependency since
                         #769, `kysely`** (ADR 0037 D-9's row): its notices
                         document says so and `check:notices` holds it. Since
                         #842 it also holds `src/store/` — the `SqlStore` port
                         over SQLite (`node:sqlite` through Kysely, with a
                         forty-line adapter because Kysely reads NO rows from
-                        `node:sqlite` as it is), four migrations each with a
-                        tested `down`, and a round-trip harness — and
+                        `node:sqlite` as it is), migrations each with a tested
+                        `down` (five since #881 — count
+                        `src/store/migrations/`, this line has said three and
+                        four), and a round-trip harness — and
                         `src/blob/`, content-addressed blobs on local disk,
                         in memory, or in an S3-compatible bucket. Since #855
                         it also holds `src/auth/` — identity (#772, #773,
@@ -1404,7 +1422,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         (migrate, backup, restore, verify, room-open);
                         `deploy/home/` is #807's compose file and #52's
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
-                        measurement. ⚠️ Only `src/store/` may
+                        measurement. Since #881 it also holds `src/sync/` —
+                        ingestion of a signed record and its original file
+                        (#37), the athlete's own rides, detail and streams
+                        (#38, never a position), the sync manifest, items and
+                        tombstones (#776), and account export and deletion
+                        (#35) — and migration 0009, served only by a handler
+                        HANDED a `sync`, which `src/instance.ts` does not yet
+                        (it hands the accounts, and no sync), so every
+                        sync route answers `unavailable` on a running box.
+                        Every sync route declares `reaches: 'own'` (#83's
+                        choke point). ⚠️ It depends on `@onyourleft/fit`
+                        (workspace, Apache-2.0) to decode the file it is sent
+                        — the only way to know the bytes are an activity, and
+                        where streams come from — so `packages/fit`'s XML
+                        reader, which refuses a `<!DOCTYPE`, is on a
+                        network-facing path for the first time
+                        (`src/sync/ingest.test.ts` pins it there). ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -1569,7 +1603,12 @@ packages/             Apache-2.0, without exception
                       write-up per ride. ⚠️ Version 13 is the FIRST record
                       migration: `SCHEMA_MIGRATIONS` is not empty and
                       `ActivityStore` runs `upgradeWith` as a version's
-                      `.upgrade()`
+                      `.upgrade()`. Since #881 (#776, #893's review), at
+                      version 14, the SYNC BASE: what this device and its
+                      instance last agreed on, two digests a ride and an
+                      item. ⚠️ A ride's base row OUTLIVES `deleteActivity` on
+                      purpose — it is the device's record that a synced ride
+                      was deleted here — and goes with `deleteAthlete`
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -2370,6 +2409,9 @@ not.
   ([#782](https://github.com/openzigs/onyourleft/issues/782)), and nothing is deployed: the home
   deployment (#807) is the owner's to run. The Durable Object adapter
   ([#781](https://github.com/openzigs/onyourleft/issues/781)) is still **deployed nowhere**.
+  ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half
+  in `apps/web/src/instance/sync.ts` exist, but `src/instance.ts` hands the handler no sync, so every
+  sync route answers `unavailable` on a running instance, and no client calls one until #777.
 
 #### What exists, and what each is **not** yet
 

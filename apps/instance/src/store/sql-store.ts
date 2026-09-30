@@ -52,7 +52,11 @@ import type {
   RoomCourseTable,
   RoomTable,
   SessionTable,
+  SyncItemTable,
+  SyncKind,
 } from './schema.ts';
+
+export type { SyncKind } from './schema.ts';
 
 export interface Athlete {
   readonly id: string;
@@ -337,6 +341,79 @@ export type RenameOutcome = 'renamed' | 'not_found' | 'rate_limited';
 /** What storing an activity record did: a retried sync of the same file is `duplicate`. */
 export type PutOutcome = 'stored' | 'duplicate';
 
+/** Every kind a sync item may be, in the order the manifest documents them (#776). */
+export const SYNC_KINDS: readonly SyncKind[] = [
+  'activity',
+  'write-up',
+  'side-camera-report',
+  'goal',
+  'note',
+  'document',
+];
+
+/** One thing an athlete synced, or its tombstone (#776). */
+export interface SyncItem {
+  /** Only ever grows: a changed item is a new `seq`. */
+  readonly seq: number;
+  readonly athleteId: string;
+  readonly kind: SyncKind;
+  /** The item's key: an activity's content SHA-256, or the device's own id for the rest. */
+  readonly key: string;
+  /** SHA-256 of the body, or of the signed record for an activity. `null` for a tombstone. */
+  readonly digest: string | null;
+  /** The item's bytes exactly as they were sent. `null` for an activity and a tombstone. */
+  readonly body: Uint8Array | null;
+  /** Unix seconds; `(receivedAt, seq)` is the manifest's order. */
+  readonly receivedAt: number;
+  /** When the item was deleted, for a tombstone. */
+  readonly deletedAt: number | null;
+}
+
+/** A manifest row: the item, and a live activity's signed record beside it. */
+export interface ManifestRow extends SyncItem {
+  readonly signedRecord: Uint8Array | null;
+}
+
+/** A position in the manifest's order. */
+export interface ManifestPosition {
+  readonly receivedAt: number;
+  readonly seq: number;
+}
+
+/** What {@link SqlStore.ingestActivity} is handed: a record already verified by the caller. */
+export interface ActivityIngestion {
+  readonly athleteId: string;
+  readonly contentSha256: string;
+  readonly signedRecord: Uint8Array;
+  /** SHA-256 of `signedRecord`, lowercase hex: the manifest's digest for it. */
+  readonly recordSha256: string;
+  /** Unix seconds. The stored `receivedAt` is never earlier than any before it. */
+  readonly now: number;
+}
+
+/** What ingesting did, and the record the athlete now holds for that file — the first one's on a duplicate. */
+export interface Ingested {
+  readonly outcome: PutOutcome;
+  readonly record: ActivityRecord;
+}
+
+/** A non-activity item, as a device puts it (#776). */
+export interface SyncItemWrite {
+  readonly athleteId: string;
+  readonly kind: Exclude<SyncKind, 'activity'>;
+  readonly key: string;
+  readonly body: Uint8Array;
+  readonly digest: string;
+  /** Unix seconds. */
+  readonly now: number;
+}
+
+/** One of an athlete's activities, with its place in the list (#38). */
+export interface ListedActivity {
+  readonly seq: number;
+  readonly record: ActivityRecord;
+}
+
 /** The storage port. */
 export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
@@ -437,6 +514,40 @@ export interface SqlStore {
   revokeSession(athleteId: string, tokenSha256: string, at: number): Promise<boolean>;
 
   putActivityRecord(record: ActivityRecord): Promise<PutOutcome>;
+  /**
+   * #37: file a verified signed record and index it in the manifest, in one
+   * transaction. The same file from the same athlete is `duplicate` however
+   * many requests race — the primary key decides, not a read before the write.
+   */
+  ingestActivity(ingestion: ActivityIngestion): Promise<Ingested>;
+  /**
+   * Whether ANY athlete — or any but `exceptAthleteId` — holds a record of
+   * this file. Not athlete-scoped, by design: a blob is shared by every
+   * athlete who sent the same bytes, and this is what says whether removing
+   * it would take somebody else's file. It answers a boolean, never a row.
+   */
+  isContentHeld(contentSha256: string, exceptAthleteId?: string): Promise<boolean>;
+  /** #38: one page of this athlete's live activities, newest first, in ONE query. */
+  listActivityPage(
+    athleteId: string,
+    beforeSeq: number | undefined,
+    limit: number,
+  ): Promise<readonly ListedActivity[]>;
+
+  /** #776: store an item, or answer `unchanged` when the athlete already holds these exact bytes. */
+  putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
+  getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
+  /**
+   * Replace a live item with its tombstone — an activity's record goes with
+   * it. `false` when the athlete holds no such live item.
+   */
+  deleteSyncItem(athleteId: string, kind: SyncKind, key: string, now: number): Promise<boolean>;
+  /** #776: the manifest, after `after`, in `(receivedAt, seq)` order, tombstones included. */
+  listSyncManifest(
+    athleteId: string,
+    after: ManifestPosition | undefined,
+    limit: number,
+  ): Promise<readonly ManifestRow[]>;
   getActivityRecord(athleteId: string, contentSha256: string): Promise<ActivityRecord | undefined>;
   listActivityRecords(athleteId: string): Promise<readonly ActivityRecord[]>;
 
@@ -516,8 +627,13 @@ export interface SqlStore {
   ): Promise<void>;
   listInviteCodes(athleteId: string): Promise<readonly InviteCode[]>;
 
-  /** Remove every row this athlete owns, the athlete included (#35). */
-  eraseAthlete(athleteId: string): Promise<void>;
+  /**
+   * Remove every row this athlete owns, the athlete included (#35). Answers
+   * the content hashes of the records it removed, for the caller's blob sweep.
+   * The tables are read from the schema's own foreign keys at the time of the
+   * call ({@link athleteTablesInErasureOrder}), not from a list.
+   */
+  eraseAthlete(athleteId: string): Promise<readonly string[]>;
 
   /** Close the connection. Nothing may be called after. */
   close(): Promise<void>;
@@ -528,26 +644,68 @@ export class OwnershipConflictError extends Error {
   override readonly name = 'OwnershipConflictError';
 }
 
+/** One foreign key column pair, as `pragma_foreign_key_list` reports it. */
+interface ForeignKey {
+  readonly child: string;
+  readonly parent: string;
+  readonly from: string;
+}
+
 /**
  * The tables `eraseAthlete` empties, children before parents so the foreign
- * keys hold at every step. ⚠️ Written down, and `sql-store.erasure.test.ts`
- * derives the list from the SCHEMA and fails when a table is missing here.
+ * keys hold at every step — **derived from the schema's foreign keys**, at the
+ * time of the call (#35, #881's rule). A table a later migration adds with an
+ * `athlete_id` REFERENCES `athlete` is erased with no edit here, and one whose
+ * reference to `athlete` is through any other column is refused rather than
+ * skipped: `eraseAthlete` deletes by `athlete_id`, and a table it could not
+ * empty must not pass for erased.
+ *
+ * `sql-store.erasure.test.ts` still reads the schema itself and checks every
+ * such table empty afterwards, so this function is tested by what it does and
+ * not by agreeing with a second copy of itself.
  */
-export const ATHLETE_TABLES_IN_ERASURE_ORDER = [
-  'result',
-  'activity_record',
-  'session',
-  'link_code',
-  'recovery_code',
-  'display_name_change',
-  'recovery_email',
-  'recovery_email_confirmation',
-  'email_recovery_token',
-  'block',
-  'report',
-  'invite_code',
-  'device_key',
-] as const satisfies readonly (keyof InstanceDatabase)[];
+export async function athleteTablesInErasureOrder(
+  db: Kysely<InstanceDatabase>,
+): Promise<readonly (keyof InstanceDatabase)[]> {
+  const keys = (
+    await sql<ForeignKey>`
+      select m.name as child, f."table" as parent, f."from" as "from"
+      from sqlite_schema as m, pragma_foreign_key_list(m.name) as f
+      where m.type = 'table'
+      order by m.name, f.id, f.seq`.execute(db)
+  ).rows;
+  const scoped = new Set<string>();
+  for (const key of keys) {
+    if (key.parent !== 'athlete') continue;
+    if (key.from !== 'athlete_id') {
+      throw new Error(`${key.child} references athlete through a column eraseAthlete cannot read.`);
+    }
+    scoped.add(key.child);
+  }
+  // A table goes after every scoped table that references it.
+  const referencedBy = new Map<string, Set<string>>();
+  for (const key of keys) {
+    if (!scoped.has(key.child) || !scoped.has(key.parent) || key.child === key.parent) continue;
+    const children = referencedBy.get(key.parent) ?? new Set<string>();
+    children.add(key.child);
+    referencedBy.set(key.parent, children);
+  }
+  const ordered: string[] = [];
+  const placed = new Set<string>();
+  const visiting = new Set<string>();
+  const place = (table: string): void => {
+    if (placed.has(table)) return;
+    if (visiting.has(table))
+      throw new Error('The athlete-scoped tables reference each other in a cycle.');
+    visiting.add(table);
+    for (const child of [...(referencedBy.get(table) ?? [])].sort()) place(child);
+    visiting.delete(table);
+    placed.add(table);
+    ordered.push(table);
+  };
+  for (const table of [...scoped].sort()) place(table);
+  return ordered as (keyof InstanceDatabase)[];
+}
 
 const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   id: row.id,
@@ -665,6 +823,71 @@ const activityRecordFrom = (row: Selectable<ActivityRecordTable>): ActivityRecor
   signedRecord: row.signed_record,
   receivedAt: row.received_at,
 });
+
+const syncItemFrom = (row: Selectable<SyncItemTable>): SyncItem => ({
+  seq: row.seq,
+  athleteId: row.athlete_id,
+  kind: row.kind,
+  key: row.item_key,
+  digest: row.digest,
+  body: row.body,
+  receivedAt: row.received_at,
+  deletedAt: row.deleted_at,
+});
+
+/**
+ * The `received_at` a new manifest row gets: now, or the newest one already
+ * written if the clock has stepped back. So `(received_at, seq)` only grows in
+ * the order rows are inserted, and a cursor a device holds can never have a
+ * new row slip in behind it (#776). Global rather than per athlete, because
+ * the clock is.
+ */
+async function nextReceivedAt(trx: Kysely<InstanceDatabase>, now: number): Promise<number> {
+  const newest = await trx
+    .selectFrom('sync_item')
+    .select((eb) => eb.fn.max('received_at').as('newest'))
+    .executeTakeFirst();
+  return Math.max(now, newest?.newest ?? now);
+}
+
+/**
+ * Insert a manifest row for an item, after removing whatever row it had. The
+ * new `received_at` is taken BEFORE the old row goes, so removing the newest
+ * row cannot lower it and put the new row behind a cursor already past the old.
+ */
+async function replaceSyncRow(
+  trx: Kysely<InstanceDatabase>,
+  row: {
+    readonly athleteId: string;
+    readonly kind: SyncKind;
+    readonly key: string;
+    readonly digest: string | null;
+    readonly body: Uint8Array | null;
+    readonly now: number;
+    readonly deletedAt: number | null;
+    readonly receivedAt?: number;
+  },
+): Promise<void> {
+  const receivedAt = row.receivedAt ?? (await nextReceivedAt(trx, row.now));
+  await trx
+    .deleteFrom('sync_item')
+    .where('athlete_id', '=', row.athleteId)
+    .where('kind', '=', row.kind)
+    .where('item_key', '=', row.key)
+    .execute();
+  await trx
+    .insertInto('sync_item')
+    .values({
+      athlete_id: row.athleteId,
+      kind: row.kind,
+      item_key: row.key,
+      digest: row.digest,
+      body: row.body,
+      received_at: receivedAt,
+      deleted_at: row.deletedAt,
+    })
+    .execute();
+}
 
 const roomFrom = (row: Selectable<RoomTable>): Room => ({
   id: row.id,
@@ -1395,6 +1618,186 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(activityRecordFrom),
       ),
 
+    ingestActivity: (ingestion) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const receivedAt = await nextReceivedAt(trx, ingestion.now);
+          const inserted = await trx
+            .insertInto('activity_record')
+            .values({
+              athlete_id: ingestion.athleteId,
+              content_sha256: ingestion.contentSha256,
+              signed_record: ingestion.signedRecord,
+              received_at: receivedAt,
+            })
+            .onConflict((conflict) =>
+              conflict.columns(['athlete_id', 'content_sha256']).doNothing(),
+            )
+            .returning('content_sha256')
+            .executeTakeFirst();
+          if (inserted !== undefined) {
+            await replaceSyncRow(trx, {
+              athleteId: ingestion.athleteId,
+              kind: 'activity',
+              key: ingestion.contentSha256,
+              digest: ingestion.recordSha256,
+              body: null,
+              now: ingestion.now,
+              deletedAt: null,
+              receivedAt,
+            });
+          }
+          const row = await trx
+            .selectFrom('activity_record')
+            .selectAll()
+            .where('athlete_id', '=', ingestion.athleteId)
+            .where('content_sha256', '=', ingestion.contentSha256)
+            .executeTakeFirstOrThrow();
+          return {
+            outcome: inserted === undefined ? 'duplicate' : 'stored',
+            record: activityRecordFrom(row),
+          } as const;
+        }),
+      ),
+
+    isContentHeld: (contentSha256, exceptAthleteId) =>
+      exclusive(async () => {
+        let query = db
+          .selectFrom('activity_record')
+          .select('athlete_id')
+          .where('content_sha256', '=', contentSha256);
+        if (exceptAthleteId !== undefined) query = query.where('athlete_id', '!=', exceptAthleteId);
+        const row = await query.limit(1).executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    listActivityPage: (athleteId, beforeSeq, limit) =>
+      exclusive(async () => {
+        let query = db
+          .selectFrom('sync_item')
+          .innerJoin('activity_record', (join) =>
+            join
+              .onRef('activity_record.athlete_id', '=', 'sync_item.athlete_id')
+              .onRef('activity_record.content_sha256', '=', 'sync_item.item_key'),
+          )
+          .select([
+            'sync_item.seq as seq',
+            'activity_record.athlete_id as athlete_id',
+            'activity_record.content_sha256 as content_sha256',
+            'activity_record.signed_record as signed_record',
+            'activity_record.received_at as received_at',
+          ])
+          .where('sync_item.athlete_id', '=', athleteId)
+          .where('sync_item.kind', '=', 'activity')
+          .where('sync_item.deleted_at', 'is', null);
+        if (beforeSeq !== undefined) query = query.where('sync_item.seq', '<', beforeSeq);
+        const rows = await query.orderBy('sync_item.seq', 'desc').limit(limit).execute();
+        return rows.map((row) => ({ seq: row.seq, record: activityRecordFrom(row) }));
+      }),
+
+    putSyncItem: (item) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          if ((item.kind as SyncKind) === 'activity') {
+            throw new Error(
+              'An activity is synced through ingestActivity, with its signature checked.',
+            );
+          }
+          const held = await trx
+            .selectFrom('sync_item')
+            .select(['digest', 'deleted_at'])
+            .where('athlete_id', '=', item.athleteId)
+            .where('kind', '=', item.kind)
+            .where('item_key', '=', item.key)
+            .executeTakeFirst();
+          if (held !== undefined && held.deleted_at === null && held.digest === item.digest) {
+            return 'unchanged' as const;
+          }
+          await replaceSyncRow(trx, {
+            athleteId: item.athleteId,
+            kind: item.kind,
+            key: item.key,
+            digest: item.digest,
+            body: item.body,
+            now: item.now,
+            deletedAt: null,
+          });
+          return 'stored' as const;
+        }),
+      ),
+
+    getSyncItem: (athleteId, kind, key) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('sync_item')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('kind', '=', kind)
+          .where('item_key', '=', key)
+          .executeTakeFirst();
+        return row === undefined ? undefined : syncItemFrom(row);
+      }),
+
+    deleteSyncItem: (athleteId, kind, key, now) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('sync_item')
+            .select('deleted_at')
+            .where('athlete_id', '=', athleteId)
+            .where('kind', '=', kind)
+            .where('item_key', '=', key)
+            .executeTakeFirst();
+          if (held === undefined || held.deleted_at !== null) return false;
+          if (kind === 'activity') {
+            await trx
+              .deleteFrom('activity_record')
+              .where('athlete_id', '=', athleteId)
+              .where('content_sha256', '=', key)
+              .execute();
+          }
+          await replaceSyncRow(trx, {
+            athleteId,
+            kind,
+            key,
+            digest: null,
+            body: null,
+            now,
+            deletedAt: now,
+          });
+          return true;
+        }),
+      ),
+
+    listSyncManifest: (athleteId, after, limit) =>
+      exclusive(async () => {
+        // An activity's row brings its signed record, so the manifest can say
+        // which ride it is without a query per entry. Joined on the athlete
+        // AND the content: another athlete's record of the same file is not it.
+        let query = db
+          .selectFrom('sync_item')
+          .leftJoin('activity_record', (join) =>
+            join
+              .onRef('activity_record.athlete_id', '=', 'sync_item.athlete_id')
+              .onRef('activity_record.content_sha256', '=', 'sync_item.item_key')
+              .on('sync_item.kind', '=', 'activity'),
+          )
+          .selectAll('sync_item')
+          .select('activity_record.signed_record as signed_record')
+          .where('sync_item.athlete_id', '=', athleteId);
+        if (after !== undefined) {
+          query = query.where(
+            sql<boolean>`(sync_item.received_at, sync_item.seq) > (${after.receivedAt}, ${after.seq})`,
+          );
+        }
+        const rows = await query
+          .orderBy('sync_item.received_at')
+          .orderBy('sync_item.seq')
+          .limit(limit)
+          .execute();
+        return rows.map((row) => ({ ...syncItemFrom(row), signedRecord: row.signed_record }));
+      }),
+
     putRoom: (room) =>
       exclusive(async () => {
         await db
@@ -1768,16 +2171,26 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       ),
 
     eraseAthlete: (athleteId) =>
-      exclusive(async () => {
-        await db.transaction().execute(async (trx) => {
-          for (const table of ATHLETE_TABLES_IN_ERASURE_ORDER) {
-            await trx.deleteFrom(table).where('athlete_id', '=', athleteId).execute();
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('activity_record')
+            .select('content_sha256')
+            .where('athlete_id', '=', athleteId)
+            .execute();
+          for (const table of await athleteTablesInErasureOrder(trx)) {
+            // Every table here has `athlete_id`: the derivation refuses one that does not.
+            await trx
+              .deleteFrom(table as 'session')
+              .where('athlete_id', '=', athleteId)
+              .execute();
           }
           // Another athlete's block OF this one names nobody once they are gone (#83).
           await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
           await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
-        });
-      }),
+          return held.map((row) => row.content_sha256);
+        }),
+      ),
 
     close: () => exclusive(() => db.destroy()),
   };

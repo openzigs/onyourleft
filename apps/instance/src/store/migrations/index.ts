@@ -24,6 +24,7 @@ import * as roomCourses from './0005-room-courses.ts';
 import * as recoveryEmailConfirmation from './0006-recovery-email-confirmation.ts';
 import * as moderation from './0007-moderation.ts';
 import * as registration from './0008-registration.ts';
+import * as sync from './0009-sync.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -40,4 +41,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0006-recovery-email-confirmation': recoveryEmailConfirmation,
   '0007-moderation': moderation,
   '0008-registration': registration,
+  '0009-sync': sync,
 };

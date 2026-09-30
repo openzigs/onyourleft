@@ -77,6 +77,7 @@ import type {
 import {
   FRAMING_CHECK_RECORDS,
   RIDE_WRITE_UP_SOURCES,
+  SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
 } from './records';
@@ -1702,4 +1703,53 @@ export function fromPersistedRideWriteUp(row: PersistedRideWriteUp): RideWriteUp
       unixSeconds,
     ),
   };
+}
+
+// --- The sync base (#776, #893's review) --------------------------------------
+
+const LOWER_HEX_SHA256 = /^[0-9a-f]{64}$/;
+
+/** The longest ride id a sync base row may name — ids here are UUIDs and slugs. */
+const MAXIMUM_SYNC_BASE_ID = 200;
+
+/**
+ * Why a sync base row is not one, or `undefined` — for the write and for a row
+ * read off disk alike, so a hand-edited row is refused on the way out exactly
+ * as a bad one is on the way in. Names the field and the constraint only.
+ */
+export function syncBaseProblem(row: {
+  readonly athleteId: unknown;
+  readonly kind: unknown;
+  readonly key: unknown;
+  readonly activityId: unknown;
+  readonly localDigest: unknown;
+  readonly remoteDigest: unknown;
+}): string | undefined {
+  if (typeof row.athleteId !== 'string' || row.athleteId.length === 0) {
+    return 'syncBase.athleteId: must be an athlete id';
+  }
+  if (!(SYNC_BASE_KINDS as readonly unknown[]).includes(row.kind)) {
+    return 'syncBase.kind: must be activity, write-up or side-camera-report';
+  }
+  if (
+    typeof row.activityId !== 'string' ||
+    row.activityId.length === 0 ||
+    row.activityId.length > MAXIMUM_SYNC_BASE_ID
+  ) {
+    return `syncBase.activityId: must be an activity id of at most ${String(MAXIMUM_SYNC_BASE_ID)} characters`;
+  }
+  if (row.kind === 'activity') {
+    if (typeof row.key !== 'string' || !LOWER_HEX_SHA256.test(row.key)) {
+      return 'syncBase.key: must be a content hash, 64 lowercase hex, for an activity';
+    }
+  } else if (row.key !== row.activityId) {
+    return 'syncBase.key: must be the activity id for an item of a ride';
+  }
+  for (const field of ['localDigest', 'remoteDigest'] as const) {
+    const value = row[field];
+    if (typeof value !== 'string' || !LOWER_HEX_SHA256.test(value)) {
+      return `syncBase.${field}: must be a SHA-256, 64 lowercase hex`;
+    }
+  }
+  return undefined;
 }

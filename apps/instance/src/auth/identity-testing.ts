@@ -24,7 +24,10 @@ import {
   type SigningKey,
 } from '@onyourleft/domain';
 
+import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
+import type { BlobStore } from '../blob/blob-store.ts';
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
+import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
@@ -115,6 +118,9 @@ export interface IdentityInstance {
    * anywhere in them is found by a substring search.
    */
   databaseBytes(): Promise<string>;
+  /** Sync's blobs, as the memory blob store keeps them: the object store, read directly. */
+  readonly blobs: MemoryBlobs;
+  readonly sync: Sync;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -130,6 +136,12 @@ export async function startIdentityInstance(
      * one process do not reliably produce.
      */
     storeSeenBy?: (store: SqlStore) => SqlStore;
+    /** What sync sees in place of the real store — to fail a write after the blob landed (#37). */
+    syncStoreSeenBy?: (store: SqlStore) => SqlStore;
+    /** What sync sees in place of the memory blob store over {@link IdentityInstance.blobs}. */
+    blobStoreSeenBy?: (blobs: BlobStore) => BlobStore;
+    /** The largest request body, in bytes. 16 KiB unless a test needs files. */
+    bodyLimitBytes?: number;
     /** What `/ready`, `/metrics` and a room's start answer (#780). */
     probes?: InstanceProbes;
   } = {},
@@ -140,7 +152,15 @@ export async function startIdentityInstance(
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
   const confirmations: { address: string; token: string }[] = [];
-  const { emailRecovery, storeSeenBy, probes, ...rest } = options;
+  const {
+    emailRecovery,
+    storeSeenBy,
+    probes,
+    syncStoreSeenBy,
+    blobStoreSeenBy,
+    bodyLimitBytes,
+    ...rest
+  } = options;
   const identity = createIdentity({
     // The identity tests predate registration modes (#775) and register
     // riders as they sign in; a test of a mode names it. The default an
@@ -171,9 +191,17 @@ export async function startIdentityInstance(
         }
       : {}),
   });
+  const blobs: MemoryBlobs = new Map();
+  const memoryBlobs = createMemoryBlobStore(blobs);
+  const sync = createSync({
+    store: syncStoreSeenBy === undefined ? store : syncStoreSeenBy(store),
+    blobs: blobStoreSeenBy === undefined ? memoryBlobs : blobStoreSeenBy(memoryBlobs),
+    now: () => clock.ms,
+  });
   const instance = await startTestInstance({
     identity,
-    config: { bodyLimitBytes: 16_384 },
+    sync,
+    config: { bodyLimitBytes: bodyLimitBytes ?? 16_384 },
     ...(probes === undefined ? {} : { probes }),
   });
 
@@ -206,6 +234,8 @@ export async function startIdentityInstance(
     clock,
     path,
     mail,
+    blobs,
+    sync,
     confirmations,
     call,
     nonceFor,

@@ -1268,7 +1268,9 @@ create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or joi
 ([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
 `node src/operator/cli.ts room-open`. The first deployment and its runbook are
 [`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
-[`operating-an-instance.md`](operating-an-instance.md).
+[`operating-an-instance.md`](operating-an-instance.md). Since #881 (#37, #38, #776, #35) the
+sync routes exist too, served only by a handler handed a sync service over a store and a blob store
+(see "Sync" below), which the entry point does not hand it yet.
 
 **The device is canonical and a rider with no instance loses nothing** (ADR 0036 D-3). Nothing in
 `apps/web` or `apps/mobile` imports the instance, and nothing may: a client reaches it over the
@@ -1401,6 +1403,45 @@ checked separately in each feature. The operator's side is [`docs/moderation.md`
 | Registration modes (#775) | `OYL_INSTANCE_REGISTRATION`, any case, and **`closed` when unset**; the project's image sets `approval` (rulings Q5 and Q13). A pending athlete gets a session that reaches only routes declaring `admitsPending` (their own account); the owner or the deputy approve or refuse, and each decision is logged. The named moderators' keys register active in every mode. New accounts: 3 an hour per client address | `identity.ts` §`register`, `moderation/routes.ts` |
 | Public rooms (#775) | One pure predicate, `publicRoomEligibility`: approved, not suspended, 18+ confirmed (ruling Q5; a date of confirmation, never a date of birth), account age (counted from ACTIVATION, `athlete.activated_at`) and synced rides at operator-set thresholds (defaults 7 days, 3 rides). A ticket to a `public` room is refused `not_eligible` without it | `moderation/eligibility.ts`, `identity.ts` §`ticket` |
 
+#### Sync (#37, #38, #776, #35)
+
+Everything a device syncs is **the caller's own**: every route takes the athlete from the session
+and never from the request, declares `reaches: 'own'` to the choke point below, and another
+athlete's ride, file or item is `not_found`. An athlete awaiting approval (#775) reaches the export
+and the deletion only. Two riders who
+send identical bytes each hold their own record of them, keyed `(athlete, content)`.
+
+```mermaid
+sequenceDiagram
+    participant D as Device (apps/web/src/instance/sync.ts)
+    participant I as Instance (apps/instance/src/sync/)
+    D->>I: GET /v1/sync/manifest?cursor= (receivedAt, id)
+    I-->>D: [{kind, key, digest, receivedAt, deleted, activityId}], next
+    D->>D: read its sync base — what the two agreed on last time
+    D->>I: DELETE /v1/sync/items/{kind}/{key} — a synced ride deleted HERE, items first
+    D->>I: GET /v1/sync/records/{content}, GET /v1/sync/files/{content} — never synced here
+    D->>D: verify signature AND file hash (ADR 0014 D-6) BEFORE writing
+    D->>I: POST /v1/sync/records {record, file} — what the instance is missing
+    D->>I: POST /v1/sync/items/{kind}/{key} {body} — an item changed HERE
+    D->>I: GET /v1/sync/items/{kind}/{key} — an item unchanged here that moved THERE
+```
+
+| Concern | Decision | Where |
+|---|---|---|
+| Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`. Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
+| The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs the first two; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
+| Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), any recovery address given and its confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
+| Deletion (#35) | `DELETE /v1/account`: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
+| The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
+
+⚠️ **Not wired to a running box yet.** Since #780 `src/instance.ts` hands the handler the accounts,
+but no sync: wiring one over the blob directory it already configures (`OYL_INSTANCE_BLOBS`, #791)
+is left to a follow-up rather than done in #893's merge, and the shipped client calls none of this
+(#777), so every sync route answers `unavailable` on a running instance and a rider's device
+sends nothing.
+
 #### The API contract (#36)
 
 | Concern | Decision | Where |
@@ -1422,8 +1463,8 @@ breaking whether or not this repository's own client notices. `info.version` in 
 the API's version, not the package's.
 
 ⚠️ **What the contract does not have yet, and who owes it.** Since #855 the identity routes
-produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; the
-pagination parser still has no caller until #776's first list.
+produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; since #881
+the pagination parser has its first callers, the sync manifest and the activity list.
 
 ### The realistic world: what is built, and how a rider chooses it
 

@@ -218,6 +218,24 @@ export interface InviteCodeTable {
   readonly used_at: number | null;
 }
 
+/** What kind of thing a sync item is (#37, #776). */
+export type SyncKind =
+  'activity' | 'write-up' | 'side-camera-report' | 'goal' | 'note' | 'document';
+
+/** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
+export interface SyncItemTable {
+  readonly seq: Generated<number>;
+  readonly athlete_id: string;
+  readonly kind: SyncKind;
+  readonly item_key: string;
+  /** SHA-256 of the body, or of the signed record for an activity; `null` for a tombstone. */
+  readonly digest: string | null;
+  /** The item exactly as the device sent it; `null` for an activity and a tombstone. */
+  readonly body: Uint8Array | null;
+  readonly received_at: number;
+  readonly deleted_at: number | null;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -238,4 +256,5 @@ export interface InstanceDatabase {
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
   readonly invite_code: InviteCodeTable;
+  readonly sync_item: SyncItemTable;
 }

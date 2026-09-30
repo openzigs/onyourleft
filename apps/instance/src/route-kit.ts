@@ -9,6 +9,7 @@
 import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
+import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
 
 /** The subset of JSON Schema the specification uses, and the contract test checks. */
@@ -22,7 +23,9 @@ export type Schema =
   | { readonly type: 'object'; readonly description: string }
   | { readonly type: 'array'; readonly items: Schema }
   | { readonly type: 'string' | ['string', 'null']; readonly format?: 'uri' }
-  | { readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] }
+  | {
+      readonly type: 'integer' | 'number' | 'boolean' | ['integer', 'null'] | ['number', 'null'];
+    }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
 
@@ -75,6 +78,8 @@ export interface RouteContext {
   readonly identity: Identity | undefined;
   /** The signed-in caller, for a route that declares `auth: 'session'`. */
   readonly caller: Caller | undefined;
+  /** Sync (#37, #776). Present for every route that declares `sync`; the handler sees to it. */
+  readonly sync: Sync | undefined;
   readonly probes: InstanceProbes | undefined;
 }
 
@@ -107,6 +112,11 @@ export interface Route {
    * identity answers `unavailable` without calling it.
    */
   readonly identity?: true;
+  /**
+   * The route needs the instance's sync store and blobs (#37). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly sync?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**
@@ -123,6 +133,8 @@ export interface Route {
   readonly response:
     | { readonly contentType: 'application/json'; readonly schema: Schema }
     | { readonly contentType: 'text/plain' }
+    /** Bytes, exactly as they were stored: an original activity file (#35, #776). */
+    | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */
     | { readonly contentType: 'none' };
   readonly handle: (context: RouteContext) => Response | Promise<Response>;

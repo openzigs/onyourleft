@@ -5,6 +5,7 @@ import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
+import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
  * The instance's routes, as ONE table the handler dispatches on and the
@@ -18,9 +19,10 @@ import { json, type Route, type Schema } from './route-kit.ts';
  * entry declares — `openapi.test.ts` holds by calling every route through the
  * real listener and checking the body against the declared schema.
  *
- * The identity routes (#772, #773, #774) are `auth/routes.ts`'s and the
- * moderation routes (#83, #775) `moderation/routes.ts`'s, appended here, so
- * there is still one table.
+ * The identity routes (#772, #773, #774) are `auth/routes.ts`'s, the
+ * moderation routes (#83, #775) `moderation/routes.ts`'s and the sync routes
+ * (#37, #38, #776, #35) `sync/routes.ts`'s, appended here, so there is still
+ * one table.
  *
  * ## Versioning
  *
@@ -173,6 +175,7 @@ export const ROUTES: readonly Route[] = [
   },
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
+  ...SYNC_ROUTES,
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/start',

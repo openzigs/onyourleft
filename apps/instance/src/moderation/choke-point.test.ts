@@ -102,6 +102,10 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   roomId: 'a room; who may enter it is the ticket’s rule, and blocking inside it is #789’s',
   publicKey: 'one of the CALLER’s own device keys; the store scopes the revocation to them',
   reportId: 'a report, read and decided only on the moderators’ routes',
+  content:
+    'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
+  kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
+  key: 'the key of one of the CALLER’s own sync items (#776)',
 };
 
 /** An athlete id nobody holds, shaped like one that somebody might. */

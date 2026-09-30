@@ -19,7 +19,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from './node-sqlite.ts';
-import { ATHLETE_TABLES_IN_ERASURE_ORDER } from './sql-store.ts';
+import { openKysely } from './open-sql-store.ts';
+import { athleteTablesInErasureOrder } from './sql-store.ts';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -239,9 +240,39 @@ describe('erasing an athlete (#769, #35)', () => {
     }
   });
 
-  it('names every athlete-scoped table in the erasure list', async () => {
+  it('derives the tables it erases from the schema, children before the tables they reference', async () => {
     harness = await createStoreHarness();
     await harness.write(() => Promise.resolve());
-    expect([...ATHLETE_TABLES_IN_ERASURE_ORDER].sort()).toEqual(athleteScopedTables(harness.path));
+    const db = openKysely(harness.path);
+    try {
+      const order = await athleteTablesInErasureOrder(db);
+      expect([...order].sort()).toEqual(athleteScopedTables(harness.path));
+      expect(order, 'migration 0009’s manifest is found with no list naming it').toContain(
+        'sync_item',
+      );
+      const scoped = new Set<string>(order);
+      for (const reference of references(harness.path)) {
+        if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;
+        if (reference.table === reference.parent) continue;
+        expect(
+          order.indexOf(reference.table as never),
+          `${reference.table} before ${reference.parent}`,
+        ).toBeLessThan(order.indexOf(reference.parent as never));
+      }
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it('answers the files the erased athlete held, for the blob sweep (#35)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(seedWorld);
+    const held = (await harness.read((store) => store.listActivityRecords(ATHLETE_B)))
+      .map((record) => record.contentSha256)
+      .sort();
+    expect(held.length).toBeGreaterThan(0);
+    const erased = await harness.write((store) => store.eraseAthlete(ATHLETE_B));
+    expect([...erased].sort()).toEqual(held);
+    expect(await harness.write((store) => store.eraseAthlete(ATHLETE_B)), 'idempotent').toEqual([]);
   });
 });
