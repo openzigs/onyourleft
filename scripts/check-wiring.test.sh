@@ -60,11 +60,14 @@ trap cleanup EXIT
 # missing-directory rule instead of the one it is about — 86 confusing failures
 # instead of one clear one — and an `exit` inside a process substitution exits
 # the subshell rather than this script.
+#
+# ⚠️ Read from the declaration's first line to the line that closes it, since
+# #782's review added `apps/web/src/net/` and the list stopped fitting on one
+# line: the one-line `sed` this used to be read nothing from the wrapped form.
 WATCHED_DIRECTORIES="$(
-  sed -n 's/^const WATCHED_PREFIXES = \[\(.*\)\];$/\1/p' "${CHECK}" |
-    tr ',' '\n' |
-    sed -e "s/[[:space:]]//g" -e "s/'//g" |
-    grep .
+  awk '/^const WATCHED_PREFIXES = \[/ { on = 1 } on { print } on && /\];/ { exit }' "${CHECK}" |
+    grep -o "'[^']*'" |
+    tr -d "'"
 )"
 if [ -z "${WATCHED_DIRECTORIES}" ]; then
   printf 'check-wiring.test: could not read WATCHED_PREFIXES out of %s\n' "${CHECK}" >&2

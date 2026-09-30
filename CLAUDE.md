@@ -3966,8 +3966,11 @@ point**: a harness page is a gate, and #236 is exactly what happens when a harne
 mistaken for the product's. Neither is a test — every one of the five defects was unit-tested and
 green, so a test calling something is not evidence that anything ships it.
 
-⚠️ **The watched set is the client's own seams** — `apps/web/src/game/`, `apps/web/src/ride/` and
-every `*-port.ts` under `apps/` — **plus five named modules in `packages/`, and nothing else there.**
+⚠️ **The watched set is the client's own seams** — `apps/web/src/game/`, `apps/web/src/ride/`,
+`apps/web/src/offline/`, `apps/web/src/net/` (since #782's review: the room session, snapshots and
+interest set) and every `*-port.ts` under `apps/` — **plus five named modules in `packages/`, and
+nothing else there.** ⚠️ It reads exports and port methods, **never a class's members**:
+`net/room-session.ts` §`RoomSession.finish` has no production reader (#785's) and is green here.
 ⚠️ **This paragraph used to end "not the packages underneath", full stop, and a reviewer who
 remembers that is reading the old file.**
 [#362](https://github.com/openzigs/onyourleft/issues/362) is what changed it: `createSimulationWriter`

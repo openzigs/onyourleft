@@ -212,12 +212,23 @@ export class RoomSession {
     return this.#status;
   }
 
-  /** How many times the room has welcomed this rider — the join, then each rejoin. */
+  /**
+   * How many times the room has welcomed this rider — the join, then each
+   * rejoin. ⚠️ Read by tests only, as the count a rejoin is asserted by; no
+   * screen says it. `check:wiring` watches this directory since #782's review
+   * but looks at exports and port methods, never a class member, so this
+   * sentence is the record.
+   */
   get welcomes(): number {
     return this.#welcomes;
   }
 
-  /** A race's finish order, once the room has sent it. */
+  /**
+   * A race's finish order, once the room has sent it. ⚠️ No production reader
+   * yet: showing a race's result is #785's, and nothing here renders it. Not a
+   * tag `check:wiring` can hold — it does not look at class members — so the
+   * gap is named here and on #785.
+   */
   get finish(): Finish | undefined {
     return this.#finish;
   }
