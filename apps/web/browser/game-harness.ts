@@ -7442,6 +7442,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     view.setQuality(top);
     dressedWithNoDrawing = meanRgbOf(readKitSquare(view, gl, kitSquareOnce));
   }
+  phaseEnds('realistic: the kit, dressed with no drawing — #623');
   // #783: a full room in the wooded frame, rule on and off, with #616's
   // counter. The drawing is rebuilt above, so the frames settle first.
   const crowded = withRoom(wooded, MAXIMUM_DRAWN_SET);
@@ -7457,9 +7458,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     withoutTheRule: roomWithoutTheRule,
     remoteRiders: crowded.markers.filter((marker) => marker.kind === 'remote').length,
   };
-  phaseEnds('realistic: a room of other riders — #783');
   view.destroy();
-  phaseEnds('realistic: the kit, dressed with no drawing — #623');
+  phaseEnds('realistic: a room of other riders — #783');
 
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
@@ -8333,32 +8333,6 @@ async function run(): Promise<void> {
         view.render(withoutScenery);
         framesDrawn += 1;
         drawCallsWithoutScatter = calls() - beforeWithoutScenery;
-        // #783: a whole room of other riders — the interest set at its
-        // largest — in the same scenery-free frame. They are instances of the
-        // rider's four meshes, so the frame must cost exactly what it did; the
-        // control puts each in a mesh of its own, which must not. Read off the
-        // plain load alone — @see SHADOW_MAP_LOAD.
-        if (!SHADOW_MAP_LOAD) {
-          const room = withRoom(withoutScenery, MAXIMUM_DRAWN_SET);
-          remoteRidersInRoom = room.markers.filter((marker) => marker.kind === 'remote').length;
-          view.render(room);
-          framesDrawn += 1;
-          const beforeRoom = calls();
-          view.render(room);
-          framesDrawn += 1;
-          roomDrawCalls = calls() - beforeRoom;
-          remoteRiderControlOf(view, 'each-own-mesh');
-          view.render(room);
-          framesDrawn += 1;
-          const beforeOwn = calls();
-          view.render(room);
-          framesDrawn += 1;
-          roomDrawCallsEachOwnMesh = calls() - beforeOwn;
-          remoteRiderControlOf(view, 'none');
-          view.render(withoutScenery);
-          framesDrawn += 1;
-          phaseEnds('default: a room of other riders');
-        }
         if (gl !== null && sceneryPresent !== undefined) {
           const sceneryAbsent = readRegion(gl, originColumn, originRow, regionWidth, regionHeight);
           const found = compareRegions(
@@ -8403,6 +8377,31 @@ async function run(): Promise<void> {
         view.render(frameAt(ON_THE_DESCENT_METRES));
         resourcesAfterSecondSweep = resources();
         phaseEnds('default: second sweep');
+
+        // #783: a whole room of other riders — the interest set at its
+        // largest — in the scenery-free frame. ⚠️ After the second sweep, and
+        // counted in no `framesDrawn`: the frame and resource counts above
+        // are the loop's own, and the control's 105 belts are GPU buffers
+        // those counts must not see. They are instances of the
+        // rider's four meshes, so the frame must cost exactly what it did; the
+        // control puts each in a mesh of its own, which must not. Read off the
+        // plain load alone — @see SHADOW_MAP_LOAD.
+        if (!SHADOW_MAP_LOAD) {
+          const room = withRoom(withoutScenery, MAXIMUM_DRAWN_SET);
+          remoteRidersInRoom = room.markers.filter((marker) => marker.kind === 'remote').length;
+          view.render(room);
+          const beforeRoom = calls();
+          view.render(room);
+          roomDrawCalls = calls() - beforeRoom;
+          remoteRiderControlOf(view, 'each-own-mesh');
+          view.render(room);
+          const beforeOwn = calls();
+          view.render(room);
+          roomDrawCallsEachOwnMesh = calls() - beforeOwn;
+          remoteRiderControlOf(view, 'none');
+          view.render(withoutScenery);
+          phaseEnds('default: a room of other riders');
+        }
 
         // ------------------------------------------------ the light — #286
         //
