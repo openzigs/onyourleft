@@ -1623,7 +1623,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         wrong); members alone are ticketed and fetch the route;
                         a room that is over deletes its route from the blob
                         directory's `rooms/` (outside the synced files and a
-                        backup). ⚠️ **A race's result is published by ONE
+                        backup). ⚠️ **"Over" is five things since #929's
+                        review, all through ONE close** (`rooms.ts` §`over`):
+                        a worker lets a finished race or an emptied group ride
+                        go; the sweep (at open and every ten minutes) ends a
+                        room nobody is riding a DAY after it was made, a
+                        started race no worker holds, and a room whose creator
+                        is gone; and `DELETE /v1/account` ends the rider's own
+                        rooms before their rows go. A reviewer who remembers
+                        "a room nobody rides is never over" is reading the old
+                        file. ⚠️ A result is read only once the room said the
+                        race is over (`room_course.race_finished_at`, ADR 0028
+                        D-7.7), never while it runs. ⚠️ **A race's result is published by ONE
                         function**, `publication.ts` §`publishRace` — W/kg,
                         never watts; flags by duration, on the W/kg side; an
                         erased rider or one the viewer may not see is "a
@@ -1633,8 +1644,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         D-7.2); `room/node/room-host.ts` §`start`. ⚠️ Results
                         are NOT signed by the instance (no ADR gives it a key);
                         `docs/architecture.md` §"A rider's room" says why.
-                        Migration 0013 holds it — numbered past #926's claimed
-                        0012, so whichever merges second re-checks the order
+                        Migration 0013 holds it, after #926's 0012
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -5528,7 +5538,8 @@ top of an issue **supersedes its body**.
 | How the client joins a race room, what it sends (power, never a position), how it keeps a Cloudflare Tunnel from idling the socket, and how it rejoins | `apps/web/src/net/room-session.ts`, `apps/web/src/net/room-port.ts`, [ADR 0037](docs/adr/0037-instance-runtime-hosting-and-transport.md) D-4, D-8, [#782](https://github.com/openzigs/onyourleft/issues/782) |
 | How a rider makes a private room, how its code is drawn and kept, and what stops a guesser | `apps/instance/src/rooms/code.ts`, `apps/instance/src/rooms/rooms.ts` §`DEFAULT_ROOM_LIMITS`, `apps/web/src/net/rooms-port.ts`, [#784](https://github.com/openzigs/onyourleft/issues/784) |
 | Why a room's route is refused if any of it is in a privacy zone, what the GPX sent carries, and how a joiner checks it is the room's | `apps/web/src/rooms/share.ts` §`sharedRoomRoute`, §`roomRouteFrom` |
-| When a room's route is deleted from the instance, and why an emptied lobby is not "over" | `apps/instance/src/rooms/rooms.ts` §`roomLetGo`, `apps/instance/src/room/node/room-host.ts` §`onRoomClosed` |
+| When a room's route is deleted from the instance, why an emptied lobby is not "over", and what ends a room nobody rides, a race a restart interrupted, and the rooms of a rider who erased their account | `apps/instance/src/rooms/rooms.ts` §"The route's lifetime", §`sweep`, §`closeRoomsMadeBy`, `apps/instance/src/room/node/room-host.ts` §`onRoomClosed`, `apps/instance/src/sync/routes.ts` §`eraseAccount` |
+| Why a race's result is not read while the race runs, and what a rider who left early is offered | `apps/instance/src/rooms/rooms.ts` §`results`, `apps/instance/src/room/node/room-host.ts` §`onRaceFinished`, `apps/web/src/rooms/RaceResult.tsx` §"A rider who left before the race was over" |
 | Who may start a race, and why it is not the room's creator | `apps/instance/src/room/node/room-host.ts` §`start`, [#785](https://github.com/openzigs/onyourleft/issues/785), ADR 0028 D-7.2 |
 | How a race's rider is held on the start line, and why the countdown never lets them go | `apps/web/src/game/simulation.ts` §`holdAt`, `apps/web/src/game/room-ride.ts` §`heldOnTheLine`, `apps/web/src/net/room-session.ts` §`RoomRace` |
 | What a race publishes about each rider, and the one function that holds W/kg-never-watts | `apps/instance/src/rooms/publication.ts` §`publishRace`, `apps/web/src/rooms/race-result.ts` §`raceResultLines`, ADR 0028 §Amendments 2026-09-22 |

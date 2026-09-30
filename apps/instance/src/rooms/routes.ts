@@ -126,7 +126,7 @@ export const ROOM_ROUTES: readonly Route[] = [
     operationId: 'getRoomResults',
     reaches: { exempt: EXEMPT_ROOM },
     summary:
-      'A race’s result, for its riders only (#785, ruling Q2): finishers by place, then those who did not finish. Per rider, a display name — or none, for a rider who erased their account or whom the caller may not see — a time, and power-to-weight: never watts (ADR 0028’s 2026-09-22 amendment). Every plausibility flag is shown to every rider, by the duration it was raised for.',
+      'A race’s result, for its riders only (#785, ruling Q2), and only once the room has said the race is over — `not_found` while it runs (ADR 0028 D-7.7): finishers by place, then those who did not finish. Per rider, a display name — or none, for a rider who erased their account or whom the caller may not see — a time, and power-to-weight: never watts (ADR 0028’s 2026-09-22 amendment). Every plausibility flag is shown to every rider, by the duration it was raised for.',
     identity: true,
     rooms: true,
     auth: 'session',

@@ -1362,13 +1362,21 @@ role — `room/node/room-host.ts` §`start`), and the room tells every seated ri
 countdown is (`@onyourleft/protocol`'s `countdown`: a duration, never an instant). A rider's result
 is written as they cross the line (#807's amendment) with their place, time, mean W/kg and the
 durations of any ceiling they breached (`room/core/ceilings.ts`); `GET /v1/rooms/{roomId}/results`
-answers the race's riders only, built by ONE function, `rooms/publication.ts` §`publishRace`, which
-has no watts to publish (ADR 0028's 2026-09-22 amendment). A room that is over — a race finished, a
-group ride past its empty grace — is never opened again, and its route is deleted from its own blob
-store (the blob directory's `rooms/`, outside the synced files and outside a backup) unless another
-open room rides the same bytes. Migration 0013 holds it: `private_room`, `room_member` (athlete-scoped,
-so erased with the athlete), three result columns and `room_course.finishers`, which is what lets an
-erased rider's place be shown as "a rider" with nothing of theirs. ⚠️ **Not signed by the instance**:
+answers the race's riders only and only once the room has said the race is over
+(`room_course.race_finished_at`, set from the Node adapter's `onRaceFinished`; ADR 0028 D-7.7 held
+by the instance, not only the client), built by ONE function, `rooms/publication.ts` §`publishRace`,
+which has no watts to publish (ADR 0028's 2026-09-22 amendment). A room that is over is never opened
+again, and its route is deleted from its own blob store (the blob directory's `rooms/`, outside the
+synced files and outside a backup) unless another open room rides the same bytes. A room is over
+when a worker lets go of a finished race or a group ride past its empty grace; when the rooms'
+sweep (as the instance opens, then every ten minutes) finds it ridden by nobody a day after it was
+made, a race that had started held by no worker (a restart interrupted it), or its creator gone; or
+when its creator erases their account — `DELETE /v1/account` ends their rooms before their rows go.
+A joiner leaves a room whose `welcome.routeRef` is not the route it fetched and checked
+(`net/room-session.ts`). Migration 0013 holds it: `private_room`, `room_member` (athlete-scoped,
+so erased with the athlete; the creator's row is how their rooms are found), three result columns,
+`room_course.finishers`, which is what lets an erased rider's place be shown as "a rider" with
+nothing of theirs, and `room_course.race_finished_at`. ⚠️ **Not signed by the instance**:
 ADR 0028 D-6.1 signs results with the device key, which proves the same device produced the reports
 and nothing about the order; an instance key would need its own publication, rotation and
 revocation, which no ADR has decided — the result is authoritative only as the instance's answer to
