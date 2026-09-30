@@ -135,6 +135,37 @@ export function eagerLazyViews(
   return problems;
 }
 
+/**
+ * The runtime UI packages that must arrive in a lazily loaded chunk — ADR 0034
+ * D-5, which admits `lucide-react` alone to the entry and requires any other
+ * runtime UI dependency to load on demand. Radix Primitives (ADR 0042, #950)
+ * are the first, matched by the scope every one of them is published under.
+ */
+export const LAZY_ONLY_PACKAGES: readonly string[] = ['@radix-ui/'];
+
+/**
+ * Every module of a {@link LAZY_ONLY_PACKAGES} package in the entry's static
+ * graph, one sentence each; empty when there is none.
+ */
+export function eagerLazyOnlyPackages(
+  chunks: readonly BuiltChunk[],
+  packages: readonly string[] = LAZY_ONLY_PACKAGES,
+): string[] {
+  const problems: string[] = [];
+  for (const chunk of staticGraph(chunks)) {
+    for (const id of chunk.moduleIds) {
+      const normalised = id.replace(/\\/g, '/');
+      const found = packages.find((name) => normalised.includes(`/node_modules/${name}`));
+      if (found !== undefined) {
+        problems.push(
+          `${normalised} (${found}) is in ${chunk.fileName}, which the entry loads statically`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 /** The group modules under `root`'s {@link LAZY_GROUP_DIRECTORY}, and what each re-exports. */
 export function readLazyGroups(root: string): LazyGroup[] {
   const directory = join(root, LAZY_GROUP_DIRECTORY);
@@ -176,11 +207,15 @@ export function lazyViewsStayLazy(root: string): Plugin {
             ]
           : [],
       );
-      const problems = eagerLazyViews(chunks, readLazyGroups(root));
+      const problems = [
+        ...eagerLazyViews(chunks, readLazyGroups(root)),
+        ...eagerLazyOnlyPackages(chunks),
+      ];
       if (problems.length > 0) {
         this.error(
-          `oyl-lazy-views-stay-lazy: a view meant to load on demand is in the entry chunk (#674).\n  - ` +
-            `${problems.join('\n  - ')}\nImport it through AppShell's lazyView, never by name.`,
+          `oyl-lazy-views-stay-lazy: a view or package meant to load on demand is in the entry ` +
+            `chunk (#674, ADR 0034 D-5).\n  - ${problems.join('\n  - ')}\nImport a view through ` +
+            `AppShell's lazyView, never by name, and a Radix primitive only from a lazily loaded view.`,
         );
       }
     },

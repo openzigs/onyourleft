@@ -25,6 +25,7 @@ import {
   formatViolations,
   isHiddenFromAssistiveTechnology,
   keyboardReachableElements,
+  openModal,
   tabbableElements,
 } from './audit';
 
@@ -806,6 +807,64 @@ describe('heading-order ignores what a reader ignores', () => {
         CLEAN_BODY.replace('<h2>Sensors</h2>', '<h4 hidden>Hidden</h4><h2>Sensors</h2>'),
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * #950: while a modal dialog is open, what a screen reader and a keyboard can
+ * reach is the dialog, so the audit is the dialog's. The page behind it is
+ * `aria-hidden` (Radix's `hideOthers`) and full of focusable controls, and a
+ * Radix focus guard — a `tabindex="0"` span marked `aria-hidden` — sits at
+ * each edge of the body. This fixture is that document, as Radix leaves it.
+ */
+const MODAL_OPEN = `
+  <span data-radix-focus-guard="" tabindex="0" aria-hidden="true"></span>
+  <div aria-hidden="true">${CLEAN_BODY}</div>
+  <div role="alertdialog" aria-modal="true" aria-labelledby="question" aria-describedby="why">
+    <h2 id="question">Delete “Tuesday hills”?</h2>
+    <p id="why">Deleting a ride cannot be undone.</p>
+    <button type="button">Keep the ride</button>
+    <button type="button">Delete the ride</button>
+  </div>
+  <span data-radix-focus-guard="" tabindex="0" aria-hidden="true"></span>
+`;
+
+describe('an open modal dialog is what is audited (#950)', () => {
+  it('audits the dialog, not the page it hides', () => {
+    const doc = documentWith(MODAL_OPEN);
+    expect(openModal(doc)?.getAttribute('role')).toBe('alertdialog');
+    const violations = auditAccessibility(doc);
+    expect(formatViolations(violations)).toBe('');
+  });
+
+  it('still finds a fault INSIDE the dialog', () => {
+    expect(rulesFiredBy(MODAL_OPEN.replace('>Keep the ride</button>', '></button>'))).toEqual([
+      'control-has-accessible-name',
+    ]);
+    expect(
+      rulesFiredBy(MODAL_OPEN.replace('<h2 id="question">', '<h2 id="question"></h2><h4>')),
+    ).toContain('heading-order');
+  });
+
+  it('audits the page when the dialog does not say it is modal', () => {
+    // A dialog that traps focus without `aria-modal` does not tell a screen
+    // reader the page is inert, so the page is what the audit reads — and the
+    // hidden page's controls, and Radix's guards, fail there.
+    const fired = rulesFiredBy(MODAL_OPEN.replace(' aria-modal="true"', ''));
+    expect(fired).toContain('aria-hidden-not-focusable');
+    expect(fired).toContain('page-has-one-main');
+  });
+
+  it('audits the page when the modal is itself hidden', () => {
+    expect(
+      openModal(documentWith(MODAL_OPEN.replace('aria-modal="true"', 'aria-modal="true" hidden'))),
+    ).toBeNull();
+  });
+
+  it('does not take a modal of any other role as the page', () => {
+    expect(
+      openModal(documentWith('<div role="region" aria-modal="true" aria-label="x"></div>')),
+    ).toBeNull();
   });
 });
 

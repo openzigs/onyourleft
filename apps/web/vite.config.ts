@@ -16,6 +16,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build, defineConfig, type Plugin } from 'vite';
 
@@ -189,6 +190,8 @@ export default defineConfig({
   // URLs taken out, which would otherwise put it in `assets/` and the precache.
   plugins: [
     react(),
+    // #950, ADR 0042: utilities over the tokens — `src/design/tailwind.css`.
+    tailwindcss(),
     themeSelection(),
     poseRuntime(),
     basisTranscoder(),

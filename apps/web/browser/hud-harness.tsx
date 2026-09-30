@@ -157,6 +157,7 @@ import type { GameState } from '../src/game/simulation';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
+import '../src/design/tailwind.css';
 
 /** One measured value element. Serialisable, so it survives `page.evaluate`. */
 export interface ValueMeasurement {

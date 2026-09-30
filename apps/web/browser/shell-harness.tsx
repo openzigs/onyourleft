@@ -72,6 +72,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
+import '../src/design/tailwind.css';
 
 /**
  * A browser with no Bluetooth, which is what a headless Chromium is.

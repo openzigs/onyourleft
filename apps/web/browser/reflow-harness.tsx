@@ -90,6 +90,7 @@ import {
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
+import '../src/design/tailwind.css';
 
 /** How long the DOM must be still before a route counts as settled. */
 const QUIET_MS = 250;

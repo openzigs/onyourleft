@@ -25,6 +25,7 @@
  * keep in step with `vite.config.ts` for no behaviour the gate can observe.
  */
 
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
 
 import {
@@ -79,7 +80,10 @@ export default defineConfig({
   // #618: and the Basis transcoder, so the realistic world's KTX2 textures are
   // transcoded in the gate by the files the product ships.
   // #672: every harness page selects its palette the way the product's page does.
-  plugins: [pmtilesFixture(), themeSelection(), poseRuntime(), basisTranscoder()],
+  // #950: the harness pages import `src/design/tailwind.css` after `theme.css`,
+  // exactly as `main.tsx` does, so a primitive drawn with utilities is drawn
+  // the same here as in the product.
+  plugins: [pmtilesFixture(), themeSelection(), poseRuntime(), basisTranscoder(), tailwindcss()],
   root: 'browser',
   // ⚠️ The APP's `public/`, not a `browser/public/` of the harness's own —
   // since ADR 0026. The realistic world's files are committed there and served
