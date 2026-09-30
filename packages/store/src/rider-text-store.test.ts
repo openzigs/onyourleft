@@ -255,6 +255,16 @@ describe('what a rider text may be', () => {
     expect(valid({ athleteId: '' })).toBe('riderText.athleteId: must be an athlete id');
   });
 
+  it('refuses a document name holding a bidirectional override or isolate (#920 review)', () => {
+    // "evil\u202Egnp.md" is drawn as "evildm.png": the name would lie about the file.
+    for (const control of ['\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2069']) {
+      expect(valid({ kind: 'document', key: 'doc-1', name: `evil${control}gnp.md` })).toMatch(
+        /^riderText\.name:/u,
+      );
+    }
+    expect(valid({ kind: 'document', key: 'doc-1', name: 'بلان plan.md' })).toBeUndefined();
+  });
+
   it('never repeats the text it refuses', () => {
     const secret = 'Priya lives at 12 Acacia Avenue\u0000';
     expect(valid({ text: secret })).not.toContain('Priya');

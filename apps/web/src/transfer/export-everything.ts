@@ -510,13 +510,13 @@ export function accountManifest(input: {
   readonly activities: readonly ManifestEntry[];
   /** #384. @see CameraManifest */
   readonly camera: CameraManifest;
+  /** #836. @see ManifestRiderTexts — absent from a manifest made before #836. */
+  readonly riderTexts?: ManifestRiderTexts | undefined;
   /**
    * #528, ADR 0033 D-7: where the rider was in the side camera's picture in
    * their last session — numbers, never a picture — and, since #530, whether
    * that session's framing check passed; or `undefined` when there is none.
    */
-  /** #836. @see ManifestRiderTexts — absent from a manifest made before #836. */
-  readonly riderTexts?: ManifestRiderTexts | undefined;
   readonly framingReference:
     | {
         readonly aspect: number;

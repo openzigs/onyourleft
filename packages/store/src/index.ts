@@ -118,6 +118,7 @@ export {
   maximumRiderTextCharacters,
   riderTextProblem,
   tidyRiderText,
+  withoutBidiControls,
 } from './rider-text';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------

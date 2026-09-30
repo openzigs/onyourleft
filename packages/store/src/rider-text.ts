@@ -60,6 +60,19 @@ const MAXIMUM_NOTE_KEY = 200;
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_BUT_TAB_AND_NEWLINE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/u;
 
+/**
+ * The bidirectional overrides and isolates, U+202A–U+202E and U+2066–U+2069.
+ * In a document NAME they make it draw as something else — `evil\u202Egnp.md`
+ * reads "evildm.png" (#920's review) — so a name holding one is refused, and
+ * {@link withoutBidiControls} is how a file's name is made keepable first.
+ */
+const BIDI_CONTROL = /[\u202A-\u202E\u2066-\u2069]/u;
+
+/** A name with every bidirectional override and isolate removed. */
+export function withoutBidiControls(name: string): string {
+  return name.replace(/[\u202A-\u202E\u2066-\u2069]/gu, '');
+}
+
 /** The longest text of a kind, in UTF-16 code units. */
 export function maximumRiderTextCharacters(kind: 'goal' | 'note' | 'document'): number {
   switch (kind) {
@@ -120,6 +133,7 @@ export function riderTextProblem(row: {
       name.trim().length === 0 ||
       name.length > MAXIMUM_DOCUMENT_NAME_CHARACTERS ||
       CONTROL_BUT_TAB_AND_NEWLINE.test(name) ||
+      BIDI_CONTROL.test(name) ||
       name.includes('\n') ||
       name.includes('\t')
     ) {

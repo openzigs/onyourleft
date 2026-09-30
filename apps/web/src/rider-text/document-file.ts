@@ -34,6 +34,7 @@ import {
   MAXIMUM_DOCUMENT_CHARACTERS,
   MAXIMUM_DOCUMENT_NAME_CHARACTERS,
   tidyRiderText,
+  withoutBidiControls,
 } from '@onyourleft/store';
 
 /** Why a file was not added. */
@@ -68,8 +69,17 @@ export type DocumentReading =
   | { readonly kind: 'document'; readonly name: string; readonly text: string }
   | { readonly kind: 'refused'; readonly refusal: DocumentRefusal };
 
-/** The same test as `apps/instance/src/history/passages.ts` §`DATA_URL`. */
-const DATA_URL = /\bdata:[a-z0-9.+-]*\/[a-z0-9.+-]*[^,\s]*,/iu;
+/**
+ * A `data:` URL: a type, a slash, anything but a comma or a space, a comma.
+ *
+ * ⚠️ ONE quantifier after the slash, and it must stay one: `[a-z0-9.+-]*`
+ * followed by `[^,\s]*` both match a letter, so a run with no comma was retried
+ * at every split — quadratic, 6.7 s for 100 000 characters on the main thread
+ * (#920's review). This pattern matches the same URLs in linear time.
+ * `apps/instance/src/history/passages.ts` §`DATA_URL` still has the old form
+ * (#921).
+ */
+const DATA_URL = /\bdata:[a-z0-9.+-]*\/[^,\s]*,/iu;
 
 /** Every control character but a tab, a newline and a carriage return. */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
@@ -82,15 +92,19 @@ export function isDocumentName(name: string): boolean {
 }
 
 /** Whether a file is worth reading at all: by its name and its size, before a byte is read. */
-export function documentFileRefusal(name: string, size: number): DocumentRefusal | undefined {
-  if (!isDocumentName(name.trim())) return 'not-text';
-  if (name.trim().length > MAXIMUM_DOCUMENT_NAME_CHARACTERS) return 'name-too-long';
+export function documentFileRefusal(chosenName: string, size: number): DocumentRefusal | undefined {
+  // Judged as it will be kept: `plan.md\u202C` is a Markdown file.
+  const name = withoutBidiControls(chosenName).trim();
+  if (!isDocumentName(name)) return 'not-text';
+  if (name.length > MAXIMUM_DOCUMENT_NAME_CHARACTERS) return 'name-too-long';
   if (size > MAXIMUM_DOCUMENT_BYTES) return 'too-long';
   return undefined;
 }
 
 /** A chosen file's name and bytes, read as a document. */
-export function readDocument(name: string, bytes: Uint8Array): DocumentReading {
+export function readDocument(chosenName: string, bytes: Uint8Array): DocumentReading {
+  // A bidirectional override would make the name draw as another (#920's review).
+  const name = withoutBidiControls(chosenName);
   const early = documentFileRefusal(name, bytes.byteLength);
   if (early !== undefined) return { kind: 'refused', refusal: early };
   let decoded: string;
@@ -100,10 +114,12 @@ export function readDocument(name: string, bytes: Uint8Array): DocumentReading {
   } catch {
     return { kind: 'refused', refusal: 'not-utf8' };
   }
-  if (NOT_TEXT.test(decoded)) return { kind: 'refused', refusal: 'binary' };
-  if (DATA_URL.test(decoded)) return { kind: 'refused', refusal: 'picture' };
   const text = tidyRiderText(decoded);
-  if (text === '') return { kind: 'refused', refusal: 'empty' };
+  // The length first, so no regular expression below ever runs over more than
+  // MAXIMUM_DOCUMENT_CHARACTERS: the byte gate alone admits three times that.
   if (text.length > MAXIMUM_DOCUMENT_CHARACTERS) return { kind: 'refused', refusal: 'too-long' };
+  if (NOT_TEXT.test(text)) return { kind: 'refused', refusal: 'binary' };
+  if (DATA_URL.test(text)) return { kind: 'refused', refusal: 'picture' };
+  if (text === '') return { kind: 'refused', refusal: 'empty' };
   return { kind: 'document', name: name.trim(), text };
 }

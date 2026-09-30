@@ -29,6 +29,7 @@ import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mo
 import { RIDER_TEXT_MODEL_WARNING } from './disclosure';
 import { DOCUMENT_REFUSAL_TEXT } from './document-file';
 import {
+  DOCUMENT_FILE_NOT_READ,
   DOCUMENTS_EMPTY,
   DOCUMENTS_FULL,
   DOCUMENTS_NOT_READ,
@@ -179,6 +180,20 @@ describe('the documents panel (#836)', () => {
     memory.failNext = new Error('the disk is full');
     await choose(new File(['text'], 'plan.txt'));
     expect(status()).toContain(documentsFailure('the disk is full'));
+    expect(listed()).toStrictEqual([]);
+  });
+
+  it('says a file that could not be read was not added, rather than rejecting unseen', async () => {
+    // #920's review: `file.arrayBuffer()` rejects when the file changed or went
+    // away after it was chosen, and the rejection escaped `void add(event)`.
+    const memory = memoryRiderText([], ATHLETE_A);
+    await open(memory.port);
+    const file = new File(['text'], 'plan.txt');
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: () => Promise.reject(new DOMException('gone', 'NotReadableError')),
+    });
+    await choose(file);
+    expect(status()).toContain(DOCUMENT_FILE_NOT_READ);
     expect(listed()).toStrictEqual([]);
   });
 

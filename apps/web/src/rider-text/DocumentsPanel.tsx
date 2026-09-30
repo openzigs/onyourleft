@@ -60,6 +60,10 @@ export function documentRemoved(name: string): string {
   return `Removed “${name}”. It is removed from your instance at the next sync.`;
 }
 
+/** Said when a chosen file could not be read (#920's review). Nothing changed. */
+export const DOCUMENT_FILE_NOT_READ =
+  'That file could not be read, so it was not added. Choose it again.';
+
 /** Said when a write or a delete failed. Nothing changed. */
 export function documentsFailure(reason: string): string {
   return `That could not be done, so your documents are as they were: ${reason}`;
@@ -107,10 +111,20 @@ export function DocumentsPanel({
     }
     // Refused by its name and size before a byte is read.
     const early = documentFileRefusal(file.name, file.size);
-    const reading =
-      early === undefined
-        ? readDocument(file.name, new Uint8Array(await file.arrayBuffer()))
-        : ({ kind: 'refused', refusal: early } as const);
+    if (early !== undefined) {
+      setMessage({ tone: 'warning', text: DOCUMENT_REFUSAL_TEXT[early] });
+      return;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      // The file changed or went away after it was chosen. Its error is not
+      // repeated: it can name a path, and a path is not the rider's words.
+      setMessage({ tone: 'danger', text: DOCUMENT_FILE_NOT_READ });
+      return;
+    }
+    const reading = readDocument(file.name, bytes);
     if (reading.kind === 'refused') {
       setMessage({ tone: 'warning', text: DOCUMENT_REFUSAL_TEXT[reading.refusal] });
       return;
