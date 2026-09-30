@@ -4408,8 +4408,6 @@ export interface RealisticMeasurement {
   readonly roadWear: RoadWearMeasurement;
   /** #627: a steep bank against level grass, blended and not. @see groundBlendProbe */
   readonly groundBlend: GroundBlendMeasurement;
-  /** #630: the far band lit by the world's sun, and a tree in the breeze. @see foliageProbe */
-  readonly foliage: FoliageMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
@@ -4620,6 +4618,12 @@ export interface TreeLevelMeasurement {
    */
   readonly nearestVisibleTriangles: number;
   readonly nearestVisibleTrianglesControl: number;
+  /**
+   * #630: the far band lit by the world's sun, and a tree in the breeze — on
+   * this load, not `?realistic`, where #870's first CI run found it the
+   * heaviest of R2's probes. @see foliageProbe
+   */
+  readonly foliage: FoliageMeasurement;
 }
 
 /**
@@ -4862,7 +4866,7 @@ function waterReflectionProbe(
   // faced square on from the chase camera's height the bank hid all but 24
   // rows. From {@link LAKE_PROBE_RISE_METRES} higher the near shore is about
   // 30° below the eye and the far shore about 6°. The side the lake lies on
-  // is found by looking both ways.
+  // is read off the lake's own vertices.
   const facing = (side: number): SceneFrame => ({
     ...base,
     markers: [],
@@ -4874,26 +4878,12 @@ function waterReflectionProbe(
       eyeRoadY: base.camera.eyeRoadY + LAKE_PROBE_RISE_METRES,
     },
   });
-  const waterIn = (scene: SceneFrame): number => {
-    const dried: SceneFrame = {
-      ...scene,
-      water: { ...scene.water, surface: { ...scene.water.surface, indices: new Uint32Array(0) } },
-    };
-    view.render(dried);
-    view.render(dried);
-    const without = readRegion(gl, 0, 0, canvas.width, canvas.height);
-    view.render(scene);
-    view.render(scene);
-    const drawn = readRegion(gl, 0, 0, canvas.width, canvas.height);
-    let count = 0;
-    for (let at = 0; at < drawn.length; at += 4) {
-      if (Math.abs((drawn[at] ?? 0) - (without[at] ?? 0)) > 2) count += 1;
-    }
-    return count;
-  };
-  const west = facing(1);
-  const east = facing(-1);
-  const frame = waterIn(west) >= waterIn(east) ? west : east;
+  // Which side the lake is on, read off its own vertices rather than by
+  // drawing both ways: `x` is west, so a lake west of the camera is `+x`.
+  const surface = base.water.surface.vertices;
+  let across = 0;
+  for (let at = 0; at < surface.length; at += 3) across += (surface[at] ?? 0) - base.camera.x;
+  const frame = facing(across >= 0 ? 1 : -1);
   const dry: SceneFrame = {
     ...frame,
     water: {
@@ -5242,7 +5232,7 @@ const IMPOSTOR_TURNS = 4;
 function foliageProbe(
   view: GameView,
   gl: WebGL2RenderingContext,
-  canvas: HTMLCanvasElement,
+  canvas: { readonly width: number; readonly height: number },
   riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
 ): FoliageMeasurement {
   const base = riding(
@@ -5323,20 +5313,55 @@ function foliageProbe(
     return readRegion(context, 0, 0, canvas.width, canvas.height);
   };
   const width = canvas.width;
-  const sides = (): { sun: number; shade: number; pixels: number } => {
+  /** The mean relative luminance of a picture's pixels either side of a column. */
+  const halves = (
+    picture: Uint8Array,
+    tree: readonly number[],
+    middle: number,
+  ): { right: number; left: number } => {
+    let right = 0;
+    let rightCount = 0;
+    let left = 0;
+    let leftCount = 0;
+    for (const pixel of tree) {
+      const at = pixel * 4;
+      const luminance = relativeLuminanceOf(
+        picture[at] ?? 0,
+        picture[at + 1] ?? 0,
+        picture[at + 2] ?? 0,
+      );
+      if (pixel % width > middle) {
+        right += luminance;
+        rightCount += 1;
+      } else {
+        left += luminance;
+        leftCount += 1;
+      }
+    }
+    return {
+      right: rightCount === 0 ? 0 : right / rightCount,
+      left: leftCount === 0 ? 0 : left / leftCount,
+    };
+  };
+  // Without the ground blobs (#620): a tree's blob lies on its shade side,
+  // thrown from the same sun, and would read as the tree's own shading.
+  showGroundBlobsOf(view, false);
+  const lit = { sun: 0, shade: 0, pixels: 0 };
+  const unlit = { sun: 0, shade: 0 };
+  try {
     const empty = settled(view, gl, { ...turned, scatter: nearer });
-    let sunTotal = 0;
-    let shadeTotal = 0;
-    let pixels = 0;
     for (let turn = 0; turn < IMPOSTOR_TURNS; turn += 1) {
       // Settled once, when the far tree first takes its rank; a turn of the
-      // same tree moves no rank.
-      const drawn = settled(
-        view,
-        gl,
-        { ...turned, scatter: [...nearer, treeAt(24, (turn * 2 * Math.PI) / IMPOSTOR_TURNS)] },
-        turn === 0 ? 11 : 2,
-      );
+      // same tree moves no rank. The unlit strip is one more draw of the SAME
+      // frame, a uniform apart, so the tree's pixels are the same pixels.
+      const frame: SceneFrame = {
+        ...turned,
+        scatter: [...nearer, treeAt(24, (turn * 2 * Math.PI) / IMPOSTOR_TURNS)],
+      };
+      const drawn = settled(view, gl, frame, turn === 0 ? 11 : 2);
+      impostorsLitOf(false);
+      const plain = settled(view, gl, frame, 1);
+      impostorsLitOf(true);
       let low = width;
       let high = -1;
       const tree: number[] = [];
@@ -5354,41 +5379,15 @@ function foliageProbe(
         }
       }
       const middle = (low + high) / 2;
-      let right = 0;
-      let rightCount = 0;
-      let left = 0;
-      let leftCount = 0;
-      for (const pixel of tree) {
-        const at = pixel * 4;
-        const luminance = relativeLuminanceOf(
-          drawn[at] ?? 0,
-          drawn[at + 1] ?? 0,
-          drawn[at + 2] ?? 0,
-        );
-        if (pixel % width > middle) {
-          right += luminance;
-          rightCount += 1;
-        } else {
-          left += luminance;
-          leftCount += 1;
-        }
-      }
       // The sun is on the right: the right half is its side.
-      sunTotal += rightCount === 0 ? 0 : right / rightCount;
-      shadeTotal += leftCount === 0 ? 0 : left / leftCount;
-      pixels += tree.length;
+      const litHalves = halves(drawn, tree, middle);
+      const plainHalves = halves(plain, tree, middle);
+      lit.sun += litHalves.right / IMPOSTOR_TURNS;
+      lit.shade += litHalves.left / IMPOSTOR_TURNS;
+      unlit.sun += plainHalves.right / IMPOSTOR_TURNS;
+      unlit.shade += plainHalves.left / IMPOSTOR_TURNS;
+      lit.pixels += tree.length;
     }
-    return { sun: sunTotal / IMPOSTOR_TURNS, shade: shadeTotal / IMPOSTOR_TURNS, pixels };
-  };
-  // Without the ground blobs (#620): a tree's blob lies on its shade side,
-  // thrown from the same sun, and would read as the tree's own shading.
-  showGroundBlobsOf(view, false);
-  let lit: ReturnType<typeof sides>;
-  let unlit: ReturnType<typeof sides>;
-  try {
-    lit = sides();
-    impostorsLitOf(false);
-    unlit = sides();
   } finally {
     impostorsLitOf(true);
     showGroundBlobsOf(view, true);
@@ -5590,7 +5589,6 @@ const NO_REALISTIC: RealisticMeasurement = {
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
-  foliage: NO_FOLIAGE,
   gantry: NO_GANTRY,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
@@ -5680,6 +5678,7 @@ const NO_TREES: TreeLevelMeasurement = {
   handOverOffScreenCovered: 0,
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
+  foliage: NO_FOLIAGE,
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -6862,10 +6861,6 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const groundBlend = groundBlendProbe(view, gl, canvas, riding);
   phaseEnds('realistic: ground blend — #627');
 
-  // #630: the far band's light, and the breeze.
-  const foliage = foliageProbe(view, gl, canvas, riding);
-  phaseEnds('realistic: foliage — #630');
-
   // #679: the finish gantry, read, and what the gantries cost.
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
@@ -7148,7 +7143,6 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     measured: true,
     roadWear,
     groundBlend,
-    foliage,
     gantry,
     waterReflection,
     waterReflectsAfterStepDown,
@@ -7279,6 +7273,8 @@ function treeLevelProbe(
   width: number,
   height: number,
   top: QualitySettings,
+  /** #630's probe, run last on the product's own view. */
+  foliage: (view: GameView, gl: WebGL2RenderingContext) => FoliageMeasurement,
 ): Pick<
   TreeLevelMeasurement,
   | 'drawnWorld'
@@ -7291,6 +7287,7 @@ function treeLevelProbe(
   | 'handOverOffScreenCovered'
   | 'nearestVisibleTriangles'
   | 'nearestVisibleTrianglesControl'
+  | 'foliage'
 > & { readonly woodedPicture: Uint8Array } {
   const build = (levels: TreeLevels): { view: GameView; gl: WebGL2RenderingContext } => {
     setTreeLevels(levels);
@@ -7452,6 +7449,9 @@ function treeLevelProbe(
     rankOnly: 'in-view',
   });
   phaseEnds('trees: nearest visible');
+  // #630, last, on the product's view: nothing after it reads that view.
+  const foliageMeasured = withLevels(REALISTIC_TREE_LEVELS, foliage);
+  phaseEnds('trees: foliage — #630');
   productView?.view.destroy();
   console.log(
     `#617: the wooded view submits ${String(product.triangles)} triangles against ` +
@@ -7470,6 +7470,7 @@ function treeLevelProbe(
     handOverOffScreenCovered: offScreen,
     nearestVisibleTriangles,
     nearestVisibleTrianglesControl,
+    foliage: foliageMeasured,
   };
 }
 
@@ -7493,9 +7494,9 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
   // #630: in still air. Every measurement of this load compares two drawings
   // of one frame pixel for pixel — two levels, two material layouts — and is
   // about WHICH level draws; the breeze moves a merged and an unmerged tree by
-  // a rounding apart (3 pixels of 230 400, measured), and has its own gate on
-  // the `?realistic` load. Module state and this load's alone: the page is
-  // this load's.
+  // a rounding apart (3 pixels of 230 400, measured). Its own probe, last on
+  // this load, lets the breeze move again (§`foliageProbe`). Module state and
+  // this load's alone: the page is this load's.
   foliageStillOf(true);
   const riding = (profile: ReturnType<typeof northRoute>, distance: number): SceneFrame => {
     const start = atStartLine(profile);
@@ -7514,7 +7515,15 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     ),
     markers: [],
   };
-  const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top);
+  const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top, (view, gl) => {
+    // The breeze moves again for #630's own probe, and is held after it.
+    foliageStillOf(false);
+    try {
+      return foliageProbe(view, gl, { width: 640, height: 360 }, riding);
+    } finally {
+      foliageStillOf(true);
+    }
+  });
   // #639's control: the world loaded as it was before #639, each tree's parts
   // one per material, and the same wooded frame on a fresh view at the same
   // size, drawn twice as the product's was.

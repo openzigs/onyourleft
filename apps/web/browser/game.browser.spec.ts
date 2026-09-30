@@ -3396,37 +3396,6 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(blend.bankControl).toBeGreaterThanOrEqual(grassControl.low / BLEND_LIGHT_FACTOR);
   });
 
-  test('lights the far band by the world’s sun, and moves the foliage on the ride’s clock — #630', async ({
-    harnessRun,
-  }) => {
-    const { foliage } = await realistic(harnessRun);
-    expect(foliage.measured).toBe(true);
-    const lean = (sun: number, shade: number): number => sun / shade - 1;
-    const lit = lean(foliage.sunSide, foliage.shadeSide);
-    const unlit = lean(foliage.sunSideUnlit, foliage.shadeSideUnlit);
-    console.log(
-      `the far band over four turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
-        `${foliage.shadeSide.toFixed(4)} (${(lit * 100).toFixed(1)} %); unlit ` +
-        `${foliage.sunSideUnlit.toFixed(4)} against ${foliage.shadeSideUnlit.toFixed(4)} ` +
-        `(${(unlit * 100).toFixed(1)} %; ${String(foliage.impostorPixels)} px). The breeze: ` +
-        `${String(foliage.swayChanged)} of the tree's ${String(foliage.treePixels)} px moved between ` +
-        `two times, ${String(foliage.heldChanged)} between two draws at one`,
-    );
-    // Non-vacuity: a tree was drawn, far and near.
-    expect(foliage.impostorPixels).toBeGreaterThan(IMPOSTOR_MINIMUM_PIXELS);
-    expect(foliage.treePixels).toBeGreaterThan(400);
-    // (1) The sun's side is lighter than the shade's, by a floor and under a
-    // ceiling; unlit — today's strip — the two halves read alike.
-    expect(lit).toBeGreaterThan(IMPOSTOR_LIGHT_FLOOR);
-    expect(lit).toBeLessThan(IMPOSTOR_LIGHT_CEILING);
-    expect(Math.abs(unlit)).toBeLessThan(IMPOSTOR_LIGHT_FLOOR);
-    // (2) The silhouette moves between two ride times, by some of its pixels
-    // and not by the whole tree; and at one time, not at all.
-    expect(foliage.swayChanged).toBeGreaterThan(SWAY_MINIMUM_PIXELS);
-    expect(foliage.swayChanged).toBeLessThan(foliage.treePixels);
-    expect(foliage.heldChanged).toBe(0);
-  });
-
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
     harnessRun,
   }) => {
@@ -3991,6 +3960,37 @@ test.describe('the trees’ levels of detail in the realistic world — #617', (
     expect(result.trees.drawnWorld).toBe('realistic');
     return result.trees;
   };
+
+  test('lights the far band by the world’s sun, and moves the foliage on the ride’s clock — #630', async ({
+    harnessRun,
+  }) => {
+    const { foliage } = await trees(harnessRun);
+    expect(foliage.measured).toBe(true);
+    const lean = (sun: number, shade: number): number => sun / shade - 1;
+    const lit = lean(foliage.sunSide, foliage.shadeSide);
+    const unlit = lean(foliage.sunSideUnlit, foliage.shadeSideUnlit);
+    console.log(
+      `the far band over four turns: the sun's side ${foliage.sunSide.toFixed(4)} against the shade's ` +
+        `${foliage.shadeSide.toFixed(4)} (${(lit * 100).toFixed(1)} %); unlit ` +
+        `${foliage.sunSideUnlit.toFixed(4)} against ${foliage.shadeSideUnlit.toFixed(4)} ` +
+        `(${(unlit * 100).toFixed(1)} %; ${String(foliage.impostorPixels)} px). The breeze: ` +
+        `${String(foliage.swayChanged)} of the tree's ${String(foliage.treePixels)} px moved between ` +
+        `two times, ${String(foliage.heldChanged)} between two draws at one`,
+    );
+    // Non-vacuity: a tree was drawn, far and near.
+    expect(foliage.impostorPixels).toBeGreaterThan(IMPOSTOR_MINIMUM_PIXELS);
+    expect(foliage.treePixels).toBeGreaterThan(400);
+    // (1) The sun's side is lighter than the shade's, by a floor and under a
+    // ceiling; unlit — today's strip — the two halves read alike.
+    expect(lit).toBeGreaterThan(IMPOSTOR_LIGHT_FLOOR);
+    expect(lit).toBeLessThan(IMPOSTOR_LIGHT_CEILING);
+    expect(Math.abs(unlit)).toBeLessThan(IMPOSTOR_LIGHT_FLOOR);
+    // (2) The silhouette moves between two ride times, by some of its pixels
+    // and not by the whole tree; and at one time, not at all.
+    expect(foliage.swayChanged).toBeGreaterThan(SWAY_MINIMUM_PIXELS);
+    expect(foliage.swayChanged).toBeLessThan(foliage.treePixels);
+    expect(foliage.heldChanged).toBe(0);
+  });
 
   test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
     harnessRun,
