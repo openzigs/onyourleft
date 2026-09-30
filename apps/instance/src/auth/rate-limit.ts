@@ -21,21 +21,29 @@ export interface RateLimit {
 export interface RateLimiter {
   /** Count one request against `key`. `false` when it is over the limit. */
   allow(key: string): boolean;
+  /**
+   * Count one request against `key` and answer how many it has made in this
+   * window, this one included — for a caller that treats the first request
+   * of a window differently from the rest (#883).
+   */
+  take(key: string): number;
 }
 
 export function createRateLimiter(rate: RateLimit, now: () => number): RateLimiter {
   let window = Number.NaN;
   let counts = new Map<string, number>();
+  const take = (key: string): number => {
+    const current = Math.floor(now() / rate.windowMs);
+    if (current !== window) {
+      window = current;
+      counts = new Map();
+    }
+    const count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count);
+    return count;
+  };
   return {
-    allow(key) {
-      const current = Math.floor(now() / rate.windowMs);
-      if (current !== window) {
-        window = current;
-        counts = new Map();
-      }
-      const count = (counts.get(key) ?? 0) + 1;
-      counts.set(key, count);
-      return count <= rate.limit;
-    },
+    allow: (key) => take(key) <= rate.limit,
+    take,
   };
 }

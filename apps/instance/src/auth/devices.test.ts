@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ROUTES } from '../routes.ts';
 import { sha256Hex, verifyEd25519 } from './crypto.ts';
 import {
+  DEFAULT_LIMITS,
   EMAIL_CONFIRMATION_LIFETIME_SECONDS,
   EMAIL_RECOVERY_LIFETIME_SECONDS,
   LINK_CODE_LIFETIME_SECONDS,
@@ -607,6 +608,88 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     }
     expect(new Set(answers.map((each) => JSON.stringify(each))).size).toBe(1);
     expect(w.confirmations).toHaveLength(3);
+  });
+
+  const give = (w: IdentityInstance, token: string, address: string) =>
+    w.call('POST', '/v1/auth/recovery-email', { token, body: { address } });
+  const mailedTo = (w: IdentityInstance, address: string) =>
+    w.confirmations.filter((each) => each.address === address).length;
+
+  it('one athlete cannot use up another’s share of an address: Mallory spends hers, and Anna’s link is still mailed (#883)', async () => {
+    const w = await start({ emailRecovery: true });
+    const mallory = await registered(w);
+    const anna = await registered(w);
+    for (let n = 0; n < 5; n += 1) await give(w, mallory.token, 'anna@example.org');
+    expect(mailedTo(w, 'anna@example.org')).toBe(3);
+    const answer = await give(w, anna.token, 'anna@example.org');
+    expect(answer.status).toBe(204);
+    expect(mailedTo(w, 'anna@example.org')).toBe(4);
+    await confirm(w, anna.token, 'anna@example.org');
+    expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
+  });
+
+  it('bounds an address’s mail across athletes, but never withholds an athlete’s first link of the hour (#883)', async () => {
+    const w = await start({
+      emailRecovery: true,
+      limits: { ...DEFAULT_LIMITS, confirmationsPerAddress: { limit: 2, windowMs: 3_600_000 } },
+    });
+    const first = await registered(w);
+    const second = await registered(w);
+    const anna = await registered(w);
+    // Two strangers spend the address's whole share at the top of the hour.
+    await give(w, first.token, 'anna@example.org');
+    await give(w, second.token, 'anna@example.org');
+    expect(mailedTo(w, 'anna@example.org')).toBe(2);
+    // Over the shared bound, a stranger's second link does not go…
+    const held = await give(w, first.token, 'anna@example.org');
+    expect(mailedTo(w, 'anna@example.org')).toBe(2);
+    // …and the owner's first one does, with the same answer.
+    const hers = await give(w, anna.token, 'anna@example.org');
+    expect(hers).toEqual(held);
+    expect(mailedTo(w, 'anna@example.org')).toBe(3);
+    await confirm(w, anna.token, 'anna@example.org');
+    expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
+  });
+
+  it('limits one athlete asking for many addresses: rate_limited, whoever holds them (#883)', async () => {
+    const w = await start({ emailRecovery: true });
+    const mallory = await registered(w);
+    const statuses: number[] = [];
+    for (let n = 0; n < 8; n += 1) {
+      statuses.push((await give(w, mallory.token, `victim-${n}@example.org`)).status);
+    }
+    const allowed = DEFAULT_LIMITS.confirmationRequestsPerAthlete.limit;
+    expect(statuses).toEqual([
+      ...Array<number>(allowed).fill(204),
+      ...Array<number>(8 - allowed).fill(429),
+    ]);
+    expect(w.confirmations).toHaveLength(allowed);
+    // One pending link at a time: each new address replaced the one before.
+    expect(
+      (await w.freshRead((store) => store.listEmailConfirmations(mallory.athleteId))).map(
+        (each) => each.address,
+      ),
+    ).toEqual([`victim-${allowed - 1}@example.org`]);
+    // Another athlete is not limited by Mallory's count.
+    const anna = await registered(w);
+    expect((await give(w, anna.token, 'anna@example.org')).status).toBe(204);
+    // And the next hour, Mallory may ask again.
+    w.clock.ms += 3_600_000;
+    expect((await give(w, mallory.token, 'victim-9@example.org')).status).toBe(204);
+  });
+
+  it('answers internal when the mail transport fails, and leaves no stray link and the earlier one standing (#883)', async () => {
+    const w = await start({ emailRecovery: 'failing' });
+    const anna = await registered(w, { recoveryEmail: 'anna@example.org' });
+    const before = await w.freshRead((store) => store.listEmailConfirmations(anna.athleteId));
+    expect(before).toHaveLength(1);
+    const answer = await give(w, anna.token, 'anna@elsewhere.org');
+    expect(answer.status).toBe(500);
+    expect(codeOf(answer.body)).toBe('internal');
+    expect(await w.freshRead((store) => store.listEmailConfirmations(anna.athleteId))).toEqual(
+      before,
+    );
+    expect(w.instance.lines.join('\n')).not.toContain('anna@elsewhere.org');
   });
 
   it('off: the routes are not there', async () => {

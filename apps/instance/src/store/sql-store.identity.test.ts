@@ -305,6 +305,49 @@ describe('confirming a recovery address (#865)', () => {
   });
 });
 
+describe('pending confirmations are bounded: one an athlete (#883)', () => {
+  it('replaces the athlete’s earlier unconfirmed link, keeps a spent one, and touches nobody else’s', async () => {
+    const opened = await world();
+    const confirmation = (athleteId: string, tokenSha256: string, address: string) =>
+      opened.write((store) =>
+        store.putEmailConfirmation({
+          tokenSha256,
+          athleteId,
+          address,
+          expiresAt: 1_790_086_400,
+        }),
+      );
+    const spent = 'a'.repeat(64);
+    await confirmation(ATHLETE_B, spent, 'spent-b@example.org');
+    expect(
+      (await opened.write((store) => store.confirmRecoveryEmail(ATHLETE_B, spent, 1_790_000_500)))
+        .outcome,
+    ).toBe('taken');
+    await confirmation(ATHLETE_C, 'c'.repeat(64), 'c-pending@example.org');
+    for (let n = 0; n < 5; n += 1) {
+      await confirmation(ATHLETE_B, n.toString(16).repeat(64), `b-${n}@example.org`);
+    }
+    const kept = await opened.read((store) => store.listEmailConfirmations(ATHLETE_B));
+    expect(kept.filter((each) => each.usedAt === null).map((each) => each.address)).toEqual([
+      'b-4@example.org',
+    ]);
+    expect(kept.filter((each) => each.usedAt !== null).map((each) => each.address)).toContain(
+      'spent-b@example.org',
+    );
+    // The replaced link spends nothing: it is simply unknown now.
+    expect(
+      await opened.write((store) =>
+        store.confirmRecoveryEmail(ATHLETE_B, '3'.repeat(64), 1_790_000_600),
+      ),
+    ).toEqual({ outcome: 'unknown' });
+    expect(
+      (await opened.read((store) => store.listEmailConfirmations(ATHLETE_C))).map(
+        (each) => each.address,
+      ),
+    ).toContain('c-pending@example.org');
+  });
+});
+
 describe('sessions (#772)', () => {
   it('revokes one athlete’s session and refuses to revoke another’s', async () => {
     const opened = await world();

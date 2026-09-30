@@ -267,7 +267,13 @@ export interface SqlStore {
   listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
 
   getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
-  /** An address given for recovery, waiting to be confirmed (#865). Binds nothing. */
+  /**
+   * An address given for recovery, waiting to be confirmed (#865). Binds
+   * nothing. ⚠️ **Replaces the athlete's earlier unconfirmed confirmation**, in
+   * the same transaction (#883), so an athlete has at most one link pending and
+   * the table cannot grow with every address they give; a link already
+   * followed stays, as the record that its token is spent.
+   */
   putEmailConfirmation(confirmation: Omit<EmailConfirmation, 'usedAt'>): Promise<void>;
   listEmailConfirmations(athleteId: string): Promise<readonly EmailConfirmation[]>;
   /**
@@ -820,18 +826,25 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       }),
 
     putEmailConfirmation: (confirmation) =>
-      exclusive(async () => {
-        await db
-          .insertInto('recovery_email_confirmation')
-          .values({
-            token_sha256: confirmation.tokenSha256,
-            athlete_id: confirmation.athleteId,
-            address: confirmation.address,
-            expires_at: confirmation.expiresAt,
-            used_at: null,
-          })
-          .execute();
-      }),
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .deleteFrom('recovery_email_confirmation')
+            .where('athlete_id', '=', confirmation.athleteId)
+            .where('used_at', 'is', null)
+            .execute();
+          await trx
+            .insertInto('recovery_email_confirmation')
+            .values({
+              token_sha256: confirmation.tokenSha256,
+              athlete_id: confirmation.athleteId,
+              address: confirmation.address,
+              expires_at: confirmation.expiresAt,
+              used_at: null,
+            })
+            .execute();
+        }),
+      ),
 
     listEmailConfirmations: (athleteId) =>
       exclusive(async () =>

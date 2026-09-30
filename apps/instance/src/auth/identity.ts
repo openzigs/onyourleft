@@ -109,6 +109,30 @@ export interface IdentityLimits {
   readonly renamesPerWindow: number;
   readonly renameWindowSeconds: number;
   readonly emailRecoveryPerAddress: RateLimit;
+  /**
+   * Confirmation mail (#865, #883), three limits and one exception — see
+   * {@link IdentityLimits.confirmationsPerAthleteAddress}. How many times one
+   * athlete may give an address, whatever the address: over it the answer is
+   * `rate_limited`, which says nothing about who holds the address.
+   */
+  readonly confirmationRequestsPerAthlete: RateLimit;
+  /**
+   * How many links one athlete may have mailed to one address. Keyed by the
+   * PAIR, so one athlete cannot use up another's share: Mallory asking for
+   * Anna's address as often as she likes leaves Anna's own requests untouched.
+   */
+  readonly confirmationsPerAthleteAddress: RateLimit;
+  /**
+   * How many links one address may be sent in all, so that many athletes
+   * asking for it cannot flood the mailbox. ⚠️ **An athlete's FIRST link to an
+   * address in a window is sent even over this bound**: otherwise a stranger
+   * spending the address's share at the top of every hour would silently
+   * starve its owner, which is the harm #865 removes. The trade, stated: an
+   * attacker holding N accounts can send the address this bound plus N links
+   * an hour, and the bound on N is how fast accounts can be made
+   * (`challengePerAddress`, and the registration mode #775 adds).
+   */
+  readonly confirmationsPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -117,6 +141,9 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   renamesPerWindow: 3,
   renameWindowSeconds: 24 * 60 * 60,
   emailRecoveryPerAddress: { limit: 3, windowMs: 60 * 60_000 },
+  confirmationRequestsPerAthlete: { limit: 5, windowMs: 60 * 60_000 },
+  confirmationsPerAthleteAddress: { limit: 3, windowMs: 60 * 60_000 },
+  confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
 };
 
 /**
@@ -279,7 +306,9 @@ export function createIdentity(options: IdentityOptions): Identity {
   const perKey = createRateLimiter(limits.challengePerKey, now);
   const perAddress = createRateLimiter(limits.challengePerAddress, now);
   const emailPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
-  const confirmationsPerAddress = createRateLimiter(limits.emailRecoveryPerAddress, now);
+  const confirmationRequests = createRateLimiter(limits.confirmationRequestsPerAthlete, now);
+  const confirmationsPerPair = createRateLimiter(limits.confirmationsPerAthleteAddress, now);
+  const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const tickets = createTicketBook(now);
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -363,16 +392,25 @@ export function createIdentity(options: IdentityOptions): Identity {
 
   /**
    * A confirmation for an address an athlete gave (#865): the token to mail,
-   * and what the store keeps of it. `undefined` when the address has had its
-   * share of mail this hour, so that giving somebody's address again and
-   * again cannot flood their mailbox — and the answer is the same either way.
+   * and what the store keeps of it. `undefined` when no mail may go, so that
+   * giving somebody's address again and again cannot flood their mailbox —
+   * and the answer is the same either way. Counted per (athlete, address), so
+   * one athlete cannot spend another's share, and per address in all, except
+   * for an athlete's first link of the window (#883):
+   * {@link IdentityLimits.confirmationsPerAddress} says why and what it costs.
    */
   async function confirmationFor(
+    athleteId: string,
     address: string,
   ): Promise<
     { token: string; tokenSha256: string; address: string; expiresAt: number } | undefined
   > {
-    if (!confirmationsPerAddress.allow(address)) return undefined;
+    // A newline cannot be in an athlete id (hex) or an address (EMAIL), so
+    // no two pairs share a key.
+    const pairCount = confirmationsPerPair.take(`${athleteId}\n${address}`);
+    if (pairCount > limits.confirmationsPerAthleteAddress.limit) return undefined;
+    const addressAllowed = confirmationsPerAddress.allow(address);
+    if (!addressAllowed && pairCount !== 1) return undefined;
     const token = randomToken(32);
     return {
       token,
@@ -411,11 +449,11 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (!address.ok) return address;
       recoveryEmail = address.value;
     }
+    const athleteId = randomHex(16);
     // Not bound: confirmed later, by whoever reads the mailbox (#865). So the
     // answer cannot depend on whether somebody already holds the address.
     const confirmation =
-      recoveryEmail === undefined ? undefined : await confirmationFor(recoveryEmail);
-    const athleteId = randomHex(16);
+      recoveryEmail === undefined ? undefined : await confirmationFor(athleteId, recoveryEmail);
     const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
     const at = seconds();
     await store.registerAthlete({
@@ -638,17 +676,32 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (mailer === undefined) return refuse('not_found');
       const given = addressOf(address, 'address');
       if (!given.ok) return given;
+      // Per caller first (#883): an athlete asking for a new address every
+      // time would otherwise have the instance mail anyone, as often as it
+      // liked. The refusal depends on the caller's count alone.
+      if (!confirmationRequests.allow(caller.athleteId)) return refuse('rate_limited');
       // The same answer whether or not somebody holds the address (#865): a
       // link goes to it either way, and only following it binds anything.
-      const confirmation = await confirmationFor(given.value);
+      const confirmation = await confirmationFor(caller.athleteId, given.value);
       if (confirmation !== undefined) {
+        // Mailed FIRST, and the row written only once it went (#883): a
+        // transport that fails is `internal`, and leaves no link in the store
+        // that nobody was sent — nor replaces the athlete's earlier one.
+        // Registration swallows the same failure instead, because there the
+        // athlete's recovery codes are about to be shown for the only time.
+        try {
+          await mailer.confirm(confirmation.address, confirmation.token);
+        } catch {
+          return refuse('internal');
+        }
+        // Replaces this athlete's earlier unconfirmed link, if any, so the
+        // table holds at most one pending confirmation an athlete (#883).
         await store.putEmailConfirmation({
           tokenSha256: confirmation.tokenSha256,
           athleteId: caller.athleteId,
           address: confirmation.address,
           expiresAt: confirmation.expiresAt,
         });
-        await mailer.confirm(confirmation.address, confirmation.token);
       }
       return { ok: true, value: null };
     },

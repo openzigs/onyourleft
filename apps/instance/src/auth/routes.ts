@@ -319,7 +319,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     path: '/v1/auth/recovery-email',
     operationId: 'setRecoveryEmail',
     summary:
-      'Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `not_found` where the operator has not enabled email recovery.',
+      'Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.',
     identity: true,
     auth: 'session',
     request: object({ address: string }),
