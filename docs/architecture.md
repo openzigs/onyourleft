@@ -1269,9 +1269,10 @@ identity service over a store. ⚠️ **Since #780 the Node entry point opens th
 rooms**, and a reviewer who remembers "a running instance still answers the metadata alone" is
 reading the old paragraph: `src/instance.ts` opens the store (never migrating it — the deploy's
 `migrate` step does, #791), hands the handler the accounts on it, and serves room sockets through a
-router and one room-worker process per core (`src/room/node/`, below). What a rider cannot do yet is
-create a room ([#784](https://github.com/openzigs/onyourleft/issues/784)) or join one from the app
-([#782](https://github.com/openzigs/onyourleft/issues/782)); an operator opens rooms with
+router and one room-worker process per core (`src/room/node/`, below). ⚠️ **Since
+[#784](https://github.com/openzigs/onyourleft/issues/784) and
+[#785](https://github.com/openzigs/onyourleft/issues/785) a rider makes and joins rooms from the app**
+— private ones only (see "A rider's room" below); an operator can still open one with
 `node src/operator/cli.ts room-open`. The first deployment and its runbook are
 [`self-hosting/home-machine.md`](self-hosting/home-machine.md) and
 [`operating-an-instance.md`](operating-an-instance.md). Since #881 (#37, #38, #776, #35) the
@@ -1345,6 +1346,33 @@ process's book, runs the room's 1 Hz tick, lets go of a client that stops readin
 socket for the tunnel. Results are handed back to the HTTP process — the one writer (ADR 0037 D-5) —
 as each becomes final. A worker that dies has its rooms' sockets closed `1011 room-lost` by the
 router, which keeps an unread copy of each, and a new worker takes its place.
+
+**A rider's room** ([#784](https://github.com/openzigs/onyourleft/issues/784),
+[#785](https://github.com/openzigs/onyourleft/issues/785)), `src/rooms/`. `POST /v1/rooms` makes a
+**private** room — a group ride or a race — on the creator's own route: its GPX, relayed by the
+SHA-256 of its bytes to the room's members, and the course (a length and grade steps) the room
+re-simulates it on. No field makes a room public: public rooms wait for #907, #910 and #911 (ADR 0028
+D-6.4). The room's **code** is 75 bits (fifteen symbols of Crockford's base 32) from the CSPRNG,
+shown once to its creator and stored only as its SHA-256; `POST /v1/rooms/join` takes it in a body,
+never a path, and is rate-limited per athlete and per address, right or wrong. A member —
+the creator, or an athlete who joined by the code — is the only one ticketed into the room
+(`auth/identity.ts` §`ticket`) or handed its route. **A race is started by any rider seated and
+connected in it** (#785's decision: a room has no leader, ADR 0028 D-7.2, so starting is nobody's
+role — `room/node/room-host.ts` §`start`), and the room tells every seated rider how long its
+countdown is (`@onyourleft/protocol`'s `countdown`: a duration, never an instant). A rider's result
+is written as they cross the line (#807's amendment) with their place, time, mean W/kg and the
+durations of any ceiling they breached (`room/core/ceilings.ts`); `GET /v1/rooms/{roomId}/results`
+answers the race's riders only, built by ONE function, `rooms/publication.ts` §`publishRace`, which
+has no watts to publish (ADR 0028's 2026-09-22 amendment). A room that is over — a race finished, a
+group ride past its empty grace — is never opened again, and its route is deleted from its own blob
+store (the blob directory's `rooms/`, outside the synced files and outside a backup) unless another
+open room rides the same bytes. Migration 0013 holds it: `private_room`, `room_member` (athlete-scoped,
+so erased with the athlete), three result columns and `room_course.finishers`, which is what lets an
+erased rider's place be shown as "a rider" with nothing of theirs. ⚠️ **Not signed by the instance**:
+ADR 0028 D-6.1 signs results with the device key, which proves the same device produced the reports
+and nothing about the order; an instance key would need its own publication, rotation and
+revocation, which no ADR has decided — the result is authoritative only as the instance's answer to
+its own riders over their own sessions.
 
 **No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
@@ -1541,6 +1569,19 @@ the pagination parser has its first callers, the sync manifest and the activity 
 | `snapshots.ts` | the room's frames, drawn 1.5 frames behind so a rider is interpolated rather than extrapolated |
 | `interest.ts` | which K of the room's riders are drawn, with hysteresis so the set does not flicker |
 | `correction.ts` | how far the room says this rider is out, and how that is applied: over 2 s, never backwards, the trainer's grade changing by at most 1 % a second |
+| `rooms-port.ts` | since #784 and #785, what the game may ask about a rider's rooms: make one on a route of their own (refused before any request when any of it is in a privacy zone, `rooms/share.ts`), join one by its code and fetch its route by hash — checked against the room's `routeRef` before it is ridden — start a race, and read its result |
+
+The screens are in `apps/web/src/rooms/`: `RoomPanel.tsx` on the game's picker (a room needs an
+instance and a declared weight before anything is offered), `RaceResult.tsx` after a race the room
+said is over, and `race-result.ts`, the one function that puts a result into words — W/kg beside
+every other rider, the rider's own watts beside their own line alone. A race's rider is held on the
+line (`game/simulation.ts` §`holdAt`) until the room's first frame; the countdown is counted on this
+device's clock from when the room's `countdown` arrived. ⚠️ **The room's correction of a rider's
+odometer stays uncapped** (#784's comment): the trainer is already protected — its grade is the
+rider's own road's, changing by at most 1 % a second while a correction runs — and a legitimate error
+after a 55 s drop is several hundred metres, so a cap that stopped a hostile room would also refuse
+the honest case. What follows the odometer is the HUD's "To go", the gaps and where the rider is
+drawn.
 
 ⚠️ **A room's paths come from one builder**, `instance-transport.ts` §`roomPath`, which refuses a room
 id the instance could not route; `InstanceHttp.call` refuses a path with a dot segment, `?`, `#`, `%`
