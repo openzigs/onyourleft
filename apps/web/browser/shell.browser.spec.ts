@@ -2283,11 +2283,13 @@ test.describe('#667 — the select opts into a styled picker and stays a select'
  * - the display step lays out at 320×256 without a sideways scroll — with the
  *   wrap stripped off as the control, which must scroll;
  * - under `prefers-reduced-motion: reduce` and under `update: slow`, the
- *   specimen's transition does not run — `document.getAnimations()` finds
- *   none running two frames after it is triggered. The CONTROL is the same
- *   page with that `@media` block deleted through the CSSOM, under the same
- *   emulated preference, and it must find at least one: without it, a
- *   transition that never started at all would pass.
+ *   specimen's transition does not run — every animation
+ *   `document.getAnimations()` finds on the page as it is triggered lasts
+ *   0.01 ms or less (§`motionOnArrival` says why duration and not
+ *   `playState`), and the specimen's own were created, so the change was one.
+ *   The CONTROL is the same page with that `@media` block deleted through the
+ *   CSSOM, under the same emulated preference, and it must find at least one
+ *   lasting longer: without it, a block that collapsed nothing would pass.
  */
 const ILLUSTRATION_PAGE = '/shell.html?illustration=specimens';
 
@@ -2301,34 +2303,51 @@ async function openIllustration(page: Page, url = ILLUSTRATION_PAGE): Promise<vo
 }
 
 /**
- * Lets the specimen arrive, waits two animation frames, and returns what is
- * still running and how long that took. Two frames is past a transition the
- * motion blocks collapse to 0.01 ms and well inside one of 200 ms.
+ * Anything longer than this is motion a person could see. The motion blocks
+ * collapse every duration to 0.01 ms; the shortest token is 120 ms.
  */
-async function runningAfterArrival(
+const VISIBLE_MOTION_MS = 1;
+
+/**
+ * Lets the specimen arrive and reads every animation the change created, on
+ * the whole page, in the same task: `document.getAnimations()` flushes style
+ * first, so a transition the change starts is in the list whether or not the
+ * compositor has given it a start time yet.
+ *
+ * ⚠️ **What is counted is DURATION, not `playState`.** The first version
+ * counted what was still `running` two animation frames later, and went red on
+ * CI (run 36764163154, and 3 in 250 locally under load): Chromium runs an
+ * opacity or transform transition on the compositor, and its start time — so
+ * its end, even at 0.01 ms — arrives asynchronously, so a collapsed transition
+ * could still read `running` after two frames on a slow runner. Whether a
+ * transition is collapsed is a property of its timing and does not depend on
+ * when it is read.
+ */
+async function motionOnArrival(
   page: Page,
-): Promise<{ readonly running: number; readonly elapsed: number }> {
-  return page.evaluate(async () => {
+): Promise<{ readonly created: number; readonly visible: number; readonly onSpecimen: number }> {
+  return page.evaluate((visibleMs) => {
     const specimen = document.querySelector<HTMLElement>('[data-oyl-motion-specimen]');
     if (specimen === null) throw new Error('no motion specimen on the page');
     // The state before arrival is computed, so the change below is a change.
     const before = getComputedStyle(specimen).opacity;
     if (before !== '0') throw new Error(`the specimen starts at opacity ${before}, not 0`);
-    const started = performance.now();
     specimen.dataset['oylEntered'] = 'true';
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
+    const animations = document.getAnimations();
+    const lasting = animations.filter((animation) => {
+      const duration = animation.effect?.getComputedTiming().duration;
+      return typeof duration === 'number' ? duration > visibleMs : true;
     });
     return {
-      running: document.getAnimations().filter((animation) => animation.playState === 'running')
-        .length,
-      elapsed: performance.now() - started,
+      created: animations.filter(
+        (animation) => (animation.effect as KeyframeEffect | null)?.target === specimen,
+      ).length,
+      visible: lasting.length,
+      onSpecimen: lasting.filter(
+        (animation) => (animation.effect as KeyframeEffect | null)?.target === specimen,
+      ).length,
     };
-  });
+  }, VISIBLE_MOTION_MS);
 }
 
 /**
@@ -2412,17 +2431,19 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
 
   test('the apparatus — with no preference, the specimen’s transition runs', async ({ page }) => {
     await openIllustration(page);
-    const { running, elapsed } = await runningAfterArrival(page);
-    test
-      .info()
-      .annotations.push({ type: 'two frames took', description: `${elapsed.toFixed(1)} ms` });
-    expect(running).toBeGreaterThanOrEqual(1);
+    expect((await motionOnArrival(page)).onSpecimen).toBeGreaterThanOrEqual(1);
   });
 
   test('under prefers-reduced-motion: reduce, nothing is running', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openIllustration(page);
-    expect((await runningAfterArrival(page)).running).toBe(0);
+    const motion = await motionOnArrival(page);
+    // The specimen's transitions are created, collapsed — so the change was one.
+    expect(
+      motion.created,
+      'the arrival started no transition, so this measured nothing',
+    ).toBeGreaterThanOrEqual(1);
+    expect(motion.visible).toBe(0);
   });
 
   test('the control — with the reduced-motion block deleted, the same page moves', async ({
@@ -2434,7 +2455,7 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
       await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
       'the harness removed no prefers-reduced-motion block, so this is not the control',
     ).toBe('1');
-    expect((await runningAfterArrival(page)).running).toBeGreaterThanOrEqual(1);
+    expect((await motionOnArrival(page)).onSpecimen).toBeGreaterThanOrEqual(1);
   });
 
   test('under update: slow, nothing is running', async ({ page }) => {
@@ -2443,7 +2464,12 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
       await page.evaluate(() => document.documentElement.dataset['oylSlowUpdateForced']),
       'the harness applied no update: slow block, so this case would measure nothing',
     ).toBe('1');
-    expect((await runningAfterArrival(page)).running).toBe(0);
+    const motion = await motionOnArrival(page);
+    expect(
+      motion.created,
+      'the arrival started no transition, so this measured nothing',
+    ).toBeGreaterThanOrEqual(1);
+    expect(motion.visible).toBe(0);
   });
 
   test('the control — with the update: slow block deleted, the same page moves', async ({
@@ -2454,6 +2480,6 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
       await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
       'the harness removed no update block, so this is not the control',
     ).toBe('1');
-    expect((await runningAfterArrival(page)).running).toBeGreaterThanOrEqual(1);
+    expect((await motionOnArrival(page)).onSpecimen).toBeGreaterThanOrEqual(1);
   });
 });
