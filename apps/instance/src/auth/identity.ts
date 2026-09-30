@@ -113,6 +113,7 @@ import {
   verifyEd25519,
 } from './crypto.ts';
 import { HIDDEN_DISPLAY_NAME, publicAthlete, type PublicAthlete } from './public-athlete.ts';
+import { DEFAULT_HISTORY_SEARCHES } from '../history/history.ts';
 import { addressKey, createRateLimiter, sweepPeriodMs, type RateLimit } from './rate-limit.ts';
 import { createTicketBook, type MintedTicket } from './tickets.ts';
 
@@ -188,6 +189,16 @@ export interface IdentityLimits {
    * address a window.
    */
   readonly firstLinksPerAddress: RateLimit;
+  /**
+   * How many times one athlete may search their history in a window (#918):
+   * `POST /v1/history/search` makes the instance embed the query, which is
+   * the embedding model's work on this instance's machine, so a signed-in
+   * rider in a loop could otherwise keep it busy. Keyed by the athlete, never
+   * an address; swept at the end of its window like every other limit here.
+   * A write-up asks once per run (the history step), so 30 a minute is far
+   * over any rider's use. Chosen.
+   */
+  readonly historySearchesPerAthlete: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -201,6 +212,7 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   confirmationsPerAthleteAddress: { limit: 3, windowMs: 60 * 60_000 },
   confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
   firstLinksPerAddress: { limit: 3, windowMs: 60 * 60_000 },
+  historySearchesPerAthlete: DEFAULT_HISTORY_SEARCHES,
 };
 
 /**
@@ -361,6 +373,12 @@ export interface Identity {
   readonly rateLimitSweepPeriodMs: number;
   /** How many rate-limit keys are held now, across every limit. */
   heldRateLimitKeys(): number;
+  /**
+   * Count one history search against the caller (#918). `false` when they are
+   * over {@link IdentityLimits.historySearchesPerAthlete}: the route answers
+   * `rate_limited` and embeds nothing.
+   */
+  allowHistorySearch(caller: Caller): boolean;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -432,6 +450,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationsPerPair = createRateLimiter(limits.confirmationsPerAthleteAddress, now);
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
+  const historySearches = createRateLimiter(limits.historySearchesPerAthlete, now);
   const tickets = createTicketBook(now, () => randomToken(32));
   const moderation = createModeration({
     store,
@@ -692,6 +711,7 @@ export function createIdentity(options: IdentityOptions): Identity {
     confirmationsPerPair,
     confirmationsPerAddress,
     firstLinksPerAddress,
+    historySearches,
   ];
 
   return {
@@ -707,6 +727,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.confirmationsPerAthleteAddress,
       limits.confirmationsPerAddress,
       limits.firstLinksPerAddress,
+      limits.historySearchesPerAthlete,
     ]),
 
     sweepRateLimits() {
@@ -715,6 +736,10 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     heldRateLimitKeys() {
       return limiters.reduce((held, limiter) => held + limiter.size, 0);
+    },
+
+    allowHistorySearch(caller) {
+      return historySearches.allow(caller.athleteId);
     },
 
     async challenge(publicKey, address) {

@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
 import { readHistorySettings, type Config } from './config.ts';
 import type { Resolver } from './history/address.ts';
+import { RETRY_PERIOD_MS } from './history/history.ts';
 import { startInstance, type InstanceOptions, type StartedInstance } from './instance.ts';
 import type { SweepTimers } from './node-listener.ts';
 import { testConfig } from './instance-testing.ts';
@@ -647,4 +648,100 @@ describe('the history index on the running instance — #835', () => {
     expect((await searchAs(instance.url, anna.sessionToken)).status).toBe(503);
     expect(requests).toStrictEqual([]);
   });
+
+  it('picks up a model started after the instance, on its own retry, with no sync and no restart — #918 item 2', async () => {
+    let down = true;
+    const documents: string[] = [];
+    model = createServer((request, response) => {
+      if (down) {
+        request.socket.destroy();
+        return;
+      }
+      let text = '';
+      request.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      request.on('end', () => {
+        const { input } = JSON.parse(text) as { input: string[] };
+        documents.push(...input);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ embeddings: input.map(() => [1, 0, 0]) }));
+      });
+    });
+    await new Promise<void>((done) => model?.listen(0, '127.0.0.1', done));
+    const port = (model.address() as AddressInfo).port;
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    // Pinned, as #892's case pins it: the next minute boundary is 40 s away
+    // and the next five-minute one 100 s, so the two timers are told apart.
+    const clock = { ms: 1_790_000_000_000 };
+    const pending: { at: number; run: () => void }[] = [];
+    const timers: SweepTimers = {
+      now: () => clock.ms,
+      setTimeout: (run, delayMs) => {
+        const entry = { at: clock.ms + delayMs, run };
+        pending.push(entry);
+        return entry;
+      },
+      clearTimeout: (handle) => {
+        const at = pending.indexOf(handle as { at: number; run: () => void });
+        if (at >= 0) pending.splice(at, 1);
+      },
+    };
+    const { instance, lines } = await start(
+      path,
+      {},
+      {
+        config: { history: readHistorySettings({ embeddingUrl: `http://ollama:${String(port)}` }) },
+        resolve: () => Promise.resolve(['127.0.0.1']),
+        timing: { now: () => clock.ms, sweepTimers: timers },
+      },
+    );
+    await instance.opened;
+    const anna = await signIn(instance.url, 'Anna', Math.floor(clock.ms / 1000));
+    // Sync is not wired into the running instance yet (#898), so the item is
+    // written as sync writes it, through a second connection to the file.
+    const body = new TextEncoder().encode(JSON.stringify({ text: 'Hill repeats.' }));
+    const writer = openServingStore(path);
+    try {
+      await writer.putSyncItem({
+        athleteId: anna.athleteId,
+        kind: 'note',
+        key: 'n1',
+        body,
+        digest: 'a'.repeat(64),
+        now: Math.floor(clock.ms / 1000),
+      });
+    } finally {
+      await writer.close();
+    }
+    /** Run the retry timer that is due, as the clock reaching it would. */
+    const fireRetry = (): void => {
+      const retry = pending.find((entry) => entry.at % RETRY_PERIOD_MS === 0);
+      if (retry === undefined) throw new Error('no retry is armed');
+      clock.ms = retry.at;
+      pending.splice(pending.indexOf(retry), 1);
+      retry.run();
+    };
+    // The first retry is due on the next five-minute boundary, 100 s away,
+    // and finds the model down: it stops, and embeds nothing.
+    expect(pending.find((entry) => entry.at % RETRY_PERIOD_MS === 0)?.at).toBe(clock.ms + 100_000);
+    fireRetry();
+    await until(
+      () =>
+        lines.some(
+          (line) => line.includes('"event":"history-indexed"') && line.includes('"unreachable"'),
+        ),
+      'the catch-up to stop',
+    );
+    expect(documents).toStrictEqual([]);
+    // The model starts. Nothing is synced again and nothing restarts.
+    down = false;
+    fireRetry();
+    await until(() => documents.length > 0, 'the note, embedded');
+    expect(documents.some((text) => text.endsWith('Hill repeats.'))).toBe(true);
+    // It is armed again for the next boundary, and stopped with the instance.
+    expect(pending.some((entry) => entry.at === clock.ms + RETRY_PERIOD_MS)).toBe(true);
+    await instance.stop();
+    running = undefined;
+    expect(pending).toStrictEqual([]);
+  }, 30_000);
 });

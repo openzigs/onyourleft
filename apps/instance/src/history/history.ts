@@ -17,7 +17,16 @@
  * never a mixture (D-7).
  *
  * It **fails closed**: when the model cannot be reached the sweep stops, the
- * items wait, and nothing is embedded anywhere else (D-6).
+ * items wait, and nothing is embedded anywhere else (D-6). A running instance
+ * tries again every {@link RETRY_PERIOD_MS} (`instance.ts`), so a model started
+ * after the instance is picked up with no sync and no restart (#918).
+ *
+ * ⚠️ **One item the model refuses does not stop the rest** (#918). A model
+ * that answers one item `refused` or `malformed` has answered — it is
+ * reachable — so that item is marked `failed` and the sweep goes on past it.
+ * Before #918 the sweep stopped there, and the same oldest item came first
+ * again on every sweep, so one bad item stopped indexing for the whole
+ * instance. A marked item is tried again {@link FAILED_RETRY_SECONDS} later.
  *
  * ## Asking it (D-2, D-3, D-8)
  *
@@ -35,7 +44,12 @@
 import type { Caller, Outcome } from '../auth/identity.ts';
 import type { FieldProblem } from '../errors.ts';
 import { logEvent, type LogSink } from '../log.ts';
-import type { HistoryIndexSummary, SqlStore, SyncKind } from '../store/sql-store.ts';
+import type {
+  HistoryIndexSummary,
+  HistoryOutcome,
+  SqlStore,
+  SyncKind,
+} from '../store/sql-store.ts';
 import type { EmbedFailure, Embedder } from './embedder.ts';
 import { cutSource, INDEXED_KINDS, RIDE_KINDS } from './passages.ts';
 
@@ -45,6 +59,15 @@ export const MAXIMUM_SEARCH_PASSAGES = 6;
 /** The largest character budget one search may state: six passages of 900 (D-8). */
 export const MAXIMUM_SEARCH_CHARACTERS = 5_400;
 
+/**
+ * How many times one athlete may search their history a minute, unless the
+ * operator's limits say otherwise (#918): `identity.ts`
+ * §`IdentityLimits.historySearchesPerAthlete` says why. Here rather than
+ * there so the route's description can name it without importing the
+ * accounts.
+ */
+export const DEFAULT_HISTORY_SEARCHES = { limit: 30, windowMs: 60_000 } as const;
+
 /** The longest query the instance embeds. */
 export const MAXIMUM_QUERY_CHARACTERS = 2_000;
 
@@ -53,6 +76,21 @@ export const EMBEDDING_BATCH = 16;
 
 /** How many pending items one round of a catch-up reads. */
 const SWEEP_PAGE = 16;
+
+/**
+ * How often a running instance starts a catch-up of its own (#918): **5
+ * minutes**. What it is for is a model that was not running when the instance
+ * started, or went away: nothing else would try again until the next sync.
+ * One query when nothing is pending. Chosen.
+ */
+export const RETRY_PERIOD_MS = 5 * 60_000;
+
+/**
+ * How long an item the model refused waits before it is tried again (#918):
+ * **one hour** — a transient refusal heals, and an item the model will never
+ * take costs one request an hour. Chosen.
+ */
+export const FAILED_RETRY_SECONDS = 60 * 60;
 
 /** One passage, as the caller is sent it. */
 export interface RetrievedPassage {
@@ -73,8 +111,10 @@ export interface HistorySearch {
 
 /** How a catch-up ended. */
 export interface CatchUpReport {
-  /** Items written: with passages, or found to have none. */
+  /** Items written: with passages, or found to have none, or marked `failed`. */
   readonly indexed: number;
+  /** Of those, the items the model refused or answered wrongly for, marked and gone past (#918). */
+  readonly failed: number;
   /** Why it stopped early, or `null` when nothing was left to index. */
   readonly stopped: EmbedFailure | 'off' | null;
 }
@@ -165,20 +205,29 @@ export function dot(a: Float32Array, b: Float32Array): number {
   return sum;
 }
 
-/** When each of an athlete's rides started, by its activity id, read from its signed records. */
-function rideStarts(
+/**
+ * When each ride in `wanted` started, by its activity id, read from the
+ * athlete's signed records — and no more of them than it takes (#918 item 5):
+ * a search dates at most six passages and the ride it is about, and used to
+ * parse every record the athlete had to do it.
+ */
+export function rideStarts(
   records: readonly { readonly signedRecord: Uint8Array }[],
+  wanted: ReadonlySet<string>,
 ): ReadonlyMap<string, number> {
   const starts = new Map<string, number>();
+  const decoder = new TextDecoder();
   for (const record of records) {
+    if (starts.size === wanted.size) break;
     try {
       const claims = (
-        JSON.parse(new TextDecoder().decode(record.signedRecord)) as {
+        JSON.parse(decoder.decode(record.signedRecord)) as {
           claims?: { activityId?: unknown; startedAt?: unknown };
         }
       ).claims;
-      if (typeof claims?.activityId === 'string' && typeof claims.startedAt === 'number') {
-        starts.set(claims.activityId, claims.startedAt);
+      const id = claims?.activityId;
+      if (typeof id === 'string' && wanted.has(id) && typeof claims?.startedAt === 'number') {
+        starts.set(id, claims.startedAt);
       }
     } catch {
       // A record that does not parse dates nothing.
@@ -222,11 +271,12 @@ export function createHistory(options: HistoryOptions): History {
   let again = false;
 
   const catchUp = async (): Promise<CatchUpReport> => {
-    if (embedder === undefined) return { indexed: 0, stopped: 'off' };
+    if (embedder === undefined) return { indexed: 0, failed: 0, stopped: 'off' };
     let indexed = 0;
+    let failed = 0;
     const write = async (
       source: { athleteId: string; kind: SyncKind; key: string; digest: string },
-      outcome: 'indexed' | 'empty' | 'too-long' | 'picture',
+      outcome: HistoryOutcome,
       passages: readonly { ordinal: number; text: string; vector: Float32Array }[],
     ): Promise<void> => {
       await store.putHistoryIndex({
@@ -239,6 +289,7 @@ export function createHistory(options: HistoryOptions): History {
         now: Math.floor(now() / 1000),
       });
       indexed += 1;
+      if (outcome === 'failed') failed += 1;
     };
     // Bounded, so a store that kept answering the same page could not spin for ever.
     for (let round = 0; round < 100_000; round += 1) {
@@ -247,8 +298,9 @@ export function createHistory(options: HistoryOptions): History {
         embedder.model,
         embedder.convention,
         SWEEP_PAGE,
+        Math.floor(now() / 1000) - FAILED_RETRY_SECONDS,
       );
-      if (pending.length === 0) return { indexed, stopped: null };
+      if (pending.length === 0) return { indexed, failed, stopped: null };
       for (const source of pending) {
         const cut = cutSource(source.kind, source.body);
         if (cut.kind !== 'passages') {
@@ -256,25 +308,39 @@ export function createHistory(options: HistoryOptions): History {
           continue;
         }
         const vectors: Float32Array[] = [];
-        let tooLong = false;
+        let gaveUp: 'too-long' | 'failed' | undefined;
         for (let at = 0; at < cut.passages.length; at += EMBEDDING_BATCH) {
           const answer = await embedder.embed(
             cut.passages.slice(at, at + EMBEDDING_BATCH),
             'document',
           );
-          if (!answer.ok && answer.why === 'too-long') {
-            tooLong = true;
+          if (answer.ok) {
+            vectors.push(...answer.vectors);
+            continue;
+          }
+          // An answer about THIS item — the model was reached, and said no,
+          // or answered wrongly: mark it and go on (#918).
+          if (answer.why === 'too-long') {
+            gaveUp = 'too-long';
             break;
           }
-          if (!answer.ok) return { indexed, stopped: answer.why };
-          vectors.push(...answer.vectors);
+          if (answer.why === 'refused' || answer.why === 'malformed') {
+            gaveUp = 'failed';
+            break;
+          }
+          // No answer at all, or an address that may not be asked: every item
+          // after this one would fare the same. Stop, and let them wait (D-6).
+          return { indexed, failed, stopped: answer.why };
         }
-        if (tooLong) {
-          await write(source, 'too-long', []);
+        if (
+          gaveUp === undefined &&
+          vectors.some((vector) => vector.length !== vectors[0]?.length)
+        ) {
+          gaveUp = 'failed';
+        }
+        if (gaveUp !== undefined) {
+          await write(source, gaveUp, []);
           continue;
-        }
-        if (vectors.some((vector) => vector.length !== vectors[0]?.length)) {
-          return { indexed, stopped: 'malformed' };
         }
         await write(
           source,
@@ -287,7 +353,7 @@ export function createHistory(options: HistoryOptions): History {
         );
       }
     }
-    return { indexed, stopped: null };
+    return { indexed, failed, stopped: null };
   };
 
   const schedule = (): void => {
@@ -304,6 +370,7 @@ export function createHistory(options: HistoryOptions): History {
           if (options.log !== undefined && (report.indexed > 0 || report.stopped !== null)) {
             logEvent(options.log, 'history-indexed', {
               indexed: report.indexed,
+              failed: report.failed,
               stopped: report.stopped,
             });
           }
@@ -362,10 +429,17 @@ export function createHistory(options: HistoryOptions): History {
         spent += entry.passage.text.length;
       }
 
-      const dated = chosen.some(({ passage }) => RIDE_KINDS.includes(passage.kind));
-      const starts = dated
-        ? rideStarts(await store.listActivityRecords(caller.athleteId))
-        : new Map<string, number>();
+      // Only the rides a chosen passage is about, and the one being written about.
+      const wanted = new Set(
+        chosen
+          .filter(({ passage }) => RIDE_KINDS.includes(passage.kind))
+          .map(({ passage }) => passage.key),
+      );
+      if (wanted.size > 0 && request.rideId !== undefined) wanted.add(request.rideId);
+      const starts =
+        wanted.size > 0
+          ? rideStarts(await store.listActivityRecords(caller.athleteId), wanted)
+          : new Map<string, number>();
       const about = request.rideId === undefined ? undefined : starts.get(request.rideId);
       return {
         ok: true,

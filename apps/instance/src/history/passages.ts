@@ -22,6 +22,14 @@
  * the whole item `picture`, and no passage of it is kept. The rider's own
  * text is otherwise not filtered (D-2 item 3).
  *
+ * ⚠️ **It is looked for AFTER the body is parsed** (#918), in every string a
+ * JSON body holds — keys too — or in the whole text when it is not JSON. It
+ * used to be one regular expression over the raw bytes, and two bodies got
+ * past it: `data\u003a…` (a JSON escape, which only parsing turns into a
+ * colon) and `data:;base64,…` (RFC 2397 lets the media type be left out). And
+ * it is found by {@link holdsDataUrl}, a scan, rather than a regular
+ * expression: see there for what each pattern tried cost.
+ *
  * A passage is at most {@link MAXIMUM_PASSAGE_CHARACTERS}: a longer block is
  * SPLIT here, at a paragraph, a sentence or a space, and never cut when it is
  * returned (D-8).
@@ -56,8 +64,78 @@ export type Cut =
   | { readonly kind: 'passages'; readonly passages: readonly string[] }
   | { readonly kind: 'empty' | 'picture' | 'too-long' };
 
-/** A `data:` URL of any kind: a picture, or bytes pretending to be text. */
-const DATA_URL = /\bdata:[a-z0-9.+-]*\/[a-z0-9.+-]*[^,\s]*,/i;
+/**
+ * The longest body, in UTF-16 code units, that is read for passages at all:
+ * **460 800**, twice what {@link MAXIMUM_PASSAGES_PER_SOURCE} full passages
+ * hold, so a JSON body's quoting and escapes fit. Checked FIRST (#918, #924
+ * item 7), so nothing below — the parse, the picture scan, the split — ever
+ * runs over more; a longer body is `too-long`, as one with too many passages
+ * is. The request body limit (`config.ts` §`DEFAULT_BODY_LIMIT_BYTES`, 1 MiB)
+ * admits more than this.
+ */
+export const MAXIMUM_SOURCE_CHARACTERS =
+  2 * MAXIMUM_PASSAGES_PER_SOURCE * MAXIMUM_PASSAGE_CHARACTERS;
+
+/** Where a `data:` URL may start: its scheme, at a word boundary. */
+const DATA_SCHEME = /\bdata:/giu;
+
+/** What ends a `data:` URL's header: its comma, or a space of any kind. */
+const HEADER_END = /[,\s]/u;
+
+/**
+ * Whether `text` holds a `data:` URL: `data:`, then anything but a comma or a
+ * space — a media type, or none (RFC 2397 lets it be left out), and any
+ * parameters — then a comma. Exactly what `/\bdata:[^,\s]*,/iu` matches
+ * (#918 item 1), in time linear in `text`.
+ *
+ * ⚠️ **Not that regular expression, and not #920's.** Measured in Node 24 on
+ * a Mac over 230 000 characters (#918, #924 item 7): the pattern this
+ * replaced, `/\bdata:[a-z0-9.+-]*\/[a-z0-9.+-]*[^,\s]*,/i`, took **74 s** on
+ * `data:a/` and a run of `a` with no comma — two quantifiers after the slash
+ * that both match a letter; #920's client pattern, `/\bdata:[a-z0-9.+-]*\/[^,\s]*,/iu`,
+ * fixes that input and still took **4.4 s** on `data:a/` repeated; and
+ * `/\bdata:[^,\s]*,/iu` took **6.1 s** on `data:` repeated. Each is retried
+ * from every place a `data:` starts and runs to the end of the text each
+ * time, which is quadratic. This scan remembers where the header that each
+ * `data:` starts in ends, and every later `data:` before that point shares
+ * the answer, so every character is looked at a bounded number of times.
+ */
+export function holdsDataUrl(text: string): boolean {
+  let end = -1;
+  for (const match of text.matchAll(DATA_SCHEME)) {
+    const from = match.index + match[0].length;
+    if (end < from) {
+      end = from;
+      while (end < text.length && !HEADER_END.test(text.charAt(end))) end += 1;
+    }
+    if (text.charAt(end) === ',') return true;
+  }
+  return false;
+}
+
+/**
+ * Every string in a parsed JSON value — keys too — however deep. A stack
+ * rather than recursion, so a body nested a hundred thousand deep is read
+ * rather than thrown on, which would leave it pending for ever.
+ */
+function stringsIn(root: unknown): string[] {
+  const found: string[] = [];
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (typeof value === 'string') {
+      found.push(value);
+    } else if (Array.isArray(value)) {
+      for (const entry of value as unknown[]) stack.push(entry);
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, entry] of Object.entries(value)) {
+        found.push(key);
+        stack.push(entry);
+      }
+    }
+  }
+  return found;
+}
 
 function jsonOf(text: string): unknown {
   try {
@@ -72,8 +150,7 @@ function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** The blocks of text a body holds, by kind; `[]` when it holds none. */
-function blocksOf(kind: SyncKind, text: string): readonly string[] {
-  const parsed = jsonOf(text);
+function blocksOf(kind: SyncKind, text: string, parsed: unknown): readonly string[] {
   switch (kind) {
     case 'write-up':
       return isObject(parsed) && typeof parsed.text === 'string' ? [parsed.text] : [];
@@ -131,8 +208,14 @@ export function cutSource(kind: SyncKind, body: Uint8Array): Cut {
   } catch {
     return { kind: 'empty' };
   }
-  if (DATA_URL.test(text)) return { kind: 'picture' };
-  const passages = blocksOf(kind, text).flatMap(splitBlock);
+  // The length first, so nothing below runs over more (#918, #924 item 7).
+  if (text.length > MAXIMUM_SOURCE_CHARACTERS) return { kind: 'too-long' };
+  const parsed = jsonOf(text);
+  // After parsing, so an escaped colon is a colon (#918 item 1): every string
+  // of a JSON body, or the whole text of one that is not JSON.
+  const strings = parsed === undefined ? [text] : stringsIn(parsed);
+  if (strings.some(holdsDataUrl)) return { kind: 'picture' };
+  const passages = blocksOf(kind, text, parsed).flatMap(splitBlock);
   if (passages.length === 0) return { kind: 'empty' };
   if (passages.length > MAXIMUM_PASSAGES_PER_SOURCE) return { kind: 'too-long' };
   return { kind: 'passages', passages };

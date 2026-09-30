@@ -421,8 +421,13 @@ export interface ListedActivity {
   readonly record: ActivityRecord;
 }
 
-/** How indexing one synced item went (#835). */
-export type HistoryOutcome = 'indexed' | 'empty' | 'too-long' | 'picture';
+/**
+ * How indexing one synced item went (#835). `failed` (#918) is an item the
+ * model refused or answered wrongly for: marked so the sweep goes past it,
+ * and tried again once {@link SqlStore.listPendingHistorySources}'s
+ * `retryFailedBefore` has passed the time it was marked.
+ */
+export type HistoryOutcome = 'indexed' | 'empty' | 'too-long' | 'picture' | 'failed';
 
 /** A live synced item the history index has not cut for the configured model yet (#835). */
 export interface PendingHistorySource {
@@ -632,13 +637,16 @@ export interface SqlStore {
   /**
    * #835: live items of `kinds`, of any athlete, that have no index row for
    * this body under this `model` and `convention` — what the indexer does
-   * next. Oldest first.
+   * next. Oldest first. An item marked `failed` (#918) is pending again when
+   * it was marked at or before `retryFailedBefore` (Unix seconds), and never
+   * when that is absent.
    */
   listPendingHistorySources(
     kinds: readonly SyncKind[],
     model: string,
     convention: string,
     limit: number,
+    retryFailedBefore?: number,
   ): Promise<readonly PendingHistorySource[]>;
   /**
    * #835: replace the index's rows for one item, in one transaction — or
@@ -2341,7 +2349,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(inviteCodeFrom),
       ),
 
-    listPendingHistorySources: (kinds, model, convention, limit) =>
+    listPendingHistorySources: (kinds, model, convention, limit, retryFailedBefore) =>
       exclusive(async () => {
         if (kinds.length === 0) return [];
         const rows = await db
@@ -2362,7 +2370,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                   .whereRef('h.source_key', '=', 's.item_key')
                   .whereRef('h.source_digest', '=', 's.digest')
                   .where('h.model', '=', model)
-                  .where('h.convention', '=', convention),
+                  .where('h.convention', '=', convention)
+                  // A marked failure is held back until its retry is due (#918).
+                  .$if(retryFailedBefore !== undefined, (query) =>
+                    query.where((held) =>
+                      held.or([
+                        held('h.outcome', '!=', 'failed'),
+                        held('h.indexed_at', '>', retryFailedBefore ?? 0),
+                      ]),
+                    ),
+                  ),
               ),
             ),
           )

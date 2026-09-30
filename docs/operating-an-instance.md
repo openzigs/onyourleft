@@ -102,8 +102,12 @@ model built it), and it can be thrown away and made again.
 | `"event":"history-index","state":"on","model":…` at start | the index is on, with that model |
 | `"event":"history-index","state":"off","code":"not-set"` | no embedding address is set: history is off, and nothing else changes |
 | `…"state":"off","code":"not-local"` | the address was refused: it must be localhost, a loopback or private address, or a single-label (Compose service) name. Standard error has the sentence |
-| `"event":"history-indexed","indexed":n,"stopped":null` | a catch-up indexed `n` items and nothing is waiting |
-| `…"stopped":"unreachable"` (or `refused`, `not-local`, `malformed`) | the model could not be used; the items wait, and nothing is embedded anywhere else. It is tried again at the next sync and the next start |
+| `"event":"history-indexed","indexed":n,"failed":f,"stopped":null` | a catch-up indexed `n` items and nothing is waiting. `f` of them the model refused or answered wrongly for: each is marked, gone past, and tried again an hour later (#918) |
+| `…"stopped":"unreachable"` (or `not-local`, `unresolved`) | the model could not be reached; the items wait, and nothing is embedded anywhere else. It is tried again every five minutes, at the next sync and at the next start, so a model started after the instance is picked up on its own (#918) |
+
+**How often a rider may search.** `POST /v1/history/search` embeds a query on this machine, so it
+is limited per rider: 30 a minute, then `429 rate_limited` (#918). The count is kept in memory by
+rider, not by address, and forgotten when its minute ends, as every other limit is.
 
 **Changing the model** (`OYL_INSTANCE_EMBEDDING_MODEL`, or either prefix) re-embeds every item at
 the next start. Until it has finished, a search returns fewer passages, never rows of two models.

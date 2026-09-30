@@ -110,7 +110,7 @@ describe('the history index reaches no picture (#799, on the server)', () => {
       try {
         const embedder = scriptedEmbedder();
         const history = createHistory({ store, embedder });
-        expect(await history.catchUp()).toEqual({ indexed: 1, stopped: null });
+        expect(await history.catchUp()).toEqual({ indexed: 1, failed: 0, stopped: null });
         expect(embedder.calls).toStrictEqual([]);
         expect(await store.summariseHistoryIndex('a')).toStrictEqual([]);
       } finally {
