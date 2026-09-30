@@ -264,6 +264,22 @@ export async function typeInto(input: HTMLInputElement, value: string): Promise<
 }
 
 /**
+ * {@link typeInto} for a `<textarea>` (#836): the element has its own `value`
+ * descriptor, and React installs one over it, so the prototype's setter is the
+ * one that makes React see the change.
+ */
+export async function typeIntoTextArea(area: HTMLTextAreaElement, value: string): Promise<void> {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+  if (descriptor?.set === undefined) {
+    throw new Error('this DOM implementation has no HTMLTextAreaElement value setter');
+  }
+  await inAct(() => {
+    descriptor.set?.call(area, value);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/**
  * Choose an option in a `<select>`, the way a rider would.
  *
  * The same native-setter trick {@link typeInto} uses and for the same reason:

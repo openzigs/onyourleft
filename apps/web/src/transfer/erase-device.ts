@@ -147,6 +147,10 @@ export const ERASE_REMOVES: readonly string[] = [
   // #801, the model write-up (#800, ADR 0035): a model's words about the
   // rider's ride, kept with it. `deleteAthlete` cascades `rideWriteUps`.
   'every write-up of a ride your own model or a hosted model wrote for you',
+  // #836. The rider's own free text for the analysis: `deleteAthlete`
+  // cascades `riderTexts`. The instance's synced copy is not this device's to
+  // erase — see the instance line in {@link ERASE_CANNOT_REACH}.
+  'your goals, your notes on your rides and the documents you added for the analysis',
   // #518. Not a store row: the address, model name and key of a hosted model
   // the rider set up are kept in `localStorage` (`camera/hosted-model.ts`),
   // where `deleteAthlete` cannot see them. A key to the rider's own account at

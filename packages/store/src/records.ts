@@ -1190,13 +1190,16 @@ export interface RideWriteUpRecord {
  * instance, the last time the two agreed — #776, and #893's review (B1, B2).
  *
  * `activity` is a ride, keyed by its signed file's content hash (64 lowercase
- * hex); `write-up` and `side-camera-report` are keyed by the ride's own id.
+ * hex); `write-up`, `side-camera-report` and `note` are keyed by the ride's own
+ * id; `goal` and `document` (#836) by the rider text's own key
+ * (`rider-text.ts`).
  * `race-consent` (#793) is a ride's "may be raced" consent, keyed by the
  * ride's own id, its digests those of `{"mayBeRaced":true}` or `…false}`: a
  * base is what stops a device that still says "yes" putting a consent back
  * after another device revoked it.
  */
-export type SyncBaseKind = 'activity' | 'write-up' | 'side-camera-report' | 'race-consent';
+export type SyncBaseKind =
+  'activity' | 'write-up' | 'side-camera-report' | 'race-consent' | 'goal' | 'note' | 'document';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1204,7 +1207,16 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'write-up',
   'side-camera-report',
   'race-consent',
+  'goal',
+  'note',
+  'document',
 ];
+
+/**
+ * The kinds that belong to no ride (#836): the rider's goals and their
+ * documents. Their sync base row names no ride — `activityId` is `null`.
+ */
+export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document'];
 
 /**
  * The **sync base**: what this device and its instance agreed on at the last
@@ -1242,10 +1254,62 @@ export interface SyncBaseRecord {
   readonly kind: SyncBaseKind;
   /** A ride's content hash for `activity`; the ride's id for an item. */
   readonly key: string;
-  /** The ride this row is about — for an item, the same as `key`. */
-  readonly activityId: ActivityId;
+  /**
+   * The ride this row is about — for an item of a ride (a write-up, a
+   * side-camera report, a note), the same as `key`. `null` for a goal or a
+   * document (#836), which belong to no ride.
+   */
+  readonly activityId: ActivityId | null;
   /** SHA-256 of this device's copy at the last sync, lowercase hex. */
   readonly localDigest: string;
   /** The digest the instance's manifest named at the last sync, lowercase hex. */
   readonly remoteDigest: string;
+}
+
+/**
+ * The three kinds of text a rider writes or adds for the analysis agent's
+ * history — #836, ADR 0040 D-1 and D-2. The names are the instance's sync
+ * kinds, so a row and the item it syncs as are one word.
+ */
+export type RiderTextKind = 'goal' | 'note' | 'document';
+
+/** Every {@link RiderTextKind}. */
+export const RIDER_TEXT_KINDS: readonly RiderTextKind[] = ['goal', 'note', 'document'];
+
+/**
+ * Something the rider wrote or added for the ride analysis to look back on
+ * (#836): their **goals** (one per rider), a **note** on one ride (one per
+ * ride), or a **document** such as a training plan (as many as
+ * `rider-text.ts` §`MAXIMUM_RIDER_DOCUMENTS`).
+ *
+ * ## The device copy is canonical (ADR 0036 D-3, ADR 0040 D-1)
+ *
+ * Every one of them is kept HERE first and synced to the rider's instance,
+ * which cuts it into passages for its history index. A document is never
+ * added on the instance: a text held only there would make the instance the
+ * only place a rider's data is.
+ *
+ * ## What it holds
+ *
+ * Plain text — a document is plain text or Markdown, never a PDF or a
+ * picture (#836, #799) — with no control character but a tab or a newline,
+ * within the length `rider-text.ts` gives its kind. **Free text**: it can name
+ * anything, which is why every validation message names the field and never
+ * the value, and why it is in the account export as the rider's own data
+ * (ADR 0040 D-10).
+ */
+export interface RiderTextRecord {
+  /** Whose. **Every read and delete of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  readonly kind: RiderTextKind;
+  /**
+   * `goals` for the goals; the ride's activity id for a note (the ride must be
+   * the athlete's); the document's own id for a document.
+   */
+  readonly key: string;
+  /** A document's name — its file name, as the rider chose it. Absent on a goal and a note. */
+  readonly name?: string;
+  readonly text: string;
+  /** When it was last saved on this device. */
+  readonly savedAt: UnixSeconds;
 }
