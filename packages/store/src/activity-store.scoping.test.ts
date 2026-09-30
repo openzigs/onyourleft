@@ -104,6 +104,7 @@ import type {
   RideWriteUpRecord,
   SyncBaseRecord,
   RiderTextRecord,
+  TrustedDeviceKeyRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -122,6 +123,7 @@ import {
   rideWriteUpFor,
   syncBaseFor,
   riderTextFor,
+  trustedDeviceKeyFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -179,6 +181,7 @@ interface World {
   readonly goal: RiderTextRecord;
   readonly note: RiderTextRecord;
   readonly document: RiderTextRecord;
+  readonly trustedKey: TrustedDeviceKeyRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -253,6 +256,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const goal = riderTextFor(owner, 'goal');
   const note = riderTextFor(owner, 'note', ride.id);
   const document = riderTextFor(owner, 'document');
+  // #898. A different key per athlete.
+  const trustedKey = trustedDeviceKeyFor(owner);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -278,6 +283,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putRiderText(goal);
     await store.putRiderText(note);
     await store.putRiderText(document);
+    await store.putTrustedDeviceKey(trustedKey);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -303,6 +309,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     goal,
     note,
     document,
+    trustedKey,
   };
 }
 
@@ -820,6 +827,16 @@ const PROBES: readonly ScopingProbe[] = [
       ]);
       await expect(store.listRiderTexts(mine.owner, 'goal')).resolves.toStrictEqual([mine.goal]);
       await expect(store.listRiderTexts(mine.owner, 'note')).resolves.toStrictEqual([mine.note]);
+    },
+  },
+  {
+    member: 'listTrustedDeviceKeys',
+    leaks:
+      "another athlete's admitted keys — a sync of mine would then take a record one of their devices signed as mine",
+    async run(store, mine) {
+      await expect(store.listTrustedDeviceKeys(mine.owner)).resolves.toStrictEqual([
+        mine.trustedKey,
+      ]);
     },
   },
   {

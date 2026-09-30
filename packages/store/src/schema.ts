@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **16** since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **17** since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -110,10 +110,15 @@
  * (a sync base row may now carry a `null` ride, for a goal or a document,
  * which no row written at 15 does).
  *
+ * ⚠️ **Version 17 is #898's `trustedDeviceKeys`** — the athlete's other
+ * devices' public keys, admitted on THIS device, which a sync checks a pulled
+ * record's key against rather than trusting the instance's device list.
+ * Additive: a new store, and no existing record's shape changes.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -199,6 +204,13 @@ export const TABLE = {
    * whose it is.
    */
   riderTexts: 'riderTexts',
+  /**
+   * #898: the public keys of the athlete's OTHER devices that were admitted on
+   * this device — the keys a sync takes a pulled record from
+   * (`records.ts` §`TrustedDeviceKeyRecord`). Keyed by the athlete and the key
+   * together, so no row can be named without naming whose it is.
+   */
+  trustedDeviceKeys: 'trustedDeviceKeys',
 } as const;
 
 /**
@@ -369,6 +381,8 @@ export const INDEX = {
   riderTextByAthlete: 'athleteId',
   /** #836: `listRiderTexts` — one athlete's texts of one kind, as one index range. */
   riderTextByAthleteAndKind: '[athleteId+kind]',
+  /** #898: `listTrustedDeviceKeys` and `deleteAthlete`'s cascade. */
+  trustedDeviceKeyByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -825,6 +839,22 @@ export const STORES_V16: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 17 — #898's trusted device keys, added beside the twenty stores that
+ * exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import like every additive version's; what a downgrade loses is the set
+ * of keys admitted here, so a sync after it pulls nothing signed by another
+ * device until each is admitted again — the safe direction.
+ *
+ * The primary key is compound and leads with the athlete, for
+ * {@link STORES_V14}'s reason.
+ */
+export const STORES_V17: Readonly<Record<string, string>> = {
+  // The twenty stores of versions 1 to 16 are inherited unchanged.
+  [TABLE.trustedDeviceKeys]: ['[athleteId+publicKey]', INDEX.trustedDeviceKeyByAthlete].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -842,4 +872,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V14,
   STORES_V15,
   STORES_V16,
+  STORES_V17,
 ];

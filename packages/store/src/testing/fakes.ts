@@ -88,6 +88,7 @@ import type {
   RideWriteUpRecord,
   SyncBaseRecord,
   RiderTextRecord,
+  TrustedDeviceKeyRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -205,6 +206,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     listRiderTexts: async (owner, kind) => real.listRiderTexts(owner, kind),
     listRiderTextKeys: async (owner, kind) => real.listRiderTextKeys(owner, kind),
     deleteRiderText: async (owner, kind, key) => real.deleteRiderText(owner, kind, key),
+    putTrustedDeviceKey: async (record) => real.putTrustedDeviceKey(record),
+    listTrustedDeviceKeys: async (owner) => real.listTrustedDeviceKeys(owner),
   };
 }
 
@@ -314,6 +317,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putRiderText: (record: RiderTextRecord) => {
           memory.set(`rider-text:${record.kind}:${record.key}`, record);
           return Promise.resolve(record);
+        },
+        putTrustedDeviceKey: (record: TrustedDeviceKeyRecord) => {
+          memory.set(`trusted-key:${record.publicKey}`, record);
+          return Promise.resolve();
         },
       };
     },
