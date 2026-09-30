@@ -79,6 +79,20 @@ export interface RoomTable {
   readonly physics_version: number;
 }
 
+/** What a room is ridden on, as the room core needs it (#780, migration 0005). */
+export interface RoomCourseTable {
+  readonly room_id: string;
+  readonly length_metres: number;
+  /** JSON: `[[fromMetres, percent], …]`, the first from 0, ascending. */
+  readonly grades: string;
+  readonly riding_position: 'upright' | 'hoods' | 'drops';
+  readonly capacity: number | null;
+  readonly countdown_ms: number | null;
+  readonly rejoin_window_ms: number | null;
+  /** Unix seconds: when this race left its lobby. It is never a lobby again. */
+  readonly race_started_at: number | null;
+}
+
 /** One athlete's result in one room. */
 export interface ResultTable {
   readonly room_id: string;
@@ -121,7 +135,10 @@ export interface DisplayNameChangeTable {
   readonly changed_at: number;
 }
 
-/** An athlete's address for email recovery — only where the operator enabled it (#773). */
+/**
+ * An athlete's address for email recovery — only where the operator enabled
+ * it (#773), and only once the athlete confirmed it (#865).
+ */
 export interface RecoveryEmailTable {
   readonly athlete_id: string;
   readonly address: string;
@@ -135,6 +152,18 @@ export interface EmailRecoveryTokenTable {
   readonly used_at: number | null;
 }
 
+/**
+ * An address an athlete gave, waiting to be confirmed (#865), and the SHA-256
+ * of the mailed token. Added by migration 0006.
+ */
+export interface RecoveryEmailConfirmationTable {
+  readonly token_sha256: string;
+  readonly athlete_id: string;
+  readonly address: string;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -142,6 +171,7 @@ export interface InstanceDatabase {
   readonly session: SessionTable;
   readonly activity_record: ActivityRecordTable;
   readonly room: RoomTable;
+  readonly room_course: RoomCourseTable;
   readonly result: ResultTable;
   readonly auth_challenge: AuthChallengeTable;
   readonly recovery_code: RecoveryCodeTable;
@@ -149,4 +179,5 @@ export interface InstanceDatabase {
   readonly display_name_change: DisplayNameChangeTable;
   readonly recovery_email: RecoveryEmailTable;
   readonly email_recovery_token: EmailRecoveryTokenTable;
+  readonly recovery_email_confirmation: RecoveryEmailConfirmationTable;
 }

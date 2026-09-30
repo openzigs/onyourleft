@@ -253,7 +253,18 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
  */
 const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/main.ts',
+  'apps/instance/src/serve.ts',
   'apps/instance/src/node-listener.ts',
+  'apps/instance/src/operator/cli.ts',
+  'apps/instance/src/operator/run.ts',
+  'apps/instance/src/room/node/router.ts',
+  'apps/instance/src/room/node/worker.ts',
+  'apps/instance/src/room/node/worker-main.ts',
+  'apps/instance/src/instance.ts',
+  'apps/instance/src/node-imports.ts',
+  'apps/instance/src/operator/commands.ts',
+  'apps/instance/src/store/backup.ts',
+  'apps/instance/src/store/serving.ts',
   'apps/instance/src/store/node-sqlite.ts',
   'apps/instance/src/blob/disk-blob-store.ts',
   'apps/instance/src/**/*.test.ts',
@@ -764,6 +775,11 @@ export default tseslint.config(
   // first download. The package declares no `exports` map, so every file under
   // it is importable by path; refusing every subpath is what closes
   // `lucide-react/dist/esm/DynamicIcon.mjs` as well as the documented one.
+  //
+  // ⚠️ Flat config keeps the LAST setting of a rule for a file, so a later block
+  // that sets `@typescript-eslint/no-restricted-imports` for any file under
+  // `apps/web` silently drops these bans there (#871, from #868's review). Such
+  // a block restates these entries rather than replacing them.
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     rules: {

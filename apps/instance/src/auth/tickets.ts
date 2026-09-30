@@ -26,10 +26,19 @@
  * whether the first was accepted or not. A ticket for another room, an expired
  * ticket and anything that is not a ticket (a session token included) are all
  * `undefined`, which the room answers `ticket-refused` without saying which.
+ *
+ * ## Mounted by both adapters (#780, #781)
+ *
+ * The book names no platform: the ticket's random text comes from the
+ * `token` its maker is handed (`crypto.ts`'s `randomToken(32)` on the box),
+ * so the Durable Object adapter compiles and loads it under `workerd` with no
+ * `types` at all. On the box the HTTP process holds the one book and a room
+ * worker asks it once per hello (`room/node/`); a Durable Object holds its
+ * own and mints through `POST …/tickets` from the Worker in front
+ * (`room/durable-object/room-object.ts`).
  */
 
 import type { Admission, Admit } from '../room/core/room.ts';
-import { randomToken } from './crypto.ts';
 
 /** How long a ticket is good for: #772's "≤ 30 s". */
 export const TICKET_LIFETIME_MS = 30_000;
@@ -50,7 +59,11 @@ export interface TicketBook {
   admitterFor(roomId: string): Admit;
 }
 
-export function createTicketBook(now: () => number): TicketBook {
+/**
+ * @param token a new unguessable ticket's text each call — at least 256 bits
+ * of randomness (`randomToken(32)`).
+ */
+export function createTicketBook(now: () => number, token: () => string): TicketBook {
   const held = new Map<string, Held>();
 
   function sweep(at: number): void {
@@ -61,7 +74,7 @@ export function createTicketBook(now: () => number): TicketBook {
     mint(roomId, admission) {
       const at = now();
       sweep(at);
-      const ticket = randomToken(32);
+      const ticket = token();
       const expiresAtMs = at + TICKET_LIFETIME_MS;
       held.set(ticket, { ...admission, roomId, expiresAtMs });
       return { ticket, expiresAtMs };

@@ -275,7 +275,8 @@ async function run(): Promise<void> {
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
   publish({ outcome, notice });
 
-  const profile = realisticRoute();
+  // #702: turned towards the sun or away from it only when the URL asks.
+  const profile = realisticRoute(config.facing);
   const origin = corridorOrigin(profile);
   document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
   const canvas = document.createElement('canvas');
