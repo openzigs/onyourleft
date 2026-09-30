@@ -137,6 +137,51 @@ function stringsIn(root: unknown): string[] {
   return found;
 }
 
+/** A piece of JSON's punctuation, told apart from a parsed value, which is never a class instance. */
+class Punctuation {
+  readonly text: string;
+  constructor(text: string) {
+    this.text = text;
+  }
+}
+
+/**
+ * A parsed JSON value written out again as `JSON.stringify` writes it — no
+ * whitespace, the least escaping, keys in the same order — but with a stack
+ * rather than recursion, for the reason {@link stringsIn} gives (#928's
+ * second review).
+ */
+function serialised(root: unknown): string {
+  const out: string[] = [];
+  const work: unknown[] = [root];
+  while (work.length > 0) {
+    const value = work.pop();
+    if (value instanceof Punctuation) {
+      out.push(value.text);
+    } else if (Array.isArray(value)) {
+      const entries = value as unknown[];
+      work.push(new Punctuation(']'));
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        work.push(entries[index]);
+        if (index > 0) work.push(new Punctuation(','));
+      }
+      work.push(new Punctuation('['));
+    } else if (typeof value === 'object' && value !== null) {
+      const entries = Object.entries(value);
+      work.push(new Punctuation('}'));
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const [key, entry] = entries[index] as [string, unknown];
+        work.push(entry, new Punctuation(':'), new Punctuation(JSON.stringify(key)));
+        if (index > 0) work.push(new Punctuation(','));
+      }
+      work.push(new Punctuation('{'));
+    } else {
+      out.push(JSON.stringify(value) ?? 'null');
+    }
+  }
+  return out.join('');
+}
+
 function jsonOf(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -211,12 +256,19 @@ export function cutSource(kind: SyncKind, body: Uint8Array): Cut {
   // The length first, so nothing below runs over more (#918, #924 item 7).
   if (text.length > MAXIMUM_SOURCE_CHARACTERS) return { kind: 'too-long' };
   const parsed = jsonOf(text);
-  // The raw text AND, after parsing, every string of a JSON body (#918 item 1).
-  // The parsed strings catch what the raw bytes hide — an escaped colon is a
-  // colon — and the raw text catches what parsing splits: a header in one
-  // string and its payload in the next, or a header in a key and its payload
-  // in the value (#928's review). Each is linear, so both together are.
-  const strings = parsed === undefined ? [text] : [text, ...stringsIn(parsed)];
+  // The raw text AND, after parsing, the body re-serialised and every string
+  // of it (#918 item 1). The parsed strings catch what the raw bytes hide — an
+  // escaped colon is a colon — and the raw text catches what parsing splits: a
+  // header in one string and its payload in the next, or a header in a key
+  // and its payload in the value (#928's review). The re-serialisation catches
+  // both at once: a split with whitespace between the strings, a split with an
+  // escaped colon, or `"data:…" : ",…"` — `JSON.stringify` drops the
+  // whitespace and the needless escapes and keeps the `","` or `":"` joint
+  // (#928's second review). The raw text stays, because a `\u0020` is not a
+  // space until it is parsed. Each is linear, and about as long as `text`.
+  // `serialised`, not `JSON.stringify`, which recurses and throws on a body
+  // nested a hundred thousand deep.
+  const strings = parsed === undefined ? [text] : [text, serialised(parsed), ...stringsIn(parsed)];
   if (strings.some(holdsDataUrl)) return { kind: 'picture' };
   const passages = blocksOf(kind, text, parsed).flatMap(splitBlock);
   if (passages.length === 0) return { kind: 'empty' };

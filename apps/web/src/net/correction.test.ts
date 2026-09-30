@@ -51,6 +51,12 @@ describe('how far a room may move the rider — #922', () => {
 
   it('still corrects a few hundred metres after a legitimate 55 s drop', () => {
     // No frame for 55 s, and the two came apart by 550 m at 10 m/s, either way.
+    // ⚠️ The LOCAL rider rides at 10 m/s here, and until #928's review stood
+    // still. That is not a looser fixture: the room coasts a silent rider
+    // through the same physics as this device (ADR 0028 D-2 rule 5), so it
+    // cannot honestly get 550 m ahead of a local rider who is also coasting
+    // from a stand — that case is now bounded at 2 m/s and refused, which is
+    // the point of #922's bound.
     const room = { distanceMetres: 1_550, speedMetresPerSecond: 10, atLocalMs: 65_000 };
     expect(roomErrorMetres(room, local(1_000, 10, 10_000), 65_000)).toBeCloseTo(550, 9);
     expect(

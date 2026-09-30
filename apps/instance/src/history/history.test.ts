@@ -291,6 +291,27 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     expect(await world.history.catchUp()).toEqual({ indexed: 0, failed: 0, stopped: null });
   });
 
+  it('does not ask about a held item again when it ends a page, and reaches the page after — #928', async () => {
+    const embedder = scriptedEmbedder();
+    const made = await syncWorld(1, { embedder });
+    world = made.world;
+    const [anna] = made.riders as [Rider];
+    embedder.failFor = (text) => (text.includes('nan') ? 'server-error' : undefined);
+    embedder.failWith = 'unreachable';
+    // A sweep reads sixteen at a time: the NaN item is the sixteenth, and the
+    // only item that could clear it is on the next page.
+    for (let index = 1; index <= 15; index += 1) {
+      await put(anna, 'note', `n${index}`, { text: `Fine note ${index}.` });
+    }
+    await put(anna, 'note', 'n16', { text: 'A nan note.' });
+    await put(anna, 'note', 'n17', { text: 'The seventeenth.' });
+    await world.history.idle();
+    embedder.failWith = undefined;
+    const before = embedder.calls.length;
+    expect(await world.history.catchUp()).toEqual({ indexed: 17, failed: 1, stopped: null });
+    expect(embedder.calls.length - before).toBe(17);
+  });
+
   it('marks nothing when the model answers 500 for every item — #928', async () => {
     const embedder = scriptedEmbedder();
     const made = await syncWorld(1, { embedder });

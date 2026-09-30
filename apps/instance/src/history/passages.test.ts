@@ -115,6 +115,29 @@ describe('which items are cut, and from what', () => {
     });
   });
 
+  it('finds a split picture with whitespace or an escape between the halves — #928 second review', () => {
+    for (const raw of [
+      // A space, then a newline, before the comma between the two strings.
+      '{"passages":["see data:image/png;base64" , ",iVBORw0KGgo"]}',
+      '{"passages":["see data:image/png;base64"\n,",iVBORw0KGgo"]}',
+      // A split AND an escaped colon: neither the raw text nor one parsed string holds it.
+      '{"passages":["see data\\u003aimage/png;base64",",iVBORw0KGgo"]}',
+      // The key/value form, written with a space either side of the colon.
+      '{"text":"hi","data:image/png;base64" : ",iVBORw0KGgo="}',
+    ]) {
+      expect(cutSource('ride-summary', new TextEncoder().encode(raw)), raw).toEqual({
+        kind: 'picture',
+      });
+    }
+    // The control: the same shape with no `data:` is passages.
+    expect(
+      cutSource(
+        'ride-summary',
+        new TextEncoder().encode('{"passages":["see image/png" , ",iVBOR"]}'),
+      ),
+    ).toEqual({ kind: 'passages', passages: ['see image/png', ',iVBOR'] });
+  });
+
   it('matches what /\\bdata:[^,\\s]*,/iu matches, and nothing else', () => {
     const pattern = /\bdata:[^,\s]*,/iu;
     for (const text of [

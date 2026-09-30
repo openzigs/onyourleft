@@ -82,7 +82,7 @@
  *
  * ## What a text scan cannot see (#922)
  *
- * It reads spellings, line by line, and a spelling is not a value. Three
+ * It reads spellings, line by line, and a spelling is not a value. These
  * ways of reaching a primitive pass it, and are written down here rather
  * than chased with patterns that would each find the next one:
  *
@@ -96,6 +96,15 @@
  * - **A primitive handed in.** A module given `fetch` as a parameter calls
  *   whatever it was given; the gate holds the module that HANDS it over, and
  *   that is where the one permitted `fetch` lives.
+ *
+ * - **Other spellings of a literal key** (#928's second review): a
+ *   parenthesised object, `(globalThis)['fetch'](u)`; a method of the
+ *   primitive, `window['fetch'].call(window, u)`; a key taken into a binding,
+ *   `const f = globalThis['fetch']`; a comment between the key and the
+ *   call's parenthesis; and anything split across lines, which a
+ *   line-by-line scan cannot see. And one false positive, from the name's
+ *   leading boundary: `obj.self['WebSocket']` and `foo.window['fetch'](u)`
+ *   match, though neither is the global object.
  *
  * What IS matched: the bare name; the name through `globalThis`, `window` or
  * `self` with `.` or `?.` (#782's review, #922); the same through a cast,
