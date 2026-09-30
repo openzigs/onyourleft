@@ -121,9 +121,37 @@ describe('what it believes of an answer', () => {
   });
 
   it.each([
-    ['another refusal', () => Response.json({ error: 'model not found' }, { status: 404 })],
-    ['a 400 that is not about length', () => Response.json({ error: 'bad' }, { status: 400 })],
+    ['a model not pulled', () => Response.json({ error: 'model not found' }, { status: 404 })],
+    ['a busy server', () => Response.json({ error: 'busy' }, { status: 429 })],
+  ])('calls %s unavailable, which is about the server and not the input', async (_case, answer) => {
+    const { fetch } = recordingFetch(answer);
+    const embedder = createOllamaEmbedder({ settings: SETTINGS, resolve: PRIVATE, fetch });
+    expect(await embedder.embed(['x'], 'document')).toEqual({ ok: false, why: 'unavailable' });
+  });
+
+  it.each([
     ['an error page', () => new Response('<html>', { status: 502 })],
+    ['a crashed server', () => Response.json({ error: 'boom' }, { status: 500 })],
+    [
+      'a NaN the model made of this input (ollama/ollama#13572)',
+      () =>
+        Response.json(
+          { error: 'failed to encode response: json: unsupported value: NaN' },
+          { status: 500 },
+        ),
+    ],
+  ])(
+    'calls %s server-error, which may be about the server or the input — #928',
+    async (_case, answer) => {
+      const { fetch } = recordingFetch(answer);
+      const embedder = createOllamaEmbedder({ settings: SETTINGS, resolve: PRIVATE, fetch });
+      expect(await embedder.embed(['x'], 'document')).toEqual({ ok: false, why: 'server-error' });
+    },
+  );
+
+  it.each([
+    ['a 400 that is not about length', () => Response.json({ error: 'bad' }, { status: 400 })],
+    ['a 422 with no JSON', () => new Response('<html>', { status: 422 })],
   ])('calls %s refused', async (_case, answer) => {
     const { fetch } = recordingFetch(answer);
     const embedder = createOllamaEmbedder({ settings: SETTINGS, resolve: PRIVATE, fetch });

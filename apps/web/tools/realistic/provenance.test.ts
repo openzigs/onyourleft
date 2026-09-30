@@ -60,6 +60,19 @@ const digest = (file: string): string =>
     .update(readFileSync(join(REPOSITORY, OUTPUT_DIRECTORY, file)))
     .digest('hex');
 
+/**
+ * Whether a Blender script reaches glTF's importer itself — however spelled:
+ * spaced, aliased, or passed along (#900 item 1). Only a line that is wholly
+ * a comment is skipped, so a script's own warning about the importer is not
+ * a call.
+ */
+function callsTheImporter(source: string): boolean {
+  return source
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .some((line) => /import_scene\.gltf\b/.test(line));
+}
+
 describe('the realistic files and the pipeline that makes them', () => {
   it('commits exactly the files the pipeline makes, in both directions', () => {
     // A file dropped in by hand has no recipe; a recipe whose file is missing
@@ -182,6 +195,28 @@ describe('the realistic files and the pipeline that makes them', () => {
     }
   });
 
+  it('finds the importer however a script reaches it — #900 item 1', () => {
+    // `import_scene.gltf(` alone missed a space before the parenthesis and an
+    // alias called later, and either would skip #696's rule.
+    for (const source of [
+      'bpy.ops.import_scene.gltf(filepath=p)',
+      'bpy.ops.import_scene.gltf (filepath=p)',
+      'load = bpy.ops.import_scene.gltf\nload(filepath=p)',
+      'getattr(bpy.ops.import_scene.gltf, "__call__")(filepath=p)',
+      'x = 1  # then bpy.ops.import_scene.gltf(filepath=p) on a line of code',
+    ]) {
+      expect(callsTheImporter(source), source).toBe(true);
+    }
+    // A line that is only a comment names it without calling it.
+    for (const source of [
+      '# Through `gltf_import.py`, never `bpy.ops.import_scene.gltf` itself',
+      '    # bpy.ops.import_scene.gltf(filepath=p)',
+      'bpy.ops.import_scene.gltfx(filepath=p)',
+    ]) {
+      expect(callsTheImporter(source), source).toBe(false);
+    }
+  });
+
   it('holds every module a Blender script imports from beside it, and imports every scan through one — #885’s review', () => {
     // ASSET007 checks the ONE `script` a row names, so a sibling module that
     // script imports — `rider_kit.py`, `gltf_import.py` — is held here: it is
@@ -199,13 +234,15 @@ describe('the realistic files and the pipeline that makes them', () => {
         if (!scripts.includes(`${name}.py`)) continue;
         imported.add(`${name}.py`);
         // A sibling import leaves a `__pycache__` beside it unless bytecode
-        // is off before it — a binary ASSET001 refuses, found by this review's
-        // own first `--check`.
+        // is off before it — a binary ASSET001 refused, found by this review's
+        // own first `--check`. Since #900 the walk prunes `__pycache__` and
+        // `.gitignore` names it; bytecode stays off so a run leaves the tree
+        // as it found it.
         const before = source.slice(0, match.index);
         expect(before, `${file} imports ${name}`).toMatch(/^sys\.dont_write_bytecode = True$/m);
       }
       if (file !== 'gltf_import.py') {
-        expect(source, file).not.toMatch(/import_scene\.gltf\(/);
+        expect(callsTheImporter(source), file).toBe(false);
       }
     }
     expect([...imported].sort()).toEqual(['gltf_import.py', 'rider_kit.py']);

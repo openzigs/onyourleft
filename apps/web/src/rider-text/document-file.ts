@@ -76,8 +76,8 @@ export type DocumentReading =
  * followed by `[^,\s]*` both match a letter, so a run with no comma was retried
  * at every split — quadratic, 6.7 s for 100 000 characters on the main thread
  * (#920's review). This pattern matches the same URLs in linear time.
- * `apps/instance/src/history/passages.ts` §`DATA_URL` still has the old form
- * (#921).
+ * `apps/instance/src/history/passages.ts` no longer has the old form: since
+ * #918 it is §`holdsDataUrl`, a scan (#921, #924 item 7).
  */
 const DATA_URL = /\bdata:[a-z0-9.+-]*\/[^,\s]*,/iu;
 

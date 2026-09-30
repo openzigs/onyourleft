@@ -87,7 +87,7 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
         handle,
         Buffer.from(message.head, 'base64'),
         (ws) => {
-          host.accept(message.plan.roomId, roomSettings, ws, message.socketId);
+          host.accept(message.plan.roomId, roomSettings, ws, message.socketId, message.started);
         },
       );
       // A handshake `ws` refused (a bad key, a wrong version) destroys the

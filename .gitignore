@@ -8,6 +8,11 @@ build/
 .DS_Store
 coverage/
 
+# Python's bytecode, written beside a module a script imports: the realistic
+# pipeline's Blender scripts import siblings (#900). `check-repo-rules.sh`
+# prunes it for the same reason.
+__pycache__/
+
 # Git worktrees of other branches, created by the delivery workflows. Git
 # already declines to stage a nested worktree — it sees the `.git` file and
 # stops — so `git add -A` was safe without this line. It is here so the intent
