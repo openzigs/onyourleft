@@ -59,14 +59,20 @@ Everything measured goes into <report.json>.
 import hashlib
 import json
 import math
+import os
 import random
 import sys
 
 import bmesh
 import bpy
 import numpy as np
-from io_scene_gltf2.io.imp.gltf2_io_binary import BinaryData
 from mathutils import Vector
+
+# The one glTF import, beside this file. ⚠️ No bytecode, as `process_rider.py`
+# imports its kit: a `__pycache__` beside it is a binary `ASSET001` refuses.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gltf_import import import_scan  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
@@ -112,77 +118,13 @@ def is_foliage(material):
     return material.blend_method == "BLEND"
 
 
-# ⚠️ A triangle the scan holds TWICE is dropped here, before Blender sees it
-# -- #696, #687. `island_tree_02`'s scan has exactly one: the same three
-# vertices at triangles 26 840 and 27 291 of its wood, wound opposite ways,
-# the only repeated triangle in any tree, shrub or rock input. The glTF
-# importer ends with `mesh.validate()`, which finds a repeated face by sorting
-# every face with `blender::parallel_sort` and dropping whichever of the two
-# the sort put second -- and a parallel sort does not order equal keys the
-# same way from run to run. Measured on 2026-09-29 on one Mac: of 150 bare
-# imports, 148 dropped the second (what is committed) and 2 the first; of 100
-# runs of this script up to the wood's collapse or through a whole middle
-# level, 4 made something else, and every one of the 4 was this. The
-# kept triangle then sits at a different place in the face list and faces the
-# other way, which moves the wood's face order through the collapse, the
-# occlusion bake's samples and the glTF's vertex count (the middle level's
-# 40 bytes, #696) and the full scan's impostor (#687): this script made to
-# keep the SECOND reproduces #696's `54886342…` and #687's `7a1f1ac9…` and
-# `5a47c511…` byte for byte. #687's "first run in a fresh tree" was chance,
-# not a cold cache -- about one import in fifty, and `--check` imports this
-# scan twice. So the second of any
-# repeated triangle in a primitive is dropped HERE, by a stable rule -- the
-# first is kept, which is what the committed files were made from -- and the
-# import is then held to having dropped nothing else (below), so a repeat
-# across two primitives, which this cannot see, stops the run rather than
-# being resolved by the sort.
-with open(IN_GLTF) as handle:
-    _document = json.load(handle)
-TRIANGLE_INDICES = {
-    primitive["indices"]
-    for mesh in _document.get("meshes", [])
-    for primitive in mesh["primitives"]
-    if "indices" in primitive and primitive.get("mode", 4) == 4
-}
-repeated_triangles = 0
-_decode_accessor = BinaryData.decode_accessor
-
-
-def decode_without_repeats(gltf, accessor_idx, cache=False):
-    """The importer's own decode, with a repeated triangle's second copy
-    dropped from a triangle list's indices -- first occurrences kept, in
-    order."""
-    global repeated_triangles
-    array = _decode_accessor(gltf, accessor_idx, cache)
-    if accessor_idx not in TRIANGLE_INDICES or len(array) % 3 != 0:
-        return array
-    triangles_of = array.reshape(-1, 3)
-    _, first = np.unique(np.sort(triangles_of, axis=1), axis=0, return_index=True)
-    if len(first) == len(triangles_of):
-        return array
-    repeated_triangles += len(triangles_of) - len(first)
-    return triangles_of[np.sort(first)].reshape(-1, 1)
-
-
 bpy.ops.wm.read_factory_settings(use_empty=True)
-BinaryData.decode_accessor = staticmethod(decode_without_repeats)
-bpy.ops.import_scene.gltf(filepath=IN_GLTF)
-BinaryData.decode_accessor = staticmethod(_decode_accessor)
-# What `mesh.validate()` may still have dropped is its choice, not this
-# script's: refuse it rather than ship a coin toss.
-_imported = sum(len(mesh.polygons) for mesh in bpy.data.meshes)
-_declared = -repeated_triangles
-for _mesh in _document.get("meshes", []):
-    for _primitive in _mesh["primitives"]:
-        if _primitive.get("mode", 4) != 4:
-            continue
-        _counted = _primitive.get("indices", _primitive["attributes"]["POSITION"])
-        _declared += _document["accessors"][_counted]["count"] // 3
-if _imported != _declared:
-    raise SystemExit(
-        f"the importer kept {_imported} triangles of {_declared}: "
-        "mesh.validate() dropped some, and which it drops is not reproducible"
-    )
+# ⚠️ Through `gltf_import.py`, never `bpy.ops.import_scene.gltf` itself: a
+# triangle the scan holds TWICE is dropped there by a stable rule before
+# Blender sees it (#696, #687 -- `island_tree_02`'s wood has one, and which of
+# the two `mesh.validate()` keeps is not reproducible), and an import that
+# dropped anything else stops the run.
+repeated_triangles = import_scan(IN_GLTF)
 meshes = [o for o in bpy.data.objects if o.type == "MESH"]
 keep = [o for o in meshes if o.name == OBJECT or o.name.startswith(OBJECT + "_LOD")]
 if len(keep) != 1:
