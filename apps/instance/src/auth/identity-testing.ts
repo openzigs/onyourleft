@@ -94,6 +94,8 @@ export interface IdentityInstance {
   readonly path: string;
   /** Mail an email-recovery link would have sent, when email recovery is on. */
   readonly mail: { address: string; token: string }[];
+  /** Mail a link confirming a recovery address would have sent (#865). */
+  readonly confirmations: { address: string; token: string }[];
   /** POST or GET a JSON body; answers the status and the parsed body. */
   call(
     method: string,
@@ -120,7 +122,8 @@ export interface IdentityInstance {
 
 export async function startIdentityInstance(
   options: Partial<Omit<IdentityOptions, 'store' | 'origin' | 'now' | 'emailRecovery'>> & {
-    emailRecovery?: boolean;
+    /** `'failing'`: email recovery on, with a mail transport that rejects every send. */
+    emailRecovery?: boolean | 'failing';
     /**
      * What the identity sees in place of the real store — for putting a
      * check-then-write race in a known order, which two concurrent calls in
@@ -136,17 +139,24 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
+  const confirmations: { address: string; token: string }[] = [];
   const { emailRecovery, storeSeenBy, probes, ...rest } = options;
   const identity = createIdentity({
     ...rest,
     store: storeSeenBy === undefined ? store : storeSeenBy(store),
     origin: TEST_ORIGIN,
     now: () => clock.ms,
-    ...(emailRecovery === true
+    ...(emailRecovery === true || emailRecovery === 'failing'
       ? {
           emailRecovery: {
             send: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
               mail.push({ address, token });
+              return Promise.resolve();
+            },
+            confirm: (address, token) => {
+              if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
+              confirmations.push({ address, token });
               return Promise.resolve();
             },
           },
@@ -188,6 +198,7 @@ export async function startIdentityInstance(
     clock,
     path,
     mail,
+    confirmations,
     call,
     nonceFor,
     signIn: async (device, extra = {}) => {

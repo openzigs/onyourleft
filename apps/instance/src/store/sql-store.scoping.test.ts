@@ -74,6 +74,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   getRecoveryEmail: {
     probe: async (store, athleteId) => one(await store.getRecoveryEmail(athleteId)),
   },
+  listEmailConfirmations: {
+    probe: (store, athleteId) => store.listEmailConfirmations(athleteId),
+  },
   listEmailRecoveryTokens: {
     probe: (store, athleteId) => store.listEmailRecoveryTokens(athleteId),
   },
@@ -100,6 +103,8 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putLinkCode: { notAScopedRead: 'a write; the schema holds the minting key to its athlete' },
   renameAthlete: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   putEmailRecoveryToken: { notAScopedRead: 'a write' },
+  putEmailConfirmation: { notAScopedRead: 'a write' },
+  confirmRecoveryEmail: { notAScopedRead: 'a write; scoping is sql-store.identity.test.ts’s' },
   getRoom: { notAScopedRead: 'a room belongs to no athlete' },
   getRoomCourse: { notAScopedRead: 'a room’s course belongs to the room, not to an athlete' },
   listRoomResults: { notAScopedRead: 'a finish order is every rider’s, by design (ADR 0037)' },

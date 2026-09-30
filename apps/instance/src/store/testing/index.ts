@@ -222,11 +222,16 @@ export function resultFixture(athleteId: string, roomId = SHARED_ROOM.id): Resul
   return { roomId, athleteId, finishMs: 3_600_000, flags: 0 };
 }
 
+/** A rename limit the fixtures never reach. */
+export const FIXTURE_RENAME_LIMIT = { count: 100, windowSeconds: 86_400 } as const;
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
   for (const athlete of ATHLETES) {
     await store.registerAthlete(registrationFixture(athlete));
+    // Bound only by following the mailed link (#865).
+    await store.confirmRecoveryEmail(athlete, confirmationTokenFixture(athlete), 1_790_000_050);
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
@@ -238,7 +243,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       mintedByKey: deviceKeyFixture(athlete).publicKey,
       expiresAt: 1_790_000_600,
     });
-    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300);
+    await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300, FIXTURE_RENAME_LIMIT);
     await store.putEmailRecoveryToken({
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
@@ -247,13 +252,25 @@ export async function seedWorld(store: SqlStore): Promise<void> {
   }
 }
 
-/** A fixture athlete's registration: their first key, a recovery code and an email address. */
+/** The SHA-256 of the token confirming a fixture athlete's address (#865). */
+export function confirmationTokenFixture(athleteId: string): string {
+  return hexOf(`confirm-${athleteId}`);
+}
+
+/**
+ * A fixture athlete's registration: their first key, a recovery code, and an
+ * email address waiting to be confirmed (#865) — `seedWorld` confirms it.
+ */
 export function registrationFixture(athleteId: string): Registration {
   return {
     athlete: athleteFixture(athleteId),
     key: deviceKeyFixture(athleteId),
     recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
-    recoveryEmail: `${athleteId}@example.org`,
+    recoveryEmailConfirmation: {
+      tokenSha256: confirmationTokenFixture(athleteId),
+      address: `${athleteId}@example.org`,
+      expiresAt: 1_790_086_400,
+    },
   };
 }
 

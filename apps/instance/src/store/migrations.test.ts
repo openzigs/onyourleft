@@ -61,7 +61,10 @@ async function migrationsOnDisk(): Promise<[string, Partial<InstanceMigration>][
 /**
  * One row for each table, so a rollback that lost rows it should have kept
  * is visible. ⚠️ A table with no entry here fails the test: a new table owes a
- * fixture row, or its rollback is checked over an empty table.
+ * fixture row, or its rollback is checked over an empty table. Each row names
+ * its whole primary key, so seeding a second time adds nothing: a generated
+ * id would add a second row, which the first migration after its table's
+ * (0005, #865) then reads as a `down` that kept too much.
  */
 const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete: `INSERT INTO athlete VALUES ('a', 'A', 1, 'active')`,
@@ -80,6 +83,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
 };
 
 interface Snapshot {
