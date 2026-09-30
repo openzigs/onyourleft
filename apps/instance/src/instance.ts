@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { lookup } from 'node:dns/promises';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { createIdentity, type Identity } from './auth/identity.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
+import type { Resolver } from './history/address.ts';
+import { createOllamaEmbedder } from './history/embedder.ts';
+import { createHistory, type History } from './history/history.ts';
 import { logEvent, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, type Listening } from './node-listener.ts';
@@ -40,6 +44,14 @@ import type { SqlStore } from './store/sql-store.ts';
  * which is what Docker sends.
  */
 
+/**
+ * Every address a name resolves to, as the operating system's resolver gives
+ * them — what the history index's embedding address is checked against on
+ * every connection (ADR 0040 D-6).
+ */
+export const systemResolver: Resolver = async (hostname) =>
+  (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
+
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
   override readonly name = 'InstanceRefusal';
@@ -55,6 +67,8 @@ export interface InstanceOptions {
   readonly now?: () => number;
   /** How often a waiting instance looks at the migration again. */
   readonly migrationPollMs?: number;
+  /** How the embedding model's name is resolved: {@link systemResolver} unless a test says otherwise. */
+  readonly resolve?: Resolver;
 }
 
 export interface StartedInstance {
@@ -103,6 +117,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
 
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
+  let history: History | undefined;
   let stopping = false;
   const counters = new HttpCounters();
 
@@ -189,6 +204,28 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
 
   const open = (): void => {
     store = openServingStore(path);
+    // The history index (#835, ADR 0040). Off, and saying why, when no local
+    // embedding model is configured; the rest of the instance does not care.
+    const settings = options.config.history;
+    history = createHistory({
+      store,
+      embedder:
+        settings.kind === 'on'
+          ? createOllamaEmbedder({
+              settings: settings.embedding,
+              resolve: options.resolve ?? systemResolver,
+            })
+          : undefined,
+      log,
+      now,
+    });
+    logEvent(
+      log,
+      'history-index',
+      settings.kind === 'on'
+        ? { state: 'on', model: settings.embedding.model }
+        : { state: 'off', code: settings.code },
+    );
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -196,8 +233,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ...identitySettings(options.config),
         now,
       });
-      handler = createHandler({ ...handlerOptions, identity });
+      handler = createHandler({ ...handlerOptions, identity, history });
     }
+    // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
+    history.schedule();
     logEvent(log, 'ready', {
       identity: identity !== undefined,
       registration: options.config.registration,
@@ -242,6 +281,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       stopping = true;
       await router.stop();
       await listening.close();
+      await history?.idle();
       await store?.close();
     },
   };

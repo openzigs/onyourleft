@@ -345,6 +345,7 @@ export type PutOutcome = 'stored' | 'duplicate';
 export const SYNC_KINDS: readonly SyncKind[] = [
   'activity',
   'write-up',
+  'ride-summary',
   'side-camera-report',
   'goal',
   'note',
@@ -412,6 +413,58 @@ export interface SyncItemWrite {
 export interface ListedActivity {
   readonly seq: number;
   readonly record: ActivityRecord;
+}
+
+/** How indexing one synced item went (#835). */
+export type HistoryOutcome = 'indexed' | 'empty' | 'too-long' | 'picture';
+
+/** A live synced item the history index has not cut for the configured model yet (#835). */
+export interface PendingHistorySource {
+  readonly athleteId: string;
+  readonly kind: SyncKind;
+  readonly key: string;
+  readonly digest: string;
+  readonly body: Uint8Array;
+}
+
+/** One passage to keep, with its vector (unit length, #835). */
+export interface HistoryPassageWrite {
+  readonly ordinal: number;
+  readonly text: string;
+  readonly vector: Float32Array;
+}
+
+/** A synced item's passages, replacing whatever the index held for it (#835). */
+export interface HistoryIndexWrite {
+  readonly athleteId: string;
+  readonly kind: SyncKind;
+  readonly key: string;
+  /** The digest of the body the passages were cut from: stale when the item has moved since. */
+  readonly digest: string;
+  readonly model: string;
+  readonly convention: string;
+  /** Every vector's length. */
+  readonly dimension: number;
+  readonly outcome: HistoryOutcome;
+  readonly passages: readonly HistoryPassageWrite[];
+  /** Unix seconds. */
+  readonly now: number;
+}
+
+/** One passage of an athlete's history index, as retrieval ranks it (#835). */
+export interface StoredHistoryPassage {
+  readonly kind: SyncKind;
+  readonly key: string;
+  readonly ordinal: number;
+  readonly text: string;
+  readonly vector: Float32Array;
+}
+
+/** Which model built an athlete's index, and how much of it — the export's manifest line (#835). */
+export interface HistoryIndexSummary {
+  readonly model: string;
+  readonly dimension: number;
+  readonly passages: number;
 }
 
 /** The storage port. */
@@ -550,6 +603,36 @@ export interface SqlStore {
   ): Promise<readonly ManifestRow[]>;
   getActivityRecord(athleteId: string, contentSha256: string): Promise<ActivityRecord | undefined>;
   listActivityRecords(athleteId: string): Promise<readonly ActivityRecord[]>;
+
+  /**
+   * #835: live items of `kinds`, of any athlete, that have no index row for
+   * this body under this `model` and `convention` — what the indexer does
+   * next. Oldest first.
+   */
+  listPendingHistorySources(
+    kinds: readonly SyncKind[],
+    model: string,
+    convention: string,
+    limit: number,
+  ): Promise<readonly PendingHistorySource[]>;
+  /**
+   * #835: replace the index's rows for one item, in one transaction — or
+   * answer `stale`, writing nothing, when the item is no longer live with that
+   * digest (it changed or was deleted while it was being embedded).
+   */
+  putHistoryIndex(write: HistoryIndexWrite): Promise<'stored' | 'stale'>;
+  /**
+   * #835: this athlete's passages of exactly this model, dimension and
+   * convention (ADR 0040 D-7). A row of any other is never returned.
+   */
+  listHistoryPassages(
+    athleteId: string,
+    model: string,
+    dimension: number,
+    convention: string,
+  ): Promise<readonly StoredHistoryPassage[]>;
+  /** #835: which models this athlete's index holds passages of, and how many. */
+  summariseHistoryIndex(athleteId: string): Promise<readonly HistoryIndexSummary[]>;
 
   putRoom(room: Room): Promise<void>;
   getRoom(roomId: string): Promise<Room | undefined>;
@@ -869,6 +952,16 @@ async function replaceSyncRow(
   },
 ): Promise<void> {
   const receivedAt = row.receivedAt ?? (await nextReceivedAt(trx, row.now));
+  // The index is derived from the item (ADR 0040 D-1, D-10): whatever it was
+  // cut from goes in the same transaction as the body it was cut from.
+  for (const table of ['history_passage', 'history_source'] as const) {
+    await trx
+      .deleteFrom(table)
+      .where('athlete_id', '=', row.athleteId)
+      .where('source_kind', '=', row.kind)
+      .where('source_key', '=', row.key)
+      .execute();
+  }
   await trx
     .deleteFrom('sync_item')
     .where('athlete_id', '=', row.athleteId)
@@ -966,6 +1059,25 @@ async function applyToAthlete(
     case 'dismiss_report':
       return true;
   }
+}
+
+/** A vector as the index keeps it: little-endian `Float32` bytes. */
+export function vectorBytes(vector: Float32Array): Uint8Array {
+  const bytes = new Uint8Array(vector.length * 4);
+  const view = new DataView(bytes.buffer);
+  for (const [index, value] of vector.entries()) view.setFloat32(index * 4, value, true);
+  return bytes;
+}
+
+/** Bytes back into a vector; a length that is not a whole number of floats is read as none. */
+export function vectorFrom(bytes: Uint8Array): Float32Array {
+  if (bytes.byteLength % 4 !== 0) return new Float32Array(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const vector = new Float32Array(bytes.byteLength / 4);
+  for (let index = 0; index < vector.length; index += 1) {
+    vector[index] = view.getFloat32(index * 4, true);
+  }
+  return vector;
 }
 
 /** The store over an already-migrated database. */
@@ -2168,6 +2280,150 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('code_sha256')
             .execute()
         ).map(inviteCodeFrom),
+      ),
+
+    listPendingHistorySources: (kinds, model, convention, limit) =>
+      exclusive(async () => {
+        if (kinds.length === 0) return [];
+        const rows = await db
+          .selectFrom('sync_item as s')
+          .select(['s.athlete_id', 's.kind', 's.item_key', 's.digest', 's.body'])
+          .where('s.deleted_at', 'is', null)
+          .where('s.kind', 'in', kinds)
+          .where('s.digest', 'is not', null)
+          .where('s.body', 'is not', null)
+          .where((eb) =>
+            eb.not(
+              eb.exists(
+                eb
+                  .selectFrom('history_source as h')
+                  .select('h.athlete_id')
+                  .whereRef('h.athlete_id', '=', 's.athlete_id')
+                  .whereRef('h.source_kind', '=', 's.kind')
+                  .whereRef('h.source_key', '=', 's.item_key')
+                  .whereRef('h.source_digest', '=', 's.digest')
+                  .where('h.model', '=', model)
+                  .where('h.convention', '=', convention),
+              ),
+            ),
+          )
+          .orderBy('s.seq')
+          .limit(limit)
+          .execute();
+        return rows.map((row) => ({
+          athleteId: row.athlete_id,
+          kind: row.kind,
+          key: row.item_key,
+          digest: row.digest ?? '',
+          body: row.body ?? new Uint8Array(),
+        }));
+      }),
+
+    putHistoryIndex: (write) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('sync_item')
+            .select('item_key')
+            .where('athlete_id', '=', write.athleteId)
+            .where('kind', '=', write.kind)
+            .where('item_key', '=', write.key)
+            .where('digest', '=', write.digest)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst();
+          if (held === undefined) return 'stale' as const;
+          for (const table of ['history_passage', 'history_source'] as const) {
+            await trx
+              .deleteFrom(table)
+              .where('athlete_id', '=', write.athleteId)
+              .where('source_kind', '=', write.kind)
+              .where('source_key', '=', write.key)
+              .execute();
+          }
+          await trx
+            .insertInto('history_source')
+            .values({
+              athlete_id: write.athleteId,
+              source_kind: write.kind,
+              source_key: write.key,
+              source_digest: write.digest,
+              model: write.model,
+              convention: write.convention,
+              outcome: write.outcome,
+              passages: write.passages.length,
+              indexed_at: write.now,
+            })
+            .execute();
+          for (const passage of write.passages) {
+            if (passage.vector.length !== write.dimension) {
+              throw new Error('Every vector of one write has the write’s dimension.');
+            }
+            await trx
+              .insertInto('history_passage')
+              .values({
+                athlete_id: write.athleteId,
+                source_kind: write.kind,
+                source_key: write.key,
+                ordinal: passage.ordinal,
+                passage: passage.text,
+                model: write.model,
+                dimension: write.dimension,
+                convention: write.convention,
+                vector: vectorBytes(passage.vector),
+              })
+              .execute();
+          }
+          return 'stored' as const;
+        }),
+      ),
+
+    listHistoryPassages: (athleteId, model, dimension, convention) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('history_passage')
+            .select(['source_kind', 'source_key', 'ordinal', 'passage', 'vector'])
+            .where('athlete_id', '=', athleteId)
+            .where('model', '=', model)
+            .where('dimension', '=', dimension)
+            .where('convention', '=', convention)
+            .orderBy('source_kind')
+            .orderBy('source_key')
+            .orderBy('ordinal')
+            .execute()
+        ).flatMap((row) => {
+          const vector = vectorFrom(row.vector);
+          // A vector whose bytes do not hold `dimension` floats is not this model's.
+          return vector.length === dimension
+            ? [
+                {
+                  kind: row.source_kind,
+                  key: row.source_key,
+                  ordinal: row.ordinal,
+                  text: row.passage,
+                  vector,
+                },
+              ]
+            : [];
+        }),
+      ),
+
+    summariseHistoryIndex: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('history_passage')
+            .select(['model', 'dimension', (eb) => eb.fn.countAll<number>().as('passages')])
+            .where('athlete_id', '=', athleteId)
+            .groupBy(['model', 'dimension'])
+            .orderBy('model')
+            .orderBy('dimension')
+            .execute()
+        ).map((row) => ({
+          model: row.model,
+          dimension: row.dimension,
+          passages: Number(row.passages),
+        })),
       ),
 
     eraseAthlete: (athleteId) =>

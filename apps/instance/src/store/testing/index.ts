@@ -38,6 +38,7 @@ import type {
   Session,
   SqlStore,
   SyncItemWrite,
+  HistoryIndexWrite,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -248,7 +249,14 @@ export const SHARED_CONTENT_SHA256 = hexOf('the-same-file-for-everyone');
  * crossed athletes would be visible in the bytes as well as in `athleteId`.
  */
 export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
-  const kinds = ['write-up', 'side-camera-report', 'goal', 'note', 'document'] as const;
+  const kinds = [
+    'write-up',
+    'ride-summary',
+    'side-camera-report',
+    'goal',
+    'note',
+    'document',
+  ] as const;
   return kinds.map((kind) => ({
     athleteId,
     kind,
@@ -257,6 +265,32 @@ export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
     digest: hexOf(`${kind}-${athleteId}`),
     now: 1_790_000_400,
   }));
+}
+
+/** The model, convention and dimension the fixture history index is built with (#835). */
+export const HISTORY_FIXTURE_MODEL = 'fixture-embedding';
+export const HISTORY_FIXTURE_CONVENTION = 'fixture-prefixes';
+export const HISTORY_FIXTURE_DIMENSION = 3;
+
+/** An athlete's history index over their write-up fixture: two passages (#835). */
+export function historyIndexFixture(athleteId: string): HistoryIndexWrite {
+  const item = syncItemFixtures(athleteId).find((each) => each.kind === 'write-up');
+  if (item === undefined) throw new Error('the fixtures carry a write-up');
+  return {
+    athleteId,
+    kind: item.kind,
+    key: item.key,
+    digest: item.digest,
+    model: HISTORY_FIXTURE_MODEL,
+    convention: HISTORY_FIXTURE_CONVENTION,
+    dimension: HISTORY_FIXTURE_DIMENSION,
+    outcome: 'indexed',
+    passages: [
+      { ordinal: 0, text: `First passage of ${athleteId}`, vector: new Float32Array([1, 0, 0]) },
+      { ordinal: 1, text: `Second passage of ${athleteId}`, vector: new Float32Array([0, 1, 0]) },
+    ],
+    now: 1_790_000_410,
+  };
 }
 
 /** Every athlete-scoped row the schema has, for all three athletes. */
@@ -286,6 +320,8 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       now: 1_790_000_250,
     });
     for (const item of syncItemFixtures(athlete)) await store.putSyncItem(item);
+    // Migration 0010's history index (#835), cut from the write-up above.
+    await store.putHistoryIndex(historyIndexFixture(athlete));
     await store.putResult(resultFixture(athlete));
     // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
     await store.putLinkCode({

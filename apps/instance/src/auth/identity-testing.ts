@@ -27,6 +27,9 @@ import {
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
+import type { Embedder } from '../history/embedder.ts';
+import { createHistory, type History } from '../history/history.ts';
+import { scriptedEmbedder } from '../history/history-testing.ts';
 import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
@@ -121,6 +124,8 @@ export interface IdentityInstance {
   /** Sync's blobs, as the memory blob store keeps them: the object store, read directly. */
   readonly blobs: MemoryBlobs;
   readonly sync: Sync;
+  /** The history index over the same store (#835): sync schedules a catch-up after each item. */
+  readonly history: History;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -144,6 +149,11 @@ export async function startIdentityInstance(
     bodyLimitBytes?: number;
     /** What `/ready`, `/metrics` and a room's start answer (#780). */
     probes?: InstanceProbes;
+    /**
+     * The history index's embedding model (#835): a scripted one unless a
+     * test hands its own, or `null` for an instance with the index off.
+     */
+    embedder?: Embedder | null;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -159,6 +169,7 @@ export async function startIdentityInstance(
     syncStoreSeenBy,
     blobStoreSeenBy,
     bodyLimitBytes,
+    embedder,
     ...rest
   } = options;
   const identity = createIdentity({
@@ -193,14 +204,23 @@ export async function startIdentityInstance(
   });
   const blobs: MemoryBlobs = new Map();
   const memoryBlobs = createMemoryBlobStore(blobs);
+  const history = createHistory({
+    store,
+    embedder: embedder === null ? undefined : (embedder ?? scriptedEmbedder()),
+    now: () => clock.ms,
+  });
   const sync = createSync({
     store: syncStoreSeenBy === undefined ? store : syncStoreSeenBy(store),
     blobs: blobStoreSeenBy === undefined ? memoryBlobs : blobStoreSeenBy(memoryBlobs),
     now: () => clock.ms,
+    itemStored: () => {
+      history.schedule();
+    },
   });
   const instance = await startTestInstance({
     identity,
     sync,
+    history,
     config: { bodyLimitBytes: bodyLimitBytes ?? 16_384 },
     ...(probes === undefined ? {} : { probes }),
   });
@@ -236,6 +256,7 @@ export async function startIdentityInstance(
     mail,
     blobs,
     sync,
+    history,
     confirmations,
     call,
     nonceFor,
@@ -263,6 +284,7 @@ export async function startIdentityInstance(
     },
     close: async () => {
       await instance.listening.close();
+      await history.idle();
       await store.close();
       await rm(directory, { recursive: true, force: true });
     },

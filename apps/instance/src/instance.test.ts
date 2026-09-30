@@ -9,6 +9,8 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
+import { readHistorySettings, type Config } from './config.ts';
+import type { Resolver } from './history/address.ts';
 import { startInstance, type StartedInstance } from './instance.ts';
 import { testConfig } from './instance-testing.ts';
 import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
@@ -55,10 +59,15 @@ function serverConfig(databasePath: string, overrides: Partial<ServerConfig> = {
   return { ...read.config, blobsPath: join(databasePath, '..', 'blobs'), ...overrides };
 }
 
-async function start(databasePath: string, overrides: Partial<ServerConfig> = {}) {
+async function start(
+  databasePath: string,
+  overrides: Partial<ServerConfig> = {},
+  extra: { config?: Partial<Config>; resolve?: Resolver } = {},
+) {
   const lines: string[] = [];
   running = await startInstance({
-    config: testConfig({ bodyLimitBytes: 16_384, registration: 'open' }),
+    config: testConfig({ bodyLimitBytes: 16_384, registration: 'open', ...extra.config }),
+    ...(extra.resolve === undefined ? {} : { resolve: extra.resolve }),
     server: serverConfig(databasePath, overrides),
     version: '9.8.7',
     notices: 'notices',
@@ -457,5 +466,114 @@ describe('the metrics token — #895 review N3', () => {
       expect(bearerMatches(header, token), String(header)).toBe(false);
     }
     expect(bearerMatches(`Bearer ${token}`, undefined)).toBe(false);
+  });
+});
+
+describe('the history index on the running instance — #835', () => {
+  let model: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((done) => (model === undefined ? done() : model.close(() => done())));
+    model = undefined;
+  });
+
+  /** A model server on loopback that answers every input with one vector, counting requests. */
+  async function modelServer(): Promise<{ port: number; requests: string[] }> {
+    const requests: string[] = [];
+    model = createServer((request, response) => {
+      let text = '';
+      request.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      request.on('end', () => {
+        requests.push(text);
+        const { input } = JSON.parse(text) as { input: string[] };
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ embeddings: input.map(() => [1, 0, 0]) }));
+      });
+    });
+    await new Promise<void>((done) => model?.listen(0, '127.0.0.1', done));
+    return { port: (model.address() as AddressInfo).port, requests };
+  }
+
+  async function searchAs(url: string, token: string): Promise<Response> {
+    return fetch(`${url}/v1/history/search`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'hills', limit: 6, characters: 5_400 }),
+    });
+  }
+
+  it('serves a search through the embedding model on this machine, reached by a service name it resolves and checks', async () => {
+    const { port, requests } = await modelServer();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const resolved: string[] = [];
+    const { instance, lines } = await start(
+      path,
+      {},
+      {
+        config: {
+          history: readHistorySettings({ embeddingUrl: `http://ollama:${String(port)}` }),
+        },
+        resolve: (hostname) => {
+          resolved.push(hostname);
+          return Promise.resolve(['127.0.0.1']);
+        },
+      },
+    );
+    await instance.opened;
+    expect(
+      lines.some(
+        (line) => line.includes('"event":"history-index"') && line.includes('"state":"on"'),
+      ),
+    ).toBe(true);
+    const anna = await signIn(instance.url, 'Anna');
+    const answer = await searchAs(instance.url, anna.sessionToken);
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ passages: [] });
+    expect(resolved).toContain('ollama');
+    expect(requests.map((body) => JSON.parse(body) as unknown)).toContainEqual({
+      model: 'nomic-embed-text',
+      input: ['search_query: hills'],
+      truncate: false,
+    });
+  });
+
+  it('starts with the index off, and says why, when the address is refused — and sends nothing', async () => {
+    const { requests } = await modelServer();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(
+      path,
+      {},
+      {
+        config: { history: readHistorySettings({ embeddingUrl: 'http://embeddings.example.org' }) },
+      },
+    );
+    await instance.opened;
+    const said = lines.find((line) => line.includes('"event":"history-index"'));
+    expect(said).toContain('"state":"off"');
+    expect(said).toContain('"code":"not-local"');
+    const anna = await signIn(instance.url, 'Anna');
+    expect((await searchAs(instance.url, anna.sessionToken)).status).toBe(503);
+    expect(requests).toStrictEqual([]);
+  });
+
+  it('refuses the search, and sends nothing, when the service name resolves to a public address', async () => {
+    const { port, requests } = await modelServer();
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(
+      path,
+      {},
+      {
+        config: {
+          history: readHistorySettings({ embeddingUrl: `http://ollama:${String(port)}` }),
+        },
+        resolve: () => Promise.resolve(['93.184.216.34']),
+      },
+    );
+    await instance.opened;
+    const anna = await signIn(instance.url, 'Anna');
+    expect((await searchAs(instance.url, anna.sessionToken)).status).toBe(503);
+    expect(requests).toStrictEqual([]);
   });
 });

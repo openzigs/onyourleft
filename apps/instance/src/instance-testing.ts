@@ -5,6 +5,7 @@ import type { Config } from './config.ts';
 import type { InstanceProbes } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
+import type { History } from './history/history.ts';
 import type { Sync } from './sync/sync.ts';
 import { listen, type Listening } from './node-listener.ts';
 
@@ -29,6 +30,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
     clientAddressHeader: null,
     trustedProxies: [],
+    history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
     ...overrides,
   };
 }
@@ -47,6 +49,7 @@ export async function startTestInstance(
     notices?: string;
     identity?: Identity;
     sync?: Sync;
+    history?: History;
     probes?: InstanceProbes;
   } = {},
 ): Promise<TestInstance> {
@@ -60,6 +63,7 @@ export async function startTestInstance(
     ...(options.routes === undefined ? {} : { routes: options.routes }),
     ...(options.identity === undefined ? {} : { identity: options.identity }),
     ...(options.sync === undefined ? {} : { sync: options.sync }),
+    ...(options.history === undefined ? {} : { history: options.history }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
   });
   const listening = await listen(handler, {

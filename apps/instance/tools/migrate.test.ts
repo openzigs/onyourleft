@@ -43,8 +43,9 @@ describe('tools/migrate.ts (#769)', () => {
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
     expect(down.out).not.toContain(LAST);
     expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
-    // The newest migration (0009, #776) is the one that creates `sync_item`.
-    expect(down.out).not.toMatch(/ {2}sync_item:/);
+    // The newest migration (0010, #835) is the one that creates the history index.
+    expect(down.out).not.toMatch(/ {2}history_passage:/);
+    expect(down.out).toMatch(/ {2}sync_item:/);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
