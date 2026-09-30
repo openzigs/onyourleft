@@ -628,7 +628,7 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
   });
 
-  it('bounds an address’s mail across athletes, but never withholds an athlete’s first link of the hour (#883)', async () => {
+  it('bounds an address’s mail across athletes, but still sends an established athlete’s first link of the hour (#883)', async () => {
     const w = await start({
       emailRecovery: true,
       limits: { ...DEFAULT_LIMITS, confirmationsPerAddress: { limit: 2, windowMs: 3_600_000 } },
@@ -636,6 +636,8 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     const first = await registered(w);
     const second = await registered(w);
     const anna = await registered(w);
+    // The exception is for accounts at least a window old (#889's B2).
+    w.clock.ms += 3_600_000;
     // Two strangers spend the address's whole share at the top of the hour.
     await give(w, first.token, 'anna@example.org');
     await give(w, second.token, 'anna@example.org');
@@ -647,6 +649,59 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     const hers = await give(w, anna.token, 'anna@example.org');
     expect(hers).toEqual(held);
     expect(mailedTo(w, 'anna@example.org')).toBe(3);
+    await confirm(w, anna.token, 'anna@example.org');
+    expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
+  });
+
+  const ceiling =
+    DEFAULT_LIMITS.confirmationsPerAddress.limit + DEFAULT_LIMITS.firstLinksPerAddress.limit;
+
+  it('a loop of fresh registrations giving one address mails it at most the ceiling, and every one registers (#889 B2)', async () => {
+    const w = await start({ emailRecovery: true });
+    const answers = [];
+    for (let n = 0; n < 40; n += 1) {
+      const device = await testDevice();
+      answers.push(await w.signIn(device, { recoveryEmail: 'victim@example.org' }));
+    }
+    for (const answer of answers) {
+      expect(answer.status).toBe(200);
+      expect(answer.body.recoveryCodes).toHaveLength(10);
+    }
+    // A registration's account is new, so it never takes the exception.
+    expect(mailedTo(w, 'victim@example.org')).toBe(DEFAULT_LIMITS.confirmationsPerAddress.limit);
+    expect(mailedTo(w, 'victim@example.org')).toBeLessThanOrEqual(ceiling);
+  });
+
+  it('a loop of email-less accounts each giving the address once mails it at most the ceiling, aged or not (#889 B2)', async () => {
+    const w = await start({ emailRecovery: true });
+    const fresh = [];
+    for (let n = 0; n < 30; n += 1) fresh.push(await registered(w));
+    // Brand-new accounts: the ordinary share and not one link more.
+    for (const account of fresh) {
+      expect((await give(w, account.token, 'victim@example.org')).status).toBe(204);
+    }
+    expect(mailedTo(w, 'victim@example.org')).toBe(DEFAULT_LIMITS.confirmationsPerAddress.limit);
+    // A window later the same accounts are established, and each one's first
+    // link of the window may take the exception — until its ceiling.
+    w.clock.ms += 3_600_000;
+    const before = mailedTo(w, 'victim@example.org');
+    for (const account of fresh) {
+      expect((await give(w, account.token, 'victim@example.org')).status).toBe(204);
+    }
+    expect(mailedTo(w, 'victim@example.org') - before).toBe(ceiling);
+  });
+
+  it('an owner whose account is established still gets a link through a flood of fresh accounts (#889 B2)', async () => {
+    const w = await start({ emailRecovery: true });
+    const anna = await registered(w);
+    w.clock.ms += 3_600_000;
+    for (let n = 0; n < 20; n += 1) {
+      await w.signIn(await testDevice(), { recoveryEmail: 'anna@example.org' });
+    }
+    const flooded = mailedTo(w, 'anna@example.org');
+    expect(flooded).toBe(DEFAULT_LIMITS.confirmationsPerAddress.limit);
+    expect((await give(w, anna.token, 'anna@example.org')).status).toBe(204);
+    expect(mailedTo(w, 'anna@example.org')).toBe(flooded + 1);
     await confirm(w, anna.token, 'anna@example.org');
     expect((await bound(w, anna.athleteId))?.address).toBe('anna@example.org');
   });

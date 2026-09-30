@@ -86,7 +86,14 @@ describe('two writers on one database (#769)', () => {
  *
  * The control runs the same race over connections whose transactions begin
  * DEFERRED, and requires it to go wrong somewhere — without it, a green run
- * could be two threads that never overlapped.
+ * could be two threads that never overlapped. ⚠️ In WAL mode "wrong" shows
+ * as `SQLITE_BUSY` reaching a caller, NOT as a lost update: a DEFERRED
+ * transaction that read under one snapshot and then tries to write after the
+ * other committed cannot be upgraded, and SQLite refuses it at once rather
+ * than wait out the busy timeout. So the control counts errors as well as
+ * broken outcomes, and it is the errors that fire: measured 2026-09-29, 46
+ * and 48 "database is locked" errors over 60 revoke and 60 rename races,
+ * and no broken outcome in either.
  */
 const RACERS = 60;
 const RACER = new URL('./testing/racing-identity-testing.ts', import.meta.url);
@@ -174,6 +181,8 @@ describe('the #867 rules hold between two connections on one file (#889)', () =>
   });
 
   it(
+    // Under WAL the race surfaces as SQLITE_BUSY (counted in `errors`), not as
+    // a lost update; either one satisfies the control.
     'is a test that can fail: with DEFERRED transactions the same races go wrong (the control)',
     { timeout: 60_000 },
     async () => {

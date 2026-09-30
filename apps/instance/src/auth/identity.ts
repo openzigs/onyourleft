@@ -123,16 +123,37 @@ export interface IdentityLimits {
    */
   readonly confirmationsPerAthleteAddress: RateLimit;
   /**
-   * How many links one address may be sent in all, so that many athletes
-   * asking for it cannot flood the mailbox. ⚠️ **An athlete's FIRST link to an
-   * address in a window is sent even over this bound**: otherwise a stranger
-   * spending the address's share at the top of every hour would silently
-   * starve its owner, which is the harm #865 removes. The trade, stated: an
-   * attacker holding N accounts can send the address this bound plus N links
-   * an hour, and the bound on N is how fast accounts can be made
-   * (`challengePerAddress`, and the registration mode #775 adds).
+   * How many links one address may be sent in a window by the ordinary path:
+   * whoever asks, however many accounts they hold.
    */
   readonly confirmationsPerAddress: RateLimit;
+  /**
+   * How many links over {@link confirmationsPerAddress} one address may be
+   * sent in a window, as an athlete's FIRST link to it (#883, #889's B2).
+   *
+   * ⚠️ **The hard ceiling per address is `confirmationsPerAddress.limit +
+   * firstLinksPerAddress.limit` a window, and nothing exceeds it**: not a
+   * loop of fresh registrations each giving the address, and not a loop of
+   * email-less accounts each giving it once. Until #889's re-review the
+   * first-link exception had no ceiling of its own, so every new account —
+   * and registration mints one per request — mailed the address once more.
+   *
+   * Why the exception is kept at all: without it a stranger spending the
+   * ordinary share at the top of every window would silently starve the
+   * address's owner, which is the harm #865 removes. It is granted only to an
+   * athlete whose account is at least one {@link confirmationsPerAddress}
+   * window old, so a registration never takes it (its account is new by
+   * definition) and nor does an account made to flood with.
+   *
+   * The trade, stated: an attacker who holds `firstLinksPerAddress.limit`
+   * accounts aged a window or more, and spends them together with the
+   * ordinary share at the top of each window, still starves the owner — who
+   * is delayed until a window in which they ask first. What the exception
+   * buys is that starving the owner costs aged accounts rather than nothing;
+   * what it costs is at most `firstLinksPerAddress.limit` more mails an
+   * address a window.
+   */
+  readonly firstLinksPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -144,6 +165,7 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   confirmationRequestsPerAthlete: { limit: 5, windowMs: 60 * 60_000 },
   confirmationsPerAthleteAddress: { limit: 3, windowMs: 60 * 60_000 },
   confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
+  firstLinksPerAddress: { limit: 3, windowMs: 60 * 60_000 },
 };
 
 /**
@@ -309,6 +331,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationRequests = createRateLimiter(limits.confirmationRequestsPerAthlete, now);
   const confirmationsPerPair = createRateLimiter(limits.confirmationsPerAthleteAddress, now);
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
+  const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
   const tickets = createTicketBook(now);
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -395,13 +418,15 @@ export function createIdentity(options: IdentityOptions): Identity {
    * and what the store keeps of it. `undefined` when no mail may go, so that
    * giving somebody's address again and again cannot flood their mailbox —
    * and the answer is the same either way. Counted per (athlete, address), so
-   * one athlete cannot spend another's share, and per address in all, except
-   * for an athlete's first link of the window (#883):
-   * {@link IdentityLimits.confirmationsPerAddress} says why and what it costs.
+   * one athlete cannot spend another's share, and per address in all, with
+   * one exception that has a hard ceiling of its own (#883, #889's B2):
+   * {@link IdentityLimits.firstLinksPerAddress} says who gets it, why, and
+   * what it costs. `createdAt` is the athlete's, in Unix seconds.
    */
   async function confirmationFor(
     athleteId: string,
     address: string,
+    createdAt: number,
   ): Promise<
     { token: string; tokenSha256: string; address: string; expiresAt: number } | undefined
   > {
@@ -409,8 +434,13 @@ export function createIdentity(options: IdentityOptions): Identity {
     // no two pairs share a key.
     const pairCount = confirmationsPerPair.take(`${athleteId}\n${address}`);
     if (pairCount > limits.confirmationsPerAthleteAddress.limit) return undefined;
-    const addressAllowed = confirmationsPerAddress.allow(address);
-    if (!addressAllowed && pairCount !== 1) return undefined;
+    if (!confirmationsPerAddress.allow(address)) {
+      // Over the ordinary share: only an established athlete's first link
+      // of the window, and only while the address's exceptions last.
+      const established = createdAt * 1000 <= now() - limits.confirmationsPerAddress.windowMs;
+      if (pairCount !== 1 || !established) return undefined;
+      if (!firstLinksPerAddress.allow(address)) return undefined;
+    }
     const token = randomToken(32);
     return {
       token,
@@ -450,12 +480,12 @@ export function createIdentity(options: IdentityOptions): Identity {
       recoveryEmail = address.value;
     }
     const athleteId = randomHex(16);
+    const at = seconds();
     // Not bound: confirmed later, by whoever reads the mailbox (#865). So the
     // answer cannot depend on whether somebody already holds the address.
     const confirmation =
-      recoveryEmail === undefined ? undefined : await confirmationFor(athleteId, recoveryEmail);
+      recoveryEmail === undefined ? undefined : await confirmationFor(athleteId, recoveryEmail, at);
     const recoveryCodes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
-    const at = seconds();
     await store.registerAthlete({
       athlete: { id: athleteId, displayName, createdAt: at, registrationState: 'active' },
       key: { publicKey, athleteId, addedAt: at, revokedAt: null },
@@ -682,7 +712,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (!confirmationRequests.allow(caller.athleteId)) return refuse('rate_limited');
       // The same answer whether or not somebody holds the address (#865): a
       // link goes to it either way, and only following it binds anything.
-      const confirmation = await confirmationFor(caller.athleteId, given.value);
+      // The account's age decides the first-link exception (#889's B2); an
+      // athlete the store no longer holds is treated as new, so gets none.
+      const createdAt = (await store.getAthlete(caller.athleteId))?.createdAt ?? seconds();
+      const confirmation = await confirmationFor(caller.athleteId, given.value, createdAt);
       if (confirmation !== undefined) {
         // Mailed FIRST, and the row written only once it went (#883): a
         // transport that fails is `internal`, and leaves no link in the store
@@ -696,6 +729,11 @@ export function createIdentity(options: IdentityOptions): Identity {
         }
         // Replaces this athlete's earlier unconfirmed link, if any, so the
         // table holds at most one pending confirmation an athlete (#883).
+        // ⚠️ The other direction is NOT covered: if this write fails after
+        // the mail went, the address holds a link the store never kept —
+        // following it answers `code_unknown`, binds nothing, and this route
+        // answers 500 (the handler's `internal`). The athlete's earlier link,
+        // if any, still stands, and giving the address again mails a fresh one.
         await store.putEmailConfirmation({
           tokenSha256: confirmation.tokenSha256,
           athleteId: caller.athleteId,
