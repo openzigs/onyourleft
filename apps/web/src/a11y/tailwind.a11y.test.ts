@@ -19,7 +19,12 @@
  *    Tailwind's own scanner and compiled with its own compiler, and the CSS
  *    that comes out may not hold a colour literal, a `color-mix()`, a duration
  *    or an easing curve, or a `var()` that is not a token; and no arbitrary
- *    value (`[…]`) may have produced a rule at all.
+ *    value (`[…]`) may have produced a rule at all. Since #950's review, no
+ *    colour may be written in the `(--custom-property)` shorthand either
+ *    (`tw:text-(--oyl-color-illo-sun)` is a token's `var()` that check 4
+ *    cannot read as a pair), a `--tw-*` property is exempt only where Tailwind
+ *    wrote it rather than the source, and no partial `opacity`, `filter` or
+ *    blend may ship: each changes the contrast of whatever pair is under it.
  * 3. **Every `tw:` class is real.** A class that generates nothing — `tw:p-4`
  *    against a theme with no numeric spacing, `tw:bg-red-500`, a typo — is a
  *    silent no-op, and fails here.
@@ -170,6 +175,61 @@ const COLOUR_PROPERTY = /(?:^|-)(?:color|background|border|outline|fill|stroke|s
 const NAMED_COLOUR =
   /\b(?:black|white|red|green|blue|yellow|orange|purple|pink|gray|grey|silver|maroon|navy|teal|olive|lime|aqua|fuchsia)\b/i;
 
+interface Declaration {
+  /** Every selector and at-rule the declaration sits inside, outermost first. */
+  readonly chain: readonly string[];
+  readonly property: string;
+  readonly value: string;
+}
+
+/**
+ * Every declaration in a piece of CSS, with the rules it is nested in — so a
+ * check can ask what CLASS wrote it, which a flat list of `property: value`
+ * cannot say (#950's review: a colour's spelling is in its selector).
+ */
+function declarationsOf(css: string): Declaration[] {
+  const found: Declaration[] = [];
+  const chain: string[] = [];
+  let buffer = '';
+  const flush = (): void => {
+    const said = buffer.trim();
+    buffer = '';
+    if (chain.length === 0) return;
+    const match = /^(--[a-z0-9-]+|-?[a-z][a-z-]*)\s*:\s*([\s\S]+)$/i.exec(said);
+    if (match === null) return;
+    found.push({
+      chain: [...chain],
+      property: (match[1] ?? '').toLowerCase(),
+      value: (match[2] ?? '').trim(),
+    });
+  };
+  for (const character of css) {
+    if (character === '{') {
+      chain.push(buffer.trim());
+      buffer = '';
+    } else if (character === ';') {
+      flush();
+    } else if (character === '}') {
+      flush();
+      chain.pop();
+    } else {
+      buffer += character;
+    }
+  }
+  return found;
+}
+
+/**
+ * The element-level properties that change the colour a rider sees without
+ * being a colour — so no contrast pair could ever measure what they make.
+ * `opacity` is allowed only fully on or fully off (#950's review: `tw:opacity-40`
+ * is a bare-value utility, so clearing the theme does not remove it, and it
+ * fades a pair exactly as the refused `bg-ink/40` would).
+ */
+const CONTRAST_CHANGING =
+  /^(?:filter|-webkit-backdrop-filter|backdrop-filter|mix-blend-mode|background-blend-mode)$/;
+const WHOLE_OPACITY = /^(?:0|1|0%|100%)$/;
+
 /**
  * Everything in a piece of compiled CSS that is not a token, as sentences.
  * Empty is a pass. Exported to nothing: the fixtures below call it too, which
@@ -178,10 +238,9 @@ const NAMED_COLOUR =
 function valuesNotFromTokens(css: string): string[] {
   const faults: string[] = [];
   const body = withoutTailwindInternals(withoutComments(css));
-  for (const [, property, value] of body.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)[;}]/gi)) {
-    const name = (property ?? '').toLowerCase();
-    const said = (value ?? '').trim();
+  for (const { chain, property: name, value: said } of declarationsOf(body)) {
     const where = `${name}: ${said}`;
+    const selectors = chain.join(' ');
     if (
       /#[0-9a-f]{3,8}\b/i.test(said) ||
       /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/i.test(said)
@@ -194,15 +253,42 @@ function valuesNotFromTokens(css: string): string[] {
     if (COLOUR_PROPERTY.test(name) && NAMED_COLOUR.test(said)) {
       faults.push(`a named colour — ${where}`);
     }
+    // ⚠️ #950's review: `tw:text-(--oyl-color-illo-sun)` compiles to a token's
+    // `var()`, so every check above passes it, and its selector escapes `(`
+    // rather than `[`, so the arbitrary-value check below does not fire
+    // either — while check 4 reads only `text-<token>` and `bg-<token>`, so the
+    // pair it makes is measured by nobody. A theme colour always has its own
+    // utility; the `(…)` shorthand is refused on any colour property.
+    if (COLOUR_PROPERTY.test(name) && selectors.includes('\\(')) {
+      faults.push(
+        `a colour written as a (--custom-property), which the contrast pair check cannot ` +
+          `read — use the token's own utility — ${selectors.trim()} { ${where} }`,
+      );
+    }
+    if (name === 'opacity' && !WHOLE_OPACITY.test(said)) {
+      faults.push(`a partial opacity, which changes the contrast of any pair under it — ${where}`);
+    }
+    if (CONTRAST_CHANGING.test(name)) {
+      faults.push(`a filter or blend, which changes the contrast of any pair under it — ${where}`);
+    }
     if (/(?:^|[\s,(])-?\d*\.?\d+m?s\b/.test(said.replaceAll(/var\([^)]*\)/g, ''))) {
       faults.push(`a duration of its own — ${where}`);
     }
-    if (/\b(?:cubic-bezier|steps|linear)\(|\bease(?:-in|-out|-in-out)?\b/i.test(said)) {
+    // A custom property's NAME is not a value: `var(--tw-ease, …)` names no easing.
+    if (
+      /\b(?:cubic-bezier|steps|linear)\(|\bease(?:-in|-out|-in-out)?\b/i.test(
+        said.replaceAll(/--[a-z0-9-]+/gi, ''),
+      )
+    ) {
       faults.push(`an easing of its own — ${where}`);
     }
     for (const [, reference] of said.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)) {
       const named = reference ?? '';
-      if (!named.startsWith('--tw-') && !DECLARED_TOKENS.has(named)) {
+      // Tailwind's own `--tw-*` plumbing is exempt; one the SOURCE names
+      // (`tw:bg-(--tw-anything)`, #950's review) is in its class, so its
+      // selector names it, and is not.
+      const tailwinds = named.startsWith('--tw-') && !selectors.includes('--tw-');
+      if (!tailwinds && !DECLARED_TOKENS.has(named)) {
         faults.push(`a custom property theme.css does not declare — ${where}`);
       }
     }
@@ -329,6 +415,15 @@ function motionFaults(list: ClassList): string[] {
     .map((utility) => `${list.where}: ${utility} is not a motion token`);
 }
 
+/**
+ * The CSS Tailwind builds for these classes and nothing else. ⚠️ A compiler
+ * keeps every candidate it has been handed, so each fixture takes a fresh one:
+ * a shared one would read the previous fixture's rules as this one's.
+ */
+async function builtAlone(classes: string[]): Promise<string> {
+  return (await compilerFor(tailwindCss)).build(classes);
+}
+
 describe('#950 — Tailwind stays inside the tokens', () => {
   let compiler: Compiler;
   let shipped: string;
@@ -408,6 +503,51 @@ describe('#950 — Tailwind stays inside the tokens', () => {
       expect(valuesNotFromTokens('.a { border-color: red; }')).toEqual([
         'a named colour — border-color: red',
       ]);
+    });
+
+    it('refuses a colour written as a (--custom-property), which the pair check cannot read', async () => {
+      // #950's review: this spelling passed every check while its pair —
+      // illo-sun on canvas — is one no contrast gate measures.
+      for (const colour of [
+        'tw:text-(--oyl-color-illo-sun)',
+        'tw:text-(color:--oyl-color-ink)',
+        'tw:hover:bg-(--oyl-color-ink)',
+        'tw:border-(--oyl-color-border)',
+      ]) {
+        expect(valuesNotFromTokens(await builtAlone([colour])), colour).toEqual(
+          expect.arrayContaining([expect.stringContaining('a colour written as a')]),
+        );
+      }
+      // The same shorthand on a length is a token like any other.
+      expect(valuesNotFromTokens(await builtAlone(['tw:max-w-(--oyl-measure)']))).toEqual([]);
+    });
+
+    it('exempts Tailwind’s own --tw-* properties, and not one the source names', async () => {
+      expect(valuesNotFromTokens(await builtAlone(['tw:transition-colors']))).toEqual([]);
+      expect(valuesNotFromTokens(await builtAlone(['tw:max-w-(--tw-anything)']))).toEqual([
+        'a custom property theme.css does not declare — max-width: var(--tw-anything)',
+      ]);
+      expect(valuesNotFromTokens(await builtAlone(['tw:bg-(--tw-anything)']))).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('a custom property theme.css does not declare'),
+        ]),
+      );
+    });
+
+    it('refuses a partial opacity, a filter and a blend, and allows fully on or off', async () => {
+      expect(valuesNotFromTokens(await builtAlone(['tw:opacity-40']))).toEqual([
+        'a partial opacity, which changes the contrast of any pair under it — opacity: 40%',
+      ]);
+      for (const effect of [
+        'tw:brightness-50',
+        'tw:backdrop-opacity-50',
+        'tw:mix-blend-multiply',
+      ]) {
+        expect(valuesNotFromTokens(await builtAlone([effect])), effect).toEqual(
+          expect.arrayContaining([expect.stringContaining('a filter or blend')]),
+        );
+      }
+      expect(valuesNotFromTokens(await builtAlone(['tw:opacity-0', 'tw:opacity-100']))).toEqual([]);
     });
 
     it('refuses a theme that holds a literal rather than a token', async () => {

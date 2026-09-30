@@ -49,7 +49,12 @@ come in without becoming a second, ungated way to paint the screen**.
   `check:licences` passes.
 - **`@radix-ui/react-alert-dialog` 1.1.23**, MIT, published 2026-07-24. Its closure is sixteen
   `@radix-ui/*` packages, `react-remove-scroll` and its three helpers, `aria-hidden`, `get-nonce`,
-  `detect-node-es` and `use-callback-ref`, all MIT, and `tslib` (0BSD, already in the closure). One of
+  `detect-node-es` and `use-callback-ref`, all MIT, and `tslib` (0BSD, already in the closure).
+  ⚠️ Radix declares `@types/react` and `@types/react-dom` as optional peers, so `pnpm licenses list
+  --prod` also lists them and `csstype` (all MIT): they are TYPES, no byte of them is in `dist`, and
+  the third-party notices credit them anyway, because the notices are generated from that closure and
+  a notice for code that does not ship costs nothing, where a filter that guessed wrong would drop one
+  that does. One of
   them, `react-remove-scroll-bar` 2.3.8, ships no licence file; its reviewed entry in
   `apps/web/third-party-notices.json` quotes its README and the author's own MIT `LICENSE` from the
   repository. `check:notices` passes with the notices regenerated.
@@ -124,7 +129,14 @@ it would ship:
    compiler, so it is what a build writes. It may hold no colour literal, no `color-mix()` (an
    opacity modifier such as `tw:bg-ink/40` makes a colour no pair measures), no duration, no easing
    curve, and no `var()` that `theme.css` does not declare. **No arbitrary value (`[…]`) may produce
-   a rule**, so `tw:bg-[#123456]` fails the build wherever it is written.
+   a rule**, so `tw:bg-[#123456]` fails the build wherever it is written. **No colour may be written
+   in the `(--custom-property)` shorthand** (`tw:text-(--oyl-color-illo-sun)`): it compiles to a
+   token's `var()` and escapes `(` rather than `[`, so it passed every other check while its pair was
+   read by nobody — found in this ADR's review. A `var(--tw-*)` is exempt only where Tailwind itself
+   wrote it, not where the source's class names one. And **no partial `opacity`** (only 0 and 100),
+   **no `filter`, `backdrop-filter` or blend mode** may ship: `tw:opacity-40` is a bare-value utility
+   that clearing the theme does not remove, and like `bg-ink/40` it changes the contrast of every
+   pair beneath it.
 3. **Every `tw:` class the source writes generates CSS**, so a typo or a class outside the theme is
    not a silent no-op.
 4. **The contrast gate reads a Tailwind colour.** Where one class list sets an ink and a surface for
