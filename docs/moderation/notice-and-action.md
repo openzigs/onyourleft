@@ -7,8 +7,8 @@
 - **Date**: 2026-09-30
 - **Issues**: [#887](https://github.com/openzigs/onyourleft/issues/887) (EU DSA Art. 16) and
   [#886](https://github.com/openzigs/onyourleft/issues/886) (UK Online Safety Act ss.20–21). Public
-  rooms ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until the owner
-  approves it.
+  rooms ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until [#907](https://github.com/openzigs/onyourleft/issues/907),
+  [#910](https://github.com/openzigs/onyourleft/issues/910) and [#911](https://github.com/openzigs/onyourleft/issues/911) ship (owner, 2026-09-30). Private rooms do not wait.
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md),
   read first-hand on 2026-09-30: DSA (Regulation (EU) 2022/2065, OJ L 277, 27.10.2022) Arts 16–18 and
   recitals 50, 52 and 54; OSA ss.10, 20, 20A, 21, 23 and 66; Ofcom's Illegal content Codes of
@@ -43,7 +43,7 @@
 | Contact address chosen | [matt@openzigs.ai](mailto:matt@openzigs.ai) |
 | Conflict-of-interest option chosen (see "A notice or complaint about the moderator") | The owner decides it, declares the conflict in the statement of reasons, and logs it |
 | Target times chosen (see "Target times") | 48 hours for notices of illegal content; 7 days for other reports and complaints |
-| Signature | The owner, 2026-09-30 |
+| Signature | The owner, 2026-09-30: *"Safety draft looks good"* |
 
 ## One moderator, and what that supersedes
 
@@ -63,7 +63,7 @@ that criterion is superseded by #905.** This procedure is written for one person
 | **The private contact address** [matt@openzigs.ai](mailto:matt@openzigs.ai) | Anybody | **Chosen** (owner, 2026-09-30). It is also the address for statements of reasons that cannot be delivered in the app, and for requests to delete |
 | **Reporting a rider** in the app (#83), and in a room (#789) | Signed-in riders only | #83's report exists. #789's in-room report is not built |
 
-⚠️ **Until #907 exists and the address is chosen, a person who is not a rider has no way to send a
+⚠️ **Until #907 exists, a person who is not a rider can write to [matt@openzigs.ai](mailto:matt@openzigs.ai) but has no in-app way; a person who is not a rider has no way to send a
 notice.** DSA Art. 16(1) says *"any individual or entity"*, and OSA s.20(2) covers *"affected
 persons"*, who are not users (s.20(5)). So this procedure cannot be followed in full before then.
 

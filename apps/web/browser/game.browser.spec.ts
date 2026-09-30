@@ -60,7 +60,11 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
-import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import {
+  REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
+import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
@@ -127,6 +131,10 @@ interface GameHarnessResult {
   readonly scatterKindCount: number;
   readonly drawCallsWithScatter: number;
   readonly drawCallsWithoutScatter: number;
+  /** #783. @see game-harness.ts */
+  readonly roomDrawCalls: number;
+  readonly roomDrawCallsEachOwnMesh: number;
+  readonly remoteRidersInRoom: number;
   readonly sceneryPixelsChanged: number;
   readonly sceneryPixelWith: Pixel;
   readonly sceneryPixelWithout: Pixel;
@@ -1715,6 +1723,26 @@ test.describe('the road reads as a road — #242', () => {
     // out is that a red run says which term moved.
     expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
   });
+
+  /**
+   * #783: a whole room of other real riders — the interest set at its
+   * largest, K = 100 plus the hysteresis — costs the scene NO draw call: they
+   * are instances of the rider's own four meshes. The control draws each in a
+   * mesh of its own (`three-renderer.ts` §`remoteRiderControlOf`), which must
+   * not come to the same number — without it this would pass over a frame the
+   * room never reached.
+   */
+  test('draws a whole room of other riders at no extra draw call — #783', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
+    expect(result.remoteRidersInRoom).toBe(MAXIMUM_DRAWN_SET);
+    expect(result.roomDrawCalls).toBe(SCENE_DRAW_CALLS);
+    expect(result.roomDrawCallsEachOwnMesh).toBeGreaterThan(SCENE_DRAW_CALLS);
+    expect(result.roomDrawCallsEachOwnMesh).toBeGreaterThanOrEqual(
+      SCENE_DRAW_CALLS + MAXIMUM_DRAWN_SET,
+    );
+  });
 });
 
 test.describe('the gradient cue reaches the screen, on a frame after the first — #242', () => {
@@ -3092,6 +3120,25 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(result.realistic.measured).toBe(true);
     return result.realistic;
   };
+
+  test('holds a full room of other riders inside the frame’s triangles, and would not without its rule — #783', async ({
+    harnessRun,
+  }) => {
+    const { room } = await realistic(harnessRun);
+    expect(room.measured).toBe(true);
+    expect(room.remoteRiders).toBe(MAXIMUM_DRAWN_SET);
+    const added = room.with - room.without;
+    // The room is really drawn — two bodies at least — and inside its share.
+    expect(added).toBeGreaterThan(10_000);
+    expect(added).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
+    // The control: every remote rider drawn, the rule off, does not fit.
+    expect(room.withoutTheRule - room.without).toBeGreaterThan(REALISTIC_REMOTE_TRIANGLES);
+    console.log(
+      `#783: a room of ${String(room.remoteRiders)} added ${String(added)} triangles to the ` +
+        `realistic frame (${String(room.without)} without); every one drawn would add ` +
+        `${String(room.withoutTheRule - room.without)}, against ${String(REALISTIC_REMOTE_TRIANGLES)}`,
+    );
+  });
 
   test('is drawn only when it is loaded, and otherwise falls back and says so — D-7', async ({
     harnessRun,

@@ -2612,12 +2612,14 @@ p > label + input[type='file'] {
 }
 
 /*
- * The rider's words to mask (#839, `athlete/MaskedWordsPanel.tsx`). One row an
+ * The rider's words to mask (#839, `athlete/MaskedWordsPanel.tsx`), and since
+ * #836 the documents list (`rider-text/DocumentsPanel.tsx`). One row an
  * entry, its Remove beside it and wrapping under it on a narrow screen, and
  * the entry itself broken anywhere — a rider may list an unbreakable village
  * name, which would otherwise scroll a phone's page sideways (SC 1.4.10).
  */
-.oyl-masked-words__list {
+.oyl-masked-words__list,
+.oyl-rider-text__list {
   display: grid;
   gap: var(--oyl-space-sm);
   margin: 0;
@@ -2625,7 +2627,8 @@ p > label + input[type='file'] {
   list-style: none;
 }
 
-.oyl-masked-words__list li {
+.oyl-masked-words__list li,
+.oyl-rider-text__list li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2633,9 +2636,37 @@ p > label + input[type='file'] {
   gap: var(--oyl-space-sm);
 }
 
-.oyl-masked-words__word {
+.oyl-masked-words__word,
+.oyl-rider-text__name {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/*
+ * The rider's goals, a ride's note and the documents list (#836,
+ * `rider-text/`). The text area takes the width it is given up to a reading
+ * measure — `.oyl-input`'s 8rem is a number box's — and grows downwards only,
+ * so a phone's page never scrolls sideways (SC 1.4.10). The form is a column,
+ * so the label, the box, its count and Save read top to bottom.
+ */
+.oyl-rider-text__form {
+  display: grid;
+  /* One column that may shrink below its content's width: an `auto` track is
+     as wide as a file input's own text, which is wider than a 320 px phone
+     (`reflow.browser.spec.ts` measured 72 px of sideways scroll). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oyl-space-sm);
+  justify-items: start;
+}
+
+.oyl-rider-text__box {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 40rem;
+  font-family: inherit;
+  font-size: var(--oyl-font-size-md);
+  line-height: 1.55;
+  resize: vertical;
 }
 
 /*
@@ -3136,6 +3167,16 @@ p > label + input[type='file'] {
 .oyl-hud__side-camera-stop {
   flex-shrink: 0;
   margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+/* #783: the room's one control, "Follow" — a 44 px secondary button like the
+   side camera's Stop, its whole name visually hidden past the word shown.
+   ⚠️ NOT measured at the ride's nine viewports: no browser harness here rides
+   in a room yet, so where it lands beside the sound row on a phone is owed to
+   #733's device check, stated rather than claimed. */
+.oyl-hud__follow {
+  align-self: flex-start;
   white-space: nowrap;
 }
 

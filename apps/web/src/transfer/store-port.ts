@@ -26,6 +26,8 @@ import type {
   FramingReferenceRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  RiderTextKind,
+  RiderTextRecord,
   LapRecord,
   ListActivitiesOptions,
   NewActivity,
@@ -56,6 +58,11 @@ import type {
  */
 export interface AccountStore {
   getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
+  /**
+   * The rider's goals, ride notes or documents (#836) — carried by the
+   * account export as the rider's own data (ADR 0040 D-10).
+   */
+  listRiderTexts(owner: AthleteId, kind: RiderTextKind): Promise<RiderTextRecord[]>;
   /**
    * Removes the athlete and everything of theirs. #35's deletion half.
    *

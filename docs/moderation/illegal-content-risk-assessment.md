@@ -5,8 +5,8 @@
 
 - **Date**: 2026-09-30
 - **Issue**: [#886](https://github.com/openzigs/onyourleft/issues/886). Public rooms
-  ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until the owner approves
-  this document and the others in this directory.
+  ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until [#907](https://github.com/openzigs/onyourleft/issues/907),
+  [#910](https://github.com/openzigs/onyourleft/issues/910) and [#911](https://github.com/openzigs/onyourleft/issues/911) ship (owner, 2026-09-30). Private rooms do not wait.
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md),
   read first-hand on 2026-09-30. Section references below (s.9, Sch.3 and so on) are to the Online
   Safety Act 2023 as quoted there. "O1" is Ofcom's Illegal content Codes of Practice for
@@ -23,7 +23,8 @@
   [#887](https://github.com/openzigs/onyourleft/issues/887#issuecomment-5913274367) (the contact address and the
   sign-off).
 - **Where this document says "proposed"**, the proposal is adopted by the owner's sign-off of
-  2026-09-30, whose words were *"Safety draft looks good"*. The owner made no change to any proposal.
+  2026-09-30, whose words were *"Safety draft looks good"*; the owner asked for no change to any
+  proposal. A proposal that is still conditional (H1 among them) stays conditional.
 - **Public rooms wait for [#907](https://github.com/openzigs/onyourleft/issues/907),
   [#910](https://github.com/openzigs/onyourleft/issues/910) and
   [#911](https://github.com/openzigs/onyourleft/issues/911)** (owner, 2026-09-30): reporting without an
@@ -44,12 +45,12 @@
 |---|---|
 | Service assessed | The project's instance with public rooms enabled (below) |
 | Assessment completed on | 2026-09-30 |
-| Completed by | The owner |
+| Completed by | Drafted in #914; approved by the owner |
 | Named person responsible for the assessment | The owner (also the ICU A2 accountable individual) |
 | Approved by | The owner, 2026-09-30: *"Safety draft looks good"* |
 | Current Ofcom Risk Profiles consulted (version and date) | **Not yet read in full.** The version headed 16 December 2024 was relied on (O9, above). To be read before the first review |
 | Next review due | Within 3 months of opening |
-| Signature | The owner, 2026-09-30 |
+| Signature | The owner, 2026-09-30: *"Safety draft looks good"* |
 
 O9 Table 8 lists what the record must contain. The rows above follow that list.
 

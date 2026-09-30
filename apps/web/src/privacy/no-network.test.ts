@@ -101,10 +101,31 @@ const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * silenced within a week, which is the failure mode a noisy rule has.
  */
 const NETWORK_PRIMITIVES: readonly { readonly name: string; readonly pattern: RegExp }[] = [
-  { name: 'fetch', pattern: /(?<![\w.$])fetch\s*\(/g },
-  { name: 'XMLHttpRequest', pattern: /(?<![\w.$])XMLHttpRequest\b/g },
-  { name: 'WebSocket', pattern: /(?<![\w.$])WebSocket\b/g },
-  { name: 'EventSource', pattern: /(?<![\w.$])EventSource\b/g },
+  // ⚠️ Each of these four is TWO spellings in one row, since #782's review
+  // (B2): the bare name, with `.` in the lookbehind so `store.fetchRides(` and
+  // `scope.fetch = …` stay quiet, OR the name reached through the global
+  // object — `globalThis.`, `window.` or `self.` — which that lookbehind used
+  // to skip, so `new globalThis.WebSocket(u)` anywhere in the client passed
+  // the gate. One row per primitive rather than a second row, so a line naming
+  // both spellings is one finding and the module-and-primitive count below is
+  // not doubled. #529 closed the same hole for `RTCPeerConnection`.
+  {
+    name: 'fetch',
+    pattern: /(?<![\w.$])fetch\s*\(|(?<![\w$])(?:globalThis|window|self)\s*\.\s*fetch\s*\(/g,
+  },
+  {
+    name: 'XMLHttpRequest',
+    pattern:
+      /(?<![\w.$])XMLHttpRequest\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*XMLHttpRequest\b/g,
+  },
+  {
+    name: 'WebSocket',
+    pattern: /(?<![\w.$])WebSocket\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*WebSocket\b/g,
+  },
+  {
+    name: 'EventSource',
+    pattern: /(?<![\w.$])EventSource\b|(?<![\w$])(?:globalThis|window|self)\s*\.\s*EventSource\b/g,
+  },
   { name: 'sendBeacon', pattern: /\.sendBeacon\s*\(/g },
   { name: 'navigator.sendBeacon', pattern: /(?<![\w.$])navigator\s*\.\s*sendBeacon\b/g },
   // #529, ADR 0033 D-9 step 1. ⚠️ **No `.` in the lookbehind, unlike every
@@ -177,6 +198,31 @@ describe('the scan itself', () => {
     expect(networkCallsIn('await Capacitor.Plugins.CapacitorHttp.request(o);')).toHaveLength(1);
     expect(networkCallsIn("registerPlugin('CapacitorHttp')")).toHaveLength(1);
     expect(networkCallsIn('const MyCapacitorHttpish = 1;')).toEqual([]);
+  });
+
+  it('finds the four reached through the global object, one finding a line — #782 review (B2)', () => {
+    // Before #782's review every one of these passed the gate: the lookbehind
+    // that keeps `store.fetchRides(` quiet skipped `globalThis.` too.
+    for (const [source, primitive] of [
+      ['const s = new globalThis.WebSocket(u);', 'WebSocket'],
+      ['const s = new window.WebSocket(u);', 'WebSocket'],
+      ['const s = new self . WebSocket(u);', 'WebSocket'],
+      ['void globalThis.fetch(url);', 'fetch'],
+      ['void window.fetch(url, init);', 'fetch'],
+      ['void self.fetch(url);', 'fetch'],
+      ['const e = new globalThis.EventSource(url);', 'EventSource'],
+      ['const e = new window.EventSource(url);', 'EventSource'],
+      ['const x = new globalThis.XMLHttpRequest();', 'XMLHttpRequest'],
+      ['const x = new window.XMLHttpRequest();', 'XMLHttpRequest'],
+    ] as const) {
+      expect(networkCallsIn(source), source).toEqual([expect.objectContaining({ primitive })]);
+    }
+    // Both spellings on one line are one finding, not two.
+    expect(networkCallsIn('const S = globalThis.WebSocket ?? WebSocket;')).toHaveLength(1);
+    // And a member of something else is still not one.
+    expect(networkCallsIn('const rides = await myself.fetchRides();')).toEqual([]);
+    expect(networkCallsIn('scope.fetch = narrowed;')).toEqual([]);
+    expect(networkCallsIn('const w = mywindow.WebSocket;')).toEqual([]);
   });
 
   it('does not fire on a name that merely contains one', () => {
@@ -262,6 +308,13 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // What leaves is argued in the module's header and walked for a coordinate
   // by `privacy/boundaries.test.ts`; `docs/privacy-policy.md` names it.
   { module: join('instance', 'instance-transport.ts'), primitive: 'fetch', count: 1 },
+  // #782: a room's socket, opened THROUGH that same module (its
+  // §`instanceRoomSocket`) — a second primitive in the one instance module,
+  // never a second module. ADR 0036 D-3 (a) admits one module for instance
+  // traffic, and this list now pins exactly one `fetch` AND exactly one
+  // `WebSocket` to it: a WebSocket anywhere else in the client, a second one
+  // here, or this one gone, is a red run (the fixtures below, "#782").
+  { module: join('instance', 'instance-transport.ts'), primitive: 'WebSocket', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -302,11 +355,16 @@ export function networkFindingsOutside(
         );
         continue;
       }
-      counted.set(file.path, (counted.get(file.path) ?? 0) + 1);
+      // ⚠️ Keyed by the module AND the primitive since #782, when one module
+      // was first permitted two: keyed by the module alone, its one `fetch`
+      // and its one `WebSocket` summed to two and each rule read "2 where the
+      // policy describes 1".
+      const key = `${file.path}\u0000${finding.primitive}`;
+      counted.set(key, (counted.get(key) ?? 0) + 1);
     }
   }
   for (const rule of permitted) {
-    const seen = counted.get(rule.module) ?? 0;
+    const seen = counted.get(`${rule.module}\u0000${rule.primitive}`) ?? 0;
     if (seen !== rule.count) {
       findings.push(
         `${rule.module} — ${String(seen)} ${rule.primitive} call(s) where the policy describes ${String(rule.count)}`,
@@ -340,7 +398,9 @@ describe('the narrowed gate itself — #387', () => {
   const INSTANCE = join('instance', 'instance-transport.ts');
   const instance: ScannedFile = {
     path: INSTANCE,
-    source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
+    source:
+      'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));\n' +
+      'const platformSocket = (url, events) => { const socket = new WebSocket(url); return socket; };',
   };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
@@ -544,20 +604,81 @@ describe('the narrowed gate itself — #387', () => {
   });
 
   it('goes red for a different primitive inside the instance transport', () => {
-    const socket: ScannedFile = {
+    const source: ScannedFile = {
       path: INSTANCE,
-      source: `${instance.source}\nconst s = new WebSocket('wss://ride.example');`,
+      source: `${instance.source}\nconst s = new EventSource('https://ride.example/v1/events');`,
     };
     const findings = networkFindingsOutside(
-      [socket, hosted, transport, link, fence],
+      [source, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toContain('WebSocket');
+    expect(findings[0]).toContain('EventSource');
+  });
+
+  // #782: the room's socket, pinned like the fetch beside it — ONE module for
+  // instance traffic (ADR 0036 D-3 (a)), and in it exactly one WebSocket.
+  it('goes red for a second WebSocket inside the instance transport — #782', () => {
+    const twice: ScannedFile = {
+      path: INSTANCE,
+      source: `${instance.source}\nconst s = new WebSocket('wss://ride.example/elsewhere');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toEqual([expect.stringContaining('2 WebSocket')]);
+  });
+
+  it('goes red for a WebSocket anywhere else, the room code included — #782', () => {
+    for (const path of [
+      join('net', 'room-port.ts'),
+      join('net', 'room-session.ts'),
+      join('instance', 'instance-port.ts'),
+      join('game', 'GameView.tsx'),
+    ]) {
+      const elsewhere: ScannedFile = { path, source: 'const socket = new WebSocket(url);' };
+      const findings = networkFindingsOutside(
+        [instance, elsewhere, hosted, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, path).toEqual([expect.stringContaining(path)]);
+    }
+  });
+
+  it('goes red for a WebSocket reached through the global object in the room code — #782 review (B2)', () => {
+    for (const source of [
+      'const socket = new globalThis.WebSocket(url);',
+      'const socket = new window.WebSocket(url);',
+      'void globalThis.fetch(url);',
+    ]) {
+      const path = join('net', 'room-port.ts');
+      const elsewhere: ScannedFile = { path, source };
+      const findings = networkFindingsOutside(
+        [instance, elsewhere, hosted, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, source).toEqual([expect.stringContaining(path)]);
+    }
+  });
+
+  it('goes red when the instance transport’s WebSocket is gone — #782', () => {
+    const emptied: ScannedFile = {
+      path: INSTANCE,
+      source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
+    };
+    const findings = networkFindingsOutside(
+      [emptied, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toEqual([expect.stringContaining('0 WebSocket')]);
   });
 
   it('goes red when the instance transport’s fetch is gone', () => {
-    const emptied: ScannedFile = { path: INSTANCE, source: 'const sender = send;' };
+    const emptied: ScannedFile = {
+      path: INSTANCE,
+      source: 'const sender = send;\nconst socket = new WebSocket(url);',
+    };
     const findings = networkFindingsOutside(
       [emptied, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
@@ -600,7 +721,8 @@ describe('the client', () => {
         'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
         'paired by scanning, a question — never a picture — to a hosted service on the ' +
-        'rider’s own key, and a sign-in to an instance the rider chose (#777); that is now ' +
+        'rider’s own key, a sign-in to an instance the rider chose (#777), and a room’s ' +
+        'power reports to that instance (#782); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);

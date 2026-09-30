@@ -177,6 +177,10 @@ export default defineConfig({
         // spec runs. `identity-harness.ts` says what it does not prove.
         identity: 'browser/identity.html',
         reflow: 'browser/reflow.html',
+        // #782: two browser contexts, each signed in to a real instance the
+        // spec starts, in one room, each seeing the other move — through the
+        // production room port and the one instance module's WebSocket.
+        room: 'browser/room.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

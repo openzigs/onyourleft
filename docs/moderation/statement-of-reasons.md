@@ -29,7 +29,7 @@
 |---|---|
 | Templates approved on | 2026-09-30, by the owner: *"Safety draft looks good"* |
 | Delivery channel chosen (see "OPEN: where a statement is delivered") | Not chosen. Public rooms wait for #910; until then a rider can write to [matt@openzigs.ai](mailto:matt@openzigs.ai) |
-| Signature | The owner, 2026-09-30 |
+| Signature | The owner, 2026-09-30: *"Safety draft looks good"* |
 
 ## When a statement is owed
 

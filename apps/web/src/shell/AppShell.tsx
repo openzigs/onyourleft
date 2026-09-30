@@ -51,6 +51,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -71,6 +72,7 @@ import type { WorkoutPort } from '../workouts/store-port';
 import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
+import type { RoomPort } from '../net/room-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
@@ -200,6 +202,17 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * Other real riders — #782, #783: the room port `main.tsx` builds over the
+   * instance this device is connected to. Handed to the game, which joins a
+   * room only when it is given one to join (#784 is the room code).
+   */
+  readonly room?: RoomPort | undefined;
+  /**
+   * Which room the game joins. ⚠️ `main.tsx` supplies none: a room is entered
+   * by its code, which is #784's. The browser gate supplies one.
+   */
+  readonly roomId?: string | undefined;
   /**
    * Android's thermal forecast, for the game's quality ladder (#247). Absent
    * in a browser. @see game/thermal-port.ts
@@ -397,6 +410,12 @@ export interface AppShellProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The rider's goals, ride notes and documents for the ride analysis (#836)
+   * — `rider-text/rider-text-port.ts`. Optional like every other port here;
+   * without one each box says there is no store to keep it in.
+   */
+  readonly riderText?: RiderTextPort | undefined;
+  /**
    * The Connect screen's port (#777) — `instance/instance-port.ts`
    * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
    * the screen says this platform cannot connect.
@@ -471,6 +490,7 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           writeUp={props.rideAnalysis}
+          riderText={props.riderText}
         />
       );
     case 'analysis':
@@ -515,6 +535,9 @@ function viewFor(
           // #551. The side camera's line on the HUD, its Stop, and its link
           // going said through the HUD's one region.
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #782, #783: other real riders, over the instance.
+          {...(props.room === undefined ? {} : { room: props.room })}
+          {...(props.roomId === undefined ? {} : { roomId: props.roomId })}
         />
       );
     case 'segment-detail':
@@ -591,6 +614,7 @@ function viewFor(
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
           maskedWords={props.maskedWords}
+          riderText={props.riderText}
         />
       );
     case 'about':

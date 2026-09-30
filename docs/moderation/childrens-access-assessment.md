@@ -5,8 +5,8 @@
 
 - **Date**: 2026-09-30
 - **Issue**: [#886](https://github.com/openzigs/onyourleft/issues/886). Public rooms
-  ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until the owner approves
-  it.
+  ([#788](https://github.com/openzigs/onyourleft/issues/788)) stay blocked until [#907](https://github.com/openzigs/onyourleft/issues/907),
+  [#910](https://github.com/openzigs/onyourleft/issues/910) and [#911](https://github.com/openzigs/onyourleft/issues/911) ship (owner, 2026-09-30). Private rooms do not wait.
 - **Sources relied on**: [spike 0019](../spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)
   §2 Q3, read first-hand on 2026-09-30: the Online Safety Act 2023 ss.35–37 and s.230; Ofcom's
   children's access assessment page (O4, updated 29 June 2026), its toolkit (O5), its guidance on
@@ -38,7 +38,7 @@
 | Stage 2 conclusion (if reached) | The child user condition is not met: not likely to be accessed by children (option B) |
 | Steps taken and evidence relied on | Registration is `approval` (the owner sees every sign-up); riders confirm they are 18 or over; a cycling-training instance. Ofcom may not accept this evidence alone |
 | Completed on | 2026-09-30 |
-| Completed by | The owner |
+| Completed by | Drafted in #914; approved by the owner |
 | Next assessment due (not more than one year later, s.36(3)) | A review within 3 months of opening |
 | Signature | The owner, 2026-09-30: *"Safety draft looks good"* |
 

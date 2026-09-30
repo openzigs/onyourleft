@@ -102,7 +102,9 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import { createRoomPort, type RoomPort } from './net/room-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
@@ -713,6 +715,20 @@ function buildMaskedWordsPort(): MaskedWordsPort {
 }
 
 /**
+ * The rider's goals, ride notes and documents (#836), over the same
+ * connection: kept on this device first, and synced by `instance/sync.ts`
+ * (ADR 0040 D-1).
+ */
+function buildRiderTextPort(): RiderTextPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    newDocumentId: () => globalThis.crypto.randomUUID(),
+  };
+}
+
+/**
  * The Connect screen's port (#777): the ONE production place an instance port
  * is built, so `check:wiring` reports `createInstancePort` if this goes.
  *
@@ -729,6 +745,25 @@ function buildInstancePort(): InstancePort | undefined {
     ensureLocalAthlete: () =>
       ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The game's room port (#782, #783): the ONE production place a room port is
+ * built, so `check:wiring` reports `createRoomPort` if this goes. Over the
+ * instance this device signed in to (`instance/instance-port.ts`), through the
+ * one instance module (ADR 0036 D-3 (a)); a device signed in to none sends
+ * nothing and rides alone. A joined room holds the ride controller's
+ * foreground service in the Android shell, so the socket survives the screen
+ * going off (#524).
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildRoomPort(rideController: RideController | undefined): RoomPort | undefined {
+  if (typeof localStorage === 'undefined') return undefined;
+  return createRoomPort({
+    storage: localStorage,
+    ...(rideController === undefined ? {} : { keepAlive: () => rideController.keepAliveForRoom() }),
   });
 }
 
@@ -992,6 +1027,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const storage = platformStorage();
   // Built once: a port per render would make the Connect screen re-read the instance on every draw.
   const instance = buildInstancePort();
+  // #782: built once, for the Connect screen's reason above.
+  const room = buildRoomPort(rideController);
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1012,7 +1049,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
+          riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
+          {...(room === undefined ? {} : { room })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

@@ -80,6 +80,8 @@ import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { RiderTextPort } from '../rider-text/rider-text-port';
+import { memoryRiderText } from '../rider-text/testing';
 import { workoutStub } from '../workouts/testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -427,6 +429,51 @@ function maskedWordsPort(populated: boolean): MaskedWordsPort {
   };
 }
 
+/**
+ * The rider's goals, a note on the fixture ride and two documents (#836) — in
+ * the populated walk, with one unbreakable word and one long file name, so the
+ * reflow walk lays out the widest a box and a row can be.
+ */
+function riderTextPort(populated: boolean): RiderTextPort {
+  if (!populated) return memoryRiderText([], ATHLETE).port;
+  const savedAt = unixSeconds(NOW);
+  return memoryRiderText(
+    [
+      {
+        athleteId: ATHLETE,
+        kind: 'goal',
+        key: 'goals',
+        text: 'A hundred miles in June. Supercalifragilisticexpialidociousgoal.',
+        savedAt,
+      },
+      {
+        athleteId: ATHLETE,
+        kind: 'note',
+        key: RIDE_ID,
+        text: 'Legs heavy after a late night; windy on the climb.',
+        savedAt,
+      },
+      {
+        athleteId: ATHLETE,
+        kind: 'document',
+        key: 'plan',
+        name: 'twelve-week-base-plan-for-the-spring-sportive-final-version.md',
+        text: '# Base plan\n\nThree rides a week.',
+        savedAt,
+      },
+      {
+        athleteId: ATHLETE,
+        kind: 'document',
+        key: 'notes',
+        name: 'Coach notes.txt',
+        text: 'Keep the easy days easy.',
+        savedAt,
+      },
+    ],
+    ATHLETE,
+  ).port;
+}
+
 function athleteMassPort(): AthleteMassPort {
   return {
     athleteId: ATHLETE,
@@ -545,6 +592,7 @@ export function PopulatedShell({
       settings={settingsPort()}
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
+      riderText={riderTextPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}

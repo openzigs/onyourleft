@@ -117,6 +117,8 @@ import {
 import { openWebBluetoothTrainer, type OpenTrainer, type TrainerConnection } from './trainer';
 import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
+import { roomPortOver } from '../net/room-port';
+import { flush, ManualClock, ScriptedRoom } from '../net/testing';
 import type {
   NotificationPermissionState,
   RideNotificationPermissionPort,
@@ -5696,6 +5698,81 @@ describe('#524 — the ride keeps the process alive while it is active', () => {
     expect(port.calls).toEqual(['keep', 'sleep', 'keep', 'sleep']);
     rig.controller.dispose();
     expect(port.calls).toEqual(['keep', 'sleep', 'keep', 'sleep']);
+  });
+});
+
+describe('#782 — a joined room keeps the process alive, and the screen off does not end its socket', () => {
+  function recordingPort(): RideKeepAlivePort & { readonly calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      keepRideAlive: () => {
+        calls.push('keep');
+        return Promise.resolve();
+      },
+      letRideSleep: () => {
+        calls.push('sleep');
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it('holds the service while a room is joined through the room port, and lets it go on leaving', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    const rooms = roomPortOver(() => room.link(), {
+      timers: clock,
+      now: clock.now,
+      keepAlive: () => rig.controller.keepAliveForRoom(),
+    });
+    const connection = rooms.join({
+      roomId: 'room-1',
+      declaredMassKilograms: 70,
+      sample: () => ({ powerWatts: 200 }),
+    });
+    expect(port.calls).toEqual(['keep']);
+    await flush();
+    room.accept();
+    room.welcome(0);
+    // The socket, with the screen off, is still reporting: nothing let it sleep.
+    await clock.advance(60_000);
+    expect(room.socket.sent.filter((m) => m.type === 'report')).toHaveLength(120);
+    expect(port.calls).toEqual(['keep']);
+    connection.leave();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
+  });
+
+  it('counts a room and a recording as one service: leaving the room mid-ride does not stop it', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    const release = rig.controller.keepAliveForRoom();
+    await rig.controller.start();
+    expect(port.calls).toEqual(['keep']);
+    release();
+    release();
+    expect(port.calls).toEqual(['keep']);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
+  });
+
+  it('keeps a room’s service after the recording stops, until the room is left', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    const release = rig.controller.keepAliveForRoom();
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(port.calls).toEqual(['keep']);
+    release();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
   });
 });
 

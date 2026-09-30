@@ -66,7 +66,8 @@ describe('who casts a contact shadow — #426', () => {
   it('is the rider and the pacer, and NOT the ghost', () => {
     // The decision #426 asked to be recorded: a ghost with no shadow reads as
     // "not really here", which helps #93's at-a-glance criterion for nothing.
-    expect(CASTS_CONTACT_SHADOW).toEqual({ rider: true, bot: true, ghost: false });
+    // #783: another real rider is grounded as the rider is.
+    expect(CASTS_CONTACT_SHADOW).toEqual({ rider: true, bot: true, ghost: false, remote: true });
     expect(placeContactShadow(marker('rider'), SUN, blank())).toBe(true);
     expect(placeContactShadow(marker('bot'), SUN, blank())).toBe(true);
     expect(placeContactShadow(marker('ghost'), SUN, blank())).toBe(false);
