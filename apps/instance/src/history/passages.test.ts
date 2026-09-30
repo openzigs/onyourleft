@@ -136,8 +136,14 @@ describe('which items are cut, and from what', () => {
   });
 
   it('refuses a body longer than it reads before it looks for anything in it — #924 item 7', () => {
-    expect(cutSource('document', bytes('x'.repeat(MAXIMUM_SOURCE_CHARACTERS + 1)))).toEqual({
-      kind: 'too-long',
+    // A body whose TEXT is short, padded past the limit in a field nothing
+    // reads: were the length not checked first, it would be parsed and
+    // scanned whole, and cut into one passage.
+    const padded = { text: 'Short.', pad: ' '.repeat(MAXIMUM_SOURCE_CHARACTERS) };
+    expect(cutSource('note', bytes(padded))).toEqual({ kind: 'too-long' });
+    expect(cutSource('note', bytes({ ...padded, pad: '' }))).toEqual({
+      kind: 'passages',
+      passages: ['Short.'],
     });
     // One under is read: a picture there is still a picture.
     const picture = `data:,${'x'.repeat(MAXIMUM_SOURCE_CHARACTERS - 6)}`;

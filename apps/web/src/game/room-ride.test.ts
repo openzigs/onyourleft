@@ -18,7 +18,7 @@ import {
 import { GameSimulation } from './simulation';
 import { northRoute } from './route-fixtures-testing';
 import { airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
-import { altitudeMetres, degreesCelsius, kilograms } from '@onyourleft/domain';
+import { altitudeMetres, degreesCelsius, kilograms, watts } from '@onyourleft/domain';
 
 const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
   riderId,
@@ -91,6 +91,26 @@ describe('one frame of a room ride — #782, #783', () => {
       memory,
       sim,
       1_000,
+    );
+    expect(sim.correcting).toBe(true);
+  });
+
+  it('measures the first frame’s bound from when the ride began — #922', () => {
+    // Thirty seconds ridden at 200 W, and then the first frame: the room
+    // has the rider 250 m on. At the room's 10 m/s that is explainable over
+    // thirty seconds, and would not be over the two a correction lasts.
+    const sim = simulation();
+    for (let at = 0; at <= 30_000; at += 100) sim.advanceTo(at, { power: watts(200), live: true });
+    expect(sim.state.ridden as number).toBeCloseTo(30, 6);
+    const local = sim.state.ride.distance as number;
+    roomFrame(
+      connection([], {
+        rider: { ...rider(0, local + 250), speedMetresPerSecond: 10 },
+        atLocalMs: 30_000,
+      }),
+      roomRideState(),
+      sim,
+      30_000,
     );
     expect(sim.correcting).toBe(true);
   });

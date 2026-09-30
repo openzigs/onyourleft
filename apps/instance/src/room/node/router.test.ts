@@ -213,6 +213,8 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(harness.router.placementOf('finished')).toBeDefined();
     // The rejoin: routed to the worker, because the placement says it holds it.
     const rejoin = await join('finished', 'ticket-ann');
+    await until(() => rejoin.messages.length > 0, 'an answer');
+    expect(rejoin.messages[0]).toEqual({ type: 'refuse', reason: 'room-closed' });
     expect(await rejoin.closed).toEqual({ code: 4005, reason: 'room-closed' });
     expect(rejoin.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
     expect(lookups).toBe(2);
