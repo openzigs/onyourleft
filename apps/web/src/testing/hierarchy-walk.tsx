@@ -22,6 +22,7 @@ import {
   POPULATED,
   SELECTIONS,
   PopulatedShell,
+  seedRouteDraft,
   type PopulatedShellExtras,
 } from './populated-shell';
 
@@ -63,7 +64,19 @@ export async function openRoute(
     />,
   );
   await settled();
-  return mounted;
+  // #864: the populated fixture writes the route builder's draft into
+  // `localStorage` as it renders (`seedRouteDraft`), and nothing took it away,
+  // so a later test in the same file — one that mounts the route builder
+  // itself, say — found a draft it never wrote. Unmounting takes it away.
+  return {
+    container: mounted.container,
+    caughtErrors: mounted.caughtErrors,
+    rerender: (next) => mounted.rerender(next),
+    unmount: () => {
+      mounted.unmount();
+      seedRouteDraft(false, localStorage);
+    },
+  };
 }
 
 /**

@@ -174,5 +174,28 @@ new_fixture "${COVERAGE}" 'vitest run'
 run_check
 assert_red 'an uninstrumented run with no filter fails'
 
+# --- What the shell would read first (#864) ----------------------------------
+# pnpm runs a script through `sh`, so each of these would reach Vitest as
+# something other than the words a split on spaces gives.
+new_fixture "vitest run --coverage --exclude 'src/slow test.ts'" "${UNINSTRUMENTED}"
+run_check
+assert_red 'a quoted exclude fails rather than being split on its space'
+assert_says 'and says why' 'reads quoting, globs, variables and separators'
+
+new_fixture 'vitest run --coverage --exclude src/*.test.ts' "${UNINSTRUMENTED}"
+run_check
+assert_red 'an exclude the shell would expand as a glob fails'
+assert_says 'and names the character' '"*"'
+
+new_fixture "${COVERAGE}" 'vitest run apps/web/src/slow.test.ts; true'
+run_check
+assert_red 'a command separator in test:uninstrumented fails'
+assert_says 'and names the script' '`test:uninstrumented` is'
+
+new_fixture "${COVERAGE}" 'vitest run $SLOW'
+run_check
+assert_red 'a variable in test:uninstrumented fails'
+assert_says 'and says it is the refusal, not an empty selection' '"$"'
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ] || exit 1

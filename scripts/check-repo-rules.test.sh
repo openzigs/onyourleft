@@ -2751,6 +2751,15 @@ assert_violation "and with a blank line and a comment between the two (#758)" SH
   'scripts/example.test.sh:6:'
 
 new_fixture
+write_script "x=\"${DOLLAR}(printf a ${P} \\" "  grep -q a)\""
+assert_violation "a pipe followed by a backslash continuation, into grep -q, is refused (#864)" SH001 \
+  'scripts/example.test.sh:4: a pipeline into'
+
+new_fixture
+write_script "true ${P}${P} \\" "  grep -q a <<< a" "printf a \\" "  grep -q a <<< a || :"
+assert_clean "a continued \`||\`, or a continuation with no pipe, is not refused (#864)"
+
+new_fixture
 write_script "true ${P}${P}" "  grep -q a <<< a" "printf a ${P}" "  grep -c a || :"
 assert_clean "a line ending in \`||\`, or piped into a grep without -q, is not refused (#758)"
 

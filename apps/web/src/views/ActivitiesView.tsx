@@ -172,17 +172,19 @@ function useLibraryLayout(
 ): [RefObject<HTMLDivElement | null>, LibraryLayout] {
   const container = useRef<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState<LibraryLayout>('table');
+  /** The container's content width now, as a layout, or nothing while it is hidden. */
+  const measure = useCallback((): void => {
+    const element = container.current;
+    if (element === null || typeof ResizeObserver !== 'function') return;
+    const width = contentWidth(element);
+    if (width > 0) setLayout(libraryLayout(width, rootRem()));
+  }, []);
   useLayoutEffect(() => {
     const element = container.current;
     if (element === null || typeof ResizeObserver !== 'function') {
       return undefined;
     }
-    const rem = (): number =>
-      Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-    const initial = contentWidth(element);
-    if (initial > 0) {
-      setLayout(libraryLayout(initial, rem()));
-    }
+    measure();
     const observer = new ResizeObserver((entries) => {
       const width = entries[entries.length - 1]?.contentRect.width;
       // ⚠️ #738: a width of NOTHING is a hidden list, not a narrow one, and is
@@ -195,23 +197,32 @@ function useLibraryLayout(
       // 36412215912). Keeping the last layout means the link focus returns
       // to is the one that stays.
       if (width === undefined || !(width > 0)) return;
-      setLayout(libraryLayout(width, rem()));
+      setLayout(libraryLayout(width, rootRem()));
     });
     observer.observe(element);
     return () => {
       observer.disconnect();
     };
     // Re-attached when a library arrives: with none, there is no container.
-    // ⚠️ And measured again whenever the choice changes (#758). On one pane
-    // the list is `hidden` while a ride is chosen, so it can come back at a
-    // width it never had while shown: a phone opened at a ride's own address,
-    // or turned with the ride open. The observer would see the new width only
-    // after `ListDetail`'s passive effect had returned focus to the old
-    // layout's link, and the redraw dropped it. This layout effect runs in the
-    // commit that removes `hidden`, and its update is flushed before any
-    // passive effect, so focus returns to the link that stays.
-  }, [present, selected]);
+  }, [present, measure]);
+  // ⚠️ And measured again whenever the choice changes (#758). On one pane the
+  // list is `hidden` while a ride is chosen, so it can come back at a width it
+  // never had while shown: a phone opened at a ride's own address, or turned
+  // with the ride open. The observer would see the new width only after
+  // `ListDetail`'s passive effect had returned focus to the old layout's link,
+  // and the redraw dropped it. This layout effect runs in the commit that
+  // removes `hidden`, and its update is flushed before any passive effect, so
+  // focus returns to the link that stays. Its own effect since #864: the
+  // observer above is not torn down and made again on every choice.
+  useLayoutEffect(() => {
+    measure();
+  }, [selected, measure]);
   return [container, layout];
+}
+
+/** The root font size in pixels: what a `rem` is. */
+function rootRem(): number {
+  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
 }
 
 /** The content-box width a `ResizeObserver` would report as `contentRect.width`. */
