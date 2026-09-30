@@ -457,16 +457,16 @@ jobs:
       # the coverage REPORT stops counting what those two files alone execute,
       # which section 5 says is a signal and not a gate. `check:test-split`,
       # in the concurrent step above, is what stops the two lists coming apart
-      # -- a file in neither run is a file CI never runs.
+      # -- a file in neither run is a file CI never runs. ⚠️ Since #866 those
+      # two files run in the NIGHTLY workflow, not in this job (below).
       - name: Tests and coverage report
         run: pnpm run test:coverage
 
-      # The other half of the split (#852): the files `test:coverage`
-      # excludes, as a plain run-once Vitest with no coverage. Its own step
-      # rather than the concurrent one, for that step's own reason: Vitest's
-      # 5 s case timeout beside other work (#651).
-      - name: Tests outside coverage
-        run: pnpm run test:uninstrumented
+      # ⚠️ The other half of #852's split, `test:uninstrumented`, is NOT here
+      # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is
+      # not a required check and cannot block a merge. A reviewer who remembers
+      # a `Tests outside coverage` step here is reading the old file.
+      # `check:test-split`, above, still fails a file in neither Vitest run.
 
       # --- The browser gate (#63) ----------------------------------------------
       #
@@ -483,7 +483,10 @@ jobs:
       # cannot block is not a gate.
       #
       # Builds the harness and drives it; CLAUDE.md section 4a documents both
-      # halves as one command. ⚠️ Since #651 it stops ITSELF before this job's
+      # halves as one command. ⚠️ Since #866 it runs the `chromium` and `game`
+      # projects only: the describes tagged `@nightly` (apps/web/browser/
+      # nightly.ts, a reviewed list, all of them the opt-in realistic world)
+      # run in .github/workflows/nightly.yml, which cannot block a merge. ⚠️ Since #651 it stops ITSELF before this job's
       # timeout (`playwright.config.ts` §`GATE_BUDGET_MS`), so a hang is
       # reported by name rather than cancelled in silence.
       - name: Browser gate
