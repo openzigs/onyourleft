@@ -2737,6 +2737,27 @@ p > label + input[type='file'] {
   overflow-wrap: anywhere;
 }
 
+/*
+ * The Moderation screen (#955). An account id is one unbroken word of up to
+ * 128 characters, and a rider's name and a report's reason come from other
+ * riders: each breaks where it must rather than widen a 320 px page
+ * (`moderation.browser.spec.ts`, whose control deletes this rule). The reason
+ * box takes the width it is given up to a reading measure.
+ */
+.oyl-moderation__list li {
+  overflow-wrap: anywhere;
+}
+
+.oyl-moderation__list > li + li {
+  margin-top: var(--oyl-space-md);
+}
+
+.oyl-moderation__reason .oyl-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 32rem;
+}
+
 .oyl-write-up__text {
   margin-inline: 0;
   padding-inline-start: var(--oyl-space-md);

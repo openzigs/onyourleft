@@ -11,7 +11,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { InstancePort } from '../instance/instance-port';
-import { scriptedInstance } from '../instance/testing';
+import { scriptedInstance, scriptedModeration } from '../instance/testing';
 import {
   activateWithKeyboard,
   mount,
@@ -26,6 +26,7 @@ import {
   INSTANCE_NO_PORT,
   INSTANCE_RECEIVES,
   InstanceView,
+  MODERATE_LINK_TEXT,
   RECOVERY_CODES_LEAD,
 } from './InstanceView';
 
@@ -172,5 +173,42 @@ describe('the Connect screen — #777, #778', () => {
     expect(button('Disconnect')).toBeDefined();
     // No device list is asked for a session the instance refused.
     expect(scripted.calls).not.toContain('devices');
+  });
+});
+
+describe('the link to Moderation, for the instance’s moderator only — #955', () => {
+  function moderateLink(): HTMLAnchorElement | undefined {
+    return [...(mounted?.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === MODERATE_LINK_TEXT,
+    );
+  }
+
+  it('is drawn for the moderator, and goes to the Moderation route', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    mounted = await mount(<InstanceView port={scripted.port} moderation={moderation.port} />);
+    await settle();
+    expect(moderateLink()?.getAttribute('href')).toBe('#/settings/instance/moderation');
+    expect(moderation.calls).toEqual(['standing']);
+  });
+
+  it.each(['not-moderator', 'signed-out', 'unreachable'] as const)(
+    'is not drawn for an account that is not the moderator (%s)',
+    async (standing) => {
+      const scripted = scriptedInstance({ connected: true });
+      const moderation = scriptedModeration({ standing });
+      mounted = await mount(<InstanceView port={scripted.port} moderation={moderation.port} />);
+      await settle();
+      expect(moderateLink()).toBeUndefined();
+    },
+  );
+
+  it('is not asked for, or drawn, before this device connects', async () => {
+    const scripted = scriptedInstance({ connected: false });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    mounted = await mount(<InstanceView port={scripted.port} moderation={moderation.port} />);
+    await settle();
+    expect(moderateLink()).toBeUndefined();
+    expect(moderation.calls).toEqual([]);
   });
 });

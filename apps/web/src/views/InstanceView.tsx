@@ -11,6 +11,8 @@ import type {
   InstancePort,
   InstanceState,
 } from '../instance/instance-port';
+import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
+import { hrefFor, routeById } from '../shell/routes';
 
 /**
  * The Connect screen (#777, #778): an instance's address, signing in with this
@@ -141,8 +143,19 @@ function DeviceList({ outcome }: { readonly outcome: DevicesOutcome | undefined 
   );
 }
 
-export function InstanceView({ port }: { readonly port?: InstancePort | undefined }): JSX.Element {
+/** The Instance screen's link to Moderation, drawn for the instance's moderator only (#955). */
+export const MODERATE_LINK_TEXT = 'Moderate this instance';
+
+export function InstanceView({
+  port,
+  moderation,
+}: {
+  readonly port?: InstancePort | undefined;
+  /** Asked, once connected, whether this account moderates the instance (#955). */
+  readonly moderation?: ModerationPort | undefined;
+}): JSX.Element {
   const [state, setState] = useState<InstanceState | undefined>(undefined);
+  const [standing, setStanding] = useState<ModerationStanding | undefined>(undefined);
   const [devices, setDevices] = useState<DevicesOutcome | undefined>(undefined);
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
@@ -156,11 +169,13 @@ export function InstanceView({ port }: { readonly port?: InstancePort | undefine
     if (port === undefined) return;
     const now = await port.current();
     setState(now);
+    setStanding(undefined);
     if (now.kind === 'connected') {
       setDevices(undefined);
       setDevices(await port.devices());
+      if (moderation !== undefined) setStanding(await moderation.standing());
     }
-  }, [port]);
+  }, [port, moderation]);
 
   useEffect(() => {
     void read();
@@ -292,6 +307,12 @@ export function InstanceView({ port }: { readonly port?: InstancePort | undefine
           {/* Controls first (#666): the one action on this state is here, not
               under the device list. */}
           {disconnectControl}
+          {/* #955: only the instance's moderator is offered the link. */}
+          {standing === 'moderator' ? (
+            <p>
+              <a href={hrefFor(routeById('moderation'))}>{MODERATE_LINK_TEXT}</a>
+            </p>
+          ) : null}
           {state.sourceUrl === null ? null : (
             <p>
               <a href={state.sourceUrl} target="_blank" rel="noreferrer">

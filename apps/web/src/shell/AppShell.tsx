@@ -47,6 +47,7 @@ import type { RoutingProvider } from '@onyourleft/domain';
 
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
+import type { ModerationPort } from '../instance/moderation-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -134,6 +135,7 @@ const SettingsView = lazyView(MORE_GROUP, (group) => group.SettingsView);
 const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
 const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 const InstanceView = lazyView(MORE_GROUP, (group) => group.InstanceView);
+const ModerationView = lazyView(MORE_GROUP, (group) => group.ModerationView);
 
 /** The id `main` carries, and the only place it is written. */
 const MAIN_ID = 'oyl-main';
@@ -432,6 +434,12 @@ export interface AppShellProps {
    */
   readonly instance?: InstancePort | undefined;
   /**
+   * The Moderation screen's port (#955) — `instance/moderation-port.ts`
+   * §`createModerationPort`, built in `main.tsx` and nowhere else. The
+   * Instance screen asks it whether to link to Moderation at all.
+   */
+  readonly moderation?: ModerationPort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -632,7 +640,9 @@ function viewFor(
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} />;
+      return <InstanceView port={props.instance} moderation={props.moderation} />;
+    case 'moderation':
+      return <ModerationView port={props.moderation} />;
     case 'credits':
       // No props: the manifest is built into the bundle, so this is the one
       // view in the shell that needs nothing passed down. `CreditsView.tsx`

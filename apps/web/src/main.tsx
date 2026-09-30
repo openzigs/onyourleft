@@ -104,6 +104,7 @@ import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
 import type { AthleteMassPort } from './athlete/store-port';
@@ -750,6 +751,19 @@ function buildInstancePort(): InstancePort | undefined {
 }
 
 /**
+ * The Moderation screen's port (#955): the ONE production place a moderation
+ * port is built, so `check:wiring` reports `createModerationPort` if this goes.
+ * Over the session the Connect screen keeps, through the one instance module
+ * (ADR 0036 D-3 (a)); a device signed in to nothing sends nothing.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildModerationPort(): ModerationPort | undefined {
+  if (typeof localStorage === 'undefined') return undefined;
+  return createModerationPort({ storage: localStorage });
+}
+
+/**
  * The game's room port (#782, #783): the ONE production place a room port is
  * built, so `check:wiring` reports `createRoomPort` if this goes. Over the
  * instance this device signed in to (`instance/instance-port.ts`), through the
@@ -1046,6 +1060,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const storage = platformStorage();
   // Built once: a port per render would make the Connect screen re-read the instance on every draw.
   const instance = buildInstancePort();
+  // #955: built once, for the Connect screen's reason above.
+  const moderation = buildModerationPort();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
@@ -1072,6 +1088,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           maskedWords={buildMaskedWordsPort()}
           riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
+          {...(moderation === undefined ? {} : { moderation })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`

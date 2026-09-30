@@ -65,6 +65,7 @@ import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { RideView } from '../views/RideView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
+import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
 
 interface Kept {
@@ -167,6 +168,14 @@ const KEPT: Record<RouteId, Kept> = {
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
   instance: { sentences: INSTANCE_KEPT_VISIBLE, populated: INSTANCE_CONNECTED_KEPT_VISIBLE },
+  // #955: that every action is logged, and the log outlives an erased account
+  // — on the page a moderator acts from (the populated walk; the empty one is
+  // an account that moderates nothing, which acts on nothing).
+  moderation: {
+    sentences: [],
+    populated: MODERATION_KEPT_VISIBLE,
+    reason: 'the empty walk is an account that moderates nothing, so the page has no action on it',
+  },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {
     sentences: [],
