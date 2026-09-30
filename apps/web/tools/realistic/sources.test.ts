@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   DRAWN_FROM,
+  EXPECTED_REPORTS,
   inputDigest,
   licenceVerdict,
   encodingWords,
@@ -13,6 +18,7 @@ import {
   PINNED_KTX_VERSION_LINE,
   polyHavenAuthors,
   polyHavenFiles,
+  reportFaults,
   RIDER_BUILD_TARGETS,
   safeRelativePath,
   shippedFiles,
@@ -30,6 +36,9 @@ import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
+
+/** This directory: where every recipe's script is. */
+const PIPELINE = dirname(fileURLToPath(import.meta.url));
 
 describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
   it('keeps a source whose own page states its licence', () => {
@@ -458,5 +467,32 @@ describe('the digest of a run that reads two sources — #623', () => {
         { id: 'b', files: [...two.files, { path: 'x', sha256: '1' }] },
       ]),
     );
+  });
+});
+
+describe('what --check requires of a run’s report — #900 item 2', () => {
+  it('names only outputs a Blender run makes, whose script writes the count', () => {
+    const files = Object.keys(EXPECTED_REPORTS);
+    expect(files.sort()).toEqual(['island_tree_02-middle.glb', 'island_tree_02.glb']);
+    for (const file of files) {
+      const output = OUTPUTS.find((each) => each.file === file);
+      expect(output?.recipe.how, file).toBe('blender');
+      if (output?.recipe.how !== 'blender') continue;
+      const script = readFileSync(join(PIPELINE, output.recipe.script), 'utf8');
+      expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
+    }
+  });
+
+  it('passes a report with #696’s count, and names a run that dropped none, or the wrong one', () => {
+    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 1, x: 2 })).toEqual([]);
+    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 0 })).toEqual([
+      'island_tree_02.glb: its report says repeatedTrianglesDropped 0, not 1',
+    ]);
+    expect(reportFaults('island_tree_02-middle.glb', {})).toEqual([
+      'island_tree_02-middle.glb: its report says repeatedTrianglesDropped nothing, not 1',
+    ]);
+    expect(reportFaults('island_tree_02.glb', undefined)).toHaveLength(1);
+    // A file nothing is required of passes whatever its report says.
+    expect(reportFaults('tree_small_02.glb', undefined)).toEqual([]);
   });
 });

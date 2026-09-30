@@ -446,3 +446,22 @@ describe('a gradient session drives a trainer from a route', () => {
     expect(session.state().coalesced).toBeGreaterThan(0);
   });
 });
+
+describe('a correction walks the trainer, however long since the last write — #928 review', () => {
+  it('moves the first bounded write by at most one write interval’s step after a long steady climb', async () => {
+    const trainer = recordingTrainer();
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    // Up the 4 % climb, then nothing worth writing for 80 s: the driver's deadband.
+    session.sample(seconds(0), 300);
+    await drain();
+    expect(trainer.written).toHaveLength(1);
+    const climbing = trainer.written[0]?.grade ?? 0;
+    expect(climbing).toBeCloseTo(4, 1);
+    // A room moves the rider onto the descent, 80 s after that write.
+    session.sample(seconds(80), 1_500, true);
+    await drain();
+    expect(trainer.written).toHaveLength(2);
+    // One percent, not the eight between the two roads.
+    expect(Math.abs((trainer.written[1]?.grade ?? 0) - climbing)).toBeLessThanOrEqual(1 + 1e-9);
+  });
+});

@@ -254,7 +254,13 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
         const road = Number.isFinite(raw)
           ? Math.max(-MAX_SIMULATED_GRADE_PERCENT, Math.min(MAX_SIMULATED_GRADE_PERCENT, raw))
           : 0;
-        const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * (at - sent.at);
+        // ⚠️ The time since the last write is capped at one write interval
+        // (#928's review): on a steady climb the driver writes nothing for
+        // minutes (its deadband), and a correction's first step measured from
+        // that old write would carry the whole change in one — 8 % at once
+        // after 81 s on the 4 % hill `trainer-wiring.test.tsx` §"#782" rides.
+        const elapsed = Math.min(at - sent.at, SIMULATION_SETPOINT_INTERVAL_SECONDS);
+        const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * elapsed;
         const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, road));
         if (!bounded && grade === road) owed = false;
         // The driver is told nothing it would believe it wrote, so when this

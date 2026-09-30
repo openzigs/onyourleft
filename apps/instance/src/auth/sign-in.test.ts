@@ -283,7 +283,9 @@ describe('how long a rate limit may hold anything — #892', () => {
         ? [[name, (value as { windowMs: number }).windowMs] as const]
         : [],
     );
-    expect(windows.length).toBeGreaterThanOrEqual(8);
+    expect(windows.length).toBeGreaterThanOrEqual(9);
+    // #918's history-search limit is one of them.
+    expect(windows.map(([name]) => name)).toContain('historySearchesPerAthlete');
     for (const [name, windowMs] of windows) {
       expect(windowMs, name).toBeGreaterThan(0);
       expect(windowMs, name).toBeLessThanOrEqual(60 * 60_000);

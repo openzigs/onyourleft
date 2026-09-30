@@ -221,11 +221,20 @@ export function linesNear(
       const at = onCorridor(centre, profile.loop ? along : stand.distance, profile.loop);
       if (at === undefined) continue;
       const from = profile.loop ? along : stand.distance;
-      const boxes = standBoxes(stand.kind).map((box): PlacedBox =>
-        box.along === 0
-          ? { box, ...at }
-          : { box, ...alongDrawnRoad(centre, from + box.along, profile.loop) },
-      );
+      const boxes = standBoxes(stand.kind)
+        // Off a point-to-point route's ends there is no road to stand beside
+        // (#902): a piece there ran straight on past the finish — and, on a
+        // closed route not ticked as a loop, onto the start road's centreline.
+        .filter(
+          (box) =>
+            profile.loop ||
+            (stand.distance + box.along >= 0 && stand.distance + box.along <= total),
+        )
+        .map((box): PlacedBox =>
+          box.along === 0
+            ? { box, ...at }
+            : { box, ...alongDrawnRoad(centre, from + box.along, profile.loop) },
+        );
       placed.push({ stand, ...at, boxes });
     }
   }
@@ -235,8 +244,10 @@ export function linesNear(
 /**
  * The drawn road at a distance, and — past either end of the corridor, where
  * nothing is drawn — the road's straight continuation from that end. Never
- * undefined, for a box: a barrier past a point-to-point route's finish stands
- * on the road's line carried on, as it did before.
+ * undefined, for a box. ⚠️ Since #902 no piece past a point-to-point route's
+ * ends reaches here ({@link linesNear} drops it), so the continuation is only
+ * for a piece inside the route and past the corridor's reach, which
+ * {@link LINE_DRAW_AHEAD_METRES} is chosen to prevent.
  */
 function alongDrawnRoad(
   centre: readonly CorridorPoint[],
