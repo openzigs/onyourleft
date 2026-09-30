@@ -430,7 +430,12 @@ surface at all — the decoder it exercises has no such dependency; the harness 
 ### The corpus is also fuzz seed material
 
 [`tools/fuzz/`](tools/fuzz/) mutates the committed corpus and requires the FIT decoder and the
-GPX/TCX readers to survive it — #128. It runs inside `pnpm run test` and adds no CI job.
+GPX/TCX readers to survive it — #128. It runs inside `pnpm run test`, but ⚠️ **since #866 not in
+the required CI job**: CI runs it in the nightly workflow (`pnpm run test:uninstrumented`), which
+cannot block a merge. **A pull request that touches the FIT decoder or the GPX/TCX readers runs
+`pnpm run test:uninstrumented` locally before it is opened**, and re-runs the M16 mutation in
+`src/decode/container.ts` — otherwise a regression the fuzz exists to catch is found the morning
+after it merges.
 
 - **Seeded, not random.** Every case is a pure function of `FUZZ_SEED` in
   [`decode-fuzz.test.ts`](tools/fuzz/decode-fuzz.test.ts), the committed corpus and a stated budget.
