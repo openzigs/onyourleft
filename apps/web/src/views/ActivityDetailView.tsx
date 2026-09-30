@@ -74,6 +74,10 @@ import {
 import type { SharedTrack } from '../detail/privacy';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
+import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
+import { RiderTextBox } from '../rider-text/RiderTextBox';
+import type { RiderTextPort } from '../rider-text/rider-text-port';
+import { NOTE_WORDS } from '../rider-text/words';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import {
   CHART_POINTS,
@@ -140,6 +144,11 @@ export interface ActivityDetailViewProps {
    * (#805). `ride-analysis/RideWriteUpControl.tsx` is the press.
    */
   readonly writeUp?: RideAnalysisPort | undefined;
+  /**
+   * Where the rider's note on this ride is kept (#836), or `undefined` where
+   * there is no store — the box then says so and offers no control.
+   */
+  readonly riderText?: RiderTextPort | undefined;
 }
 
 /**
@@ -181,6 +190,7 @@ export function ActivityDetailView({
   basemap,
   preferences,
   writeUp,
+  riderText,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -560,6 +570,19 @@ export function ActivityDetailView({
         reread={async () =>
           port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
         }
+      />
+
+      {/*
+        #836. The rider's own note on this ride, for the analysis to look back
+        on: one passage of at most 900 characters, kept here and synced.
+      */}
+      <RiderTextBox
+        port={riderText}
+        kind="note"
+        textKey={activity.id}
+        maximum={MAXIMUM_RIDE_NOTE_CHARACTERS}
+        words={NOTE_WORDS}
+        headingLevel={3}
       />
 
       {activity.hasPosition ? (

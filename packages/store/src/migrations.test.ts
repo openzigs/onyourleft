@@ -56,6 +56,7 @@ import {
   framingReferenceFor,
   rideWriteUpFor,
   syncBaseFor,
+  riderTextFor,
   sideCameraReportFor,
 } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
@@ -292,7 +293,8 @@ describe('the production registry', () => {
     // the reason this test used to say "empty" and does not now.
     // Version 14 (#776, #893's review) adds `syncBases`: a new store again,
     // with no rows to migrate, so the registry does not grow.
-    expect(SCHEMA_VERSION).toBe(14);
+    // Version 15 (#836) adds `riderTexts`: a new store, so again nothing.
+    expect(SCHEMA_VERSION).toBe(15);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY]);
   });
 
@@ -945,5 +947,40 @@ describe('version 13 to version 14 — #776’s sync base (#893’s review)', ()
     expect(athlete?.displayName).toBe('A');
     expect(empty).toStrictEqual([]);
     expect(kept).toStrictEqual([base]);
+  });
+});
+
+describe('version 14 to version 15 — #836’s rider texts', () => {
+  /**
+   * Additive: rows written at version 14 survive the reopen at 15, and the
+   * new store is usable on a database that predates it.
+   */
+  it('keeps every version-14 record and makes rider texts usable', async () => {
+    const v14 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 14).forEach((stores, index) => {
+      v14.version(index + 1).stores(stores);
+    });
+    await v14.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const base = syncBaseFor(athleteId('athlete-a'), activityId('ride-before-15'), 'write-up');
+    await v14.table(TABLE.syncBases).put(base);
+    const beforeVersion = v14.backendDB().version;
+    v14.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const kept = await store.listSyncBase(owner);
+    const empty = await store.listRiderTexts(owner, 'goal');
+    const goal = riderTextFor(owner, 'goal');
+    await store.putRiderText(goal);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const read = await reopened.getRiderText(owner, 'goal', 'goals');
+    reopened.close();
+
+    expect(beforeVersion).toBe(14 * 10);
+    expect(kept).toStrictEqual([base]);
+    expect(empty).toStrictEqual([]);
+    expect(read).toStrictEqual(goal);
   });
 });

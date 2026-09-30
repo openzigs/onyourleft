@@ -103,6 +103,7 @@ import type {
   SideCameraReportRecord,
   RideWriteUpRecord,
   SyncBaseRecord,
+  RiderTextRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -120,6 +121,7 @@ import {
   sideCameraReportFor,
   rideWriteUpFor,
   syncBaseFor,
+  riderTextFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -174,6 +176,9 @@ interface World {
   readonly report: SideCameraReportRecord;
   readonly writeUp: RideWriteUpRecord;
   readonly syncBase: SyncBaseRecord;
+  readonly goal: RiderTextRecord;
+  readonly note: RiderTextRecord;
+  readonly document: RiderTextRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -243,6 +248,11 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // the ride's id, and the ACTIVITY row's key is a content hash — the same
   // shape two riders who sent the same file would share.
   const syncBase = syncBaseFor(owner, ride.id, 'write-up');
+  // #836. ⚠️ Every athlete's goals share ONE key, `goals` — so a point read
+  // or a delete that matched on the key alone would find another athlete's.
+  const goal = riderTextFor(owner, 'goal');
+  const note = riderTextFor(owner, 'note', ride.id);
+  const document = riderTextFor(owner, 'document');
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -265,6 +275,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putSideCameraReport(report);
     await store.putRideWriteUp(writeUp);
     await store.putSyncBase(syncBase);
+    await store.putRiderText(goal);
+    await store.putRiderText(note);
+    await store.putRiderText(document);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -287,6 +300,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     report,
     writeUp,
     syncBase,
+    goal,
+    note,
+    document,
   };
 }
 
@@ -764,6 +780,54 @@ const PROBES: readonly ScopingProbe[] = [
         store.deleteSyncBase(mine.owner, theirs.syncBase.kind, theirs.syncBase.key),
       ).resolves.toBe(false);
       await expect(store.listSyncBase(theirs.owner)).resolves.toStrictEqual([theirs.syncBase]);
+    },
+  },
+  {
+    member: 'getRiderText',
+    leaks:
+      "another athlete's goals, a note on their ride or one of their documents — free text that can name anything",
+    async run(store, mine, theirs) {
+      // The goals key is the same for everybody: only the owner tells them apart.
+      await expect(store.getRiderText(mine.owner, 'goal', 'goals')).resolves.toStrictEqual(
+        mine.goal,
+      );
+      await expect(
+        store.getRiderText(mine.owner, 'note', theirs.note.key),
+      ).resolves.toBeUndefined();
+      await expect(
+        store.getRiderText(mine.owner, 'document', theirs.document.key),
+      ).resolves.toBeUndefined();
+    },
+  },
+  {
+    member: 'listRiderTexts',
+    leaks: "every one of another athlete's documents, notes or goals",
+    async run(store, mine) {
+      await expect(store.listRiderTexts(mine.owner, 'document')).resolves.toStrictEqual([
+        mine.document,
+      ]);
+      await expect(store.listRiderTexts(mine.owner, 'goal')).resolves.toStrictEqual([mine.goal]);
+      await expect(store.listRiderTexts(mine.owner, 'note')).resolves.toStrictEqual([mine.note]);
+    },
+  },
+  {
+    member: 'deleteRiderText',
+    leaks: "another athlete's goals or documents, deleted by a rider who deleted their own",
+    async run(store, mine, theirs) {
+      await expect(
+        store.deleteRiderText(mine.owner, 'document', theirs.document.key),
+      ).resolves.toBe(false);
+      // Mine go; theirs, under the same key, stay.
+      // The world is shared by every probe and this one runs twice, so mine
+      // are put back afterwards.
+      await expect(store.deleteRiderText(mine.owner, 'goal', 'goals')).resolves.toBe(true);
+      await expect(store.getRiderText(theirs.owner, 'goal', 'goals')).resolves.toStrictEqual(
+        theirs.goal,
+      );
+      await store.putRiderText(mine.goal);
+      await expect(store.listRiderTexts(theirs.owner, 'document')).resolves.toStrictEqual([
+        theirs.document,
+      ]);
     },
   },
 ];

@@ -574,6 +574,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         ADR 0035 D-9 B's words, marked kept-visible. A port
                         remembers a server that refused the `response_format`
                         hint and stops offering it (#805, from #831's review)
+    src/rider-text/     the rider's own text for the analysis agent's history
+                        (#836, ADR 0040 D-1, D-11) — the goals box on Settings,
+                        a ride's note on its page (`RiderTextBox.tsx`, one
+                        control for both) and the documents list
+                        (`DocumentsPanel.tsx`): kept on THIS device first, and
+                        synced by `instance/sync.ts` rule 8 as `goal`, `note`
+                        and `document` items, both ways of a deletion included.
+                        A document is plain text or Markdown only, UTF-8 or
+                        refused, and never a picture (`document-file.ts`).
+                        ⚠️ `disclosure.ts` is ADR 0040 D-11's DRAFTED wording,
+                        word for word, kept visible beside every box; the
+                        privacy policy and Play Data Safety do NOT change yet,
+                        because nothing in a shipped build syncs (no production
+                        caller of `syncWithInstance` until #898/#892) — the
+                        pull request that wires sync owes them
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
@@ -1636,7 +1651,13 @@ packages/             Apache-2.0, without exception
                       instance last agreed on, two digests a ride and an
                       item. ⚠️ A ride's base row OUTLIVES `deleteActivity` on
                       purpose — it is the device's record that a synced ride
-                      was deleted here — and goes with `deleteAthlete`
+                      was deleted here — and goes with `deleteAthlete`. Since
+                      #836, at version 15, `riderTexts`: the rider's goals,
+                      a note per ride and their documents, plain text, limits
+                      in CHARACTERS (`rider-text.ts`). ⚠️ Every athlete's goals
+                      share the key `goals`: only the athlete tells them apart.
+                      A goal's or a document's sync base row names NO ride
+                      (`activityId: null`)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -5391,6 +5412,8 @@ top of an issue **supersedes its body**.
 | What a ride shows and says about the side camera, why a lost link is a notice and "filming" is not, and why it is spoken with announcements off | `apps/web/src/ride/side-camera.ts`, `apps/web/src/game/hud/announce.ts` §`side-camera-lost`, `apps/web/src/game/hud/HudPanel.tsx` §`sideCamera`, [#551](https://github.com/openzigs/onyourleft/issues/551) |
 | What a rider is told when the Android recording service could not start, what asks for it again, and where the sentence goes on each screen | `apps/web/src/ride/controller.ts` §`askToKeepAlive`, §`askAgainIfRefused`, §`RIDE_MAY_STOP_WITH_SCREEN_OFF`, `apps/web/src/ride/keep-alive-notice.a11y.test.tsx`, `apps/web/browser/rideview.browser.spec.ts` §"#647", [#647](https://github.com/openzigs/onyourleft/issues/647) |
 | What a model is sent about a ride, how the ride is cut into sections, and what the input may never carry | `apps/web/src/ride-analysis/input.ts`, `apps/web/src/ride-analysis/input.test.ts` §"what never leaves", `apps/web/src/camera/side-session-summary.ts`, [#809](https://github.com/openzigs/onyourleft/issues/809) |
+| Where a rider writes goals, a ride's note and training documents for the analysis, what their limits are in characters, and what the disclosure beside them says | `apps/web/src/rider-text/`, `packages/store/src/rider-text.ts`, [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md) D-1, D-11, [#836](https://github.com/openzigs/onyourleft/issues/836) |
+| How a goal, note or document syncs to the instance, and how a deletion on either side reaches the other | `apps/web/src/instance/sync.ts` rule 8, §`riderTextBody`, `apps/web/src/instance/sync.test.ts` §"#836" |
 | Which kind of button a control is, why a view may have one primary, and what counts them | `apps/web/src/design/Button.tsx` §`ButtonVariant`, `apps/web/src/a11y/button-hierarchy.a11y.test.tsx`, [`docs/architecture.md`](docs/architecture.md) §"Three kinds of button", [#668](https://github.com/openzigs/onyourleft/issues/668) |
 | Why Activities, Workouts and Routes are two panes on a landscape tablet and one below, where the breakpoint is written, and how a selection survives back, reload and a shared link | `apps/web/src/shell/ListDetail.tsx`, `apps/web/src/shell/routes.ts` §`RouteDefinition.selection`, `apps/web/src/design/theme.css` §`--oyl-list-detail-from`, `apps/web/browser/list-detail.browser.spec.ts`, [#670](https://github.com/openzigs/onyourleft/issues/670) |
 | Why the one-primary rule counts per pane on a list–detail route at two panes and nowhere else, and why one pane is one view | `apps/web/src/a11y/button-hierarchy.ts` §`primaryUnits`, [#670](https://github.com/openzigs/onyourleft/issues/670), [#723](https://github.com/openzigs/onyourleft/issues/723) |

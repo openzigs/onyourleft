@@ -77,6 +77,7 @@ import type {
 import {
   FRAMING_CHECK_RECORDS,
   RIDE_WRITE_UP_SOURCES,
+  RIDERLESS_SYNC_BASE_KINDS,
   SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
@@ -1729,16 +1730,27 @@ export function syncBaseProblem(row: {
     return 'syncBase.athleteId: must be an athlete id';
   }
   if (!(SYNC_BASE_KINDS as readonly unknown[]).includes(row.kind)) {
-    return 'syncBase.kind: must be activity, write-up or side-camera-report';
+    return 'syncBase.kind: must be activity, write-up, side-camera-report, goal, note or document';
   }
-  if (
+  if ((RIDERLESS_SYNC_BASE_KINDS as readonly unknown[]).includes(row.kind)) {
+    // #836: a goal or a document belongs to no ride.
+    if (row.activityId !== null) {
+      return 'syncBase.activityId: must be null for a goal or a document';
+    }
+    if (
+      typeof row.key !== 'string' ||
+      row.key.length === 0 ||
+      row.key.length > MAXIMUM_SYNC_BASE_ID
+    ) {
+      return `syncBase.key: must be a key of at most ${String(MAXIMUM_SYNC_BASE_ID)} characters`;
+    }
+  } else if (
     typeof row.activityId !== 'string' ||
     row.activityId.length === 0 ||
     row.activityId.length > MAXIMUM_SYNC_BASE_ID
   ) {
     return `syncBase.activityId: must be an activity id of at most ${String(MAXIMUM_SYNC_BASE_ID)} characters`;
-  }
-  if (row.kind === 'activity') {
+  } else if (row.kind === 'activity') {
     if (typeof row.key !== 'string' || !LOWER_HEX_SHA256.test(row.key)) {
       return 'syncBase.key: must be a content hash, 64 lowercase hex, for an activity';
     }

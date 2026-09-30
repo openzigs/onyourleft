@@ -60,6 +60,7 @@ import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../
 import { DEVICES_KEPT_VISIBLE, DevicesView } from '../views/DevicesView';
 import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD } from '../detail/write-up';
 import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
+import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { RideView } from '../views/RideView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
@@ -171,7 +172,13 @@ const KEPT: Record<RouteId, Kept> = {
     // #805, carried from #831's review: what leaves the device, and when, on
     // the ride's page — the ask's explanation and the approved words of what
     // it sends (ADR 0035 D-9 B). The populated fixture sets up the ask.
-    populated: [WRITE_UP_EXPLANATION, `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`],
+    // #836: the note box's disclosure (ADR 0040 D-11) — where the note goes and
+    // that a model reads it.
+    populated: [
+      WRITE_UP_EXPLANATION,
+      `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`,
+      ...RIDER_TEXT_KEPT_VISIBLE,
+    ],
     reason:
       'the empty walk opens a ride that is not on the device, so nothing of the write-up renders there',
   },

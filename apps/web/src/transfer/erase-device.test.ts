@@ -188,6 +188,13 @@ describe('what the rider is told before they press it', () => {
     expect(straight(line ?? '')).toContain("a question or a ride's numbers");
   });
 
+  it('names the rider’s goals, ride notes and documents among what an erase removes — #836', () => {
+    const text = ERASE_REMOVES.join(' ');
+    expect(text).toContain('your goals');
+    expect(text).toContain('notes on your rides');
+    expect(text).toContain('documents you added');
+  });
+
   it('names the hosted service’s key among what an erase removes — #518', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('key you entered for a hosted model');
   });

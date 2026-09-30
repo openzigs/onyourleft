@@ -131,6 +131,8 @@ import type {
   FramingReferenceRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  RiderTextKind,
+  RiderTextRecord,
   SyncBaseKind,
   SyncBaseRecord,
   LapRecord,
@@ -145,6 +147,7 @@ import type {
 } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
 import { parseMaskedWords } from './masked-words';
+import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
 import type { UnitSystem } from './unit-system';
 import type {
   NewRecordingChunk,
@@ -348,6 +351,11 @@ export interface AthleteDeletionCounts {
    * syncs as a fresh device: it pulls, and deletes nothing on the instance.
    */
   readonly syncBases: number;
+  /**
+   * The rider's goals, ride notes and documents removed — #836. Free text the
+   * rider wrote or added; an erase takes all of it.
+   */
+  readonly riderTexts: number;
 }
 
 /**
@@ -537,6 +545,10 @@ export class ActivityStore {
 
   get #syncBases(): Table<SyncBaseRecord, [string, string, string]> {
     return this.#db.table<SyncBaseRecord, [string, string, string]>(TABLE.syncBases);
+  }
+
+  get #riderTexts(): Table<RiderTextRecord, [string, string, string]> {
+    return this.#db.table<RiderTextRecord, [string, string, string]>(TABLE.riderTexts);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -889,6 +901,7 @@ export class ActivityStore {
         this.#sideCameraReports,
         this.#rideWriteUps,
         this.#syncBases,
+        this.#riderTexts,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -968,6 +981,11 @@ export class ActivityStore {
         // #776. What this device last agreed with the instance: an erased
         // device is a fresh one, which pulls and deletes nothing there.
         const syncBases = await this.#syncBases.where(INDEX.syncBaseByAthlete).equals(id).delete();
+        // #836. The rider's own goals, notes and documents.
+        const riderTexts = await this.#riderTexts
+          .where(INDEX.riderTextByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -984,6 +1002,7 @@ export class ActivityStore {
           sideCameraReports,
           rideWriteUps,
           syncBases,
+          riderTexts,
         };
       },
     );
@@ -1205,6 +1224,7 @@ export class ActivityStore {
         this.#segmentEfforts,
         this.#sideCameraReports,
         this.#rideWriteUps,
+        this.#riderTexts,
       ],
       async () => {
         const existing = await this.#activities
@@ -1244,6 +1264,9 @@ export class ActivityStore {
         // #800. The write-up is about this ride and nothing else, for the
         // report's reason.
         await this.#rideWriteUps.delete(id);
+        // #836. The rider's note on this ride is about this ride and nothing
+        // else; left behind it would be words under a ride that is gone.
+        await this.#riderTexts.delete([owner, 'note', id]);
         await this.#activities.delete(id);
         return true;
       },
@@ -1901,6 +1924,119 @@ export class ActivityStore {
         return false;
       }
       await this.#syncBases.delete([owner, kind, key]);
+      return true;
+    });
+  }
+
+  // --- Rider texts: goals, ride notes and documents (#836) -------------------
+
+  /**
+   * Keeps something the rider wrote or added for the analysis agent's history,
+   * **replacing** the row for the same athlete, kind and key — the goals, a
+   * ride's note, or one document.
+   *
+   * The text is tidied first (`rider-text.ts` §`tidyRiderText`: carriage
+   * returns folded, the ends trimmed) and a document's name trimmed, and what
+   * was written is returned — so a caller shows what landed, not what it asked
+   * for. Only the six fields are written, whatever the caller spread in.
+   *
+   * **A note must be on a ride of the athlete's**, checked inside the same
+   * transaction as the write, for `putRideWriteUp`'s reason. **A new document
+   * past `MAXIMUM_RIDER_DOCUMENTS` is refused**; replacing one is not.
+   *
+   * @throws {StoreReferentialError} if the athlete does not exist, or a note's
+   * ride is not theirs.
+   * @throws {StoreValidationError} naming the field and the constraint — never
+   * the value, which is free text that can name anything.
+   */
+  async putRiderText(record: RiderTextRecord): Promise<RiderTextRecord> {
+    const row: RiderTextRecord = {
+      athleteId: record.athleteId,
+      kind: record.kind,
+      key: record.key,
+      ...(record.name === undefined
+        ? {}
+        : { name: typeof record.name === 'string' ? record.name.trim() : record.name }),
+      text: typeof record.text === 'string' ? tidyRiderText(record.text) : record.text,
+      savedAt: record.savedAt,
+    };
+    const problem =
+      riderTextProblem(row) ??
+      (Number.isFinite(row.savedAt) ? undefined : 'riderText.savedAt: must be an instant');
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    await this.#db.transaction(
+      'rw',
+      [this.#athletes, this.#activities, this.#riderTexts],
+      async () => {
+        await this.#requireAthlete(row.athleteId);
+        if (row.kind === 'note') {
+          const ride = await this.#activities
+            .where(INDEX.activityByAthleteAndId)
+            .equals([row.athleteId, row.key])
+            .first();
+          if (ride === undefined) {
+            throw new StoreReferentialError(
+              `cannot store a ride note: athlete ${row.athleteId} has no activity ${row.key}`,
+            );
+          }
+        }
+        if (
+          row.kind === 'document' &&
+          (await this.#riderTexts.get([row.athleteId, row.kind, row.key])) === undefined &&
+          (await this.#riderTexts
+            .where(INDEX.riderTextByAthleteAndKind)
+            .equals([row.athleteId, 'document'])
+            .count()) >= MAXIMUM_RIDER_DOCUMENTS
+        ) {
+          throw new StoreValidationError(
+            `riderText: at most ${String(MAXIMUM_RIDER_DOCUMENTS)} documents may be kept`,
+          );
+        }
+        await this.#riderTexts.put(row);
+      },
+    );
+    return row;
+  }
+
+  /**
+   * One of this athlete's texts, or `undefined` — the ordinary answer for a
+   * rider who wrote no goals, or a ride with no note.
+   *
+   * @throws {StoreDecodeError} if the row on disk is not a rider text.
+   */
+  async getRiderText(
+    owner: AthleteId,
+    kind: RiderTextKind,
+    key: string,
+  ): Promise<RiderTextRecord | undefined> {
+    const row = await this.#riderTexts.get([owner, kind, key]);
+    return row === undefined ? undefined : checkedRiderText(row);
+  }
+
+  /**
+   * Every one of this athlete's texts of one kind, in key order. A sync reads
+   * all of them; the documents screen reads the documents.
+   *
+   * @throws {StoreDecodeError} if a row on disk is not a rider text.
+   */
+  async listRiderTexts(owner: AthleteId, kind: RiderTextKind): Promise<RiderTextRecord[]> {
+    const rows = await this.#riderTexts
+      .where(INDEX.riderTextByAthleteAndKind)
+      .equals([owner, kind])
+      .toArray();
+    return rows.map(checkedRiderText).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  }
+
+  /** Removes one of this athlete's texts. `false` when there was none. */
+  async deleteRiderText(owner: AthleteId, kind: RiderTextKind, key: string): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#riderTexts], async () => {
+      const held = await this.#riderTexts.get([owner, kind, key]);
+      if (held === undefined) {
+        return false;
+      }
+      await this.#riderTexts.delete([owner, kind, key]);
       return true;
     });
   }
@@ -3073,4 +3209,17 @@ function withoutMass(record: AthleteRecord): AthleteRecord {
   const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
   delete copy.mass;
   return copy as AthleteRecord;
+}
+
+/** A rider text read off disk, or a {@link StoreDecodeError} — a hand-edited row is refused. */
+function checkedRiderText(row: RiderTextRecord): RiderTextRecord {
+  const problem =
+    riderTextProblem(row) ??
+    (typeof row.savedAt === 'number' && Number.isFinite(row.savedAt)
+      ? undefined
+      : 'riderText.savedAt: must be an instant');
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return row;
 }

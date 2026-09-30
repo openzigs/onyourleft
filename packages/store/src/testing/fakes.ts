@@ -86,6 +86,7 @@ import type {
   SideCameraReportRecord,
   RideWriteUpRecord,
   SyncBaseRecord,
+  RiderTextRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -195,6 +196,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     putSyncBase: async (record) => real.putSyncBase(record),
     listSyncBase: async (owner) => real.listSyncBase(owner),
     deleteSyncBase: async (owner, kind, key) => real.deleteSyncBase(owner, kind, key),
+    putRiderText: async (record) => real.putRiderText(record),
+    getRiderText: async (owner, kind, key) => real.getRiderText(owner, kind, key),
+    listRiderTexts: async (owner, kind) => real.listRiderTexts(owner, kind),
+    deleteRiderText: async (owner, kind, key) => real.deleteRiderText(owner, kind, key),
   };
 }
 
@@ -298,6 +303,12 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putSyncBase: (record: SyncBaseRecord) => {
           memory.set(`sync-base:${record.kind}:${record.key}`, record);
           return Promise.resolve();
+        },
+        // #836. Answers with the record it was handed, as the real write
+        // answers with the record it wrote — so only the read-back notices.
+        putRiderText: (record: RiderTextRecord) => {
+          memory.set(`rider-text:${record.kind}:${record.key}`, record);
+          return Promise.resolve(record);
         },
       };
     },

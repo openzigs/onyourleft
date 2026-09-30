@@ -102,6 +102,7 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
 import type { AthleteMassPort } from './athlete/store-port';
 
@@ -713,6 +714,20 @@ function buildMaskedWordsPort(): MaskedWordsPort {
 }
 
 /**
+ * The rider's goals, ride notes and documents (#836), over the same
+ * connection: kept on this device first, and synced by `instance/sync.ts`
+ * (ADR 0040 D-1).
+ */
+function buildRiderTextPort(): RiderTextPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    newDocumentId: () => globalThis.crypto.randomUUID(),
+  };
+}
+
+/**
  * The Connect screen's port (#777): the ONE production place an instance port
  * is built, so `check:wiring` reports `createInstancePort` if this goes.
  *
@@ -1012,6 +1027,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
+          riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.

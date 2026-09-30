@@ -38,6 +38,8 @@ export type {
   SideSessionSourceRecord,
   SideSessionSummaryRecord,
   RideWriteUpRecord,
+  RiderTextKind,
+  RiderTextRecord,
   SyncBaseKind,
   SyncBaseRecord,
   RideWriteUpSourceRecord,
@@ -58,6 +60,8 @@ export type {
 export {
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
   RIDE_WRITE_UP_SOURCES,
+  RIDER_TEXT_KINDS,
+  RIDERLESS_SYNC_BASE_KINDS,
   SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
@@ -101,6 +105,20 @@ export {
   parseMaskedWords,
   tidyMaskedWord,
 } from './masked-words';
+
+// --- The rider's goals, ride notes and documents (#836) ---------------------
+
+export {
+  GOALS_KEY,
+  MAXIMUM_DOCUMENT_CHARACTERS,
+  MAXIMUM_DOCUMENT_NAME_CHARACTERS,
+  MAXIMUM_GOALS_CHARACTERS,
+  MAXIMUM_RIDE_NOTE_CHARACTERS,
+  MAXIMUM_RIDER_DOCUMENTS,
+  maximumRiderTextCharacters,
+  riderTextProblem,
+  tidyRiderText,
+} from './rider-text';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------
 

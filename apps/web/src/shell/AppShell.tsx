@@ -51,6 +51,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -397,6 +398,12 @@ export interface AppShellProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The rider's goals, ride notes and documents for the ride analysis (#836)
+   * — `rider-text/rider-text-port.ts`. Optional like every other port here;
+   * without one each box says there is no store to keep it in.
+   */
+  readonly riderText?: RiderTextPort | undefined;
+  /**
    * The Connect screen's port (#777) — `instance/instance-port.ts`
    * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
    * the screen says this platform cannot connect.
@@ -471,6 +478,7 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           writeUp={props.rideAnalysis}
+          riderText={props.riderText}
         />
       );
     case 'analysis':
@@ -591,6 +599,7 @@ function viewFor(
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
           maskedWords={props.maskedWords}
+          riderText={props.riderText}
         />
       );
     case 'about':
