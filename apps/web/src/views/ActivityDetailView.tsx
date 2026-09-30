@@ -37,6 +37,12 @@
  * overview and screened again before it is shown, and the press that asks the
  * rider's model for a new one. `detail/RideWriteUpSection.tsx` is all of it.
  *
+ * ## "May be raced" (#793)
+ *
+ * Below the write-up, on every ride: the rider's consent to another rider
+ * racing a ghost of it, off by default and revocable, and never the share
+ * setting (ADR 0021 D-5.1). `detail/RaceConsentSection.tsx` is all of it.
+ *
  * ## The shared view
  *
  * The rider's own track is shown whole. ADR 0004 decision E and #51's export
@@ -74,6 +80,7 @@ import {
 import type { SharedTrack } from '../detail/privacy';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
+import { RaceConsentSection } from '../detail/RaceConsentSection';
 import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
 import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
@@ -571,6 +578,13 @@ export function ActivityDetailView({
           port === undefined ? { kind: 'none' } : readWriteUp(port, activity.id)
         }
       />
+
+      {/*
+        #793. The ride's "may be raced" consent (ADR 0021 D-5.1): off unless
+        the rider turns it on here, revocable here, and never the share
+        setting. On every ride, because consent is per ride.
+      */}
+      <RaceConsentSection port={port} activity={activity} />
 
       {/*
         #836. The rider's own note on this ride, for the analysis to look back

@@ -661,6 +661,18 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'setActivityMayBeRaced',
+    leaks:
+      "another athlete's consent to be raced, given on their behalf — a stranger's ride offered as a ghost it never agreed to be",
+    async run(store, mine, theirs) {
+      await expect(store.setActivityMayBeRaced(mine.owner, theirs.ride.id, true)).resolves.toBe(
+        false,
+      );
+      const after = await store.getActivity(theirs.owner, theirs.ride.id);
+      expect(after?.mayBeRaced).toBe(false);
+    },
+  },
+  {
     member: 'listCameraFrames',
     leaks:
       'every picture kept on this device, whoever took it — a photograph of the inside of somebody else’s house',

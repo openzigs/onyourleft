@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **15** since #836; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **16** since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -100,15 +100,20 @@
  * ⚠️ **Version 14 is the sync base (#776, after #893's review)**, additive
  * again: a new store, `syncBases`, and no existing record's shape changes.
  *
- * ⚠️ **Version 15 is #836's `riderTexts`** — the rider's goals, ride notes and
- * documents — additive again: a new store, and no existing record's shape
- * changes (a sync base row may now carry a `null` ride, for a goal or a
- * document, which no row written at 14 does).
+ * ⚠️ **Version 15 is #793, the second record migration**: every activity
+ * gains a required `mayBeRaced`, `false` for every ride written before
+ * (`migrations.ts` §`ACTIVITY_MAY_BE_RACED`). No store and no index changes
+ * — see {@link STORES_V15} for why the cross-rider read needs no new index.
+ *
+ * ⚠️ **Version 16 is #836's `riderTexts`** — the rider's goals, ride notes and
+ * documents — additive: a new store, and no existing record's shape changes
+ * (a sync base row may now carry a `null` ride, for a goal or a document,
+ * which no row written at 15 does).
  *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -782,7 +787,27 @@ export const STORES_V14: Readonly<Record<string, string>> = {
 };
 
 /**
- * Version 15 — #836's rider texts, added beside the nineteen stores that
+ * Version 15 — #793's "may be raced" consent. **No store and no index
+ * changes**: the version exists for its `.upgrade()`, which writes
+ * `mayBeRaced: false` onto every activity (`migrations.ts`
+ * §`ACTIVITY_MAY_BE_RACED`).
+ *
+ * ⚠️ **There is deliberately no index on `routeId` alone, or leading with it**,
+ * though the cross-rider read `listRaceableAttempts` asks about one route over
+ * every athlete. Such an index is exactly what
+ * `activity-store.ghost-scope.test.ts` warns about — the two-character change
+ * that turns #93's own-ghost lookup into "every rider's rides on this route".
+ * The read walks the athletes on the device instead (a handful) and asks each
+ * one's `[athleteId+routeId]` index, so the only index that answers "rides on
+ * this route" still cannot be asked without an athlete. And a boolean is not a
+ * valid IndexedDB key, so an index over the consent would hold no rows at all.
+ */
+export const STORES_V15: Readonly<Record<string, string>> = {
+  // The nineteen stores of versions 1 to 14 are inherited unchanged.
+};
+
+/**
+ * Version 16 — #836's rider texts, added beside the nineteen stores that
  * exist. Additive: a new store, no existing shape touched, so
  * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
  * re-import: the account export carries every goal, note and document as the
@@ -791,8 +816,8 @@ export const STORES_V14: Readonly<Record<string, string>> = {
  * The primary key is compound and leads with the athlete, for
  * {@link STORES_V14}'s reason.
  */
-export const STORES_V15: Readonly<Record<string, string>> = {
-  // The nineteen stores of versions 1 to 14 are inherited unchanged.
+export const STORES_V16: Readonly<Record<string, string>> = {
+  // The nineteen stores of versions 1 to 15 are inherited unchanged.
   [TABLE.riderTexts]: [
     '[athleteId+kind+key]',
     INDEX.riderTextByAthlete,
@@ -816,4 +841,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V13,
   STORES_V14,
   STORES_V15,
+  STORES_V16,
 ];

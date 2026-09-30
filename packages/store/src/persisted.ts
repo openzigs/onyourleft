@@ -128,8 +128,16 @@ export interface PersistedActivity {
   originalFileKey?: string;
   /** Flattened, and indexed: #37 deduplicates on it. */
   originalFileSha256?: string;
+  /** @see ActivityRecord.mayBeRaced — required since schema version 15 (#793). */
+  mayBeRaced: boolean;
   createdAt: number;
 }
+
+/**
+ * An activity as schema versions 1 to 14 wrote it — the shape
+ * `migrations.ts` §`ACTIVITY_MAY_BE_RACED`'s `down` returns to.
+ */
+export type PersistedActivityV14 = Omit<PersistedActivity, 'mayBeRaced'>;
 
 /** @see LapRecord */
 export interface PersistedLap {
@@ -485,6 +493,7 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
     distance: record.distance,
     visibility: record.visibility,
     hasPosition: record.hasPosition,
+    mayBeRaced: record.mayBeRaced,
     createdAt: record.createdAt,
   };
   // ⚠️ Conditional for a sharper reason than `averagePower` below: `routeId` is
@@ -563,6 +572,11 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
     // would hide corruption in the one field whose corruption matters most.
     visibility: parseVisibility(row.visibility),
     hasPosition: decodedBoolean('activity.hasPosition', row.hasPosition),
+    // Not defaulted on read either, for `visibility`'s reason one field up:
+    // version 15's migration wrote `false` onto every row, so a row without a
+    // boolean here is corrupt, and reading it as "off" would hide that — while
+    // reading it as "on" would race somebody who never agreed (#793).
+    mayBeRaced: decodedBoolean('activity.mayBeRaced', row.mayBeRaced),
     createdAt: decoded(
       'activity.createdAt',
       decodedNumber('activity.createdAt', row.createdAt),
@@ -1730,7 +1744,7 @@ export function syncBaseProblem(row: {
     return 'syncBase.athleteId: must be an athlete id';
   }
   if (!(SYNC_BASE_KINDS as readonly unknown[]).includes(row.kind)) {
-    return 'syncBase.kind: must be activity, write-up, side-camera-report, goal, note or document';
+    return 'syncBase.kind: must be activity, write-up, side-camera-report, race-consent, goal, note or document';
   }
   if ((RIDERLESS_SYNC_BASE_KINDS as readonly unknown[]).includes(row.kind)) {
     // #836: a goal or a document belongs to no ride.

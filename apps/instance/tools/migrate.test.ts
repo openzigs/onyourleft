@@ -55,9 +55,10 @@ describe('tools/migrate.ts (#769)', () => {
     const belowLast = tablesIn(down.out);
     expect(all.length).toBeGreaterThan(0);
     expect(all).toEqual(expect.arrayContaining(belowLast));
-    // ⚠️ Every migration so far creates a table, so its `down` drops one. A
-    // migration that only adds a column would need a different check here.
-    expect(belowLast.length).toBeLessThan(all.length);
+    // ⚠️ Not every migration creates a table: 0011 (#793) only adds a column,
+    // so its `down` drops none. What holds either way is that `down` drops no
+    // table the newest migration did not create, and `up` puts back every one.
+    expect(belowLast.length).toBeLessThanOrEqual(all.length);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);

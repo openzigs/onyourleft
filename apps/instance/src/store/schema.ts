@@ -82,6 +82,11 @@ export interface ActivityRecordTable {
   readonly content_sha256: string;
   readonly signed_record: Uint8Array;
   readonly received_at: number;
+  /**
+   * The rider's "may be raced" consent, `0` or `1` (#793, migration 0011).
+   * Defaults to `0`; not part of the signed record, because it is revocable.
+   */
+  readonly may_be_raced: Generated<number>;
 }
 
 /** A group ride or a race. */

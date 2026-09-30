@@ -59,7 +59,19 @@
  *      addition);
  *    - not here at all (the store cannot remove an item and keep its ride):
  *      pulled.
- * 6. The base forgets a ride neither side holds any more.
+ * 6. **A ride's "may be raced" consent** (#793, ADR 0039 D-2.5), for every
+ *    ride on both sides: the same three-way rule as an item's, against a
+ *    `race-consent` base row — changed here, it is sent
+ *    (`POST /v1/sync/records/{content}/race-consent`); unchanged here and moved
+ *    there, it is taken. So a revocation reaches the instance in one sync, and
+ *    a device that still says "yes" cannot put it back. A ride this device
+ *    pulls takes the instance's consent with it (the two then agree, and that
+ *    is remembered as the base in the same sync), and a ride it pushes starts
+ *    from the instance's "off", which is remembered as its base. **With no
+ *    base** (a ride synced before the consent existed), the two differing
+ *    means off wins: a "yes" is never re-granted by a sync that cannot tell
+ *    which device changed.
+ * 7. The base forgets a ride neither side holds any more.
  *
  * ⚠️ **A pulled record is not kept on this device.** `packages/store`'s
  * `putActivityRecord` refuses a record signed by a key that is not THIS
@@ -150,7 +162,7 @@ export interface SyncTransport {
   bytes(path: string): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
 }
 
-/** What sync needs of the local store: the transfer screen's port, and thirteen writes and reads. */
+/** What sync needs of the local store: the transfer screen's port, and fourteen writes and reads. */
 export type SyncStore = TransferStore &
   Pick<
     ActivityStore,
@@ -163,6 +175,7 @@ export type SyncStore = TransferStore &
     | 'putSyncBase'
     | 'listSyncBase'
     | 'deleteSyncBase'
+    | 'setActivityMayBeRaced'
     | 'getRiderText'
     | 'putRiderText'
     | 'listRiderTexts'
@@ -198,6 +211,8 @@ interface ManifestEntry {
   readonly digest: string | null;
   readonly deleted: boolean;
   readonly activityId: string | null;
+  /** A live ride's "may be raced" consent (#793); absent from an instance that predates it. */
+  readonly mayBeRaced?: boolean | null;
 }
 
 /** Why one thing did not sync. */
@@ -218,6 +233,10 @@ export interface SyncReport {
   /** Rides deleted on this device since the last sync, now deleted on the instance too. */
   readonly deletedOnInstance: number;
   readonly deleted: number;
+  /** Rides whose "may be raced" consent was sent to the instance (#793). */
+  readonly consentsPushed: number;
+  /** Rides whose consent was taken from the instance — set or revoked on another device. */
+  readonly consentsPulled: number;
   /** Goals, notes and documents pulled from the instance (#836). */
   readonly textsPulled: number;
   /** Goals, notes and documents pushed to the instance (#836). */
@@ -303,6 +322,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let summariesPushed = 0;
   let deleted = 0;
   let deletedOnInstance = 0;
+  let consentsPushed = 0;
+  let consentsPulled = 0;
   let textsPulled = 0;
   let textsPushed = 0;
   let textsDeleted = 0;
@@ -331,6 +352,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     for (const [kind, key] of [
       ['activity', content],
       ...[...ITEM_KINDS, 'note' as const].map((each) => [each, activity] as const),
+      ['race-consent', activity],
     ] as const) {
       if (base.delete(keyOf(kind, key))) await store.deleteSyncBase(athleteId, kind, key);
     }
@@ -383,6 +405,12 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       localDigest: entry.key,
       remoteDigest: entry.key,
     });
+    // A ride this device has only now received takes the instance's consent:
+    // it cannot have changed here, and pushing this device's default "off"
+    // would revoke a consent its rider gave elsewhere (#793).
+    if (entry.mayBeRaced === true) {
+      await store.setActivityMayBeRaced(athleteId, outcome.activityId, true);
+    }
   }
 
   // --- A ride deleted on another device ---------------------------------------
@@ -414,6 +442,18 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         activityId: id,
         localDigest: outcome.content,
         remoteDigest: outcome.content,
+      });
+      // The instance creates a pushed ride with its consent off, so that is
+      // the consent's base: a "yes" given here before this push is a change
+      // here, and the next sync sends it rather than losing it to the "off
+      // wins" rule below (#793, #915's review).
+      const off = await consentDigest(false, sha256);
+      await remember({
+        kind: 'race-consent',
+        key: id,
+        activityId: id,
+        localDigest: off,
+        remoteDigest: off,
       });
     } else if (outcome !== 'held') {
       failures.push({ kind: 'activity', key: id, reason: outcome });
@@ -476,6 +516,79 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
   }
 
+  // --- "May be raced", three ways (#793) --------------------------------------
+  // After the rides, so a ride pushed in this sync has its content key in the
+  // base. The same rule as an item's: a change here is pushed, a change there
+  // on an unchanged copy here is pulled — so a device that still says "yes"
+  // cannot put back a consent another device revoked. With no base, off wins.
+  const contentOf = new Map(
+    [...base.values()]
+      .filter((row) => row.kind === 'activity')
+      .map((row) => [row.activityId as string, row.key]),
+  );
+  const liveRemote = new Map(
+    manifest
+      .filter((entry) => entry.kind === 'activity' && !entry.deleted)
+      .map((entry) => [entry.key, entry]),
+  );
+  for (const id of rides) {
+    const content = contentOf.get(id);
+    const entry = content === undefined ? undefined : liveRemote.get(content);
+    // Not on the instance yet (it arrives next sync), or an instance that
+    // predates the consent: nothing to agree with.
+    if (content === undefined || typeof entry?.mayBeRaced !== 'boolean') continue;
+    const ride = await store.getActivity(athleteId, id);
+    if (ride === undefined) continue;
+    const local = ride.mayBeRaced;
+    const remote = entry.mayBeRaced;
+    const localDigest = await consentDigest(local, sha256);
+    const remoteDigest = await consentDigest(remote, sha256);
+    const known = base.get(keyOf('race-consent', id));
+    if (local === remote) {
+      await remember({ kind: 'race-consent', key: id, activityId: id, localDigest, remoteDigest });
+      continue;
+    }
+    // Unchanged here since the last sync, and the instance's moved: another
+    // device set or revoked it — take it. With NO base (every ride synced
+    // before store v15, or against an instance that predates migration 0011)
+    // neither side can be shown to have changed, so OFF wins: a device still
+    // saying "yes" takes a "no", and a device saying "no" sends it. A consent
+    // is never granted by a sync that cannot tell who gave it (ADR 0021
+    // D-5.1, off by default; #915's review).
+    const takeTheInstances =
+      known === undefined ? remote === false : known.localDigest === localDigest;
+    if (takeTheInstances) {
+      if (await store.setActivityMayBeRaced(athleteId, id, remote)) {
+        consentsPulled += 1;
+        await remember({
+          kind: 'race-consent',
+          key: id,
+          activityId: id,
+          localDigest: remoteDigest,
+          remoteDigest,
+        });
+      } else {
+        failures.push({ kind: 'race-consent', key: id, reason: 'not-stored' });
+      }
+      continue;
+    }
+    const answer = await transport.json('POST', `/v1/sync/records/${content}/race-consent`, {
+      mayBeRaced: local,
+    });
+    if (answer.status === 200) {
+      consentsPushed += 1;
+      await remember({
+        kind: 'race-consent',
+        key: id,
+        activityId: id,
+        localDigest,
+        remoteDigest: localDigest,
+      });
+    } else {
+      failures.push({ kind: 'race-consent', key: id, reason: codeOf(answer.body) });
+    }
+  }
+
   // --- Each ride's summary, for the rider's history (#835) -------------------
   // Derived from the ride, so never pulled and never in the base (rule 7).
   for (const id of rides) {
@@ -532,6 +645,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     summariesPushed,
     deleted,
     deletedOnInstance,
+    consentsPushed,
+    consentsPulled,
     textsPulled,
     textsPushed,
     textsDeleted,
@@ -717,6 +832,10 @@ async function pullItem(
 }
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** The digest a consent is remembered by in the sync base: of the body it is sent as. */
+const consentDigest = (mayBeRaced: boolean, sha256: Sha256): Promise<string> =>
+  hex(utf8(JSON.stringify({ mayBeRaced })), sha256);
 
 function localItem(
   store: SyncStore,

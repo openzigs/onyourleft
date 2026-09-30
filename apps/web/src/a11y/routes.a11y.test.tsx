@@ -218,6 +218,7 @@ function segmentsRide(): ActivityRecord {
     distance: 30_000 as ActivityRecord['distance'],
     visibility: 'private',
     hasPosition: true,
+    mayBeRaced: false,
     createdAt: SEGMENTS_NOW,
   };
 }

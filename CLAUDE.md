@@ -1651,8 +1651,17 @@ packages/             Apache-2.0, without exception
                       instance last agreed on, two digests a ride and an
                       item. ⚠️ A ride's base row OUTLIVES `deleteActivity` on
                       purpose — it is the device's record that a synced ride
-                      was deleted here — and goes with `deleteAthlete`. Since
-                      #836, at version 15, `riderTexts`: the rider's goals,
+                      was deleted here — and goes with `deleteAthlete`.
+                      Since #793, at version 15 (the SECOND record
+                      migration), every ride's "may be raced" consent,
+                      `mayBeRaced`, off by default: never the share setting
+                      (ADR 0021 D-5.1). `listRaceableAttempts` is the
+                      consent-scoped cross-rider read and
+                      `activity-store.race-consent.test.ts` its test, red
+                      against `consentIgnoredStoreFactory`. ⚠️ Nothing calls
+                      it yet — #331, in a LATER pull request, and it must not
+                      touch `activity-store.ghost-scope.test.ts` in the same
+                      one (ADR 0039 D-2.3). Since #836, at version 16, `riderTexts`: the rider's goals,
                       a note per ride and their documents, plain text, limits
                       in CHARACTERS (`rider-text.ts`). ⚠️ Every athlete's goals
                       share the key `goals`: only the athlete tells them apart.

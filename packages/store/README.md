@@ -800,9 +800,28 @@ tidy cascade a reader of `deleteActivity` would add, and exactly the defect the 
 prevent. `assertSyncBaseRoundTrip` deletes the ride between its write and its read, and
 `sync-base-store.test.ts` holds the red/green pair.
 
+## "May be raced" — #793
+
+Schema version 15, the **second record migration**: every activity gains a required `mayBeRaced`,
+written `false` onto every ride that predates it (`migrations.ts` §`ACTIVITY_MAY_BE_RACED`, whose
+`down` drops a consent given since — the safe direction). It is a ride's consent to another rider
+racing a ghost of it (ADR 0021 D-5.1, ADR 0039 D-2.1): off unless the rider turns it on, revocable
+through `setActivityMayBeRaced`, and **never** the share setting.
+
+`listRaceableAttempts({ route, requester })` is the cross-rider read: other athletes' rides on the
+route whose riders consented, never the requester's own. It walks the athletes on the device and
+asks each one's `[athleteId+routeId]` index, so there is still no index that answers "rides on this
+route" without an athlete (`schema.ts` §`STORES_V15`). `activity-store.race-consent.test.ts` is
+ADR 0021 D-5.3's consent-scoped test; `consentIgnoredStoreFactory` answers the read without the flag
+and must go red. ⚠️ Nothing calls the read yet: #331 is its first caller, and must not touch
+`activity-store.ghost-scope.test.ts` in the same pull request as anything else (ADR 0039 D-2.3).
+
+A sync base row of kind `race-consent` (keyed by the ride's id) is what stops a device that still
+says "yes" putting a consent back after another device revoked it (`apps/web/src/instance/sync.ts`).
+
 ## The rider's goals, ride notes and documents — #836, ADR 0040 D-1
 
-Schema version 15, additive: a new store, `riderTexts`, and no existing record changes shape. It
+Schema version 16, additive: a new store, `riderTexts`, and no existing record changes shape. It
 holds what the rider writes or adds for the ride analysis to look back on — **their goals** (one row,
 key `goals`), **a note on a ride** (key: the ride's id; the ride must be the athlete's) and **their
 documents** (key: the document's id, with the file's name) — as plain text. The kinds are the

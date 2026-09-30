@@ -45,12 +45,18 @@ import {
   migrateDown,
   migrateUp,
   SCHEMA_MIGRATIONS,
+  ACTIVITY_MAY_BE_RACED,
   SIDE_REPORT_POSE_SUMMARY,
   upgradeWith,
   type RecordMigration,
 } from './migrations';
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
-import type { PersistedSideCameraReport, PersistedSideCameraReportV12 } from './persisted';
+import type {
+  PersistedActivity,
+  PersistedActivityV14,
+  PersistedSideCameraReport,
+  PersistedSideCameraReportV12,
+} from './persisted';
 import {
   cameraFrameFor,
   framingReferenceFor,
@@ -241,7 +247,7 @@ describe('the same pair, applied to a database that contains rows', () => {
 });
 
 describe('the production registry', () => {
-  it('holds one record migration, version 13’s, because only version 13 changed a record’s shape', () => {
+  it('holds two record migrations, version 13’s and version 15’s, because only they changed a record’s shape', () => {
     // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
     // adds the recording stores, version 4 (#61) adds `deviceKeys` and
     // `activityRecords`, version 5 (#64) adds `segments`, and version 6 (#66)
@@ -293,9 +299,12 @@ describe('the production registry', () => {
     // the reason this test used to say "empty" and does not now.
     // Version 14 (#776, #893's review) adds `syncBases`: a new store again,
     // with no rows to migrate, so the registry does not grow.
-    // Version 15 (#836) adds `riderTexts`: a new store, so again nothing.
-    expect(SCHEMA_VERSION).toBe(15);
-    expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY]);
+    //
+    // ⚠️ Version 15 (#793) is the second record migration: every activity
+    // gains a REQUIRED `mayBeRaced`, false. So the registry holds two.
+    // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
+    expect(SCHEMA_VERSION).toBe(16);
+    expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
   });
 
   it('names a version this store declares for every migration, so each one is attached and runs', () => {
@@ -950,21 +959,131 @@ describe('version 13 to version 14 — #776’s sync base (#893’s review)', ()
   });
 });
 
-describe('version 14 to version 15 — #836’s rider texts', () => {
-  /**
-   * Additive: rows written at version 14 survive the reopen at 15, and the
-   * new store is usable on a database that predates it.
-   */
-  it('keeps every version-14 record and makes rider texts usable', async () => {
+describe('version 14 to version 15 — #793’s “may be raced” consent', () => {
+  /** Two rides exactly as version 14 wrote them: no `mayBeRaced` key at all. */
+  const V14_RIDES: readonly PersistedActivityV14[] = [
+    {
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'Written at fourteen',
+      startedAt: 1_760_000_000,
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: 600,
+      movingTime: 590,
+      distance: 5000,
+      visibility: 'public',
+      hasPosition: true,
+      routeId: 'route-1',
+      createdAt: 1_760_000_600,
+    },
+    {
+      id: 'ride-2',
+      athleteId: 'athlete-b',
+      name: 'Indoors',
+      startedAt: 1_760_100_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 1200,
+      movingTime: 1200,
+      distance: 10_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_760_101_200,
+    },
+  ];
+
+  it('up then down returns every version-14 ride to exactly its version-14 shape', () => {
+    const rolledBack = migrateDown(
+      ACTIVITY_MAY_BE_RACED,
+      migrateUp(ACTIVITY_MAY_BE_RACED, V14_RIDES),
+    );
+    expect(rolledBack).toStrictEqual(V14_RIDES);
+    for (const row of rolledBack) {
+      expect(Object.keys(row)).not.toContain('mayBeRaced');
+    }
+  });
+
+  it('up gives every ride the consent OFF — a shared ride included — and moves nothing else', () => {
+    const migrated = migrateUp(ACTIVITY_MAY_BE_RACED, V14_RIDES);
+    expect(migrated).toStrictEqual(V14_RIDES.map((row) => ({ ...row, mayBeRaced: false })));
+  });
+
+  it('up does not carry a consent nobody could have given at version 14', () => {
+    const edited = { ...V14_RIDES[0]!, mayBeRaced: true } as PersistedActivityV14;
+    expect(ACTIVITY_MAY_BE_RACED.up(edited).mayBeRaced).toBe(false);
+  });
+
+  it('down drops a consent given since — the safe direction, which its description names', () => {
+    const consented: PersistedActivity = { ...V14_RIDES[0]!, mayBeRaced: true };
+    expect(ACTIVITY_MAY_BE_RACED.down(consented)).toStrictEqual(V14_RIDES[0]);
+    expect(ACTIVITY_MAY_BE_RACED.description).toMatch(/down drops/);
+  });
+
+  it('is pure — the fixture is not mutated', () => {
+    const before = structuredClone(V14_RIDES);
+    migrateDown(ACTIVITY_MAY_BE_RACED, migrateUp(ACTIVITY_MAY_BE_RACED, V14_RIDES));
+    expect(V14_RIDES).toStrictEqual(before);
+  });
+
+  it('migrates the rides on a real version-14 database, and they roll back exactly', async () => {
     const v14 = new Dexie(databaseName);
     SCHEMA_VERSIONS.slice(0, 14).forEach((stores, index) => {
       v14.version(index + 1).stores(stores);
     });
-    await v14.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
-    const base = syncBaseFor(athleteId('athlete-a'), activityId('ride-before-15'), 'write-up');
-    await v14.table(TABLE.syncBases).put(base);
+    await v14.table(TABLE.athletes).bulkPut([
+      { id: 'athlete-a', displayName: 'A', createdAt: 1 },
+      { id: 'athlete-b', displayName: 'B', createdAt: 1 },
+    ]);
+    await v14.table(TABLE.activities).bulkPut([...V14_RIDES]);
     const beforeVersion = v14.backendDB().version;
     v14.close();
+
+    const store = openActivityStore(databaseName);
+    const read = await store.getActivity(athleteId('athlete-a'), activityId('ride-1'));
+    // The consent is settable on a ride that predates it.
+    const set = await store.setActivityMayBeRaced(
+      athleteId('athlete-b'),
+      activityId('ride-2'),
+      true,
+    );
+    store.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = (await raw
+      .table(TABLE.activities)
+      .orderBy('id')
+      .toArray()) as PersistedActivity[];
+    raw.close();
+
+    expect(beforeVersion).toBe(14 * 10);
+    expect(read?.mayBeRaced).toBe(false);
+    expect(read?.visibility).toBe('public');
+    expect(set).toBe(true);
+    expect(onDisk).toStrictEqual([
+      { ...V14_RIDES[0]!, mayBeRaced: false },
+      { ...V14_RIDES[1]!, mayBeRaced: true },
+    ]);
+    expect(migrateDown(ACTIVITY_MAY_BE_RACED, onDisk)).toStrictEqual(V14_RIDES);
+  });
+});
+
+describe('version 15 to version 16 — #836’s rider texts', () => {
+  /**
+   * Additive: rows written at version 15 survive the reopen at 16, and the
+   * new store is usable on a database that predates it.
+   */
+  it('keeps every version-15 record and makes rider texts usable', async () => {
+    const v15 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 15).forEach((stores, index) => {
+      v15.version(index + 1).stores(stores);
+    });
+    await v15.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const base = syncBaseFor(athleteId('athlete-a'), activityId('ride-before-16'), 'write-up');
+    await v15.table(TABLE.syncBases).put(base);
+    const beforeVersion = v15.backendDB().version;
+    v15.close();
 
     const owner = athleteId('athlete-a');
     const store = openActivityStore(databaseName);
@@ -978,7 +1097,7 @@ describe('version 14 to version 15 — #836’s rider texts', () => {
     const read = await reopened.getRiderText(owner, 'goal', 'goals');
     reopened.close();
 
-    expect(beforeVersion).toBe(14 * 10);
+    expect(beforeVersion).toBe(15 * 10);
     expect(kept).toStrictEqual([base]);
     expect(empty).toStrictEqual([]);
     expect(read).toStrictEqual(goal);
