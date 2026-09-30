@@ -75,6 +75,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // The same HUD control while the ride is paused (#710's review).
   { surface: 'game-hud', name: 'Resume', match: 'exact' },
   { surface: 'game-hud', name: 'End ride', match: 'exact' },
+  // #785: a private race waiting on its line — any rider on it may start it.
+  { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
 ];
 

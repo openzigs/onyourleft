@@ -78,6 +78,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilograms,
   routeProfile,
   watts,
   type RoutePoint,
@@ -86,6 +87,8 @@ import {
 } from '@onyourleft/domain';
 
 import { scriptedSidePairing } from '../src/camera/testing';
+import { roomPortOver } from '../src/net/room-port';
+import { ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
@@ -304,6 +307,31 @@ const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 
  */
 const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
 
+/**
+ * `ride.html?room=race` — #785: the ride is in a private race that is waiting
+ * on its start line, so the HUD carries the race's notice and *Start the
+ * race* — a ride-time control (#669's ruling names *Start*), measured by
+ * `ride-targets.browser.spec.ts`. The room is the scripted one the unit tests
+ * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
+ * waits for as long as the page is open.
+ */
+const IN_A_RACE = new URLSearchParams(window.location.search).get('room') === 'race';
+const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
+const RACE_PORTS =
+  RACE_ROOM === undefined
+    ? {}
+    : {
+        room: roomPortOver(() => RACE_ROOM.link(), {}),
+        roomId: 'harness-race',
+        riderMass: kilograms(72),
+        rooms: {
+          create: () => Promise.resolve({ kind: 'unreachable' as const }),
+          join: () => Promise.resolve({ kind: 'unreachable' as const }),
+          start: () => Promise.resolve({ kind: 'started' as const }),
+          results: () => Promise.resolve({ kind: 'unreachable' as const }),
+        },
+      };
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   // #503: the Ride press's request for control — this double changes nothing.
@@ -516,6 +544,7 @@ async function run(): Promise<void> {
           game={GAME}
           gameTrainer={TRAINER}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+          {...RACE_PORTS}
         />
       </StrictMode>,
     );
@@ -544,6 +573,15 @@ async function run(): Promise<void> {
   ride.click();
 
   await until('the ride to take the stage', () => document.querySelector(`.${STAGE_CLASS}`));
+  if (RACE_ROOM !== undefined) {
+    // #785: the room answers the ride's hello as a race, and sends no frame.
+    await until('the race room to be asked for', () =>
+      RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
+    );
+    RACE_ROOM.accept();
+    RACE_ROOM.welcome(0, 'race');
+    await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+  }
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every
   // measurement rather than of whichever ones happened to run late.
