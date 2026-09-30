@@ -255,6 +255,13 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // its second exception. Its own module, so that `camera/hosted-transport.test.ts`
   // can read off the imports that it cannot name a picture.
   { module: join('camera', 'hosted-transport.ts'), primitive: 'fetch', count: 1 },
+  // #777, ADR 0036 D-3 (a): the ONE module permitted for instance traffic —
+  // signing in, reading the session, the instance's name and source, the
+  // device list, and signing out. A room's socket (#782) is opened through
+  // this module, and that is a change to this entry, never a second module.
+  // What leaves is argued in the module's header and walked for a coordinate
+  // by `privacy/boundaries.test.ts`; `docs/privacy-policy.md` names it.
+  { module: join('instance', 'instance-transport.ts'), primitive: 'fetch', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -330,11 +337,19 @@ describe('the narrowed gate itself — #387', () => {
     path: HOSTED,
     source: 'const send: HostedSend = options.send ?? (async (url, init) => fetch(url, init));',
   };
+  const INSTANCE = join('instance', 'instance-transport.ts');
+  const instance: ScannedFile = {
+    path: INSTANCE,
+    source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
     expect(
-      networkFindingsOutside([hosted, transport, link, quiet, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside(
+        [instance, hosted, transport, link, quiet, fence],
+        PERMITTED_NETWORK_CALLS,
+      ),
     ).toEqual([]);
   });
 
@@ -346,7 +361,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
     const findings = networkFindingsOutside(
-      [hosted, transport, link, elsewhere, fence],
+      [instance, hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -360,7 +375,10 @@ describe('the narrowed gate itself — #387', () => {
       source: 'void fetch(url);',
     };
     expect(
-      networkFindingsOutside([hosted, transport, link, sibling, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside(
+        [instance, hosted, transport, link, sibling, fence],
+        PERMITTED_NETWORK_CALLS,
+      ),
     ).toHaveLength(1);
   });
 
@@ -370,7 +388,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     expect(
-      networkFindingsOutside([hosted, twice, link, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside([instance, hosted, twice, link, fence], PERMITTED_NETWORK_CALLS),
     ).toHaveLength(1);
   });
 
@@ -379,7 +397,10 @@ describe('the narrowed gate itself — #387', () => {
       path: TRANSPORT,
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
-    const findings = networkFindingsOutside([hosted, socket, link, fence], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [instance, hosted, socket, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('WebSocket');
   });
@@ -387,7 +408,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [hosted, emptied, link, fence],
+      [instance, hosted, emptied, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -402,7 +423,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
     const findings = networkFindingsOutside(
-      [hosted, transport, twice, fence],
+      [instance, hosted, transport, twice, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -415,7 +436,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
     const findings = networkFindingsOutside(
-      [hosted, transport, fetched, fence],
+      [instance, hosted, transport, fetched, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -428,7 +449,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
     const findings = networkFindingsOutside(
-      [hosted, transport, link, elsewhere, fence],
+      [instance, hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -438,7 +459,10 @@ describe('the narrowed gate itself — #387', () => {
   // #530: the pose worker's fence, pinned like a call so that deleting it is
   // a red run.
   it('goes red when the pose worker’s fence is gone', () => {
-    const findings = networkFindingsOutside([hosted, transport, link], PERMITTED_NETWORK_CALLS);
+    const findings = networkFindingsOutside(
+      [instance, hosted, transport, link],
+      PERMITTED_NETWORK_CALLS,
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 XMLHttpRequest');
   });
@@ -449,7 +473,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const request = new XMLHttpRequest();',
     };
     const findings = networkFindingsOutside(
-      [hosted, transport, link, fence, elsewhere],
+      [instance, hosted, transport, link, fence, elsewhere],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -463,7 +487,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${hosted.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [transport, link, fence, twice],
+      [instance, transport, link, fence, twice],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -476,7 +500,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${hosted.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [transport, link, fence, socket],
+      [instance, transport, link, fence, socket],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -486,7 +510,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the hosted transport’s fetch is gone', () => {
     const emptied: ScannedFile = { path: HOSTED, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [transport, link, fence, emptied],
+      [instance, transport, link, fence, emptied],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -497,11 +521,63 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
     const findings = networkFindingsOutside(
-      [hosted, transport, emptied, fence],
+      [instance, hosted, transport, emptied, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain('0 RTCPeerConnection');
+  });
+
+  // #777, ADR 0036 D-3 (a): the instance transport's three, as #387's — the
+  // ONE module permitted for instance traffic.
+  it('goes red for a second fetch inside the instance transport', () => {
+    const twice: ScannedFile = {
+      path: INSTANCE,
+      source: `${instance.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('2 fetch');
+  });
+
+  it('goes red for a different primitive inside the instance transport', () => {
+    const socket: ScannedFile = {
+      path: INSTANCE,
+      source: `${instance.source}\nconst s = new WebSocket('wss://ride.example');`,
+    };
+    const findings = networkFindingsOutside(
+      [socket, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the instance transport’s fetch is gone', () => {
+    const emptied: ScannedFile = { path: INSTANCE, source: 'const sender = send;' };
+    const findings = networkFindingsOutside(
+      [emptied, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(INSTANCE);
+    expect(findings[0]).toContain('0 fetch');
+  });
+
+  it('goes red for a fetch beside the instance transport, in the same directory', () => {
+    const sibling: ScannedFile = {
+      path: join('instance', 'instance-port.ts'),
+      source: "void fetch('https://ride.example/v1/auth/session');",
+    };
+    const findings = networkFindingsOutside(
+      [instance, sibling, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(join('instance', 'instance-port.ts'));
   });
 });
 
@@ -523,8 +599,9 @@ describe('the client', () => {
       'docs/privacy-policy.md says this client sends nothing except one picture, or a ride’s ' +
         'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
-        'paired by scanning, and a question — never a picture — to a hosted service on the ' +
-        'rider’s own key; that is now false, and the policy and the Data Safety form are what ' +
+        'paired by scanning, a question — never a picture — to a hosted service on the ' +
+        'rider’s own key, and a sign-in to an instance the rider chose (#777); that is now ' +
+        'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);
   });
@@ -1049,3 +1126,212 @@ function policySection(markdown: string, heading: string): string {
   const end = body.indexOf('\n## ');
   return end === -1 ? body : body.slice(0, end);
 }
+
+/**
+ * **What an instance receives, class by class — #778.**
+ *
+ * `instance/instance-transport.ts` is in {@link PERMITTED_NETWORK_CALLS}
+ * because a rider may connect to an instance, and #778 made that entry
+ * conditional on the policy saying, per data class, what leaves the device,
+ * to whom, when — only after the rider connects — and how to delete it (#35).
+ * This pins those sentences, in the section the policy gives the instance,
+ * so a rewrite that dropped a class, the operator, the network path or the
+ * 18+ rule is a red build rather than a quieter policy.
+ *
+ * ⚠️ It checks that the words are there, not that they are true — whether a
+ * class is sent is `instance-port.ts`'s and its tests', and the wording is a
+ * DRAFT awaiting the owner's approval (#880).
+ */
+/**
+ * Deleting instructions the policy may not give, because nothing in this build
+ * carries them out (#892's review): no in-app screen removes a device or
+ * changes the name, and no instance route erases an account. If one is built,
+ * its phrase comes off this list in the same change that ships it.
+ *
+ * ⚠️ A denylist is a TRIPWIRE, not a proof (#892's second review): a synonym —
+ * "delete your account on the instance" — is on no list and passes it. What
+ * proves the section names no unbuilt path is the positive rule beside it,
+ * {@link deletionRouteFaults}: every "How to delete it" cell names
+ * *Disconnect*, the operator, or Discord (a separate service the rider acts on
+ * themselves), or is a dash for a class this version does not send.
+ */
+const UNBUILT_DELETION_PATHS: readonly string[] = [
+  'remove the device from your account on the instance',
+  'change it on the instance',
+  'erase your account on the instance',
+  'until you erase your account',
+  'until it is erased on the instance',
+  'erase it on the instance',
+];
+
+/**
+ * Every "How to delete it" cell of the instance section's table that names no
+ * route this build has: *Disconnect*, the instance's operator, Discord, or a
+ * dash (#892's second review). Answers the offending cells, normalised.
+ */
+function deletionRouteFaults(section: string): readonly string[] {
+  const rows = section
+    .split('\n')
+    .filter((line) => line.startsWith('|'))
+    .map((line) => line.split('|').slice(1, -1));
+  const heading = rows.findIndex((cells) =>
+    normalised(cells.at(-1) ?? '').includes('how to delete'),
+  );
+  if (heading === -1) return ['no "how to delete it" column'];
+  const cells = rows.slice(heading + 2).map((cells) => normalised(cells.at(-1) ?? '').trim());
+  if (cells.length === 0) return ['no rows under "how to delete it"'];
+  return cells.filter(
+    (cell) =>
+      cell !== '—' &&
+      !cell.includes('disconnect') &&
+      !cell.includes('operator') &&
+      !cell.includes('discord'),
+  );
+}
+
+describe('the instance is disclosed, class by class — #778', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+  const section = normalised(policySection(policy, 'An instance you connect to'));
+
+  it('has a section for the instance, while the transport is permitted', () => {
+    // The pairing this block exists for: the permitted module and the words.
+    expect(
+      PERMITTED_NETWORK_CALLS.some(
+        (rule) => rule.module === join('instance', 'instance-transport.ts'),
+      ),
+    ).toBe(true);
+    expect(section, 'the policy has no "An instance you connect to" section').not.toBe('');
+  });
+
+  it('says nothing leaves until the rider connects, and to whom it goes', () => {
+    expect(section).toContain(
+      'nothing is sent to any instance until you type its address and press connect',
+    );
+    expect(section).toContain('only after you connect');
+    expect(section).toContain('an instance you run yourself is yours');
+    expect(section).toContain('the project’s own instance is ours'.replace('’', "'"));
+  });
+
+  it('names Cloudflare as the project instance’s network path, and its operator and where it runs', () => {
+    expect(section).toContain('cloudflare tunnel');
+    expect(section).toContain('cloudflare decrypts and carries the traffic');
+    expect(section).toContain("maintainer's computer, at their home");
+    expect(section).toContain('the maintainer is its operator');
+  });
+
+  it('gives each data class what leaves, to whom, when and how to delete it', () => {
+    for (const phrase of [
+      // What this version sends.
+      "this device's public key",
+      'the name other riders see',
+      'your internet address',
+      // What it does not send yet, each named rather than left out.
+      'your rides, including their positions',
+      'not sent by this version of the app',
+      'power, cadence, the weight you declare, and your display name',
+      'the route of a group ride',
+      // Ruling Q2.
+      "visible to that race's participants only, until your account on the instance is erased",
+      // #778's comment of 2026-09-29: Discord, what it receives, what others see.
+      'it happens on discord',
+      'discord receives your voice',
+      'see your discord username and picture',
+      'the instance keeps your discord id with your account',
+      // How to delete: #35.
+      'how to delete it',
+      'disconnect makes this device forget the instance',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+  });
+
+  it('says when the name is sent and when it is kept, and that earlier names are kept — #892 review', () => {
+    // `sign-in.ts` sends a typed name on EVERY Connect; the instance keeps it
+    // only when it registers the key (`instance-port.test.ts` measures both).
+    // The row used to say it was SENT only to an instance that had not seen
+    // the device.
+    expect(section).toContain('each time you press connect with a name typed');
+    expect(section).toContain('keeps it with your account only the first time it sees this device');
+    expect(section).not.toContain('when it has not seen this device before');
+    // Migration 0004's `display_name_change`.
+    expect(section).toContain('also keeps each earlier name, and when it changed');
+    expect(section).toContain('for moderation');
+  });
+
+  it('says what the project’s own instance and Cloudflare keep of an internet address — #892 review', () => {
+    // `apps/instance/src/log.ts` writes no address; the rate limiter holds one
+    // in memory for a window of at most an hour, and forgets it when that
+    // window ends with no further request — `apps/instance/src/auth/
+    // rate-limit.test.ts` and `sign-in.test.ts` §"what the rate limits hold"
+    // drive the clock past the window and read the address gone.
+    expect(section).toContain('does not write your address to its log or its database');
+    expect(section).toContain('in memory only, for at most an hour');
+    // The tile section's wording, for the same Cloudflare account.
+    expect(section).toContain('our cloudflare account can see for up to 7 days');
+    expect(section).not.toContain("the instance's operator decides how long it is kept");
+  });
+
+  it('offers only ways of deleting that this build has — #892 review', () => {
+    // No screen removes a device or changes the name, and nothing a rider can
+    // reach erases an account: `DELETE /v1/account` (#893) is a sync route,
+    // which a running instance answers `unavailable` because `instance.ts`
+    // hands the handler no sync, and no screen calls it. A policy
+    // telling a rider to do those "on the instance" names paths that do not
+    // exist, so each such instruction is refused, here and across the policy.
+    const whole = normalised(policy);
+    for (const claim of UNBUILT_DELETION_PATHS) {
+      expect(whole, claim).not.toContain(claim);
+    }
+    // What IS true: disconnecting, and asking the operator — the maintainer,
+    // for the project's own instance, through the policy's contact route.
+    expect(section).toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain("ask the instance's operator");
+    expect(section).toContain("for the project's own instance, that is this project's maintainer");
+    expect(section).toContain('as described under contact below');
+    expect(normalised(policySection(policy, 'Contact'))).toContain('open an issue');
+  });
+
+  it('names only Disconnect, the operator or Discord in every "how to delete it" cell — #892 second review', () => {
+    expect(deletionRouteFaults(policySection(policy, 'An instance you connect to'))).toEqual([]);
+    // The prose paragraph under the table says the same.
+    expect(section).toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain("ask the instance's operator to do them");
+  });
+
+  it('would find a synonym the denylist misses — the positive rule is not vacuous', () => {
+    const table =
+      '| Data | What | When | How to delete it |\n| --- | --- | --- | --- |\n' +
+      '| A key | sent | always | delete your account on the instance |\n' +
+      '| A name | sent | always | *Disconnect* |\n';
+    expect(deletionRouteFaults(table)).toEqual(['delete your account on the instance']);
+    expect(deletionRouteFaults('no table here')).toEqual(['no "how to delete it" column']);
+  });
+
+  it('would find an unbuilt deletion path — the rule is not vacuous', () => {
+    for (const claim of UNBUILT_DELETION_PATHS) {
+      expect(normalised(`You can ${claim} whenever you like.`)).toContain(claim);
+    }
+  });
+
+  it('says public rooms are for adults, self-declared, and names the assessments that come first', () => {
+    expect(section).toContain('for people aged 18 or over only');
+    expect(section).toContain('confirm your age yourself');
+    expect(section).toContain('online safety act');
+    expect(section).toContain('digital services act');
+    expect(section).toContain('/issues/886');
+    expect(section).toContain('/issues/887');
+  });
+
+  it('refuses http and says so in the policy too', () => {
+    expect(section).toContain('it refuses a plain http:// address, before sending anything');
+  });
+
+  it('would find a class missing — the rule is not vacuous', () => {
+    expect(
+      normalised(
+        policySection('\n## An instance you connect to\nNothing.\n', 'An instance you connect to'),
+      ),
+    ).not.toContain('your internet address');
+  });
+});

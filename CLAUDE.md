@@ -326,6 +326,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         fitness line carried to today, and the empty state a
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`
+    src/instance/       connecting this app to an instance (#777) — which
+                        addresses it will talk to (`https:`, and `http:` only
+                        to this machine's loopback, refused before any
+                        request), the ONE module `no-network.test.ts` permits
+                        for instance traffic (`instance-transport.ts`, one
+                        `fetch`; a room's socket goes through it, never beside
+                        it — ADR 0036 D-3), signing in with the device key
+                        (#772's `sign-in.ts`), and `instance-port.ts`, whose
+                        `createInstancePort` only `main.tsx` names, so
+                        deleting that wiring is a red `check:wiring`. The
+                        session token and the address are kept on the DEVICE,
+                        not the athlete row (ADR 0020 D-2's question, answered
+                        the other way in the port's header). The screen is
+                        `views/InstanceView.tsx` at `#/settings/instance`
     src/library/        the activity library's row model, its port and its stub (#62),
                         and since #660 `layout.ts` — whether it is a table or a
                         list of cards, from the width the library is GIVEN
@@ -2412,6 +2426,11 @@ not.
   ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half
   in `apps/web/src/instance/sync.ts` exist, but `src/instance.ts` hands the handler no sync, so every
   sync route answers `unavailable` on a running instance, and no client calls one until #777.
+  ⚠️ **`GET /instance` answers the operator's `OYL_INSTANCE_NAME` or `null` since #777**, never a
+  made-up default, and **every answer carries `Access-Control-Allow-Origin: *`**, with a preflight
+  to a routed path answering `204`, because the rider's app is always on another origin; it is safe
+  only because the instance reads no cookie and never sends `Allow-Credentials` (`src/handler.ts`
+  argues it).
 
 #### What exists, and what each is **not** yet
 
@@ -5357,6 +5376,11 @@ top of an issue **supersedes its body**.
 | Why the page has two palettes, how one is chosen before the first paint, and what the HUD keeps | `apps/web/src/design/tokens.ts` §`DARK_COLOUR_TOKENS`, `apps/web/src/design/theme-selection.ts`, `apps/web/tools/theme/theme-selection-plugin.ts`, `apps/web/browser/theme.browser.spec.ts`, [#672](https://github.com/openzigs/onyourleft/issues/672) |
 | Where a screen's longer explanation goes, which sentences may never be tucked, and what measures the fold | `apps/web/src/design/MoreAbout.tsx`, `apps/web/src/a11y/kept-visible.a11y.test.tsx`, `apps/web/browser/controls-first.browser.spec.ts`, [#666](https://github.com/openzigs/onyourleft/issues/666) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
+| Which instance addresses the app will talk to, and why `http:` is refused before any request | `apps/web/src/instance/address.ts`, [#777](https://github.com/openzigs/onyourleft/issues/777) |
+| The one module that may talk to an instance, what it sends, and why a room's socket goes through it | `apps/web/src/instance/instance-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) D-3 |
+| Why the instance answers `Access-Control-Allow-Origin: *`, and why that is safe with bearer tokens | `apps/instance/src/handler.ts` §"A rider's app is on another origin", `apps/web/browser/identity.browser.spec.ts` §"#777" |
+| Where a sign-in to an instance is kept, why on the device and not the athlete row, and what Disconnect and an erase remove | `apps/web/src/instance/instance-port.ts` §"What the device keeps", §`instanceEraser` |
+| What the privacy policy says an instance receives, class by class, and what pins it | [`docs/privacy-policy.md`](docs/privacy-policy.md) §"An instance you connect to", `apps/web/src/privacy/no-network.test.ts` §"#778" |
 | How a device signs in to an instance with its key, what each refusal code means, and why the nonce is spent before the signature is checked | `apps/instance/src/auth/identity.ts`, `packages/domain/src/identity/device-statement.ts`, [#772](https://github.com/openzigs/onyourleft/issues/772) |
 | Why a room's WebSocket carries a ticket and never the session token, and where the room core's `Admit` comes from | `apps/instance/src/auth/tickets.ts` |
 | What an instance stores of a session token, a recovery code, a link code or an email-recovery token, and what proves it | `apps/instance/src/auth/sign-in.test.ts`, `devices.test.ts` (`databaseBytes`) |

@@ -228,6 +228,98 @@ describe('the session token', () => {
   });
 });
 
+describe('what the rate limits hold, and for how long — #892 review', () => {
+  // The privacy policy: the project's instance holds an internet address "in
+  // memory only, for at most an hour". The sweep, with no further request.
+  it('forgets an address and a key when their minute ends, with no further request', async () => {
+    const w = await start();
+    expect(w.identity.rateLimitSweepPeriodMs).toBe(60_000);
+    const device = await testDevice();
+    // A challenge counts the address; the key is counted only once a valid
+    // signature spends a challenge (#891), so a whole sign-in is what holds
+    // it — with the per-address registration count of a new account.
+    expect((await w.identity.challenge(device.publicKey, '203.0.113.9')).ok).toBe(true);
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    await w.signIn(device);
+    // 203.0.113.9 and the test's own loopback address, per address; the key,
+    // proven; and loopback again, for the registration it made.
+    expect(w.identity.heldRateLimitKeys()).toBe(4);
+    const end = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.clock.ms = end - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(4);
+    w.clock.ms = end;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+
+  it('forgets an email address when its hour ends, and the internet address at its minute', async () => {
+    const w = await start({ emailRecovery: true });
+    expect((await w.identity.requestEmailRecovery('rider@example.org', '203.0.113.9')).ok).toBe(
+      true,
+    );
+    expect(w.identity.heldRateLimitKeys()).toBe(2);
+    w.clock.ms = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    const hourEnd = (Math.floor(w.clock.ms / 3_600_000) + 1) * 3_600_000;
+    w.clock.ms = hourEnd - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(1);
+    w.clock.ms = hourEnd;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+});
+
+describe('how long a rate limit may hold anything — #892', () => {
+  // The privacy policy's "in memory only, for at most an hour" rests on this:
+  // a key is swept at the end of its window, so no window may be longer than
+  // an hour. Every `RateLimit` in the defaults is found by its shape, so a
+  // limit added later is held here with no edit.
+  it('has no default window longer than an hour', () => {
+    const windows = Object.entries(DEFAULT_LIMITS).flatMap(([name, value]) =>
+      typeof value === 'object' && value !== null && 'windowMs' in value
+        ? [[name, (value as { windowMs: number }).windowMs] as const]
+        : [],
+    );
+    expect(windows.length).toBeGreaterThanOrEqual(8);
+    for (const [name, windowMs] of windows) {
+      expect(windowMs, name).toBeGreaterThan(0);
+      expect(windowMs, name).toBeLessThanOrEqual(60 * 60_000);
+    }
+  });
+});
+
+describe('what the rate limits hold after the merge with #889 and #891 — #892', () => {
+  // #889's confirmation limits and #891's registration limit hold keys too —
+  // an athlete, an address pair, an email address, an internet address — and
+  // every one of them is swept at the end of its hour.
+  it('forgets the registration and confirmation keys when their hour ends', async () => {
+    const w = await start({ emailRecovery: true });
+    const answer = await w.signIn(await testDevice());
+    const token = answer.body.sessionToken as string;
+    const given = await w.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'rider@example.org' },
+    });
+    expect(given.status).toBe(204);
+    const minuteEnd = (Math.floor(w.clock.ms / 60_000) + 1) * 60_000;
+    w.clock.ms = minuteEnd;
+    w.identity.sweepRateLimits();
+    // The test harness's registration limit is a minute long; the three
+    // confirmation limits are an hour long, and still held.
+    expect(w.identity.heldRateLimitKeys()).toBe(3);
+    const hourEnd = (Math.floor(w.clock.ms / 3_600_000) + 1) * 3_600_000;
+    w.clock.ms = hourEnd - 1;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(3);
+    w.clock.ms = hourEnd;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+});
+
 describe('rate limits on /v1/auth/challenge', () => {
   it('refuses the eleventh SIGN-IN of one key in a minute, and allows it the next minute', async () => {
     const w = await start();

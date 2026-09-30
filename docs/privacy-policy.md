@@ -7,7 +7,8 @@ app's About page and from the Google Play listing, and those two links point at 
 
 ## The short version
 
-There is no account, and the app contains no analytics. **Your rides stay on your device.** To draw a
+There is no account unless you connect the app to an instance, and the app contains no analytics.
+**Your rides stay on your device.** To draw a
 map, the app asks our tile server for the map around where you rode. It sends no ride data.
 **Cloudflare, which runs the tile server for us, keeps a record of each map request — your IP
 address, the time, and your device or browser type, not which part of the map — that our Cloudflare
@@ -18,10 +19,20 @@ and then no request is made and there is nothing to record. Apart from that map 
 **on its own the app uploads nothing** — not a ride, not a heart rate, not a position, not a crash
 report, not a page view.
 
+**If you connect the app to an instance.** An instance is a server that lets riders ride together.
+You choose whether to connect, and to which one: nothing is sent to any instance until you type its
+address and press *Connect*. Connecting sends this device's public key, the name other riders will
+see if you type one, and — as with any server — your internet address and your device or browser
+type. Nothing else of yours: this version of the app sends no ride, route, position or heart rate to
+an instance. It is described under **An instance
+you connect to** below, class by class, with what each one will receive when the features that
+send it arrive.
+
 That is not a promise about our intentions. It is a property of the software: the code this project
-writes contains exactly **three** network calls, and each can do only the one thing described below —
+writes contains exactly **four** network calls, and each can do only the one thing described below —
 a picture, or a ride's numbers when you ask for an analysis, to a computer of your own, a direct link between your tablet and a second phone you
-paired with it, and a question, or a ride's numbers when you ask for an analysis — never a picture — to a service you chose, on your own key. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
+paired with it, a question, or a ride's numbers when you ask for an analysis — never a picture — to a service you chose, on your own key,
+and signing in to an instance you chose to connect to. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
 check that rather than take our word for it.
 
 **The one thing you can switch on: a picture sent to a computer of your own.** If you use the
@@ -43,10 +54,10 @@ numbers when you ask for an analysis of that ride. It is off whenever the app is
 nothing is set up to begin with. It is described under **Questions sent to a service you chose, on
 your own key** below.
 
-⚠️ **That computer is yours, not ours.** On Your Left runs no server. It is not an On Your Left
-service, not an account, and not the future sync server this project may one day run
-([#7](https://github.com/openzigs/onyourleft/issues/7)), which does not exist. We never see the
-picture, and we cannot see what your computer does with it.
+⚠️ **That computer is yours, not ours.** It is not an On Your Left service, not an account, and not
+an instance ([#7](https://github.com/openzigs/onyourleft/issues/7)) — instances are described
+separately below, and no picture is ever sent to one. We never see the picture, and we cannot see
+what your computer does with it.
 
 The other exception is a map, and it is described under **What leaves the device** below: when a
 ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
@@ -71,6 +82,7 @@ your own action:
 | Your list of words to mask before anything is sent to a hosted model — a street, a town, a name | typed by you in Settings; kept with your rides on this device, not put in the account export, and *Erase everything* removes it |
 | Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
+| The address of an instance you connected to, the account id it gave you, and this device's sign-in to it (a session token) | kept in this device's browser storage when you press *Connect*; never put in an export; *Disconnect* and *Erase everything* remove it |
 | Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
 | The address and model name of a hosted service, and **your key for it**, if you set one up | typed by you on the Camera page, and kept in this device's browser storage; never put in an export; *Erase everything* removes it |
@@ -82,9 +94,10 @@ The private half of the signing key is a non-extractable key held by the browser
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only
 inside a file you export.
 
-**Nothing here is linked to an identity, because there is no identity to link it to.** The app never
-asks for a name, an email address, a phone number or a date of birth, and it has no field to put one
-in.
+**Nothing here is linked to an identity unless you connect to an instance.** The app never asks for
+an email address, a phone number or a date of birth, and it has no field to put one in. The one name
+it asks for is optional, and only when you connect to an instance: the name other riders will see
+there. It is sent to that instance and is not kept on this device.
 
 ## Location
 
@@ -117,6 +130,9 @@ Only these, and only when you do them:
 - **A file you export.** FIT, GPX, TCX, a workout, or a whole-account export. It goes wherever you
   put it and it is then out of the app's hands.
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
+- **Signing in to an instance you chose to connect to.** This device's public key, the name other
+  riders will see if you type one, and — as with any server — your internet address and your device
+  or browser type. See **An instance you connect to** above.
 - **A picture sent to your own computer, if you set one up and switch it on.** See **Pictures sent
   to your own computer** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
@@ -153,6 +169,59 @@ Only these, and only when you do them:
   contiguous United States; elsewhere the map shows your line on a plain background, and after
   reading the file's index the app requests no tiles at all. A build of the app can be pointed at another tile
   host, or at none.
+
+## An instance you connect to
+
+An **instance** is an On Your Left server that lets riders ride together. Anybody can run one. You
+choose whether to connect this app to one, and to which, on Settings → *Instance*. **Nothing is sent
+to any instance until you type its address and press *Connect*.** The screen lists what the instance
+will receive before you press it.
+
+**Who you are sending it to.** An instance belongs to whoever runs it:
+
+- **An instance you run yourself** is yours, the way the computer under **Pictures sent to your own
+  computer** is yours. We never see what it receives.
+- **The project's own instance** is ours. It runs on this project's maintainer's computer, at their
+  home, and the maintainer is its operator. You reach it through **Cloudflare Tunnel**: the encrypted
+  connection from the app ends at Cloudflare's edge, so **Cloudflare decrypts and carries the traffic**
+  between you and that computer, as our service provider, under its own privacy policy.
+- **Anybody else's instance** is theirs, under their own terms. We cannot see what it does with what
+  it receives, and we cannot delete it for you.
+
+**How it travels.** The app talks to an instance only over `https://` (and `wss://` for a room),
+which is encrypted on the way. It refuses a plain `http://` address, before sending anything, unless
+the instance is on the same computer as the app (`localhost`). It will not follow a redirect
+somewhere else.
+
+**What each kind of data does.** The *when* in every row is **only after you connect**:
+
+| Data | What leaves the device, and to whom | When | How to delete it |
+| --- | --- | --- | --- |
+| This device's public key | sent to the instance you connected to, which keeps it on your account there, with when it was added and last used | when you press *Connect* | *Disconnect* makes this device forget the instance and ends this device's sign-in there, but the key stays on your account there. This version of the app cannot remove a device from your account: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| The name other riders see | sent to that instance each time you press *Connect* with a name typed. The instance keeps it with your account only the first time it sees this device, and ignores it after that. If your name there is ever changed, the instance also keeps each earlier name, and when it changed, with your account, for moderation | when you press *Connect* | this version of the app cannot change or remove it, or the earlier names: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
+| Your rides, including their positions | **not sent by this version of the app.** A later version that syncs rides ([#776](https://github.com/openzigs/onyourleft/issues/776)) will send a ride you choose to sync — its positions included, trimmed by your privacy zones where it is shared with anybody else — and this policy will say so, and be dated, before it does | not in this version | — |
+| In a room: power, cadence, the weight you declare, and your display name | **not sent by this version of the app.** When rooms arrive ([#782](https://github.com/openzigs/onyourleft/issues/782)) they go to the instance running the room, and on to the other riders in it, while you ride in it | not in this version | — |
+| The route of a group ride | **not sent by this version of the app.** When group rides arrive, the route the ride's creator chose is shared with the other riders in it | not in this version | — |
+| Race results | **not in this version.** When races arrive, a race's results are kept on the instance, visible to that race's participants only, until your account on the instance is erased | not in this version | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
+| Your voice, in a room's voice chat | **never sent by this app.** Where an instance offers voice chat, it happens on **Discord**, a separate service you choose to use: Discord receives your voice, and other riders in the voice channel see your Discord username and picture. If you link your Discord account to your account on the instance, the instance keeps your Discord id with your account | only if you join the voice chat, or link your Discord account | leave the voice channel or unlink your Discord account; what Discord keeps is Discord's, under its own privacy policy |
+
+**Public rooms are for adults.** Where an instance offers public rooms — rooms anybody on that
+instance can join — they are **for people aged 18 or over only**, and you will be asked to confirm
+your age yourself before joining one. The project's own instance does not offer public rooms, and
+will not until its operator has completed the UK Online Safety Act's illegal-content risk and
+children's access assessments ([#886](https://github.com/openzigs/onyourleft/issues/886)) and the EU
+Digital Services Act's notice-and-action mechanism is in place
+([#887](https://github.com/openzigs/onyourleft/issues/887)).
+
+**Disconnecting.** *Disconnect* makes this device forget the instance's address and its sign-in to
+it, and asks the instance to end that sign-in. Every ride stays on this device. What the instance
+already holds stays there.
+
+**Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
+remove a device from your account on an instance, change or remove your name there, or erase your
+account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask as described under
+**Contact** below. For anybody else's instance, ask whoever runs it.
 
 ## A second phone you pair as a side camera
 
@@ -351,27 +420,31 @@ can do the same analysis.
 - We never sell your data. The only sharing is the analysis you choose to send to a service you
   set up. Nothing is transmitted to us or to anybody else
   except the pictures and the rides you choose to send to your own computer, the questions and the
-  rides you choose to send to a service of your own choosing, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
+  rides you choose to send to a service of your own choosing, what you send to an instance you
+  choose to connect to, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
 - No tracking across apps or sites.
 
 ## Deleting your data
 
 Uninstalling the app removes everything it holds. Inside the app, **Files → Erase this device**
-deletes every ride, route, segment, effort, workout and setting, and the signing key with them,
-after you type a confirmation phrase.
+deletes every ride, route, segment, effort, workout and setting, and the signing key with them, and
+makes this device forget any instance it was connected to, after you type a confirmation phrase.
 
 Some things an erase cannot reach, and the app says so before you press it: files you have already
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
 sent to your own computer, which is a copy that computer holds, a question or a ride's numbers you
-sent to a service you chose, which is a copy that service holds, and Cloudflare's record of recent map requests —
+sent to a service you chose, which is a copy that service holds, your account on an instance you
+connected to, and anything it received, which is a copy that instance holds and which you ask its
+operator to erase (see **Deleting what an instance holds**), and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
 
 ## Children
 
-The app is not directed at children. It collects nothing from anybody, including them, beyond the
-map tile requests described above, which you can turn off.
+The app is not directed at children. On its own it collects nothing from anybody, including them,
+beyond the map tile requests described above, which you can turn off. Public rooms on an instance
+are for adults aged 18 or over only, as described under **An instance you connect to**.
 
 ## Changes to this policy
 

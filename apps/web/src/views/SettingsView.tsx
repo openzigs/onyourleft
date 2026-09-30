@@ -528,6 +528,16 @@ export function SettingsView({
       {/* #839. Beside the map tiles: both are about what leaves this device. */}
       <MaskedWordsPanel port={maskedWords} />
 
+      {/* #777. A link, not the form: the one screen that sends something to a
+          server is its own page, with what it sends above its Connect button. */}
+      <section className="oyl-panel" aria-labelledby="oyl-instance-link-heading">
+        <h2 id="oyl-instance-link-heading">Instance</h2>
+        <p>
+          <a href={hrefFor(routeById('instance'))}>Connect to an instance</a>, to ride with other
+          people, and see this device’s connection and your devices there.
+        </p>
+      </section>
+
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
   );

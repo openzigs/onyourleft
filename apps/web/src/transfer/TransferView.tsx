@@ -1015,6 +1015,7 @@ function ErasePanel({
         drafts: port.drafts,
         theme: port.theme,
         hostedModel: port.hostedModel,
+        instance: port.instance,
         athlete: port.athleteRow,
       });
       setDone(eraseSentence(outcome));

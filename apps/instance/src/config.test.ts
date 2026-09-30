@@ -22,6 +22,7 @@ describe('readConfig', () => {
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
         trustedProxies: [],
+        name: null,
       },
     });
   });
@@ -56,6 +57,21 @@ describe('readConfig', () => {
     for (const port of ['-1', '65536', '80a', '1.5']) {
       expect(readConfig({ commit: COMMIT, port }).ok).toBe(false);
     }
+  });
+
+  it('reads the instance’s name, trimmed — #777', () => {
+    const result = readConfig({ commit: COMMIT, name: '  Lanes of the Weald ' });
+    expect(result.ok && result.config.name).toBe('Lanes of the Weald');
+    const blank = readConfig({ commit: COMMIT, name: '   ' });
+    expect(blank.ok && blank.config.name).toBeNull();
+  });
+
+  it('refuses a name a rider’s screen should not be handed, or one too long — #777', () => {
+    for (const name of ['a\u202Eb', 'a\u200Bb', 'line\nbreak', 'x'.repeat(65)]) {
+      const result = readConfig({ commit: COMMIT, name });
+      expect(result.ok ? [] : result.problems.join(' ')).toContain('OYL_INSTANCE_NAME');
+    }
+    expect(readConfig({ commit: COMMIT, name: 'x'.repeat(64) }).ok).toBe(true);
   });
 
   it('reports every problem, not only the first', () => {

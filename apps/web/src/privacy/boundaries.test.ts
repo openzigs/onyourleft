@@ -49,7 +49,7 @@ import {
   streamSetFor,
 } from '@onyourleft/store/testing';
 import type { PrivacyZoneRecord } from '@onyourleft/store';
-import { privacyZoneId } from '@onyourleft/store';
+import { ensureDeviceSigningKey, privacyZoneId } from '@onyourleft/store';
 import {
   degreesLatitude,
   degreesLongitude,
@@ -68,6 +68,9 @@ import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
 import { routeShare } from '../routes/share';
 import { exportActivity } from '../transfer/export-activity';
+import { createInstancePort } from '../instance/instance-port';
+import type { InstanceSend } from '../instance/instance-transport';
+import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 
 import { coordinatesIn, insideZone } from './boundaries';
 import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
@@ -152,6 +155,16 @@ const BOUNDARIES: readonly Boundary[] = [
     // owns (ADR 0033 D-3). What crosses is enumerated in
     // `camera/side-link-messages.ts`, and D-3's *"never across"* list — a
     // position among it — is asserted below by walking every message.
+    direction: 'departing',
+  },
+  {
+    module: 'instance/instance-transport.ts',
+    what: 'a device’s public key, a signed statement and a display name, sent to an instance the rider chose (#777)',
+    // ⚠️ Departing: an instance is somebody's server — the rider's own, the
+    // project's, or a third party's (ADR 0036 D-3 (d)). This build sends it no
+    // ride and no position; the walk below reads every body a connection
+    // sends and finds no coordinate at all, and when sync (#776) starts
+    // sending a ride through this module it is here that the trim is asserted.
     direction: 'departing',
   },
   {
@@ -388,6 +401,58 @@ describe('the hosted question carries no coordinate at all — #518', () => {
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);
+  });
+});
+
+describe('an instance is sent no coordinate at all — #777', () => {
+  /** Every body a connection sends: sign in, read back, list devices, sign out. */
+  async function everyBody(): Promise<readonly unknown[]> {
+    const harness = createStoreHarness();
+    const bodies: unknown[] = [];
+    const map = new Map<string, string>();
+    const send: InstanceSend = (url, init) => {
+      bodies.push(typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : {});
+      const path = new URL(url).pathname;
+      const answer =
+        path === '/v1/auth/challenge'
+          ? { nonce: '0'.repeat(64), expiresAt: 1 }
+          : path === '/v1/auth/session' && init.method === 'POST'
+            ? { sessionToken: 't'.repeat(43), athleteId: 'athlete', registered: true }
+            : path === '/v1/auth/devices'
+              ? { devices: [] }
+              : { displayName: 'Anna', name: null, url: 'https://example.org' };
+      return Promise.resolve(Response.json(answer));
+    };
+    const port = createInstancePort({
+      storage: {
+        getItem: (key) => map.get(key) ?? null,
+        setItem: (key, value) => void map.set(key, value),
+        removeItem: (key) => void map.delete(key),
+      },
+      ensureLocalAthlete: () =>
+        harness.write(async (open) => ensureLocalAthlete(open, unixSeconds(1_790_000_000))),
+      signingKey: () => harness.write(async (open) => ensureDeviceSigningKey(open, LOCAL_ATHLETE)),
+      send,
+    });
+    await port.connect('https://ride.example', 'Anna');
+    await port.current();
+    await port.devices();
+    await port.disconnect();
+    await harness.destroy();
+    return bodies;
+  }
+
+  it('has none in any body a connection sends', async () => {
+    const bodies = await everyBody();
+    // Challenge, sign-in, three reads, the device list and the sign-out.
+    expect(bodies.length).toBeGreaterThanOrEqual(7);
+    for (const body of bodies) expect(coordinatesIn(body)).toStrictEqual([]);
+  });
+
+  it('would find one if a body carried it', () => {
+    expect(
+      coordinatesIn({ publicKey: 'ab', where: { latitude: 51.5, longitude: -0.12 } }),
+    ).toHaveLength(1);
   });
 });
 
