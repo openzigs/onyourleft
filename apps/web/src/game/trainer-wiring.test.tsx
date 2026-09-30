@@ -62,6 +62,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilograms,
   routeProfile,
   seconds,
   watts,
@@ -828,6 +829,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         now={() => nowMs}
         room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
         roomId="room-1"
+        riderMass={kilograms(72)}
       />,
     );
     await settle();
@@ -1266,6 +1268,7 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
         now={() => nowMs}
         room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
         roomId="room-1"
+        riderMass={kilograms(72)}
       />,
     );
     await settle();
@@ -1296,6 +1299,80 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
       expect(step).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
     }
     expect(writes.at(-1)?.grade).toBeLessThan(-3);
+  });
+});
+
+describe('other riders never reach the trainer — #782 review (N8)', () => {
+  /**
+   * One ride up the hill in a room, and every grade the trainer was sent. The
+   * room's frames about THIS rider (seat 0) are the same whatever `others`
+   * adds, so any difference between two rides is the other riders' doing.
+   */
+  async function gradesSent(
+    others: (tick: number) => readonly ReturnType<typeof frameRider>[],
+  ): Promise<readonly number[]> {
+    pending = [];
+    nowMs = 1_000_000;
+    const grades: number[] = [];
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const port = trainerPort(READY, commands);
+    const recording: GameTrainerPort = {
+      ...port,
+      readTrainer: () => {
+        const found = port.readTrainer();
+        if (found.control === undefined) return found;
+        const control = found.control;
+        return {
+          ...found,
+          control: {
+            ...control,
+            setSimulationParameters: async (parameters) => {
+              grades.push(parameters.grade);
+              return control.setSimulationParameters(parameters);
+            },
+          },
+        };
+      },
+    };
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={recording}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+        roomId="room-1"
+        riderMass={kilograms(72)}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flushRoom();
+    room.accept();
+    room.welcome(0);
+    for (let tick = 1; tick <= 30; tick += 1) {
+      // This rider where the room would put them at 5 m/s from the start…
+      room.frame(tick, [frameRider(0, tick * 2.5, 5), ...others(tick)]);
+      await pumpWith(clock, 2);
+    }
+    mounted.unmount();
+    mounted = undefined;
+    return grades;
+  }
+
+  it('sends the trainer the same grades whether or not other riders jump kilometres about the room', async () => {
+    const alone = await gradesSent(() => []);
+    const crowded = await gradesSent((tick) => [
+      // …and others teleporting kilometres forward and back every frame,
+      // over the top of the climb and down the descent.
+      frameRider(1, tick % 2 === 0 ? 5_000 : 0),
+      frameRider(2, tick % 2 === 0 ? 0 : 900, 30),
+      frameRider(3, 1_100 + tick * 400, 60),
+    ]);
+    expect(alone.length).toBeGreaterThan(3);
+    expect(crowded).toEqual(alone);
   });
 });
 
