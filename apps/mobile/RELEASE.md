@@ -112,6 +112,24 @@ every request's path is the same — which is why the row is approximate and the
 precise row is not collected. §8 has a step that re-checks both before every
 tag.
 
+**The form's two section-level answers are filed too**, and are in the same file
+as `DATA_SAFETY_SECTION_ANSWERS`
+([#562](https://github.com/openzigs/onyourleft/issues/562)); the owner decided
+both on 2026-09-30 and enters them in Play Console:
+
+- **Is all of the user data collected by your app encrypted in transit? Yes**,
+  with one exception the form cannot carry: a picture or a ride's numbers sent
+  to a computer on the rider's own network can travel over plain `http://`. The
+  privacy policy discloses it, and `sectionAnswerFaults` fails if any other path
+  can be plain `http:` without being named as an exception (`DATA_PATHS`, each
+  held to the address rule in `apps/web` that decides it).
+- **Do you provide a way for users to request that their data is deleted? Yes**:
+  by email to `DELETION_REQUEST_EMAIL` (matt@openzigs.ai), named in the privacy
+  policy, until in-app deletion on an instance
+  ([#906](https://github.com/openzigs/onyourleft/issues/906)) ships. ⚠️ Play's
+  separate **account-deletion** requirement — a web link as well as an in-app
+  path, for an app that lets a rider create an account — is #906's, not this.
+
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
 the "no location collection" claim — since #558, the claim that the app does
 not read the **device's** location (the precise-location row). That is now done
