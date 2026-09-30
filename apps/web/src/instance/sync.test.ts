@@ -43,7 +43,12 @@ import { rideSummaryOf } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
-import { syncWithInstance, type SyncDependencies, type SyncTransport } from './sync';
+import {
+  athleteKeysFrom,
+  syncWithInstance,
+  type SyncDependencies,
+  type SyncTransport,
+} from './sync';
 
 interface TestDevice {
   readonly publicKey: string;
@@ -205,6 +210,8 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     timeZone: 'Europe/London',
     // The harness hands the whole ActivityStore, which reads a ride's input.
     rideSummary: rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE),
+    // The athlete's keys, from the instance's device list (#898).
+    athleteKeys: () => athleteKeysFrom(on.transport.sync),
   };
 }
 
@@ -441,11 +448,14 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(await libraryRows(b.harness)).toEqual([]);
   }, 60_000);
 
-  it('deletes on this device a ride another device deleted, with its write-up', async () => {
+  // #898 rule 1: a tombstone is unsigned and the device is canonical (ADR 0036
+  // D-3), so a ride another device deleted is KEPT here, and hidden there.
+  it('keeps on this device a ride another device deleted, and sends nothing of it back', async () => {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
     const origin = instanceTesting.TEST_ORIGIN;
     const a = device(world.url);
     const [id] = await importRides(a, ['nominal-outdoor-ride.fit']);
+    await a.harness.write((store) => store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, id!)));
     const signedIn = await signInToInstance(signInDependencies(origin, a));
     a.transport.setToken(signedIn.sessionToken);
     await a.harness.write((store) => syncWithInstance(syncDependencies(a, store)));
@@ -462,11 +472,34 @@ describe('two-way sync through the real instance (#776)', () => {
 
     const record = await a.harness.read((store) => store.getActivityRecord(LOCAL_ATHLETE, id!));
     const content = record!.record.contentHash.slice('sha256:'.length);
-    const removed = await a.transport.sync.json('DELETE', `/v1/sync/items/activity/${content}`);
-    expect(removed.status).toBe(204);
+    for (const [kind, key] of [
+      ['write-up', id!],
+      ['ride-summary', id!],
+      ['activity', content],
+    ] as const) {
+      const removed = await a.transport.sync.json('DELETE', `/v1/sync/items/${kind}/${key}`);
+      expect(removed.status).toBe(204);
+    }
     const report = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
-    expect(report.deleted).toBe(1);
-    expect(await libraryRows(b.harness)).toEqual([]);
+    expect(report).toMatchObject({
+      hiddenOnInstance: 1,
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      failures: [],
+    });
+    // B's copy is B's: the ride and its write-up, read after a reload.
+    expect(await libraryRows(b.harness)).toHaveLength(1);
+    expect(await b.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, id!))).toEqual(
+      rideWriteUpFor(LOCAL_ATHLETE, id!),
+    );
+    // And the instance still hides it: nothing of it was sent back.
+    const manifest = await manifestOf(b);
+    for (const entry of manifest) expect(entry.deleted, `${entry.kind} ${entry.key}`).toBe(true);
+    // Nor on the next sync.
+    const again = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
+    expect(again).toMatchObject({ pushed: 0, itemsPushed: 0, summariesPushed: 0, failures: [] });
+    expect(await libraryRows(b.harness)).toHaveLength(1);
   }, 60_000);
 
   // #893's review, B1: the device is canonical (ADR 0036 D-3), so a ride the
@@ -576,8 +609,9 @@ describe('two-way sync through the real instance (#776)', () => {
   }, 60_000);
   // #893's re-review, N1: the device that RECORDED and pushed a ride finds it
   // by the base, since the tombstone names no ride and the ride's own
-  // `originalFile` is not the hash of the FIT it exported.
-  it('deletes a ride another device deleted on the device that pushed it, with its write-up', async () => {
+  // `originalFile` is not the hash of the FIT it exported — and since #898 it
+  // KEEPS it, and sends none of it back.
+  it('keeps a ride another device deleted on the device that pushed it, with its write-up', async () => {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
     const origin = instanceTesting.TEST_ORIGIN;
     const a = await signedInDevice(world.url, origin, [
@@ -593,13 +627,37 @@ describe('two-way sync through the real instance (#776)', () => {
     await b.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
     expect(await b.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
 
-    expect(await a.sync()).toMatchObject({ deleted: 1, pushed: 0, failures: [] });
-    expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
-    expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, gone!))).toBe(
-      undefined,
+    expect(await a.sync()).toMatchObject({
+      hiddenOnInstance: 1,
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      failures: [],
+    });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id).sort()).toEqual(
+      [gone, kept].sort(),
     );
-    // …and it stays deleted: A does not push it back.
-    expect(await a.sync()).toMatchObject({ pushed: 0, pulled: 0, deleted: 0, failures: [] });
+    expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, gone!))).toEqual(
+      rideWriteUpFor(LOCAL_ATHLETE, gone!),
+    );
+    // …and it stays hidden on the instance: A pushes none of it back.
+    expect(await a.sync()).toMatchObject({ pushed: 0, pulled: 0, itemsPushed: 0, failures: [] });
+    const manifest = await manifestOf(a.on);
+    expect(
+      manifest.filter((entry) => !entry.deleted && entry.key === gone).map((entry) => entry.kind),
+    ).toEqual([]);
+    expect(
+      manifest
+        .filter((entry) => entry.kind === 'activity' && !entry.deleted)
+        .map((e) => e.activityId),
+    ).toEqual([kept]);
+    // Deleted HERE later, it is simply gone, and nothing is asked of the instance.
+    await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
+    expect(await a.sync()).toMatchObject({
+      hiddenOnInstance: 0,
+      deletedOnInstance: 0,
+      failures: [],
+    });
     expect(await libraryRows(a.on.harness)).toHaveLength(1);
   }, 60_000);
 
@@ -761,5 +819,164 @@ describe('two-way sync through the real instance (#776)', () => {
       (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
     ).toBe(true);
     expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+});
+
+describe('what a device will not take from an instance (#898)', () => {
+  /** A ride on A, pushed; B linked to A's athlete. */
+  async function twoDevices() {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    const record = await a.on.harness.read((store) =>
+      store.getActivityRecord(LOCAL_ATHLETE, a.ids[0]!),
+    );
+    return { a, b, record: record!.record };
+  }
+
+  const syncB = (
+    b: Awaited<ReturnType<typeof twoDevices>>['b'],
+    athleteKeys: SyncDependencies['athleteKeys'],
+  ) =>
+    b.on.harness.write((store) =>
+      syncWithInstance({ ...syncDependencies(b.on, store), athleteKeys }),
+    );
+
+  it('refuses a pulled record whose key is not one of the athlete’s, and writes nothing', async () => {
+    const { b } = await twoDevices();
+    // An instance that names only a stranger's key as the athlete's.
+    const report = await syncB(b, () =>
+      Promise.resolve([{ publicKey: 'a'.repeat(64), revokedAt: null }]),
+    );
+    expect(report.pulled).toBe(0);
+    expect(report.failures).toEqual([
+      expect.objectContaining({ kind: 'activity', reason: 'not-your-key' }),
+    ]);
+    expect(await libraryRows(b.on.harness)).toEqual([]);
+    // The control: the athlete's own list, and the same ride is pulled.
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+  }, 60_000);
+
+  it('refuses a record another rider signed, served as this athlete’s — a good signature is not enough', async () => {
+    const { b } = await twoDevices();
+    const stranger = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    try {
+      // A stranger's device, on its own instance, signs the SAME file.
+      const c = await signedInDevice(stranger.url, instanceTesting.TEST_ORIGIN, [
+        'nominal-outdoor-ride.fit',
+      ]);
+      expect(await c.sync()).toMatchObject({ pushed: 1, failures: [] });
+      const theirs = await c.on.harness.read((store) =>
+        store.getActivityRecord(LOCAL_ATHLETE, c.ids[0]!),
+      );
+      // The instance hands B the stranger's record: it verifies against the file.
+      const honest = b.on.transport.sync;
+      const lying: SyncTransport = {
+        ...honest,
+        json: async (method, path, body) => {
+          const answer = await honest.json(method, path, body);
+          if (!path.startsWith('/v1/sync/records/')) return answer;
+          return { ...answer, body: { ...(answer.body as object), record: theirs!.record } };
+        },
+      };
+      const report = await b.on.harness.write((store) =>
+        syncWithInstance({ ...syncDependencies(b.on, store), transport: lying }),
+      );
+      expect(report.failures).toEqual([
+        expect.objectContaining({ kind: 'activity', reason: 'not-your-key' }),
+      ]);
+      expect(await libraryRows(b.on.harness)).toEqual([]);
+    } finally {
+      await stranger.close();
+    }
+  }, 60_000);
+
+  it('takes a revoked key’s record only for a ride that started before the revocation', async () => {
+    const { b, record } = await twoDevices();
+    const startedAt = record.claims.startedAt;
+    const revokedAt = (at: number) => () =>
+      Promise.resolve([{ publicKey: record.publicKey, revokedAt: at }]);
+    const refused = await syncB(b, revokedAt(startedAt));
+    expect(refused.failures).toEqual([
+      expect.objectContaining({ kind: 'activity', reason: 'key-revoked' }),
+    ]);
+    expect(await libraryRows(b.on.harness)).toEqual([]);
+    expect(await syncB(b, revokedAt(startedAt + 1))).toMatchObject({ pulled: 1, failures: [] });
+  }, 60_000);
+
+  it('pulls nothing when the athlete’s keys cannot be read', async () => {
+    const { b } = await twoDevices();
+    const report = await syncB(b, () => Promise.reject(new Error('no answer')));
+    expect(report.failures).toEqual([
+      expect.objectContaining({ kind: 'activity', reason: 'keys-unavailable' }),
+    ]);
+    expect(await libraryRows(b.on.harness)).toEqual([]);
+  }, 60_000);
+});
+
+describe('a push whose answer was lost (#901)', () => {
+  it('is deleted on the instance, not pulled back, when the rider deletes the ride before the next sync', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const a = await signedInDevice(world.url, instanceTesting.TEST_ORIGIN, [
+      'nominal-outdoor-ride.fit',
+    ]);
+    const [id] = a.ids;
+    // The instance stores the ride; the answer never reaches the device.
+    const honest = a.on.transport.sync;
+    const losing: SyncTransport = {
+      ...honest,
+      json: async (method, path, body) => {
+        const answer = await honest.json(method, path, body);
+        if (method === 'POST' && path === '/v1/sync/records') {
+          expect(answer.status).toBe(200);
+          throw new Error('the connection dropped before the answer arrived');
+        }
+        return answer;
+      },
+    };
+    await expect(
+      a.on.harness.write((store) =>
+        syncWithInstance({ ...syncDependencies(a.on, store), transport: losing }),
+      ),
+    ).rejects.toThrow(/dropped/);
+    expect(
+      (await manifestOf(a.on)).filter((entry) => entry.kind === 'activity' && !entry.deleted),
+    ).toHaveLength(1);
+
+    await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, id!));
+    expect(await a.sync()).toMatchObject({ pulled: 0, deletedOnInstance: 1, failures: [] });
+    expect(await libraryRows(a.on.harness)).toEqual([]);
+    expect(
+      (await manifestOf(a.on)).filter((entry) => entry.kind === 'activity' && !entry.deleted),
+    ).toEqual([]);
+    // And the next sync leaves it so.
+    expect(await a.sync()).toMatchObject({ pulled: 0, failures: [] });
+    expect(await libraryRows(a.on.harness)).toEqual([]);
+  }, 60_000);
+
+  it('is pushed again, and settles, when the push did not arrive at all — the pending row does not mistake it for synced', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const a = await signedInDevice(world.url, instanceTesting.TEST_ORIGIN, [
+      'nominal-outdoor-ride.fit',
+    ]);
+    const honest = a.on.transport.sync;
+    const refusing: SyncTransport = {
+      ...honest,
+      json: (method, path, body) =>
+        method === 'POST' && path === '/v1/sync/records'
+          ? Promise.resolve({ status: 503, body: { error: { code: 'unavailable' } } })
+          : honest.json(method, path, body),
+    };
+    const first = await a.on.harness.write((store) =>
+      syncWithInstance({ ...syncDependencies(a.on, store), transport: refusing }),
+    );
+    expect(first).toMatchObject({
+      pushed: 0,
+      failures: [expect.objectContaining({ reason: 'unavailable' })],
+    });
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    expect(await libraryRows(a.on.harness)).toHaveLength(1);
   }, 60_000);
 });
