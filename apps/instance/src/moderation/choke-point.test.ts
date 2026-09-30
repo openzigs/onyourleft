@@ -366,3 +366,69 @@ describe('every path a blocked athlete could use is refused, as though nobody we
     );
   });
 });
+
+/**
+ * A suspended rider's way out (#898): the routes that admit their limited
+ * session are TWO, declared on the route table, and every other session route
+ * refuses it — walked from the table, so a route added later is walked too.
+ */
+const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount'];
+
+describe('a suspended rider’s way-out session reaches the export and the deletion, and nothing else (#898)', () => {
+  it('is declared by exactly the account export and deletion, and no other route', () => {
+    expect(
+      ROUTES.filter((route) => route.admitsSuspended === true)
+        .map((route) => route.operationId)
+        .sort(),
+    ).toEqual(ADMITS_SUSPENDED);
+    for (const route of ROUTES.filter((each) => each.admitsSuspended === true)) {
+      // Only on a signed-in route about the caller's own account.
+      expect(route.auth, route.operationId).toBe('session');
+      expect(route.reaches, route.operationId).toBe('own');
+    }
+  });
+
+  let world: ModerationWorld;
+  let token: string;
+  beforeAll(async () => {
+    world = await startModerationWorld();
+    const leaving = await world.rider('Leaving');
+    const suspended = await world.as(
+      world.owner,
+      'POST',
+      `/v1/moderation/athletes/${leaving.athleteId}/suspend`,
+      { reason: 'Cheating' },
+    );
+    expect(suspended.status).toBe(200);
+    const opened = await world.call('POST', '/v1/auth/leave-session', {
+      body: await leaving.device.statement(await world.nonceFor(leaving.device)),
+    });
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    token = (opened.body as { sessionToken: string }).sessionToken;
+  });
+  afterAll(() => world.close());
+
+  const refused = ROUTES.filter(
+    (route) => route.auth === 'session' && route.admitsSuspended !== true,
+  );
+
+  it('walks every other session route', () => {
+    expect(refused.length).toBeGreaterThan(10);
+  });
+
+  it.each(refused.map((route) => [route.operationId, route] as const))(
+    '%s answers the way-out session `account_suspended`',
+    async (_operation, route) => {
+      const answer = await world.call(route.method, route.path.replace(/\{[A-Za-z]+\}/g, 'x'), {
+        token,
+        ...(route.method === 'GET' ? {} : { body: {} }),
+      });
+      expect(answer.status).toBe(403);
+      expect(codeOf(answer.body)).toBe('account_suspended');
+    },
+  );
+
+  it('reaches the export — the control that shows the session works', async () => {
+    expect((await world.call('GET', '/v1/account/export', { token })).status).toBe(200);
+  });
+});

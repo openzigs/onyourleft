@@ -1779,3 +1779,31 @@ export function syncBaseProblem(row: {
   }
   return undefined;
 }
+
+// --- Trusted device keys (#898) -----------------------------------------------
+
+/**
+ * Why a trusted device key row is not one, or `undefined` — for the write and
+ * for a row read off disk alike, so a hand-edited row is refused on the way
+ * out as a bad one is on the way in. Names the field and the constraint only.
+ */
+export function trustedDeviceKeyProblem(row: {
+  readonly athleteId: unknown;
+  readonly publicKey: unknown;
+  readonly admittedAt: unknown;
+}): string | undefined {
+  if (typeof row.athleteId !== 'string' || row.athleteId.length === 0) {
+    return 'trustedDeviceKey.athleteId: must be an athlete id';
+  }
+  if (typeof row.publicKey !== 'string' || !LOWER_HEX_SHA256.test(row.publicKey)) {
+    return 'trustedDeviceKey.publicKey: must be a public key, 64 lowercase hex';
+  }
+  if (
+    typeof row.admittedAt !== 'number' ||
+    !Number.isSafeInteger(row.admittedAt) ||
+    row.admittedAt < 0
+  ) {
+    return 'trustedDeviceKey.admittedAt: must be whole Unix seconds';
+  }
+  return undefined;
+}

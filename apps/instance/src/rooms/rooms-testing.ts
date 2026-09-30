@@ -37,16 +37,28 @@ export function roomBody(
   };
 }
 
-/** A rider signed in on a new device: their session and their athlete id. */
+/** A rider signed in on a new device: their session, their athlete id and a recovery code. */
 export async function riderIn(
   world: IdentityInstance,
   device: Parameters<IdentityInstance['signIn']>[0],
-): Promise<{ readonly token: string; readonly athleteId: string }> {
+): Promise<{ readonly token: string; readonly athleteId: string; readonly recoveryCode: string }> {
   const session = await world.signIn(device);
   return {
     token: session.body.sessionToken as string,
     athleteId: session.body.athleteId as string,
+    recoveryCode: (session.body.recoveryCodes as string[])[0] as string,
   };
+}
+
+/** `DELETE /v1/account` as `rider`, with the step-up it needs (#898). */
+export function erasedAccount(
+  world: IdentityInstance,
+  rider: { readonly token: string; readonly recoveryCode: string },
+): ReturnType<IdentityInstance['call']> {
+  return world.call('DELETE', '/v1/account', {
+    token: rider.token,
+    body: { recoveryCode: rider.recoveryCode },
+  });
 }
 
 /** A room made through `POST /v1/rooms`, as `token`'s athlete. */

@@ -169,6 +169,22 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       ),
   },
   {
+    method: 'POST',
+    path: '/v1/auth/leave-session',
+    operationId: 'createLeaveSession',
+    reaches: 'own',
+    summary:
+      'A suspended rider’s way out (#898): sign with a live device key, as for signing in, and get a session that reaches only `GET /v1/account/export` and `DELETE /v1/account`, for an hour. Every other route answers it `account_suspended`. An account that is not suspended is `not_suspended`, and signs in as usual.',
+    identity: true,
+    request: object(STATEMENT_PROPERTIES),
+    errors: [...STATEMENT_ERRORS, 'unauthenticated', 'key_revoked', 'not_suspended'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ sessionToken: string, expiresAt: integer, athleteId: string }),
+    },
+    handle: async (context) => answer(await identityOf(context).openLeaveSession(context.json)),
+  },
+  {
     method: 'GET',
     path: '/v1/auth/session',
     operationId: 'getSession',

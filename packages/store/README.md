@@ -851,6 +851,22 @@ The sync base gains the three kinds. A note's base row is an item of its ride; a
 document's name **no** ride — their `activityId` is `null`, and `syncBaseProblem` refuses any other
 combination.
 
+## Trusted device keys — #898
+
+Schema version 17, additive: a new store, `trustedDeviceKeys`, and no existing record changes shape.
+Each row is the public key of one of the athlete's **other** devices that was admitted **on this
+device** — 64 lowercase hex, as a signed record carries it — and when (`records.ts`
+§`TrustedDeviceKeyRecord`). A sync takes a record pulled from an instance only when its key is this
+device's own or one of these (`apps/web/src/instance/sync.ts` §"Whose key it is"): the instance's
+own device list comes from the server that served the record, so it cannot be what vouches for it
+(#898, the owner's decision 4). Nothing writes a row because an instance listed a key.
+
+`putTrustedDeviceKey` keeps the first admission of a key; there is no delete but the athlete's
+(counted as `trustedDeviceKeys`), because revocation is the instance's list narrowing trust, not a
+row going. The primary key is `[athleteId+publicKey]`; `listTrustedDeviceKeys(owner)` reads by the
+athlete, and one rule, `trustedDeviceKeyProblem`, holds a row on the way in and out.
+`assertTrustedDeviceKeyRoundTrip` is red against `memoryWriteStoreFactory`.
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.

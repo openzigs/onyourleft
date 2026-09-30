@@ -27,6 +27,7 @@ import * as registration from './0008-registration.ts';
 import * as sync from './0009-sync.ts';
 import * as historyIndex from './0010-history-index.ts';
 import * as raceConsent from './0011-race-consent.ts';
+import * as sessionScope from './0012-session-scope.ts';
 import * as privateRooms from './0013-private-rooms.ts';
 
 /** A migration this repository accepts: both directions. */
@@ -47,5 +48,6 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0009-sync': sync,
   '0010-history-index': historyIndex,
   '0011-race-consent': raceConsent,
+  '0012-session-scope': sessionScope,
   '0013-private-rooms': privateRooms,
 };

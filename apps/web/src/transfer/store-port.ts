@@ -63,6 +63,14 @@ export interface AccountStore {
    * account export as the rider's own data (ADR 0040 D-10).
    */
   listRiderTexts(owner: AthleteId, kind: RiderTextKind): Promise<RiderTextRecord[]>;
+  /** The keys of the rider's texts of one kind, reading no row (#924). */
+  listRiderTextKeys(owner: AthleteId, kind: RiderTextKind): Promise<string[]>;
+  /** One of the rider's texts, read on its own, so one bad row costs only itself (#924). */
+  getRiderText(
+    owner: AthleteId,
+    kind: RiderTextKind,
+    key: string,
+  ): Promise<RiderTextRecord | undefined>;
   /**
    * Removes the athlete and everything of theirs. #35's deletion half.
    *

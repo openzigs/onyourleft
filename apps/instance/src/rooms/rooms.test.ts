@@ -21,7 +21,7 @@ import { helloText, reportText } from '../room/core/room-testing.ts';
 import { finalResults } from '../room/node/room-host.ts';
 import { sha256Hex } from '../blob/blob-store.ts';
 import { DEFAULT_ROOM_LIMITS, MAXIMUM_OPEN_ROOMS_PER_ATHLETE } from './rooms.ts';
-import { madeRoom, riderIn, ROOM_GPX, roomBody } from './rooms-testing.ts';
+import { erasedAccount, madeRoom, riderIn, ROOM_GPX, roomBody } from './rooms-testing.ts';
 import { normaliseRoomCode } from './code.ts';
 
 let world: IdentityInstance | undefined;
@@ -422,8 +422,8 @@ describe('a race’s result — #785', () => {
       { athleteId: bea.athleteId, watts: 290 },
       { athleteId: cat.athleteId, watts: 250 },
     ]);
-    const erased = await w.call('DELETE', '/v1/account', { token: bea.token });
-    expect(erased.status).toBeLessThan(300);
+    const erased = await erasedAccount(w, bea);
+    expect(erased.status).toBe(204);
     await w.freshRead(async (store) => {
       const left = await store.listRoomResults(room.roomId);
       expect(left.map((result) => result.athleteId).sort()).toEqual(

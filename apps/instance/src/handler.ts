@@ -36,7 +36,9 @@ import { ROUTES, type Route } from './routes.ts';
  *    (`unavailable` when this instance was given none), a signed-in session
  *    (`unauthenticated`, with `WWW-Authenticate: Bearer`) — one that is not
  *    awaiting approval unless the route `admitsPending` (#775,
- *    `registration_pending`) — and a JSON object body (`validation_failed`).
+ *    `registration_pending`), and not a suspended athlete's way-out session
+ *    unless the route `admitsSuspended` (#898, `account_suspended`) — and a
+ *    JSON object body (`validation_failed`).
  * 4. **Whom the route reaches** (#83) — THE choke point. A route that names
  *    another athlete in its path is called only when `moderation.ts`
  *    §`canSee` says the caller may see them; otherwise the answer is
@@ -144,9 +146,14 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
   return params;
 }
 
-/** The body as a JSON object, or `undefined` when it is not one. */
+/**
+ * The body as a JSON object, or `undefined` when it is not one. No body at all
+ * — none, or none of length — is the empty object: a `DELETE` sent with
+ * nothing is then told what the route wants (#898's step-up), not that
+ * nothing is not JSON.
+ */
 function jsonObject(body: Uint8Array | null): Record<string, unknown> | undefined {
-  if (body === null) return {};
+  if (body === null || body.byteLength === 0) return {};
   try {
     const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
@@ -278,6 +285,11 @@ export function createHandler(options: HandlerOptions): Handler {
       // else (#775): not other riders, not rooms, not reports.
       if (caller.standing === 'pending' && matched.admitsPending !== true) {
         return errorResponse('registration_pending');
+      }
+      // A suspended athlete's way-out session (#898) reaches the account
+      // export and deletion, and nothing else: not even their own profile.
+      if (caller.standing === 'suspended' && matched.admitsSuspended !== true) {
+        return errorResponse('account_suspended');
       }
     }
     if (!(await reachable(matched, params, caller))) return errorResponse('not_found');

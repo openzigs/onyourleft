@@ -2642,6 +2642,15 @@ p > label + input[type='file'] {
   overflow-wrap: anywhere;
 }
 
+/* "Remove this document?" and its two answers (#924), in the Remove's place:
+   one row that wraps on a narrow screen, never a sideways scroll. */
+.oyl-rider-text__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
 /*
  * The rider's goals, a ride's note and the documents list (#836,
  * `rider-text/`). The text area takes the width it is given up to a reading

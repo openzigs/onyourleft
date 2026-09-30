@@ -344,18 +344,52 @@
     "/v1/account": {
       "delete": {
         "operationId": "eraseAccount",
-        "summary": "Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure.",
+        "summary": "Remove your account from THIS instance: every row, and every original file no other rider also sent. It cannot reach a copy anyone already downloaded, or another instance. Safe to repeat after a failure. Needs a step-up beyond the session (#898): one of your recovery codes (checked, not spent), or an `oyl-erase-account-v1` statement signed just now by one of your own live device keys. The moderation log is kept.",
         "security": [
           {
             "session": []
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "recoveryCode": {
+                    "type": "string"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "description": "A signed `oyl-erase-account-v1` device statement: purpose, instanceOrigin, nonce (from `POST /v1/auth/challenge`), publicKey, issuedAt and signature."
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "No content"
           },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
           "401": {
-            "$ref": "#/components/responses/unauthenticated"
+            "description": "One of `unauthenticated`, `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `key_revoked`, `code_unknown`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/step_up_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -1391,6 +1425,114 @@
           },
           "405": {
             "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/leave-session": {
+      "post": {
+        "operationId": "createLeaveSession",
+        "summary": "A suspended rider’s way out (#898): sign with a live device key, as for signing in, and get a session that reaches only `GET /v1/account/export` and `DELETE /v1/account`, for an hour. Every other route answers it `account_suspended`. An account that is not suspended is `not_suspended`, and signs in as usual.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "instanceOrigin": {
+                    "type": "string"
+                  },
+                  "nonce": {
+                    "type": "string"
+                  },
+                  "publicKey": {
+                    "type": "string"
+                  },
+                  "issuedAt": {
+                    "type": "integer"
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "purpose",
+                  "instanceOrigin",
+                  "nonce",
+                  "publicKey",
+                  "issuedAt",
+                  "signature"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionToken": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    },
+                    "athleteId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sessionToken",
+                    "expiresAt",
+                    "athleteId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "description": "One of `unauthenticated`, `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `key_revoked`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/not_suspended"
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -4282,7 +4424,7 @@
     "/v1/sync/records": {
       "post": {
         "operationId": "ingestRecord",
-        "summary": "Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and stored only if every check passes. The same file sent again answers the first record.",
+        "summary": "Send a signed activity record with its original file (base64). Checked in order — the file’s type from its bytes, that it decodes, the record’s signature and content hash, that the key is yours — and, for a key since revoked, that the ride started before it was — and stored only if every check passes. The same file sent again answers the first record.",
         "security": [
           {
             "session": []
@@ -4363,7 +4505,7 @@
             "$ref": "#/components/responses/file_type_unsupported"
           },
           "422": {
-            "description": "One of `file_undecodable`, `record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`, `record_not_your_key`, in the one error shape.",
+            "description": "One of `file_undecodable`, `record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`, `record_not_your_key`, `record_key_revoked`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4569,6 +4711,7 @@
                   "code_expired",
                   "registration_closed",
                   "account_suspended",
+                  "step_up_required",
                   "registration_pending",
                   "registration_refused",
                   "not_eligible",
@@ -4578,6 +4721,7 @@
                   "last_device",
                   "moderation_not_applicable",
                   "address_in_use",
+                  "not_suspended",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -4586,6 +4730,7 @@
                   "record_signature_mismatch",
                   "record_content_mismatch",
                   "record_not_your_key",
+                  "record_key_revoked",
                   "rate_limited",
                   "internal",
                   "unavailable"
@@ -4768,6 +4913,16 @@
           }
         }
       },
+      "step_up_required": {
+        "description": "`step_up_required` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "registration_pending": {
         "description": "`registration_pending` (403), in the one error shape.",
         "content": {
@@ -4858,6 +5013,16 @@
           }
         }
       },
+      "not_suspended": {
+        "description": "`not_suspended` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
         "content": {
@@ -4930,6 +5095,16 @@
       },
       "record_not_your_key": {
         "description": "`record_not_your_key` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "record_key_revoked": {
+        "description": "`record_key_revoked` (422), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

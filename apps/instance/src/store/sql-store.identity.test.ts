@@ -167,6 +167,36 @@ describe('device keys (#772, #773)', () => {
     });
   });
 
+  it('checks a recovery code as its own athlete’s, unspent, and does not spend it (#898)', async () => {
+    const opened = await world();
+    const [codeOfB] = registrationFixture(ATHLETE_B).recoveryCodeSha256s as [string];
+    expect(await opened.read((store) => store.hasRecoveryCode(ATHLETE_B, codeOfB))).toBe(true);
+    // Another athlete's code is no step-up for this one.
+    expect(await opened.read((store) => store.hasRecoveryCode(ATHLETE_A, codeOfB))).toBe(false);
+    expect(await opened.read((store) => store.hasRecoveryCode(ATHLETE_B, 'f0'.repeat(32)))).toBe(
+      false,
+    );
+    const codes = await opened.read((store) => store.listRecoveryCodes(ATHLETE_B));
+    expect(codes.map((code) => code.usedAt)).toEqual([null]);
+    await opened.write((store) => store.takeRecoveryCode(codeOfB, 6));
+    expect(await opened.read((store) => store.hasRecoveryCode(ATHLETE_B, codeOfB))).toBe(false);
+  });
+
+  it('keeps what a session reaches, full unless it says leave (#898)', async () => {
+    const opened = await world();
+    const full = sessionFixture(ATHLETE_A);
+    expect((await opened.read((store) => store.findSession(full.tokenSha256)))?.scope).toBe('full');
+    const leave = {
+      ...sessionFixture(ATHLETE_A),
+      tokenSha256: 'e1'.repeat(32),
+      scope: 'leave' as const,
+    };
+    await opened.write((store) => store.putSession(leave));
+    expect((await opened.read((store) => store.findSession(leave.tokenSha256)))?.scope).toBe(
+      'leave',
+    );
+  });
+
   it('records when a key was last used, for its own athlete only', async () => {
     const opened = await world();
     const key = deviceKeyFixture(ATHLETE_B).publicKey;

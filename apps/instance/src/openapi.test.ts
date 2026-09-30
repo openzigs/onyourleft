@@ -268,6 +268,26 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       displayName: 'Anna',
     });
   },
+  createLeaveSession: async (world) => {
+    // A suspended rider's way out (#898).
+    const device = await testDevice();
+    const athleteId = (await world.signIn(device)).body.athleteId as string;
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${athleteId}/suspend`,
+      await moderatorToken(world),
+      { reason: 'Checked against the rules' },
+    );
+    world.clock.ms += 60_000;
+    return send(
+      world,
+      'POST',
+      '/v1/auth/leave-session',
+      undefined,
+      await device.statement(await world.nonceFor(device)),
+    );
+  },
   getSession: async (world) =>
     send(world, 'GET', '/v1/auth/session', (await signedIn(world)).token),
   deleteSession: async (world) =>
