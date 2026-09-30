@@ -489,6 +489,20 @@ export const REALISTIC_REMOTE_RIDERS = 2;
 export const REALISTIC_REMOTE_STYLISED_RIDERS = 24;
 
 /**
+ * What a room's remote riders may add to a realistic frame, in triangles —
+ * #783: **64 226**, all that the worst frame above leaves under
+ * {@link REALISTIC_FRAME_TRIANGLES} (the first two rows of
+ * {@link REALISTIC_REMOTE_STYLISED_RIDERS}' table). The rule spends 57 604 of
+ * it at most; the browser gate counts what a frame with a full room actually
+ * added with #616's counter and holds it here, and its control — every remote
+ * rider drawn — must not fit.
+ *
+ * @test-facing held by `realistic-budget.test.ts` §"#783" and
+ * `game.browser.spec.ts` §"#783"
+ */
+export const REALISTIC_REMOTE_TRIANGLES = 64_226;
+
+/**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
  * the all-on 252 024 #457 drew on the tablet. What it is held against is the
  * worst case the caps above allow — every near slot filled with the heaviest

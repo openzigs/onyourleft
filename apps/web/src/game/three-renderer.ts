@@ -11097,6 +11097,23 @@ export function realisticSilhouetteOf(view: GameView): RiderSilhouette | undefin
   return view instanceof ThreeGameView ? view.realisticSilhouette : undefined;
 }
 
+/** #783's browser-gate controls. @see remoteRiderControlOf */
+export type RemoteRiderControl = 'none' | 'each-own-mesh' | 'no-realistic-rule';
+
+/**
+ * #783's two controls, for the browser gate and nothing else: `'each-own-mesh'`
+ * draws every remote rider in a rider belt of its own — four draw calls each,
+ * which the stylised draw-call assertion must then catch — and
+ * `'no-realistic-rule'` hands a realistic frame's remote riders all to the
+ * stylised belt, which the triangle assertion must then catch.
+ *
+ * @test-facing called by `game-harness.ts`; nothing in the render path sets a
+ * control
+ */
+export function remoteRiderControlOf(view: GameView, control: RemoteRiderControl): void {
+  if (view instanceof ThreeGameView) view.setRemoteControl(control);
+}
+
 /**
  * Draws a view's realistic riders, or leaves them out while their shadows are
  * still cast — #626: the browser gate reads a shadow the rider would otherwise
@@ -11615,6 +11632,14 @@ class ThreeGameView implements GameView {
    */
   readonly #riders = new RiderBelt();
   /**
+   * #783's browser-gate controls, and nothing the product sets: every remote
+   * rider in a mesh of its own, or the realistic world's rule for them off.
+   * @see remoteRiderControlOf
+   */
+  #remoteControl: RemoteRiderControl = 'none';
+  /** The belts the `'each-own-mesh'` control draws remote riders in, one each. */
+  readonly #ownMeshes: RiderBelt[] = [];
+  /**
    * The kit the rider chose, as {@link riderKitFor} answered for it — #623.
    * Held here as well as on the belts because the realistic belt is built
    * later, when a world has loaded, and must be dressed then too.
@@ -11903,11 +11928,20 @@ class ThreeGameView implements GameView {
     );
     // #783: a realistic frame draws the nearest remote riders realistically,
     // the next few stylised, and no more. @see realisticRemoteSplit
-    const split = this.#drawing === 'realistic' ? realisticRemoteSplit(frame.markers) : undefined;
+    const realisticFrame = this.#drawing === 'realistic';
+    const split =
+      realisticFrame && this.#remoteControl !== 'no-realistic-rule'
+        ? realisticRemoteSplit(frame.markers)
+        : undefined;
     this.#realistic?.riders.place(split?.realistic ?? frame.markers);
     // #679: the gantries at the lines in reach, and none anywhere else.
     this.#realistic?.gantries.update(frame.lines);
-    this.#updateMarkers(split?.stylised ?? frame.markers);
+    this.#updateMarkers(
+      split?.stylised ??
+        (realisticFrame
+          ? frame.markers.filter((marker) => marker.kind === 'remote')
+          : frame.markers),
+    );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
   }
@@ -12424,6 +12458,7 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
+    for (const belt of this.#ownMeshes) belt.dispose();
     this.#contactShadows.dispose();
     this.#shadowCatcher.geometry.dispose();
     this.#shadowCatcher.material.dispose();
@@ -12602,10 +12637,32 @@ class ThreeGameView implements GameView {
   }
 
   #updateMarkers(markers: readonly RiderMarker[]): void {
+    if (this.#remoteControl === 'each-own-mesh') {
+      // #783's control: the shape a room would cost if each rider were a mesh.
+      const remote = markers.filter((marker) => marker.kind === 'remote');
+      this.#riders.place(markers.filter((marker) => marker.kind !== 'remote'));
+      while (this.#ownMeshes.length < remote.length) {
+        const belt = new RiderBelt();
+        belt.addTo(this.#scene);
+        this.#ownMeshes.push(belt);
+      }
+      this.#ownMeshes.forEach((belt, index) => {
+        const one = remote[index];
+        belt.place(one === undefined ? [] : [one]);
+      });
+      return;
+    }
+    for (const belt of this.#ownMeshes) belt.hide();
     // #368. One call for all three, and a frame that carries none draws none —
     // `RiderBelt.place` sets every mesh's count from what it was handed, so
-    // there is no "hide the ones that went" pass left to forget.
+    // there is no "hide the ones that went" pass left to forget. #783: and for
+    // a room's riders, as more instances of the same four meshes.
     this.#riders.place(markers);
+  }
+
+  /** @see remoteRiderControlOf */
+  setRemoteControl(control: RemoteRiderControl): void {
+    this.#remoteControl = control;
   }
 
   /**

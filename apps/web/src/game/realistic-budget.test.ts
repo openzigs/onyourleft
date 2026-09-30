@@ -52,6 +52,7 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_RIDER_SILHOUETTE_BYTES,
@@ -380,6 +381,17 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     ).toBeGreaterThan(REALISTIC_FRAME_TRIANGLES);
     // #681 stays blocked: this is two bodies, not a pack.
     expect(REALISTIC_REMOTE_RIDERS).toBeLessThanOrEqual(2);
+    // The browser gate's ceiling: inside what the worst frame leaves, and the
+    // rule's own worst inside it.
+    expect(
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        REALISTIC_REMOTE_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    expect(remote).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
   });
 
   it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {
