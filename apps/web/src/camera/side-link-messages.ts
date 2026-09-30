@@ -12,9 +12,13 @@
  * | `start`, `stop` (each numbered, each acknowledged) | `hello` — D-4's one-time secret, the first message and only then |
  * | `reference`, `verdict` — the framing numbers and the check's result (D-7) | `state` — framing, filming or stopped, and why |
  * | `ping` | `ack` of a numbered command, and `ping` |
+ * | `welcome` — the phone's secret was verified (#568) | |
  *
  * `ping` is the heartbeat `side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`
- * reads; it carries nothing.
+ * reads; it carries nothing. `welcome` carries nothing either: the tablet
+ * sends it only once the phone has proved itself, and the phone says nothing
+ * after its secret until it hears it (`side-link.ts` §"Why the phone says
+ * nothing more until it is welcomed", ADR 0033's 2026-09-30 amendment).
  *
  * ## ⚠️ Untrusted input, both ways (D-4)
  *
@@ -54,7 +58,8 @@ export type TabletMessage =
   | { readonly t: 'stop'; readonly n: number }
   | { readonly t: 'reference'; readonly reference: unknown }
   | { readonly t: 'verdict'; readonly verdict: unknown }
-  | { readonly t: 'ping' };
+  | { readonly t: 'ping' }
+  | { readonly t: 'welcome' };
 
 /** What the phone sends. */
 export type PhoneMessage =
@@ -125,6 +130,8 @@ export function tabletMessageFrom(data: unknown): TabletMessage | undefined {
         : undefined;
     case 'ping':
       return exactly(fields, ['t']) ? { t: 'ping' } : undefined;
+    case 'welcome':
+      return exactly(fields, ['t']) ? { t: 'welcome' } : undefined;
     default:
       return undefined;
   }
