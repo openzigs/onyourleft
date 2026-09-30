@@ -362,6 +362,18 @@ describe('a private race — #785', () => {
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(3);
     expect(reading('To go')).not.toBe(atTheLine);
+    // And the start is said, whatever the rider chose about announcements.
+    expect(document.querySelector('[data-oyl-announcer="hud"]')?.textContent).toBe('Go.');
+  });
+
+  it('shows no result for a race the rider leaves before the room says it is over', async () => {
+    const { instance, sockets } = await inARace();
+    await sockets.say({ type: 'frame', tick: 1, riders: [] });
+    await frame(3);
+    await press('End ride');
+    await settle();
+    expect(document.body.textContent).not.toContain('Race result');
+    expect(instance.seen.some((each) => each.path.endsWith('/results'))).toBe(false);
   });
 
   it('shows no ordered result while the race runs, and the room’s own after it — W/kg beside others, every flag to everyone', async () => {
