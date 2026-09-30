@@ -359,10 +359,8 @@ export function createRideAnalysis(options: RideAnalysisOptions): RideAnalysisPo
           historyNotice = HISTORY_NOTICE_TEXT.unreachable;
         }
       }
-      if (signal.aborted) {
-        return failed('cancelled');
-      }
-
+      // A cancel that landed while the instance was being asked is the
+      // runner's to honour: its first step refuses to start.
       const outcome = await runAnalysis(input, {
         port,
         clock,

@@ -325,6 +325,24 @@ describe('the ask, with the rider’s history (ADR 0040 D-8)', () => {
     expect(server.requests.map(stepOf).filter((step) => step === 'history_notes')).toHaveLength(2);
   });
 
+  it('sends nothing to the model when the rider cancels while the instance is being asked', async () => {
+    const id = await seededRide();
+    const cancel = new AbortController();
+    const source: HistorySource = {
+      retrieve: () => {
+        cancel.abort();
+        return Promise.resolve({ kind: 'unreachable' });
+      },
+    };
+    const outcome = await ask({ history: () => source }).askForRideWriteUp(
+      id,
+      'computer',
+      cancel.signal,
+    );
+    expect(outcome.kind).toBe('failed');
+    expect(server.requests).toStrictEqual([]);
+  });
+
   it('never asks for history on a hosted run, whose disclosures do not cover it yet (ADR 0040 D-9)', async () => {
     const id = await seededRide();
     const source = history(passagesOf('A note.'));
