@@ -1279,13 +1279,15 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
     expect(before).toBeGreaterThan(0);
     expect(writes.at(-1)?.grade).toBeGreaterThan(3);
     // The room puts the rider 1 100 m on — over the top and onto the 4 %
-    // descent — and says so on every frame for eight seconds.
+    // descent — in ONE frame: a two-second correction, and an 8 % change of
+    // grade the trainer is then walked through at the stated rate, most of it
+    // after the correction itself has finished.
     const along = (): number => drawn.at(-1)?.markers[0]?.z ?? 0;
-    const target = along() + 1_100;
-    for (let tick = 1; tick <= 16; tick += 1) {
-      room.frame(tick, [frameRider(0, target + tick * 5, 10)]);
-      await pumpWith(clock, 1);
-    }
+    room.frame(1, [frameRider(0, along() + 1_100, 10)]);
+    await pumpWith(clock, 16);
+    // …and on after the correction has finished, until the trainer is on the
+    // road again: a write that fell short of the road is owed, not forgotten.
+    await pumpWith(clock, 40);
     const during = writes.slice(before - 1);
     expect(during.length).toBeGreaterThan(3);
     for (let index = 1; index < during.length; index += 1) {
@@ -1293,8 +1295,6 @@ describe('a room’s correction reaches the trainer gently — #782', () => {
       const seconds = ((during[index]?.at ?? 0) - (during[index - 1]?.at ?? 0)) / 1000;
       expect(step).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
     }
-    // And it walks all the way to the descent the rider is now on, afterwards.
-    await pumpWith(clock, 40);
     expect(writes.at(-1)?.grade).toBeLessThan(-3);
   });
 });
