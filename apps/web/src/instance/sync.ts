@@ -112,9 +112,37 @@
  *    reading one ride from different files can build different summaries,
  *    and each pushing its own would change the instance's copy on every sync.
  *
- * Goals, notes and reference documents (#836) are carried by the instance
- * already; this module pushes them when #836 gives the device something to
- * push.
+ * 8. **The rider's goals, ride notes and documents** (#836, ADR 0040 D-1):
+ *    the rider's own text, kept on this device first (`packages/store`
+ *    §`RiderTextRecord`) and synced as items of the same three kinds, each a
+ *    JSON body — `{text}`, or `{name, text}` for a document — that the
+ *    instance cuts into passages for its history index. A note is an item of
+ *    its ride (visited with the ride's other items, deleted on the instance
+ *    with it); the goals and the documents belong to no ride, and their base
+ *    rows name none. Unlike a write-up, a rider can DELETE one, so both ways
+ *    of a deletion are carried, against the base:
+ *    - here, and not here now, and in the base: **the rider deleted it
+ *      here**, so it is deleted on the instance (and deleting a document
+ *      there takes its passages and vectors in the same transaction — #835)
+ *      — **unless another device changed it there since the base** (#924):
+ *      then the delete is not sent, and the newer text is pulled back, so a
+ *      delete never silently takes words typed elsewhere;
+ *    - tombstoned on the instance, and unchanged here since the base:
+ *      another device deleted it, so it is deleted here — rule 3's choice
+ *      for a ride, and the owner question on #893 is the same one;
+ *    - otherwise the three ways of rule 5: the same is remembered, a change
+ *      only there is pulled, a change here (or a copy the instance lacks) is
+ *      pushed — ⚠️ **and a change on BOTH sides keeps both** (#924, the
+ *      owner's ruling of 2026-09-30): changed here and changed there since the
+ *      base, or held on both sides with no base and different words, the
+ *      other device's version is first saved HERE as a new document, a
+ *      visible conflict copy the rider can merge ({@link conflictCopyName}),
+ *      and only then is this device's pushed. Typed text is never lost
+ *      silently: if the copy cannot be kept (the rider has 50 documents), the
+ *      push is not made either, and the sync reports `conflict-not-kept`.
+ *    A pulled text is written through the store's own validating write, so a
+ *    body that is not one (too long, a control character, a 51st document)
+ *    is not stored and is reported.
  */
 
 import {
@@ -136,8 +164,16 @@ import type {
   ActivityStore,
   AthleteId,
   RideWriteUpRecord,
+  RiderTextKind,
+  RiderTextRecord,
   SideCameraReportRecord,
   SyncBaseRecord,
+} from '@onyourleft/store';
+
+import {
+  GOALS_KEY,
+  MAXIMUM_DOCUMENT_NAME_CHARACTERS,
+  withoutBidiControls,
 } from '@onyourleft/store';
 
 import { exportActivity } from '../transfer/export-activity';
@@ -156,7 +192,7 @@ export interface SyncTransport {
   bytes(path: string): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
 }
 
-/** What sync needs of the local store: the transfer screen's port, and ten writes and reads. */
+/** What sync needs of the local store: the transfer screen's port, and fourteen writes and reads. */
 export type SyncStore = TransferStore &
   Pick<
     ActivityStore,
@@ -170,6 +206,10 @@ export type SyncStore = TransferStore &
     | 'listSyncBase'
     | 'deleteSyncBase'
     | 'setActivityMayBeRaced'
+    | 'getRiderText'
+    | 'putRiderText'
+    | 'listRiderTexts'
+    | 'deleteRiderText'
   >;
 
 export interface SyncDependencies {
@@ -201,6 +241,12 @@ export interface SyncDependencies {
    * same way on both routes.
    */
   readonly athleteKeys: () => Promise<readonly AthleteKey[]>;
+  /**
+   * A new document's id — `crypto.randomUUID`, bound — for a conflict copy
+   * (#924): the other device's version of a goal, note or document, kept
+   * beside this device's when both changed.
+   */
+  readonly newDocumentId: () => string;
 }
 
 /** One of the athlete's device keys, as {@link SyncDependencies.athleteKeys} gives it. */
@@ -273,6 +319,20 @@ export interface SyncReport {
   readonly consentsPushed: number;
   /** Rides whose consent was taken from the instance — set or revoked on another device. */
   readonly consentsPulled: number;
+  /** Goals, notes and documents pulled from the instance (#836). */
+  readonly textsPulled: number;
+  /** Goals, notes and documents pushed to the instance (#836). */
+  readonly textsPushed: number;
+  /** Goals, notes and documents deleted here, because another device deleted them (#836). */
+  readonly textsDeleted: number;
+  /** Goals, notes and documents deleted on the instance, because the rider deleted them here. */
+  readonly textsDeletedOnInstance: number;
+  /**
+   * Goals, notes and documents changed on this device AND on another (#924):
+   * this device's pushed, the other's kept here as a new document to merge.
+   * Counted in {@link SyncReport.textsPushed} as well.
+   */
+  readonly textConflicts: number;
   readonly failures: readonly SyncFailure[];
 }
 
@@ -357,6 +417,11 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   const athleteKeys = (): Promise<readonly AthleteKey[]> => (keys ??= dependencies.athleteKeys());
   let consentsPushed = 0;
   let consentsPulled = 0;
+  let textsPulled = 0;
+  let textsPushed = 0;
+  let textsDeleted = 0;
+  let textsDeletedOnInstance = 0;
+  let textConflicts = 0;
 
   const manifest = await readManifest(transport);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
@@ -380,7 +445,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   const forgetRide = async (content: string, activity: string): Promise<void> => {
     for (const [kind, key] of [
       ['activity', content],
-      ...ITEM_KINDS.map((each) => [each, activity] as const),
+      ...[...ITEM_KINDS, 'note' as const].map((each) => [each, activity] as const),
       ['race-consent', activity],
     ] as const) {
       if (base.delete(keyOf(kind, key))) await store.deleteSyncBase(athleteId, kind, key);
@@ -412,10 +477,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       // Synced before, and not on this device now: the rider deleted it HERE.
       // Delete it there — its items first, so a failure part way leaves the
       // ride for the next sync to finish rather than orphaned items.
-      const outcome = await deleteRideOnInstance(transport, entry.key, known.activityId);
+      const outcome = await deleteRideOnInstance(transport, entry.key, rideOf(known));
       if (outcome === 'deleted') {
         deletedOnInstance += 1;
-        await forgetRide(entry.key, known.activityId);
+        await forgetRide(entry.key, rideOf(known));
       } else {
         failures.push({ kind: 'activity', key: entry.key, reason: outcome });
       }
@@ -458,7 +523,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       hidden.add(ride.id);
       hiddenOnInstance += 1;
     } else if (known !== undefined) {
-      await forgetRide(entry.key, known.activityId);
+      await forgetRide(entry.key, rideOf(known));
     }
   }
 
@@ -661,10 +726,32 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
   }
 
+  // --- The rider's goals, ride notes and documents (#836) --------------------
+  const textKeys: [RiderTextKind, string][] = [['goal', GOALS_KEY]];
+  // A hidden ride's note would put it back on the instance (#898).
+  for (const id of rides) if (!hidden.has(id)) textKeys.push(['note', id]);
+  const documentKeys = new Set<string>([
+    ...(await store.listRiderTexts(athleteId, 'document')).map((row) => row.key),
+    ...manifest.filter((entry) => entry.kind === 'document').map((entry) => entry.key),
+    ...[...base.values()].filter((row) => row.kind === 'document').map((row) => row.key),
+  ]);
+  for (const key of [...documentKeys].sort()) textKeys.push(['document', key]);
+  for (const [kind, key] of textKeys) {
+    const outcome = await syncRiderText(kind, key);
+    if (outcome === 'pulled') textsPulled += 1;
+    else if (outcome === 'pushed') textsPushed += 1;
+    else if (outcome === 'deleted') textsDeleted += 1;
+    else if (outcome === 'deleted-on-instance') textsDeletedOnInstance += 1;
+    else if (outcome === 'kept-both') {
+      textsPushed += 1;
+      textConflicts += 1;
+    } else if (outcome !== 'same') failures.push({ kind, key, reason: outcome });
+  }
+
   // --- The base forgets what neither side holds any more ---------------------
   for (const row of [...base.values()]) {
     if (row.kind !== 'activity' || remote.has(keyOf('activity', row.key))) continue;
-    if (!onDevice.has(row.activityId)) await forgetRide(row.key, row.activityId);
+    if (!onDevice.has(rideOf(row))) await forgetRide(row.key, rideOf(row));
   }
 
   return {
@@ -677,8 +764,171 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     deletedOnInstance,
     consentsPushed,
     consentsPulled,
+    textsPulled,
+    textsPushed,
+    textsDeleted,
+    textsDeletedOnInstance,
+    textConflicts,
     failures,
   };
+
+  /**
+   * One goal, note or document, both ways — rule 8. Answers what happened,
+   * or why not (an instance error code, or `not-stored`).
+   */
+  async function syncRiderText(kind: RiderTextKind, key: string): Promise<string> {
+    const entry = remote.get(keyOf(kind, key));
+    const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+    const known = base.get(keyOf(kind, key));
+    const activityId = kind === 'note' ? (key as ActivityId) : null;
+    const forget = async (): Promise<void> => {
+      if (base.delete(keyOf(kind, key))) await store.deleteSyncBase(athleteId, kind, key);
+    };
+    const local = await store.getRiderText(athleteId, kind, key);
+    if (local === undefined) {
+      if (remoteDigest === null) {
+        await forget();
+        return 'same';
+      }
+      if (known !== undefined) {
+        // Synced before, and not here now: the rider deleted it HERE — over
+        // the copy the base knows. Another device changed it there since, so
+        // the delete would take words the rider never saw: pull them instead
+        // (#924).
+        if (remoteDigest !== known.remoteDigest) {
+          return pullText(kind, key, remoteDigest, activityId);
+        }
+        const answer = await transport.json(
+          'DELETE',
+          `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
+        );
+        if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
+          return codeOf(answer.body);
+        }
+        await forget();
+        return 'deleted-on-instance';
+      }
+      return pullText(kind, key, remoteDigest, activityId);
+    }
+    const body = riderTextBody(local);
+    const localDigest = await hex(utf8(body), sha256);
+    if (remoteDigest === localDigest) {
+      await remember({ kind, key, activityId, localDigest, remoteDigest });
+      return 'same';
+    }
+    const unchangedHere = known !== undefined && known.localDigest === localDigest;
+    if (unchangedHere && remoteDigest === null && entry?.deleted === true) {
+      // Unchanged here since the last sync, and deleted on another device.
+      await store.deleteRiderText(athleteId, kind, key);
+      await forget();
+      return 'deleted';
+    }
+    if (unchangedHere && remoteDigest !== null) {
+      if (remoteDigest === known.remoteDigest) return 'same';
+      return pullText(kind, key, remoteDigest, activityId);
+    }
+    // Changed here and ALSO changed there since the base — or on both sides
+    // with no base to tell: keep the other device's version as a conflict
+    // copy before this device's goes over it (#924).
+    const changedThere =
+      remoteDigest !== null && (known === undefined || remoteDigest !== known.remoteDigest);
+    let keptBoth = false;
+    if (changedThere) {
+      const copied = await keepConflictCopy(kind, key, local);
+      if (copied !== 'kept') return copied;
+      keptBoth = true;
+    }
+    // Changed here, never synced, or gone from the instance: this device's
+    // copy is canonical (ADR 0036 D-3).
+    const answer = await transport.json(
+      'POST',
+      `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
+      { body },
+    );
+    if (answer.status !== 200) return codeOf(answer.body);
+    await remember({ kind, key, activityId, localDigest, remoteDigest: localDigest });
+    return keptBoth ? 'kept-both' : 'pushed';
+  }
+
+  /**
+   * The instance's copy of a goal, note or document, saved HERE as a new
+   * document the rider can see and merge (#924), before this device's copy
+   * replaces it there. Answers `kept`, an instance error code, or
+   * `conflict-not-kept` when the store refuses it — the 51st document, say —
+   * in which case nothing is pushed over the other device's words.
+   */
+  async function keepConflictCopy(
+    kind: RiderTextKind,
+    key: string,
+    local: RiderTextRecord,
+  ): Promise<string> {
+    const answer = await transport.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
+    if (answer.status !== 200) return codeOf(answer.body);
+    try {
+      const body = JSON.parse((answer.body as { body: string }).body) as {
+        text?: unknown;
+        name?: unknown;
+      };
+      if (typeof body.text !== 'string') return 'conflict-not-kept';
+      const ride =
+        kind === 'note' ? await store.getActivity(athleteId, key as ActivityId) : undefined;
+      const copyKey = dependencies.newDocumentId();
+      await store.putRiderText({
+        athleteId,
+        kind: 'document',
+        key: copyKey,
+        name: conflictCopyName(
+          kind,
+          kind === 'document'
+            ? typeof body.name === 'string'
+              ? body.name
+              : (local.name ?? '')
+            : (ride?.name ?? ''),
+        ),
+        text: body.text,
+        savedAt: dependencies.now(),
+      });
+      // Sent in this sync, as any new document is, so the rider's other
+      // devices see it too.
+      textKeys.push(['document', copyKey]);
+    } catch {
+      return 'conflict-not-kept';
+    }
+    return 'kept';
+  }
+
+  /** One goal, note or document from the instance, through the store's own validating write. */
+  async function pullText(
+    kind: RiderTextKind,
+    key: string,
+    remoteDigest: string,
+    activityId: ActivityId | null,
+  ): Promise<string> {
+    const answer = await transport.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
+    if (answer.status !== 200) return codeOf(answer.body);
+    let kept: RiderTextRecord;
+    try {
+      const body = JSON.parse((answer.body as { body: string }).body) as {
+        text?: unknown;
+        name?: unknown;
+      };
+      if (typeof body.text !== 'string') return 'not-stored';
+      if (kind === 'document' && typeof body.name !== 'string') return 'not-stored';
+      kept = await store.putRiderText({
+        athleteId,
+        kind,
+        key,
+        ...(kind === 'document' ? { name: body.name as string } : {}),
+        text: body.text,
+        savedAt: dependencies.now(),
+      });
+    } catch {
+      return 'not-stored';
+    }
+    const localDigest = await hex(utf8(riderTextBody(kept)), sha256);
+    await remember({ kind, key, activityId, localDigest, remoteDigest });
+    return 'pulled';
+  }
 
   /** The base for an item just pulled: the copy as this device now reads it. */
   async function rememberItem(kind: ItemKind, id: ActivityId, remoteDigest: string): Promise<void> {
@@ -689,6 +939,47 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   }
 }
 
+/**
+ * A goal, note or document as the instance keeps it (#836): `{text}`, or
+ * `{name, text}` for a document — a JSON body, whose `text` the instance cuts
+ * into passages (`apps/instance/src/history/passages.ts`). Never the athlete
+ * id and never when it was saved, so two devices holding the same words send
+ * the same bytes.
+ */
+function riderTextBody(record: RiderTextRecord): string {
+  return JSON.stringify(
+    record.kind === 'document' ? { name: record.name, text: record.text } : { text: record.text },
+  );
+}
+
+/**
+ * The name of a conflict copy (#924): what it is a copy of, and that it came
+ * from another device — the rider's cue to merge it and remove it. Kept on
+ * one line, without a bidirectional control (#920's review), and within a
+ * document name's length.
+ */
+export function conflictCopyName(kind: RiderTextKind, of: string): string {
+  const suffix = ' (from another device)';
+  const cleaned = withoutBidiControls(of)
+    // eslint-disable-next-line no-control-regex -- a control character is what is removed
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/gu, ' ')
+    .trim();
+  const what =
+    kind === 'goal'
+      ? 'Goals'
+      : kind === 'note'
+        ? cleaned === ''
+          ? 'Ride note'
+          : `Ride note on ${cleaned}`
+        : cleaned === ''
+          ? 'Document'
+          : cleaned;
+  return `${what.slice(0, MAXIMUM_DOCUMENT_NAME_CHARACTERS - suffix.length).trim()}${suffix}`;
+}
+
+/** The ride a ride's base row names — every base row but a goal's or a document's names one. */
+const rideOf = (row: SyncBaseRecord): string => row.activityId ?? '';
+
 /** The two item kinds, in the order a sync visits them. */
 const ITEM_KINDS: readonly ItemKind[] = ['write-up', 'side-camera-report'];
 
@@ -696,8 +987,8 @@ const ITEM_KINDS: readonly ItemKind[] = ['write-up', 'side-camera-report'];
 const SUMMARY_KIND = 'ride-summary';
 
 /**
- * Delete a ride on the instance: its write-up, side-camera report and summary
- * (#835), then the ride (whose file the instance collects unless another rider sent the same
+ * Delete a ride on the instance: its write-up, side-camera report, summary
+ * (#835) and note (#836), then the ride (whose file the instance collects unless another rider sent the same
  * bytes). `not_found` is success — somebody got there first. Answers `deleted`
  * or the instance's error code.
  */
@@ -707,7 +998,7 @@ async function deleteRideOnInstance(
   activity: string,
 ): Promise<string> {
   for (const [kind, key] of [
-    ...[...ITEM_KINDS, SUMMARY_KIND].map((each) => [each, activity] as const),
+    ...[...ITEM_KINDS, SUMMARY_KIND, 'note'].map((each) => [each, activity] as const),
     ['activity', content] as const,
   ]) {
     const answer = await transport.json(
