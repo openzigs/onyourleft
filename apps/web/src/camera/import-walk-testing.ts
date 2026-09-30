@@ -40,8 +40,6 @@ import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 
-import { stripComments } from '../units/no-inline-units';
-
 /** `apps/web/src`, on disk. */
 export const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -142,7 +140,10 @@ export function importWalk(read: ReadSource = readFromDisk): {
     }
     const local: string[] = [];
     const bare: string[] = [];
-    for (const specifier of specifiersIn(stripComments(source), path)) {
+    // The parser skips comments itself. A `stripComments` pre-pass used to go
+    // first, and its quote tracker does not know a regex literal: `/[/*]/`
+    // opened a "comment" that swallowed the imports after it (#864).
+    for (const specifier of specifiersIn(source, path)) {
       if (!specifier.startsWith('.')) {
         bare.push(specifier);
         continue;

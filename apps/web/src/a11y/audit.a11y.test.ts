@@ -728,6 +728,28 @@ describe('landmarks-are-distinguishable reads a declared role as well as a tag �
     ).not.toContain('landmarks-are-distinguishable');
   });
 
+  it('fires on an unnamed nav beside an unnamed navigation role — #864', () => {
+    // An unnamed `nav` is a navigation landmark (HTML-AAM), unlike an unnamed
+    // `section`, so the declared role is the second of two with no name.
+    const body = CLEAN_BODY.replace('<nav aria-label="Primary">', '<nav>');
+    expect(rulesFiredBy(`${body}<div role="navigation"><a href="#/">Ride</a></div>`)).toContain(
+      'landmarks-are-distinguishable',
+    );
+  });
+
+  it('fires on an unnamed aside beside an unnamed complementary role — #864', () => {
+    expect(
+      rulesFiredBy(`${CLEAN_BODY}<aside><p>x</p></aside><div role="complementary"><p>y</p></div>`),
+    ).toContain('landmarks-are-distinguishable');
+  });
+
+  it('accepts one unnamed nav beside one NAMED navigation role — #864', () => {
+    const body = CLEAN_BODY.replace('<nav aria-label="Primary">', '<nav>');
+    expect(
+      rulesFiredBy(`${body}<div role="navigation" aria-label="Pages"><a href="#/">Ride</a></div>`),
+    ).toEqual([]);
+  });
+
   it('fires on two navigation roles named alike, whatever their tags', () => {
     expect(
       rulesFiredBy(
