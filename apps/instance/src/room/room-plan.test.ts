@@ -27,6 +27,7 @@ const COURSE: RoomCourse = {
   capacity: 80,
   countdownMs: null,
   rejoinWindowMs: 5_000,
+  raceStartedAt: null,
 };
 
 describe('a stored room, as the room core’s settings — #780', () => {

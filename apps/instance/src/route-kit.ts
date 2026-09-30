@@ -6,6 +6,7 @@
  * `auth/routes.ts` can both use it without importing each other.
  */
 
+import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
@@ -29,6 +30,19 @@ export type Schema =
 export interface ClientInfo {
   /** The peer's address, for rate limits only — never logged. `null` when unknown. */
   readonly address: string | null;
+}
+
+/**
+ * What a running instance can say about itself and its rooms (#780, #791),
+ * handed to the handler by `instance.ts`. Absent — a test's handler, or a
+ * mount with no rooms — `/ready` is not ready and `/metrics` is not served.
+ */
+export interface InstanceProbes {
+  ready(): Promise<Readiness>;
+  /** The metrics document, when the operator turned it on (`OYL_INSTANCE_METRICS`). */
+  readonly metrics?: () => Promise<string>;
+  /** Start a race's countdown, for an athlete seated in it. */
+  readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
 }
 
 /** What a route is handed. */
@@ -57,6 +71,7 @@ export interface RouteContext {
   readonly identity: Identity | undefined;
   /** The signed-in caller, for a route that declares `auth: 'session'`. */
   readonly caller: Caller | undefined;
+  readonly probes: InstanceProbes | undefined;
 }
 
 export interface Route {

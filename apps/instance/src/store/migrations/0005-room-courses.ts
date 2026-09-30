@@ -12,6 +12,11 @@
  * operator may set per room. Absent, the room cannot be opened, and a socket
  * for it is refused before it upgrades.
  *
+ * `race_started_at` (Unix seconds) is set once a race leaves its lobby. From
+ * then the room is never opened as a lobby again — not when it finishes, and
+ * not when the instance restarts in the middle of it: an interrupted race
+ * does not resume (#807), and a rider rejoining it is told it is closed.
+ *
  * A course belongs to a room, not to an athlete, so erasing an athlete leaves
  * it (the erasure test finds athlete-scoped tables by their foreign keys, and
  * this has none to `athlete`). #784 and #785, which let a rider create a
@@ -32,6 +37,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('capacity', 'integer')
     .addColumn('countdown_ms', 'integer')
     .addColumn('rejoin_window_ms', 'integer')
+    .addColumn('race_started_at', 'integer')
     .modifyEnd(sql`strict`)
     .execute();
 }

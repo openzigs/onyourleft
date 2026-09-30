@@ -104,6 +104,8 @@ export interface RoomCourse {
   readonly capacity: number | null;
   readonly countdownMs: number | null;
   readonly rejoinWindowMs: number | null;
+  /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
+  readonly raceStartedAt: number | null;
 }
 
 export interface Result {
@@ -252,6 +254,8 @@ export interface SqlStore {
   /** A room's course. A room is nobody's, so this is not athlete-scoped. */
   putRoomCourse(course: RoomCourse): Promise<void>;
   getRoomCourse(roomId: string): Promise<RoomCourse | undefined>;
+  /** A race left its lobby at `at` (Unix seconds). The first time is kept. */
+  markRaceStarted(roomId: string, at: number): Promise<void>;
 
   putResult(result: Result): Promise<void>;
   listResults(athleteId: string): Promise<readonly Result[]>;
@@ -372,6 +376,7 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   capacity: row.capacity,
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
+  raceStartedAt: row.race_started_at,
 });
 
 const resultFrom = (row: Selectable<ResultTable>): Result => ({
@@ -937,7 +942,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         };
         await db
           .insertInto('room_course')
-          .values({ room_id: course.roomId, ...row })
+          .values({ room_id: course.roomId, race_started_at: course.raceStartedAt, ...row })
           .onConflict((conflict) => conflict.column('room_id').doUpdateSet(row))
           .execute();
       }),
@@ -950,6 +955,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('room_id', '=', roomId)
           .executeTakeFirst();
         return row === undefined ? undefined : roomCourseFrom(row);
+      }),
+
+    markRaceStarted: (roomId, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('room_course')
+          .set({ race_started_at: at })
+          .where('room_id', '=', roomId)
+          .where('race_started_at', 'is', null)
+          .execute();
       }),
 
     putResult: (result) =>

@@ -89,6 +89,8 @@ export interface RoomCourseTable {
   readonly capacity: number | null;
   readonly countdown_ms: number | null;
   readonly rejoin_window_ms: number | null;
+  /** Unix seconds: when this race left its lobby. It is never a lobby again. */
+  readonly race_started_at: number | null;
 }
 
 /** One athlete's result in one room. */

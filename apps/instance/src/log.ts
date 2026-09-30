@@ -22,10 +22,85 @@
  *
  * `log.test.ts` sends a request carrying a token, a coordinate and a body
  * through the real listener and reads every line written.
+ *
+ * ## One function every line goes through — {@link redacted} (#791)
+ *
+ * Every logger here writes through {@link writeRecord}, and that through
+ * {@link redacted}: a record keeps a key only if it is on
+ * {@link LOGGABLE_KEYS}, and a value only if it is a number, a boolean, `null`
+ * or a short string — every other key's value is replaced whole. An
+ * allowlist, not a denylist, because the thing to keep out is whatever
+ * somebody passes in next week under a name nobody thought to ban: a session
+ * token, a signature, a latitude, a display name. `log.test.ts` logs one of
+ * each and reads the line.
  */
 
 /** Where lines go. `main.ts` writes them to standard output; a test keeps them. */
 export type LogSink = (line: string) => void;
+
+/**
+ * The keys a log line may carry a value under: what happened, to what route,
+ * how it ended, and the instance's own facts about itself. Nothing here is
+ * about a rider.
+ */
+export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
+  'event',
+  'method',
+  'route',
+  'status',
+  'ms',
+  'error',
+  'url',
+  'version',
+  'commit',
+  'signal',
+  'worker',
+  'workers',
+  'code',
+  'roomsLost',
+  'migrations',
+  'command',
+  'database',
+  'rooms',
+  'compression',
+  'metrics',
+  'registration',
+  'identity',
+  'state',
+]);
+
+/** A logged string longer than this is cut: a token or a signature is longer. */
+const MAXIMUM_LOGGED_STRING = 120;
+
+/** What stands in for a value that may not be logged. */
+export const REDACTED = '[redacted]';
+
+function loggable(value: unknown): unknown {
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : REDACTED;
+  if (typeof value === 'string') {
+    return value.length <= MAXIMUM_LOGGED_STRING ? value : REDACTED;
+  }
+  return REDACTED;
+}
+
+/**
+ * The one function every log line goes through: only {@link LOGGABLE_KEYS},
+ * and only plain, short values under them. Anything else — a key not on the
+ * list, an object, an array — is {@link REDACTED}, whatever it held.
+ */
+export function redacted(record: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    kept[key] = LOGGABLE_KEYS.has(key) ? loggable(value) : REDACTED;
+  }
+  return kept;
+}
+
+/** Writes one record as one line, through {@link redacted}. */
+export function writeRecord(sink: LogSink, record: Readonly<Record<string, unknown>>): void {
+  sink(JSON.stringify(redacted(record)));
+}
 
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 
@@ -44,25 +119,23 @@ export function logRequest(
     readonly ms: number;
   },
 ): void {
-  sink(
-    JSON.stringify({
-      event: 'request',
-      method: loggedMethod(entry.method),
-      route: entry.route,
-      status: entry.status,
-      ms: Math.round(entry.ms),
-    }),
-  );
+  writeRecord(sink, {
+    event: 'request',
+    method: loggedMethod(entry.method),
+    route: entry.route,
+    status: entry.status,
+    ms: Math.round(entry.ms),
+  });
 }
 
 /** An exception a route did not handle, logged by the error's name alone. */
 export function logUnhandled(sink: LogSink, route: string | null, error: unknown): void {
   const name =
     error instanceof Error && /^[A-Za-z]{1,64}$/.test(error.name) ? error.name : 'unknown';
-  sink(JSON.stringify({ event: 'unhandled', route, error: name }));
+  writeRecord(sink, { event: 'unhandled', route, error: name });
 }
 
 /** Something the instance itself did — started, stopped — with no request in it. */
 export function logEvent(sink: LogSink, event: string, detail: Record<string, unknown> = {}): void {
-  sink(JSON.stringify({ event, ...detail }));
+  writeRecord(sink, { event, ...detail });
 }

@@ -27,6 +27,7 @@ import {
 import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import type { InstanceProbes } from '../route-kit.ts';
 import { createIdentity, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
@@ -126,6 +127,8 @@ export async function startIdentityInstance(
      * one process do not reliably produce.
      */
     storeSeenBy?: (store: SqlStore) => SqlStore;
+    /** What `/ready`, `/metrics` and a room's start answer (#780). */
+    probes?: InstanceProbes;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -133,7 +136,7 @@ export async function startIdentityInstance(
   const store = await openSqlStore(path);
   const clock: TestClock = { ms: 1_790_000_000_000 };
   const mail: { address: string; token: string }[] = [];
-  const { emailRecovery, storeSeenBy, ...rest } = options;
+  const { emailRecovery, storeSeenBy, probes, ...rest } = options;
   const identity = createIdentity({
     ...rest,
     store: storeSeenBy === undefined ? store : storeSeenBy(store),
@@ -150,7 +153,11 @@ export async function startIdentityInstance(
         }
       : {}),
   });
-  const instance = await startTestInstance({ identity, config: { bodyLimitBytes: 16_384 } });
+  const instance = await startTestInstance({
+    identity,
+    config: { bodyLimitBytes: 16_384 },
+    ...(probes === undefined ? {} : { probes }),
+  });
 
   const call: IdentityInstance['call'] = async (method, route, callOptions = {}) => {
     const headers: Record<string, string> = { ...callOptions.headers };

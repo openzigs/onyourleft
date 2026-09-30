@@ -1,51 +1,85 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 
 import manifest from '../package.json' with { type: 'json' };
 import { readConfig } from './config.ts';
-import { createHandler } from './handler.ts';
+import { InstanceRefusal, startInstance } from './instance.ts';
 import { logEvent, type LogSink } from './log.ts';
-import { listen } from './node-listener.ts';
+import { readServerConfig } from './server-config.ts';
 
 /**
  * What `main.ts` starts, once the resolve hook is registered (#767, #780).
  *
- * Every variable is read HERE, by name, and nowhere else — see `config.ts` for
- * why, and `.env.example` for what each one means.
+ * Every variable is read HERE, by name, and nowhere else — see `config.ts` and
+ * `server-config.ts` for why, and `.env.example` for what each one means.
  */
 
 const log: LogSink = (line) => {
   process.stdout.write(`${line}\n`);
 };
 
-const result = readConfig({
+const http = readConfig({
   host: process.env.OYL_INSTANCE_HOST,
   port: process.env.OYL_INSTANCE_PORT,
   commit: process.env.OYL_INSTANCE_COMMIT,
   sourceUrl: process.env.OYL_INSTANCE_SOURCE_URL,
 });
+const server = readServerConfig(
+  {
+    database: process.env.OYL_INSTANCE_DATABASE,
+    blobs: process.env.OYL_INSTANCE_BLOBS,
+    origin: process.env.OYL_INSTANCE_ORIGIN,
+    registration: process.env.OYL_INSTANCE_REGISTRATION,
+    roomWorkers: process.env.OYL_INSTANCE_ROOM_WORKERS,
+    compression: process.env.OYL_INSTANCE_WS_COMPRESSION,
+    metrics: process.env.OYL_INSTANCE_METRICS,
+  },
+  availableParallelism(),
+);
 
-if (!result.ok) {
-  for (const problem of result.problems) process.stderr.write(`instance: ${problem}\n`);
+const problems = [...(http.ok ? [] : http.problems), ...(server.ok ? [] : server.problems)];
+if (!http.ok || !server.ok) {
+  for (const problem of problems) process.stderr.write(`instance: ${problem}\n`);
   process.exit(1);
 }
 
-const { config } = result;
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');
-const handler = createHandler({ config, version: manifest.version, notices, log });
-const listening = await listen(handler, { host: config.host, port: config.port });
+
+let instance;
+try {
+  instance = await startInstance({
+    config: http.config,
+    server: server.config,
+    version: manifest.version,
+    notices,
+    log,
+  });
+} catch (error) {
+  if (error instanceof InstanceRefusal) {
+    process.stderr.write(`instance: ${error.message}\n`);
+    process.exit(1);
+  }
+  throw error;
+}
+const running = instance;
+
 logEvent(log, 'listening', {
-  url: listening.url,
+  url: running.url,
   version: manifest.version,
-  commit: config.commit,
+  commit: http.config.commit,
 });
 
-// Docker stops a container with SIGTERM and waits; an instance that ignores it
-// is killed ten seconds later with whatever it had in flight.
+// Docker stops a container with SIGTERM and waits ten seconds before it kills
+// it: rooms are told the server is stopping, results already final are
+// written, and the store is closed well inside that.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     logEvent(log, 'stopping', { signal });
-    void listening.close().then(() => process.exit(0));
+    void running.stop().then(
+      () => process.exit(0),
+      () => process.exit(1),
+    );
   });
 }

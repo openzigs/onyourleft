@@ -109,6 +109,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putActivityRecord: { notAScopedRead: 'a write' },
   putRoom: { notAScopedRead: 'a write' },
   putRoomCourse: { notAScopedRead: 'a write' },
+  markRaceStarted: { notAScopedRead: 'a write' },
   putResult: { notAScopedRead: 'a write' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   close: { notAScopedRead: 'not a read' },
