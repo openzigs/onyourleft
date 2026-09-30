@@ -75,6 +75,14 @@ export interface SyncOptions {
   readonly blobs: BlobStore;
   /** Unix milliseconds. */
   readonly now?: () => number;
+  /**
+   * Told after an item is stored, so the history index can cut it (#835,
+   * ADR 0040 D-1) — `history.ts` §`History.schedule`. Not awaited: a rider's
+   * sync never waits on the embedding model. A deletion needs no call: the
+   * index rows go in the store's own transaction (`sql-store.ts`
+   * §`replaceSyncRow`).
+   */
+  readonly itemStored?: () => void;
 }
 
 /** What ingesting a record answers. */
@@ -237,6 +245,17 @@ export interface AccountExport {
     readonly expiresAt: number;
     readonly usedAt: number | null;
   }[];
+  /**
+   * That a history index of the items above exists, and which model built it
+   * (#835, ADR 0040 D-10): the model, the vectors' dimension and how many
+   * passages. Empty when there is none. The passages and vectors themselves
+   * are NOT here — see {@link AccountExport.notIncluded}.
+   */
+  readonly historyIndex: readonly {
+    readonly model: string;
+    readonly dimension: number;
+    readonly passages: number;
+  }[];
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
@@ -250,6 +269,7 @@ export const EXPORT_LEAVES_OUT: readonly string[] = [
   'How a report you made was decided, and when: that is the moderators’ record, not the reporter’s.',
   'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
   'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
+  'The history index’s passages and vectors: they are cut from the items above and worked out by the model named in historyIndex, so the same model can make them again from those items, and without it they mean nothing.',
 ];
 
 export interface Sync {
@@ -475,6 +495,11 @@ export function createSync(options: SyncOptions): Sync {
               usedAt: confirmation.usedAt,
             }))
             .sort((a, b) => a.expiresAt - b.expiresAt),
+          historyIndex: (await store.summariseHistoryIndex(caller.athleteId)).map((row) => ({
+            model: row.model,
+            dimension: row.dimension,
+            passages: row.passages,
+          })),
           notIncluded: EXPORT_LEAVES_OUT,
         },
       };
@@ -570,6 +595,7 @@ export function createSync(options: SyncOptions): Sync {
         now: seconds(),
       });
       const stored = await store.getSyncItem(caller.athleteId, known, key);
+      if (outcome === 'stored') options.itemStored?.();
       return {
         ok: true,
         value: {

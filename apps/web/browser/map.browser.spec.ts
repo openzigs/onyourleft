@@ -183,7 +183,8 @@ async function labelLoad(page: import('@playwright/test').Page): Promise<LabelLo
  * Every warning MapLibre prints when it could not load a glyph range and drew
  * the text in the device's own font instead (#578).
  *
- * MapLibre 6.10's wording, `glyph_manager.ts` §`_warnOnMissingGlyphRange`. The
+ * MapLibre 6.10's wording, `glyph_manager.ts` §`_warnOnMissingGlyphRange`, and
+ * 6.11.2's, character for character (#756). The
  * control below is what says this spelling is still the one it prints: if a
  * MapLibre bump rewords it, the 404 control goes red rather than the positive
  * case going quietly green over a fallback.
@@ -223,7 +224,10 @@ const PLACE_NAME_RANGES = [
  * again over ten seconds; a connection dropped mid-request is asked for
  * **twice** and then left alone. Whatever the first version met was an older
  * MapLibre, or something else, and the retry claim is withdrawn rather than
- * kept as folklore.
+ * kept as folklore. #756 re-measured 6.11.2 against 6.10.0: a 404 is still asked
+ * for once, and a connection dropped by #535's own method
+ * (`route.abort('internetdisconnected')`) was asked for once on BOTH versions,
+ * so the "twice" does not reproduce on either (CLAUDE.md §4f).
  *
  * The advice still holds, for a reason that does not depend on MapLibre's
  * retry policy: `networkidle` resolves just as happily over a page that asked
@@ -665,7 +669,8 @@ test.describe('a ride outside the archive’s coverage — #534', () => {
     // the bounds — so this count is already taken `CONTROL_DEADLINE_MS` after
     // the map was created. That window is a BOUND, not a proof: a retry later
     // than it would not be seen. #535's review measured MapLibre 6.10.0 making
-    // no retry over ten seconds even for a 404, which is what makes three
+    // no retry over ten seconds even for a 404, and #756 measured 6.11.2 the
+    // same, which is what makes three
     // seconds a reasonable bound rather than a hopeful one.
     const archiveReads = (): number =>
       seen.requests.filter((url) => url.startsWith(BOUNDED_FIXTURE_URL)).length;
@@ -846,9 +851,9 @@ test.describe('the dark map — #672', () => {
  * #578: place names, drawn from glyphs the app ships.
  *
  * ⚠️ **"A label painted" cannot, on its own, tell the app's glyphs from the
- * device's font — and that is a finding, not a caveat.** MapLibre 6.10 draws a
- * glyph itself, with TinySDF and whatever font the browser has, whenever the
- * style has no `glyphs` URL or the URL cannot serve a range
+ * device's font — and that is a finding, not a caveat.** MapLibre 6.10 (and
+ * 6.11) draws a glyph itself, with TinySDF and whatever font the browser has,
+ * whenever the style has no `glyphs` URL or the URL cannot serve a range
  * (`glyph_manager.ts` §`_getAndCacheGlyphsPromise`). So a style with no glyphs
  * at all **still labels the map**, and the positive case's ink assertion would
  * be green over a regression that deleted every range file. The issue's

@@ -8,11 +8,10 @@
  * ## What this module does NOT do: talk to the network
  *
  * It names no `fetch`. It takes an {@link InstanceTransport} and a
- * {@link InstanceAccountStorage}, and #777 — the one module
- * `privacy/no-network.test.ts` will permit to call an instance — supplies the
- * production transport, after #778 has changed every promise about what
- * leaves the device. Until then nothing in the shipped client calls this, and
- * no byte leaves the device: that is the order #777 and #778 set, and this
+ * {@link InstanceAccountStorage}, and #777's `instance-port.ts` §`createInstancePort`
+ * supplies the production transport — `instance-transport.ts`, the one module
+ * `privacy/no-network.test.ts` permits to call an instance — in the same pull
+ * request as #778 changed every promise about what leaves the device. This
  * module is what they wire rather than a second place that sends.
  *
  * ## The order of things

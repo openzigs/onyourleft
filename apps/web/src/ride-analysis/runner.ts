@@ -15,8 +15,9 @@
  * ## The app decides every step (#810)
  *
  * The chain is fixed: a note per section, a note on position when the input
- * carries a pose summary, a summary, and — only when the summary fails the
- * screen — one rewrite. Per-step success compounds (at 95 % a step, eight
+ * carries a pose summary, a note on the rider's history when the template has
+ * that step and there are passages (#835), a summary, and — only when the
+ * summary fails the screen — one rewrite. Per-step success compounds (at 95 % a step, eight
  * steps land about two thirds of the time), so a failed section does not sink
  * the run: see §"The policy for a weak model".
  *
@@ -70,10 +71,12 @@ import {
   type ScreenReason,
   type ScreenedWriteUp,
 } from '../camera/write-up-screen';
+import type { HistoryPassage } from './history';
 import type { RideAnalysisInput } from './input';
 import type { ModelStepPort, StepReply } from './model-step-port';
 import { sealStep } from './sealed-step';
 import {
+  acceptHistoryNote,
   acceptPositionNote,
   acceptSectionNote,
   CURRENT_ANALYSIS_TEMPLATE,
@@ -81,6 +84,7 @@ import {
   type AnalysisStepKind,
   type AnalysisTemplate,
   type EarlierNotes,
+  type HistoryNote,
   type PositionNote,
   type ScreenRule,
   type SectionNote,
@@ -102,15 +106,17 @@ import {
 export const RUN_BUDGET_MILLISECONDS = 10 * 60_000;
 
 /**
- * The most `max_tokens` a run may ask for, all its steps together: 10 000.
+ * The most `max_tokens` a run may ask for, all its steps together: 10 100.
  *
  * Version 1 asks for at most 9 248 — eight sections and a position at 400
  * each, every one asked twice, and a summary and a rewrite at 1 024 —
- * (`runner.test.ts` computes it from the template), so the budget never cuts a
- * version 1 run short. It is here for the template after it: one whose worst
- * case is larger has to raise this knowingly, with its own reason.
+ * (`runner.test.ts` computes it from the template). Version 2 adds the
+ * history step (#835), at 400 asked twice: 10 048. The budget was 10 000
+ * until then and is raised by exactly that step's worst case, rounded up, so
+ * it still never cuts a run of either version short and still says so the day
+ * a template's worst case passes it.
  */
-export const RUN_TOKEN_BUDGET = 10_000;
+export const RUN_TOKEN_BUDGET = 10_100;
 
 /**
  * `temperature` for a step whose reply is JSON: 0.1. Structured output from a
@@ -196,13 +202,20 @@ export type RunOutcome =
       readonly templateVersion: string;
       /** The 1-based indexes of the sections the write-up leaves out, in the input's order. */
       readonly missingSections: readonly number[];
+      /**
+       * The history step (#835): `used` when its note reached the summary,
+       * `failed` when it ran and its reply was not accepted, `none` when it
+       * did not run.
+       */
+      readonly history: 'used' | 'failed' | 'none';
     }
   | { readonly kind: 'failed'; readonly why: RunFailure };
 
 /**
  * Where a run is, as a step number and the steps planned — and nothing else:
  * no step kind, no prompt and no reply (#804). `total` is the sections, the
- * position step when the input has a pose summary, and the summary. A re-ask
+ * position step when the input has a pose summary, the history step when
+ * there are passages (#835), and the summary. A re-ask
  * and the rewrite are not new steps: they report the step they repair.
  */
 export interface RunProgress {
@@ -220,6 +233,12 @@ export interface RunOptions {
   readonly template?: AnalysisTemplate;
   /** Told as each planned step starts. @see RunProgress */
   readonly progress?: (progress: RunProgress) => void;
+  /**
+   * Passages of the rider's history (#835), as `history.ts` accepted them.
+   * The template's history step runs only when there is at least one and the
+   * template has such a step; it is the ONLY step they reach.
+   */
+  readonly history?: readonly HistoryPassage[];
 }
 
 // --- The parse-repair re-ask ----------------------------------------------------
@@ -309,8 +328,17 @@ export async function runAnalysis(
   let tokensAskedFor = 0;
   let stepsStarted = 0;
   // Known before the first step: the position step runs exactly when the
-  // template builds it a prompt, which it does exactly when there is a pose summary.
-  const total = input.sections.length + (input.pose === undefined ? 0 : 1) + 1;
+  // template builds it a prompt, which it does exactly when there is a pose
+  // summary; the history step exactly when it builds one, over passages.
+  const historyPrompt =
+    template.history === undefined
+      ? undefined
+      : template.history.prompt(input, options.history ?? []);
+  const total =
+    input.sections.length +
+    (input.pose === undefined ? 0 : 1) +
+    (historyPrompt === undefined ? 0 : 1) +
+    1;
   /** Report the next planned step. Nothing of the step is said. */
   const starting = (): void => {
     stepsStarted += 1;
@@ -447,9 +475,19 @@ export async function runAnalysis(
         ? undefined
         : await structured('position', positionPrompt, positionStep.bounds, acceptPositionNote);
 
+    // The ONE step a passage of the rider's history reaches (ADR 0040 D-8).
+    // What the summary is shown of it is the note, accepted and screened.
+    const history: HistoryNote | undefined =
+      historyPrompt === undefined || template.history === undefined
+        ? undefined
+        : await structured('history', historyPrompt, template.history.bounds, acceptHistoryNote);
+    const historyRan: 'used' | 'failed' | 'none' =
+      historyPrompt === undefined ? 'none' : history === undefined ? 'failed' : 'used';
+
     const earlier: EarlierNotes = {
       sections,
       ...(position === undefined ? {} : { position }),
+      ...(history === undefined ? {} : { history }),
       failedSections,
     };
     // §`written`: a cancellation that landed after the last reply arrived, but
@@ -463,6 +501,7 @@ export async function runAnalysis(
             writeUp,
             templateVersion: template.version,
             missingSections: [...failedSections],
+            history: historyRan,
           };
 
     starting();

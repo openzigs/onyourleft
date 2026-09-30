@@ -25,7 +25,8 @@ import * as recoveryEmailConfirmation from './0006-recovery-email-confirmation.t
 import * as moderation from './0007-moderation.ts';
 import * as registration from './0008-registration.ts';
 import * as sync from './0009-sync.ts';
-import * as raceConsent from './0010-race-consent.ts';
+import * as historyIndex from './0010-history-index.ts';
+import * as raceConsent from './0011-race-consent.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -43,5 +44,6 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0007-moderation': moderation,
   '0008-registration': registration,
   '0009-sync': sync,
-  '0010-race-consent': raceConsent,
+  '0010-history-index': historyIndex,
+  '0011-race-consent': raceConsent,
 };

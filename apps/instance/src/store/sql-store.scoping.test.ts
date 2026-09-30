@@ -29,6 +29,9 @@ import {
   SHARED_CONTENT_SHA256,
   syncItemFixtures,
   createStoreHarness,
+  HISTORY_FIXTURE_CONVENTION,
+  HISTORY_FIXTURE_DIMENSION,
+  HISTORY_FIXTURE_MODEL,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -42,6 +45,9 @@ interface Owned {
 type Probe = (store: SqlStore, athleteId: string) => Promise<readonly Owned[]>;
 
 type Entry = { readonly probe: Probe } | { readonly notAScopedRead: string };
+
+/** Which athlete a fixture item key belongs to: `…-of-<athlete>`. */
+const ownerOfKey = (key: string): string => key.slice(key.lastIndexOf('-of-') + 4);
 
 const one = (row: Owned | undefined): readonly Owned[] => (row === undefined ? [] : [row]);
 
@@ -92,6 +98,37 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     },
   },
   listActivityRecords: { probe: (store, athleteId) => store.listActivityRecords(athleteId) },
+  // #835, ADR 0040 D-3 and OWASP LLM08:2025's partitioning: the history index.
+  // Each passage is labelled with its source's key, which names its owner, so
+  // a passage of another athlete's is visible as theirs.
+  listHistoryPassages: {
+    probe: async (store, athleteId) =>
+      (
+        await store.listHistoryPassages(
+          athleteId,
+          HISTORY_FIXTURE_MODEL,
+          HISTORY_FIXTURE_DIMENSION,
+          HISTORY_FIXTURE_CONVENTION,
+        )
+      ).map((passage) => ({ athleteId: ownerOfKey(passage.key) })),
+  },
+  summariseHistoryIndex: {
+    // A count, held to the caller's own passages: an unscoped count is every
+    // athlete's three times over.
+    probe: async (store, athleteId) => {
+      const own = await store.listHistoryPassages(
+        athleteId,
+        HISTORY_FIXTURE_MODEL,
+        HISTORY_FIXTURE_DIMENSION,
+        HISTORY_FIXTURE_CONVENTION,
+      );
+      const summary = await store.summariseHistoryIndex(athleteId);
+      const counted = summary.reduce((sum, row) => sum + row.passages, 0);
+      return counted === own.length && own.length > 0
+        ? own.map((passage) => ({ athleteId: ownerOfKey(passage.key) }))
+        : [{ athleteId: `counted ${String(counted)}` }];
+    },
+  },
   listResults: { probe: (store, athleteId) => store.listResults(athleteId) },
   listRecoveryCodes: { probe: (store, athleteId) => store.listRecoveryCodes(athleteId) },
   listLinkCodes: { probe: (store, athleteId) => store.listLinkCodes(athleteId) },
@@ -156,6 +193,13 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putActivityRecord: { notAScopedRead: 'a write' },
   ingestActivity: {
     notAScopedRead: 'a write; its scoping is sync/ingest.test.ts’s (two athletes, one file)',
+  },
+  listPendingHistorySources: {
+    notAScopedRead:
+      'the indexer’s sweep over every athlete’s items: each row names its owner, and it is written back under that owner only (history.test.ts, #835)',
+  },
+  putHistoryIndex: {
+    notAScopedRead: 'a write; it checks the item is the athlete’s own and live (history.test.ts)',
   },
   putSyncItem: {
     notAScopedRead: 'a write; its scoping is sync/manifest.test.ts’s (cross-athlete PUT)',

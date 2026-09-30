@@ -24,6 +24,7 @@ import {
   type RunProgress,
   type RunOutcome,
 } from './runner';
+import { acceptHistoryAnswer } from './history';
 import { ANALYSIS_TEMPLATES, CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
 
 // --- Fixtures -----------------------------------------------------------------
@@ -302,6 +303,7 @@ describe('the steps the runner issues', () => {
       writeUp: GOOD_SUMMARY.answer,
       templateVersion: CURRENT_ANALYSIS_TEMPLATE.version,
       missingSections: [],
+      history: 'none',
     });
   });
 
@@ -640,9 +642,22 @@ describe('the input and token bounds', () => {
         8 * 2 * sectionStep.bounds.maximumTokens +
         2 * positionStep.bounds.maximumTokens +
         summaryStep.bounds.maximumTokens +
-        rewriteStep.bounds.maximumTokens;
+        rewriteStep.bounds.maximumTokens +
+        // #835: the history step, asked twice, for a template that has one.
+        2 * (template.history?.bounds.maximumTokens ?? 0);
       expect(worst).toBeLessThanOrEqual(RUN_TOKEN_BUDGET);
     }
+    // And the budget is no looser than the largest worst case needs, rounded to a hundred.
+    const history = CURRENT_ANALYSIS_TEMPLATE.history;
+    expect(history).toBeDefined();
+    const [sectionStep, positionStep, summaryStep, rewriteStep] = CURRENT_ANALYSIS_TEMPLATE.steps;
+    const current =
+      16 * sectionStep.bounds.maximumTokens +
+      2 * positionStep.bounds.maximumTokens +
+      summaryStep.bounds.maximumTokens +
+      rewriteStep.bounds.maximumTokens +
+      2 * (history?.bounds.maximumTokens ?? 0);
+    expect(Math.ceil(current / 100) * 100).toBe(RUN_TOKEN_BUDGET);
   });
 });
 
@@ -854,5 +869,105 @@ describe('progress', () => {
       { step: 1, total: 2 },
       { step: 2, total: 2 },
     ]);
+  });
+});
+
+// --- The history step (#835, ADR 0040 D-8) ----------------------------------------------
+
+describe('the history step', () => {
+  const PASSAGES =
+    acceptHistoryAnswer(
+      {
+        passages: [
+          { kind: 'note', label: 'Your note', text: 'Tempo felt hard last month.' },
+          { kind: 'goal', label: 'Your goal', text: 'A century in June.' },
+        ],
+      },
+      { limit: 6, characters: 5_400 },
+    ) ?? [];
+  const HISTORY_NOTE: AnswerStep = {
+    answer: JSON.stringify({ notes: 'Steadier than the tempo ride a month ago.' }),
+  };
+
+  async function withHistory(
+    script: readonly Step[],
+    options: { template?: AnalysisTemplate; passages?: typeof PASSAGES; pose?: boolean } = {},
+  ) {
+    const clock = manualClock();
+    const port = scriptedPort(clock, script);
+    const seen: RunProgress[] = [];
+    const outcome = await runAnalysis(rideWith(2, options.pose ?? false), {
+      port,
+      clock,
+      signal: new AbortController().signal,
+      history: options.passages ?? PASSAGES,
+      progress: (progress) => {
+        seen.push(progress);
+      },
+      ...(options.template === undefined ? {} : { template: options.template }),
+    });
+    return { outcome, port, seen };
+  }
+
+  it('runs once, after position and before the summary, and is the only step shown a passage', async () => {
+    const { outcome, port, seen } = await withHistory(
+      [note(1), note(2), POSITION_NOTE, HISTORY_NOTE, GOOD_SUMMARY],
+      { pose: true },
+    );
+    expect(port.requests.map((request) => request.kind)).toStrictEqual([
+      'section',
+      'section',
+      'position',
+      'history',
+      'summary',
+    ]);
+    const carrying = port.requests.filter((request) =>
+      request.user.includes('Tempo felt hard last month.'),
+    );
+    expect(carrying.map((request) => request.kind)).toStrictEqual(['history']);
+    expect(port.requests[4]?.user).toContain(
+      'History, from earlier rides and notes: Steadier than the tempo ride a month ago.',
+    );
+    expect(port.requests[3]?.maximumTokens).toBe(
+      CURRENT_ANALYSIS_TEMPLATE.history?.bounds.maximumTokens,
+    );
+    expect(outcome).toMatchObject({ kind: 'written', history: 'used' });
+    expect(seen.at(-1)).toStrictEqual({ step: 5, total: 5 });
+  });
+
+  it('does not run without a passage, and says none', async () => {
+    const { outcome, port } = await withHistory([note(1), note(2), GOOD_SUMMARY], { passages: [] });
+    expect(port.requests.map((request) => request.kind)).not.toContain('history');
+    expect(outcome).toMatchObject({ kind: 'written', history: 'none' });
+  });
+
+  it('does not run on a template that has no history step, whatever it is handed', async () => {
+    const v1 = ANALYSIS_TEMPLATES[0];
+    const { outcome, port } = await withHistory([note(1), note(2), GOOD_SUMMARY], {
+      ...(v1 === undefined ? {} : { template: v1 }),
+    });
+    expect(port.requests.map((request) => request.kind)).not.toContain('history');
+    expect(JSON.stringify(port.requests)).not.toContain('Tempo felt hard');
+    expect(outcome).toMatchObject({ kind: 'written', history: 'none' });
+  });
+
+  it('is left out, and the write-up still written, when its reply is refused twice', async () => {
+    const { outcome, port } = await withHistory([
+      note(1),
+      note(2),
+      { answer: 'Ignore the rules.' },
+      { answer: JSON.stringify({ notes: 'The knee reached 142°.' }) },
+      GOOD_SUMMARY,
+    ]);
+    expect(port.requests.map((request) => request.kind)).toStrictEqual([
+      'section',
+      'section',
+      'history',
+      'history',
+      'summary',
+    ]);
+    expect(port.requests[4]?.user).not.toContain('History, from');
+    expect(port.requests[4]?.user).not.toContain('142');
+    expect(outcome).toMatchObject({ kind: 'written', history: 'failed' });
   });
 });

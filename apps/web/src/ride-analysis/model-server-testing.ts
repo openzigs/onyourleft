@@ -28,9 +28,18 @@ export interface ModelServer {
   readonly send: AnalysisSend;
   /** Every request, in order. */
   readonly requests: ModelServerRequest[];
+  /** The URL of every request, in the same order. */
+  readonly urls: string[];
   /** What the summary step answers from now on. */
   summary: string;
+  /** What the history step answers from now on (#835) — the whole reply content. */
+  history: string;
 }
+
+/** What the history step answers unless a test says otherwise. */
+export const HISTORY_REPLY = JSON.stringify({
+  notes: 'Faster on the climbs than three weeks earlier.',
+});
 
 function contentOf(request: ModelServerRequest): string {
   const messages = request.messages as readonly { readonly content: string }[] | undefined;
@@ -51,6 +60,9 @@ function schemaNameOf(request: ModelServerRequest): string | undefined {
 function formNameOf(prompt: string): string | undefined {
   if (/in exactly this form: \{"section":\d+,"notes"/.test(prompt)) {
     return 'section_notes';
+  }
+  if (prompt.includes('[history-data-begin]')) {
+    return 'history_notes';
   }
   return prompt.includes('in exactly this form: {"notes"') ? 'position_notes' : undefined;
 }
@@ -74,10 +86,14 @@ export function modelServer(
 ): ModelServer {
   const extra = options.extraKey === true ? { remark: REPLY_MARKER } : {};
   const requests: ModelServerRequest[] = [];
+  const urls: string[] = [];
   const server: ModelServer = {
     requests,
+    urls,
     summary,
-    send: async (_url, init) => {
+    history: HISTORY_REPLY,
+    send: async (url, init) => {
+      urls.push(String(url));
       const request = JSON.parse(
         typeof init?.body === 'string' ? init.body : '{}',
       ) as ModelServerRequest;
@@ -93,6 +109,8 @@ export function modelServer(
           notes: `Section ${String(section)} was steady.`,
           ...extra,
         });
+      } else if (name === 'history_notes') {
+        content = server.history;
       } else if (name === 'position_notes') {
         content = JSON.stringify({ notes: 'Posture held steady.', ...extra });
       } else {

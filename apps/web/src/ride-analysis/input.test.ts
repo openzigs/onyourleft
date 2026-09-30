@@ -60,6 +60,7 @@ import {
   type RideAnalysisInput,
   type RideAnalysisOptions,
 } from './input';
+import { rideSummaryBody } from './ride-summary';
 
 const TEMPLATE = 'ride-analysis/1';
 
@@ -286,6 +287,40 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
 
     // And the privacy module's own walk finds no position anywhere.
     expect(coordinatesIn(input)).toStrictEqual([]);
+  });
+
+  it('builds a ride summary for the rider’s history that holds none of it either (#835, ADR 0040 D-2)', async () => {
+    const route = hillRoute(DISTINCTIVE_BASE_METRES);
+    const { ride, streams } = rideOverTheHill(route);
+    const from = await saved(
+      { ...ride, name: 'Home to Box Hill via the Zig Zag' },
+      withChannel(streams, 'altitude', distinctiveAltitude(streams.sampleCount)),
+      {
+        route,
+        athlete: { displayName: 'Ada Lovelace', mass: kilograms(68.5), thresholdPower: watts(240) },
+        laps: [lapFor(ride, 0), lapFor(ride, 1)],
+      },
+    );
+    // Read as the sync builds it: without camera consent, so never the pose (D-2 item 1).
+    const body = rideSummaryBody(inputFor(from, { pose: POSE, cameraConsented: false }));
+    const parsed = JSON.parse(body) as { passages: string[] };
+    expect(parsed.passages.length).toBeGreaterThan(1);
+    for (const passage of parsed.passages) expect(passage.length).toBeLessThanOrEqual(900);
+    const text = parsed.passages.join(' ');
+    // Every number in the text, read out of it, and every figure a place or a time is made of.
+    const numbers = (text.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const located = locatedIn(from);
+    expect(located.heights.length).toBeGreaterThan(100);
+    expect(located.coordinates.length).toBeGreaterThan(100);
+    expect(leaksIn({ numbers }, located)).toStrictEqual({ keys: [], numbers: [] });
+    expect(coordinatesIn(parsed)).toStrictEqual([]);
+    for (const named of ['Box Hill', 'Ada', 'Lovelace', from.ride.id, ATHLETE_A]) {
+      expect(text).not.toContain(named);
+    }
+    // No pose: the side camera's words are nowhere in it.
+    expect(text).not.toMatch(/torso|elbow|knee|posed|saddle|camera/i);
+    // No date or time of day in any spelling.
+    expect(text).not.toMatch(/\b(19|20)\d\d\b|\d{1,2}:\d\d|monday|tuesday|january|february/i);
   });
 
   it('carries no height of the ROUTE when the sections follow a saved route', async () => {

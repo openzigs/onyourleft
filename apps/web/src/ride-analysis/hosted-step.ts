@@ -79,6 +79,13 @@ export function hostedStepPort(
       if (!isSealedStep(step)) {
         return { kind: 'failed', failure: 'not-numbers' };
       }
+      // ADR 0040 D-9: the rider's history — their own notes and documents —
+      // goes to a hosted model only once the consent, the privacy policy and
+      // Play Data Safety say so, and they do not yet. The ask never sends one
+      // on this path (`ride-analysis.ts`); this refuses it if anything did (#835).
+      if (step.kind === 'history') {
+        return { kind: 'failed', failure: 'not-numbers' };
+      }
       if (signal.aborted) {
         return { kind: 'failed', failure: 'cancelled' };
       }

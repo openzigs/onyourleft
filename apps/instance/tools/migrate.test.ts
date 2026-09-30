@@ -23,6 +23,11 @@ afterEach(async () => {
   directory = undefined;
 });
 
+/** The tables a run of the tool lists after it, with their row counts. */
+function tablesIn(out: string): string[] {
+  return [...out.matchAll(/^ {2}(\w+): \d+ row\(s\)$/gm)].map((match) => match[1] as string);
+}
+
 function migrate(...args: string[]): { status: number | null; out: string } {
   const run = spawnSync(process.execPath, [TOOL, ...args], { encoding: 'utf8' });
   return { status: run.status, out: `${run.stdout}${run.stderr}` };
@@ -43,14 +48,22 @@ describe('tools/migrate.ts (#769)', () => {
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
     expect(down.out).not.toContain(LAST);
     expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
-    // The newest migration (0010, #793) adds a column and no table, so one
-    // down leaves every table — `sync_item`, 0009's, included — in the count.
-    expect(down.out).toMatch(/ {2}sync_item:/);
-    expect(down.out).toMatch(/ {2}activity_record:/);
+    // What the newest migration dropped is read off the two runs, never named
+    // here: naming it (`sync_item` for 0009, the history index for 0010) made
+    // this test the one to edit whenever a migration lands after it.
+    const all = tablesIn(latest.out);
+    const belowLast = tablesIn(down.out);
+    expect(all.length).toBeGreaterThan(0);
+    expect(all).toEqual(expect.arrayContaining(belowLast));
+    // ⚠️ Not every migration creates a table: 0011 (#793) only adds a column,
+    // so its `down` drops none. What holds either way is that `down` drops no
+    // table the newest migration did not create, and `up` puts back every one.
+    expect(belowLast.length).toBeLessThanOrEqual(all.length);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
     expect(up.out).toContain(LAST);
+    expect(tablesIn(up.out)).toEqual(all);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

@@ -113,7 +113,7 @@ import {
   verifyEd25519,
 } from './crypto.ts';
 import { HIDDEN_DISPLAY_NAME, publicAthlete, type PublicAthlete } from './public-athlete.ts';
-import { addressKey, createRateLimiter, type RateLimit } from './rate-limit.ts';
+import { addressKey, createRateLimiter, sweepPeriodMs, type RateLimit } from './rate-limit.ts';
 import { createTicketBook, type MintedTicket } from './tickets.ts';
 
 /** A challenge's life: #772's "+60 s". */
@@ -349,6 +349,18 @@ export interface Identity {
   setRecoveryEmail(caller: Caller, address: unknown): Promise<Outcome<null>>;
   /** Follow that link, signed in as the athlete who gave the address (#865). */
   confirmRecoveryEmail(caller: Caller, token: unknown): Promise<Outcome<null>>;
+  /**
+   * Forget every rate-limit key — an internet address, a public key, an email
+   * address — whose window has ended (#892's review). The Node adapter runs it
+   * on every {@link rateLimitSweepPeriodMs} boundary, which is what keeps the
+   * privacy policy's "in memory only, for at most an hour" true on an instance
+   * nobody asks again.
+   */
+  sweepRateLimits(): void;
+  /** The period {@link sweepRateLimits} must run on: every window ends on one of its boundaries. */
+  readonly rateLimitSweepPeriodMs: number;
+  /** How many rate-limit keys are held now, across every limit. */
+  heldRateLimitKeys(): number;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -668,10 +680,42 @@ export function createIdentity(options: IdentityOptions): Identity {
     };
   }
 
+  // Every limiter this identity holds, and so every key — an internet
+  // address, a public key, an email address, an athlete — it can hold: all of
+  // them are swept, so none outlives its window (#892's review).
+  const limiters = [
+    registrations,
+    perKey,
+    perAddress,
+    emailPerAddress,
+    confirmationRequests,
+    confirmationsPerPair,
+    confirmationsPerAddress,
+    firstLinksPerAddress,
+  ];
+
   return {
     origin,
     moderation,
     emailRecoveryEnabled: mailer !== undefined,
+    rateLimitSweepPeriodMs: sweepPeriodMs([
+      limits.registrationPerAddress,
+      limits.challengePerKey,
+      limits.challengePerAddress,
+      limits.emailRecoveryPerAddress,
+      limits.confirmationRequestsPerAthlete,
+      limits.confirmationsPerAthleteAddress,
+      limits.confirmationsPerAddress,
+      limits.firstLinksPerAddress,
+    ]),
+
+    sweepRateLimits() {
+      for (const limiter of limiters) limiter.sweep();
+    },
+
+    heldRateLimitKeys() {
+      return limiters.reduce((held, limiter) => held + limiter.size, 0);
+    },
 
     async challenge(publicKey, address) {
       if (!isPublicKey(publicKey))

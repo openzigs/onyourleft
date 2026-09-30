@@ -21,7 +21,7 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
+import { kilograms, toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   ensureDeviceSigningKey,
@@ -38,6 +38,8 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { orderedRows, PAGE_SIZE } from '../library/rows';
+import type { RideInputStore } from '../ride-analysis/read-input';
+import { rideSummaryOf } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
@@ -201,6 +203,8 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     verifier: webCryptoVerifier,
     now: () => NOW,
     timeZone: 'Europe/London',
+    // The harness hands the whole ActivityStore, which reads a ride's input.
+    rideSummary: rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE),
   };
 }
 
@@ -297,11 +301,37 @@ describe('two-way sync through the real instance (#776)', () => {
     const signedInA = await signInToInstance(signInDependencies(origin, a));
     a.transport.setToken(signedInA.sessionToken);
     const pushed = await a.harness.write((store) => syncWithInstance(syncDependencies(a, store)));
-    expect(pushed).toMatchObject({ pushed: 3, itemsPushed: 2, pulled: 0, failures: [] });
+    expect(pushed).toMatchObject({
+      pushed: 3,
+      itemsPushed: 2,
+      summariesPushed: 3,
+      pulled: 0,
+      failures: [],
+    });
+
+    // #835: every ride's summary is on the instance for the rider's history —
+    // passages the device built, and nothing that names or places the ride.
+    for (const id of ids) {
+      const summary = await instanceItem(a, 'ride-summary', id);
+      expect(summary?.format).toBe('onyourleft.ride-summary');
+      const passages = summary?.passages as string[] | undefined;
+      expect(passages?.[0]).toMatch(
+        /^A ride of [0-9.]+ minutes of riding over [0-9.]+ kilometres\./,
+      );
+      const rows = await libraryRows(a.harness);
+      for (const row of rows) expect(JSON.stringify(summary)).not.toContain(row.name);
+      expect(JSON.stringify(summary)).not.toContain(id);
+    }
 
     // Nothing the second time: every push is answered from the manifest.
     const again = await a.harness.write((store) => syncWithInstance(syncDependencies(a, store)));
-    expect(again).toMatchObject({ pushed: 0, itemsPushed: 0, pulled: 0, failures: [] });
+    expect(again).toMatchObject({
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      pulled: 0,
+      failures: [],
+    });
 
     // A fresh device B, linked to A's athlete with a code A minted.
     const code = await a.transport.sync.json('POST', '/v1/auth/link-codes');
@@ -329,9 +359,23 @@ describe('two-way sync through the real instance (#776)', () => {
     );
     expect(report).toEqual(sideCameraReportFor(LOCAL_ATHLETE, ids[1]!));
 
-    // And B pushes nothing back: it pulled these, it did not ride them.
+    // And B pushes nothing back: it pulled these, it did not ride them — not
+    // even its own reading of their summaries, which is A's to describe
+    // (#835), though B's reads differently once B knows the rider's weight.
+    expect(pulled).toMatchObject({ summariesPushed: 0 });
+    await b.harness.write((store) => store.setAthleteMass(LOCAL_ATHLETE, kilograms(70)));
+    const onB = await b.harness.read((store) =>
+      rideSummaryOf(store as unknown as RideInputStore, LOCAL_ATHLETE)(ids[0]!),
+    );
+    expect(onB).not.toBe(JSON.stringify(await instanceItem(a, 'ride-summary', ids[0]!)));
     const bAgain = await b.harness.write((store) => syncWithInstance(syncDependencies(b, store)));
-    expect(bAgain).toMatchObject({ pushed: 0, itemsPushed: 0, pulled: 0, failures: [] });
+    expect(bAgain).toMatchObject({
+      pushed: 0,
+      itemsPushed: 0,
+      summariesPushed: 0,
+      pulled: 0,
+      failures: [],
+    });
     // …and never signs them: a ride B pulled is not a ride B vouches for.
     for (const id of ids) {
       expect(await b.harness.read((store) => store.getActivityRecord(LOCAL_ATHLETE, id))).toBe(
@@ -453,6 +497,13 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(manifest.find((entry) => entry.kind === 'write-up' && entry.key === gone)?.deleted).toBe(
       true,
     );
+    // #835: its summary too, so the history index keeps nothing of it (ADR 0040 D-10).
+    expect(
+      manifest.find((entry) => entry.kind === 'ride-summary' && entry.key === gone)?.deleted,
+    ).toBe(true);
+    expect(
+      manifest.find((entry) => entry.kind === 'ride-summary' && entry.key === kept)?.deleted,
+    ).toBe(false);
     expect(
       manifest
         .filter((entry) => entry.kind === 'activity' && !entry.deleted)
@@ -618,7 +669,7 @@ describe('two-way sync through the real instance (#776)', () => {
   }, 60_000);
 
   // #915's review: with NO race-consent base — every ride synced before store
-  // v15, or against an instance before migration 0010 — a device still saying
+  // v15, or against an instance before migration 0011 — a device still saying
   // "yes" pushed it over a revocation made on another device. Off wins.
   it('lets "off" win when a device has no consent base, so a device still saying yes cannot re-grant a revoked consent (#793)', async () => {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });

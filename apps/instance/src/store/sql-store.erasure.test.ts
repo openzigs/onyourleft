@@ -250,6 +250,9 @@ describe('erasing an athlete (#769, #35)', () => {
       expect(order, 'migration 0009’s manifest is found with no list naming it').toContain(
         'sync_item',
       );
+      // Migration 0010's history index (#835, ADR 0040 D-10): found the same way.
+      expect(order).toContain('history_source');
+      expect(order).toContain('history_passage');
       const scoped = new Set<string>(order);
       for (const reference of references(harness.path)) {
         if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;

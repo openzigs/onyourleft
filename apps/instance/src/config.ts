@@ -48,6 +48,13 @@
  */
 
 import { isAddress, normalisedAddress } from './client-address.ts';
+import { configuredHostProblem } from './history/address.ts';
+import {
+  DEFAULT_DOCUMENT_PREFIX,
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_QUERY_PREFIX,
+  type EmbeddingSettings,
+} from './history/embedder.ts';
 import {
   DEFAULT_PUBLIC_ROOM_THRESHOLDS,
   type PublicRoomThresholds,
@@ -77,6 +84,9 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
 /** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
 export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
 
+/** The longest name an operator may give their instance, in characters. */
+export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
+
 /** The raw values, as the environment gives them. */
 export interface RawConfig {
   readonly host?: string | undefined;
@@ -90,7 +100,32 @@ export interface RawConfig {
   readonly publicRoomMinRides?: string | undefined;
   readonly clientAddressHeader?: string | undefined;
   readonly trustedProxies?: string | undefined;
+  readonly embeddingUrl?: string | undefined;
+  readonly embeddingModel?: string | undefined;
+  readonly embeddingDocumentPrefix?: string | undefined;
+  readonly embeddingQueryPrefix?: string | undefined;
+  readonly name?: string | undefined;
 }
+
+/**
+ * The history index (#835, ADR 0040): on, with the embedding model's settings,
+ * or off and why. ⚠️ **Off is never a refusal to start** (D-6): the rest of the
+ * instance does not depend on it, so a missing or refused address turns the
+ * index off and the instance says so in its log.
+ */
+export type HistorySettings =
+  | { readonly kind: 'on'; readonly embedding: EmbeddingSettings }
+  | {
+      readonly kind: 'off';
+      /** Which refusal, short enough for the log to carry (`log.ts`). */
+      readonly code: HistoryOffCode;
+      /** The sentence an operator reads. */
+      readonly reason: string;
+    };
+
+/** Why the history index is off. */
+export type HistoryOffCode =
+  'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'bad-model' | 'bad-prefix';
 
 /** A configuration the instance can start with. */
 export interface Config {
@@ -112,6 +147,15 @@ export interface Config {
    * `client-address.ts` §`normalisedAddress` writes it. Empty: loopback only.
    */
   readonly trustedProxies: readonly string[];
+  /** The history index's embedding model, or why there is none (#835). */
+  readonly history: HistorySettings;
+  /**
+   * What the operator calls this instance, which a rider's app shows once it
+   * is connected (#777) — or `null`, and the app then names the instance by
+   * its address. Never invented here: a default name would be a name no
+   * operator chose.
+   */
+  readonly name: string | null;
 }
 
 export type ConfigResult =
@@ -121,6 +165,9 @@ export type ConfigResult =
 const COMMIT = /^[0-9a-f]{40}$/;
 const DEVICE_KEY = /^[0-9a-f]{64}$/;
 const HEADER = /^[a-z0-9-]{1,64}$/;
+
+/** A character a rider's screen should never be handed in a name. */
+const UNSHOWABLE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 
 const present = (value: string | undefined): value is string =>
   value !== undefined && value.trim() !== '';
@@ -244,9 +291,25 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  let instanceName: string | null = null;
+  if (present(raw.name)) {
+    const value = raw.name.trim();
+    // Shown to riders, so no control, bidirectional or invisible character —
+    // the rule a display name has (`@onyourleft/domain` §`checkDisplayName`),
+    // applied to the one other name the app renders from an instance.
+    if ([...value].length > MAXIMUM_INSTANCE_NAME_LENGTH || UNSHOWABLE.test(value)) {
+      problems.push(
+        `OYL_INSTANCE_NAME must be at most ${String(MAXIMUM_INSTANCE_NAME_LENGTH)} characters, with no control, bidirectional or invisible character.`,
+      );
+    } else {
+      instanceName = value;
+    }
+  }
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
+  const history = readHistorySettings(raw);
   return {
     ok: true,
     config: {
@@ -260,7 +323,108 @@ export function readConfig(raw: RawConfig): ConfigResult {
       publicRooms,
       clientAddressHeader,
       trustedProxies,
+      history,
+      name: instanceName,
     },
+  };
+}
+
+/** A model name as Ollama spells one: `name`, `name:tag`, `namespace/name:tag`. */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+
+/**
+ * The history index's settings (#835, ADR 0040 D-5, D-6), read from
+ * `OYL_INSTANCE_EMBEDDING_URL`, `…_MODEL`, `…_DOCUMENT_PREFIX` and
+ * `…_QUERY_PREFIX`.
+ *
+ * - **No address, no index.** Nothing is defaulted: the instance does not
+ *   assume a model server is running anywhere.
+ * - **The address is local or refused** (D-6): its host must be loopback, a
+ *   private address or a single-label name (`address.ts`
+ *   §`configuredHostProblem`), it must be `http:` or `https:`, and it names the
+ *   server's origin only — no path, no query, no credentials. Every connection
+ *   checks where the name resolved to as well (`embedder.ts`).
+ * - **The model defaults to `nomic-embed-text`** (the owner's ruling, D-5), and
+ *   its prefixes to that model's own. For any other model the prefixes default
+ *   to none, because another model's convention is its own. A prefix that is
+ *   set is used exactly as it is set, spaces included; set to nothing (as a
+ *   copied `.env.example` leaves it) it is unset.
+ */
+export function readHistorySettings(raw: RawConfig): HistorySettings {
+  const off = (code: HistoryOffCode, reason: string): HistorySettings => ({
+    kind: 'off',
+    code,
+    reason,
+  });
+  if (!present(raw.embeddingUrl)) {
+    return off(
+      'not-set',
+      'OYL_INSTANCE_EMBEDDING_URL is not set, so no embedding model is configured.',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw.embeddingUrl.trim());
+  } catch {
+    return off('not-a-url', 'OYL_INSTANCE_EMBEDDING_URL is not a URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return off('not-a-url', 'OYL_INSTANCE_EMBEDDING_URL must be an http: or https: URL.');
+  }
+  if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    return off(
+      'not-origin',
+      'OYL_INSTANCE_EMBEDDING_URL must be the model server’s address alone.',
+    );
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    return off(
+      'not-origin',
+      'OYL_INSTANCE_EMBEDDING_URL must be the model server’s address, with no path.',
+    );
+  }
+  const hostProblem = configuredHostProblem(url.hostname);
+  if (hostProblem !== undefined) {
+    return off(
+      'not-local',
+      `OYL_INSTANCE_EMBEDDING_URL was refused because ${hostProblem}: the embedding model must be on this machine or its private network (ADR 0040 D-6).`,
+    );
+  }
+  const model = present(raw.embeddingModel) ? raw.embeddingModel.trim() : DEFAULT_EMBEDDING_MODEL;
+  if (!MODEL_NAME.test(model)) {
+    return off(
+      'bad-model',
+      'OYL_INSTANCE_EMBEDDING_MODEL must be a model name, such as name or name:tag.',
+    );
+  }
+  const isDefault = model === DEFAULT_EMBEDDING_MODEL;
+  const documentPrefix = present(raw.embeddingDocumentPrefix)
+    ? raw.embeddingDocumentPrefix
+    : isDefault
+      ? DEFAULT_DOCUMENT_PREFIX
+      : '';
+  const queryPrefix = present(raw.embeddingQueryPrefix)
+    ? raw.embeddingQueryPrefix
+    : isDefault
+      ? DEFAULT_QUERY_PREFIX
+      : '';
+  for (const [name, prefix] of [
+    ['OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX', documentPrefix],
+    ['OYL_INSTANCE_EMBEDDING_QUERY_PREFIX', queryPrefix],
+  ] as const) {
+    if (prefix.length > 100 || CONTROL.test(prefix)) {
+      return off(
+        'bad-prefix',
+        `${name} must be at most 100 characters, with no control character.`,
+      );
+    }
+  }
+  return {
+    kind: 'on',
+    embedding: { endpoint: new URL(url.origin), model, documentPrefix, queryPrefix },
   };
 }
 

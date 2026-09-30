@@ -85,6 +85,17 @@
  * this device does not erase the instance's copy. That is the account's own
  * deletion (`DELETE /v1/account`, #35).
  *
+ * 7. **Each ride's summary** (#835, ADR 0040 D-2): the passages of the
+ *    rider's history the instance indexes for a later write-up, built HERE
+ *    from #809's input by `ride-analysis/ride-summary.ts` — the instance
+ *    interprets no text. It is derived, never pulled and never kept on the
+ *    device, and deleted with its ride. It is pushed when the instance holds
+ *    none, and — for a ride this device recorded or imported, the one it
+ *    signed — whenever the instance's copy differs from what it builds now.
+ *    ⚠️ Not for a PULLED ride whose summary the instance holds: two devices
+ *    reading one ride from different files can build different summaries,
+ *    and each pushing its own would change the instance's copy on every sync.
+ *
  * Goals, notes and reference documents (#836) are carried by the instance
  * already; this module pushes them when #836 gives the device something to
  * push.
@@ -156,6 +167,12 @@ export interface SyncDependencies {
   readonly now: () => UnixSeconds;
   /** The zone a pulled ride is imported in when its record does not name one it can use. */
   readonly timeZone: string;
+  /**
+   * A ride's summary, as the body of its `ride-summary` item (#835) — or
+   * `undefined` when the ride cannot be read. `ride-analysis/ride-summary.ts`
+   * §`rideSummaryOf`, bound to this store and athlete.
+   */
+  readonly rideSummary: (activityId: ActivityId) => Promise<string | undefined>;
 }
 
 /** The two item kinds this device syncs beside its rides. */
@@ -185,6 +202,8 @@ export interface SyncReport {
   readonly pushed: number;
   readonly itemsPulled: number;
   readonly itemsPushed: number;
+  /** Ride summaries pushed for the rider's history (#835): derived, so counted apart from items. */
+  readonly summariesPushed: number;
   /** Rides deleted on this device since the last sync, now deleted on the instance too. */
   readonly deletedOnInstance: number;
   readonly deleted: number;
@@ -266,6 +285,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let pushed = 0;
   let itemsPulled = 0;
   let itemsPushed = 0;
+  let summariesPushed = 0;
   let deleted = 0;
   let deletedOnInstance = 0;
   let consentsPushed = 0;
@@ -492,7 +512,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
     // Unchanged here since the last sync, and the instance's moved: another
     // device set or revoked it — take it. With NO base (every ride synced
-    // before store v15, or against an instance that predates migration 0010)
+    // before store v15, or against an instance that predates migration 0011)
     // neither side can be shown to have changed, so OFF wins: a device still
     // saying "yes" takes a "no", and a device saying "no" sends it. A consent
     // is never granted by a sync that cannot tell who gave it (ADR 0021
@@ -531,6 +551,30 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
   }
 
+  // --- Each ride's summary, for the rider's history (#835) -------------------
+  // Derived from the ride, so never pulled and never in the base (rule 7).
+  for (const id of rides) {
+    const entry = remote.get(keyOf(SUMMARY_KIND, id));
+    const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+    // A ride another device signed is that device's to describe, once described.
+    if (remoteDigest !== null && (await store.getActivityRecord(athleteId, id)) === undefined) {
+      continue;
+    }
+    const body = await dependencies.rideSummary(id);
+    if (body === undefined) continue;
+    if (remoteDigest === (await hex(utf8(body), sha256))) continue;
+    const answer = await transport.json(
+      'POST',
+      `/v1/sync/items/${SUMMARY_KIND}/${encodeURIComponent(id)}`,
+      { body },
+    );
+    if (answer.status === 200) {
+      summariesPushed += 1;
+    } else {
+      failures.push({ kind: SUMMARY_KIND, key: id, reason: codeOf(answer.body) });
+    }
+  }
+
   // --- The base forgets what neither side holds any more ---------------------
   for (const row of [...base.values()]) {
     if (row.kind !== 'activity' || remote.has(keyOf('activity', row.key))) continue;
@@ -542,6 +586,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     pushed,
     itemsPulled,
     itemsPushed,
+    summariesPushed,
     deleted,
     deletedOnInstance,
     consentsPushed,
@@ -561,9 +606,12 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
 /** The two item kinds, in the order a sync visits them. */
 const ITEM_KINDS: readonly ItemKind[] = ['write-up', 'side-camera-report'];
 
+/** A ride's summary (#835): derived from the ride, so pushed and deleted, never pulled. */
+const SUMMARY_KIND = 'ride-summary';
+
 /**
- * Delete a ride on the instance: its write-up and side-camera report, then the
- * ride (whose file the instance collects unless another rider sent the same
+ * Delete a ride on the instance: its write-up, side-camera report and summary
+ * (#835), then the ride (whose file the instance collects unless another rider sent the same
  * bytes). `not_found` is success — somebody got there first. Answers `deleted`
  * or the instance's error code.
  */
@@ -573,7 +621,7 @@ async function deleteRideOnInstance(
   activity: string,
 ): Promise<string> {
   for (const [kind, key] of [
-    ...ITEM_KINDS.map((each) => [each, activity] as const),
+    ...[...ITEM_KINDS, SUMMARY_KIND].map((each) => [each, activity] as const),
     ['activity', content] as const,
   ]) {
     const answer = await transport.json(

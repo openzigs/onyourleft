@@ -6,6 +6,7 @@ import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
 import type { ClientInfo, InstanceProbes } from './route-kit.ts';
+import type { History } from './history/history.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 
@@ -45,6 +46,37 @@ import { ROUTES, type Route } from './routes.ts';
  * 5. **The route's own answer**, and anything it throws is `internal` in the
  *    one error shape — no message, no stack, no path (#36, ADR 0004 D) — while
  *    the log gets the error's name alone (`log.ts`).
+ *
+ * ## A rider's app is on another origin — #777
+ *
+ * The app a rider connects from is served from its own origin (a web host, or
+ * `https://localhost` inside the Android shell), never from the instance's, so
+ * every call it makes is cross-origin and a browser refuses to hand it the
+ * answer unless the instance says it may. So:
+ *
+ * - **Every response carries `Access-Control-Allow-Origin: *`**, errors
+ *   included, so a refusal reaches the app as the refusal rather than as a
+ *   network error the rider cannot act on.
+ * - **An `OPTIONS` preflight to a path a route serves is `204`**, naming that
+ *   path's methods and the two request headers the app sends
+ *   (`authorization`, `content-type`). An `OPTIONS` to no route is `not_found`,
+ *   as any other method there is.
+ *
+ * ⚠️ **`*` and not a list of origins, and that is safe here because nothing
+ * rides on ambient authority**: the instance sets no cookie and reads none,
+ * and a session is a bearer token the app puts in `Authorization` itself, so a
+ * page on another origin that calls the instance holds exactly what it could
+ * send with `curl`. `Access-Control-Allow-Credentials` is therefore never
+ * sent, and must not be — with it, `*` is refused by browsers, and a list of
+ * origins that did carry credentials would be a different threat model.
+ *
+ * **A preflight reaches nobody** (#891's choke point, step 4): it calls no
+ * route and reads no store, and its answer depends on the PATH's shape alone
+ * — the same `204` for an athlete who exists, one who blocked the caller and
+ * one who does not, and for a moderators' route the same list of methods a
+ * `method_not_allowed` there already names to anybody. A browser sends no
+ * `Authorization` on a preflight, so there is no caller to ask the choke point
+ * about; the real request that follows is asked, as every request is.
  */
 
 export type Handler = (request: Request, client?: ClientInfo) => Promise<Response>;
@@ -77,6 +109,11 @@ export interface HandlerOptions {
    * every route that needs it answers `unavailable`, as for identity.
    */
   readonly sync?: Sync;
+  /**
+   * The history index (#835, ADR 0040). Absent, every route that needs it
+   * answers `unavailable`, and a device's analysis runs without history.
+   */
+  readonly history?: History;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -115,7 +152,18 @@ function jsonObject(body: Uint8Array | null): Record<string, unknown> | undefine
 }
 
 /** Headers every response carries, whatever produced it. */
-const ALWAYS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+const ALWAYS = {
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
+  // #777: a rider's app is on another origin. See the header.
+  'access-control-allow-origin': '*',
+};
+
+/** The request headers a rider's app sends, which a preflight must allow. */
+const PREFLIGHT_HEADERS = 'authorization, content-type';
+
+/** How long a browser may keep a preflight's answer, in seconds. */
+const PREFLIGHT_MAX_AGE_SECONDS = 600;
 
 /** Past the limit: the request is refused rather than read further. */
 const TOO_LARGE = Symbol('too large');
@@ -210,6 +258,9 @@ export function createHandler(options: HandlerOptions): Handler {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
     if (matched.sync === true && options.sync === undefined) return errorResponse('unavailable');
+    if (matched.history === true && options.history === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -243,6 +294,7 @@ export function createHandler(options: HandlerOptions): Handler {
       identity,
       caller,
       sync: options.sync,
+      history: options.history,
       probes: options.probes,
     });
   }
@@ -263,7 +315,19 @@ export function createHandler(options: HandlerOptions): Handler {
         });
         const found = atPath.find(({ candidate }) => candidate.method === request.method);
         route = found?.candidate;
-        if (found !== undefined) {
+        if (found === undefined && request.method === 'OPTIONS' && atPath.length > 0) {
+          // #777: a CORS preflight. The header says why this is safe.
+          response = new Response(null, {
+            status: 204,
+            headers: {
+              'access-control-allow-methods': [
+                ...new Set(atPath.map(({ candidate }) => candidate.method)),
+              ].join(', '),
+              'access-control-allow-headers': PREFLIGHT_HEADERS,
+              'access-control-max-age': String(PREFLIGHT_MAX_AGE_SECONDS),
+            },
+          });
+        } else if (found !== undefined) {
           response = await answer(found.candidate, found.params, request, url, body, client);
         } else if (atPath.length > 0) {
           response = errorResponse('method_not_allowed', {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0010 (#793): a ride's **"may be raced"** consent, on the
+ * Migration 0011 (#793): a ride's **"may be raced"** consent, on the
  * instance as on the device (ADR 0021 D-5.1, ADR 0039 D-2.1 and D-2.5).
  *
  * **`activity_record.may_be_raced`** is `0` or `1`, and `0` on every row this

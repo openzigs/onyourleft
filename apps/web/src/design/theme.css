@@ -2638,6 +2638,17 @@ p > label + input[type='file'] {
   overflow-wrap: anywhere;
 }
 
+/*
+ * The Connect screen (#777). An instance's name, its address and a rider's
+ * display name all come from the instance, and any of them may be one long
+ * word: each breaks where it must rather than widen a 320 px page
+ * (`reflow.browser.spec.ts`).
+ */
+.oyl-instance__facts dd,
+.oyl-instance__devices li {
+  overflow-wrap: anywhere;
+}
+
 .oyl-write-up__text {
   margin-inline: 0;
   padding-inline-start: var(--oyl-space-md);

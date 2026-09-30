@@ -326,6 +326,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         fitness line carried to today, and the empty state a
                         new rider sees first. ⚠️ `#/` is Home since #428 and
                         the Ride screen is `#/ride`
+    src/instance/       connecting this app to an instance (#777) — which
+                        addresses it will talk to (`https:`, and `http:` only
+                        to this machine's loopback, refused before any
+                        request), the ONE module `no-network.test.ts` permits
+                        for instance traffic (`instance-transport.ts`, one
+                        `fetch`; a room's socket goes through it, never beside
+                        it — ADR 0036 D-3), signing in with the device key
+                        (#772's `sign-in.ts`), and `instance-port.ts`, whose
+                        `createInstancePort` only `main.tsx` names, so
+                        deleting that wiring is a red `check:wiring`. The
+                        session token and the address are kept on the DEVICE,
+                        not the athlete row (ADR 0020 D-2's question, answered
+                        the other way in the port's header). The screen is
+                        `views/InstanceView.tsx` at `#/settings/instance`
     src/library/        the activity library's row model, its port and its stub (#62),
                         and since #660 `layout.ts` — whether it is a table or a
                         list of cards, from the width the library is GIVEN
@@ -334,9 +348,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         once-per-application protocol registration, and the one
                         file that names MapLibre. Since #578 it labels places
                         and road names from glyphs the app ships, at a RELATIVE
-                        `glyphs` URL so they add no origin. ⚠️ MapLibre 6.10
-                        draws text in the device's font when a range cannot be
-                        fetched, so a label painting proves nothing about the
+                        `glyphs` URL so they add no origin. ⚠️ MapLibre (6.10,
+                        and 6.11 since #756) draws text in the device's font
+                        when a range cannot be fetched, so a label painting
+                        proves nothing about the
                         glyphs — the browser gate asserts the requests. Since
                         #672 every colour the map paints is in `basemap.ts`
                         §`MAP_COLOURS`, one table per palette, CHECKED against
@@ -1438,7 +1453,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         where streams come from — so `packages/fit`'s XML
                         reader, which refuses a `<!DOCTYPE`, is on a
                         network-facing path for the first time
-                        (`src/sync/ingest.test.ts` pins it there). ⚠️ Only `src/store/` may
+                        (`src/sync/ingest.test.ts` pins it there). Since
+                        #835 it also holds `src/history/` — the history index
+                        (ADR 0040): migration 0010's passages and unit
+                        vectors, cut from synced write-ups, ride summaries,
+                        goals, notes and documents (never a side-camera
+                        report), embedded by a LOCAL Ollama (`truncate:
+                        false`, the model's prefixes, `nomic-embed-text` by
+                        default) and ranked by a dot product, and
+                        `POST /v1/history/search`. ⚠️ The embedding address
+                        is refused unless local, and every name is resolved
+                        and checked on EVERY request (`address.ts`); a
+                        refused or unset address turns the index off, never
+                        the instance. `src/instance.ts` mounts it; sync does
+                        not feed it yet (above). ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
@@ -2422,6 +2450,11 @@ not.
   ⚠️ **Sync is BUILT and unreachable** (#881: #37, #38, #776, #35): `src/sync/` and the client half
   in `apps/web/src/instance/sync.ts` exist, but `src/instance.ts` hands the handler no sync, so every
   sync route answers `unavailable` on a running instance, and no client calls one until #777.
+  ⚠️ **`GET /instance` answers the operator's `OYL_INSTANCE_NAME` or `null` since #777**, never a
+  made-up default, and **every answer carries `Access-Control-Allow-Origin: *`**, with a preflight
+  to a routed path answering `204`, because the rider's app is always on another origin; it is safe
+  only because the instance reads no cookie and never sends `Allow-Credentials` (`src/handler.ts`
+  argues it).
 
 #### What exists, and what each is **not** yet
 
@@ -2500,13 +2533,16 @@ three editing this list on its own branch and conflicting with the other two.
     `@types/node` for the generator under `tools/`, and `tsconfig.platform-free.json` compiles
     `src/` alone with `lib: ["ES2024"]` and `types: []`. A `TextDecoder` in `src/` is therefore a
     compile error, which is why the codec carries its own UTF-8 reader **and its own XML reader**.
-    ⚠️ **`fit-file-parser` 5.0.2 (MIT) is now a devDependency of `packages/fit`**, imported from
+    ⚠️ **`fit-file-parser` 6.1.2 (MIT) is now a devDependency of `packages/fit`**, imported from
     one test file (`tools/fixture-corpus/third-party-acceptance.test.ts`) and never from `src/`. It
     is the independent third-party FIT reader #31's acceptance criterion requires, adopted under
     that issue's revision block, which struck "validate with the SDK's own checker" under
     ADR 0006 R1. `packages/fit/README.md` §1 records the reconciliation; that README's declaration
     no longer claims the package depends on nothing named `fit-file-parser`, and a reviewer
-    expecting the old sentence should read the new one.
+    expecting the old sentence should read the new one. ⚠️ **It was 5.0.2 until #755**: 6.1.2's
+    effective message and type tables differ from 5.0.2's only by two sub-sports (153
+    `mountain_enduro`, 154 `mountain_downhill`), and it parses every corpus file and the #138
+    uploads to identical output in both `list` and `cascade` mode.
     ⚠️ **Since [#89](https://github.com/openzigs/onyourleft/issues/89) it also holds
     `src/route/`**, `decodeGpxRoute` — the #32 decoder composed with
     `@onyourleft/domain`'s route profile, and the only place the codec and the profile meet. That
@@ -2578,13 +2614,15 @@ and routing it through `web-crypto.ts` would destroy the independence it exists 
 React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
 Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
-`packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
+`packages/sensors`) and — since #31 — `fit-file-parser` **6.1.2** (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
-MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.10.0** and `pmtiles` 4.5.0 (both
+MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.11.2** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
 one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence — ⚠️ **this said 6.7.0 until #489**,
 which took 6.10.0 with the browser gate re-run; the bump added `bidi-js` and `require-from-string`
-to that closure, both MIT, so the sentence above still describes it) and — also since #63 —
+to that closure, both MIT, so the sentence above still describes it; and **6.10.0 until #756**,
+which took 6.11.2 with the browser gate re-run and changed no dependency of `maplibre-gl` at all)
+and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,
@@ -3521,7 +3559,15 @@ and #91's 60-minute measured run on the device floor is still outstanding.
 the harness's 404 made **MapLibre retry a failed source** so the network never went idle, and a
 reviewer who remembers that is reading the old file. #535's review measured MapLibre **6.10.0**: an
 archive answering 404 is requested **once**, raises two `console.error`s and is not requested again
-over ten seconds; a connection dropped mid-request is requested **twice** and then left alone. The
+over ten seconds; a connection dropped mid-request is requested **twice** and then left alone.
+⚠️ **#756 re-measured it on 6.11.2 with 6.10.0 as the control, and half of that did not
+reproduce.** The 404 half held on both: one request, two `console.error`s, nothing more over ten
+seconds. A dropped connection was requested **once** on both, not twice, with the same two errors
+— by #535's own recorded method (`route.abort('internetdisconnected')`), by
+`route.abort('connectionreset')`, and cut 100 bytes into a 206 body by a local server. So the
+"twice" is not a change between the two versions, and it does not reproduce today on either by the
+method that produced it; why it once did is not known. The request is pmtiles' `FetchSource`, which
+is 4.5.0 in both runs. The
 advice stands for a reason that does not depend on any retry policy: `networkidle` resolves just as
 happily over a page that requested **nothing**, which is what a broken protocol registration looks
 like. Wait on the event you mean (`waitForRequest`), which fails immediately when the request is
@@ -4565,7 +4611,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0040.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0041.**
+  ⚠️ **0040 is [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md)**, taken by
+  [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29 for the history index on
+  the rider's instance. A reviewer who remembers this sentence offering 0040 is reading the old file.
   ⚠️ **0036 to 0039 are [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) to
   [ADR 0039](docs/adr/0039-racing-another-riders-ghost-on-consent.md)**, reserved and written together
   by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29 for the race-server
@@ -5361,6 +5410,11 @@ top of an issue **supersedes its body**.
 | Why the page has two palettes, how one is chosen before the first paint, and what the HUD keeps | `apps/web/src/design/tokens.ts` §`DARK_COLOUR_TOKENS`, `apps/web/src/design/theme-selection.ts`, `apps/web/tools/theme/theme-selection-plugin.ts`, `apps/web/browser/theme.browser.spec.ts`, [#672](https://github.com/openzigs/onyourleft/issues/672) |
 | Where a screen's longer explanation goes, which sentences may never be tucked, and what measures the fold | `apps/web/src/design/MoreAbout.tsx`, `apps/web/src/a11y/kept-visible.a11y.test.tsx`, `apps/web/browser/controls-first.browser.spec.ts`, [#666](https://github.com/openzigs/onyourleft/issues/666) |
 | What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
+| Which instance addresses the app will talk to, and why `http:` is refused before any request | `apps/web/src/instance/address.ts`, [#777](https://github.com/openzigs/onyourleft/issues/777) |
+| The one module that may talk to an instance, what it sends, and why a room's socket goes through it | `apps/web/src/instance/instance-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0036](docs/adr/0036-a-self-hostable-instance-server-now.md) D-3 |
+| Why the instance answers `Access-Control-Allow-Origin: *`, and why that is safe with bearer tokens | `apps/instance/src/handler.ts` §"A rider's app is on another origin", `apps/web/browser/identity.browser.spec.ts` §"#777" |
+| Where a sign-in to an instance is kept, why on the device and not the athlete row, and what Disconnect and an erase remove | `apps/web/src/instance/instance-port.ts` §"What the device keeps", §`instanceEraser` |
+| What the privacy policy says an instance receives, class by class, and what pins it | [`docs/privacy-policy.md`](docs/privacy-policy.md) §"An instance you connect to", `apps/web/src/privacy/no-network.test.ts` §"#778" |
 | How a device signs in to an instance with its key, what each refusal code means, and why the nonce is spent before the signature is checked | `apps/instance/src/auth/identity.ts`, `packages/domain/src/identity/device-statement.ts`, [#772](https://github.com/openzigs/onyourleft/issues/772) |
 | Why a room's WebSocket carries a ticket and never the session token, and where the room core's `Admit` comes from | `apps/instance/src/auth/tickets.ts` |
 | What an instance stores of a session token, a recovery code, a link code or an email-recovery token, and what proves it | `apps/instance/src/auth/sign-in.test.ts`, `devices.test.ts` (`databaseBytes`) |
@@ -5374,5 +5428,9 @@ top of an issue **supersedes its body**.
 | How a model's write-up is shown on a ride's page, why a saved one is screened again, what every state says, and what a rider with no model set up sees | `apps/web/src/detail/RideWriteUpSection.tsx`, `apps/web/src/detail/write-up.ts` §`shownWriteUp`, `apps/web/src/camera/write-up-screen.ts` §`screenSavedWriteUp`, `RideWriteUpSection.test.tsx`, [#805](https://github.com/openzigs/onyourleft/issues/805) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
 | What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
+| Where the history index lives, what it may never hold, where its embedding model may be, and what a model change does | `apps/instance/src/history/`, `apps/instance/src/store/migrations/0010-history-index.ts`, [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), `docs/operating-an-instance.md` §"The history index", [#835](https://github.com/openzigs/onyourleft/issues/835) |
+| Which step a passage of the rider's history reaches, how it is fenced, what happens to a reply that obeys a planted note, and why a hosted run never gets one | `apps/web/src/ride-analysis/template-v2.ts` §`HISTORY_FENCE_BEGIN`, `apps/web/src/ride-analysis/history.ts`, `apps/web/src/ride-analysis/template.ts` §`acceptHistoryNote`, `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/history.test.ts` §"a note planted with instructions" |
+| What a ride summary synced for the rider's history says, and which device may replace it | `apps/web/src/ride-analysis/ride-summary.ts`, `apps/web/src/instance/sync.ts` rule 7 |
+| Whether the rider's instance may keep a searchable index of their history for the AI analysis, where the embeddings are computed, what the index may never hold, and how retrieved text reaches the model | [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), [#835](https://github.com/openzigs/onyourleft/issues/835), [#836](https://github.com/openzigs/onyourleft/issues/836) |
 
 <!-- Last updated: 2026-09-29 by delivery:code-issue resolving #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->
