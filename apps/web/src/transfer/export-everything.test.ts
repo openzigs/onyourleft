@@ -20,6 +20,7 @@ import {
   rideFor,
   sideCameraReportFor,
   rideWriteUpFor,
+  riderTextFor,
   routeFor,
   seedAthletes,
   signedRecordFor,
@@ -27,7 +28,7 @@ import {
   workoutFor,
 } from '@onyourleft/store/testing';
 import type { ActivityId, PrivacyZoneRecord } from '@onyourleft/store';
-import { activityId, privacyZoneId, webCryptoVerifier } from '@onyourleft/store';
+import { activityId, privacyZoneId, TABLE, webCryptoVerifier } from '@onyourleft/store';
 import {
   degreesLatitude,
   degreesLongitude,
@@ -57,6 +58,7 @@ import {
   cameraFrameFileName,
   exportEverything,
   RIDE_WRITE_UP_UNREADABLE,
+  RIDER_TEXTS_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
   type AccountExportCursor,
@@ -468,6 +470,81 @@ describe('exporting everything', () => {
     // were allowed", which is true of a library of exactly `limit`.
     expect(report.exported).toBe(2);
     expect(report.continueAfter).toBeUndefined();
+  });
+});
+
+describe('the rider’s goals, ride notes and documents — #836, ADR 0040 D-10', () => {
+  it('carries all three as the rider’s own data, and nobody else’s', async () => {
+    const { written } = await seedLibrary(1);
+    const ride = written[0]!.ride;
+    await harness.write(async (store) => {
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'goal'));
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'note', ride.id));
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'document'));
+      await store.putRiderText(riderTextFor(ATHLETE_B, 'goal'));
+      await store.putRiderText(riderTextFor(ATHLETE_B, 'document'));
+    });
+    const manifest = manifestOf((await runExport()).files);
+
+    const goal = riderTextFor(ATHLETE_A, 'goal');
+    const note = riderTextFor(ATHLETE_A, 'note', ride.id);
+    const document = riderTextFor(ATHLETE_A, 'document');
+    expect(manifest['riderTexts']).toStrictEqual({
+      goals: { text: goal.text, savedAt: goal.savedAt },
+      rideNotes: [{ activityId: ride.id, text: note.text, savedAt: note.savedAt }],
+      documents: [{ name: document.name, text: document.text, savedAt: document.savedAt }],
+    });
+    const text = JSON.stringify(manifest);
+    expect(text).not.toContain(riderTextFor(ATHLETE_B, 'goal').text);
+    expect(text).not.toContain(riderTextFor(ATHLETE_B, 'document').name);
+  });
+
+  it('says there are none, rather than omitting them', async () => {
+    await seedLibrary(1);
+    expect(manifestOf((await runExport()).files)['riderTexts']).toStrictEqual({
+      goals: null,
+      rideNotes: [],
+      documents: [],
+    });
+  });
+
+  it('says a kind could not be read, carries nothing of it, and still writes the rest', async () => {
+    await seedLibrary(1);
+    await harness.write(async (store) => {
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'goal'));
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'document'));
+    });
+    // A row a later build — or a hand — wrote, which this build refuses.
+    await harness.discard();
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open(harness.databaseName);
+      opening.onsuccess = () => {
+        resolve(opening.result);
+      };
+      opening.onerror = () => {
+        reject(new Error('could not open the database'));
+      };
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(TABLE.riderTexts, 'readwrite');
+      transaction
+        .objectStore(TABLE.riderTexts)
+        .put({ ...riderTextFor(ATHLETE_A, 'document'), text: 'zzzz\u0000' });
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = () => {
+        reject(new Error('could not write the row'));
+      };
+    });
+    database.close();
+
+    const { files, report } = await runExport();
+    const texts = manifestOf(files)['riderTexts'] as Record<string, unknown>;
+    expect(texts['documents']).toStrictEqual({ unreadable: RIDER_TEXTS_UNREADABLE });
+    expect((texts['goals'] as { text: string }).text).toBe(riderTextFor(ATHLETE_A, 'goal').text);
+    expect(JSON.stringify(texts)).not.toContain('zzzz');
+    expect(report.exported).toBe(1);
   });
 });
 

@@ -22,10 +22,22 @@
  *    defect, one layer in.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
 
+import { endpointDecision } from '../../../web/src/camera/analysis-endpoint';
+import { hostedModelDecision } from '../../../web/src/camera/hosted-model';
+import { instanceAddress } from '../../../web/src/instance/address';
 import {
+  DATA_PATHS,
+  DATA_SAFETY_SECTION_ANSWERS,
+  DELETION_REQUEST_EMAIL,
+  SECTION_ANSWERS_PLAY_HELP,
+  sectionAnswerFaults,
+  type DataPath,
+  type DataSafetySectionAnswers,
   DATA_SAFETY_DECLARATION,
   FORBIDDEN_LOCATION_PERMISSIONS,
   LEGACY_SCAN_MAX_SDK,
@@ -384,6 +396,215 @@ describe('the declaration filed on Play', () => {
     for (const answer of DATA_SAFETY_DECLARATION) {
       expect(answer.why.length, answer.dataType).toBeGreaterThan(20);
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * The section-level answers — #562.
+ * -------------------------------------------------------------------------- */
+
+const pathById = (id: string): DataPath => {
+  const found = DATA_PATHS.find((path) => path.id === id);
+  if (found === undefined) {
+    throw new Error(`no path ${id}`);
+  }
+  return found;
+};
+
+const POLICY = readFileSync(
+  new URL('../../../../docs/privacy-policy.md', import.meta.url),
+  'utf8',
+).replace(/\s+/g, ' ');
+
+const policySection = (heading: string): string => {
+  const start = POLICY.indexOf(`## ${heading}`);
+  expect(start, heading).toBeGreaterThanOrEqual(0);
+  const end = POLICY.indexOf('## ', start + 3);
+  return POLICY.slice(start, end === -1 ? undefined : end);
+};
+
+describe('the section-level answers filed on Play — #562', () => {
+  it('are supported by the rows and the paths as filed', () => {
+    expect(
+      sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, DATA_SAFETY_SECTION_ANSWERS),
+    ).toEqual([]);
+  });
+
+  it('are required once any row is collected', () => {
+    // The declaration as filed collects seven rows, so this is the live case.
+    expect(DATA_SAFETY_DECLARATION.some((row) => row.collected)).toBe(true);
+    const faults = sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, undefined);
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toContain('section-level answers are absent');
+  });
+
+  it('are not required when nothing is collected', () => {
+    const nothing = DATA_SAFETY_DECLARATION.map((row) => ({ ...row, collected: false }));
+    expect(sectionAnswerFaults(nothing, [], undefined)).toEqual([]);
+  });
+
+  it('refuse a Yes to encrypted in transit while an http path is not a stated exception', () => {
+    const unstated: DataSafetySectionAnswers = {
+      ...DATA_SAFETY_SECTION_ANSWERS,
+      encryptedInTransit: { ...DATA_SAFETY_SECTION_ANSWERS.encryptedInTransit, exceptions: [] },
+    };
+    const faults = sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, unstated);
+    expect(faults).toEqual([
+      'encrypted in transit is answered Yes, and path own-computer can be plain http without being a stated exception',
+    ]);
+  });
+
+  it('accept a No to encrypted in transit with an http path', () => {
+    const no: DataSafetySectionAnswers = {
+      ...DATA_SAFETY_SECTION_ANSWERS,
+      encryptedInTransit: { answer: false, exceptions: [], why: 'a control' },
+    };
+    expect(sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, no)).toEqual([]);
+  });
+
+  it('refuse an exception that names no unencrypted path', () => {
+    const stale: DataSafetySectionAnswers = {
+      ...DATA_SAFETY_SECTION_ANSWERS,
+      encryptedInTransit: {
+        ...DATA_SAFETY_SECTION_ANSWERS.encryptedInTransit,
+        exceptions: ['own-computer', 'map-tiles'],
+      },
+    };
+    expect(sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, stale)).toEqual([
+      'exception map-tiles names no unencrypted path',
+    ]);
+  });
+
+  it('refuse a collected row that leaves by no recorded path', () => {
+    // Without this a new collected row could escape the encryption check by
+    // simply not being in DATA_PATHS.
+    const without = DATA_PATHS.map((path) => ({
+      ...path,
+      dataTypes: path.dataTypes.filter((type) => type !== 'Personal info — Name'),
+    }));
+    expect(
+      sectionAnswerFaults(DATA_SAFETY_DECLARATION, without, DATA_SAFETY_SECTION_ANSWERS),
+    ).toEqual(['Personal info — Name is collected and leaves by no recorded path']);
+  });
+
+  it('refuse a path that carries a row declared not collected', () => {
+    const extra = [
+      ...DATA_PATHS,
+      { id: 'extra', dataTypes: ['App activity'], encryptedInTransit: true, why: 'a control' },
+    ];
+    expect(
+      sectionAnswerFaults(DATA_SAFETY_DECLARATION, extra, DATA_SAFETY_SECTION_ANSWERS),
+    ).toEqual(['path extra carries App activity, which is not a collected row']);
+  });
+
+  it('refuse a Yes to deletion requests with no way to make one', () => {
+    const blank: DataSafetySectionAnswers = {
+      ...DATA_SAFETY_SECTION_ANSWERS,
+      deletionRequests: { ...DATA_SAFETY_SECTION_ANSWERS.deletionRequests, how: ' ' },
+    };
+    expect(sectionAnswerFaults(DATA_SAFETY_DECLARATION, DATA_PATHS, blank)).toEqual([
+      'deletion requests are answered Yes with no way to make one',
+    ]);
+  });
+
+  it('record the owner’s answers of 2026-09-30: Yes, and Yes by email', () => {
+    const { encryptedInTransit, deletionRequests } = DATA_SAFETY_SECTION_ANSWERS;
+    expect(encryptedInTransit.answer).toBe(true);
+    expect(encryptedInTransit.exceptions).toEqual(['own-computer']);
+    expect(deletionRequests.answer).toBe(true);
+    expect(DELETION_REQUEST_EMAIL).toBe('matt@openzigs.ai');
+    expect(deletionRequests.how).toContain(DELETION_REQUEST_EMAIL);
+    expect(deletionRequests.how).toContain('#906');
+    for (const answer of [encryptedInTransit, deletionRequests]) {
+      expect(answer.why).toContain('2026-09-30');
+    }
+  });
+
+  it('cite the Play Console Help page they were read against, dated', () => {
+    expect(SECTION_ANSWERS_PLAY_HELP.url).toMatch(/^https:\/\/support\.google\.com\//);
+    expect(SECTION_ANSWERS_PLAY_HELP.read).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(SECTION_ANSWERS_PLAY_HELP.encryption).toContain('encrypted in transit');
+    expect(SECTION_ANSWERS_PLAY_HELP.deletion).toContain('request that their data is deleted');
+  });
+
+  it('give a reason for every path', () => {
+    for (const path of DATA_PATHS) {
+      expect(path.why.length, path.id).toBeGreaterThan(20);
+    }
+  });
+});
+
+describe('each path’s encryption answer is the one the client enforces — #562', () => {
+  // A path's `encryptedInTransit` is a claim about which addresses the client
+  // accepts. Each is held to the rule that decides it, in the direction that
+  // would make the answer wrong.
+
+  it('the rider’s own computer accepts a plain http address, so that path is not encrypted', () => {
+    const plain = endpointDecision({
+      address: 'http://192.168.1.20:8080',
+      model: 'a-model',
+      switchedOn: true,
+    });
+    expect(plain.refusal).toBeUndefined();
+    expect(pathById('own-computer').encryptedInTransit).toBe(plain.endpoint === undefined);
+  });
+
+  it('a hosted model refuses a plain http address, so that path is encrypted', () => {
+    const plain = hostedModelDecision({
+      address: 'http://models.example',
+      model: 'a-model',
+      key: 'a-key',
+    });
+    expect(plain.refusal).toBe('not-https');
+    expect(pathById('hosted-model').encryptedInTransit).toBe(plain.model === undefined);
+  });
+
+  it('an instance refuses plain http across a network, and admits it only to this device', () => {
+    expect(instanceAddress('http://ride.example').kind).toBe('refused');
+    expect(instanceAddress('http://192.168.1.20:8787').kind).toBe('refused');
+    // Loopback is admitted, and never leaves the device, so it is not transit.
+    expect(instanceAddress('http://localhost:8787').kind).toBe('accepted');
+    expect(pathById('instance').encryptedInTransit).toBe(true);
+  });
+
+  it('the map is fetched over https', () => {
+    // Read as text: `basemap.ts` reads `import.meta.env`, which this package's
+    // program has no types for, so importing it would not typecheck here.
+    const basemap = readFileSync(
+      new URL('../../../web/src/map/basemap.ts', import.meta.url),
+      'utf8',
+    );
+    const published = /PUBLISHED_BASEMAP_URL = '([^']+)'/.exec(basemap)?.[1];
+    expect(published, 'PUBLISHED_BASEMAP_URL').toBeDefined();
+    expect(new URL(published ?? '').protocol).toBe('https:');
+    expect(pathById('map-tiles').encryptedInTransit).toBe(true);
+  });
+});
+
+describe('the privacy policy agrees with the section-level answers — #562', () => {
+  it('discloses the exception wherever the rider’s own computer is described', () => {
+    // Play's form cannot carry the exception to its Yes, so the policy is the
+    // only place a rider can read it.
+    expect(pathById('own-computer').encryptedInTransit).toBe(false);
+    expect(policySection('Pictures sent to your own computer')).toContain(
+      'not encrypted on the way',
+    );
+    expect(policySection('A ride sent to your own computer')).toContain('not encrypted on the way');
+  });
+
+  it('says everything else travels encrypted, naming the one exception', () => {
+    const leaves = policySection('What leaves the device');
+    expect(leaves).toContain('encrypted on the way');
+    expect(leaves).toContain('except');
+    expect(leaves).toContain('your own computer');
+  });
+
+  it('names the deletion address where it says how to delete, and in Contact', () => {
+    expect(policySection('Deleting your data')).toContain(DELETION_REQUEST_EMAIL);
+    expect(policySection('Contact')).toContain(DELETION_REQUEST_EMAIL);
+    expect(POLICY).toContain(`**Deleting what an instance holds.**`);
+    const instance = POLICY.slice(POLICY.indexOf('**Deleting what an instance holds.**'));
+    expect(instance.slice(0, 600)).toContain(DELETION_REQUEST_EMAIL);
   });
 });
 

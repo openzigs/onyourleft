@@ -108,6 +108,8 @@ import type {
   RideWriteUpRecord,
   SyncBaseKind,
   SyncBaseRecord,
+  RiderTextKind,
+  RiderTextRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -960,12 +962,65 @@ export function syncBaseFor(
     return hex.slice(0, 64);
   };
   const content = digestOf(`${owner}|${activity}|content`);
+  // #836: a goal or a document belongs to no ride, so its row names none.
+  const riderless = kind === 'goal' || kind === 'document';
   return {
     athleteId: owner,
     kind,
-    key: kind === 'activity' ? content : activity,
-    activityId: activity,
+    key:
+      kind === 'activity'
+        ? content
+        : kind === 'goal'
+          ? 'goals'
+          : kind === 'document'
+            ? `document-${activity}`
+            : activity,
+    activityId: riderless ? null : activity,
     localDigest: digestOf(`${owner}|${activity}|${kind}|local`),
     remoteDigest: digestOf(`${owner}|${activity}|${kind}|remote`),
   };
+}
+
+/**
+ * One rider text — #836: the goals, a note on `activity`, or a document.
+ *
+ * ⚠️ **Different text per athlete and per kind**, so a scoping probe that
+ * returned somebody else's text cannot hand back the right answer. Two
+ * paragraphs and a tab, so the two control characters a text may hold are in
+ * the round trip.
+ */
+export function riderTextFor(
+  owner: AthleteId,
+  kind: RiderTextKind,
+  activity: ActivityId = activityId('ride-for-a-note'),
+): RiderTextRecord {
+  const mark = `${owner} ${String(ATHLETES.indexOf(owner))}`;
+  const common = {
+    athleteId: owner,
+    savedAt: unixSeconds(FIXTURE_EPOCH + 400_000 + ATHLETES.indexOf(owner)),
+  };
+  switch (kind) {
+    case 'goal':
+      return {
+        ...common,
+        kind,
+        key: 'goals',
+        text: `Ride a hundred miles in June, for ${mark}.\n\nKeep\tthe easy days easy.`,
+      };
+    case 'note':
+      return {
+        ...common,
+        kind,
+        key: activity,
+        text: `Legs heavy after a late night, for ${mark}.\n\tWindy on the climb.`,
+      };
+    case 'document':
+      return {
+        ...common,
+        kind,
+        key: `plan-${owner}`,
+        name: `Base plan for ${mark}.md`,
+        text: `# Base plan for ${mark}\n\n- Week 1:\tthree rides.`,
+      };
+  }
 }

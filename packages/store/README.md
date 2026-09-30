@@ -170,7 +170,7 @@ IndexedDB has no `EXPLAIN`, so "this query uses an index" is asserted one level 
 | Deleting | Also deletes |
 |---|---|
 | an athlete | their activities, those activities' laps, their privacy zones, their stream sets and blobs, **and their recordings in progress with every chunk** |
-| an activity | that activity's laps, its stream set and its blobs |
+| an activity | that activity's laps, its stream set and its blobs — and since #836 its note |
 
 A half-recorded ride is a GPS trace like any other, so erasure that left it behind would leave the
 athlete's route on the device under a row no scoped read can reach. That is the orphan-as-privacy-
@@ -818,6 +818,38 @@ and must go red. ⚠️ Nothing calls the read yet: #331 is its first caller, an
 
 A sync base row of kind `race-consent` (keyed by the ride's id) is what stops a device that still
 says "yes" putting a consent back after another device revoked it (`apps/web/src/instance/sync.ts`).
+
+## The rider's goals, ride notes and documents — #836, ADR 0040 D-1
+
+Schema version 16, additive: a new store, `riderTexts`, and no existing record changes shape. It
+holds what the rider writes or adds for the ride analysis to look back on — **their goals** (one row,
+key `goals`), **a note on a ride** (key: the ride's id; the ride must be the athlete's) and **their
+documents** (key: the document's id, with the file's name) — as plain text. The kinds are the
+instance's sync kinds word for word, because each row syncs as the item of that kind (ADR 0040
+D-1: the device copy is canonical; the instance's index is cut from what it synced).
+
+The limits are in characters (UTF-16 code units, `String.length`, which is how the instance counts a
+passage), and `rider-text.ts` says where each comes from: a note is at most 900, one passage; the
+goals 4 000; a document 100 000, about 112 passages and about 20 s to re-embed at the one measured
+CPU-only rate; at most 50 documents. A text holds no control character but a tab or a newline —
+`putRiderText` folds carriage returns first — and every refusal names the field and never the value,
+because free text can name anything. One rule, `riderTextProblem`, holds a row on the way in and on
+the way out, so a hand-edited row is a `StoreDecodeError` rather than something believed.
+
+| Deleting | Also deletes |
+|---|---|
+| a ride | its note |
+| an athlete | every goal, note and document (counted as `riderTexts`) |
+
+The primary key is `[athleteId+kind+key]`, so, like the sync base, no row can be read, replaced or
+deleted without naming whose it is — which matters here more than anywhere: every athlete's goals
+share the key `goals`. `activity-store.scoping.test.ts` probes that exact collision.
+`assertRiderTextRoundTrip` reads a kept text back through the point read AND the list, and is red
+against `memoryWriteStoreFactory`.
+
+The sync base gains the three kinds. A note's base row is an item of its ride; a goal's and a
+document's name **no** ride — their `activityId` is `null`, and `syncBaseProblem` refuses any other
+combination.
 
 ## Not in this package
 

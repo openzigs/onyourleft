@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **15** since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **16** since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -105,10 +105,15 @@
  * (`migrations.ts` §`ACTIVITY_MAY_BE_RACED`). No store and no index changes
  * — see {@link STORES_V15} for why the cross-rider read needs no new index.
  *
+ * ⚠️ **Version 16 is #836's `riderTexts`** — the rider's goals, ride notes and
+ * documents — additive: a new store, and no existing record's shape changes
+ * (a sync base row may now carry a `null` ride, for a goal or a document,
+ * which no row written at 15 does).
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -186,6 +191,14 @@ export const TABLE = {
    * the ride it names on purpose (`records.ts` §`SyncBaseRecord`).
    */
   syncBases: 'syncBases',
+  /**
+   * #836: what the rider wrote or added for the analysis agent's history —
+   * their goals, a note per ride and their documents — plain text, kept here
+   * first and synced (ADR 0040 D-1). Keyed by the athlete, the kind and the
+   * key together, like the sync base, so no row can be named without naming
+   * whose it is.
+   */
+  riderTexts: 'riderTexts',
 } as const;
 
 /**
@@ -352,6 +365,10 @@ export const INDEX = {
    * there is no key that names a row without naming whose it is.
    */
   syncBaseByAthlete: 'athleteId',
+  /** #836: `deleteAthlete`'s cascade. */
+  riderTextByAthlete: 'athleteId',
+  /** #836: `listRiderTexts` — one athlete's texts of one kind, as one index range. */
+  riderTextByAthleteAndKind: '[athleteId+kind]',
 } as const;
 
 /**
@@ -789,6 +806,25 @@ export const STORES_V15: Readonly<Record<string, string>> = {
   // The nineteen stores of versions 1 to 14 are inherited unchanged.
 };
 
+/**
+ * Version 16 — #836's rider texts, added beside the nineteen stores that
+ * exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import: the account export carries every goal, note and document as the
+ * rider's own data (ADR 0040 D-10).
+ *
+ * The primary key is compound and leads with the athlete, for
+ * {@link STORES_V14}'s reason.
+ */
+export const STORES_V16: Readonly<Record<string, string>> = {
+  // The nineteen stores of versions 1 to 15 are inherited unchanged.
+  [TABLE.riderTexts]: [
+    '[athleteId+kind+key]',
+    INDEX.riderTextByAthlete,
+    INDEX.riderTextByAthleteAndKind,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -805,4 +841,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V13,
   STORES_V14,
   STORES_V15,
+  STORES_V16,
 ];

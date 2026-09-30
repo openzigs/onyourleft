@@ -73,6 +73,12 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athle
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import { MASKED_WORDS_LEAD, MaskedWordsPanel } from '../athlete/MaskedWordsPanel';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
+import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
+import { DocumentsPanel } from '../rider-text/DocumentsPanel';
+import { RiderTextBox } from '../rider-text/RiderTextBox';
+import type { RiderTextPort } from '../rider-text/rider-text-port';
+import { GOALS_WORDS } from '../rider-text/words';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
@@ -201,6 +207,9 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   'the app asks',
   CLEARING_STILL_REMOVES,
   MASKED_WORDS_LEAD,
+  // #836, ADR 0040 D-11: what the goals and documents are kept as, where they
+  // go, and that a model reads them.
+  ...RIDER_TEXT_KEPT_VISIBLE,
 ];
 
 /** Said when there is nothing to write a weight to. */
@@ -354,6 +363,12 @@ export interface SettingsViewProps {
    * panel then says so and offers no list.
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
+  /**
+   * The rider's goals and documents for the ride analysis (#836).
+   * `undefined` where this browser has no local store — each panel then says
+   * so and offers no control.
+   */
+  readonly riderText?: RiderTextPort | undefined;
 }
 
 export function SettingsView({
@@ -371,6 +386,7 @@ export function SettingsView({
   basemap,
   themeStorage,
   maskedWords,
+  riderText,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -527,6 +543,15 @@ export function SettingsView({
 
       {/* #839. Beside the map tiles: both are about what leaves this device. */}
       <MaskedWordsPanel port={maskedWords} />
+      <RiderTextBox
+        port={riderText}
+        kind="goal"
+        textKey={GOALS_KEY}
+        maximum={MAXIMUM_GOALS_CHARACTERS}
+        words={GOALS_WORDS}
+        headingLevel={2}
+      />
+      <DocumentsPanel port={riderText} />
 
       {/* #777. A link, not the form: the one screen that sends something to a
           server is its own page, with what it sends above its Connect button. */}

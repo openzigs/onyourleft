@@ -44,6 +44,7 @@ import type {
   RideWriteUpRecord,
   RouteRecord,
   SyncBaseRecord,
+  RiderTextRecord,
   SegmentEndpointRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -831,7 +832,8 @@ export async function assertSyncBaseRoundTrip(
   const rows = await harness.roundTrip(
     async (store) => {
       await store.putSyncBase(base);
-      await store.deleteActivity(base.athleteId, base.activityId);
+      // A goal's or a document's row names no ride (#836): nothing to delete.
+      if (base.activityId !== null) await store.deleteActivity(base.athleteId, base.activityId);
     },
     async (store) => store.listSyncBase(base.athleteId),
   );
@@ -844,6 +846,46 @@ export async function assertSyncBaseRoundTrip(
   for (const field of ['athleteId', 'activityId', 'localDigest', 'remoteDigest'] as const) {
     if (read[field] !== base[field]) {
       throw new RoundTripFailure(`syncBase.${field}: is not the value kept`);
+    }
+  }
+  return read;
+}
+
+/**
+ * Keeps a rider text (#836), closes every connection, and reads it back
+ * through `getRiderText` AND `listRiderTexts` — the documents screen reads the
+ * list, the ride page and a sync read the point.
+ *
+ * `memoryWriteStoreFactory` answers the write with the record it was handed
+ * and never writes it; this is what notices.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertRiderTextRoundTrip(
+  harness: StoreHarness,
+  text: RiderTextRecord,
+): Promise<RiderTextRecord> {
+  const [read, listed] = await harness.roundTrip(
+    async (store) => {
+      await store.putRiderText(text);
+    },
+    async (store) =>
+      Promise.all([
+        store.getRiderText(text.athleteId, text.kind, text.key),
+        store.listRiderTexts(text.athleteId, text.kind),
+      ]),
+  );
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the ${text.kind} ${text.key} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (!listed.some((row) => row.key === text.key && row.text === read.text)) {
+    throw new RoundTripFailure(`the ${text.kind} ${text.key} is not in the list a screen reads`);
+  }
+  for (const field of ['athleteId', 'kind', 'key', 'name', 'text', 'savedAt'] as const) {
+    if (read[field] !== text[field]) {
+      throw new RoundTripFailure(`riderText.${field}: is not the value kept`);
     }
   }
   return read;

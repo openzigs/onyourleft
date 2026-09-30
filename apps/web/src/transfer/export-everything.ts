@@ -112,6 +112,8 @@ import {
   type FramingCheckRecord,
   type RideWriteUpRecord,
   type RideWriteUpSourceRecord,
+  type RiderTextKind,
+  type RiderTextRecord,
   type SideCameraReportRecord,
   type SideSessionKind,
   type SideSessionSourceRecord,
@@ -208,6 +210,29 @@ export interface ManifestRideWriteUp {
   readonly missingSections: readonly number[];
   readonly writtenAt: UnixSeconds;
 }
+
+/**
+ * The rider's own goals, ride notes and documents as the manifest carries them
+ * (#836, ADR 0040 D-10) — the device is where they are kept (D-1), so this is
+ * where a rider leaving takes them from. Field by field, never the row: the
+ * athlete is the archive's own. `{ unreadable }` where a row of that kind on
+ * this device could not be read, for {@link SIDE_CAMERA_REPORT_UNREADABLE}'s
+ * reason — and carrying nothing of the row, which is free text.
+ */
+export interface ManifestRiderTexts {
+  readonly goals:
+    { readonly text: string; readonly savedAt: number } | null | { readonly unreadable: string };
+  readonly rideNotes:
+    | readonly { readonly activityId: string; readonly text: string; readonly savedAt: number }[]
+    | { readonly unreadable: string };
+  readonly documents:
+    | readonly { readonly name: string; readonly text: string; readonly savedAt: number }[]
+    | { readonly unreadable: string };
+}
+
+/** What the manifest says of goals, notes or documents on this device that could not be read. */
+export const RIDER_TEXTS_UNREADABLE =
+  'this device holds some of these that could not be read, so this archive does not contain them';
 
 /**
  * What the manifest says of a side-camera report that is on this device and
@@ -485,6 +510,8 @@ export function accountManifest(input: {
   readonly activities: readonly ManifestEntry[];
   /** #384. @see CameraManifest */
   readonly camera: CameraManifest;
+  /** #836. @see ManifestRiderTexts — absent from a manifest made before #836. */
+  readonly riderTexts?: ManifestRiderTexts | undefined;
   /**
    * #528, ADR 0033 D-7: where the rider was in the side camera's picture in
    * their last session — numbers, never a picture — and, since #530, whether
@@ -540,6 +567,8 @@ export function accountManifest(input: {
     // #384, ADR 0029 D-3: the manifest **names** the pictures, and says in
     // words what an activity file cannot carry.
     camera: input.camera,
+    // #836, ADR 0040 D-10: the rider's own goals, ride notes and documents.
+    riderTexts: input.riderTexts ?? null,
     // #528, ADR 0033 D-7 and ADR 0004 E: the athlete's own numbers coming back
     // to them. Fields, not the row: the record's `athleteId` is already the
     // manifest's own, and a spread would carry whatever the record grows next.
@@ -810,6 +839,7 @@ export async function exportEverything(
       store.listWorkouts(athleteId),
       store.getFramingReference(athleteId),
     ]);
+  const riderTexts = await readRiderTexts(store, athleteId);
 
   // #384, ADR 0029 D-3.
   //
@@ -875,6 +905,7 @@ export async function exportEverything(
         cannotCarry: CAMERA_CANNOT_CARRY,
       },
       framingReference,
+      riderTexts,
       exportedAt: Math.trunc(Date.now() / 1000),
     }),
   );
@@ -922,6 +953,50 @@ async function readRideWriteUp(
     }
     throw error;
   }
+}
+
+/** Every goal, ride note and document of the rider's, field by field. @see ManifestRiderTexts */
+async function readRiderTexts(
+  store: AccountStore,
+  athleteId: AthleteId,
+): Promise<ManifestRiderTexts> {
+  const read = async (
+    kind: RiderTextKind,
+  ): Promise<readonly RiderTextRecord[] | { readonly unreadable: string }> => {
+    try {
+      return await store.listRiderTexts(athleteId, kind);
+    } catch (error) {
+      if (error instanceof StoreDecodeError) {
+        return { unreadable: RIDER_TEXTS_UNREADABLE };
+      }
+      throw error;
+    }
+  };
+  const [goals, notes, documents] = await Promise.all([
+    read('goal'),
+    read('note'),
+    read('document'),
+  ]);
+  return {
+    goals:
+      'unreadable' in goals
+        ? goals
+        : goals[0] === undefined
+          ? null
+          : { text: goals[0].text, savedAt: goals[0].savedAt },
+    rideNotes:
+      'unreadable' in notes
+        ? notes
+        : notes.map((note) => ({ activityId: note.key, text: note.text, savedAt: note.savedAt })),
+    documents:
+      'unreadable' in documents
+        ? documents
+        : documents.map((document) => ({
+            name: document.name ?? '',
+            text: document.text,
+            savedAt: document.savedAt,
+          })),
+  };
 }
 
 /** A pose summary, field by field. @see ManifestPoseSummary */
