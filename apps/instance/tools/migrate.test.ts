@@ -23,6 +23,11 @@ afterEach(async () => {
   directory = undefined;
 });
 
+/** The tables a run of the tool lists after it, with their row counts. */
+function tablesIn(out: string): string[] {
+  return [...out.matchAll(/^ {2}(\w+): \d+ row\(s\)$/gm)].map((match) => match[1] as string);
+}
+
 function migrate(...args: string[]): { status: number | null; out: string } {
   const run = spawnSync(process.execPath, [TOOL, ...args], { encoding: 'utf8' });
   return { status: run.status, out: `${run.stdout}${run.stderr}` };
@@ -43,12 +48,21 @@ describe('tools/migrate.ts (#769)', () => {
     expect(down.out).toMatch(/down: 1 migration\(s\) changed/);
     expect(down.out).not.toContain(LAST);
     expect(down.out).toContain(`applied: ${NAMES.slice(0, -1).join(', ')}\n`);
-    // The newest migration (0009, #776) is the one that creates `sync_item`.
-    expect(down.out).not.toMatch(/ {2}sync_item:/);
+    // What the newest migration dropped is read off the two runs, never named
+    // here: naming it (`sync_item` for 0009, the history index for 0010) made
+    // this test the one to edit whenever a migration lands after it.
+    const all = tablesIn(latest.out);
+    const belowLast = tablesIn(down.out);
+    expect(all.length).toBeGreaterThan(0);
+    expect(all).toEqual(expect.arrayContaining(belowLast));
+    // ⚠️ Every migration so far creates a table, so its `down` drops one. A
+    // migration that only adds a column would need a different check here.
+    expect(belowLast.length).toBeLessThan(all.length);
 
     const up = migrate(path, 'up');
     expect(up.out).toMatch(/up: 1 migration\(s\) changed/);
     expect(up.out).toContain(LAST);
+    expect(tablesIn(up.out)).toEqual(all);
   });
 
   it('refuses status, up and down on a path with no database, and creates none', async () => {

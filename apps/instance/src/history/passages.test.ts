@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/** What a synced item is cut into (#835, ADR 0040 D-2, D-8). */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  cutSource,
+  INDEXED_KINDS,
+  MAXIMUM_PASSAGE_CHARACTERS,
+  MAXIMUM_PASSAGES_PER_SOURCE,
+  splitBlock,
+} from './passages.ts';
+
+const bytes = (value: unknown): Uint8Array =>
+  new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value));
+
+describe('which items are cut, and from what', () => {
+  it('indexes the four contents the owner named and nothing else (ADR 0040 D-2)', () => {
+    expect([...INDEXED_KINDS].sort()).toStrictEqual(
+      ['document', 'goal', 'note', 'ride-summary', 'write-up'].sort(),
+    );
+  });
+
+  it('never cuts a side-camera report, whose pose summary the index may not hold', () => {
+    const report = bytes({ text: 'Possibly more upright late on.', pose: { torso: 2 } });
+    expect(cutSource('side-camera-report', report)).toEqual({ kind: 'empty' });
+    expect(cutSource('activity', report)).toEqual({ kind: 'empty' });
+  });
+
+  it('takes a write-up’s text and nothing else of the record', () => {
+    const cut = cutSource(
+      'write-up',
+      bytes({ text: 'A strong finish.', templateId: 'ride-write-up', source: 'computer' }),
+    );
+    expect(cut).toEqual({ kind: 'passages', passages: ['A strong finish.'] });
+  });
+
+  it('takes each of a ride summary’s passages, as the device built them', () => {
+    const cut = cutSource(
+      'ride-summary',
+      bytes({
+        format: 'onyourleft.ride-summary',
+        version: 1,
+        passages: ['Whole ride.', 'Climb.', 7],
+      }),
+    );
+    expect(cut).toEqual({ kind: 'passages', passages: ['Whole ride.', 'Climb.'] });
+  });
+
+  it('takes a goal, note or document’s text, as JSON or as plain text, unfiltered', () => {
+    expect(cutSource('note', bytes({ text: 'Knee felt odd on Tuesday.' }))).toEqual({
+      kind: 'passages',
+      passages: ['Knee felt odd on Tuesday.'],
+    });
+    expect(cutSource('document', bytes('Week 1: base.\n\nWeek 2: build.'))).toEqual({
+      kind: 'passages',
+      passages: ['Week 1: base.\n\nWeek 2: build.'],
+    });
+    expect(cutSource('goal', bytes({ other: 1 }))).toEqual({ kind: 'empty' });
+  });
+
+  it('finds nothing in a write-up with no text, or bytes that are not UTF-8', () => {
+    expect(cutSource('write-up', bytes({}))).toEqual({ kind: 'empty' });
+    expect(cutSource('write-up', bytes('not json'))).toEqual({ kind: 'empty' });
+    expect(cutSource('note', new Uint8Array([0xff, 0xfe, 0x00]))).toEqual({ kind: 'empty' });
+    expect(cutSource('note', bytes({ text: '   ' }))).toEqual({ kind: 'empty' });
+  });
+
+  it('never indexes an item carrying a picture, in any kind (ADR 0040 D-2 item 1)', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(cutSource('document', bytes(`My fit: ${png}`))).toEqual({ kind: 'picture' });
+    expect(cutSource('note', bytes({ text: `see ${png}` }))).toEqual({ kind: 'picture' });
+    expect(cutSource('write-up', bytes({ text: 'x', extra: png }))).toEqual({ kind: 'picture' });
+    // The control: the word "data" is not a picture.
+    expect(cutSource('note', bytes({ text: 'The data: power held.' })).kind).toBe('passages');
+  });
+
+  it('refuses an item that would take more passages than one item may, rather than keeping part of it', () => {
+    const paragraph = `${'word '.repeat(170).trim()}.`;
+    const long = Array.from({ length: MAXIMUM_PASSAGES_PER_SOURCE + 1 }, () => paragraph).join(
+      '\n\n',
+    );
+    expect(cutSource('document', bytes(long))).toEqual({ kind: 'too-long' });
+  });
+});
+
+describe('a block, split', () => {
+  it('keeps a short block whole', () => {
+    expect(splitBlock('  Short.  ')).toStrictEqual(['Short.']);
+  });
+
+  it('splits at a paragraph, then a sentence, then a space — never past the limit, never losing a word', () => {
+    const sentence = 'The climb went well and the cadence held steady throughout. ';
+    const block = `${sentence.repeat(20)}\n\n${sentence.repeat(3)}`;
+    const passages = splitBlock(block);
+    expect(passages.length).toBeGreaterThan(1);
+    for (const passage of passages) {
+      expect(passage.length).toBeLessThanOrEqual(MAXIMUM_PASSAGE_CHARACTERS);
+      expect(passage.endsWith('.')).toBe(true);
+    }
+    expect(passages.join(' ').replace(/\s+/g, ' ')).toBe(block.replace(/\s+/g, ' ').trim());
+  });
+
+  it('cuts a word with no space in it at the limit, and never through a surrogate pair', () => {
+    const passages = splitBlock('🚲'.repeat(600));
+    for (const passage of passages) {
+      expect(passage.length).toBeLessThanOrEqual(MAXIMUM_PASSAGE_CHARACTERS);
+      expect(passage.length % 2).toBe(0);
+    }
+    expect(passages.join('')).toBe('🚲'.repeat(600));
+  });
+});

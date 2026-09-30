@@ -5,6 +5,7 @@ import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
+import { HISTORY_ROUTES } from './history/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
@@ -194,6 +195,7 @@ export const ROUTES: readonly Route[] = [
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,
+  ...HISTORY_ROUTES,
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/start',

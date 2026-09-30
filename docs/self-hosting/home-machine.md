@@ -112,6 +112,55 @@ docker compose run --rm --no-deps --entrypoint node migrate \
   src/operator/cli.ts room-open saturday-ride --kind ride --length 40000
 ```
 
+## The history index (optional)
+
+The post-ride write-up can look back at a rider's own history — their earlier write-ups, ride
+summaries, goals, notes and documents — when the instance keeps a searchable index of it
+([ADR 0040](../adr/0040-a-history-index-on-the-riders-instance.md), #835). The index is worked out
+by an embedding model **on this machine**: nothing is sent anywhere else to build it. Without it
+the instance works exactly as before, and a write-up is written without history.
+
+1. In `.env`: `COMPOSE_PROFILES=history` and `OYL_INSTANCE_EMBEDDING_URL=http://ollama:11434`.
+2. Start the model server and pull the model once:
+
+   ```bash
+   cd apps/instance/deploy/home
+   docker compose up -d ollama
+   docker compose exec ollama ollama pull nomic-embed-text
+   docker compose up -d instance
+   ```
+
+   `nomic-embed-text` (`nomic-ai/nomic-embed-text-v1.5`, Apache-2.0, 274 MB) is the default. You may
+   name another in `OYL_INSTANCE_EMBEDDING_MODEL`; changing it re-embeds everything, and until that
+   has finished a write-up gets less history, never a mixture of two models'.
+
+3. `docker compose logs instance` says `"event":"history-index","state":"on"`. If it says `off`,
+   the `code` says why, and the instance's standard error has the whole sentence.
+
+⚠️ **Never publish Ollama's port and never point the tunnel at it.** Its API has **no
+authentication**: a published port is an open model server for anybody who can reach it. The
+compose file publishes none, and the instance is the only thing that talks to it, by its service
+name over this project's own network. The instance also refuses an embedding address that is not
+this machine or its private network, and checks where the name resolved to on every request.
+
+**A GPU is optional.** On the processor, four cores embed about six passages a second, measured on
+an Apple M4 Pro in Docker — enough for a rider's history, but ⚠️ **not measured on a Windows PC**
+([#835](https://github.com/openzigs/onyourleft/issues/835) owes that figure). Docker Desktop passes
+through an NVIDIA GPU only, on the WSL 2 backend: add to the `ollama` service
+
+```yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+and check it with `docker run --rm -it --gpus=all nvcr.io/nvidia/k8s/cuda-sample:nbody nbody -gpu
+-benchmark` ([Docker's GPU guide](https://docs.docker.com/desktop/features/gpu/)).
+
 ## Compression and your upload
 
 A home connection's **upload** is the first thing a room runs out of — before the CPU and before

@@ -89,6 +89,30 @@ it off on a rented box with bandwidth to spare. Restart the instance to change i
 (`docker compose up -d instance`). A client offers compression on every socket; with the dial off,
 the handshake simply answers without it.
 
+## The history index
+
+With `OYL_INSTANCE_EMBEDDING_URL` set, the instance keeps a searchable index of each rider's synced
+history for the post-ride write-up ([ADR 0040](adr/0040-a-history-index-on-the-riders-instance.md)).
+It is an **index, never a store of record**: every row is cut from an item a rider's device synced,
+it goes with that item and with the account, it is not in a rider's export (the export says which
+model built it), and it can be thrown away and made again.
+
+| You see | It means |
+|---|---|
+| `"event":"history-index","state":"on","model":…` at start | the index is on, with that model |
+| `"event":"history-index","state":"off","code":"not-set"` | no embedding address is set: history is off, and nothing else changes |
+| `…"state":"off","code":"not-local"` | the address was refused: it must be localhost, a loopback or private address, or a single-label (Compose service) name. Standard error has the sentence |
+| `"event":"history-indexed","indexed":n,"stopped":null` | a catch-up indexed `n` items and nothing is waiting |
+| `…"stopped":"unreachable"` (or `refused`, `not-local`, `malformed`) | the model could not be used; the items wait, and nothing is embedded anywhere else. It is tried again at the next sync and the next start |
+
+**Changing the model** (`OYL_INSTANCE_EMBEDDING_MODEL`, or either prefix) re-embeds every item at
+the next start. Until it has finished, a search returns fewer passages, never rows of two models.
+**Throwing the index away** — `DELETE FROM history_passage; DELETE FROM history_source;` on a
+stopped instance's database — loses nothing: the next start makes it again from the synced items.
+
+⚠️ **Nothing is measured on the owner's box yet**: the ingest rate (passages a second) and one
+query's time, CPU-only and on a GPU if present, are owed by #835.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),

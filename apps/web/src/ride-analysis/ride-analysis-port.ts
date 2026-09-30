@@ -46,8 +46,12 @@ export interface AskProgress {
 
 /** How an ask ended. */
 export type AskOutcome =
-  /** Saved with the ride, replacing any write-up it had. */
-  | { readonly kind: 'written' }
+  /**
+   * Saved with the ride, replacing any write-up it had. `notice`, from a
+   * fixed table, says what the write-up had to leave out of the rider's
+   * history (#835) — `ride-analysis.ts` §`HISTORY_NOTICE_TEXT`.
+   */
+  | { readonly kind: 'written'; readonly notice?: string }
   /** Nothing was saved, and any earlier write-up is untouched. `text` is from a fixed table. */
   | { readonly kind: 'failed'; readonly text: string };
 

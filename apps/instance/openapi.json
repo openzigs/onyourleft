@@ -394,7 +394,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations` and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`."
                 }
               }
             }
@@ -2245,6 +2245,119 @@
         }
       }
     },
+    "/v1/history/search": {
+      "post": {
+        "operationId": "searchHistory",
+        "summary": "The passages of YOUR history — past write-ups, ride summaries, goals, notes and documents you synced — that best match `query`, at most `limit` of them (1–6) and `characters` in all (1–5400); a passage is never cut to fit. `rideId`, the synced id of the ride being written about, leaves that ride out and dates the others against it in whole weeks. `query` is at most 2000 characters. `unavailable` when this instance has no embedding model, or cannot reach it.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "characters": {
+                    "type": "integer"
+                  },
+                  "rideId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query",
+                  "limit",
+                  "characters"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "write-up",
+                              "ride-summary",
+                              "goal",
+                              "note",
+                              "document"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "label",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "passages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/athletes/{athleteId}/hide-display-name": {
       "post": {
         "operationId": "hideDisplayName",
@@ -3669,6 +3782,7 @@
                             "enum": [
                               "activity",
                               "write-up",
+                              "ride-summary",
                               "side-camera-report",
                               "goal",
                               "note",

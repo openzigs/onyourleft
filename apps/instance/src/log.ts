@@ -67,6 +67,10 @@ export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
   'registration',
   'identity',
   'state',
+  // The history index (#835): the operator's own model, and how a catch-up went.
+  'model',
+  'indexed',
+  'stopped',
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */
