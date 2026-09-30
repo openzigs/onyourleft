@@ -207,7 +207,10 @@ describe('the declaration filed on Play', () => {
     expect(precise?.why).toContain('handled while the request is served and not kept');
   });
 
-  it('declares no precise location collection and no sharing of it', () => {
+  it('declares a room’s route as precise location collected, optional and not shared — #784', () => {
+    // Until #784 this row was `collected: false`: no position ever left. A
+    // private room's route does — to the instance, and to the riders its maker
+    // gives the code to — so the row says so, and says what keeps it narrow.
     const precise = DATA_SAFETY_DECLARATION.find(
       (answer) => answer.dataType === 'Location — precise location',
     );
@@ -215,8 +218,14 @@ describe('the declaration filed on Play', () => {
       precise,
       'the form has a precise-location row whether or not we collect any',
     ).toBeDefined();
-    expect(precise?.collected).toBe(false);
+    expect(precise?.collected).toBe(true);
     expect(precise?.shared).toBe(false);
+    expect(precise?.optional).toBe(true);
+    expect(precise?.why).toContain('make a private room on');
+    expect(precise?.why).toContain('refused before anything is sent');
+    expect(precise?.why).toContain('deletes it when the room is over');
+    // And still never the device's own location: no GPS fix, and a ride's positions never.
+    expect(precise?.why).toContain('requests no GPS fix and never transmits a ride’s positions');
   });
 
   it('gives every collected row a purpose, and no uncollected row one', () => {
@@ -310,12 +319,14 @@ describe('the declaration filed on Play', () => {
     expect(photos?.shared).toBe(false);
   });
 
-  it('collects nothing else — the map, the camera, the post-ride ask and an instance, and nothing more', () => {
+  it('collects nothing else — the map, the camera, the post-ride ask, an instance and its rooms, and nothing more', () => {
     const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
       (answer) => answer.dataType,
     );
     expect(collected).toStrictEqual([
       'Location — approximate location',
+      // #784: the route of a private room the rider makes.
+      'Location — precise location',
       'Health and fitness — health info',
       'Health and fitness — fitness info',
       'Personal info — Name',
@@ -381,15 +392,30 @@ describe('the declaration filed on Play', () => {
     expect(ids?.why).toContain('Discord id');
   });
 
-  it('still declares no precise location with an instance connected — #777', () => {
+  it('sends an instance a position only as the route of a room the rider makes — #777, #784', () => {
     // #778: the location rule must pass with the new declaration, not be
-    // deleted. This build sends an instance no position.
+    // deleted. Connecting sends no position; making a room sends its route.
     const precise = DATA_SAFETY_DECLARATION.find(
       (answer) => answer.dataType === 'Location — precise location',
     );
-    expect(precise?.collected).toBe(false);
-    expect(precise?.why).toContain('instance');
+    expect(precise?.why).toContain('Connecting to an instance (#777) sends no position of its own');
     expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
+    // The route leaves by the instance's path, which is encrypted.
+    const instance = DATA_PATHS.find((path) => path.id === 'instance');
+    expect(instance?.dataTypes).toContain('Location — precise location');
+    expect(instance?.encryptedInTransit).toBe(true);
+  });
+
+  it('names what a room sends and what a race publishes in the fitness row — #784, #785', () => {
+    const fitness = DATA_SAFETY_DECLARATION.find(
+      (answer) => answer.dataType === 'Health and fitness — fitness info',
+    );
+    expect(fitness?.why).toContain('their power and cadence twice a second while they ride in it');
+    expect(fitness?.why).toContain('the weight they declare once as they join');
+    expect(fitness?.why).toContain('power-to-weight and never watts');
+    expect(DATA_PATHS.find((path) => path.id === 'instance')?.dataTypes).toContain(
+      'Health and fitness — fitness info',
+    );
   });
 
   it('gives a reason for every answer', () => {

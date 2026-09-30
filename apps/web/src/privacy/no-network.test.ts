@@ -1352,9 +1352,17 @@ describe('the instance is disclosed, class by class — #778', () => {
       'your rides, including their positions',
       'not sent by this version of the app',
       'power, cadence, the weight you declare, and your display name',
-      'the route of a group ride',
+      // #784: a room's route — refused in a privacy zone, deleted when the room is over.
+      'the route of a room you make',
+      'a route that starts, ends or passes inside one of your privacy zones is refused before anything is sent',
+      'the route is deleted from the instance when the room is over',
+      'the instance keeps only a fingerprint of a room',
       // Ruling Q2.
       "visible to that race's participants only, until your account on the instance is erased",
+      // #785: the publication rule (ADR 0028's 2026-09-22 amendment), and ruling Q2's erasure.
+      'beside another rider it shows power-to-weight and never watts',
+      "every rider in the race sees every rider's result, flags included",
+      'show you as "a rider", with no name and nothing of yours',
       // #778's comment of 2026-09-29: Discord, what it receives, what others see.
       'it happens on discord',
       'discord receives your voice',

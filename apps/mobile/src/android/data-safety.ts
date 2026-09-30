@@ -117,7 +117,14 @@ export interface DataSafetyAnswer {
  * cadence twice a second, and the declared weight once, to the instance
  * running a room — with NO way into a room in the product: the first build
  * that offers one (#784's room code) is the one that moves the health rows.
- * Draft wording awaiting the owner's approval (#880).
+ * ⚠️ **#784 and #785 are that build**, and a reviewer who remembers "no way
+ * into a room" is reading the old file: a rider may now make a private room
+ * on one of their own routes, or join one by its code. That moves the
+ * PRECISE LOCATION row to collected — the route of a room the rider makes is
+ * sent to the instance and shown to the riders they invite — and adds the
+ * room's power, cadence, declared weight and a race's result (place, time,
+ * W/kg, flags) to the fitness row's words and to the instance's path. Draft
+ * wording awaiting the owner's approval (#880; #784, #785).
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -193,10 +200,24 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
   },
   {
+    // ⚠️ **Re-answered by #784, and the answer CHANGED — collected: true.** A
+    // reviewer who remembers "never transmits a position" is reading the old
+    // file. A private room is made on one of the rider's own routes, and that
+    // route — a line of positions, very likely starting near home — is sent to
+    // the instance and shown to the riders the maker shares its code with. It
+    // is not the DEVICE's location (the app still requests no GPS fix, and
+    // `locationClaimFaults` still guards that), but Play's location type is the
+    // user's location, and a route is that. `shared: false`: the instance is
+    // the rider's or ours, and the riders who see the route are the ones the
+    // maker chose to give the code to — a user-initiated transfer. Optional:
+    // nothing is sent until the rider presses *Make a room*, and a route in a
+    // privacy zone is refused before anything is sent.
     dataType: 'Location — precise location',
-    collected: false,
+    collected: true,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a position — connecting to an instance (#777) sends none either, in this build. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The one location signal that leaves the device is a map tile request: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
+    optional: true,
+    purposes: ['App functionality'],
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix and never transmits a ride’s positions. The one route that leaves the device is one the rider chooses to make a private room on (#784): its positions and heights — not its name, and no times — go to the instance the rider connected to, which shows it to the riders the maker shares the room’s code with and deletes it when the room is over. A route that starts, ends or passes inside one of the rider’s privacy zones is refused before anything is sent. Connecting to an instance (#777) sends no position of its own. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The map tile request is the other location signal: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -245,7 +266,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project, and this build sends none of it to an instance the rider connects to (#777). No position, altitude, date or identifier is sent on either path',
+    why: 'power, cadence, speed and distance from BLE sensors and the trainer, stored locally. When the rider presses the button on a ride’s page that asks for a write-up (#804), that ride’s power, cadence, the rider’s weight and watts per kilogram, their threshold power if set, and the ride’s length and distance, with each section’s gradient and total climb (the height gained over the section, a difference between two heights and never an altitude), section by section, are sent as numbers to the source they chose: one computer the rider configured at an address on their own network and switched on — the same computer and rules as the Photos row — or (#803) a hosted model service the rider chose, at the https address they typed, on their own key, which is a third party — hence shared. The hosted path is off by default, separately consented, off again whenever the app is opened, and gated on that consent at every step. Nothing is set up by default and nothing is sent until the press. It is not sent to this project. No position, altitude, date or identifier is sent on either path. In a private room the rider makes or joins on an instance they connected to (#784, #785): their power and cadence twice a second while they ride in it, and the weight they declare once as they join, for the room to simulate them — never shown to anybody; the other riders see where they are on the room’s road. After a race, the instance keeps each rider’s result — place, time, power-to-weight (W/kg) over the race and any plausibility flag — shown to that race’s riders only, until the rider’s account there is erased; beside another rider it is power-to-weight and never watts',
   },
   {
     // ⚠️ **Split by #777, and the Name answer CHANGED — collected: true.** A
@@ -438,6 +459,10 @@ export const DATA_PATHS: readonly DataPath[] = [
     id: 'instance',
     dataTypes: [
       'Location — approximate location',
+      // #784: the route of a private room the rider makes.
+      'Location — precise location',
+      // #784, #785: power, cadence and declared weight in a room, and a race's result.
+      'Health and fitness — fitness info',
       'Personal info — Name',
       'Personal info — User IDs',
       'Device or other IDs',
@@ -535,7 +560,7 @@ export const DATA_SAFETY_SECTION_ANSWERS: DataSafetySectionAnswers = {
   deletionRequests: {
     answer: true,
     how: `by email to ${DELETION_REQUEST_EMAIL}, until in-app deletion on an instance (#906) ships`,
-    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id — and a request to ${DELETION_REQUEST_EMAIL} is how it is deleted until #906 adds deletion in the app. Cloudflare’s record of map and instance requests cannot be deleted on request; it ages out of what this project’s Cloudflare account can see after 7 days, which Play’s FAQ allows for (deletion “within 90 days of collection”). A picture or a ride’s numbers sent to the rider’s own computer is held by that computer, and anything sent to a hosted service on the rider’s own key is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
+    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id, which private rooms they made or joined and their results in any race they rode there, and, while a room they made is open, its route — and a request to ${DELETION_REQUEST_EMAIL} is how it is deleted until #906 adds deletion in the app. Cloudflare’s record of map and instance requests cannot be deleted on request; it ages out of what this project’s Cloudflare account can see after 7 days, which Play’s FAQ allows for (deletion “within 90 days of collection”). A picture or a ride’s numbers sent to the rider’s own computer is held by that computer, and anything sent to a hosted service on the rider’s own key is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
   },
 };
 
