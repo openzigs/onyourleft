@@ -114,7 +114,14 @@ describe('the production room port — #782', () => {
   // #782's review (B1): the ticket's POST carries the rider's session token,
   // so a hostile id must reach neither it nor the socket — and must be refused
   // for good, since every retry would send it again.
-  for (const roomId of ['../x', 'x/../../auth/devices/PK/revoke?', 'room-1?', 'room%2F..', 'a.b', '']) {
+  for (const roomId of [
+    '../x',
+    'x/../../auth/devices/PK/revoke?',
+    'room-1?',
+    'room%2F..',
+    'a.b',
+    '',
+  ]) {
     it(`sends nothing, opens nothing and retries nothing for the room id ${JSON.stringify(roomId)}`, async () => {
       const send = ticketing();
       const sockets = recordingSockets();
