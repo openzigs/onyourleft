@@ -211,9 +211,12 @@ export function cutSource(kind: SyncKind, body: Uint8Array): Cut {
   // The length first, so nothing below runs over more (#918, #924 item 7).
   if (text.length > MAXIMUM_SOURCE_CHARACTERS) return { kind: 'too-long' };
   const parsed = jsonOf(text);
-  // After parsing, so an escaped colon is a colon (#918 item 1): every string
-  // of a JSON body, or the whole text of one that is not JSON.
-  const strings = parsed === undefined ? [text] : stringsIn(parsed);
+  // The raw text AND, after parsing, every string of a JSON body (#918 item 1).
+  // The parsed strings catch what the raw bytes hide — an escaped colon is a
+  // colon — and the raw text catches what parsing splits: a header in one
+  // string and its payload in the next, or a header in a key and its payload
+  // in the value (#928's review). Each is linear, so both together are.
+  const strings = parsed === undefined ? [text] : [text, ...stringsIn(parsed)];
   if (strings.some(holdsDataUrl)) return { kind: 'picture' };
   const passages = blocksOf(kind, text, parsed).flatMap(splitBlock);
   if (passages.length === 0) return { kind: 'empty' };

@@ -98,6 +98,23 @@ describe('which items are cut, and from what', () => {
     ).toEqual({ kind: 'picture' });
   });
 
+  it('finds a picture split across two JSON strings, which no one parsed string holds — #928 review', () => {
+    // The header in one passage and the payload in the next: each parsed
+    // string alone holds no `data:…,`, and the base64 would be indexed as a
+    // passage of its own. The raw text holds it.
+    const split = { passages: ['see data:image/png;base64', ',iVBORw0KGgo'] };
+    expect(cutSource('ride-summary', bytes(split))).toEqual({ kind: 'picture' });
+    // The header in a key and the payload in its value.
+    expect(
+      cutSource('document', bytes({ text: 'hi', 'data:image/png;base64': ',iVBORw0KGgo=' })),
+    ).toEqual({ kind: 'picture' });
+    // The control: the same two passages with no `data:` are passages.
+    expect(cutSource('ride-summary', bytes({ passages: ['see image/png', ',iVBOR'] }))).toEqual({
+      kind: 'passages',
+      passages: ['see image/png', ',iVBOR'],
+    });
+  });
+
   it('matches what /\\bdata:[^,\\s]*,/iu matches, and nothing else', () => {
     const pattern = /\bdata:[^,\s]*,/iu;
     for (const text of [
