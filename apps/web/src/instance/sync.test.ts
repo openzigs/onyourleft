@@ -476,11 +476,9 @@ describe('two-way sync through the real instance (#776)', () => {
     expect((await instanceItem(a.on, 'side-camera-report', id!))?.summary).toBe(
       sideCameraReportFor(LOCAL_ATHLETE, id!, 2).summary,
     );
-    // Nothing moves on the next sync.
-    expect(await a.sync()).toMatchObject({ itemsPulled: 0, itemsPushed: 0, failures: [] });
-
     // The other direction still works: another device replaces the write-up,
-    // and this device — unchanged since — takes it.
+    // and this device — unchanged since its push, with no sync in between —
+    // takes it rather than pushing its own copy back over it.
     const b = await linkedDevice(world.url, origin, a.on);
     expect(await b.sync()).toMatchObject({ pulled: 1, itemsPulled: 2, failures: [] });
     await b.on.harness.write((store) =>
@@ -491,5 +489,7 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(await a.on.harness.read((store) => store.getRideWriteUp(LOCAL_ATHLETE, id!))).toEqual(
       rideWriteUpFor(LOCAL_ATHLETE, id!, 3),
     );
+    // Nothing moves on the next sync.
+    expect(await a.sync()).toMatchObject({ itemsPulled: 0, itemsPushed: 0, failures: [] });
   }, 60_000);
 });
