@@ -1269,6 +1269,16 @@ describe('the rider’s goals, ride notes and documents (#836)', () => {
       failures: [],
     });
     expect(await instanceItem(a.on, 'goal', 'goals')).toStrictEqual({ text: 'A faster century.' });
+
+    // And A, which deleted it, takes the new words back on its next sync: A
+    // holds no copy and forgot its base, so the instance's goal is new to it.
+    // This goes further than "never pushed back" — the owner is asked to
+    // confirm it on #934 — and this pins what A holds, so a change is seen.
+    const goalOnA = () =>
+      a.on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', 'goals'));
+    expect(await goalOnA()).toBeUndefined();
+    expect(await a.sync()).toMatchObject({ textsPulled: 1, textsPushed: 0, failures: [] });
+    expect((await goalOnA())?.text).toBe('A faster century.');
   }, 60_000);
 
   it('takes a goal another device changed, and pushes one changed here', async () => {
