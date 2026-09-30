@@ -85,6 +85,7 @@ import type {
   RouteRecord,
   SideCameraReportRecord,
   RideWriteUpRecord,
+  SyncBaseRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -191,6 +192,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     getSideCameraReport: async (owner, activity) => real.getSideCameraReport(owner, activity),
     putRideWriteUp: async (record) => real.putRideWriteUp(record),
     getRideWriteUp: async (owner, activity) => real.getRideWriteUp(owner, activity),
+    putSyncBase: async (record) => real.putSyncBase(record),
+    listSyncBase: async (owner) => real.listSyncBase(owner),
+    deleteSyncBase: async (owner, kind, key) => real.deleteSyncBase(owner, kind, key),
   };
 }
 
@@ -289,6 +293,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putRideWriteUp: (record: RideWriteUpRecord) => {
           memory.set(`write-up:${record.activityId}`, record);
+          return Promise.resolve();
+        },
+        putSyncBase: (record: SyncBaseRecord) => {
+          memory.set(`sync-base:${record.kind}:${record.key}`, record);
           return Promise.resolve();
         },
       };
@@ -1164,6 +1172,38 @@ export function firstWriteUpStoreFactory(): StoreFactory {
             return;
           }
           await real.putRideWriteUp(record);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose ride delete **takes the ride's sync base with it**.
+ *
+ * The twentieth fake, for #776's sync base and #893's review (B1). It stands
+ * for the tidy-minded cascade a reader of `deleteActivity` would add: "a row
+ * about a ride that is gone is an orphan, delete it too". Every write
+ * succeeds, every base row reads back while its ride exists — and the one
+ * thing the base is FOR, remembering that this device deleted a synced ride,
+ * is gone at the moment it matters, so the next sync pulls the ride back.
+ * `assertSyncBaseRoundTrip` deletes the ride between the write and the read;
+ * `sync-base-store.test.ts` is the red/green pair.
+ */
+export function cascadingSyncBaseStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        deleteActivity: async (owner, id) => {
+          for (const row of await real.listSyncBase(owner)) {
+            if (row.activityId === id) await real.deleteSyncBase(owner, row.kind, row.key);
+          }
+          return real.deleteActivity(owner, id);
         },
       };
     },

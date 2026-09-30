@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
+import { clientAddress } from './client-address.ts';
 import { errorResponse } from './errors.ts';
 import type { Handler } from './handler.ts';
 
@@ -92,31 +93,6 @@ export interface Listening {
   readonly close: () => Promise<void>;
 }
 
-/**
- * The client's address for the rate limits: the peer's, or — when the
- * operator names one — the address a proxy in front of the instance wrote into
- * a header. Behind Cloudflare's tunnel every connection's peer is
- * `cloudflared`, so without it every rider shares one rate-limit bucket (#895's
- * review, B3); Cloudflare writes the rider's own address into
- * `CF-Connecting-IP` and a client cannot set it through Cloudflare.
- * ⚠️ Name a header ONLY when every request reaches the instance through the
- * proxy that writes it: a client that can reach the port directly can put any
- * address it likes in any header. A header that is missing, repeated or empty
- * falls back to the peer.
- */
-export function clientAddress(
-  incoming: Pick<IncomingMessage, 'headers' | 'socket'>,
-  addressHeader: string | undefined,
-): string | null {
-  if (addressHeader !== undefined) {
-    const value = incoming.headers[addressHeader];
-    if (typeof value === 'string' && value.trim() !== '' && !value.includes(',')) {
-      return value.trim();
-    }
-  }
-  return incoming.socket.remoteAddress ?? null;
-}
-
 /** Start listening. Port 0 asks the operating system for a free one, which is what the tests do. */
 export function listen(
   handler: Handler,
@@ -124,11 +100,19 @@ export function listen(
     host,
     port,
     clientAddressHeader,
+    trustedProxies,
   }: {
     readonly host: string;
     readonly port: number;
-    /** A header, lower case, that carries the client's address (`clientAddress`). */
-    readonly clientAddressHeader?: string | undefined;
+    /**
+     * The header a local proxy puts the client's address in (#775), or `null`.
+     * REQUIRED, like `trustedProxies`, so a caller that forgets to pass the
+     * operator's setting is a compile error rather than a quiet default
+     * (#891's merge review).
+     */
+    readonly clientAddressHeader: string | null;
+    /** The proxies the header is believed from besides loopback (#891's review); `[]` for loopback only. */
+    readonly trustedProxies: readonly string[];
   },
 ): Promise<Listening> {
   const server = createServer((incoming, outgoing) => {
@@ -139,10 +123,17 @@ export function listen(
       send(errorResponse('validation_failed'), outgoing).catch(() => outgoing.destroy());
       return;
     }
-    // The client's address, for the identity routes' rate limits (#772). It is
-    // never logged (`log.ts`); behind a proxy it is the proxy's unless the
-    // operator named the header that proxy writes (`clientAddress`).
-    handler(request, { address: clientAddress(incoming, clientAddressHeader) })
+    // The client's address, for the per-address rate limits (#772, #775). It
+    // is never logged (`log.ts`). Behind a proxy the operator runs, the
+    // socket's peer is the proxy for everybody, so the header the operator
+    // named is read instead — from a trusted proxy only (`client-address.ts`).
+    const address = clientAddress(
+      incoming.socket.remoteAddress ?? null,
+      request.headers,
+      clientAddressHeader,
+      trustedProxies,
+    );
+    handler(request, { address })
       .catch(() => errorResponse('internal'))
       .then((response) => send(response, outgoing))
       .catch(() => outgoing.destroy());

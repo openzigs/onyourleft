@@ -1153,3 +1153,63 @@ export interface RideWriteUpRecord {
   readonly missingSections: readonly number[];
   readonly writtenAt: UnixSeconds;
 }
+
+/**
+ * What one thing of a ride's was, on this device AND on the athlete's
+ * instance, the last time the two agreed — #776, and #893's review (B1, B2).
+ *
+ * `activity` is a ride, keyed by its signed file's content hash (64 lowercase
+ * hex); `write-up` and `side-camera-report` are keyed by the ride's own id.
+ */
+export type SyncBaseKind = 'activity' | 'write-up' | 'side-camera-report';
+
+/** Every {@link SyncBaseKind}, in the order a sync visits them. */
+export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
+  'activity',
+  'write-up',
+  'side-camera-report',
+];
+
+/**
+ * The **sync base**: what this device and its instance agreed on at the last
+ * sync, one row per ride and per item of a ride — #776, after #893's review.
+ *
+ * ## Why a sync needs it
+ *
+ * Two copies that differ say nothing about which of them changed. Without a
+ * base a sync cannot tell "the rider replaced this write-up here" from "another
+ * device replaced it there", nor "the rider deleted this ride here" from "this
+ * device has never had it" — and both mistakes are the instance winning over a
+ * device that is canonical (ADR 0036 D-3). With one, each side's change is its
+ * copy against the base: a local change is pushed, a remote change on an
+ * unchanged local copy is pulled.
+ *
+ * ## ⚠️ It outlives the ride, on purpose
+ *
+ * `deleteActivity` does **not** remove a ride's base row. That row is the
+ * device's record of the deletion: a ride the base says was synced and the
+ * device no longer holds was deleted HERE, so the next sync deletes it on the
+ * instance rather than pulling it back. `deleteAthlete` removes every row, as
+ * it removes everything else of the athlete's — an erased device is a fresh
+ * device, which pulls rather than deletes.
+ *
+ * ## What it holds, and what it does not
+ *
+ * Two digests — never a body, a coordinate, a name or a time. The digest the
+ * device computes of its own copy and the one the instance's manifest names
+ * are kept apart, because a pulled item stored and read back need not
+ * serialise to the bytes it was sent in.
+ */
+export interface SyncBaseRecord {
+  /** Whose. **Every read and delete of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  readonly kind: SyncBaseKind;
+  /** A ride's content hash for `activity`; the ride's id for an item. */
+  readonly key: string;
+  /** The ride this row is about — for an item, the same as `key`. */
+  readonly activityId: ActivityId;
+  /** SHA-256 of this device's copy at the last sync, lowercase hex. */
+  readonly localDigest: string;
+  /** The digest the instance's manifest named at the last sync, lowercase hex. */
+  readonly remoteDigest: string;
+}

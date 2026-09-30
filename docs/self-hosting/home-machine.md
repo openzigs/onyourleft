@@ -67,13 +67,24 @@ Edit `.env`:
 | Variable | Set it to |
 |---|---|
 | `OYL_INSTANCE_ORIGIN` | `https://` and the public hostname from step 3 |
-| `OYL_INSTANCE_REGISTRATION` | `open` while the riders you expect sign up, then `closed` |
+| `OYL_INSTANCE_REGISTRATION` | `approval` (you or your deputy approve each new account), `invite`, `open`, or `closed`. Left empty here it is `closed` — see [`docs/moderation.md`](../moderation.md) |
+| `OYL_INSTANCE_OWNER_KEY`, `OYL_INSTANCE_DEPUTY_KEY` | the device keys of the two moderators, which the app shows; empty names nobody |
 | `CLOUDFLARE_TUNNEL_TOKEN` | the token from step 3 |
 | `OYL_BACKUP_DIR` | a folder on this machine for snapshots, e.g. `C:/onyourleft/backups` |
 | `OYL_OFFBOX_DIR` | a folder on a drive that is **not** this machine — the USB drive, `E:/onyourleft-backups` |
 | `OYL_INSTANCE_WS_COMPRESSION` | `off` unless your upload is the limit — see [Compression](#compression-and-your-upload) |
 
 `.env` is ignored by git, so `git pull` never overwrites it and never uploads it.
+
+**The rider's address, and why `compose.yaml` fixes the tunnel's.** Every connection reaches the
+instance from `cloudflared`, so the per-address rate limits read the rider's own address from the
+`cf-connecting-ip` header Cloudflare writes (`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`). The instance
+believes that header only from a proxy it trusts — loopback, or an address in
+`OYL_INSTANCE_TRUSTED_PROXIES` — so `compose.yaml` gives `cloudflared` the fixed address
+`172.30.87.10` on the project's own network and names exactly that address. You do not set either in
+`.env`. If `172.30.87.0/24` is already in use on this machine, change the subnet, the tunnel's
+address and `OYL_INSTANCE_TRUSTED_PROXIES` in `compose.yaml` together. Anything else on that network,
+or a port published for local debugging, is counted as itself, whatever header it sends.
 
 ## 5. Deploy — one command
 

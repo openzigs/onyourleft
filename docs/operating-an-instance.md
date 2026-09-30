@@ -183,14 +183,17 @@ Running an instance for other people is a set of duties as well as a box:
 - **Rate limits behind a proxy.** Sign-in is rate-limited per client address. Behind the tunnel
   every connection comes from `cloudflared`, so the home deployment sets
   `OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip` and the limits read the rider's own address
-  from the header Cloudflare writes. Set it only where nothing can reach the instance but that
-  proxy.
-- **Registration** is `closed` by default (`OYL_INSTANCE_REGISTRATION`): open it while the riders you
-  expect sign up. Approval-required registration and the owner-plus-deputy moderation the owner ruled
-  (Q13) are [#775](https://github.com/openzigs/onyourleft/issues/775).
-- **Blocking, reporting and moderation tooling** — and the operator's page for it — is
-  [#83](https://github.com/openzigs/onyourleft/issues/83). Until it lands, keep rooms private: a
-  public room owes ADR 0028 D-6's moderation and identity prerequisites first.
+  from the header Cloudflare writes — **only** from `cloudflared`'s fixed address, which it names in
+  `OYL_INSTANCE_TRUSTED_PROXIES`. From any other peer the header is ignored
+  ([`docs/moderation.md`](moderation.md) §"Behind a proxy or a tunnel").
+- **Registration** (`OYL_INSTANCE_REGISTRATION`) is `approval`, `invite`, `open` or `closed`. Unset,
+  it is `closed`; the project's image sets `approval`, and the home deployment's compose file uses
+  `closed` unless `.env` says otherwise. The owner and the deputy are named by device key (`OYL_INSTANCE_OWNER_KEY`,
+  `OYL_INSTANCE_DEPUTY_KEY`) — [`docs/moderation.md`](moderation.md).
+- **Blocking, reporting and moderation** ([#83](https://github.com/openzigs/onyourleft/issues/83)):
+  riders block and report each other, and the owner and the deputy suspend, hide names and decide
+  reports through the moderators' routes, every action in an append-only log —
+  [`docs/moderation.md`](moderation.md) is the operator's page for it.
 - **The source offer**: `GET /source` names the exact source of the running build (AGPL-3.0 §13, ADR
   0036 D-6). An operator who modified the instance sets `OYL_INSTANCE_SOURCE_URL` to their own.
 - **Privacy**: Cloudflare terminates TLS on the tunnel's path and can see the instance's traffic in

@@ -64,12 +64,25 @@ WORKDIR /srv/apps/instance
 RUN mkdir /data && chown node:node /data
 VOLUME /data
 
+# The project's instance (#775, rulings Q5 and Q13 of 2026-09-28): registration
+# needs a moderator's approval, and the rider's address comes from the
+# Cloudflare Tunnel's header, which is believed only from loopback or a proxy
+# named in OYL_INSTANCE_TRUSTED_PROXIES (`src/client-address.ts`). Under
+# `deploy/home/compose.yaml` that is cloudflared's fixed address on the compose
+# network, which compose sets. ⚠️ Run by hand, publish the port on 127.0.0.1
+# only (`-p 127.0.0.1:8787:8787`): Docker's published connections arrive from
+# the bridge gateway whoever sent them, so trusting that gateway is safe only
+# when nothing but the host can reach the port. The
+# owner's and the deputy's device keys, and the trusted proxies, are NOT baked
+# in: pass them when the container is run — `docs/moderation.md` says how.
 ENV NODE_ENV=production \
     OYL_INSTANCE_HOST=0.0.0.0 \
     OYL_INSTANCE_PORT=8787 \
     OYL_INSTANCE_DATABASE=/data/instance.sqlite \
     OYL_INSTANCE_BLOBS=/data/blobs \
-    OYL_INSTANCE_COMMIT=${OYL_INSTANCE_COMMIT}
+    OYL_INSTANCE_COMMIT=${OYL_INSTANCE_COMMIT} \
+    OYL_INSTANCE_REGISTRATION=approval \
+    OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip
 
 USER node
 EXPOSE 8787

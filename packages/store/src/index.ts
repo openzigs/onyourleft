@@ -38,6 +38,8 @@ export type {
   SideSessionSourceRecord,
   SideSessionSummaryRecord,
   RideWriteUpRecord,
+  SyncBaseKind,
+  SyncBaseRecord,
   RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,
@@ -56,6 +58,7 @@ export type {
 export {
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
   RIDE_WRITE_UP_SOURCES,
+  SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
 } from './records';

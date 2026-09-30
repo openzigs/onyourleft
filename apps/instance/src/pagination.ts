@@ -19,10 +19,8 @@ import type { FieldProblem } from './errors.ts';
  * pages. A row inserted AFTER the reader's position may or may not appear on a
  * later page, which is correct — it did not exist when the listing began.
  *
- * ⚠️ **No route pages anything yet.** The instance's first list endpoint is
- * #776's sync, so this module has tests and no production caller; it is here
- * because #36 asks for pagination to be defined ONCE before the first list
- * exists, rather than by whichever endpoint happens to come first.
+ * Its callers are the sync manifest and the activity list (#881): each states
+ * its order in SQL and hands this module the position of its last row.
  *
  * `pageOf` is the reference semantics, over an array. A list endpoint backed by
  * SQL (#769) states the same order as `ORDER BY key, id` and the same cursor as

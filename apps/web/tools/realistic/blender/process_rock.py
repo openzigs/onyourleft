@@ -11,7 +11,8 @@ A rock is the easy case the tree script is not: its silhouette is its whole
 shape and it has no cards to lose, so a collapse-decimate is the right tool.
 The scan's normal map keeps the surface the decimation took away.
 
-1. Import the glTF, keep ONE object, stand it on the origin.
+1. Import the glTF through `gltf_import.py` (#696's stable rule for a
+   repeated triangle, and its guard), keep ONE object, stand it on the origin.
 2. Collapse-decimate to <target-tris>.
 3. Bake ambient occlusion into a colour attribute with Cycles -- #620, the
    same bake `process_tree.py` step 6 makes, with a ground plane under the
@@ -38,11 +39,18 @@ pinned by `inputs.lock.json` and the tool by `sources.ts` section PINNED_BLENDER
 """
 
 import json
+import os
 import sys
 
 import bpy
 import numpy as np
 from mathutils import Vector
+
+# The one glTF import, beside this file. ⚠️ No bytecode, as `process_rider.py`
+# imports its kit: a `__pycache__` beside it is a binary `ASSET001` refuses.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gltf_import import import_scan  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
@@ -65,7 +73,10 @@ def triangles(obj):
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.import_scene.gltf(filepath=IN_GLTF)
+# Through `gltf_import.py`, as `process_tree.py` imports a plant: no rock
+# input holds a repeated triangle today, so nothing is dropped, and the guard
+# there stops the run if `mesh.validate()` ever drops one of its own choosing.
+repeated_triangles = import_scan(IN_GLTF)
 meshes = [o for o in bpy.data.objects if o.type == "MESH"]
 keep = [o for o in meshes if o.name == OBJECT]
 if len(keep) != 1:
@@ -217,6 +228,7 @@ report = {
     "materials": len(rock.material_slots),
     "meanAmbientOcclusion": mean_ao,
     "darkestAmbientOcclusion": darkest_ao,
+    "repeatedTrianglesDropped": repeated_triangles,
 }
 with open(OUT_REPORT, "w") as handle:
     json.dump(report, handle, indent=2, sort_keys=True)

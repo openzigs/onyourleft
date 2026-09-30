@@ -81,6 +81,45 @@ describe('changing a display name (#774)', () => {
     expect(fields[0]?.problem).toMatch(/bidirectional/);
   });
 
+  it('refuses one of two renames at once when only one is left in the window (#867)', async () => {
+    // The race in a known order: when the first rename reaches the store, the
+    // second is run to completion ahead of it. A limit counted in one store
+    // call and written in another would let both through.
+    let interleave: (() => Promise<unknown>) | undefined;
+    world = await startIdentityInstance({
+      storeSeenBy: (store) => ({
+        ...store,
+        renameAthlete: async (...args) => {
+          const other = interleave;
+          interleave = undefined;
+          if (other !== undefined) await other();
+          return store.renameAthlete(...args);
+        },
+      }),
+    });
+    const w = world;
+    const session = await w.signIn(await testDevice(), { displayName: 'Anna' });
+    const token = session.body.sessionToken as string;
+    const athleteId = session.body.athleteId as string;
+    const rename = (displayName: string) =>
+      w.call('POST', '/v1/auth/display-name', { token, body: { displayName } });
+    expect((await rename('Bea')).status).toBe(200);
+    expect((await rename('Cat')).status).toBe(200);
+
+    let late: { status: number; body: unknown } | undefined;
+    interleave = async () => {
+      late = await rename('Eve');
+    };
+    const early = await rename('Dee');
+
+    expect(late?.status, JSON.stringify(late?.body)).toBe(200);
+    expect(early.status, JSON.stringify(early.body)).toBe(429);
+    expect(codeOf(early.body)).toBe('rate_limited');
+    const trail = await w.freshRead((store) => store.listDisplayNameChanges(athleteId));
+    expect(trail).toHaveLength(3);
+    expect((await w.freshRead((store) => store.getAthlete(athleteId)))?.displayName).toBe('Eve');
+  });
+
   it('is rate-limited, and keeps every earlier name for moderation (#789)', async () => {
     const { w, token, athleteId } = await signedIn();
     for (const name of ['Bea', 'Cat', 'Dee']) {

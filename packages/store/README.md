@@ -774,6 +774,32 @@ nineteenth) acknowledges a second write-up and keeps the first — CLAUDE.md §5
 its sentences, or `null` when the session compared nothing. Nothing writes a write-up yet; its
 writer and reader are #804's.
 
+## The sync base — #776, after #893's review
+
+Schema version 14, additive: a new store, `syncBases`, and no existing record changes shape. It is
+**what this device and its instance agreed on at the last sync** — one row per ride (keyed by its
+signed file's content hash) and per write-up and side-camera report (keyed by the ride's id), each
+holding two SHA-256 digests: the device's copy and the instance's, kept apart because a pulled item
+stored and read back need not serialise to the bytes it arrived in. No body, no name, no coordinate.
+
+Without it a sync cannot tell a change here from a change there: #893's review found the client
+pulling back a ride the rider had deleted, and overwriting a write-up the rider had replaced with the
+instance's older copy. With it, each side's change is its copy against the base, and the device's
+change wins (ADR 0036 D-3).
+
+⚠️ **A ride's base row outlives `deleteActivity`, on purpose.** It is the device's only record that
+a synced ride was deleted here — the thing that makes the next sync delete it on the instance rather
+than pull it back. `deleteAthlete` removes every row (counted as `syncBases`): an erased device is a
+fresh one, which pulls and deletes nothing on the instance. The primary key is
+`[athleteId+kind+key]`, so `deleteSyncBase(owner, kind, key)` cannot name a row without naming whose
+it is; `listSyncBase(owner)` reads by the athlete. One rule holds a row on the way in and on the way
+out (`persisted.ts` §`syncBaseProblem`).
+
+The twentieth fake, `cascadingSyncBaseStoreFactory`, takes a ride's base rows with the ride — the
+tidy cascade a reader of `deleteActivity` would add, and exactly the defect the base exists to
+prevent. `assertSyncBaseRoundTrip` deletes the ride between its write and its read, and
+`sync-base-store.test.ts` holds the red/green pair.
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.
