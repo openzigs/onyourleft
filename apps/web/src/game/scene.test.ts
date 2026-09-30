@@ -916,3 +916,45 @@ describe('a marker that has a front — #349', () => {
 function lakeValleyFarmland() {
   return northRoute(3_000, () => 40);
 }
+
+describe('other real riders on the road — #783', () => {
+  const setup = straightRoute();
+  const frameWith = (
+    remote: readonly { riderId: number; distanceMetres: number; speedMetresPerSecond: number }[],
+  ) =>
+    sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: {
+        ...atStartLine(setup.profile),
+        ride: { ...atStartLine(setup.profile).ride, distance: metres(400) },
+      },
+      remoteRiders: remote,
+    });
+
+  it('places each as a remote marker, after the rider, and none past the road it built', () => {
+    const frame = frameWith([
+      { riderId: 3, distanceMetres: 420, speedMetresPerSecond: 9 },
+      { riderId: 8, distanceMetres: 380, speedMetresPerSecond: 9 },
+      { riderId: 9, distanceMetres: 1_900, speedMetresPerSecond: 9 },
+    ]);
+    expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider', 'remote', 'remote']);
+  });
+
+  it('turns their cranks from their own odometer, never an invented cadence', () => {
+    const frame = frameWith([{ riderId: 3, distanceMetres: 437.5, speedMetresPerSecond: 9 }]);
+    const remote = frame.markers.find((marker) => marker.kind === 'remote');
+    expect(remote?.crankAngle).toBeCloseTo(simulatedCrankAngle(437.5), 9);
+    const still = frameWith([{ riderId: 3, distanceMetres: 437.5, speedMetresPerSecond: 0 }]);
+    expect(still.markers.find((marker) => marker.kind === 'remote')?.pedalling).toBe(0);
+  });
+
+  it('keeps two level remote riders apart, each on its own side', () => {
+    const frame = frameWith([
+      { riderId: 4, distanceMetres: 450, speedMetresPerSecond: 9 },
+      { riderId: 5, distanceMetres: 450, speedMetresPerSecond: 9 },
+    ]);
+    const [a, b] = frame.markers.filter((marker) => marker.kind === 'remote');
+    expect(Math.hypot((a?.x ?? 0) - (b?.x ?? 0), (a?.z ?? 0) - (b?.z ?? 0))).toBeGreaterThan(1);
+  });
+});
