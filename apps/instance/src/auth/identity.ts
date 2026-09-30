@@ -884,6 +884,11 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     async stepUp(caller, stepUpProof) {
       const { recoveryCode, statement } = stepUpProof;
+      // One proof, not two: a client that sends both has a bug worth seeing,
+      // and ignoring one would leave its challenge unspent (#926's review).
+      if (recoveryCode !== undefined && statement !== undefined) {
+        return invalid('statement', 'must not be sent with a recoveryCode: send one of the two');
+      }
       if (recoveryCode !== undefined) {
         if (typeof recoveryCode !== 'string') {
           return invalid('recoveryCode', 'must be a string');

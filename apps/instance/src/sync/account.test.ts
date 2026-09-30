@@ -10,7 +10,7 @@
  * anybody already downloaded, and not another instance.
  */
 
-import { AUTH_PURPOSE, ERASE_ACCOUNT_PURPOSE, toHex } from '@onyourleft/domain';
+import { AUTH_PURPOSE, ERASE_ACCOUNT_PURPOSE, LINK_PURPOSE, toHex } from '@onyourleft/domain';
 import { decodeFitActivity, decodeGpx, decodeTcx, trackPointsOf } from '@onyourleft/fit';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -38,6 +38,28 @@ const FILES = ['nominal-outdoor-ride.fit', 'nominal-ride.gpx', 'nominal-ride.tcx
 async function readJson<T>(response: Response): Promise<T> {
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as T;
+}
+
+/**
+ * A second device of `rider`'s, linked with a code the rider minted, and then
+ * REVOKED from the rider's own session — a lost phone, say (#926's review).
+ */
+async function revokedSecondDevice(instance: IdentityInstance, rider: Rider): Promise<TestDevice> {
+  const lost = await testDevice();
+  const code = await instance.call('POST', '/v1/auth/link-codes', { token: rider.token });
+  const linked = await instance.call('POST', '/v1/auth/link', {
+    body: {
+      ...(await lost.statement(await instance.nonceFor(lost), { purpose: LINK_PURPOSE })),
+      linkCode: (code.body as { linkCode: string }).linkCode,
+    },
+  });
+  expect(linked.status, JSON.stringify(linked.body)).toBe(200);
+  const revoked = await instance.call('POST', `/v1/auth/devices/${lost.publicKey}/revoke`, {
+    token: rider.token,
+    body: {},
+  });
+  expect(revoked.status, JSON.stringify(revoked.body)).toBe(204);
+  return lost;
 }
 
 async function syncEverything(instance: IdentityInstance, rider: Rider): Promise<string[]> {
@@ -426,6 +448,34 @@ describe('deleting an account needs a step-up beyond the session (#898)', () => 
     expect(await world.freshRead((store) => store.getAthlete(anna!.athleteId))).toBeUndefined();
   });
 
+  it('refuses an erase statement signed by a key the rider revoked, and deletes nothing (#926’s review, B2)', async () => {
+    const setup = await syncWorld(1);
+    world = setup.world;
+    const [anna] = setup.riders;
+    // Keys A (Anna's device) and B (a phone she lost, revoked from A's session).
+    const lost = await revokedSecondDevice(world, anna!);
+    // Whoever holds B signs an erase statement, and it is sent in A's session.
+    const answer = await erase(world, anna!.token, await eraseStatement(world, lost));
+    expect(await codeOf(answer)).toBe('key_revoked');
+    expect(await world.freshRead((store) => store.getAthlete(anna!.athleteId))).toBeDefined();
+    // The control: the same session with A's own key erases.
+    const own = await erase(world, anna!.token, await eraseStatement(world, anna!.device));
+    expect(own.status, await own.clone().text()).toBe(204);
+  });
+
+  it('refuses a recovery code and a statement sent together, rather than ignoring one', async () => {
+    const setup = await syncWorld(1);
+    world = setup.world;
+    const [anna] = setup.riders;
+    const answer = await erase(world, anna!.token, {
+      ...stepUp(anna!),
+      ...(await eraseStatement(world, anna!.device)),
+    });
+    expect(answer.status).toBe(400);
+    expect(await codeOf(answer)).toBe('validation_failed');
+    expect(await world.freshRead((store) => store.getAthlete(anna!.athleteId))).toBeDefined();
+  });
+
   it('refuses a signed-in statement, another rider’s key, and a spent nonce', async () => {
     const setup = await syncWorld(2);
     world = setup.world;
@@ -449,12 +499,13 @@ describe('deleting an account needs a step-up beyond the session (#898)', () => 
 });
 
 describe('a suspended rider may take their data out and delete their account, and nothing else (#898)', () => {
-  async function suspendedWorld() {
+  async function suspendedWorld(before?: (rider: Rider) => Promise<void>) {
     const owner = await testDevice();
     const setup = await syncWorld(1, { moderators: { owner: owner.publicKey } });
     world = setup.world;
     const [bea] = setup.riders;
     await syncEverything(world, bea!);
+    await before?.(bea!);
     world.clock.ms += 60_000;
     const ownerSession = await world.signIn(owner);
     const suspended = await world.call(
@@ -503,6 +554,32 @@ describe('a suspended rider may take their data out and delete their account, an
     expect(await instance.freshRead((store) => store.getAthlete(bea.athleteId))).toBeUndefined();
     // The moderation log is the instance's audit trail and outlives the account.
     expect(await instance.freshRead((store) => store.listModerationLog())).toEqual(logBefore);
+  });
+
+  it('refuses a way-out session to a key nobody holds: it is a way out, not in', async () => {
+    const { instance } = await suspendedWorld();
+    const stranger = await testDevice();
+    const opened = await leaveSession(instance, stranger);
+    expect(opened.status).toBe(401);
+    expect(codeIn(opened.body)).toBe('unauthenticated');
+    expect(await instance.freshRead((store) => store.findDeviceKey(stranger.publicKey))).toBe(
+      undefined,
+    );
+  });
+
+  it('refuses a way-out session to a revoked key, and opens no session for it (#926’s review, N1)', async () => {
+    let lost: TestDevice | undefined;
+    const { bea, instance } = await suspendedWorld(async (rider) => {
+      lost = await revokedSecondDevice(world!, rider);
+    });
+    const opened = await leaveSession(instance, lost!);
+    expect(codeIn(opened.body)).toBe('key_revoked');
+    const sessions = await instance.freshRead((store) => store.listSessions(bea.athleteId));
+    // The link opened a full session for the lost key, revoked with it; no
+    // way-out session was written for it.
+    expect(sessions.filter((session) => session.scope === 'leave')).toEqual([]);
+    // The control: Bea's own, live key opens one.
+    expect((await leaveSession(instance, bea.device)).status).toBe(200);
   });
 
   it('still needs the step-up to erase from a way-out session', async () => {
