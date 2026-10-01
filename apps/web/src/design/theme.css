@@ -1018,49 +1018,27 @@ h3:first-child {
 
 /*
  * A card with its shape drawn on it — #941, epic #935: a route's climb or a
- * workout's blocks, drawn as a strip across the foot of the card.
+ * workout's blocks, drawn across the foot of the card; since #982 (the owner's
+ * ruling on #935) about 48 px tall, where #941 drew a 16 px strip that read as
+ * a progress bar on a phone.
  *
- * ⚠️ **The drawing takes the place of space the card already had, and adds
- * none.** The line of facts ended in its own 1 em bottom margin; that margin
- * is now the drawing's row (`--oyl-shape-card-art-height` is that same 1 em),
- * so a card is exactly as tall as it was before #941. A column beside the
- * words was tried first and wrapped the facts — and the fixtures' long names
- * — onto another line on a phone, 25 px further down for *Save workout*.
- * Every primary's margin to the fold therefore stays where #670 recorded it:
- * `list-detail.browser.spec.ts` §"#941" measures it against
- * `reflow.html?shape=off`, and its control (`?shape=tall`) sets this height to
- * three times its value, which must push *Import route* down on the upright
- * tablet.
+ * ⚠️ **The drawing costs a card 32 px, and that is measured, not hoped.** The
+ * line of facts gives up its own 1 em bottom margin to the drawing's row, so a
+ * card grows by the drawing's height less that margin: 3rem − 1em. Every
+ * primary below the cards moves down by that much per card above it and by no
+ * more — `list-detail.browser.spec.ts` §"#941" holds that against
+ * `reflow.html?shape=off` (the card as it was before #941), and its control
+ * (`?shape=tall`) sets this height to three times its value, which must break
+ * the bound for *Import route* on the upright tablet. How many cards fit
+ * before scrolling is published there too (§"#982").
  *
- * The name's link keeps its own width (`justify-self: start`), as it had as an
- * inline box, so the card is not one long target.
+ * The card's layout is `tw:` utilities in `RoutesView` and `WorkoutsView`
+ * (ADR 0042). The height stays here because it is a length no token is, and
+ * the control re-sets it through this property, which a utility reads as
+ * `tw:h-(--oyl-shape-card-art-height)` — a `var()` this file declares.
  */
 .oyl-shape-card {
-  --oyl-shape-card-art-height: 1em;
-
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.oyl-shape-card > a {
-  justify-self: start;
-}
-
-.oyl-shape-card > p {
-  margin-bottom: 0;
-}
-
-.oyl-shape-card__art {
-  position: relative;
-  height: var(--oyl-shape-card-art-height);
-}
-
-.oyl-shape-card__art > svg {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
+  --oyl-shape-card-art-height: 3rem;
 }
 
 .oyl-home {
