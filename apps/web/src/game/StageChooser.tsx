@@ -65,7 +65,8 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
@@ -221,27 +222,33 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
     // Files screen and the Routes screen cannot drift apart.
     return (
       <div className="oyl-game__picker">
-        <h2>Choose a route</h2>
-        <p>{NO_ROUTES_YET}</p>
         {/*
           #668: both next steps are actions, so both are drawn as buttons
           rather than links in sentences. Importing is the primary — it is
-          the one a rider with a course from a planner, the common case, takes.
+          the one a rider with a course from a planner, the common case, takes
+          — and since #943 it is the empty state's one action, with drawing a
+          route stepping down beneath it.
         */}
-        <ul>
-          <li>
-            <a className="oyl-button" href={hrefFor(routeById('routes'))}>
+        <EmptyState
+          art="road"
+          seed={5}
+          heading="Choose a route"
+          level={2}
+          action={
+            <ButtonLink href={hrefFor(routeById('routes'))}>
               Import a GPX file on the Routes screen
-            </a>{' '}
-            — a course from a route planner, read on this device.
-          </li>
-          <li>
-            <a className="oyl-button oyl-button--secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
-              Draw one on this device
-            </a>{' '}
-            — place waypoints and have the roads between them worked out.
-          </li>
-        </ul>
+            </ButtonLink>
+          }
+          note="— a course from a route planner, read on this device."
+        >
+          <p>{NO_ROUTES_YET}</p>
+        </EmptyState>
+        <p>
+          <ButtonLink variant="secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
+            Draw one on this device
+          </ButtonLink>{' '}
+          — place waypoints and have the roads between them worked out.
+        </p>
       </div>
     );
   }

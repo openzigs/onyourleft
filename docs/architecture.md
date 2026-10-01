@@ -833,8 +833,8 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   `browser/shell.html?illustration=specimens` draws every part from the same specimen table the
   Vitest suite uses (`illustration/specimens-testing.ts`), and `shell.browser.spec.ts` §"#938" reads
   a pixel inside every painted region of every part, in both palettes, against the token its paint
-  names, with the other palette forced as the control. The kit has no production caller yet: the
-  menu screens of #939 to #943 are its first.
+  names, with the other palette forced as the control. The menu screens of #939 to #943 are its
+  callers.
 - **Route and workout cards draw their shape** ([#941](https://github.com/openzigs/onyourleft/issues/941)).
   Each card in the Routes and Workouts list panes draws `ProfileShape` from the route's stored
   profile, or `WorkoutShape` from the workout the list already expanded, as a strip across the
@@ -844,6 +844,20 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   (`list-detail.browser.spec.ts` §"#941", against `reflow.html?shape=off`, with `?shape=tall` as
   the control). Activities draws no trace on its cards: a ride's line is location data under
   [ADR 0004](adr/0004-privacy-and-location.md), and drawing one on a list is its own question.
+- **A screen with nothing on it yet is one component** ([#943](https://github.com/openzigs/onyourleft/issues/943)).
+  `design/EmptyState.tsx` is a drawing from the kit (about 48 px tall, the owner's ruling of
+  2026-10-01, one custom property `--oyl-empty-state-art-height`), a heading, the screen's own
+  sentences as children, and **one** action — a `Button` or a `ButtonLink` (`design/Button.tsx`, a
+  link drawn as a button of the same kind), primary unless the view already has its primary. It is
+  a `<div>`, not a landmark. Activities, Workouts, Routes, the game's picker, Devices with nothing
+  paired, Segments and Analysis use it, declared in `testing/populated-shell.tsx` §`EMPTY_STATES`;
+  `a11y/empty-states.a11y.test.tsx` walks `ALL_ROUTES` over the empty fixture and fails a declared
+  sentence said outside one, and `controls-first.browser.spec.ts` holds each action above the fold,
+  with `reflow.html?illustration=tall` (the drawing at 50vh) as the control that must fail. Where
+  the action used to be a line at the head of a list (Routes' *Import a route*, Workouts' *Build a
+  workout*, Activities' *Start a ride*) it moves INTO the empty state rather than being said twice,
+  and Segments puts its list ahead of its forms while it has no segment, so the action is above
+  the fold.
 
 `browser/shell.html?illustration=specimens` paints every new token until a screen does, and since
 #938 draws every part of the kit.

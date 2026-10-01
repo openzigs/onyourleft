@@ -6,6 +6,7 @@ import { LOOP_CLOSURE_METRES, unixSeconds, type Metres } from '@onyourleft/domai
 import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { StatusMessage } from '../design/StatusMessage';
@@ -346,7 +347,21 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
     ) : routes.length === 0 ? (
       <>
         {loadFault !== undefined && <StatusMessage tone="warning">{loadFault}</StatusMessage>}
-        <p>You have no saved routes yet. Import a GPX file to add one.</p>
+        {/* #943: with nothing saved, the import is the empty state's one
+            action rather than a line above it. */}
+        <EmptyState
+          art="road"
+          seed={3}
+          heading="Your first route"
+          level={3}
+          action={
+            <CreateLink route={routeById('routes')} selection={selected}>
+              Import a route
+            </CreateLink>
+          }
+        >
+          <p>You have no saved routes yet. Import a GPX file to add one.</p>
+        </EmptyState>
       </>
     ) : (
       <>
@@ -381,17 +396,23 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       </>
     );
 
-  const list = (
-    <>
-      <p>
-        <CreateLink route={routeById('routes')} selection={selected}>
-          Import a route
-        </CreateLink>
-      </p>
-      {drawOne}
-      {listed}
-    </>
-  );
+  const list =
+    routes?.length === 0 ? (
+      <>
+        {listed}
+        {drawOne}
+      </>
+    ) : (
+      <>
+        <p>
+          <CreateLink route={routeById('routes')} selection={selected}>
+            Import a route
+          </CreateLink>
+        </p>
+        {drawOne}
+        {listed}
+      </>
+    );
 
   const chosen =
     selected === undefined ? null : shown === undefined ? (
