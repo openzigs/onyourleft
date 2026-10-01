@@ -81,7 +81,7 @@ describe('what the rider is told', () => {
     // fully usable afterwards".
     const view = await settings(DENIED);
     expect(view.container.querySelector('h1')?.textContent).toBe('Settings');
-    const headings = [...view.container.querySelectorAll('h2')].map(
+    const headings = [...view.container.querySelectorAll('h2, h3')].map(
       (heading) => heading.textContent ?? '',
     );
     expect(headings).toContain('Units');

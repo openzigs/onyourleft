@@ -181,7 +181,7 @@ export function DocumentsPanel({
 
   return (
     <section className="oyl-panel oyl-rider-text" aria-labelledby="oyl-documents-heading">
-      <h2 id="oyl-documents-heading">{DOCUMENTS_HEADING}</h2>
+      <h3 id="oyl-documents-heading">{DOCUMENTS_HEADING}</h3>
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
           {RIDER_TEXT_NO_STORE}

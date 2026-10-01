@@ -242,6 +242,17 @@ function closedAbove(element: Element): Element | undefined {
   return undefined;
 }
 
+/**
+ * The `aria-hidden` element above `element` (or `element` itself), or
+ * `undefined` when assistive technology can reach it — #942. A sentence
+ * drawn on the screen and hidden from a screen reader is kept visible to
+ * half the riders it is kept for, and an illustration's wrapper is exactly
+ * where one could land: art is `aria-hidden` (epic #935, principle 1).
+ */
+function ariaHiddenAbove(element: Element): Element | undefined {
+  return element.closest('[aria-hidden="true"]') ?? undefined;
+}
+
 /** Every fault with a list of sentences on a rendered page. */
 function keptVisibleFaults(root: Element, sentences: readonly string[]): string[] {
   const faults: string[] = [];
@@ -257,11 +268,19 @@ function keptVisibleFaults(root: Element, sentences: readonly string[]): string[
           `tucked in a closed disclosure (“${normalise(hidden.querySelector('summary')?.textContent ?? '')}”): “${sentence}”`,
         );
       }
+      if (ariaHiddenAbove(element) !== undefined) {
+        faults.push(`hidden from assistive technology by aria-hidden: “${sentence}”`);
+      }
     }
   }
   for (const marked of root.querySelectorAll('[data-oyl-kept-visible]')) {
     if (closedAbove(marked) !== undefined) {
       faults.push(`marked data-oyl-kept-visible and tucked: “${normalise(marked.textContent)}”`);
+    }
+    if (ariaHiddenAbove(marked) !== undefined) {
+      faults.push(
+        `marked data-oyl-kept-visible and under aria-hidden: “${normalise(marked.textContent)}”`,
+      );
     }
   }
   return faults;
@@ -479,6 +498,31 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       'marked data-oyl-kept-visible and tucked: “A marked one.”',
     ]);
   });
+  it('the rule itself: a kept-visible sentence inside an illustration’s wrapper is reported (#942)', async () => {
+    // The fixture #942 names: a card's picture and its kept sentence under one
+    // `aria-hidden` wrapper — drawn, and silent to a screen reader.
+    mounted = await mount(
+      <main>
+        <div aria-hidden="true" className="oyl-illustration">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+            <path d="M0 0 L24 24 Z" />
+          </svg>
+          <p data-oyl-kept-visible="">A sentence that must stay visible.</p>
+        </div>
+        <p>A visible sentence.</p>
+      </main>,
+    );
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(keptVisibleFaults(main, ['A visible sentence.'])).toEqual([
+      'marked data-oyl-kept-visible and under aria-hidden: “A sentence that must stay visible.”',
+    ]);
+    expect(keptVisibleFaults(main, ['A sentence that must stay visible.'])).toEqual([
+      'hidden from assistive technology by aria-hidden: “A sentence that must stay visible.”',
+      'marked data-oyl-kept-visible and under aria-hidden: “A sentence that must stay visible.”',
+    ]);
+  });
+
   it('the rule itself: a marked sentence no list names, and a heading in a summary, are reported', async () => {
     mounted = await mount(
       <main>

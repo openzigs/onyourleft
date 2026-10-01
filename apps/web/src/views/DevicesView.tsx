@@ -140,7 +140,10 @@ function BrowserDevices({
   if (support?.canPair === true && controller !== undefined) {
     return (
       <>
-        <h2>Your trainer and sensors</h2>
+        {/* #942: a shorter gap above the garage than a section's, which pays
+            for the cards' own padding — the first Pair button stays as high
+            on a phone as it was before the cards (devices.browser.spec.ts). */}
+        <h2 className="tw:mt-lg">Your trainer and sensors</h2>
         <PairingPanel
           controller={controller}
           summary="What this browser can and cannot do"
@@ -207,7 +210,10 @@ function ShellDevices({
   if (support?.canPair === true && controller !== undefined) {
     return (
       <>
-        <h2>Your trainer and sensors</h2>
+        {/* #942: a shorter gap above the garage than a section's, which pays
+            for the cards' own padding — the first Pair button stays as high
+            on a phone as it was before the cards (devices.browser.spec.ts). */}
+        <h2 className="tw:mt-lg">Your trainer and sensors</h2>
         <PairingPanel
           controller={controller}
           summary="What this phone can and cannot do"

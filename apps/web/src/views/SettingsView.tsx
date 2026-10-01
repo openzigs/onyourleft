@@ -58,7 +58,7 @@
  * guess.
  */
 
-import { useState, type JSX } from 'react';
+import { useState, type JSX, type ReactNode } from 'react';
 
 import { kilograms, type Kilograms } from '@onyourleft/domain';
 import {
@@ -81,6 +81,11 @@ import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { GOALS_WORDS } from '../rider-text/words';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
+// The parts' own files, not the kit's index: the index names every part, and
+// a part these cards do not draw is not this screen's to pull into a bundle.
+import { Hills } from '../design/illustration/Hills';
+import { RoadRibbon } from '../design/illustration/RoadRibbon';
+import { Sky } from '../design/illustration/Sky';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
 import {
   THEME_CHOICES,
@@ -414,11 +419,21 @@ export function SettingsView({
 
   return (
     <>
-      <section className="oyl-panel" aria-labelledby="oyl-units-heading">
-        <h2 id="oyl-units-heading">Units</h2>
-        <p className="oyl-muted">One choice covers distance, speed, climbing and weight.</p>
+      <SettingsCard
+        id="oyl-settings-you"
+        title={SETTINGS_CARD_TITLES.you}
+        picture={
+          <>
+            <Sky />
+            <RoadRibbon />
+          </>
+        }
+      >
+        <section className="oyl-panel" aria-labelledby="oyl-units-heading">
+          <h3 id="oyl-units-heading">Units</h3>
+          <p className="oyl-muted">One choice covers distance, speed, climbing and weight.</p>
 
-        {/*
+          {/*
         A radio group rather than a select, because there are two options and
         both should be readable without opening anything: #238 asks for the
         current unit to be visible rather than implied, and a collapsed select
@@ -426,69 +441,69 @@ export function SettingsView({
         grouping HTML already has, so no ARIA is needed to associate the label
         with the group — the same argument `HudPanel.tsx` makes for `dl`.
       */}
-        {/*
+          {/*
         ⚠️ **Absent rather than disabled where there is nothing to write to.**
         `design/Button.tsx` states the rule and #48's first criterion is behind
         it: a disabled control leaves the tab order, so a keyboard user never
         reaches it and never hears why. The explanation takes its place.
       */}
-        {port === undefined ? (
-          <StatusMessage tone="warning" label="No local store">
-            {UNITS_NO_STORE}
-          </StatusMessage>
-        ) : (
-          // #668: a segmented control — the choice changes how numbers are
-          // SHOWN, not what happens, and there are two options. Still native
-          // radios in a fieldset, so the arrow keys and the grouping are the
-          // platform's. The option's detail moved out of its label, where two
-          // sentences made each segment several lines tall on a phone, into
-          // the description below, which says what the CHOSEN one means.
-          <fieldset className="oyl-segmented" aria-describedby="oyl-units-detail">
-            <legend>Which units do you ride in?</legend>
-            <div className="oyl-segmented__options">
-              {UNIT_SYSTEMS.map((option) => (
-                <label key={option} htmlFor={`oyl-units-${option}`}>
-                  <input
-                    type="radio"
-                    id={`oyl-units-${option}`}
-                    name="oyl-units"
-                    value={option}
-                    checked={units === option}
-                    onChange={() => {
-                      void choose(option);
-                    }}
-                  />{' '}
-                  {CHOICES[option].label}
-                </label>
-              ))}
-            </div>
-            <p id="oyl-units-detail" className="oyl-muted">
-              {CHOICES[units].detail}
+          {port === undefined ? (
+            <StatusMessage tone="warning" label="No local store">
+              {UNITS_NO_STORE}
+            </StatusMessage>
+          ) : (
+            // #668: a segmented control — the choice changes how numbers are
+            // SHOWN, not what happens, and there are two options. Still native
+            // radios in a fieldset, so the arrow keys and the grouping are the
+            // platform's. The option's detail moved out of its label, where two
+            // sentences made each segment several lines tall on a phone, into
+            // the description below, which says what the CHOSEN one means.
+            <fieldset className="oyl-segmented" aria-describedby="oyl-units-detail">
+              <legend>Which units do you ride in?</legend>
+              <div className="oyl-segmented__options">
+                {UNIT_SYSTEMS.map((option) => (
+                  <label key={option} htmlFor={`oyl-units-${option}`}>
+                    <input
+                      type="radio"
+                      id={`oyl-units-${option}`}
+                      name="oyl-units"
+                      value={option}
+                      checked={units === option}
+                      onChange={() => {
+                        void choose(option);
+                      }}
+                    />{' '}
+                    {CHOICES[option].label}
+                  </label>
+                ))}
+              </div>
+              <p id="oyl-units-detail" className="oyl-muted">
+                {CHOICES[units].detail}
+              </p>
+            </fieldset>
+          )}
+
+          {message === undefined ? null : (
+            <StatusMessage tone={message.tone} live>
+              {message.text}
+            </StatusMessage>
+          )}
+
+          <MoreAbout about="units">
+            <p className="oyl-muted">
+              A rider who wants miles for distance and metres for climbing cannot have that — the
+              whole app follows one setting, and splitting it later is something we can add without
+              taking anything away.
             </p>
-          </fieldset>
-        )}
+            <p className="oyl-muted">
+              This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
+              recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected —
+              those formats have their own unit rules and another program reads them.
+            </p>
+          </MoreAbout>
+        </section>
 
-        {message === undefined ? null : (
-          <StatusMessage tone={message.tone} live>
-            {message.text}
-          </StatusMessage>
-        )}
-
-        <MoreAbout about="units">
-          <p className="oyl-muted">
-            A rider who wants miles for distance and metres for climbing cannot have that — the
-            whole app follows one setting, and splitting it later is something we can add without
-            taking anything away.
-          </p>
-          <p className="oyl-muted">
-            This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
-            recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected — those
-            formats have their own unit rules and another program reads them.
-          </p>
-        </MoreAbout>
-      </section>
-
-      {/*
+        {/*
         ⚠️ A **sibling section**, not a second fieldset inside the units one.
         `a11y/audit.ts` checks heading order, and a rider looking for "where do
         I put my weight" is looking for a heading rather than for a control
@@ -496,7 +511,7 @@ export function SettingsView({
         below is in whichever unit the panel above selects — and that is a
         reason to put them on one screen rather than in one panel.
       */}
-      {/*
+        {/*
         ⚠️ **Keyed on the units, and on nothing else.** The panel is what a
         units switch invalidates: the box below it has to be re-seeded in the
         new unit, and a confirmation about the old one has stopped describing
@@ -504,67 +519,163 @@ export function SettingsView({
         that value moves on every successful save, and a remount there threw
         the confirmation away. See {@link WeightPanel}.
       */}
-      <WeightPanel
-        key={units}
-        {...(mass === undefined ? {} : { port: mass })}
-        units={units}
-        {...(riderMass === undefined ? {} : { riderMass })}
-        onRiderMassChange={onRiderMassChange}
-      />
+        <WeightPanel
+          key={units}
+          {...(mass === undefined ? {} : { port: mass })}
+          units={units}
+          {...(riderMass === undefined ? {} : { riderMass })}
+          onRiderMassChange={onRiderMassChange}
+        />
 
-      {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
-      <KitPanel
-        {...(kit === undefined ? {} : { port: kit })}
-        {...(kitColour === undefined ? {} : { kitColour })}
-        {...(onKitColourChange === undefined ? {} : { onKitColourChange })}
-      />
+        {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
+        <KitPanel
+          {...(kit === undefined ? {} : { port: kit })}
+          {...(kitColour === undefined ? {} : { kitColour })}
+          {...(onKitColourChange === undefined ? {} : { onKitColourChange })}
+        />
+      </SettingsCard>
 
-      <AppearancePanel storage={themeStorage === undefined ? deviceThemeStorage() : themeStorage} />
+      <SettingsCard id="oyl-settings-look" title={SETTINGS_CARD_TITLES.look} picture={<Sky />}>
+        <AppearancePanel
+          storage={themeStorage === undefined ? deviceThemeStorage() : themeStorage}
+        />
 
-      {/*
+        {/*
         #409. Last, because it is the one panel a rider reads rather than
         acts on — and it is on this screen rather than About because About is
         prose about the product and this is a fact about *this browser* that
         can change between visits.
       */}
-      <AnnouncementsPanel
-        units={units}
-        storage={announcements === undefined ? deviceStorage() : announcements}
-      />
+        <AnnouncementsPanel
+          units={units}
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
 
-      <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+        <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+      </SettingsCard>
 
-      <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+      <SettingsCard
+        id="oyl-settings-ride"
+        title={SETTINGS_CARD_TITLES.ride}
+        picture={
+          <>
+            <Sky clouds={false} />
+            <Hills />
+            <RoadRibbon />
+          </>
+        }
+      >
+        <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
-      <MapTilesPanel
-        storage={announcements === undefined ? deviceStorage() : announcements}
-        basemap={basemap}
-      />
+        <MapTilesPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+          basemap={basemap}
+        />
+      </SettingsCard>
 
-      {/* #839. Beside the map tiles: both are about what leaves this device. */}
-      <MaskedWordsPanel port={maskedWords} />
-      <RiderTextBox
-        port={riderText}
-        kind="goal"
-        textKey={GOALS_KEY}
-        maximum={MAXIMUM_GOALS_CHARACTERS}
-        words={GOALS_WORDS}
-        headingLevel={2}
-      />
-      <DocumentsPanel port={riderText} />
+      {/* #839, #836: what is masked, and the goals and documents it is masked in. */}
+      <SettingsCard
+        id="oyl-settings-words"
+        title={SETTINGS_CARD_TITLES.words}
+        picture={
+          <>
+            <Sky sun={false} />
+            <Hills seed={1} />
+          </>
+        }
+      >
+        <MaskedWordsPanel port={maskedWords} />
+        <RiderTextBox
+          port={riderText}
+          kind="goal"
+          textKey={GOALS_KEY}
+          maximum={MAXIMUM_GOALS_CHARACTERS}
+          words={GOALS_WORDS}
+          headingLevel={3}
+        />
+        <DocumentsPanel port={riderText} />
+      </SettingsCard>
 
-      {/* #777. A link, not the form: the one screen that sends something to a
+      <SettingsCard
+        id="oyl-settings-device"
+        title={SETTINGS_CARD_TITLES.device}
+        picture={
+          <>
+            <Sky clouds={false} />
+            <Hills seed={2} />
+          </>
+        }
+      >
+        {/* #777. A link, not the form: the one screen that sends something to a
           server is its own page, with what it sends above its Connect button. */}
-      <section className="oyl-panel" aria-labelledby="oyl-instance-link-heading">
-        <h2 id="oyl-instance-link-heading">Instance</h2>
-        <p>
-          <a href={hrefFor(routeById('instance'))}>Connect to an instance</a>, to ride with other
-          people, and see this device’s connection and your devices there.
-        </p>
-      </section>
+        <section className="oyl-panel" aria-labelledby="oyl-instance-link-heading">
+          <h3 id="oyl-instance-link-heading">Instance</h3>
+          <p>
+            <a href={hrefFor(routeById('instance'))}>Connect to an instance</a>, to ride with other
+            people, and see this device’s connection and your devices there.
+          </p>
+        </section>
 
-      <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
+        <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
+      </SettingsCard>
     </>
+  );
+}
+
+/**
+ * The titles of the cards Settings' sections are gathered into — #942.
+ *
+ * ⚠️ **Gathered, not reordered**: every section is where it was, in the order
+ * #666 set, so the tab order and each section's own first control are
+ * unchanged; the cards only put a title and a picture over a run of them. The
+ * titles name a topic and claim nothing about what a section does, because
+ * the sentences that do are the sections' own and some are kept visible
+ * (`SETTINGS_KEPT_VISIBLE`).
+ */
+export const SETTINGS_CARD_TITLES = {
+  you: 'You and your bike',
+  look: 'Look and sound',
+  ride: 'The ride',
+  words: 'Your words',
+  device: 'Connect and keep',
+} as const;
+
+/**
+ * One titled card of Settings — #942, epic #935.
+ *
+ * The title is an `h2` and each section inside it an `h3`, so the outline a
+ * screen reader walks is the grouping a sighted rider sees. The picture is the
+ * illustration kit's, `aria-hidden` by the kit's own rule, and sits BESIDE the
+ * title rather than around anything: no sentence is inside an illustration's
+ * wrapper (`a11y/kept-visible.a11y.test.tsx` fails one that is). The card's
+ * box is token utilities over `surface`, the surface every section already
+ * sat on, so no new contrast pair; `theme.css` §`.oyl-settings-card` takes
+ * each section's own panel chrome off inside it and rules a line between them.
+ */
+function SettingsCard({
+  id,
+  title,
+  picture,
+  children,
+}: {
+  readonly id: string;
+  readonly title: string;
+  readonly picture: ReactNode;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <section
+      className="oyl-settings-card tw:bg-surface tw:border tw:border-border tw:rounded tw:p-md"
+      aria-labelledby={id}
+    >
+      <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">
+        <span className="oyl-settings-card__picture">{picture}</span>
+        <h2 id={id} className="tw:mt-0 tw:mb-0">
+          {title}
+        </h2>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -623,7 +734,7 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-appearance-heading">
-      <h2 id="oyl-appearance-heading">Appearance</h2>
+      <h3 id="oyl-appearance-heading">Appearance</h3>
       <fieldset className="oyl-segmented" aria-describedby="oyl-appearance-detail">
         <legend>Light or dark?</legend>
         <div className="oyl-segmented__options">
@@ -699,7 +810,7 @@ function AnnouncementsPanel({
   const unit = distanceUnit(units);
   return (
     <section className="oyl-panel oyl-announce" aria-labelledby="oyl-announce-heading">
-      <h2 id="oyl-announce-heading">Announcements</h2>
+      <h3 id="oyl-announce-heading">Announcements</h3>
       <p className="oyl-muted">For riding with a screen reader.</p>
       <p>
         <label className="oyl-announce__switch">
@@ -812,7 +923,7 @@ function SoundsPanel({
 
   return (
     <section className="oyl-panel oyl-announce oyl-sounds" aria-labelledby="oyl-sounds-heading">
-      <h2 id="oyl-sounds-heading">Sounds</h2>
+      <h3 id="oyl-sounds-heading">Sounds</h3>
       <p className="oyl-muted">
         Off unless you turn it on; while riding, a Mute sounds button and a volume slider are on the
         ride screen.
@@ -893,7 +1004,7 @@ function GameWorldPanel({
   // 2.5.8 — #475's review. `oyl-world` is the hook the tests find it by.
   return (
     <section className="oyl-panel oyl-announce oyl-world" aria-labelledby="oyl-world-heading">
-      <h2 id="oyl-world-heading">Game world</h2>
+      <h3 id="oyl-world-heading">Game world</h3>
       <p className="oyl-muted">
         The trainer game draws a standard world unless you choose the realistic one: photographic
         road, ground and sky, photoscanned trees and a modelled rider.
@@ -978,7 +1089,7 @@ function MapTilesPanel({
       className="oyl-panel oyl-announce oyl-map-tiles"
       aria-labelledby="oyl-map-tiles-heading"
     >
-      <h2 id="oyl-map-tiles-heading">Ride map</h2>
+      <h3 id="oyl-map-tiles-heading">Ride map</h3>
       {host === undefined ? (
         <KeptVisible>
           <p className="oyl-muted">
@@ -1152,7 +1263,7 @@ function WeightPanel({
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-weight-heading">
-      <h2 id="oyl-weight-heading">Your weight</h2>
+      <h3 id="oyl-weight-heading">Your weight</h3>
       <KeptVisible>
         <p className="oyl-muted">{WEIGHT_STAYS_HERE}</p>
       </KeptVisible>
@@ -1261,7 +1372,7 @@ function KitPanel({
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-kit-heading">
-      <h2 id="oyl-kit-heading">Your kit</h2>
+      <h3 id="oyl-kit-heading">Your kit</h3>
       {/*
         ⚠️ **Absent rather than disabled where there is nothing to write to** —
         the units' and the weight's rule, and the owner's ruling of 2026-09-28.
