@@ -33,7 +33,9 @@
  * - **`busy_timeout`**: a second connection waiting on the write lock waits
  *   for it rather than failing with `SQLITE_BUSY` at once — and every
  *   transaction begins IMMEDIATE, for the reason at {@link kyselyDatabase}.
- *   `sql-store.concurrency.test.ts` runs two writers in two threads.
+ *   The wait is not fair, so a start that still meets the lock is run again
+ *   (`busy-retry.ts`, #985). `sql-store.concurrency.test.ts` runs two
+ *   writers in two threads.
  * - **Foreign keys ON.** SQLite leaves them off per connection, which would
  *   make a schema's `REFERENCES` clauses decoration; `node:sqlite` turns them
  *   on by default (`enableForeignKeyConstraints`), so no pragma is written —
