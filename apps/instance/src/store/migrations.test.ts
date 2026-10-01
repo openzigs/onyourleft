@@ -7,14 +7,16 @@
  * or any other list, so a migration file nobody registered is still checked —
  * and the index is then held to the directory, so it cannot drift either.
  *
- * For each migration `n`, on a fresh database file:
+ * For each migration `n`, on ONE database file walked forward (#985):
  *
- * 1. apply `1…n-1`, write fixture rows into every table there is, and read the
- *    schema back from `sqlite_schema` — never from the migration source;
+ * 1. with `1…n-1` applied, write fixture rows into every table there is, and
+ *    read the schema back from `sqlite_schema` — never from the migration
+ *    source;
  * 2. apply `n` and read the schema again;
  * 3. `down(n)`: the schema must equal step 1's, and every fixture row must
  *    still be there;
- * 4. `up(n)` again: the schema must equal step 2's, rows unchanged.
+ * 4. `up(n)` again: the schema must equal step 2's, rows unchanged — and that
+ *    database, migrated through `n`, is step 1 of `n + 1`.
  *
  * A migration with no `down` fails before any of that; a `down` that leaves a
  * table, a column or an index behind fails step 3.
@@ -200,44 +202,66 @@ describe('the migrations (#769)', () => {
     }
   });
 
-  it('each one, undone, leaves the schema and the rows exactly as they were before it', async () => {
-    const onDisk = await migrationsOnDisk();
-    for (let n = 1; n <= onDisk.length; n += 1) {
-      const name = onDisk[n - 1]![0];
-      const earlier = Object.fromEntries(onDisk.slice(0, n - 1)) as Record<
-        string,
-        InstanceMigration
-      >;
-      const through = Object.fromEntries(onDisk.slice(0, n)) as Record<string, InstanceMigration>;
+  /**
+   * ⚠️ **One database walked forward, not a fresh one per migration (#985).**
+   * A fresh file per migration re-applied `1…n-1` every time — 78 of the 117
+   * migration steps at thirteen migrations, growing with the square of the
+   * count — and that is what took this case to 11 237 ms on a loaded runner.
+   * The walk checks the same four things of every migration; what differs is
+   * that the rows step 1 counts have also been through every earlier
+   * migration's `down` and `up`, which is more than the fresh file asked of
+   * them, not less. Seeding twice adds nothing (`FIXTURE_ROWS`).
+   *
+   * ⚠️ **Its timeout is judged against CI under coverage** (CLAUDE.md §4c).
+   * Before the walk, on `Tests and coverage report`: 505–993 ms on 34 of 38
+   * green runs read on 2026-10-01 (36843950489 to 36882904839), then 1 140,
+   * 1 829, 2 775 and 3 293 ms (36849145949, 36881644356, 36877000180,
+   * 36845803725); and over Vitest's 5 s, so red, 6 737 ms on 36860095171
+   * attempt 1 (#975) and 11 237 ms on 36884103033 attempt 1 (#984). Every
+   * figure over 2.5 s was an Intel Xeon 6973P-C. 35 s is about three times
+   * the slowest; the walk took 180–230 ms locally where the fresh files took
+   * 280–450 ms. The walk's first CI figure is 327 ms (36891647825, an AMD
+   * EPYC 9V74), one run on a fast runner: the timeout still rests on the old
+   * shape's slowest figures until a walk lands on a loaded Xeon.
+   */
+  it(
+    'each one, undone, leaves the schema and the rows exactly as they were before it',
+    { timeout: 35_000 },
+    async () => {
+      const onDisk = await migrationsOnDisk();
       const path = await freshPath();
+      for (let n = 1; n <= onDisk.length; n += 1) {
+        const name = onDisk[n - 1]![0];
+        const through = Object.fromEntries(onDisk.slice(0, n)) as Record<string, InstanceMigration>;
 
-      await withKysely(path, (db) => migrateToLatest(db, earlier));
-      seedEveryTable(path);
-      const before = snapshot(path);
+        // Migrated through n - 1 already: by the previous turn's up(n - 1).
+        seedEveryTable(path);
+        const before = snapshot(path);
 
-      await withKysely(path, (db) => migrateToLatest(db, through));
-      seedEveryTable(path, EMPTY_FOR_ITS_OWN_DOWN[name]);
-      const after = snapshot(path);
-      expect(after.schema, `${name} changes the schema`).not.toEqual(before.schema);
+        await withKysely(path, (db) => migrateToLatest(db, through));
+        seedEveryTable(path, EMPTY_FOR_ITS_OWN_DOWN[name]);
+        const after = snapshot(path);
+        expect(after.schema, `${name} changes the schema`).not.toEqual(before.schema);
 
-      await withKysely(path, (db) => migrateDownOne(db, through));
-      const undone = snapshot(path);
-      expect(undone.schema, `down(${name}) restores the schema`).toEqual(before.schema);
-      expect(undone.rows, `down(${name}) keeps the earlier rows`).toEqual(before.rows);
+        await withKysely(path, (db) => migrateDownOne(db, through));
+        const undone = snapshot(path);
+        expect(undone.schema, `down(${name}) restores the schema`).toEqual(before.schema);
+        expect(undone.rows, `down(${name}) keeps the earlier rows`).toEqual(before.rows);
 
-      await withKysely(path, (db) => migrateUpOne(db, through));
-      const redone = snapshot(path);
-      expect(redone.schema, `up(${name}) again`).toEqual(after.schema);
-      expect(redone.rows, `up(${name}) again keeps the earlier rows`).toEqual({
-        ...before.rows,
-        ...Object.fromEntries(
-          Object.keys(after.rows)
-            .filter((table) => !(table in before.rows))
-            .map((table) => [table, 0]),
-        ),
-      });
-    }
-  });
+        await withKysely(path, (db) => migrateUpOne(db, through));
+        const redone = snapshot(path);
+        expect(redone.schema, `up(${name}) again`).toEqual(after.schema);
+        expect(redone.rows, `up(${name}) again keeps the earlier rows`).toEqual({
+          ...before.rows,
+          ...Object.fromEntries(
+            Object.keys(after.rows)
+              .filter((table) => !(table in before.rows))
+              .map((table) => [table, 0]),
+          ),
+        });
+      }
+    },
+  );
 
   it('refuses to undo 0007 while the moderation log holds an entry, and changes nothing (#891)', async () => {
     const path = await freshPath();
