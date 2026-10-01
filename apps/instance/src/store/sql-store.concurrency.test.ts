@@ -5,13 +5,19 @@
  *
  * Two connections in two THREADS — `node:sqlite` is synchronous, so two
  * connections in one thread never actually contend — each writing athletes
- * and device keys to one file as fast as they can. With WAL, the busy timeout
- * and IMMEDIATE transactions (`node-sqlite.ts`), every write lands.
+ * and device keys to one file as fast as they can. With WAL, the busy timeout,
+ * IMMEDIATE transactions (`node-sqlite.ts`) and the retry of a start that met
+ * the lock anyway (`busy-retry.ts`), every write lands.
+ *
+ * ⚠️ **Without the retry this case failed on a loaded runner** (#985, run
+ * 36884103033: `[ 'database is locked' ]` after 11 964 ms): the busy timeout
+ * is not fair, and one writer missed the lock for its whole five seconds.
+ * `busy-retry.test.ts` holds the retry deterministically.
  *
  * The control runs the same two writers with the busy timeout at nought and
- * requires `SQLITE_BUSY` (in SQLite's words, "database is locked") to reach a
- * caller: without it this test would be green on a machine where the two
- * threads simply never overlapped.
+ * no retry, and requires `SQLITE_BUSY` (in SQLite's words, "database is
+ * locked") to reach a caller: without it this test would be green on a
+ * machine where the two threads simply never overlapped.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -43,10 +49,11 @@ function writer(
   prefix: string,
   busyTimeoutMilliseconds?: number,
   count = WRITES_PER_THREAD,
+  busyRetryDelaysMilliseconds?: readonly number[],
 ): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(WORKER, {
-      workerData: { path, prefix, count, busyTimeoutMilliseconds },
+      workerData: { path, prefix, count, busyTimeoutMilliseconds, busyRetryDelaysMilliseconds },
     });
     worker.once('message', (errors: string[]) => resolve(errors));
     worker.once('error', reject);
@@ -78,13 +85,13 @@ describe('two writers on one database (#769)', () => {
   });
 
   it(
-    'is a test that can fail: with no busy timeout, SQLITE_BUSY does escape (the control)',
+    'is a test that can fail: with no busy timeout and no retry, SQLITE_BUSY does escape (the control)',
     { timeout: 30_000 },
     async () => {
       const path = await migrated();
       const errors = await Promise.all([
-        writer(path, 'left', 0, CONTROL_WRITES_PER_THREAD),
-        writer(path, 'right', 0, CONTROL_WRITES_PER_THREAD),
+        writer(path, 'left', 0, CONTROL_WRITES_PER_THREAD, []),
+        writer(path, 'right', 0, CONTROL_WRITES_PER_THREAD, []),
       ]);
       expect(errors.flat().some((message) => /database is locked/.test(message))).toBe(true);
     },
