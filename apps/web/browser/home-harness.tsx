@@ -25,7 +25,12 @@
  * the link's box, its declared `min-height`/`min-width`, the box it has with
  * that floor stripped, and what is hit at the card's middle.
  *
- * `home.html?hero=tall` is #939's control: the band at 60 vh, which must push
+ * Since the owner's ruling of 2026-10-01 (medium drawings) it also publishes
+ * each card's picture, the Trainer card's glyph and the days ring, and
+ * `home.html?art=hidden|band|strip` puts back a superseded card picture —
+ * `ART_CONTROLS` says which.
+ *
+ * `home.html?hero=tall` is #939's control: the band at 90 vh, which must push
  * the first ride card's control under a phone's fold — so a measurement that
  * finds it above the fold has measured the band and not a page that drew none.
  */
@@ -83,10 +88,22 @@ export interface HomeMeasurement {
   readonly fold: number;
   /** The ride cards, in document order. */
   readonly rideCards: readonly RideCardMeasurement[];
+  /** The Trainer card's glyph, or `undefined` when none was drawn. */
+  readonly trainerGlyph: Box | undefined;
+  /** The last-seven-days ring, or `undefined` when none was drawn. */
+  readonly daysRing: Box | undefined;
 }
 
 export interface RideCardMeasurement {
   readonly card: Box;
+  /**
+   * The card's picture — `.oyl-ride-card__art` — or `undefined` when it has no
+   * box at all (`display: none`). The owner's ruling of 2026-10-01: about
+   * 48 px tall.
+   */
+  readonly art: Box | undefined;
+  /** The heading's TEXT and the line under it, as line boxes. */
+  readonly words: readonly Box[];
   readonly linkText: string;
   readonly link: Box;
   /** The link's computed `min-height` and `min-width`, in px. */
@@ -130,6 +147,14 @@ function boxOf(element: Pick<Element, 'getBoundingClientRect'>): Box {
   };
 }
 
+/** A box, or `undefined` for an element that is absent or not rendered. */
+function boxOrNothing(element: Element | null): Box | undefined {
+  if (element === null || element.getClientRects().length === 0) {
+    return undefined;
+  }
+  return boxOf(element);
+}
+
 function measure(): HomeMeasurement {
   const main = document.querySelector('main');
   const hero = document.querySelector('.oyl-home-hero');
@@ -150,6 +175,8 @@ function measure(): HomeMeasurement {
       );
     }),
     fold: foldLine(),
+    trainerGlyph: boxOrNothing(document.querySelector('.oyl-home__glyph')),
+    daysRing: boxOrNothing(document.querySelector('.oyl-home__ring')),
     rideCards: ((cards) => {
       window.scrollTo(0, 0);
       return cards;
@@ -172,6 +199,12 @@ function measureCard(card: Element): RideCardMeasurement {
   link.style.minHeight = '';
   link.style.minWidth = '';
   const box = boxOf(card);
+  const art = boxOrNothing(card.querySelector('.oyl-ride-card__art'));
+  const words = [...card.querySelectorAll('h3, p')].flatMap((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return [...range.getClientRects()].map((rect) => boxOf({ getBoundingClientRect: () => rect }));
+  });
   // The middle is hit-tested where it is on screen: `elementFromPoint` finds
   // nothing outside the viewport, so a card below the fold is scrolled to
   // first, and the page put back at its top afterwards (`measure`).
@@ -181,6 +214,8 @@ function measureCard(card: Element): RideCardMeasurement {
   const hitLink = hit?.closest('a') ?? null;
   return {
     card: box,
+    art,
+    words,
     linkText: (link.textContent ?? '').trim(),
     link: shipped,
     declaredMinHeight: Number.parseFloat(style.minHeight),
@@ -244,6 +279,19 @@ function deleteShortViewportRule(): void {
   }
 }
 
+/**
+ * `?art=…`: a card picture as it was before the ruling. `hidden` is the first
+ * answer to #939's review (no card picture under 30rem tall); `band` is the
+ * 8rem band across the card's top that #939 first shipped; `strip` is a band
+ * of the ruling's height — 48 px tall and the card's full width, which is
+ * what #973 drew and the ruling was made against.
+ */
+const ART_CONTROLS: ReadonlyMap<string, string> = new Map([
+  ['hidden', '.oyl-ride-card__art { display: none; }'],
+  ['band', '.oyl-ride-card__art { position: relative; width: auto; height: 8rem; }'],
+  ['strip', '.oyl-ride-card__art { position: relative; width: auto; height: 3rem; }'],
+]);
+
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
   const deadline = performance.now() + PATIENCE_MS;
   for (;;) {
@@ -269,13 +317,25 @@ async function run(): Promise<void> {
   }
   window.location.hash = '#/';
   if (new URLSearchParams(window.location.search).get('hero') === 'tall') {
-    // #939's control: the band at 60 vh, a screen rather than a band.
+    // #939's control: the band at 90 vh, a screen rather than a band.
     const tall = document.createElement('style');
-    tall.textContent = '.oyl-home-hero { min-height: 60vh; }';
+    tall.textContent = '.oyl-home-hero { min-height: 90vh; }';
     document.head.append(tall);
   }
   if (new URLSearchParams(window.location.search).get('short') === 'off') {
     deleteShortViewportRule();
+  }
+  const art = new URLSearchParams(window.location.search).get('art');
+  if (art !== null) {
+    // The controls for the owner's ruling of 2026-10-01 (medium drawings,
+    // about 48 px tall): each puts back a superseded picture.
+    const superseded = ART_CONTROLS.get(art);
+    if (superseded === undefined) {
+      throw new Error(`home harness: no ?art=${art} control`);
+    }
+    const style = document.createElement('style');
+    style.textContent = superseded;
+    document.head.append(style);
   }
   const now = Math.floor(Date.now() / 1000);
   const rides = Array.from({ length: 60 }, (_unused, index) => ({

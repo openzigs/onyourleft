@@ -17,7 +17,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
-import type { HomeMeasurement } from './home-harness';
+import type { Box, HomeMeasurement } from './home-harness';
 
 const SUBPIXEL_TOLERANCE = 1;
 
@@ -115,6 +115,31 @@ const FOLD_MARGIN_PIXELS = 50;
  */
 const TOUCH_TARGET_PIXELS = 44;
 
+/**
+ * The owner's ruling of 2026-10-01 on #935: drawings on cards and panels are
+ * MEDIUM — about 48 px tall, and not thin strips. A picture is held to a
+ * height in this band and to a shape no wider than `MAXIMUM_DRAWING_ASPECT`
+ * times its height: the scene's own 320 × 120 is 2.67, a card's picture is 2,
+ * and a 48 px band across a phone's card is 7.5.
+ */
+const MEDIUM_DRAWING_PIXELS = { least: 44, most: 56 } as const;
+const MAXIMUM_DRAWING_ASPECT = 3;
+
+/** Why `box` is not a medium drawing, or `undefined` when it is one. */
+function notMedium(box: Box | undefined): string | undefined {
+  if (box === undefined) return 'not drawn';
+  if (box.height < MEDIUM_DRAWING_PIXELS.least || box.height > MEDIUM_DRAWING_PIXELS.most) {
+    return `${box.height.toFixed(1)} px tall`;
+  }
+  if (box.width > MAXIMUM_DRAWING_ASPECT * box.height) {
+    return `a strip, ${box.width.toFixed(1)} × ${box.height.toFixed(1)} px`;
+  }
+  return undefined;
+}
+
+const size = (box: Box | undefined): string =>
+  box === undefined ? 'none' : `${box.width.toFixed(1)}×${box.height.toFixed(1)}`;
+
 const FOLD_VIEWPORTS = [
   { name: 'phone 390×844', width: 390, height: 844, insets: undefined, margin: 0 },
   // #939's review (B2): a phone on its side, a #660 reflow viewport, where
@@ -181,8 +206,7 @@ test.describe('#939 — the hero is a band, and the first ride card starts above
       expect(seen.hero?.height ?? Infinity).toBeLessThan(viewport.height / 3);
     });
   }
-
-  test('the control — the hero at 60 vh puts the first control under a phone’s fold', async ({
+  test('the control — the hero at 90 vh puts the first control under a phone’s fold', async ({
     page,
   }) => {
     const shipped = await open(page, 390, 844);
@@ -195,7 +219,7 @@ test.describe('#939 — the hero is a band, and the first ride card starts above
         `first link top ${(first?.link.top ?? 0).toFixed(1)} (+${moved.toFixed(1)}) against ` +
         `the fold ${seen.fold.toFixed(1)}`,
     );
-    expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(0.6 * 844 - SUBPIXEL_TOLERANCE);
+    expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(0.9 * 844 - SUBPIXEL_TOLERANCE);
     expect(first?.link.top ?? 0).toBeGreaterThan(seen.fold);
     // Whatever the fonts: the band is what moved the control, by as much as
     // the band grew (#939's review, N2) — not a margin of a few pixels that a
@@ -216,6 +240,73 @@ test.describe('#939 — the hero is a band, and the first ride card starts above
     expect(margin).toBeLessThan(0);
     expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(390 / 3);
   });
+});
+
+test.describe('#939 — medium drawings, about 48 px tall (the owner’s ruling of 2026-10-01)', () => {
+  for (const viewport of FOLD_VIEWPORTS) {
+    test(viewport.name, async ({ page }) => {
+      const seen = await open(page, viewport.width, viewport.height, {
+        ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
+      });
+      // The apparatus: three cards, and the panels that carry a drawing.
+      expect(seen.rideCards).toHaveLength(3);
+      console.log(
+        `#939 drawings at ${viewport.name}: cards ` +
+          seen.rideCards.map((card) => size(card.art)).join(', ') +
+          `; trainer glyph ${size(seen.trainerGlyph)}; days ring ${size(seen.daysRing)}` +
+          `; hero picture ${size(seen.ground)}`,
+      );
+      for (const card of seen.rideCards) {
+        expect(notMedium(card.art), `${card.linkText}'s picture`).toBeUndefined();
+        // Beside the heading, inside the card, and over none of its words.
+        const art = card.art;
+        const covered = card.words.filter(
+          (line) =>
+            art !== undefined &&
+            line.right > art.left + SUBPIXEL_TOLERANCE &&
+            line.left < art.right &&
+            line.bottom > art.top + SUBPIXEL_TOLERANCE &&
+            line.top < art.bottom - SUBPIXEL_TOLERANCE,
+        );
+        expect(covered, `${card.linkText}: words under the picture`).toEqual([]);
+        expect(card.art?.top ?? -1).toBeGreaterThanOrEqual(card.card.top - SUBPIXEL_TOLERANCE);
+        expect(card.art?.right ?? Infinity).toBeLessThanOrEqual(
+          card.card.right + SUBPIXEL_TOLERANCE,
+        );
+      }
+      expect(notMedium(seen.trainerGlyph), 'the Trainer card’s glyph').toBeUndefined();
+      expect(notMedium(seen.daysRing), 'the days ring').toBeUndefined();
+      // The hero's picture is at least medium (8rem on a tablet), and never a
+      // strip across the band.
+      const ground = seen.ground;
+      expect(ground?.height ?? 0).toBeGreaterThanOrEqual(MEDIUM_DRAWING_PIXELS.least);
+      expect(ground?.width ?? Infinity).toBeLessThanOrEqual(
+        MAXIMUM_DRAWING_ASPECT * (ground?.height ?? 0),
+      );
+    });
+  }
+
+  // The controls: each puts back a card picture the ruling superseded, and the
+  // same measurement must refuse it.
+  for (const control of [
+    { art: 'hidden', width: 640, height: 360, why: 'no card picture under 30rem tall' },
+    { art: 'band', width: 390, height: 844, why: 'the 8rem band #939 first shipped' },
+    { art: 'strip', width: 390, height: 844, why: 'a 48 px band across the card' },
+  ] as const) {
+    test(`the control — ?art=${control.art} (${control.why}) is not a medium drawing`, async ({
+      page,
+    }) => {
+      const seen = await open(page, control.width, control.height, {
+        query: `?art=${control.art}`,
+      });
+      expect(seen.rideCards).toHaveLength(3);
+      const reasons = seen.rideCards.map((card) => notMedium(card.art));
+      console.log(`#939 drawing control ?art=${control.art}: ${reasons.join(', ')}`);
+      for (const reason of reasons) {
+        expect(reason).toBeDefined();
+      }
+    });
+  }
 });
 
 test.describe('#939 — three equal cards, each one `.oyl-button` link at 44×44', () => {

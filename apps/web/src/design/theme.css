@@ -979,18 +979,26 @@ h3:first-child {
  * straight into `main`, and Home's view renders the band after them, so `main`
  * becomes a one-column grid ON HOME ONLY (`:has(> .oyl-home-hero)`), with the
  * band in the same two rows as the title and the summary and painted under
- * them. The ground (hills and road) sits in the band's bottom
- * `--oyl-home-ground`, and the summary is padded by as much, so the words only
- * ever stand on the sky: `ink` and `inkMuted` on `illoSky`, both declared
- * pairs (`tokens.ts` §`CONTRAST_REQUIREMENTS`, #936).
+ * them. The band's picture (hills and road) is FRAMED at the band's top right,
+ * at the scene's own 320 × 120 shape, and the title is padded clear of it, so
+ * the words only ever stand on the sky: `ink` and `inkMuted` on `illoSky`, both
+ * declared pairs (`tokens.ts` §`CONTRAST_REQUIREMENTS`, #936).
+ *
+ * ⚠️ **A medium drawing, not a strip** — the owner's ruling of 2026-10-01 on
+ * #935: drawings on cards and panels are about 48 px tall. Until it, a phone
+ * drew the ground as an 88 px strip across the whole band under the summary.
+ * `--oyl-home-ground` is the picture's HEIGHT: 3rem on a phone and on a short
+ * viewport, 8rem on a tablet. On a phone only the title is padded clear of it
+ * (and is at least as tall as it), so the summary keeps the band's width.
  *
  * ⚠️ **A band, not a screen.** `browser/home.browser.spec.ts` publishes its
- * height and the first ride card's margin to the fold, and its control
- * (`home.html?hero=tall`, the band at 60 vh) must push the first control
- * under a phone's fold.
+ * height, the picture's, and the first ride card's margin to the fold, and its
+ * control (`home.html?hero=tall`, the band at 90 vh) must push the first
+ * control under a phone's fold.
  */
 .oyl-main:has(> .oyl-home-hero) {
-  --oyl-home-ground: 5.5rem;
+  --oyl-home-ground: 3rem;
+  --oyl-home-ground-width: calc(var(--oyl-home-ground) * 8 / 3);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
@@ -1010,6 +1018,8 @@ h3:first-child {
 .oyl-main:has(> .oyl-home-hero) > h1 {
   grid-row: 1;
   padding-top: var(--oyl-space-md);
+  padding-inline-end: calc(var(--oyl-home-ground-width) + 2 * var(--oyl-space-md));
+  min-height: calc(var(--oyl-home-ground) + var(--oyl-space-md));
   font-size: var(--oyl-font-size-display);
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -1020,7 +1030,7 @@ h3:first-child {
 .oyl-main:has(> .oyl-home-hero) > h1 + p {
   grid-row: 2;
   padding-top: var(--oyl-space-xs);
-  padding-bottom: calc(var(--oyl-home-ground) + var(--oyl-space-sm));
+  padding-bottom: var(--oyl-space-md);
 }
 
 .oyl-home-hero {
@@ -1033,8 +1043,11 @@ h3:first-child {
 
 .oyl-home-hero__ground {
   position: absolute;
-  inset: auto 0 0;
+  inset: var(--oyl-space-md) var(--oyl-space-md) auto auto;
+  width: var(--oyl-home-ground-width);
   height: var(--oyl-home-ground);
+  overflow: hidden;
+  border-radius: var(--oyl-radius);
 }
 
 .oyl-main:has(> .oyl-home-hero) > .oyl-home {
@@ -1043,35 +1056,24 @@ h3:first-child {
 }
 
 /*
- * Wider than a phone, the ground is a framed picture at the band's right, at
- * the scene's own 320 × 120 shape, rather than a strip across it: stretched
- * across a tablet the scene is cropped to the bottom fifth of its drawing — a
- * road and no hills. The words keep to the left of it.
+ * Wider than a phone the picture is 8rem tall and both lines of words keep to
+ * the left of it.
  */
 @media (min-width: 48rem) {
   .oyl-main:has(> .oyl-home-hero) {
     --oyl-home-ground: 8rem;
-    --oyl-home-ground-width: calc(var(--oyl-home-ground) * 8 / 3);
   }
 
-  .oyl-main:has(> .oyl-home-hero) > h1,
+  .oyl-main:has(> .oyl-home-hero) > h1 {
+    min-height: 0;
+  }
+
   .oyl-main:has(> .oyl-home-hero) > h1 + p {
     padding-inline-end: calc(var(--oyl-home-ground-width) + 2 * var(--oyl-space-md));
   }
 
-  .oyl-main:has(> .oyl-home-hero) > h1 + p {
-    padding-bottom: var(--oyl-space-md);
-  }
-
   .oyl-home-hero {
     min-height: calc(var(--oyl-home-ground) + 2 * var(--oyl-space-md));
-  }
-
-  .oyl-home-hero__ground {
-    inset: var(--oyl-space-md) var(--oyl-space-md) auto auto;
-    width: var(--oyl-home-ground-width);
-    overflow: hidden;
-    border-radius: var(--oyl-radius);
   }
 }
 
@@ -1101,50 +1103,65 @@ h3:first-child {
   list-style: none;
 }
 
+/*
+ * Each card's picture — a medium drawing, the owner's ruling of 2026-10-01 on
+ * #935: about 48 px tall, framed in the card's top corner BESIDE its heading
+ * rather than a band across the card's top. Until the ruling it was an 8rem
+ * band (7rem on a tablet), and a viewport under 30rem tall dropped it to clear
+ * the fold. Beside the heading it costs the card no height: the heading is
+ * held at least as tall as the picture less the body's top padding, so the
+ * line under it starts below the picture, and is padded clear of it on its
+ * own row. The picture is a sibling of the card's link, never its ancestor,
+ * so the stretched link (below) still covers it.
+ * `home.browser.spec.ts` holds every card's picture to 44–56 px tall at every
+ * fold viewport, and to the shape of a picture rather than a strip.
+ */
 .oyl-ride-card__art {
-  position: relative;
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  width: 6rem;
+  height: 3rem;
   overflow: hidden;
-  height: 8rem;
+  border-end-start-radius: var(--oyl-radius);
 }
 
-@media (min-width: 48rem) {
-  .oyl-ride-card__art {
-    height: 7rem;
-  }
+.oyl-ride-card__body > h3 {
+  display: flex;
+  align-items: center;
+  min-height: calc(3rem - var(--oyl-space-md));
+  padding-inline-end: calc(6rem + var(--oyl-space-xs));
 }
 
 /*
  * A SHORT viewport — a phone on its side (#939's review, B2). Above 48rem wide
- * a landscape phone took the tablet's framed 8rem picture, the display step
- * and 7rem of card art: at 844×390 the hero was 41 % of the screen and the
- * first ride control 115 px under the fold, where it had been 161 px above it
- * before #939. Keyed to HEIGHT, at the 30rem the ride stage's short layout
- * uses: the picture framed at the band's right at 3rem tall whatever the
- * width (so it costs no height under the words), the title one step down from
- * the display size, tighter margins, and no card art. A first cut kept 3rem
- * of card art and cleared the fold by 15 px at 640×360 on a Mac and missed it
- * by 10 on the CI runner, whose fonts wrap the summary a line further. Declared after
- * every Home rule it overrides, which is what makes it win.
- * `home.browser.spec.ts` measures 844×390 and 640×360, and its control
+ * a landscape phone took the tablet's 8rem picture and the display step: at
+ * 844×390 the hero was 41 % of the screen and the first ride control 115 px
+ * under the fold, where it had been 161 px above it before #939. Keyed to
+ * HEIGHT, at the 30rem the ride stage's short layout uses: the picture back at
+ * 3rem tall, both lines of words padded clear of it, the title one step down
+ * from the display size, and tighter margins. ⚠️ **The cards keep their
+ * pictures here**, and a reviewer who remembers this rule hiding them is
+ * reading the superseded first answer (#939's comment of 2026-09-30): the
+ * owner's ruling of 2026-10-01 asks for a medium drawing at every height, and
+ * a picture beside the heading costs no height, which is what recovers the
+ * fold. Declared after every Home rule it overrides, which is what makes it
+ * win. `home.browser.spec.ts` measures 844×390 and 640×360, and its control
  * (`home.html?short=off`) deletes this rule.
  */
 @media (max-height: 30rem) {
   .oyl-main:has(> .oyl-home-hero) {
     --oyl-home-ground: 3rem;
-    --oyl-home-ground-width: calc(var(--oyl-home-ground) * 8 / 3);
   }
 
   .oyl-main:has(> .oyl-home-hero) > h1 {
+    min-height: 0;
     padding-top: var(--oyl-space-sm);
     font-size: var(--oyl-font-size-xl);
   }
 
-  .oyl-main:has(> .oyl-home-hero) > h1,
   .oyl-main:has(> .oyl-home-hero) > h1 + p {
     padding-inline-end: calc(var(--oyl-home-ground-width) + 2 * var(--oyl-space-md));
-  }
-
-  .oyl-main:has(> .oyl-home-hero) > h1 + p {
     padding-bottom: var(--oyl-space-sm);
   }
 
@@ -1154,31 +1171,23 @@ h3:first-child {
 
   .oyl-home-hero__ground {
     inset: var(--oyl-space-sm) var(--oyl-space-md) auto auto;
-    width: var(--oyl-home-ground-width);
-    overflow: hidden;
-    border-radius: var(--oyl-radius);
   }
 
   .oyl-main:has(> .oyl-home-hero) > .oyl-home {
     margin-top: var(--oyl-space-sm);
   }
-
-  /* The cards' pictures go: the band keeps the screen's one picture. */
-  .oyl-ride-card__art {
-    display: none;
-  }
 }
 
 .oyl-ride-card__rider {
-  top: var(--oyl-space-sm);
-  height: calc(100% - var(--oyl-space-sm) - var(--oyl-space-xs));
+  top: var(--oyl-space-xs);
+  height: calc(100% - 2 * var(--oyl-space-xs));
 }
 
 .oyl-ride-card__workout {
-  top: var(--oyl-space-lg);
-  left: var(--oyl-space-md);
-  width: calc(100% - 2 * var(--oyl-space-md));
-  height: calc(100% - var(--oyl-space-lg));
+  top: var(--oyl-space-sm);
+  left: var(--oyl-space-sm);
+  width: calc(100% - 2 * var(--oyl-space-sm));
+  height: calc(100% - var(--oyl-space-sm));
 }
 
 /*
@@ -1235,10 +1244,12 @@ h3:first-child {
   stroke-linecap: round;
 }
 
+/* The Trainer card's glyph — a medium drawing, 3rem, like the ring above and
+   the cards' pictures (the owner's ruling of 2026-10-01 on #935). */
 .oyl-home__glyph {
   flex: none;
-  width: 1.5em;
-  height: 1.5em;
+  width: 3rem;
+  height: 3rem;
 }
 
 .oyl-home__facts {

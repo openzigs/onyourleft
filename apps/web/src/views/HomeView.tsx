@@ -302,13 +302,15 @@ function TrainerCard({ controller }: { readonly controller: RideController }): J
  * The band under the title — #939. Decoration only: `aria-hidden`, drawn from
  * the illustration kit (#938) and holding no word, so the `h1` and the route's
  * summary the shell renders above it stay real text. `theme.css` §"Home"
- * lays the band BEHIND those two, over its sky, and keeps the ground below
- * them, so the only pairs it puts text on are the declared ones: `ink` and
- * `inkMuted` on `illoSky`.
+ * lays the band BEHIND those two, over its sky, and frames its picture at the
+ * band's top right with the words kept clear of it, so the only pairs it puts
+ * text on are the declared ones: `ink` and `inkMuted` on `illoSky`. The
+ * picture is a medium drawing — 48 px tall on a phone, never a strip across
+ * the band (the owner's ruling of 2026-10-01 on #935).
  *
  * ⚠️ **It is short on purpose**: a band, not a screen. `home.browser.spec.ts`
  * publishes its height, and its control (`home.html?hero=tall`, the band at
- * 60 vh) must push the first ride card's control under a phone's fold.
+ * 90 vh) must push the first ride card's control under a phone's fold.
  */
 function HomeHero(): JSX.Element {
   return (
@@ -406,8 +408,9 @@ const RIDE_CHOICES: readonly RideChoice[] = [
 
 /**
  * Where a ride starts — #939: three equal cards, the next thing to do the
- * largest thing on the screen. Each card is a list item with a picture, a real
- * heading, one line and ONE link; the link's `::after` stretches over the card
+ * largest thing on the screen. Each card is a list item with a picture (a
+ * medium drawing, 48 px tall, framed beside the heading — the owner's ruling
+ * of 2026-10-01 on #935), a real heading, one line and ONE link; the link's `::after` stretches over the card
  * (`theme.css` §`.oyl-ride-card__link`), so the whole card is the target and
  * still holds a single interactive element.
  */
