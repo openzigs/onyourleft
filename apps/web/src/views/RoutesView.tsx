@@ -6,6 +6,8 @@ import { LOOP_CLOSURE_METRES, unixSeconds, type Metres } from '@onyourleft/domai
 import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+// The part's own module, not the kit's index: this list reaches only what it draws (#941).
+import { ProfileShape } from '../design/illustration/ProfileShape';
 import { StatusMessage } from '../design/StatusMessage';
 import { checkName, editRoute, LOOP_CHECKBOX_LABEL, type SaveRefusal } from '../routes/save';
 import { FILE_FIELD, LOOP_FIELD, routeFromImportForm } from '../routes/import-form';
@@ -354,7 +356,7 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
         </p>
         <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
           {routes.map((route) => (
-            <li key={route.id} className="oyl-pane-list__item">
+            <li key={route.id} className="oyl-pane-list__item oyl-shape-card">
               <a
                 href={hrefForSelection(routeById('routes'), route.id)}
                 data-oyl-select={route.id}
@@ -367,6 +369,12 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
                 {routeClimb(route.profile.totalAscent, units)} ·{' '}
                 {route.profile.loop ? 'loop' : 'point to point'} · {route.visibility}
               </p>
+              {/* #941: the route's climb, drawn from the profile this list
+                  already read — no read of its own, and decoration only: the
+                  words above say everything it does. */}
+              <div className="oyl-shape-card__art">
+                <ProfileShape profile={route.profile} />
+              </div>
             </li>
           ))}
         </ul>
