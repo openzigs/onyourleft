@@ -13,8 +13,9 @@ import {
 
 import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
+import { EmptyState } from '../design/EmptyState';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -387,6 +388,19 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
     state.kind === 'loading' || state.kind === 'idle'
       ? 'Reading the rides on this device…'
       : 'Nothing recorded yet. A ride appears here the moment you finish one.';
+  // #943: read, and nothing in it — the one state the empty state is for. A
+  // read still going, or one that failed, says so in the list instead.
+  const empty = state.kind === 'ready' && rows.length === 0;
+  const emptyState = (
+    <EmptyState
+      art="rider"
+      heading="Your first ride"
+      level={3}
+      action={<ButtonLink href={hrefFor(routeById('ride'))}>Start a ride</ButtonLink>}
+    >
+      <p>{nothingYet}</p>
+    </EmptyState>
+  );
   const deleteButton = (row: LibraryRow): JSX.Element => (
     <Button
       variant="secondary"
@@ -423,12 +437,16 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         5,560 px down a populated library.
       */}
       <p className="oyl-library__actions">
-        <a className="oyl-button" href={hrefFor(routeById('ride'))}>
-          Start a ride
-        </a>{' '}
-        <a className="oyl-button oyl-button--secondary" href={hrefFor(routeById('transfer'))}>
+        {/* #943: with nothing recorded, *Start a ride* is the empty state's one
+            action below, so it is not said twice. */}
+        {empty ? null : (
+          <>
+            <ButtonLink href={hrefFor(routeById('ride'))}>Start a ride</ButtonLink>{' '}
+          </>
+        )}
+        <ButtonLink variant="secondary" href={hrefFor(routeById('transfer'))}>
           Import or export files
-        </a>
+        </ButtonLink>
       </p>
       <div className="oyl-library-controls">
         {/*
@@ -463,7 +481,12 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         </StatusMessage>
       ) : undefined}
 
-      {layout === 'cards' ? (
+      {empty ? (
+        <>
+          <p className="oyl-muted">{caption}</p>
+          {emptyState}
+        </>
+      ) : layout === 'cards' ? (
         <>
           <p className="oyl-muted" id={listCaptionId}>
             {caption}

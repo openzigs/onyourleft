@@ -332,10 +332,16 @@ async function walk(
   readonly lines: string[];
   readonly faults: Map<string, readonly string[]>;
   readonly exempted: readonly RouteId[];
+  /** #943: each empty state's action against the fold, on the empty fixture only. */
+  readonly emptyLines: string[];
+  readonly emptyFaults: Map<string, readonly string[]>;
 }> {
   const lines: string[] = [];
   const faults = new Map<string, readonly string[]>();
   const exempted: RouteId[] = [];
+  const emptyLines: string[] = [];
+  const emptyFaults = new Map<string, readonly string[]>();
+  const empty = await page.evaluate(() => window.__oylReflow?.data === 'empty');
   for (const route of ALL_ROUTES) {
     const seen = await visit(page, route);
     const verdict = judge(route, seen, viewport.margin);
@@ -346,10 +352,76 @@ async function walk(
     if (verdict.exempted) {
       exempted.push(route.id);
     }
+    if (empty) {
+      const declared = await emptyStateDeclared(page, route.id);
+      const emptyVerdict = judgeEmptyState(route.id, declared, seen, viewport.margin);
+      if (emptyVerdict.line !== undefined) emptyLines.push(emptyVerdict.line);
+      if (emptyVerdict.faults.length > 0) emptyFaults.set(route.id, emptyVerdict.faults);
+    }
   }
   const unvisited = await page.evaluate(() => window.__oylReflow?.unvisited());
   expect(unvisited, 'routes in ALL_ROUTES the walk never opened').toEqual([]);
-  return { lines, faults, exempted };
+  return { lines, faults, exempted, emptyLines, emptyFaults };
+}
+
+/**
+ * Whether a route declares an empty state the walk reaches — #943,
+ * `testing/populated-shell.tsx` §`EMPTY_STATES`, read off the page rather than
+ * imported, because importing it pulls the whole client into Playwright's
+ * transform. Devices declares one only where a browser can pair, which the
+ * walk's no-Bluetooth fixture is not; its own case below measures it.
+ */
+async function emptyStateDeclared(page: Page, id: RouteId): Promise<boolean> {
+  const expectation = await page.evaluate((route) => window.__oylReflow?.emptyStates[route], id);
+  if (expectation === undefined) {
+    throw new Error(`${id}: testing/populated-shell.tsx §EMPTY_STATES has no entry`);
+  }
+  return expectation.kind === 'empty-state' && expectation.bluetooth !== true;
+}
+
+/**
+ * #943: a route that declares an empty state shows exactly one, with exactly
+ * one action, and that action STARTS above the fold by `margin` — the rule
+ * {@link judge} holds a first control to. A route that declares none shows
+ * none.
+ */
+function judgeEmptyState(
+  id: RouteId,
+  declared: boolean,
+  seen: ReflowMeasurement,
+  margin: number,
+): { readonly line: string | undefined; readonly faults: readonly string[] } {
+  if (!declared) {
+    return {
+      line: undefined,
+      faults:
+        seen.emptyStates.length === 0
+          ? []
+          : [`${id}: shows an empty state, and EMPTY_STATES declares none for it`],
+    };
+  }
+  if (seen.emptyStates.length !== 1) {
+    return {
+      line: `${id}: ${String(seen.emptyStates.length)} empty states`,
+      faults: [`${id}: shows ${String(seen.emptyStates.length)} empty states, not one`],
+    };
+  }
+  const [state] = seen.emptyStates;
+  if (state === undefined || state.top === null) {
+    return { line: `${id}: no action`, faults: [`${id}: its empty state has no action`] };
+  }
+  const clearance = seen.fold - state.top;
+  const line =
+    `${id}: empty state’s action “${state.text}” at y = ${state.top.toFixed(0)}, ` +
+    `fold ${seen.fold.toFixed(0)}, margin ${clearance.toFixed(0)} px`;
+  const faults: string[] = [];
+  if (state.actions !== 1) {
+    faults.push(`${id}: its empty state holds ${String(state.actions)} actions, not one`);
+  }
+  if (clearance <= margin) {
+    faults.push(`${line} — needs more than ${String(margin)} px`);
+  }
+  return { line, faults };
 }
 
 test.describe('#666 — the first control is above the fold on every route', () => {
@@ -365,9 +437,15 @@ test.describe('#666 — the first control is above the fold on every route', () 
           test.setTimeout(180_000);
           await open(page, PHONE, `data=${data}`);
           expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
-          const { lines, faults, exempted } = await walk(page, PHONE);
+          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(page, PHONE);
           console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
           expect([...faults.values()].flat()).toEqual([]);
+          if (data === 'empty') {
+            // #943: every declared empty state is measured, so none passes unseen.
+            console.log(`empty states, ${PHONE.name}\n  ${emptyLines.join('\n  ')}`);
+            expect([...emptyFaults.values()].flat()).toEqual([]);
+            expect(emptyLines.length, 'no empty state was measured').toBeGreaterThanOrEqual(6);
+          }
           // Equal, not only within: a listed route that stops needing the
           // exemption on a phone is one to take off the list.
           expect(exempted, 'routes behind kept-visible text only').toEqual(CONSENT_BEFORE_CONTROL);
@@ -386,11 +464,14 @@ test.describe('#666 — the first control is above the fold on every route', () 
           test.setTimeout(180_000);
           await open(page, viewport, 'data=empty');
           expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
-          const { lines, faults, exempted } = await walk(page, viewport);
+          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(page, viewport);
           console.log(`controls first, ${viewport.name}\n  ${lines.join('\n  ')}`);
           console.log(`  behind kept-visible text only: [${exempted.join(', ')}]`);
+          console.log(`empty states, ${viewport.name}\n  ${emptyLines.join('\n  ')}`);
           test.info().annotations.push({ type: 'margins', description: lines.join('; ') });
           expect([...faults.values()].flat()).toEqual([]);
+          expect([...emptyFaults.values()].flat()).toEqual([]);
+          expect(emptyLines.length, 'no empty state was measured').toBeGreaterThanOrEqual(6);
           expect(exempted, 'routes behind kept-visible text only').toEqual(
             CONSENT_BEFORE_CONTROL.filter((id) => viewport.consentBelowFold.includes(id)),
           );
@@ -410,8 +491,28 @@ test.describe('#666 — the first control is above the fold on every route', () 
       expect(seen.firstControl?.text).toMatch(/^Pair /u);
       expect(verdict.faults).toEqual([]);
       expect(verdict.exempted).toBe(false);
+      // #943: nothing is paired, so the garage's empty state is the one the
+      // walk above cannot reach, and its action is held the same way.
+      const empty = judgeEmptyState('devices', true, seen, viewport.margin);
+      console.log(`  ${empty.line ?? ''}`);
+      expect(empty.faults).toEqual([]);
     });
   }
+
+  test('#943’s control: with the drawing at half the viewport, Activities’ action falls below the fold', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await open(page, PHONE, 'data=empty&illustration=tall');
+    const { emptyLines, emptyFaults } = await walk(page, PHONE);
+    console.log(
+      `empty states, CONTROL (drawing at 50vh), ${PHONE.name}\n  ${emptyLines.join('\n  ')}`,
+    );
+    expect(
+      emptyFaults.get('activities'),
+      'Activities’ empty-state action stayed above the fold with its drawing at 50vh',
+    ).toBeDefined();
+  });
 
   test('the control: with the explanation put back, Segments, Settings and Files fail', async ({
     page,

@@ -180,7 +180,7 @@ describe('in a browser that can pair — #659, pairing lives here', () => {
   it('offers one control per kind of device, in the order #49 asks for', async () => {
     const { container } = await withController();
     expect(
-      [...container.querySelectorAll('button')]
+      [...container.querySelectorAll('.oyl-pairing button')]
         .map((each) => each.textContent?.trim())
         .filter((label) => label?.startsWith('Pair')),
     ).toEqual([
@@ -189,6 +189,24 @@ describe('in a browser that can pair — #659, pairing lives here', () => {
       'Pair a power meter',
       'Pair a speed or cadence sensor',
     ]);
+  });
+
+  it('with nothing paired, the empty garage pairs the trainer with its one action — #943', async () => {
+    const { stub, container } = await withController();
+    const empty = container.querySelector('[data-oyl-empty-state]');
+    expect(empty?.textContent).toContain('Nothing paired yet');
+    // The action wears the trainer row's own label (#987's review), so it is
+    // found INSIDE the empty state rather than by name alone.
+    const action = empty?.querySelector('.oyl-empty-state__action button');
+    expect(action?.textContent?.trim()).toBe('Pair a smart trainer');
+    if (!(action instanceof HTMLButtonElement)) throw new Error('the empty garage has no button');
+    await activateWithKeyboard(action);
+    expect(stub.calls.pair).toEqual(['trainer']);
+  });
+
+  it('with a device paired, there is no empty garage — #943', async () => {
+    const { container } = await withController(ridingSnapshot());
+    expect(container.querySelector('[data-oyl-empty-state]')).toBeNull();
   });
 
   it('passes the role straight to the ride controller, from the keyboard', async () => {
