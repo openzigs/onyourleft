@@ -66,7 +66,9 @@ test.describe('#950 — the delete confirmation is a real modal', () => {
     await remove.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('alertdialog')).toBeVisible();
-    expect(await focused(page)).toBe('dialog: Keep the ride');
+    // Radix moves focus in from an effect, which may run after the dialog is
+    // already visible — so this waits for the focus it claims (#963).
+    await expect.poll(() => focused(page)).toBe('dialog: Keep the ride');
 
     // Twice round in each direction: past the last button, through the body's
     // edge (Radix's focus guards, and the browser's own chrome if it were a
@@ -119,7 +121,17 @@ test.describe('#950 — the delete confirmation is a real modal', () => {
     await expect(page.getByRole('alertdialog')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    expect(await focused(page)).toBe(`outside: ${(name ?? '').trim()}`);
+    // ⚠️ Not a one-shot read (#963). Radix's `FocusScope` hands focus back in a
+    // `setTimeout(0)` AFTER the dialog has left the DOM, so for a moment focus
+    // is on the page's body: measured 3 to 50 ms on an idle Mac, and a read
+    // straight after the dialog went failed 13 runs in 20 under CPU load. So
+    // this waits for the one focus it claims — that Delete, outside the
+    // dialog — and still fails if focus never comes back, or lands anywhere
+    // else (#963's mutation: `ConfirmDialog` not calling `returnTo.focus()`).
+    await expect
+      .poll(() => focused(page), { message: 'focus did not go back to that Delete' })
+      .toBe(`outside: ${(name ?? '').trim()}`);
+    await expect(remove).toBeFocused();
     await expect(firstDelete(page)).toHaveText(name ?? '');
   });
 
