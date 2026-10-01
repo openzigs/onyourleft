@@ -36,7 +36,9 @@ import type {
   PresenceCostMeasurement,
   RideStartMeasurement,
   HorizonReading,
+  LogoMeasurement,
   RealisticMeasurement,
+  StylisedTextureMeasurement,
   RiderExtent,
   TreeHandOver,
   TreeLevelMeasurement,
@@ -163,6 +165,8 @@ interface GameHarnessResult {
   readonly sceneryInstances: Readonly<Record<string, number>>;
   readonly texturesCreated: number;
   readonly texturesBaseline: number;
+  readonly stylisedTextures: StylisedTextureMeasurement;
+  readonly logos: LogoMeasurement;
   readonly treeRedPixels: number;
   readonly treeGreenPixels: number;
   readonly buildingGreenPixels: number;
@@ -325,7 +329,7 @@ const RIDER_BOX_TOLERANCE = 0.02;
 const RIDE_START_STALL_FACTOR = 4;
 
 /**
- * What one frame of the harness route costs, with the scenery taken out: **9**.
+ * What one frame of the harness route costs, with the scenery taken out: **11**.
  *
  * | | calls |
  * |---|--:|
@@ -338,6 +342,8 @@ const RIDE_START_STALL_FACTOR = 4;
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
  * | every rider's four leg segments, as one instanced mesh (#349, #368) | 1 |
  * | every rider's contact shadow, as one instanced transparent mesh (#426) | 1 |
+ * | the start gate's legs, beam and barriers, instanced — the frame is at the start line (#966) | 1 |
+ * | every wordmark board in the frame, the gate's and the billboards' (#966) | 1 |
  *
  * ⚠️ **5 → 6 with #426, deliberately, and this line is where it is published.**
  * The riders floated, and the blob under the rider and the pacer is ONE draw
@@ -383,13 +389,22 @@ const RIDE_START_STALL_FACTOR = 4;
  * §`RIDER_UPPER_BODY_PARTS`), rolled about the hips: one call for all three
  * riders, and a ghost still adds none.
  *
+ * ⚠️ **9 → 11 with #966, deliberately — a reviewer who remembers 9 is reading
+ * the old file.** The harness frame is drawn AT the start line, and since
+ * #966 the stylised world draws the start gate there too, as the realistic
+ * world has since #679: the gantry's legs, beam and barriers are one instanced
+ * call (its banners are not drawn — they would be a second texture), and the
+ * wordmark's board on the beam is another — the one call every board in a
+ * frame shares, billboards included. Both are hidden, and cost nothing, away
+ * from a line and a billboard.
+ *
  * ⚠️ **Unchanged by #547, and no longer the frame a stylised ride STARTS on.**
  * It is measured at level 0, the contact rung, which is still what every ride
  * draws after its first step down and what the realistic world falls back to.
  * A stylised ride starts on `quality.ts` §`RIDER_SHADOW_MAP_RUNG` since #547,
  * and that frame is this one plus {@link SHADOW_MAP_EXTRA_DRAW_CALLS}.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1 + 1 + 1;
 
 /**
  * What the shadow map rung draws beyond the contact rung — #426, and since
@@ -406,6 +421,31 @@ const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1;
  * that constant's riders' term: a fifth rider mesh costs a call twice.
  */
 const SHADOW_MAP_EXTRA_DRAW_CALLS = -1 + 1 + 4;
+
+/**
+ * #966: the least share of a board's strip that must read as the wordmark's
+ * navy for the wordmark to have been drawn there — and, with the boards off,
+ * the most the same strip may hold (the control: what is behind a board has
+ * none of it).
+ */
+const WORDMARK_NAVY_FLOOR = 0.12;
+const WORDMARK_NAVY_CONTROL_CEILING = 0.02;
+
+/** The wordmark read on the gate and a billboard, against its control — either world. */
+function expectWordmarkRead(logos: LogoMeasurement): void {
+  // Non-vacuity: a gate's board and a billboard's were drawn.
+  expect(logos.gateBoards).toBeGreaterThanOrEqual(1);
+  expect(logos.billboardBoards).toBeGreaterThanOrEqual(1);
+  expect(logos.gateNavy / logos.stripPixels).toBeGreaterThan(WORDMARK_NAVY_FLOOR);
+  expect(logos.billboardNavy / logos.stripPixels).toBeGreaterThan(WORDMARK_NAVY_FLOOR);
+  // The control: the same strips with the boards off.
+  expect(logos.gateNavyOff / logos.stripPixels).toBeLessThanOrEqual(WORDMARK_NAVY_CONTROL_CEILING);
+  expect(logos.billboardNavyOff / logos.stripPixels).toBeLessThanOrEqual(
+    WORDMARK_NAVY_CONTROL_CEILING,
+  );
+  // One draw call for every board in a frame.
+  expect(logos.calls).toBe(1);
+}
 
 /**
  * The most meshes the scenery belt may ever hold: **24**.
@@ -1113,6 +1153,8 @@ function realisticImageCount(): number {
     REALISTIC_BICYCLE_MAP_NAMES.length +
     // #623: the rider's kit, relief and occlusion maps.
     REALISTIC_RIDER_MAP_NAMES.length +
+    // #966: the wordmark.
+    1 +
     models.reduce(
       (sum, model) =>
         sum +
@@ -2314,7 +2356,7 @@ test.describe('the scenery is models, not solids — #341', () => {
     expect(requested.filter((url) => !url.startsWith(HARNESS_ORIGIN))).toEqual([]);
   });
 
-  test('uploads no texture to the GPU, however the colour got there — #366', async ({
+  test('uploads only the logo texture to the GPU, however the colour got there — #366, #966', async ({
     harnessRun,
   }) => {
     // ⚠️ **#366's fourth criterion, and the only way to make it.** The atlas is
@@ -2331,7 +2373,41 @@ test.describe('the scenery is models, not solids — #341', () => {
     // sampler kind its default uniforms declare — so that is what a working
     // counter sees, and it is subtracted rather than asserted against.
     expect(result.texturesBaseline).toBeGreaterThan(0);
-    expect(result.texturesCreated).toBe(0);
+    // ⚠️ **An allowlist of ONE since #966**, and a reviewer who remembers
+    // `toBe(0)` here is reading the old file: the start gate carries the
+    // wordmark in the stylised world too (the owner's ruling), and the
+    // wordmark is a picture. Everything else stays colour without a texture —
+    // the atlas above still never reaches the GPU.
+    expect(result.texturesCreated).toBe(1);
+    // WHICH one: every 2D image handed to the GPU while a view first drew the
+    // gate is the wordmark's 1024 × 128 (`tools/brand/game-wordmark.ts`)…
+    const textures = result.stylisedTextures;
+    expect(textures.measured).toBe(true);
+    expect(textures.created).toBe(1);
+    expect(textures.uploads.length).toBeGreaterThan(0);
+    expect(new Set(textures.uploads)).toEqual(new Set(['1024x128']));
+    // …and the control: the same frames with the boards off upload nothing at
+    // all, so the one texture is the wordmark's and only the wordmark's.
+    expect(textures.controlCreated).toBe(0);
+    console.log(
+      `#966: the stylised world uploads ${String(textures.created)} texture ` +
+        `(${textures.uploads.join(', ')}); with the boards off, ${String(textures.controlCreated)}`,
+    );
+  });
+
+  test('draws the wordmark on the start gate and on a billboard, and nothing with them off — #966', async ({
+    harnessRun,
+  }) => {
+    const { logos } = await harness(harnessRun);
+    expect(logos.measured).toBe(true);
+    console.log(
+      `#966 (stylised): the gate's board ${String(logos.gateNavy)} of ${String(logos.stripPixels)} ` +
+        `navy (off ${String(logos.gateNavyOff)}); the billboard's ${String(logos.billboardNavy)} ` +
+        `(off ${String(logos.billboardNavyOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
+        `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
+        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
+    );
+    expectWordmarkRead(logos);
   });
 });
 
@@ -3558,6 +3634,21 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // Control 2: mid-route, nothing at all.
     expect(gantry.callsMiddle).toBe(0);
     expect(gantry.trianglesMiddle).toBe(0);
+  });
+
+  test('draws the wordmark on the start gate and on a billboard, from its KTX2, and nothing with them off — #966', async ({
+    harnessRun,
+  }) => {
+    const { logos } = await realistic(harnessRun);
+    expect(logos.measured).toBe(true);
+    console.log(
+      `#966 (realistic): the gate's board ${String(logos.gateNavy)} of ${String(logos.stripPixels)} ` +
+        `navy (off ${String(logos.gateNavyOff)}); the billboard's ${String(logos.billboardNavy)} ` +
+        `(off ${String(logos.billboardNavyOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
+        `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
+        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
+    );
+    expectWordmarkRead(logos);
   });
 
   test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({

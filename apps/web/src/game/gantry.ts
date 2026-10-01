@@ -4,6 +4,10 @@
  * Where the realistic world's start and finish gantries stand, and what they
  * are made of — #679.
  *
+ * ⚠️ **Both worlds draw them since #966**: the start gate carries the game's
+ * wordmark (`logo-board.ts`) in the stylised world too, so the stylised view
+ * draws the same stands, unlettered (`three-renderer.ts` §`GantryBelt`).
+ *
  * ## At the line and nowhere else
  *
  * A loop has ONE line, at route distance 0 — the lap line the HUD's "To go"

@@ -154,12 +154,22 @@ import {
   foliageStillOf,
   gantriesShownOf,
   gantryCountsOf,
+  loadGameWordmark,
+  logoBoardsOf,
+  logosShownOf,
   waterFresnelOf,
   waterReflectsOf,
   remoteRiderControlOf,
 } from '../src/game/three-renderer';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
+import { billboardsAt } from '../src/game/billboards';
+import {
+  BILLBOARD_BOARD_BOTTOM_METRES,
+  carriesTheLogo,
+  gateLogoPlace,
+  LOGO_BOARD_HEIGHT_METRES,
+} from '../src/game/logo-board';
 import { FINISH_WORD } from '../src/game/gantry-wording';
 import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
@@ -727,7 +737,9 @@ declare global {
       /**
        * WebGL textures created across a whole sweep — #366's fourth criterion.
        *
-       * ⚠️ **Zero is the assertion, and it is the only way to make it.** The
+       * ⚠️ **Since #966 ONE is the assertion — the start gate's wordmark, the
+       * stylised world's one allowed texture — and {@link stylisedTextures}
+       * says which texture it was.** Until then zero was. The
        * buildings' colour comes out of a 512 × 512 atlas that is fetched,
        * sampled once at load and thrown away, and every step of that is
        * invisible from outside: a renderer that kept the `Texture` and bound it
@@ -747,6 +759,10 @@ declare global {
        * declare, whether or not this program has an image anywhere.
        */
       readonly texturesBaseline: number;
+      /** #966: the one texture the stylised world uploads, and its control. @see stylisedTextureProbe */
+      readonly stylisedTextures: StylisedTextureMeasurement;
+      /** #966: the wordmark on the gate and a billboard, read back, stylised. @see logoProbe */
+      readonly logos: LogoMeasurement;
       /**
        * A broadleaf tree's own pixels, split by which channel leads — #366.
        *
@@ -2554,7 +2570,11 @@ function colourProbes(probe: SceneFrame): {
     // this program has an image anywhere. What #366's fourth criterion is
     // about is whether the **scenery** adds one, so the baseline is taken
     // after the first frame and what is published is the difference.
-    view.render({ ...probe, markers: [], scatter: [] });
+    // ⚠️ **And with no gate and no billboard in it — #966**: the start gate's
+    // wordmark is the one texture the stylised world may upload, and it is
+    // uploaded the first time a frame draws a board, so the baseline frame
+    // must not, or the count below could not see it.
+    view.render({ ...probe, markers: [], scatter: [], lines: [], billboards: [] });
     const baseline = counted();
     baselineTextures = baseline;
 
@@ -4489,6 +4509,8 @@ export interface RealisticMeasurement {
   readonly groundBlend: GroundBlendMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
+  /** #966: the wordmark on the gate and a billboard, read back, realistic. @see logoProbe */
+  readonly logos: LogoMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
   readonly waterReflection: WaterReflectionMeasurement;
   /**
@@ -5705,6 +5727,267 @@ function gantryProbe(
   };
 }
 
+/**
+ * The wordmark, read back off the drawing buffer — #966: on the start gate of
+ * a loop, 15 m before its lap line, and on a billboard the placement rules
+ * stood beside a valley road, 15 m ahead of it. Each is read as a strip aimed
+ * from geometry at the board's middle, counting the pixels that are the
+ * wordmark's navy ({@link isWordmarkNavy}); then the same frames with the
+ * boards off — the control: the strip must read what is behind, and no navy.
+ */
+export interface LogoMeasurement {
+  readonly measured: boolean;
+  /** Boards the view drew approaching the gate, and approaching the billboard. */
+  readonly gateBoards: number;
+  readonly billboardBoards: number;
+  /** Navy pixels on each strip, the boards drawn and not. */
+  readonly gateNavy: number;
+  readonly gateNavyOff: number;
+  readonly billboardNavy: number;
+  readonly billboardNavyOff: number;
+  /** Pixels in each strip, for the counts' denominator. */
+  readonly stripPixels: number;
+  /** Each strip's mean colour, bytes, the boards drawn — published, not asserted. */
+  readonly gateMean: readonly number[];
+  readonly billboardMean: readonly number[];
+  /** Draw calls the boards add to the gate's frame. */
+  readonly calls: number;
+}
+
+const NO_LOGO: LogoMeasurement = {
+  measured: false,
+  gateBoards: 0,
+  billboardBoards: 0,
+  gateNavy: 0,
+  gateNavyOff: 0,
+  billboardNavy: 0,
+  billboardNavyOff: 0,
+  stripPixels: 0,
+  gateMean: [],
+  billboardMean: [],
+  calls: 0,
+};
+
+/** The strip read on a board, in pixels: wide, because the wordmark runs across it. */
+const LOGO_STRIP = { width: 31, height: 5 } as const;
+
+/**
+ * Whether a pixel is the wordmark's navy: darker than the white board and the
+ * sky, and blue leading red — which neither the board, the galvanised beam,
+ * the road nor the ground is. Bytes, as read back.
+ */
+function isWordmarkNavy(r: number, g: number, b: number): boolean {
+  return b - r >= 12 && (r + g + b) / 3 <= 130;
+}
+
+/** @see LogoMeasurement */
+function logoProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): LogoMeasurement {
+  const bare = (frame: SceneFrame): SceneFrame => ({ ...frame, markers: [], scatter: [] });
+  const loop = circuitRoute(500);
+  const gateFrame = bare(riding(loop, (loop.totalDistance as number) - 15));
+  const gate = gateFrame.lines.find(carriesTheLogo);
+  const valley = valleyRoute();
+  const placed = billboardsAt(
+    valley,
+    corridorOrigin(valley),
+    scatterSeed(valley),
+    0,
+    valley.totalDistance,
+  )[0];
+  if (gate === undefined || placed === undefined) return { ...NO_LOGO, measured: true };
+  const boardFrame = bare(riding(valley, placed.along - 15));
+  const board = boardFrame.billboards.find((each) => each.along === placed.along);
+  if (board === undefined) return { ...NO_LOGO, measured: true };
+  const middle = BILLBOARD_BOARD_BOTTOM_METRES + LOGO_BOARD_HEIGHT_METRES / 2;
+  const gateAim = gateLogoPlace(gate);
+  const gateCentre = pixelFor(gateFrame, canvas, {
+    x: gateAim.x,
+    y: gateAim.y + middle,
+    z: gateAim.z,
+  });
+  const boardCentre = pixelFor(boardFrame, canvas, { x: board.x, y: board.y + middle, z: board.z });
+  const means: number[][] = [];
+  const navyOn = (frame: SceneFrame, centre: { x: number; y: number }): number => {
+    view.render(frame);
+    view.render(frame);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - (LOGO_STRIP.width - 1) / 2,
+      Math.round(centre.y) - (LOGO_STRIP.height - 1) / 2,
+      LOGO_STRIP.width,
+      LOGO_STRIP.height,
+    );
+    let navy = 0;
+    const mean = [0, 0, 0];
+    for (let at = 0; at + 3 < pixels.length; at += 4) {
+      if (isWordmarkNavy(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0)) navy += 1;
+      for (let channel = 0; channel < 3; channel += 1) {
+        mean[channel] = (mean[channel] ?? 0) + (pixels[at + channel] ?? 0) / (pixels.length / 4);
+      }
+    }
+    means.push(mean.map((each) => Math.round(each)));
+    return navy;
+  };
+  const gateNavy = navyOn(gateFrame, gateCentre);
+  const gateBoards = logoBoardsOf(view);
+  const billboardNavy = navyOn(boardFrame, boardCentre);
+  const billboardBoards = logoBoardsOf(view);
+  let calls = 0;
+  countingDrawCalls((counted) => {
+    const before = counted();
+    view.render(gateFrame);
+    const on = counted() - before;
+    logosShownOf(view, false);
+    const again = counted();
+    view.render(gateFrame);
+    calls = on - (counted() - again);
+  });
+  let gateNavyOff: number;
+  let billboardNavyOff: number;
+  try {
+    gateNavyOff = navyOn(gateFrame, gateCentre);
+    billboardNavyOff = navyOn(boardFrame, boardCentre);
+  } finally {
+    logosShownOf(view, true);
+  }
+  return {
+    measured: true,
+    gateBoards,
+    billboardBoards,
+    gateNavy,
+    gateNavyOff,
+    billboardNavy,
+    billboardNavyOff,
+    stripPixels: LOGO_STRIP.width * LOGO_STRIP.height,
+    gateMean: means[0] ?? [],
+    billboardMean: means[1] ?? [],
+    calls,
+  };
+}
+
+/** {@link logoProbe} in the stylised world, on a canvas and a view of its own. */
+function stylisedLogoProbe(): LogoMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2');
+  try {
+    if (gl === null) return NO_LOGO;
+    return logoProbe(view, gl, canvas, (profile, distance) => {
+      const start = atStartLine(profile);
+      return sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      });
+    });
+  } finally {
+    view.destroy();
+  }
+}
+
+/**
+ * The stylised world's one texture — #966: what a view uploads when it first
+ * draws the start gate's wordmark, counted from a frame drawn without it, and
+ * the size of every 2D image handed to the GPU meanwhile — with the control: a
+ * second view, the boards off, the same frames, which must upload nothing.
+ */
+export interface StylisedTextureMeasurement {
+  readonly measured: boolean;
+  readonly created: number;
+  /** `width×height` of every 2D texture storage allocated or image uploaded. */
+  readonly uploads: readonly string[];
+  readonly controlCreated: number;
+}
+
+const NO_STYLISED_TEXTURES: StylisedTextureMeasurement = {
+  measured: false,
+  created: 0,
+  uploads: [],
+  controlCreated: 0,
+};
+
+/** @see StylisedTextureMeasurement */
+function stylisedTextureProbe(): StylisedTextureMeasurement {
+  const loop = circuitRoute(500);
+  const origin = corridorOrigin(loop);
+  const start = atStartLine(loop);
+  const gateFrame: SceneFrame = {
+    ...sceneFrame({
+      profile: loop,
+      origin,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres((loop.totalDistance as number) - 35) },
+      },
+    }),
+    markers: [],
+  };
+  const without: SceneFrame = { ...gateFrame, lines: [], billboards: [] };
+  const measure = (boardsOn: boolean): { created: number; uploads: string[] } => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 300;
+    canvas.height = 200;
+    const uploads: string[] = [];
+    let created = 0;
+    const gl = WebGL2RenderingContext.prototype;
+    /* eslint-disable @typescript-eslint/unbound-method */
+    const realStorage = gl.texStorage2D;
+    const realImage = gl.texImage2D;
+    /* eslint-enable @typescript-eslint/unbound-method */
+    let watching = false;
+    gl.texStorage2D = function patchedStorage(
+      this: WebGL2RenderingContext,
+      ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
+    ) {
+      if (watching) uploads.push(`${String(args[3])}x${String(args[4])}`);
+      realStorage.apply(this, args);
+    };
+    gl.texImage2D = function patchedImage(this: WebGL2RenderingContext, ...args: unknown[]) {
+      if (watching && typeof args[3] === 'number' && typeof args[4] === 'number') {
+        uploads.push(`${String(args[3])}x${String(args[4])}`);
+      }
+      (realImage as (...each: unknown[]) => void).apply(this, args);
+    };
+    try {
+      countingTextures((counted) => {
+        const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+        view.resize(300, 200);
+        logosShownOf(view, boardsOn);
+        // Baselined on a frame with no gate and no billboard in it: three's
+        // own four default textures exist after any first frame.
+        view.render(without);
+        const baseline = counted();
+        watching = true;
+        view.render(gateFrame);
+        view.render(gateFrame);
+        watching = false;
+        created = counted() - baseline;
+        view.destroy();
+      });
+    } finally {
+      gl.texStorage2D = realStorage;
+      gl.texImage2D = realImage;
+    }
+    return { created, uploads };
+  };
+  const shown = measure(true);
+  const control = measure(false);
+  return {
+    measured: true,
+    created: shown.created,
+    uploads: shown.uploads,
+    controlCreated: control.created,
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -5730,6 +6013,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
   gantry: NO_GANTRY,
+  logos: NO_LOGO,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
@@ -7013,6 +7297,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
 
+  // #966: the wordmark on the start gate and a billboard, read.
+  const logos = logoProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: wordmark — #966');
+
   // #629: the water, on the lake.
   const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
   phaseEnds('realistic: water reflection — #629');
@@ -7476,6 +7764,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     roadWear,
     groundBlend,
     gantry,
+    logos,
     waterReflection,
     waterReflectsAfterStepDown,
     textures,
@@ -7965,6 +8254,8 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     sceneryInstances: {},
     texturesCreated: 0,
     texturesBaseline: 0,
+    stylisedTextures: NO_STYLISED_TEXTURES,
+    logos: NO_LOGO,
     treeRedPixels: 0,
     treeGreenPixels: 0,
     buildingGreenPixels: 0,
@@ -8021,6 +8312,8 @@ async function run(): Promise<void> {
   // the same place and for exactly the same reason. A harness that skipped it
   // would draw the primitive world and every assertion below would pass.
   await loadSceneryModels();
+  // #966: and the wordmark, on the same seam `main.tsx` loads it on.
+  await loadGameWordmark();
   phaseEnds('scenery models');
   // ADR 0026. A run of its own, so the default run fetches none of the
   // realistic set — which `game.browser.spec.ts` asserts off the requests it
@@ -8094,6 +8387,8 @@ async function run(): Promise<void> {
     straightOff: NO_LINE,
   };
   let bend = { right: NO_BEND, mirrored: NO_BEND };
+  let stylisedTextures = NO_STYLISED_TEXTURES;
+  let logos = NO_LOGO;
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -8709,6 +9004,10 @@ async function run(): Promise<void> {
       // #583, on a canvas of its own. @see bendProbe
       bend = bendProbe(640, 360);
       phaseEnds('default: bend');
+      // #966, on canvases of their own. @see stylisedTextureProbe, logoProbe
+      stylisedTextures = stylisedTextureProbe();
+      logos = stylisedLogoProbe();
+      phaseEnds('default: wordmark');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -8797,6 +9096,8 @@ async function run(): Promise<void> {
     sceneryInstances,
     texturesCreated,
     texturesBaseline,
+    stylisedTextures,
+    logos,
     treeRedPixels,
     treeGreenPixels,
     buildingGreenPixels,

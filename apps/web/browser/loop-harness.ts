@@ -226,19 +226,24 @@ function startFrame(profile: RouteProfile): SceneFrame {
     camera: cameraPose(corridor, state.ride.distance, 0),
     scatter: [],
     markers: [],
+    // #966: and the start gate, which since then stands over this very line in
+    // the stylised world too — its legs, barriers and board are not the road.
+    lines: [],
+    billboards: [],
   };
 }
 
 /**
  * The frame at the start line as the PRODUCT draws it — #572: the real
  * `sceneFrame`'s own corridor and its own camera, on the rider's racing line,
- * with only the markers and the scenery taken off so the pixels that change
- * with the road are the road.
+ * with only the markers, the scenery and — since #966, which stood the start
+ * gate here in the stylised world — the gate and the billboards taken off, so
+ * the pixels that change with the road are the road.
  */
 function drawnStartFrame(profile: RouteProfile): SceneFrame {
   const origin = corridorOrigin(profile);
   const frame = sceneFrame({ profile, origin, state: atStartLine(profile) });
-  return { ...frame, scatter: [], markers: [] };
+  return { ...frame, scatter: [], markers: [], lines: [], billboards: [] };
 }
 
 /** The side of the top-down frames, in pixels. */

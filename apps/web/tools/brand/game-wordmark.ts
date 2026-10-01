@@ -6,7 +6,8 @@
  *
  * ## The source
  *
- * `gemini-assets-v2.jpeg` beside this file: the owner's artwork, made with
+ * `sources/gemini-assets-v2.jpeg` beside this file — committed at the same path,
+ * with the same `ASSETS.toml` row, as #965's brand pipeline commits it: the owner's artwork, made with
  * Google Gemini and licensed by the owner as CC-BY-4.0 (#965's rulings; the
  * Gemini terms' *Use of Generated Content* leave the output to the person who
  * asked for it). Its bottom band is the in-game wordmark — "ON YOUR LEFT", the
@@ -56,7 +57,7 @@ import { deflateSync, inflateSync } from 'node:zlib';
 import { decodeBaselineJpeg, type DecodedJpeg } from './jpeg-baseline';
 
 /** The committed source, repository-relative. */
-export const WORDMARK_SOURCE = 'apps/web/tools/brand/gemini-assets-v2.jpeg';
+export const WORDMARK_SOURCE = 'apps/web/tools/brand/sources/gemini-assets-v2.jpeg';
 
 /** Its SHA-256, as the owner's copy was read on 2026-10-01. */
 export const WORDMARK_SOURCE_SHA256 =
@@ -69,15 +70,13 @@ export const WORDMARK_PNG = 'apps/web/src/game/brand/game-wordmark.png';
 export const WORDMARK_SCRIPT = 'apps/web/tools/brand/game-wordmark.ts';
 
 /**
- * Who the wordmark is credited to: the project's owner, by the name they
- * publish this repository under — CC BY 4.0 §3(a)(1)(A)(i). #965's ruling:
- * the creator is the owner, and the provenance says it was generated with
- * Google Gemini.
+ * Who the wordmark is credited to: the project's owner — CC BY 4.0
+ * §3(a)(1)(A)(i), and #965's ruling — by the name #965's rows give.
  */
-export const WORDMARK_CREATOR = 'mgcronin (the On Your Left project owner)';
+export const WORDMARK_CREATOR = 'Matthew Cronin';
 
-/** A link to the material: the committed source — §3(a)(1)(A)(v). */
-export const WORDMARK_URL = `https://github.com/openzigs/onyourleft/blob/main/${WORDMARK_SOURCE}`;
+/** A link to the material: the brand directory, as #965's rows give it — §3(a)(1)(A)(v). */
+export const WORDMARK_URL = 'https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand';
 
 /** The date the source and its licence were read: the owner's ruling on #965. */
 export const WORDMARK_READ = '2026-10-01';

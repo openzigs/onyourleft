@@ -23,6 +23,7 @@
 
 import type { UnitSystem } from '@onyourleft/store';
 
+import { billboardsAt, clearOfBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
@@ -182,6 +183,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // tree and the hillside it stands on are hashed from the same route.
   const seed = scatterSeed(input.profile);
   const riders = placedRiders(input, corridor);
+  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed);
   return {
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
@@ -193,7 +195,9 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
-    scatter: scatter(corridor, input, riderDistance, seed),
+    scatter: items,
+    // #966: the billboards in view, out of the structures' budget.
+    billboards,
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
@@ -238,26 +242,38 @@ function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFr
  * last centreline point's own `along` cannot drift, because it *is* what was
  * built.
  */
-function scatter(
+function scenery(
   corridor: RoadCorridor,
   input: SceneInput,
   riderDistance: number,
   seed: number,
-): readonly ScatterItem[] {
+): { readonly scatter: readonly ScatterItem[]; readonly billboards: readonly Billboard[] } {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
   const natural = scatterAt(input.profile, input.origin, seed, first.along, last.along, {
     maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
     riderMetres: riderDistance,
   });
+  // #966. The billboards come out of the structures' budget FIRST: a rung that
+  // takes structures away takes them too, and none is ever extra.
+  const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
+  const billboards = billboardsAt(input.profile, input.origin, seed, first.along, last.along)
+    .slice()
+    .sort(
+      (one, other) => Math.abs(one.along - riderDistance) - Math.abs(other.along - riderDistance),
+    )
+    .slice(0, structureBudget);
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
-  // the natural scenery kept clear of every building.
+  // the natural scenery kept clear of every building, and of every billboard.
   const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: input.structureItems ?? STRUCTURE_MAX_ITEMS,
+    maxItems: structureBudget - billboards.length,
     riderMetres: riderDistance,
   });
-  return [...built, ...clearOfBuildings(natural, built)];
+  return {
+    scatter: [...built, ...clearOfBillboards(clearOfBuildings(natural, built), billboards)],
+    billboards,
+  };
 }
 
 /**

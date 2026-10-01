@@ -119,8 +119,10 @@ describe('the game wordmark — #966', () => {
       expect(row['creator']).toBe(WORDMARK_CREATOR);
       expect(row['url']).toBe(WORDMARK_URL);
       expect(row['read']).toBe(WORDMARK_READ);
-      expect(row['source']).toContain(WORDMARK_SOURCE_WORDS);
+      expect(row['source']).toContain('Google Gemini');
     }
+    // The source's row is #965's, word for word; the texture's is this script's.
+    expect(texture['source']).toBe(WORDMARK_SOURCE_WORDS);
     expect(source['sha256']).toBe(WORDMARK_SOURCE_SHA256);
     expect(source['modified']).toBe('no');
     // The texture is derived: its input is the source, its script this one.

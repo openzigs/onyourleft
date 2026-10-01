@@ -34,6 +34,7 @@
  * hardware, and it is recorded as outstanding in `README.md` beside this file.
  */
 
+import type { Billboard } from './billboards';
 import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
@@ -278,9 +279,19 @@ export interface SceneFrame {
    * The start and finish gantries and the boards before them, within reach of
    * the rider, placed on the drawn road — #679 (`gantry.ts` §`linesNear`).
    * Empty everywhere else on a route, which is what makes them cost nothing
-   * there. Only the realistic world draws them.
+   * there. ⚠️ Since #966 BOTH worlds draw them — the stylised world the
+   * gantries and barriers without lettering, so that the start gate can carry
+   * the wordmark (`logo-board.ts`) there too — and a reviewer who remembers
+   * "only the realistic world draws them" is reading the old file.
    */
   readonly lines: readonly PlacedStand[];
+  /**
+   * The billboards beside the road in view — #966 (`billboards.ts`), each
+   * carrying the wordmark. Counted against the rung's `structureItems`
+   * before the structures are (`scene.ts`), and drawn in both worlds with the
+   * gate's wordmark board, by one instanced mesh.
+   */
+  readonly billboards: readonly Billboard[];
 }
 
 /** What {@link SceneFrame.water} carries. */
