@@ -1431,11 +1431,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         COUNTED in the structures budget (`scene.ts`). Not a
                         structure kind, so the arrangement digest did not
                         move. `logo-board.ts` is the board itself — the same
-                        shape on the start gate's beam — and
+                        shape on every gate's beam, the start's and, since
+                        #978, the finish's (`carriesTheLogo`) — and
                         `three-renderer.ts` §`LogoBelt` draws every board in a
                         frame in ONE call, in both worlds. ⚠️ Since #966 the
                         stylised world draws the gantries too (unlettered:
-                        their banner atlas would be a second texture)
+                        their banner atlas would be a second texture), and
+                        NOT the "to go" board before a line, which unlettered
+                        would be a bare post
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
     src/game/instance-tint.ts
@@ -5355,7 +5358,7 @@ top of an issue **supersedes its body**.
 | What proves the stylised world uploads one texture — the wordmark — and nothing else, and why a count is not enough on its own | `apps/web/browser/game.browser.spec.ts` §"uploads only the logo texture to the GPU", `game-harness.ts` §`texturesBaseline`, §`stylisedTextureProbe`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
 | Where the game's wordmark comes from, how it is keyed out of the owner's JPEG, and why the KTX2 is made by the realistic pipeline | `apps/web/tools/brand/game-wordmark.ts`, `apps/web/tools/brand/jpeg-baseline.ts`, `apps/web/tools/realistic/sources.ts` §`WORDMARK_FROM`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
 | Where a billboard may stand, why it is never on a bend's inside, and how it is counted in the structures budget | `apps/web/src/game/billboards.ts`, `apps/web/src/game/scene.ts` §`scenery`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
-| How the start gate carries the wordmark, and why one instanced mesh draws the gate's board and every billboard | `apps/web/src/game/logo-board.ts` §`gateLogoPlace`, `apps/web/src/game/three-renderer.ts` §`LogoBelt` |
+| How the start and finish gates carry the wordmark (the finish since [#978](https://github.com/openzigs/onyourleft/issues/978)), and why one instanced mesh draws the gates' boards and every billboard | `apps/web/src/game/logo-board.ts` §`gateLogoPlace`, `apps/web/src/game/three-renderer.ts` §`LogoBelt` |
 | How many shapes a scenery kind may have, what that costs in draw calls, and who may raise it | `apps/web/src/game/scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`, `apps/web/browser/game.browser.spec.ts` §`SCATTER_MESH_CEILING`, [validation 0002](docs/validation/0002-android-shell-and-game.md) Part M |
 | Why an item's variant is drawn from six slots rather than three, and why the digest did not move | `apps/web/src/game/scatter.ts` §`SCATTER_VARIANT_SLOTS`, `apps/web/src/game/arrangement-unchanged.test.ts` §"changes WHAT stands somewhere" |
 | Which of the two scenery rungs has its call site covered, and which does not | `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setVariants`, §`ScatterBelt.setBudget` |
