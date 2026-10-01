@@ -5488,7 +5488,7 @@ interface RealisticWorld {
    * app's own glyph range. Absent where the loaders read no glyphs.
    */
   readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
-  /** The game's wordmark, KTX2 — #966: on the start gate and the billboards. */
+  /** The game's wordmark, KTX2 — #966: on the gates (the finish since #978) and the billboards. */
   readonly wordmark: Texture;
 }
 
@@ -7642,7 +7642,8 @@ const GANTRY_BANNER_CAPACITY = 4;
  * The start and finish gantries, their barriers and the boards before them —
  * #679. ⚠️ **In both worlds since #966**, and a reviewer who remembers
  * "realistic rungs only: the stylised world has none" is reading the old file:
- * the start gate carries the wordmark in both (the owner's ruling), so the
+ * the gates carry the wordmark in both (the owner's ruling; the finish's too
+ * since #978), so the
  * stylised view builds a belt of its own — with no banners, because the
  * lettering is a texture and the stylised world's one allowed texture is the
  * wordmark (`game.browser.spec.ts` §"uploads only the logo texture") — and
@@ -7904,7 +7905,7 @@ diffuseColor.rgb = bannerGround;
 }
 
 /* ----------------------------------------------------------------------------
- * The wordmark — #966: on the start gate and on the billboards, in both worlds
+ * The wordmark — #966: on the gates and on the billboards, in both worlds
  * ------------------------------------------------------------------------- */
 
 /** The board's colours: its own white, and galvanised posts. This repository's own. */
@@ -8015,8 +8016,9 @@ diffuseColor.rgb = mix(diffuseColor.rgb, oylMark.rgb, oylMark.a * vOylFace);
 }
 
 /**
- * The wordmark's boards — #966: the one on the start gate's beam and the
- * billboards beside the road. **One draw call** however many there are, one
+ * The wordmark's boards — #966: the one on each gate's beam — the start's and,
+ * since #978, the finish's — and the billboards beside the road. **One draw
+ * call** however many there are, one
  * texture, and none at all where a frame holds neither: one instanced mesh of
  * `logo-board.ts`' shape, hidden when its count is nought.
  *
@@ -8094,7 +8096,10 @@ export class LogoBelt {
     map.updateMatrix();
   }
 
-  /** This frame's boards: the start gate's, if it is in reach, and the billboards in view. */
+  /**
+   * This frame's boards: every gate's in reach — the start's and, since #978,
+   * the finish's — and the billboards in view.
+   */
   update(lines: readonly PlacedStand[], billboards: readonly Billboard[]): void {
     let count = 0;
     const place = (at: LogoPlace): void => {

@@ -5736,8 +5736,10 @@ function gantryProbe(
 
 /**
  * The wordmark, read back off the drawing buffer — #966: on the start gate of
- * a loop, 15 m before its lap line, and on a billboard the placement rules
- * stood beside a valley road, 15 m ahead of it. Each is read as a strip aimed
+ * a loop, 15 m before its lap line, on a billboard the placement rules
+ * stood beside a valley road, 15 m ahead of it, and — since #978 — on the
+ * FINISH gate of a point-to-point route, 15 m before it, with the start
+ * 2 985 m behind and out of reach. Each is read as a strip aimed
  * from geometry at the board's middle, counting the pixels that are the
  * wordmark's lettering ({@link letteringIn}); then the same frames with the
  * boards off — the control: the strip must read what is behind, and no
@@ -5745,19 +5747,24 @@ function gantryProbe(
  */
 export interface LogoMeasurement {
   readonly measured: boolean;
-  /** Boards the view drew approaching the gate, and approaching the billboard. */
+  /** Boards the view drew approaching the gate, the billboard and the finish. */
   readonly gateBoards: number;
   readonly billboardBoards: number;
+  /** #978: the finish gate's board — the only board in its frame. */
+  readonly finishBoards: number;
   /** Lettering pixels on each strip, the boards drawn and not. */
   readonly gateLettering: number;
   readonly gateLetteringOff: number;
   readonly billboardLettering: number;
   readonly billboardLetteringOff: number;
+  readonly finishLettering: number;
+  readonly finishLetteringOff: number;
   /** Pixels in each strip, for the counts' denominator. */
   readonly stripPixels: number;
   /** Each strip's mean colour, bytes, the boards drawn — published, not asserted. */
   readonly gateMean: readonly number[];
   readonly billboardMean: readonly number[];
+  readonly finishMean: readonly number[];
   /** Draw calls the boards add to the gate's frame. */
   readonly calls: number;
   /**
@@ -5768,6 +5775,8 @@ export interface LogoMeasurement {
    */
   readonly gateOrientation: OrientationAgreement;
   readonly billboardOrientation: OrientationAgreement;
+  /** #978: the finish gate's board, read the same way. */
+  readonly finishOrientation: OrientationAgreement;
   /**
    * The control: the gate's board read again with the texture drawn mirrored,
    * then upside down (`wordmarkOrientationOf`) — each must now agree best with
@@ -5959,16 +5968,21 @@ const NO_LOGO: LogoMeasurement = {
   measured: false,
   gateBoards: 0,
   billboardBoards: 0,
+  finishBoards: 0,
   gateLettering: 0,
   gateLetteringOff: 0,
   billboardLettering: 0,
   billboardLetteringOff: 0,
+  finishLettering: 0,
+  finishLetteringOff: 0,
   stripPixels: 0,
   gateMean: [],
   billboardMean: [],
+  finishMean: [],
   calls: 0,
   gateOrientation: NO_ORIENTATION,
   billboardOrientation: NO_ORIENTATION,
+  finishOrientation: NO_ORIENTATION,
   gateOrientationMirrored: NO_ORIENTATION,
   gateOrientationUpsideDown: NO_ORIENTATION,
 };
@@ -6017,6 +6031,16 @@ function logoProbe(
   const boardFrame = bare(riding(valley, placed.along - 15));
   const board = boardFrame.billboards.find((each) => each.along === placed.along);
   if (board === undefined) return { ...NO_LOGO, measured: true };
+  // #978: the finish gate of a point-to-point route, the start out of reach —
+  // so a board here is the finish's or nothing.
+  const straight = northRoute(3_000, () => 0);
+  const straightTotal = straight.totalDistance as number;
+  const finishFrame = bare(riding(straight, straightTotal - 15));
+  const finishLine = finishFrame.lines.find(
+    (line) => line.stand.kind === 'gantry' && line.stand.distance === straightTotal,
+  );
+  if (finishLine === undefined) return { ...NO_LOGO, measured: true };
+  const finishAim = gateLogoPlace(finishLine);
   const middle = BILLBOARD_BOARD_BOTTOM_METRES + LOGO_BOARD_HEIGHT_METRES / 2;
   const gateAim = gateLogoPlace(gate);
   const gateCentre = pixelFor(gateFrame, canvas, {
@@ -6025,6 +6049,11 @@ function logoProbe(
     z: gateAim.z,
   });
   const boardCentre = pixelFor(boardFrame, canvas, { x: board.x, y: board.y + middle, z: board.z });
+  const finishCentre = pixelFor(finishFrame, canvas, {
+    x: finishAim.x,
+    y: finishAim.y + middle,
+    z: finishAim.z,
+  });
   const means: number[][] = [];
   const letteringOn = (frame: SceneFrame, centre: { x: number; y: number }): number => {
     view.render(frame);
@@ -6049,6 +6078,8 @@ function logoProbe(
   const gateBoards = logoBoardsOf(view);
   const billboardLettering = letteringOn(boardFrame, boardCentre);
   const billboardBoards = logoBoardsOf(view);
+  const finishLettering = letteringOn(finishFrame, finishCentre);
+  const finishBoards = logoBoardsOf(view);
   // #966's review: which way up, on both boards, and the gate's two controls.
   const billboardPlace = billboardLogoPlace(board);
   const gateOrientation = orientedReading(view, gl, gateFrame, canvas, gateAim, 'upright');
@@ -6060,6 +6091,7 @@ function logoProbe(
     billboardPlace,
     'upright',
   );
+  const finishOrientation = orientedReading(view, gl, finishFrame, canvas, finishAim, 'upright');
   const gateOrientationMirrored = orientedReading(view, gl, gateFrame, canvas, gateAim, 'mirrored');
   const gateOrientationUpsideDown = orientedReading(
     view,
@@ -6081,9 +6113,11 @@ function logoProbe(
   });
   let gateLetteringOff: number;
   let billboardLetteringOff: number;
+  let finishLetteringOff: number;
   try {
     gateLetteringOff = letteringOn(gateFrame, gateCentre);
     billboardLetteringOff = letteringOn(boardFrame, boardCentre);
+    finishLetteringOff = letteringOn(finishFrame, finishCentre);
   } finally {
     logosShownOf(view, true);
   }
@@ -6091,16 +6125,21 @@ function logoProbe(
     measured: true,
     gateBoards,
     billboardBoards,
+    finishBoards,
     gateLettering,
     gateLetteringOff,
     billboardLettering,
     billboardLetteringOff,
+    finishLettering,
+    finishLetteringOff,
     stripPixels: LOGO_STRIP.width * LOGO_STRIP.height,
     gateMean: means[0] ?? [],
     billboardMean: means[1] ?? [],
+    finishMean: means[2] ?? [],
     calls,
     gateOrientation,
     billboardOrientation,
+    finishOrientation,
     gateOrientationMirrored,
     gateOrientationUpsideDown,
   };
