@@ -220,7 +220,9 @@ describe('the migrations (#769)', () => {
    * attempt 1 (#975) and 11 237 ms on 36884103033 attempt 1 (#984). Every
    * figure over 2.5 s was an Intel Xeon 6973P-C. 35 s is about three times
    * the slowest; the walk took 180–230 ms locally where the fresh files took
-   * 280–450 ms.
+   * 280–450 ms. The walk's first CI figure is 327 ms (36891647825, an AMD
+   * EPYC 9V74), one run on a fast runner: the timeout still rests on the old
+   * shape's slowest figures until a walk lands on a loaded Xeon.
    */
   it(
     'each one, undone, leaves the schema and the rows exactly as they were before it',

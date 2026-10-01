@@ -14,6 +14,12 @@
  * is not fair, and one writer missed the lock for its whole five seconds.
  * `busy-retry.test.ts` holds the retry deterministically.
  *
+ * ⚠️ **A red here under load may be a TIMEOUT, not "database is locked".**
+ * With the retry, one write can now wait about 21 s (four 5 s busy timeouts
+ * and the pauses between) before it gives up, inside these cases' 30 s. A
+ * writer starved that long fails the case on Vitest's clock first, so read
+ * the failure: a timeout is the same defect as the error, arriving slower.
+ *
  * The control runs the same two writers with the busy timeout at nought and
  * no retry, and requires `SQLITE_BUSY` (in SQLite's words, "database is
  * locked") to reach a caller: without it this test would be green on a

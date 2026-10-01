@@ -18,7 +18,11 @@ import { createSqlStore, type SqlStore } from './sql-store.ts';
 export interface StoreOpenOptions extends OpenOptions {
   /**
    * Called with every statement's SQL as it runs — how #38's "a bounded number
-   * of queries" is counted rather than asserted by reading the code.
+   * of queries" is counted rather than asserted by reading the code. Since
+   * #985's review it is called once per ATTEMPT, beneath the busy retry
+   * (`busy-retry.ts` §`onAttempt`), so a statement run again is counted again
+   * and one that failed is counted too; with no retry and no failure that is
+   * exactly the count Kysely's own log gave.
    */
   readonly onQuery?: (sql: string) => void;
   /**
@@ -44,15 +48,9 @@ export function openKysely(path: string, options: StoreOpenOptions = {}): Kysely
         ...(busyRetryDelaysMilliseconds === undefined
           ? {}
           : { delaysMilliseconds: busyRetryDelaysMilliseconds }),
+        ...(onQuery === undefined ? {} : { onAttempt: onQuery }),
       },
     ),
-    ...(onQuery === undefined
-      ? {}
-      : {
-          log: (event) => {
-            if (event.level === 'query') onQuery(event.query.sql);
-          },
-        }),
   });
 }
 

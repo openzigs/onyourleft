@@ -17,9 +17,29 @@
  * writes while the server serves — `room-open`, and the deploy's `migrate`
  * step while the old server is still up — so the same error could reach a
  * rider as a failed request. So a statement that fails with `SQLITE_BUSY`
- * OUTSIDE a transaction is run again, after an ASYNCHRONOUS pause: the
- * server's event loop is free while it waits, and the next attempt starts a
- * fresh busy timeout.
+ * OUTSIDE a transaction is run again, after an asynchronous pause, and the
+ * next attempt starts a fresh busy timeout.
+ *
+ * ⚠️ **The event loop is NOT free while a write waits — only during the
+ * pauses.** `node:sqlite` is synchronous: each attempt blocks the instance's
+ * one thread for up to the whole busy timeout (5 s) while SQLite polls for the
+ * lock. Nothing else in that process runs then — not `/health`, not `/ready`,
+ * not any request queued behind Kysely's connection mutex. That was
+ * already true of the one attempt before #985; what the retry changes is how
+ * long. A lock held for good now blocks the thread for up to four times 5 s
+ * across about 21 s, with the pauses (50, 200, 1 000 ms) the only gaps in
+ * which anything else runs, where it used to be 5 s and an error.
+ *
+ * A shorter per-attempt busy timeout with more pauses would block less at a
+ * stretch, and was NOT taken: SQLite's own poll retries every few
+ * milliseconds while a pause here is tens to hundreds, so moving patience
+ * from the poll into the pauses makes the wait LESS fair against a writer
+ * that keeps writing — the failure #985 is about — and the under-load result
+ * (0 of 30 runs on two loaded CPUs, against 4 of 30 before; PR #988) was
+ * measured with the 5 s attempt and no other shape.
+ * The trade is taken because the case is rare (a second writer on the file:
+ * an operator command or a deploy's `migrate`), and a frozen server that
+ * then answers is better than a rider's write lost.
  *
  * ⚠️ **Only outside a transaction.** Outside one, `SQLITE_BUSY` means nothing
  * happened: either the `BEGIN IMMEDIATE` that opens every transaction
@@ -67,6 +87,14 @@ export interface BusyRetryOptions {
   readonly delaysMilliseconds?: readonly number[];
   /** How a pause is taken; a timer by default. */
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  /**
+   * Called with a statement's SQL every time it is handed to SQLite — once per
+   * ATTEMPT, so a statement retried twice is three calls, and one that failed
+   * is counted too. This is what `open-sql-store.ts`'s `onQuery` is: Kysely's
+   * own query log sits ABOVE the driver and sees one event per statement
+   * however many times it was run, and only the ones that succeeded.
+   */
+  readonly onAttempt?: (sql: string) => void;
 }
 
 const timer = (milliseconds: number): Promise<void> =>
@@ -82,6 +110,7 @@ export function retryingConnection(
   return {
     async executeQuery<R>(compiledQuery: CompiledQuery): Promise<QueryResult<R>> {
       for (let attempt = 0; ; attempt += 1) {
+        options.onAttempt?.(compiledQuery.sql);
         try {
           return await inner.executeQuery<R>(compiledQuery);
         } catch (error) {
@@ -91,8 +120,15 @@ export function retryingConnection(
         }
       }
     },
-    streamQuery: <R>(compiledQuery: CompiledQuery, chunkSize: number) =>
-      inner.streamQuery<R>(compiledQuery, chunkSize),
+    // NOT retried. A stream's statement is stepped as its rows are read, so
+    // `SQLITE_BUSY` could arrive after rows were already handed out, and a
+    // re-run would hand them out twice. Nothing in the store streams (every
+    // read is `executeQuery`), and a stream is a read, which WAL does not
+    // block on a writer, so there is nothing here for it to retry.
+    streamQuery: <R>(compiledQuery: CompiledQuery, chunkSize: number) => {
+      options.onAttempt?.(compiledQuery.sql);
+      return inner.streamQuery<R>(compiledQuery, chunkSize);
+    },
   };
 }
 
