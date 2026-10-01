@@ -797,8 +797,40 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   reproducing a competitor's layout, colour palette and icon set as a set. No part of the house style
   is drawn with another product's screenshot open.
 
-`browser/shell.html?illustration=specimens` paints every new token until a screen does (#938
-onwards).
+- **The kit is `design/illustration/`** ([#938](https://github.com/openzigs/onyourleft/issues/938)).
+  Seven parts, each a React component rendering inline SVG: `Sky` (with its sun and clouds), `Hills`
+  (a far and a near layer, seeded so one seed is one shape on every render and device), `RoadRibbon`,
+  `RiderSilhouette` (the side view of `game/bicycle.ts`'s parts list and its leg solve, with no
+  proportion of its own), `SensorGlyph` (`trainer`, `heart-rate`, `cadence`, `power`, drawn here and
+  from no icon set, ADR 0034 D-3), `ProfileShape` (an elevation series as a filled hill) and
+  `WorkoutShape` (a workout's segments as bars of relative height). The landscape parts share one
+  320×120 scene, so a screen stacks them. Its rules, each a test:
+  - every part is an `<svg aria-hidden="true" focusable="false">` with no `<text>`, `<title>` or
+    `<desc>`, and no attribute or style value is a colour literal. A shape names its **paint** — a
+    class (`illustration/paint.ts` §`ILLUSTRATION_PAINTS`, the same table as `theme.css`
+    §`.oyl-illo__*`) — and the class names the token. Beside the five illustration colours the kit
+    paints clouds and the road's dashes `canvas`, the rider `ink` and the glyphs and workout bars
+    `accent`, so it adds no token and owes no new pair. `illustration.test.tsx` reads the parts off
+    `index.ts`'s exports, so a new part is held to this with no edit, and a fixture with
+    `fill="#ff0000"` fails it;
+  - a part drawn from data is **pure and bounded**: `ProfileShape` downsamples to
+    `PROFILE_SHAPE_COLUMNS` (120) by `detail/series.ts`' own `downsample`, and `WorkoutShape` draws
+    at most `WORKOUT_SHAPE_BARS` (120) bars, so a 200 km route or an expanded workout of thousands of
+    segments puts a few hundred points in the DOM (`PROFILE_SHAPE_MAX_POINTS`,
+    `WORKOUT_SHAPE_MAX_POINTS`, asserted at 100 000 samples). An empty input draws nothing rather than
+    a flat line, and a gap is a gap (`traceSegments`' rule);
+  - `WorkoutShape` renders **no number**: heights are each target's share of the hardest, never a
+    watt or a percentage (`workouts/library.ts` §`WorkoutRow`), and a test fails on a digit in its
+    text or in any attribute but its geometry;
+  - nothing moves: the kit is static, and any motion a screen gives it follows the bullet above.
+  `browser/shell.html?illustration=specimens` draws every part from the same specimen table the
+  Vitest suite uses (`illustration/specimens-testing.ts`), and `shell.browser.spec.ts` §"#938" reads
+  a pixel inside every painted region of every part, in both palettes, against the token its paint
+  names, with the other palette forced as the control. The kit has no production caller yet: the
+  menu screens of #939 to #943 are its first.
+
+`browser/shell.html?illustration=specimens` paints every new token until a screen does, and since
+#938 draws every part of the kit.
 
 ### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
 
