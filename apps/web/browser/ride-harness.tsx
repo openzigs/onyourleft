@@ -97,6 +97,7 @@ import {
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -209,7 +210,7 @@ function route(): RouteProfile {
 }
 
 /**
- * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SIX
+ * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
  * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
  * `ride.browser.spec.ts` §"#940" can choose the last card and measure where
  * *Ride* is. The first route is the ridden fixture's own, so everything the
@@ -217,8 +218,9 @@ function route(): RouteProfile {
  *
  * `?picker=list` is its control: the same chooser with the old picker's
  * layout put back by a stylesheet of this page's own ({@link restoreTheList})
- * — the loadout above the routes, one route per row, and *Ride* in the flow
- * after them rather than pinned. *Ride* must then fall under the tablet's floor.
+ * — the notices, the loadout, the routes one per row, and *Ride* after them
+ * rather than straight after the notices. *Ride* must then fall under the
+ * tablet's floor.
  */
 const PICKER = new URLSearchParams(window.location.search).get('picker');
 const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
@@ -238,8 +240,36 @@ const ALL_NOTICES =
   AT_THE_PICKER && new URLSearchParams(window.location.search).get('notices') === 'all';
 
 /**
- * The chooser's other five routes. The LAST has the longest name, so the
- * *Ride* it names is the longest the fixture can make.
+ * `ride.html?picker=chooser&notices=release` — #940's second review: a READY
+ * trainer whose last release was not confirmed (#372), so the chooser shows
+ * the release fault AND #503's promise above *Ride*. It is the state in which
+ * the pinned *Ride* hid the whole promise on every landscape phone, and the
+ * reason the promise is measured under a release fault as well as alone.
+ */
+const RELEASE_AND_PROMISE =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('notices') === 'release';
+
+/**
+ * The longest name a route can have — `routes/save.ts`
+ * §`MAXIMUM_ROUTE_NAME_LENGTH` characters, read from the constant rather than
+ * counted here, so a longer bound is measured the day it ships. #940's second
+ * review: the fixture's longest was 70 characters, and a 119-character name
+ * wrapped the pinned *Ride* past the padding made for it.
+ */
+const LONGEST_ROUTE_NAME = (() => {
+  const words =
+    'Box Hill, Leith Hill, Ranmore Common, Coldharbour, Holmbury St Mary, Peaslake, Shere, ' +
+    'Abinger and every lane between them, twice over, the long way round';
+  const name = words.slice(0, MAXIMUM_ROUTE_NAME_LENGTH);
+  if (name.length !== MAXIMUM_ROUTE_NAME_LENGTH || name !== name.trim()) {
+    throw new Error('ride harness: the longest route name is not the store’s bound');
+  }
+  return name;
+})();
+
+/**
+ * The chooser's other routes. The LAST has the longest name a route can have
+ * ({@link LONGEST_ROUTE_NAME}), so the *Ride* it names is the tallest there is.
  */
 function chooserRoutes(): readonly {
   id: string;
@@ -253,6 +283,7 @@ function chooserRoutes(): readonly {
     'Two bridges',
     'Old railway line',
     'Box Hill, Leith Hill and every lane between them the long way round',
+    LONGEST_ROUTE_NAME,
   ];
   return names.map((name, index) => {
     const points: RoutePoint[] = [];
@@ -278,11 +309,12 @@ function restoreTheList(): void {
   style.textContent = [
     '.oyl-main:has(.oyl-chooser) { max-width: var(--oyl-measure) !important; }',
     '.oyl-chooser { display: flex !important; flex-direction: column; }',
-    '.oyl-chooser > h2 { order: -2; }',
-    '.oyl-chooser__side { display: contents !important; }',
+    '.oyl-chooser__lead { display: contents !important; }',
+    '.oyl-chooser > h2 { order: -3; }',
+    '.oyl-chooser__notices { order: -2; }',
     '.oyl-chooser__loadout { order: -1; }',
     '.oyl-chooser__cards { grid-template-columns: minmax(0, 1fr) !important; }',
-    '.oyl-chooser__go { position: static !important; }',
+    '.oyl-chooser__go { order: 1; }',
   ].join('\n');
   document.head.append(style);
 }
@@ -439,6 +471,7 @@ const TRAINER: GameTrainerPort = {
         }
       : {
           kind: 'ready',
+          ...(RELEASE_AND_PROMISE ? { releaseFault: RELEASE_INCOMPLETE } : {}),
           control: {
             setSimulationParameters: async () =>
               REFUSED ? Promise.reject(new Error('control-not-permitted')) : Promise.resolve(),
@@ -661,6 +694,8 @@ async function run(): Promise<void> {
     if (PICKER === 'list') {
       restoreTheList();
     }
+    // The store's bound, for the spec, which does not import the client.
+    document.documentElement.dataset.oylMaximumRouteName = String(MAXIMUM_ROUTE_NAME_LENGTH);
     await document.fonts.ready;
     window.__oylRide = {
       ready: true,

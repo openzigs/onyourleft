@@ -19,12 +19,21 @@
  *   (#509, #503), the trainer notice (#362) and the realistic world (#475).
  *   #503 is the one that matters most: the promise is what makes the press
  *   that asks the trainer for control the rider's decision, so it has to be
- *   read before *Ride*. They come FIRST, under the heading and above the cards,
- *   where the picker before #940 had them, and they are never pinned: #940's
- *   review found a pinned stack of them covering the controls a rider tabs to
- *   (WCAG 2.2 SC 2.4.11) and pushing *Ride* off a phone held sideways. Only
- *   *Ride* is pinned, and `theme.css` §"THE PRE-RIDE CHOOSER" pads the page
- *   for it.
+ *   read before *Ride*. They come FIRST, under the heading, and *Ride* comes
+ *   straight after them — before the cards and the loadout — all in the flow
+ *   and none of it pinned. #940's first review found a pinned stack of the
+ *   notices covering the controls a rider tabs to (WCAG 2.2 SC 2.4.11); its
+ *   second found a pinned *Ride* alone covering the promise on a phone held
+ *   sideways (#503) and outgrowing its padding with a long route name (SC
+ *   2.4.11 again). In the flow neither can happen whatever the screen, the
+ *   notices or the name: *Ride* is on the page after every notice, and
+ *   nothing covers anything.
+ * - **Tab order** is therefore the notices' one link (Settings, when the
+ *   realistic world is chosen), *Ride*, the route cards (one stop, arrow keys
+ *   between them), then the loadout. *Ride* names the chosen route, so a rider
+ *   who chooses a card hears the change on *Ride*'s name and reaches it again
+ *   with Shift+Tab; the issue's "the loadout and then Ride" is the order this
+ *   gave up, for the reason above.
  * - **A refused *Ride* is `aria-disabled` with `aria-describedby`**, never
  *   `disabled` (#255), and the handler still refuses.
  * - **A route with no attempt offers the ghost disabled, with the reason as
@@ -303,60 +312,21 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   ].filter((each) => each !== undefined);
   return (
     <div className="oyl-game__picker oyl-chooser">
-      <h2 id={headingId}>Choose a route</h2>
       {/*
-        ⚠️ **Every standing notice comes first, above the cards, the loadout and
-        Ride** — this file's header, and #940's review (B1, B2). They are in the
-        flow, never pinned: a pinned stack of them covered the controls a rider
-        tabs to and pushed Ride off a phone held sideways.
+        ⚠️ **Every standing notice, and then Ride, come FIRST — in the flow,
+        before the cards and the loadout, and nothing here is pinned** (#940's
+        two reviews). A rider reads #503's promise before the one control that
+        asks the trainer for control, on any screen and at any scroll: Ride is
+        below the notices on the page, and nothing can cover them. Ride's name
+        is the chosen route's, so it can stand before the cards: choosing a
+        card renames it in place. They come before the "Choose a route"
+        heading, which names the cards' radio group and is about the cards; on
+        a phone held sideways that heading's 30 px is what lets Ride stand on
+        the screen at the top of the page.
       */}
-      {notices.length === 0 ? undefined : <div className="oyl-chooser__notices">{notices}</div>}
-      <RouteCards
-        routes={props.routes}
-        chosen={chosen}
-        onPick={props.onPick}
-        units={props.units}
-        labelledBy={headingId}
-        idPrefix={ids}
-      />
-      {/*
-        The loadout and Ride share one column on a wide screen, beside the
-        cards; on a narrow one this box is not a box at all (`display:
-        contents`, `theme.css` §"THE PRE-RIDE CHOOSER"), so that Ride's bar
-        can stick to the bottom of the whole chooser rather than of a column
-        that starts below the fold.
-      */}
-      <div className="oyl-chooser__side">
-        <div className="oyl-chooser__loadout tw:mb-md tw:p-md tw:bg-surface tw:border tw:border-border tw:rounded">
-          <h3 className="tw:mt-0">Your ride</h3>
-          <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
-          <PacerControls
-            withPacer={props.withPacer}
-            onPacer={props.onPacer}
-            intensity={props.intensity}
-            onIntensity={props.onIntensity}
-            problem={props.choice.problem}
-          />
-          <PositionControl position={props.position} onPosition={props.onPosition} />
-          <WindControls
-            withWind={props.withWind}
-            onWind={props.onWind}
-            speed={props.windSpeed}
-            onSpeed={props.onWindSpeed}
-            fromBearing={props.windFrom}
-            onFromBearing={props.onWindFrom}
-            speedUnit={props.windUnit}
-            problem={props.air.problem}
-            field={props.air.field}
-          />
-        </div>
-        {/*
-          ⚠️ **Ride, and nothing else, is pinned** to the bottom of a screen
-          too short for the chooser (`theme.css` §"THE PRE-RIDE CHOOSER"), and
-          the page is padded by the bar's height so a focused control is never
-          scrolled under it (WCAG 2.2 SC 2.4.11).
-        */}
-        <div className="oyl-chooser__go tw:flex tw:flex-col tw:py-sm tw:bg-canvas tw:border-t tw:border-border">
+      <div className="oyl-chooser__lead tw:mb-md">
+        {notices.length === 0 ? undefined : <div className="oyl-chooser__notices">{notices}</div>}
+        <div className="oyl-chooser__go">
           {/*
             ⚠️ **`aria-disabled`, deliberately, and not the `disabled`
             attribute** — #255's second defect. The attribute removes the
@@ -394,9 +364,51 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
               );
             }}
           >
-            Ride {chosen.name}
+            {/*
+              ⚠️ ONE line, ending in an ellipsis when the route's name is
+              longer than the screen is wide (`theme.css`
+              §`.oyl-chooser__ride-label`): a name may be
+              `routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH` characters, and
+              wrapped it made Ride five lines tall. The text is all still in
+              the button, so its accessible name is the whole name and what is
+              visible is a prefix of it (WCAG 2.2 SC 2.5.3); the chosen card,
+              just below, shows the name in full.
+            */}
+            <span className="oyl-chooser__ride-label">Ride {chosen.name}</span>
           </Button>
         </div>
+      </div>
+      <h2 id={headingId}>Choose a route</h2>
+      <RouteCards
+        routes={props.routes}
+        chosen={chosen}
+        onPick={props.onPick}
+        units={props.units}
+        labelledBy={headingId}
+        idPrefix={ids}
+      />
+      <div className="oyl-chooser__loadout tw:mb-md tw:p-md tw:bg-surface tw:border tw:border-border tw:rounded">
+        <h3 className="tw:mt-0">Your ride</h3>
+        <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
+        <PacerControls
+          withPacer={props.withPacer}
+          onPacer={props.onPacer}
+          intensity={props.intensity}
+          onIntensity={props.onIntensity}
+          problem={props.choice.problem}
+        />
+        <PositionControl position={props.position} onPosition={props.onPosition} />
+        <WindControls
+          withWind={props.withWind}
+          onWind={props.onWind}
+          speed={props.windSpeed}
+          onSpeed={props.onWindSpeed}
+          fromBearing={props.windFrom}
+          onFromBearing={props.onWindFrom}
+          speedUnit={props.windUnit}
+          problem={props.air.problem}
+          field={props.air.field}
+        />
       </div>
     </div>
   );

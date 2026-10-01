@@ -179,36 +179,33 @@ describe('#940 — the order of the notices and Ride', () => {
     expect(rideButton(tree.container).getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('puts every notice before the cards — in the flow, outside the pinned bar (#940 review, B1)', async () => {
+  it('puts every notice, then Ride, before the cards — in the flow (#940 reviews, B1 and #503)', async () => {
     const tree = await render({ notices: true, worldChosen: true });
     const cards = tree.container.querySelector('.oyl-chooser__cards');
-    const bar = tree.container.querySelector('.oyl-chooser__go');
+    const ride = rideButton(tree.container);
     const notices = queryAll(tree.container, '.oyl-status');
     expect(notices).toHaveLength(4);
     for (const notice of notices) {
-      expect(
-        notice.compareDocumentPosition(cards as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-      expect(bar?.contains(notice)).toBe(false);
+      expect(notice.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-    // The bar holds Ride and nothing else.
-    expect(bar?.children).toHaveLength(1);
-    expect(bar?.firstElementChild).toBe(rideButton(tree.container));
+    expect(
+      ride.compareDocumentPosition(cards as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+      'Ride comes before the cards',
+    ).toBeTruthy();
+    // Ride's own box holds Ride and nothing else.
+    const go = ride.closest('.oyl-chooser__go');
+    expect(go?.children).toHaveLength(1);
   });
 
-  it('puts the loadout between the cards and Ride', async () => {
+  it('puts the cards before the loadout', async () => {
     const tree = await render();
     const cards = tree.container.querySelector('.oyl-chooser__cards');
     const loadout = tree.container.querySelector('.oyl-chooser__loadout');
-    const ride = rideButton(tree.container);
     expect(cards).not.toBeNull();
     expect(loadout).not.toBeNull();
     expect(
       (cards as Element).compareDocumentPosition(loadout as Element) &
         Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      (loadout as Element).compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 });
