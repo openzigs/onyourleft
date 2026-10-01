@@ -628,7 +628,7 @@ h3:first-child {
   justify-content: center;
   min-width: 2.75rem;
   min-height: 2.75rem;
-  padding: 2px var(--oyl-space-xs);
+  padding: 2px;
   color: var(--oyl-color-ink);
   text-decoration: none;
   font-size: var(--oyl-font-size-sm);
@@ -654,9 +654,20 @@ h3:first-child {
  *
  * The larger icon on the current destination is a `transform`, so it moves
  * nothing around it: a `width` would have grown the bar for one item.
+ *
+ * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem.**
+ * Five of them share a 320 px row (#427's row at 320×256, and the bar at
+ * 320×640), and a label is as wide as the platform's font makes it. #944's
+ * first version padded the pill 8 px a side and the link 4 px more: five
+ * items came to 299 px on a Mac and wrapped onto a second line on the CI
+ * runner's fonts — the row 115.7 px tall, caught by `NAV_BOX_BEFORE_944`. The
+ * 3rem floor keeps a short label's pill (Ride) a 44 px target with the
+ * link's own floor stripped (§4f's third measurement) and gives the five
+ * pills one rhythm.
  */
 .oyl-nav-indicator {
   gap: 2px;
+  min-width: 3rem;
   padding-block: 4px 2px;
   border-radius: 1rem;
 }
@@ -4088,7 +4099,7 @@ p > label + input[type='file'] {
      two pixels back so neither the pill nor the bar grows. */
   .oyl-nav-link[aria-current] .oyl-nav-indicator {
     border: 2px solid;
-    padding: 2px calc(var(--oyl-space-sm) - 2px) 0;
+    padding: 2px calc(var(--oyl-space-xs) - 2px) 0;
   }
 }
 
