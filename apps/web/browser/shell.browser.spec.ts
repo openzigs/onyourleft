@@ -3027,7 +3027,12 @@ test.describe('#944 — the indicator moves, and only when motion is wanted', ()
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openShell(page);
     const motion = await navigateAndReadMotion(page);
-    // Both transitions are still created — so this read measured them…
+    // Both transitions are still created — so this read saw the move…
+    // ⚠️ …which says nothing about the SHIPPED transitions: the reduced-motion
+    // block gives every element a 0.01 ms transition, and `transition-property`
+    // starts as `all`, so these counts hold with the pill's or the icon's own
+    // transition deleted (measured, #977). The apparatus above and the control
+    // below are what hold those.
     expect(
       motion.pillFill.length,
       'the navigation started no background-color transition on a pill, so this measured nothing',
