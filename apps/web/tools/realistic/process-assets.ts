@@ -73,6 +73,8 @@ import { fileURLToPath } from 'node:url';
 
 import { drawMark, encodePng } from '../icons/generate-icons';
 
+import { committedWordmark, encodeRgbaPng, rgbaDigest } from '../brand/game-wordmark';
+
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { LOCK, RAW } from './fetch-assets';
@@ -156,6 +158,15 @@ function make(output: OutputSpec, into: string, stage: string): unknown {
     writeFileSync(picture, encodePng(drawn.size, drawn.pixels));
     encodeKtx2(recipe.ktx2, picture, join(into, output.file));
     return { pixels: pixelDigest(drawn) };
+  }
+  if (recipe.how === 'wordmark') {
+    // #966: keyed from the committed artwork, written as a PNG into the
+    // scratch stage, and encoded — the drawn maps' shape.
+    const wordmark = committedWordmark();
+    const picture = join(stage, `${output.file}.png`);
+    writeFileSync(picture, encodeRgbaPng(wordmark));
+    encodeKtx2(recipe.ktx2, picture, join(into, output.file));
+    return { pixels: rgbaDigest(wordmark) };
   }
   const made = recipe.made ?? output.file;
   const report = join(stage, `${output.file}.report.json`);

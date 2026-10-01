@@ -524,7 +524,10 @@ async function loadGameRenderer(): Promise<GameRenderer> {
   // arrived" and "a view exists". A `create` that raced the load would draw a
   // world of primitives and report success, which is exactly the shape
   // `three-renderer.ts` §`sceneryGeometries` warns about.
-  await renderer.loadSceneryModels();
+  // #966: and the wordmark the start gate and the billboards carry, on the
+  // same seam for the same reason — a view built before it arrived would draw
+  // plain boards.
+  await Promise.all([renderer.loadSceneryModels(), renderer.loadGameWordmark()]);
   return renderer.threeGameRenderer;
 }
 

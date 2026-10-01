@@ -532,3 +532,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   whether the owner wants option 2 beside it, is validation 0002 Part AH's and #626's, not this
   entry's. Nothing in this ADR's decisions changes: D-6's budget gains a 128 KiB line for it
   (`realistic-budget.ts` §`REALISTIC_RIDER_SILHOUETTE_BYTES`) inside the texture ceiling.
+
+- **2026-10-01** — **The stylised world now uploads one texture and is not Kenney's alone.** The
+  supersession table records D-7's second bullet for the stylised world as *"no texture reaching
+  the GPU"*, and the source table says the stylised world *"stays Kenney's alone"*. By the owner's
+  ruling in [#966](https://github.com/openzigs/onyourleft/issues/966) — the On Your Left wordmark
+  on a race's start gate and on billboards, in **both** worlds — the stylised world uploads exactly
+  one texture, `apps/web/src/game/brand/game-wordmark.png` (the owner's `CC-BY-4.0` artwork, #965,
+  precached), and the realistic world draws the same picture as
+  `apps/web/public/realistic/game-wordmark.ktx2` under D-7 and D-8 like its other textures. It is a
+  **brand mark, not a second scenery author**: every stylised model is still Kenney's, so D-2's
+  refusal of a mixed house style in the scenery stands, and no rung mixes the two worlds' scenery
+  (D-3). Nothing in this ADR's decisions changes. ADR 0022 carries the matching entry.
+  ([#966](https://github.com/openzigs/onyourleft/issues/966))

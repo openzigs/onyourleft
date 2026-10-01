@@ -8,7 +8,11 @@ import {
   POSE_RUNTIME_WASM_FILE,
 } from '../../src/camera/pose-files';
 import { SHIPPED_LICENCE_TEXTS } from '../../src/credits/credits';
-import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
+import {
+  REALISTIC_DIRECTORY,
+  REALISTIC_WORDMARK,
+  realisticFiles,
+} from '../../src/game/realistic-assets';
 import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
 import { REALISTIC_TRANSCODER_DIRECTORY } from '../../src/game/transcoder-files';
 import { TRANSCODER_FILES } from '../basis/transcoder-plugin';
@@ -116,6 +120,17 @@ describe('the realistic world is not precached, and the stylised one all is — 
     for (const each of stylised) {
       expect(precacheEntries(build), each.name).toContain(each.name);
     }
+  });
+
+  it('holds the stylised world’s wordmark, and not the realistic world’s — #966', () => {
+    // The two copies of one picture, as the build names them: the stylised
+    // PNG a `?url` asset under `assets/`, the realistic KTX2 under its directory.
+    const stylisedWordmark = file('assets/game-wordmark-h4sh.png');
+    const realisticWordmark = realistic.find((each) => each.name.endsWith(REALISTIC_WORDMARK));
+    expect(realisticWordmark).toBeDefined();
+    const entries = precacheEntries([...build, stylisedWordmark]);
+    expect(entries).toContain(stylisedWordmark.name);
+    expect(entries).not.toContain(realisticWordmark?.name);
   });
 
   it('holds no realistic file, whatever it is called', () => {

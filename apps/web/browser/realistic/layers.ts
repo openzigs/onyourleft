@@ -35,7 +35,7 @@
  * | `surfaces` | the road, the ground, the hills on the horizon | the same meshes, in their photographed materials |
  * | `vegetation` | the trees, shrubs and rocks | their near meshes |
  * | `impostors` | — (there are none) | the far trees' billboards |
- * | `structures` | buildings, walls, hedges, fences, signposts | the same, photographed, and since #679 the start and finish gantries |
+ * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards |
  * | `water` | streams, lakes, bridges | the same |
  * | `riders` | the three riders, their contact shadows and the shadow map's catcher | the MakeHuman riders, and the same shadows |
  *
@@ -67,6 +67,7 @@ import {
   GantryBelt,
   GroundBlobBelt,
   HorizonRing,
+  LogoBelt,
   RealisticRiderBelt,
   RealisticStructureBelts,
   RealisticVegetationBelt,
@@ -139,8 +140,11 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [TerrainBelt, 'surfaces'],
   [WaterBelt, 'water'],
   [BridgeBelt, 'water'],
-  // #679: the gantries at the lines stand with the other built things.
+  // #679: the gantries at the lines stand with the other built things —
+  // and since #966 in both worlds, with the wordmark's boards on them and
+  // beside the road.
   [GantryBelt, 'structures'],
+  [LogoBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],
