@@ -887,10 +887,7 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
           return (
             <li key={group.id}>
               <a className="oyl-nav-link" href={hrefFor(destination)} aria-current={current}>
-                <span
-                  className="oyl-nav-indicator tw:flex tw:flex-col tw:items-center tw:px-xs tw:transition-colors"
-                  data-oyl-nav-indicator="true"
-                >
+                <span className="oyl-nav-indicator tw:flex tw:flex-col tw:items-center tw:px-xs tw:transition-colors">
                   <NavIcon name={group.icon} />
                   <span className="oyl-nav-label">{group.label}</span>
                 </span>

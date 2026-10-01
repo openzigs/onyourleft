@@ -1399,7 +1399,7 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       expect(paintedPillFaults(links)).toEqual([]);
     });
 
-    test('#944 — the control: with the indicator rule deleted, only colour is left, and the case fails', async ({
+    test('#944 — the control: with the indicator’s fill rule deleted, the pill is gone and the case fails', async ({
       page,
     }) => {
       await page.goto(`/shell.html?nav-indicator=${NAV_INDICATOR_OFF}`);
@@ -1411,7 +1411,9 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       const links = await navLinks(page);
       const current = links.find((link) => link.current !== null);
       const other = links.find((link) => link.current === null);
-      // What is left tells the current destination by its label's colour…
+      // What is left still tells the current destination apart — by its
+      // label's colour (and its weight and larger icon, which this does not
+      // read) — but with no painted SHAPE…
       expect(current?.labelColour).not.toBe(other?.labelColour);
       // …and the case above fails over it.
       expect(paintedPillFaults(links)).not.toEqual([]);
@@ -1423,14 +1425,28 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
         const element = document.querySelector('nav[aria-label="Primary"]');
         if (element === null) throw new Error('no Primary nav');
         const rect = element.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
+        // The five items' own widths, summed: how close a row is to wrapping
+        // on this machine's fonts (#944's first version wrapped on the CI
+        // runner's), published so the margin is visible in the log.
+        const items = [...element.querySelectorAll('li')].reduce(
+          (sum, item) => sum + item.getBoundingClientRect().width,
+          0,
+        );
+        return { width: rect.width, height: rect.height, items };
       });
-      const published = `${box.width.toFixed(2)}×${box.height.toFixed(2)} px`;
+      // The items' widths summed mean something only where they share a row.
+      const items = viewport.expect === 'rail' ? '' : `, items ${box.items.toFixed(2)} px wide`;
+      const published = `${box.width.toFixed(2)}×${box.height.toFixed(2)} px${items}`;
       console.log(`#944 navigation box, ${viewport.name}: ${published}`);
       test.info().annotations.push({ type: 'navigation box', description: published });
       // The row and the bar are bounded by their height, the rail by its width:
       // the other axis is the viewport's in each.
       if (viewport.expect === 'rail') {
+        // ⚠️ This ceiling cannot move: the rail's width is the declared
+        // 5.5rem, so padding added to a rail item grows nothing measured
+        // here. It is kept to read the rail as it is, not as coverage — the
+        // rail's real exposure, items overflowing its height (it scrolls,
+        // `overflow-y: auto`), is measured by nothing in this file.
         expect(box.width).toBeLessThanOrEqual(NAV_BOX_BEFORE_944.rail);
       } else {
         expect(
@@ -1552,6 +1568,52 @@ for (const viewport of [
         ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
       }
     });
+
+    // Not in the rail: there the pill stretches to the rail's declared
+    // 5.5rem, so no floor holds the width and there is nothing to strip.
+    if (viewport.width < 1024)
+      test('#944 — Ride’s width is held by a floor, and falls short with every floor stripped', async ({
+        page,
+      }) => {
+        // The case above strips the LINK's floors only, and Ride's width then
+        // comes from the pill's own `min-width: 3rem` — a second declared
+        // floor (#977's review). This is #316's genuine third measurement for
+        // the width axis: strip that floor too and the short label must fall
+        // SHORT of 44, so the floor is what holds it. Height keeps #427's form
+        // above (it reaches 44 on its own).
+        await openShell(page);
+        const ride = await page.evaluate(() => {
+          const link = [
+            ...document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a'),
+          ].find((each) => (each.textContent ?? '').trim() === 'Ride');
+          const pill = link?.querySelector<HTMLElement>('.oyl-nav-indicator');
+          if (link === undefined || pill === null || pill === undefined) {
+            throw new Error('no Ride, or no pill in it');
+          }
+          const before = { link: link.style.cssText, pill: pill.style.cssText };
+          link.style.minHeight = '0px';
+          link.style.minWidth = '0px';
+          pill.style.minWidth = '0px';
+          const box = link.getBoundingClientRect();
+          const measured = {
+            width: box.width,
+            pillFloor: getComputedStyle(pill).minWidth,
+            linkFloor: getComputedStyle(link).minWidth,
+          };
+          link.style.cssText = before.link;
+          pill.style.cssText = before.pill;
+          return measured;
+        });
+        expect(ride.pillFloor).toBe('0px');
+        expect(ride.linkFloor).toBe('0px');
+        console.log(
+          `#944 Ride with every floor stripped, ${viewport.name}: ${ride.width.toFixed(2)} px wide`,
+        );
+        expect(
+          ride.width,
+          `Ride is ${ride.width.toFixed(1)}px wide with no floor, so no floor is holding it`,
+        ).toBeLessThan(TOUCH_TARGET_PIXELS);
+      });
   });
 }
 
@@ -2842,11 +2904,15 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
  *   `transition-colors` on the short motion token and the icon's scale a
  *   `transform` on the same. Read the moment `aria-current` moves (a
  *   `MutationObserver`'s microtask, before the frame): with no preference the
- *   navigation has a transition lasting longer than 1 ms; under
- *   `prefers-reduced-motion: reduce` nothing on the page does, and once it has
- *   settled `document.getAnimations()` is empty. The CONTROL is the same page
- *   with the reduced-motion block deleted through the CSSOM, under the same
- *   preference, and it must move.
+ *   pill's OWN `background-color` transition runs for `--oyl-motion-short`
+ *   and the icon's own `transform` transition for the same — each counted by
+ *   its target and its property, so deleting either alone is red (#977's
+ *   review: counting anything on the navigation let the icon's transition
+ *   stand in for a deleted fill transition). Under
+ *   `prefers-reduced-motion: reduce` both are still CREATED (so the case
+ *   measured something) and nothing on the page lasts longer than 1 ms. The
+ *   CONTROL is the same page with the reduced-motion block deleted through
+ *   the CSSOM, under the same preference, and both must move.
  * - **Forced colours.** The fill is dropped by a forced palette, so the
  *   current pill is drawn as a 2 px border there, and the others have none.
  */
@@ -2858,6 +2924,16 @@ interface NavigationMotion {
   readonly visible: number;
   /** …of which on the navigation. */
   readonly visibleOnNav: number;
+  /** The pill's own `background-color` transitions, created by the move. */
+  readonly pillFill: readonly TransitionRead[];
+  /** The icons' own `transform` transitions, created by the move. */
+  readonly iconScale: readonly TransitionRead[];
+  /** `--oyl-motion-short`, in ms, as the page resolves it. */
+  readonly shortMs: number;
+}
+
+interface TransitionRead {
+  readonly durationMs: number;
 }
 
 async function navigateAndReadMotion(page: Page): Promise<NavigationMotion> {
@@ -2883,11 +2959,38 @@ async function navigateAndReadMotion(page: Page): Promise<NavigationMotion> {
           const duration = animation.effect?.getComputedTiming().duration;
           return typeof duration === 'number' ? duration > visibleMs : true;
         };
+        // Each transition by its own target and property: `CSSTransition`
+        // carries the property it animates.
+        const transitionsOf = (selector: string, property: string): TransitionRead[] =>
+          onNav
+            .filter((animation) => {
+              const target = (animation.effect as KeyframeEffect | null)?.target;
+              return (
+                target instanceof Element &&
+                target.matches(selector) &&
+                (animation as CSSTransition).transitionProperty === property
+              );
+            })
+            .map((animation) => {
+              const duration = animation.effect?.getComputedTiming().duration;
+              return { durationMs: typeof duration === 'number' ? duration : Number.NaN };
+            });
+        const short = getComputedStyle(document.documentElement)
+          .getPropertyValue('--oyl-motion-short')
+          .trim();
+        const shortMs = short.endsWith('ms')
+          ? Number.parseFloat(short)
+          : short.endsWith('s')
+            ? Number.parseFloat(short) * 1000
+            : Number.NaN;
         resolve({
           moved: true,
           createdOnNav: onNav.length,
           visible: animations.filter(lasting).length,
           visibleOnNav: onNav.filter(lasting).length,
+          pillFill: transitionsOf('.oyl-nav-indicator', 'background-color'),
+          iconScale: transitionsOf('.oyl-nav-icon', 'transform'),
+          shortMs,
         });
       });
       observer.observe(nav, { attributes: true, subtree: true, attributeFilter: ['aria-current'] });
@@ -2903,7 +3006,19 @@ test.describe('#944 — the indicator moves, and only when motion is wanted', ()
     await openShell(page);
     const motion = await navigateAndReadMotion(page);
     expect(motion.moved).toBe(true);
-    expect(motion.visibleOnNav).toBeGreaterThanOrEqual(1);
+    expect(motion.shortMs, '--oyl-motion-short did not resolve to a duration').toBeGreaterThan(
+      VISIBLE_MOTION_MS,
+    );
+    // The pill's fill and the icon's scale, each on its own: the move leaves
+    // Home's pill and enters Ride's, and shrinks one icon and grows another.
+    expect(
+      motion.pillFill.length,
+      'no background-color transition on a pill',
+    ).toBeGreaterThanOrEqual(1);
+    expect(motion.iconScale.length, 'no transform transition on an icon').toBeGreaterThanOrEqual(1);
+    for (const each of [...motion.pillFill, ...motion.iconScale]) {
+      expect(each.durationMs).toBe(motion.shortMs);
+    }
   });
 
   test('under prefers-reduced-motion: reduce, nothing is running after a navigation', async ({
@@ -2912,12 +3027,21 @@ test.describe('#944 — the indicator moves, and only when motion is wanted', ()
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openShell(page);
     const motion = await navigateAndReadMotion(page);
+    // Both transitions are still created — so this read measured them…
     expect(
-      motion.createdOnNav,
-      'the navigation started no transition, so this measured nothing',
+      motion.pillFill.length,
+      'the navigation started no background-color transition on a pill, so this measured nothing',
     ).toBeGreaterThanOrEqual(1);
+    expect(
+      motion.iconScale.length,
+      'the navigation started no transform transition on an icon, so this measured nothing',
+    ).toBeGreaterThanOrEqual(1);
+    // …and none of them, nor anything else on the page, lasts long enough to see.
     expect(motion.visible, 'an animation a person could see ran on a navigation').toBe(0);
-    // And once it has settled, nothing at all.
+    // ⚠️ What holds the criterion is the instant read above, guarded by the
+    // two "created" counts and by the control below. This poll is a SETTLE
+    // check and no evidence: a 120 ms transition also finishes inside its
+    // timeout, so it passes with or without the reduced-motion block.
     await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
   });
 
@@ -2931,7 +3055,10 @@ test.describe('#944 — the indicator moves, and only when motion is wanted', ()
       await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
       'the harness removed no prefers-reduced-motion block, so this is not the control',
     ).not.toBe('0');
-    expect((await navigateAndReadMotion(page)).visibleOnNav).toBeGreaterThanOrEqual(1);
+    const motion = await navigateAndReadMotion(page);
+    const lasting = (each: TransitionRead): boolean => each.durationMs > VISIBLE_MOTION_MS;
+    expect(motion.pillFill.filter(lasting).length).toBeGreaterThanOrEqual(1);
+    expect(motion.iconScale.filter(lasting).length).toBeGreaterThanOrEqual(1);
   });
 });
 

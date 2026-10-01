@@ -4178,6 +4178,14 @@ p > label + input[type='file'] {
     border: 2px solid;
     padding: 2px calc(var(--oyl-space-xs) - 2px) 0;
   }
+
+  /* The content box starts 4 px in here (border and padding), where it is
+     4 px of padding otherwise, so `scale(1.2)` — 2.4 px each way on a 24 px
+     icon — would reach 0.4 px into the border (#977's review). 1.15 grows it
+     1.8 px each way, inside the 2 px of padding. */
+  .oyl-nav-link[aria-current] .oyl-nav-icon {
+    transform: scale(1.15);
+  }
 }
 
 /*
