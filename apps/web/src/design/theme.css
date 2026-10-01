@@ -1121,7 +1121,9 @@ h3:first-child {
  * before #939. Keyed to HEIGHT, at the 30rem the ride stage's short layout
  * uses: the picture framed at the band's right at 3rem tall whatever the
  * width (so it costs no height under the words), the title one step down from
- * the display size, tighter margins, and 3rem of card art. Declared after
+ * the display size, tighter margins, and no card art. A first cut kept 3rem
+ * of card art and cleared the fold by 15 px at 640×360 on a Mac and missed it
+ * by 10 on the CI runner, whose fonts wrap the summary a line further. Declared after
  * every Home rule it overrides, which is what makes it win.
  * `home.browser.spec.ts` measures 844×390 and 640×360, and its control
  * (`home.html?short=off`) deletes this rule.
@@ -1161,8 +1163,9 @@ h3:first-child {
     margin-top: var(--oyl-space-sm);
   }
 
+  /* The cards' pictures go: the band keeps the screen's one picture. */
   .oyl-ride-card__art {
-    height: 3rem;
+    display: none;
   }
 }
 
