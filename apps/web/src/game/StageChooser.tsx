@@ -29,9 +29,11 @@
  *   `disabled` (#255), and the handler still refuses.
  * - **A route with no attempt offers the ghost disabled, with the reason as
  *   its label** (#93) — one checkbox now, for the chosen route.
- * - ***Ride* is 48 px** (`Button` §`size`, #669). `RIDE_TIME_CONTROLS` is not
- *   edited: it lists the controls pressed DURING a ride, and the owner's
- *   ruling that *Start* gets the ride-time target is what this one follows.
+ * - ***Ride* is 48 px** (`Button` §`size`, #669), and it is on
+ *   `design/ride-time-controls.ts` §`RIDE_TIME_CONTROLS` as the
+ *   `stage-chooser` entry: it starts the ride, so it is *Start* in the owner's
+ *   ruling, and `browser/ride-targets.browser.spec.ts` measures it with the
+ *   rest.
  *
  * ## Why native radios
  *

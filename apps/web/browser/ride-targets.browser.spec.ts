@@ -90,7 +90,8 @@ const RIDE_SCREEN: readonly RideTimeSurface[] = ['ride-screen', 'trainer-panel',
 /**
  * Every state that puts a ride-time control on the screen. The Ride screen
  * through `rideview-harness.tsx` (`?ride=` is #669's), the game through
- * `ride-harness.tsx`, which RIDES — its HUD is the one a rider gets.
+ * `ride-harness.tsx`, which RIDES — its HUD is the one a rider gets — or, with
+ * `?picker=chooser`, stops at the stage chooser before the ride (#940).
  */
 const SCENES: readonly Scene[] = [
   {
@@ -133,6 +134,21 @@ const SCENES: readonly Scene[] = [
     page: 'ride',
     query: '?room=race',
     surfaces: ['game-hud'],
+  },
+  // #940: the pre-ride chooser, whose *Ride* starts the ride. `ride.html`
+  // stops at the chooser with `?picker=chooser`, and `&notices=all` stands the
+  // tallest stack of notices above *Ride*, so it is measured both ways.
+  {
+    name: 'the game’s stage chooser',
+    page: 'ride',
+    query: '?picker=chooser',
+    surfaces: ['stage-chooser'],
+  },
+  {
+    name: 'the game’s stage chooser, every notice standing',
+    page: 'ride',
+    query: '?picker=chooser&notices=all',
+    surfaces: ['stage-chooser'],
   },
 ];
 

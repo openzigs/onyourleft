@@ -100,13 +100,7 @@ interface ButtonCommonProps {
    * WebView), above WCAG 2.2 SC 2.5.5's 44 (AAA). Which controls carry it is
    * ONE list, `design/ride-time-controls.ts` §`RIDE_TIME_CONTROLS`, and
    * `browser/ride-targets.browser.spec.ts` walks it. A control not on that list
-   * does not get this size — the list, not a caller's taste, is the ruling —
-   * with ONE exception: the trainer game's pre-ride *Ride*
-   * (`game/StageChooser.tsx`). #940 asks for it at 48 px, after the owner's
-   * ruling that *Start* gets the ride-time target, and #940 also forbids
-   * editing `RIDE_TIME_CONTROLS`; so it carries this size without being on the
-   * list, and `browser/ride.browser.spec.ts` §"#940" measures it #316's three
-   * ways instead. Whether it belongs on the list is the owner's to say.
+   * does not get this size — the list, not a caller's taste, is the ruling.
    */
   readonly size?: 'ride';
 }
