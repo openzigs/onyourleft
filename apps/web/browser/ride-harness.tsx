@@ -203,10 +203,78 @@ function route(): RouteProfile {
   return routeProfile(points);
 }
 
+/**
+ * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SIX
+ * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
+ * `ride.browser.spec.ts` §"#940" can choose the last card and measure where
+ * *Ride* is. The first route is the ridden fixture's own, so everything the
+ * chooser shows above *Ride* is what the ridden page's rider saw.
+ *
+ * `?picker=list` is its control: the same chooser with the old picker's
+ * layout put back by a stylesheet of this page's own ({@link restoreTheList})
+ * — the loadout above the routes, one route per row, and *Ride* in the flow
+ * after them rather than pinned. *Ride* must then fall under the tablet's floor.
+ */
+const PICKER = new URLSearchParams(window.location.search).get('picker');
+const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
+
+/**
+ * The chooser's other five routes. The LAST has the longest name, so the
+ * *Ride* it names is the longest the fixture can make.
+ */
+function chooserRoutes(): readonly {
+  id: string;
+  name: string;
+  profile: RouteProfile;
+  attempts: number;
+}[] {
+  const names = [
+    'Reservoir loop',
+    'The coast road',
+    'Two bridges',
+    'Old railway line',
+    'Box Hill, Leith Hill and every lane between them the long way round',
+  ];
+  return names.map((name, index) => {
+    const points: RoutePoint[] = [];
+    const count = 120 + index * 40;
+    for (let step = 0; step <= count; step += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (step * 100) / 111_320),
+          degreesLongitude(-0.12 + index * 0.05),
+        ),
+        elevation: altitudeMetres(
+          40 + (index + 1) * 15 * Math.sin((step / count) * (index + 2) * Math.PI) ** 2,
+        ),
+      });
+    }
+    return { id: `chooser-${String(index)}`, name, profile: routeProfile(points), attempts: 0 };
+  });
+}
+
+/** The old picker's layout, as the control's stylesheet. @see PICKER */
+function restoreTheList(): void {
+  const style = document.createElement('style');
+  style.textContent = [
+    '.oyl-main:has(.oyl-chooser) { max-width: var(--oyl-measure) !important; }',
+    '.oyl-chooser { display: flex !important; flex-direction: column; }',
+    '.oyl-chooser > h2 { order: -2; }',
+    '.oyl-chooser__side { display: contents !important; }',
+    '.oyl-chooser__loadout { order: -1; }',
+    '.oyl-chooser__cards { grid-template-columns: minmax(0, 1fr) !important; }',
+    '.oyl-chooser__go { position: static !important; }',
+  ].join('\n');
+  document.head.append(style);
+}
+
 const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
-    Promise.resolve([{ id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 }]),
+    Promise.resolve([
+      { id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 },
+      ...(AT_THE_PICKER ? chooserRoutes() : []),
+    ]),
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
@@ -559,6 +627,23 @@ async function run(): Promise<void> {
   const ride = await until('the picker to offer a ride', () =>
     labelled<HTMLButtonElement>('button', 'Ride '),
   );
+  if (AT_THE_PICKER) {
+    // #940: the chooser is what is measured, so the page stops here.
+    if (PICKER === 'list') {
+      restoreTheList();
+    }
+    await document.fonts.ready;
+    window.__oylRide = {
+      ready: true,
+      errors,
+      measure,
+      unstage,
+      setSafeArea,
+      restoreFullHeightShell,
+      restoreNoticeTakesTheRoute,
+    };
+    return;
+  }
   for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
     const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
     if (box === undefined || box.disabled) {

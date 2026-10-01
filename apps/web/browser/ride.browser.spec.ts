@@ -60,6 +60,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
 
+import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+
 import { riderFrameBox } from '../src/game/camera';
 import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
 import { workoutRescueText } from '../src/workout/rescue-text';
@@ -1521,3 +1523,294 @@ test.describe('keep the screen on, beside every notice that stays — #647', () 
     });
   }
 });
+
+/*
+ * #940 — THE PRE-RIDE CHOOSER.
+ *
+ * `ride.html?picker=chooser` stops at the chooser with six routes rather than
+ * riding (`ride-harness.tsx` §`PICKER`). Each case chooses the LAST card —
+ * whose name is the longest, so *Ride*, which is named after it, is the
+ * tallest it gets — puts the page back at `scrollY === 0`, and reads *Ride*:
+ * on the screen, the topmost thing at its own centre, and on the owner's
+ * tablet with the #439 insets 50 px clear of the fold (`rideview.browser.spec.ts`
+ * §`FOLD_MARGIN_PIXELS`' floor and its reason). Every margin is printed.
+ *
+ * ⚠️ **The control is `?picker=list`**: the same chooser with the old picker's
+ * layout put back — the loadout above the routes, one route to a row, and
+ * *Ride* in the flow after them rather than pinned — and *Ride* must then be
+ * under the tablet's floor. Without it, every assertion here is true of a
+ * chooser with one short route on it.
+ */
+
+/** `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`, restated for a different page. */
+const CHOOSER_FOLD_FLOOR_PIXELS = 50;
+
+/** `design/ride-time-controls.ts` §`RIDE_TIME_TARGET_PIXELS`. */
+const CHOOSER_RIDE_TARGET_PIXELS = 48;
+
+interface ChooserViewport {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly insets: boolean;
+}
+
+const CHOOSER_VIEWPORTS: readonly ChooserViewport[] = [
+  { name: 'a phone upright — 390×844', width: 390, height: 844, insets: false },
+  { name: 'a phone in landscape — 844×390', width: 844, height: 390, insets: false },
+  {
+    name: 'a landscape tablet inside the Android shell — 1280×800, insets 36/32',
+    width: 1280,
+    height: 800,
+    insets: true,
+  },
+];
+
+/** Where the chooser's *Ride* is, and the three readings of its size. */
+interface ChooserRide {
+  readonly text: string;
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+  readonly width: number;
+  readonly height: number;
+  readonly onTop: boolean;
+  readonly scrollY: number;
+  readonly fold: number;
+  readonly minHeight: number;
+  readonly minWidth: number;
+}
+
+async function openChooser(
+  page: Page,
+  viewport: ChooserViewport,
+  query: 'chooser' | 'list',
+): Promise<void> {
+  if (viewport.insets) {
+    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+  }
+  await openRide(page, { ...viewport, unstagedFails: false }, `?picker=${query}`);
+}
+
+/** Choose the last card, as a rider does, then read *Ride* at the top of the page. */
+async function chooseLastAndReadRide(page: Page): Promise<ChooserRide> {
+  const lastName = await page.evaluate(() => {
+    const radios = [...document.querySelectorAll<HTMLInputElement>('.oyl-chooser__radio')];
+    const last = radios.at(-1);
+    if (last === undefined || radios.length < 2) throw new Error('the chooser offers no routes');
+    last.click();
+    return document.querySelector(`label[for="${last.id}"]`)?.textContent ?? '';
+  });
+  await page.waitForFunction(
+    (name) =>
+      [...document.querySelectorAll('button')].some((each) => each.textContent === `Ride ${name}`),
+    lastName,
+  );
+  return page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const ride = [...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button')].find(
+      (each) => (each.textContent ?? '').startsWith('Ride '),
+    );
+    if (ride === undefined) throw new Error('the chooser has no Ride');
+    const box = ride.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;bottom:0;height:env(safe-area-inset-bottom,0px)';
+    document.body.append(probe);
+    const inset = probe.getBoundingClientRect().height;
+    probe.remove();
+    const style = getComputedStyle(ride);
+    const minHeight = Number.parseFloat(style.minHeight);
+    const minWidth = Number.parseFloat(style.minWidth);
+    return {
+      text: ride.textContent ?? '',
+      top: box.top,
+      bottom: box.bottom,
+      left: box.left,
+      right: box.right,
+      width: box.width,
+      height: box.height,
+      onTop: hit !== null && ride.contains(hit),
+      scrollY: window.scrollY,
+      fold: window.innerHeight - inset,
+      minHeight,
+      minWidth,
+    };
+  });
+}
+
+test.describe('#940 — the pre-ride chooser', () => {
+  for (const viewport of CHOOSER_VIEWPORTS) {
+    test(`Ride is on the screen after choosing the last route — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, viewport, 'chooser');
+      const ride = await chooseLastAndReadRide(page);
+      const margin = ride.fold - ride.bottom;
+      console.log(`#940 — ${viewport.name}: Ride ends ${margin.toFixed(1)} px above the fold`);
+
+      expect(ride.text).toBe(
+        'Ride Box Hill, Leith Hill and every lane between them the long way round',
+      );
+      expect(ride.scrollY).toBe(0);
+      expect(ride.top).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+      expect(ride.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+      expect(ride.right).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
+      expect(margin).toBeGreaterThanOrEqual(viewport.insets ? CHOOSER_FOLD_FLOOR_PIXELS : 0);
+      expect(ride.onTop, 'something covers Ride at its own centre').toBe(true);
+    });
+
+    test(`Ride is at least 48 × 48, as laid out and as declared — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, viewport, 'chooser');
+      const ride = await chooseLastAndReadRide(page);
+      // The shipped box.
+      expect(ride.height).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+      expect(ride.width).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+      // The declaration (`.oyl-button--ride`).
+      expect(ride.minHeight).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+      expect(ride.minWidth).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+      // The third reading, the box with the floor stripped, is the case after
+      // this loop: the last route's name wraps, and a two-line Ride is over 48
+      // without any floor, so it is read on the first route's one line.
+    });
+  }
+
+  test('the floor is what holds Ride at 48 px — a one-line Ride, stripped', async ({ page }) => {
+    const viewport = CHOOSER_VIEWPORTS[2] as ChooserViewport;
+    await openChooser(page, viewport, 'chooser');
+    const stripped = await page.evaluate(() => {
+      const ride = [
+        ...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button'),
+      ].find((each) => (each.textContent ?? '').startsWith('Ride '));
+      if (ride === undefined) throw new Error('the chooser has no Ride');
+      const shipped = ride.getBoundingClientRect().height;
+      ride.style.minHeight = '0px';
+      ride.style.minWidth = '0px';
+      return {
+        text: ride.textContent ?? '',
+        shipped,
+        stripped: ride.getBoundingClientRect().height,
+      };
+    });
+    expect(stripped.text).toBe('Ride Harness hills');
+    expect(stripped.shipped).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+    expect(stripped.stripped).toBeLessThan(CHOOSER_RIDE_TARGET_PIXELS);
+  });
+
+  test('the control — the old list puts Ride under the tablet’s floor', async ({ page }) => {
+    const viewport = CHOOSER_VIEWPORTS[2] as ChooserViewport;
+    await openChooser(page, viewport, 'list');
+    const ride = await chooseLastAndReadRide(page);
+    const margin = ride.fold - ride.bottom;
+    console.log(
+      `#940 — the control, ${viewport.name}: Ride ends ${margin.toFixed(1)} px above the fold`,
+    );
+    expect(margin).toBeLessThan(CHOOSER_FOLD_FLOOR_PIXELS);
+  });
+
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`a card's focus ring is 3:1, and the arrow keys move the choice — ${colorScheme}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme });
+      const viewport = CHOOSER_VIEWPORTS[2] as ChooserViewport;
+      await openChooser(page, viewport, 'chooser');
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(colorScheme);
+      await page.evaluate(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+      let onRadio = false;
+      for (let press = 0; press < 40 && !onRadio; press += 1) {
+        await page.keyboard.press('Tab');
+        onRadio = await page.evaluate(
+          () => document.activeElement?.classList.contains('oyl-chooser__radio') ?? false,
+        );
+      }
+      expect(onRadio, 'Tab never reached a route card').toBe(true);
+      const rings = await page.evaluate(() => {
+        const radio = document.activeElement as HTMLInputElement;
+        const card = radio.closest('.oyl-chooser__card') as HTMLElement;
+        const paintedBehind = (element: Element): string => {
+          for (let at = element.parentElement; at !== null; at = at.parentElement) {
+            const background = getComputedStyle(at).backgroundColor;
+            if (background !== 'rgba(0, 0, 0, 0)' && background !== 'transparent') {
+              return background;
+            }
+          }
+          return getComputedStyle(document.documentElement).backgroundColor;
+        };
+        const read = (element: Element) => {
+          const style = getComputedStyle(element);
+          return {
+            colour: style.outlineColor,
+            style: style.outlineStyle,
+            width: Number.parseFloat(style.outlineWidth),
+            surface: paintedBehind(element),
+          };
+        };
+        return {
+          visible: radio.matches(':focus-visible'),
+          checked: radio.checked,
+          card: read(card),
+          radio: read(radio),
+        };
+      });
+      expect(rings.visible).toBe(true);
+      for (const ring of [rings.card, rings.radio]) {
+        expect(ring.style).toBe('solid');
+        expect(ring.width).toBeGreaterThanOrEqual(2);
+        expect(
+          contrastRatio(hexOf(ring.colour), hexOf(ring.surface)),
+          `${ring.colour} on ${ring.surface}`,
+        ).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+      }
+
+      // Native radio behaviour: an arrow key moves the choice, and Ride follows.
+      const before = await page.evaluate(
+        () => [...document.querySelectorAll('.oyl-chooser__go button')].at(-1)?.textContent,
+      );
+      await page.keyboard.press('ArrowDown');
+      const after = await page.evaluate(() => ({
+        ride: [...document.querySelectorAll('.oyl-chooser__go button')].at(-1)?.textContent,
+        focused: document.activeElement?.classList.contains('oyl-chooser__radio') ?? false,
+      }));
+      expect(after.focused).toBe(true);
+      expect(after.ride).not.toBe(before);
+
+      // And Tab leaves the group for the loadout, and reaches Ride after it.
+      const order: string[] = [];
+      for (let press = 0; press < 20; press += 1) {
+        await page.keyboard.press('Tab');
+        const where = await page.evaluate(() => {
+          const element = document.activeElement;
+          if (element === null) return 'nothing';
+          if (element.closest('.oyl-chooser__cards') !== null) return 'card';
+          if (element.closest('.oyl-chooser__loadout') !== null) return 'loadout';
+          if (element.closest('.oyl-chooser__go') !== null) {
+            return element.tagName === 'BUTTON' ? 'ride' : 'notice';
+          }
+          return 'elsewhere';
+        });
+        order.push(where);
+        if (where === 'ride') break;
+      }
+      expect(order[0], order.join(' → ')).toBe('loadout');
+      expect(order.at(-1), order.join(' → ')).toBe('ride');
+      expect(order, order.join(' → ')).not.toContain('card');
+    });
+  }
+});
+
+/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+function hexOf(rgb: string): string {
+  const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1, 4)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
