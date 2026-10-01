@@ -1571,6 +1571,57 @@ a.oyl-button {
   color: var(--oyl-color-ink-muted);
 }
 
+/*
+ * Settings' titled cards — #942, epic #935. The card's own box is `tw:`
+ * utilities over `surface` (`views/SettingsView.tsx` §`SettingsCard`); what is
+ * here is what utilities cannot say without an arbitrary variant, which ADR
+ * 0042 D-5 refuses. Inside a card, a section keeps its markup and loses its
+ * panel's own chrome — it is already on the card's `surface`, the surface it
+ * sat on before, so nothing it paints meets a new background — and a rule in
+ * `border` divides one section from the next.
+ */
+.oyl-settings-card + .oyl-settings-card {
+  margin-top: var(--oyl-space-lg);
+}
+
+.oyl-settings-card .oyl-panel {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.oyl-settings-card > section + section {
+  border-top: 1px solid var(--oyl-color-border);
+  margin-top: var(--oyl-space-md);
+  padding-top: var(--oyl-space-md);
+}
+
+.oyl-settings-card > section > h3:first-child {
+  margin-top: 0;
+}
+
+/*
+ * The card's picture: the kit's parts stacked in one small box, the furthest
+ * first, each filling it (a scene layer crops itself, a figure fits). A fixed
+ * size, so a title that wraps on a narrow phone does not stretch it, and it
+ * never shrinks beside the title.
+ */
+.oyl-settings-card__picture {
+  display: grid;
+  flex: none;
+  inline-size: 3rem;
+  block-size: 2.25rem;
+  border-radius: var(--oyl-radius);
+  overflow: hidden;
+}
+
+.oyl-settings-card__picture > svg {
+  grid-area: 1 / 1;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
 .oyl-data-table {
   border-collapse: collapse;
   width: 100%;
@@ -2251,15 +2302,41 @@ p > label + input[type='file'] {
  * phone for no gain, and `browser/devices.browser.spec.ts` measures that the
  * first control is above the fold at 390×844.
  */
+/*
+ * ⚠️ Since #942 a GARAGE: each row is a card (its box is the `tw:` utilities
+ * on the `li`, over the surface tokens every panel already sits on, so no new
+ * contrast pair), the cards in as many columns of at least 18 rem as the width
+ * holds — one on a phone, two on a tablet. The kit's glyph has a column of its
+ * own beside the card's words, so it adds no height above the first button;
+ * the card's padding is paid for by the list's own top margin and a shorter
+ * gap above the heading (`DevicesView.tsx`), measured at 390 × 844.
+ */
 .oyl-pairing {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
   gap: var(--oyl-space-md);
+  align-items: start;
 }
 
+/* The glyph in a column of its own, beside everything the card says. */
 .oyl-pairing__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  column-gap: var(--oyl-space-md);
+}
+
+.oyl-pairing__glyph {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+}
+
+.oyl-pairing__body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oyl-space-sm);
+  min-inline-size: 0;
 }
 
 .oyl-pairing__kind {
@@ -2272,7 +2349,7 @@ p > label + input[type='file'] {
   margin: 0;
 }
 
-.oyl-pairing__row > .oyl-sensor-list {
+.oyl-pairing__body > .oyl-sensor-list {
   flex: 1 1 100%;
   margin: 0;
 }
