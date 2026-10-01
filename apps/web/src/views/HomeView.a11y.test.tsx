@@ -194,3 +194,61 @@ describe('the home screen — #428', () => {
     expect(text()).toContain('not worked out yet');
   });
 });
+
+describe('the illustrated home — #939', () => {
+  const cards = (): HTMLLIElement[] => [
+    ...document.querySelectorAll<HTMLLIElement>('main .oyl-home__rides > li'),
+  ];
+
+  it('offers three ride cards, each a heading, a line and ONE link, to the three places a ride starts', async () => {
+    await openHome([]);
+    const found = cards().map((card) => ({
+      heading: card.querySelector('h3')?.textContent,
+      links: [...card.querySelectorAll('a, button, input, select, textarea')].map((control) => [
+        control.textContent,
+        control.getAttribute('href'),
+      ]),
+    }));
+    expect(found).toEqual([
+      { heading: 'Free ride', links: [['Start a ride', hrefFor(routeById('ride'))]] },
+      { heading: 'Ride a route', links: [['Choose a route', hrefFor(routeById('game'))]] },
+      { heading: 'Workout', links: [['Choose a workout', hrefFor(routeById('workouts'))]] },
+    ]);
+    expectClean('home, the ride cards');
+  });
+
+  it('draws its pictures from the kit: hidden from assistive technology, no word in them, and no <img>', async () => {
+    await openHome([ride('only', 2)]);
+    const main = document.querySelector('main');
+    expect(main?.querySelectorAll('img')).toHaveLength(0);
+    const pictures = [...(main?.querySelectorAll('svg') ?? [])];
+    // The hero's three layers, the cards' eight, the trainer's glyph and the ring.
+    expect(pictures.length).toBeGreaterThanOrEqual(12);
+    for (const picture of pictures) {
+      expect(
+        picture.closest('[aria-hidden="true"]'),
+        picture.outerHTML.slice(0, 80),
+      ).not.toBeNull();
+      expect(picture.querySelectorAll('text, title, desc')).toHaveLength(0);
+      expect((picture.textContent ?? '').trim()).toBe('');
+    }
+    expect(document.querySelector('.oyl-home-hero')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('keeps the trainer’s sentence and its link to Devices (#659) when no trainer is paired', async () => {
+    await openHome([]);
+    const trainer = document.querySelector('[aria-labelledby="oyl-home-trainer"]');
+    expect(trainer?.textContent).toContain('No trainer paired.');
+    expect(trainer?.querySelector(`a[href="${hrefFor(routeById('devices'))}"]`)?.textContent).toBe(
+      'Pair one on Devices',
+    );
+  });
+
+  it('says how many of the last seven days were ridden, beside a ring that draws the same share', async () => {
+    await openHome([ride('a', 5), ride('b', 2), ride('c', 2), ride('d', 30)]);
+    expect(text()).toContain('You rode on 2 of the last seven days.');
+    const fill = document.querySelector('.oyl-home__ring-fill');
+    const [drawn, whole] = (fill?.getAttribute('stroke-dasharray') ?? '').split(' ').map(Number);
+    expect((drawn ?? 0) / (whole ?? 1)).toBeCloseTo(2 / 7, 5);
+  });
+});

@@ -974,10 +974,12 @@ export const RIDER_UPPER_BODY_PARTS: readonly RiderPart[] = [
  * The bicycle and the body together: everything that does not turn with the
  * cranks, in the model's own frame, at rest.
  *
- * @test-facing the renderer draws {@link RIDER_BICYCLE_PARTS} and
+ * The renderer draws {@link RIDER_BICYCLE_PARTS} and
  * {@link RIDER_UPPER_BODY_PARTS} as two meshes since #546; `bicycle.test.ts`
  * holds the whole rider's shape — stands on the road, fits the lane, the arms
  * reach the bar — to the union, at rest, which is the shape it had before.
+ * The illustration kit's `RiderSilhouette` (#938) draws the union in side
+ * view, and since #939 Home's Free ride card ships it, so this is wired.
  */
 export const RIDER_BODY_PARTS: readonly RiderPart[] = [
   ...RIDER_BICYCLE_PARTS,

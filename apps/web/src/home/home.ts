@@ -49,6 +49,8 @@ import { thresholdsFor } from '../analysis/thresholds';
 /** How far back "this week" reaches: seven days to the second, not a calendar week. */
 export const WEEK_SECONDS = 7 * 24 * 60 * 60;
 
+const DAY_SECONDS = 24 * 60 * 60;
+
 export interface HomeLastRide {
   readonly name: string;
   readonly startedAt: UnixSeconds;
@@ -67,6 +69,13 @@ export interface HomeWeek {
   readonly load: number;
   /** How many of {@link rides} carried a load — so "load 0" is never a guess. */
   readonly ridesWithLoad: number;
+  /**
+   * On how many of the last seven days at least one ride started — #939's
+   * progress ring. A "day" is a 24-hour slice counted back from `now`, the
+   * same window as {@link rides}, so it is never more than seven and needs no
+   * time zone. Arithmetic over the rows already read: no read of its own.
+   */
+  readonly daysRidden: number;
 }
 
 export interface HomeData {
@@ -99,7 +108,8 @@ export async function loadHome(
   const thresholds = thresholdsFor(await port.store.getAthlete(port.athleteId));
 
   const entries: LoadEntry[] = [];
-  let week: HomeWeek = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
+  let week: Omit<HomeWeek, 'daysRidden'> = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
+  const days = new Set<number>();
   let lastRide: HomeLastRide | undefined;
   for (const summary of considered) {
     const load = loadFromSummary(summary, thresholds)?.load;
@@ -113,6 +123,7 @@ export async function loadHome(
         load: week.load + (load ?? 0),
         ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
       };
+      days.add(Math.min(6, Math.floor((now - summary.startedAt) / DAY_SECONDS)));
     }
     // Ascending, so the last one seen is the newest.
     lastRide = {
@@ -135,7 +146,7 @@ export async function loadHome(
 
   return {
     lastRide,
-    week,
+    week: { ...week, daysRidden: days.size },
     fitness: fitnessSeries(dailyLoads(entries)),
     truncated: summaries.length > limit,
   };

@@ -16,6 +16,18 @@
  * `main` — the rule every other reading route keeps — and the spec requires
  * the cards to stop short of the window again. Without it, "fills the width"
  * is as true of a page whose main rendered nothing.
+ *
+ * ## #939: the hero band and the ride cards
+ *
+ * `measure()` also publishes the hero band's box, the fold (the viewport less
+ * its bottom inset, or the top of a bottom navigation bar —
+ * `reflow-harness.tsx` §`foldLine`'s rule), and each ride card with its link:
+ * the link's box, its declared `min-height`/`min-width`, the box it has with
+ * that floor stripped, and what is hit at the card's middle.
+ *
+ * `home.html?hero=tall` is #939's control: the band at 60 vh, which must push
+ * the first ride card's control under a phone's fold — so a measurement that
+ * finds it above the fold has measured the band and not a page that drew none.
  */
 
 import { StrictMode } from 'react';
@@ -58,6 +70,34 @@ export interface HomeMeasurement {
   readonly cards: readonly Box[];
   /** `scrollWidth − innerWidth`: anything above zero is horizontal scrolling. */
   readonly horizontalOverflow: number;
+  /** #939: the hero band, or `undefined` when none was drawn. */
+  readonly hero: Box | undefined;
+  /** The hero's ground — its hills and road — or `undefined`. */
+  readonly ground: Box | undefined;
+  /**
+   * Every line of the `h1`'s and the summary's TEXT — their line boxes, not
+   * their padded boxes — so "the words stand on the sky" is a measurement.
+   */
+  readonly titleText: readonly Box[];
+  /** The fold, in CSS px from the top of the viewport. */
+  readonly fold: number;
+  /** The ride cards, in document order. */
+  readonly rideCards: readonly RideCardMeasurement[];
+}
+
+export interface RideCardMeasurement {
+  readonly card: Box;
+  readonly linkText: string;
+  readonly link: Box;
+  /** The link's computed `min-height` and `min-width`, in px. */
+  readonly declaredMinHeight: number;
+  readonly declaredMinWidth: number;
+  /** The link's box with `min-height` and `min-width` set to 0. */
+  readonly stripped: Box;
+  /** Whether `elementFromPoint` at the card's middle is this card's link. */
+  readonly middleHitsOwnLink: boolean;
+  /** The text of whatever link the middle hit, for a failure message. */
+  readonly middleHit: string;
 }
 
 declare global {
@@ -73,7 +113,7 @@ declare global {
 
 const errors: string[] = [];
 
-function boxOf(element: Element): Box {
+function boxOf(element: Pick<Element, 'getBoundingClientRect'>): Box {
   const rect = element.getBoundingClientRect();
   return {
     left: rect.left,
@@ -87,13 +127,81 @@ function boxOf(element: Element): Box {
 
 function measure(): HomeMeasurement {
   const main = document.querySelector('main');
+  const hero = document.querySelector('.oyl-home-hero');
+  const ground = document.querySelector('.oyl-home-hero__ground');
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     main: main === null ? undefined : boxOf(main),
     mainClass: main?.className ?? '',
     cards: [...document.querySelectorAll('.oyl-home > .oyl-panel')].map(boxOf),
     horizontalOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    hero: hero === null ? undefined : boxOf(hero),
+    ground: ground === null ? undefined : boxOf(ground),
+    titleText: [...document.querySelectorAll('main > h1, main > h1 + p')].flatMap((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return [...range.getClientRects()].map((rect) =>
+        boxOf({ getBoundingClientRect: () => rect }),
+      );
+    }),
+    fold: foldLine(),
+    rideCards: ((cards) => {
+      window.scrollTo(0, 0);
+      return cards;
+    })([...document.querySelectorAll('.oyl-home__rides > li')].map(measureCard)),
   };
+}
+
+function measureCard(card: Element): RideCardMeasurement {
+  const link = card.querySelector<HTMLAnchorElement>('a');
+  if (link === null) {
+    throw new Error('home harness: a ride card holds no link');
+  }
+  window.scrollTo(0, 0);
+  const style = getComputedStyle(link);
+  const shipped = boxOf(link);
+  link.style.minHeight = '0';
+  link.style.minWidth = '0';
+  const stripped = boxOf(link);
+  link.style.minHeight = '';
+  link.style.minWidth = '';
+  const box = boxOf(card);
+  // The middle is hit-tested where it is on screen: `elementFromPoint` finds
+  // nothing outside the viewport, so a card below the fold is scrolled to
+  // first, and the page put back at its top afterwards (`measure`).
+  card.scrollIntoView({ block: 'center' });
+  const seen = card.getBoundingClientRect();
+  const hit = document.elementFromPoint(seen.left + seen.width / 2, seen.top + seen.height / 2);
+  const hitLink = hit?.closest('a') ?? null;
+  return {
+    card: box,
+    linkText: (link.textContent ?? '').trim(),
+    link: shipped,
+    declaredMinHeight: Number.parseFloat(style.minHeight),
+    declaredMinWidth: Number.parseFloat(style.minWidth),
+    stripped,
+    middleHitsOwnLink: hitLink === link,
+    middleHit: (hitLink?.textContent ?? hit?.tagName ?? 'nothing').trim(),
+  };
+}
+
+/** `reflow-harness.tsx` §`foldLine`, for the same reason. */
+function foldLine(): number {
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;visibility:hidden;padding-bottom:env(safe-area-inset-bottom,0px)';
+  document.body.append(probe);
+  const inset = Number.parseFloat(getComputedStyle(probe).paddingBottom);
+  probe.remove();
+  let fold = window.innerHeight - inset;
+  const nav = document.querySelector('.oyl-nav');
+  if (nav !== null && getComputedStyle(nav).position === 'fixed') {
+    const box = nav.getBoundingClientRect();
+    if (box.width >= window.innerWidth - 1 && box.top > window.innerHeight / 2) {
+      fold = Math.min(fold, box.top);
+    }
+  }
+  return fold;
 }
 
 function constrain(): void {
@@ -128,6 +236,12 @@ async function run(): Promise<void> {
     throw new Error('home harness: #shell is missing from home.html');
   }
   window.location.hash = '#/';
+  if (new URLSearchParams(window.location.search).get('hero') === 'tall') {
+    // #939's control: the band at 60 vh, a screen rather than a band.
+    const tall = document.createElement('style');
+    tall.textContent = '.oyl-home-hero { min-height: 60vh; }';
+    document.head.append(tall);
+  }
   const now = Math.floor(Date.now() / 1000);
   const rides = Array.from({ length: 60 }, (_unused, index) => ({
     activity: stubActivity({

@@ -95,6 +95,26 @@ describe('the three states — #428', () => {
     expect(home.week.movingTime).toBe(6000);
   });
 
+  it('counts the DAYS ridden in the last seven, not the rides — #939', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('old', 9),
+        ride('six', 6.5),
+        ride('twoA', 2.2),
+        ride('twoB', 2.1),
+        ride('today', 0.1),
+      ]),
+      NOW,
+    );
+    expect(home.week.rides).toBe(4);
+    expect(home.week.daysRidden).toBe(3);
+  });
+
+  it('rides nothing on a day it has nothing for', async () => {
+    const home = await loadHome(stubAnalysis(OWNER, [ride('old', 30)]), NOW);
+    expect(home.week.daysRidden).toBe(0);
+  });
+
   it('draws the week line at exactly seven days', async () => {
     const edge = { startedAt: unixSeconds(NOW - WEEK_SECONDS) };
     const home = await loadHome(
