@@ -134,7 +134,7 @@ export function MaskedWordsPanel({
 
   return (
     <section className="oyl-panel oyl-masked-words" aria-labelledby="oyl-masked-words-heading">
-      <h2 id="oyl-masked-words-heading">{MASKED_WORDS_HEADING}</h2>
+      <h3 id="oyl-masked-words-heading">{MASKED_WORDS_HEADING}</h3>
       <KeptVisible>
         <p className="oyl-muted">{MASKED_WORDS_LEAD}</p>
       </KeptVisible>
