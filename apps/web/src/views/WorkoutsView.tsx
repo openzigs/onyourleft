@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+import { memo, useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
 
 import { expandWorkout, type WorkoutBlock, type WorkoutTimeline } from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
@@ -118,12 +118,33 @@ interface WorkoutEntry {
 interface ListedWorkout extends WorkoutEntry {
   /**
    * The workout expanded, for the card's drawn shape — #941. From the record
-   * already in hand: drawing it costs no read. `workoutRow` expands it too, and
-   * `workouts/library.ts` is left as it is rather than made to hand back its
-   * timeline, because a row is a summary built for reading.
+   * already in hand: drawing it costs no read. It is expanded once per load
+   * and handed to `workoutRow`, which would otherwise expand it again.
    */
   readonly timeline: WorkoutTimeline;
 }
+
+/**
+ * A card's drawing — #941: the blocks as bars of relative height, from the
+ * timeline the list already expanded. Decoration: no number reaches it, and
+ * the card's words carry the workout.
+ *
+ * `memo`, because the timeline is the one the list read set into state, and
+ * the builder beside the list re-renders this view on every keystroke: without
+ * it every card's outline (up to `WORKOUT_LIST_LIMIT` of them) is drawn again
+ * for a character typed into a name.
+ */
+const WorkoutCardArt = memo(function WorkoutCardArt({
+  timeline,
+}: {
+  readonly timeline: WorkoutTimeline;
+}): JSX.Element {
+  return (
+    <div className="oyl-shape-card__art">
+      <WorkoutShape workout={timeline} />
+    </div>
+  );
+});
 
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
@@ -160,11 +181,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       // list reports the failure rather than rendering a name a rider could
       // press.
       setEntries(
-        list.map((record) => ({
-          row: workoutRow(record),
-          record,
-          timeline: expandWorkout(record.workout),
-        })),
+        list.map((record) => {
+          const timeline = expandWorkout(record.workout);
+          return { row: workoutRow(record, timeline), record, timeline };
+        }),
       );
       setLoadFault(undefined);
     } catch {
@@ -422,12 +442,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   <p className="oyl-muted">
                     {row.duration} · hardest: {hardestText(row)}
                   </p>
-                  {/* #941: the blocks as bars of relative height, from the
-                      timeline the list already expanded. Decoration: no number
-                      reaches it, and the words above carry the workout. */}
-                  <div className="oyl-shape-card__art">
-                    <WorkoutShape workout={timeline} />
-                  </div>
+                  <WorkoutCardArt timeline={timeline} />
                 </li>
               ))}
             </ul>

@@ -1246,7 +1246,7 @@ test.describe('#723 — two panes scroll on their own', () => {
  * blocks in a strip across its foot (`theme.css` §`.oyl-shape-card`). What
  * is held here, on the loads the blocks above already make:
  *
- * - **No primary moves down.** Every primary's margin to its line, on arrival
+ * - **No primary moves down**, in both palettes. Every primary's margin to its line, on arrival
  *   and with the fixture's item chosen, at the four viewports #670 publishes,
  *   is at least what the same page measures with the shapes taken off
  *   (`reflow.html?shape=off`, the card as it was before #941) — read in the
@@ -1291,25 +1291,45 @@ async function primaryMargins(page: Page, viewport: Viewport): Promise<Map<strin
 }
 
 test.describe('#941 — cards with their shape drawn on them', () => {
-  for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE, REFLOW]) {
-    test(`no primary moves down at ${viewport.name}`, async ({ page }) => {
-      await open(page, viewport, 'data=populated&shape=off');
-      expect(await page.locator('style[data-oyl-control="shape=off"]').count()).toBe(1);
-      const before = await primaryMargins(page, viewport);
-      await open(page, viewport);
-      const after = await primaryMargins(page, viewport);
-      console.log(
-        `[#941] margins @ ${viewport.name}\n  ` +
-          [...after]
-            .map(
-              ([key, margin]) =>
-                `${key}: ${margin.toFixed(1)} px (without shapes ${(before.get(key) ?? Number.NaN).toFixed(1)})`,
-            )
-            .join('\n  '),
-      );
-      expect([...after.keys()]).toEqual([...before.keys()]);
-      const worse = [...after].filter(([key, margin]) => margin < (before.get(key) ?? 0) - 0.5);
-      expect(worse).toEqual([]);
+  /*
+   * In both palettes (#941 asks for both), parametrised over `THEMES` with
+   * `colorScheme` as the reflow walk is. Not only for form's sake: the dark
+   * palette is not purely colour — `theme.css` swaps the brand images under
+   * `:root[data-theme='dark']` — so "layout does not depend on the palette" is
+   * measured here rather than assumed. Four more cases, about 3 s each locally.
+   */
+  for (const theme of THEMES) {
+    test.describe(`${theme} palette`, () => {
+      test.use({ colorScheme: theme });
+
+      for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE, REFLOW]) {
+        test(`no primary moves down at ${viewport.name}, ${theme}`, async ({ page }) => {
+          await open(page, viewport, 'data=populated&shape=off');
+          expect(await page.locator('style[data-oyl-control="shape=off"]').count()).toBe(1);
+          expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+          const before = await primaryMargins(page, viewport);
+          await open(page, viewport);
+          expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+          const after = await primaryMargins(page, viewport);
+          console.log(
+            `[#941] margins @ ${viewport.name}, ${theme}\n  ` +
+              [...after]
+                .map(
+                  ([key, margin]) =>
+                    `${key}: ${margin.toFixed(1)} px (without shapes ${(before.get(key) ?? Number.NaN).toFixed(1)})`,
+                )
+                .join('\n  '),
+          );
+          // Both maps hold something, or the comparison below holds over
+          // nothing: a harness that stopped finding primaries would make two
+          // empty maps equal and `worse` empty (#941's review).
+          expect(before.size, `no primary measured without the shapes`).toBeGreaterThan(0);
+          expect(after.size, `no primary measured with the shapes`).toBeGreaterThan(0);
+          expect([...after.keys()]).toEqual([...before.keys()]);
+          const worse = [...after].filter(([key, margin]) => margin < (before.get(key) ?? 0) - 0.5);
+          expect(worse).toEqual([]);
+        });
+      }
     });
   }
 

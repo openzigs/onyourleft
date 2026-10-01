@@ -20,6 +20,7 @@
 
 import {
   altitudeMetres,
+  expandWorkout,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -36,15 +37,30 @@ import {
   type RouteRecord,
   type WorkoutRecord,
 } from '@onyourleft/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { routeStub, stubRouteId } from '../routes/testing';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 import { POPULATED_WORKOUT_BLOCKS } from '../testing/populated-shell';
 import { workoutRow } from '../workouts/library';
 import { workoutStub } from '../workouts/testing';
 import { RoutesView } from './RoutesView';
 import { WorkoutsView } from './WorkoutsView';
+import { WorkoutShape } from '../design/illustration/WorkoutShape';
+
+/*
+ * Counted, not replaced: the real expansion and the real drawing run, and each
+ * call is written down, so "expanded once" and "not drawn again for a
+ * keystroke" are read off the calls (#941's review).
+ */
+vi.mock('@onyourleft/domain', async (actual) => {
+  const domain = await actual<typeof import('@onyourleft/domain')>();
+  return { ...domain, expandWorkout: vi.fn(domain.expandWorkout) };
+});
+vi.mock('../design/illustration/WorkoutShape', async (actual) => {
+  const shape = await actual<typeof import('../design/illustration/WorkoutShape')>();
+  return { ...shape, WorkoutShape: vi.fn(shape.WorkoutShape) };
+});
 
 const ATHLETE = toAthleteId('athlete-a');
 const METRES_PER_DEGREE_LATITUDE = 111_195;
@@ -54,6 +70,8 @@ let mounted: Mounted | undefined;
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  vi.mocked(expandWorkout).mockClear();
+  vi.mocked(WorkoutShape).mockClear();
 });
 
 /**
@@ -109,14 +127,21 @@ function workout(id: string, name: string, blocks: readonly WorkoutBlock[]): Wor
   };
 }
 
-/** The populated fixture's workout, and two that draw every kind of block. */
+/**
+ * The populated fixture's workout, and two that draw every kind of block.
+ *
+ * ⚠️ The ids hold no digit on purpose: a card carries its id in its link's
+ * `href` and `data-oyl-select`, and the no-number check reads every attribute
+ * on the card, so an id with a digit in it would need an exemption a number
+ * could hide behind.
+ */
 const WORKOUTS: readonly WorkoutRecord[] = [
   workout(
-    'workout-1',
+    'workout-sweet',
     'Sweet spot over-unders with a very long name for a small screen',
     POPULATED_WORKOUT_BLOCKS,
   ),
-  workout('workout-2', 'Ramp and intervals', [
+  workout('workout-ramp', 'Ramp and intervals', [
     {
       kind: 'ramp',
       seconds: seconds(300),
@@ -132,7 +157,7 @@ const WORKOUTS: readonly WorkoutRecord[] = [
       easyTarget: thresholdShare(0.5),
     },
   ]),
-  workout('workout-3', 'Free ride', [{ kind: 'free-ride', seconds: seconds(900) }]),
+  workout('workout-free', 'Free ride', [{ kind: 'free-ride', seconds: seconds(900) }]),
 ];
 
 /** The cards on the page: every item of the list pane's list. */
@@ -140,11 +165,25 @@ function cards(root: HTMLElement): HTMLElement[] {
   return queryAll(root, '.oyl-pane-list__item');
 }
 
-/** Every attribute value in a drawing, less the geometry. */
-function nonGeometryAttributes(svg: SVGElement): string[] {
-  return [svg, ...svg.querySelectorAll('*')].flatMap((element) =>
+/**
+ * Every attribute on a card — the `<li>` itself and every element inside it,
+ * the drawing's wrapper included — less the drawing's geometry: an SVG
+ * element's `d` and `viewBox` and nothing else.
+ *
+ * Until #941's review this read the `<svg>` alone, and a `title="250 W"` on the
+ * wrapper `div` passed every test here: a `title` is a tooltip and an
+ * accessible description, which is text a rider reads.
+ */
+function nonGeometryAttributes(card: HTMLElement): string[] {
+  return [card, ...card.querySelectorAll('*')].flatMap((element) =>
     [...element.attributes]
-      .filter((attribute) => attribute.name !== 'd' && attribute.name !== 'viewBox')
+      .filter(
+        (attribute) =>
+          !(
+            element.closest('svg') !== null &&
+            (attribute.name === 'd' || attribute.name === 'viewBox')
+          ),
+      )
       .map((attribute) => `${element.tagName}[${attribute.name}=${attribute.value}]`),
   );
 }
@@ -217,12 +256,31 @@ describe('#941 — the Workouts list', () => {
           ? 'No target'
           : `${String(row.hardestPercent)}% of threshold`);
       expect(card.textContent).toBe(before);
-      const svg = card.querySelector('svg');
-      if (svg === null) throw new Error('no drawing');
-      // Outside its path data and its coordinate system, the drawing holds no
-      // digit at all: no watt, percentage or score in a class, a label or a
-      // title.
-      expect(nonGeometryAttributes(svg).filter((value) => /\d/.test(value))).toEqual([]);
+      // Outside the drawing's path data and coordinate system, no attribute
+      // on the card holds a digit: no watt, percentage or score in a class, a
+      // label, a title, a `data-*` or an `aria-*`.
+      expect(nonGeometryAttributes(card).filter((value) => /\d/.test(value))).toEqual([]);
     }
+  });
+
+  it('expands each workout once per load, and draws no card again for a keystroke', async () => {
+    mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
+    await settle();
+    expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
+    // One expansion a workout: the card's drawing and its row share it.
+    expect(vi.mocked(expandWorkout)).toHaveBeenCalledTimes(WORKOUTS.length);
+    const drawn = vi.mocked(WorkoutShape).mock.calls.length;
+    expect(drawn).toBeGreaterThanOrEqual(WORKOUTS.length);
+
+    const name = mounted.container.querySelector<HTMLInputElement>('#workout-name');
+    if (name === null) throw new Error('no name box');
+    await typeInto(name, 'S');
+    await typeInto(name, 'Su');
+    await typeInto(name, 'Sun');
+    expect(name.value).toBe('Sun');
+    // The builder re-rendered the view three times; no card was drawn again
+    // and no workout expanded again.
+    expect(vi.mocked(WorkoutShape).mock.calls.length).toBe(drawn);
+    expect(vi.mocked(expandWorkout)).toHaveBeenCalledTimes(WORKOUTS.length);
   });
 });
