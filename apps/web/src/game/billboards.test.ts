@@ -46,6 +46,7 @@ import {
 import {
   STRUCTURE_KINDS,
   TIGHT_BEND_RADIANS_PER_METRE,
+  scatterAt,
   scatterSeed,
   type ScatterItem,
 } from './scatter';
@@ -88,17 +89,43 @@ function longHairpin(): RouteProfile {
     });
   };
   const radius = 7;
-  for (let north = 0; north < 1_600; north += 10) push(0, north);
+  // 1 800 m legs: two of this route's site boundaries hash the side facing
+  // the other leg, which is what the clearance has to refuse.
+  for (let north = 0; north < 1_800; north += 10) push(0, north);
   for (let step = 0; step <= 12; step += 1) {
     const angle = (step / 12) * Math.PI;
-    push(radius * (1 - Math.cos(angle)), 1_600 + radius * Math.sin(angle));
+    push(radius * (1 - Math.cos(angle)), 1_800 + radius * Math.sin(angle));
   }
-  for (let north = 1_590; north >= 0; north -= 10) push(2 * radius, north);
+  for (let north = 1_790; north >= 0; north -= 10) push(2 * radius, north);
+  return routeProfile(points);
+}
+
+/**
+ * A road that coils round a 30 m circle seven times, climbing: every site
+ * boundary on it is on a bend tight enough that a real road would be posted,
+ * so it holds no billboard.
+ */
+function coilRoute(): RouteProfile {
+  const perLongitude = METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const radius = 30;
+  const steps = Math.round((2 * Math.PI * radius) / 5);
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 7 * steps; index += 1) {
+    const angle = (index / steps) * 2 * Math.PI;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + (radius * Math.sin(angle)) / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (radius * (Math.cos(angle) - 1)) / perLongitude),
+      ),
+      elevation: altitudeMetres(index * 0.1),
+    });
+  }
   return routeProfile(points);
 }
 
 const ROUTES: readonly (readonly [string, RouteProfile])[] = [
   ['two legs 14 m apart', longHairpin()],
+  ['a road coiled round a 30 m circle', coilRoute()],
   ['a 3 km climb', steadyClimb()],
   ['a valley', valleyRoute()],
   ['a planner’s bends', plannerRoute()],
@@ -235,6 +262,22 @@ describe('billboards — #966', () => {
         expect(Math.hypot(board.x - middleX, board.z - middleZ)).toBeGreaterThan(400);
       }
     }
+  });
+
+  it('stands none on a road that only ever bends tightly', () => {
+    const coil = coilRoute();
+    // Non-vacuity: the route is long enough for a site boundary.
+    expect(
+      Math.round((coil.totalDistance as number) / SETTLEMENT_SPACING_METRES),
+    ).toBeGreaterThanOrEqual(2);
+    expect(all(coil)).toEqual([]);
+  });
+
+  it('stands none facing the other leg of a hairpin, where it would be in the road', () => {
+    // Both of this route's site boundaries hash the side facing the other leg
+    // (measured: without the clearance each would stand 2.5 m from that leg's
+    // centreline, in its carriageway), so the clearance leaves it none.
+    expect(all(longHairpin())).toEqual([]);
   });
 
   it('reads a right-hand bend as turning toward the normal', () => {
@@ -374,10 +417,16 @@ describe('billboards — #966', () => {
     });
 
     it('keeps the frame’s natural scenery off them', () => {
-      const shown = frame();
-      for (const item of shown.scatter) {
-        for (const board of shown.billboards) {
-          expect(
+      // On a circuit whose billboard has trees where it stands: the natural
+      // scatter there holds some, and the frame holds none.
+      const circuit = circuitRoute(400);
+      const circuitOrigin = corridorOrigin(circuit);
+      const seed = scatterSeed(circuit);
+      const circuitStart = atStartLine(circuit);
+      let cleared = 0;
+      for (const board of all(circuit)) {
+        const near = (items: readonly ScatterItem[]): number =>
+          items.filter((item) =>
             footprintsMeet(
               board,
               BILLBOARD_FOOTPRINT,
@@ -385,10 +434,25 @@ describe('billboards — #966', () => {
               { x: 0, back: 0, front: 0 },
               SCENERY_MARGIN_METRES,
             ),
-            item.kind,
-          ).toBe(false);
-        }
+          ).length;
+        cleared += near(
+          scatterAt(circuit, circuitOrigin, seed, board.along - 60, board.along + 60, {
+            maxItems: 100_000,
+            riderMetres: board.along,
+          }),
+        );
+        const shown = sceneFrame({
+          profile: circuit,
+          origin: circuitOrigin,
+          state: {
+            ...circuitStart,
+            ride: { ...circuitStart.ride, distance: metres(board.along - 60) },
+          },
+        });
+        expect(shown.billboards.map((each) => each.along)).toContain(board.along);
+        expect(near(shown.scatter)).toBe(0);
       }
+      expect(cleared).toBeGreaterThan(0);
     });
   });
 });
