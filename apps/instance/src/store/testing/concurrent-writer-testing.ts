@@ -18,6 +18,7 @@ interface Job {
   readonly prefix: string;
   readonly count: number;
   readonly busyTimeoutMilliseconds?: number;
+  readonly busyRetryDelaysMilliseconds?: readonly number[];
 }
 
 const job = workerData as Job;
@@ -26,12 +27,14 @@ const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 async function run(): Promise<void> {
-  const store = await openSqlStore(
-    job.path,
-    job.busyTimeoutMilliseconds === undefined
+  const store = await openSqlStore(job.path, {
+    ...(job.busyTimeoutMilliseconds === undefined
       ? {}
-      : { busyTimeoutMilliseconds: job.busyTimeoutMilliseconds },
-  );
+      : { busyTimeoutMilliseconds: job.busyTimeoutMilliseconds }),
+    ...(job.busyRetryDelaysMilliseconds === undefined
+      ? {}
+      : { busyRetryDelaysMilliseconds: job.busyRetryDelaysMilliseconds }),
+  });
   for (let index = 0; index < job.count; index += 1) {
     const athleteId = `${job.prefix}-${index}`;
     try {
