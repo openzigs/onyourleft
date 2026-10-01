@@ -475,6 +475,34 @@ function removeMediaBlocks(condition: string): number {
 }
 
 /**
+ * `?nav-indicator=off` is #944's CONTROL: the shipping sheet with the one rule
+ * that fills the current destination's pill —
+ * `.oyl-nav-link[aria-current] .oyl-nav-indicator` — deleted through the
+ * CSSOM. What is left marks the current destination by its label's colour and
+ * weight, and `shell.browser.spec.ts` §"#944" requires its "a painted pill the
+ * others lack" case to fail here. Only top-level rules are removed: the
+ * forced-colours border inside its `@media` block is a different claim.
+ * Publishes how many rules it removed, and the spec requires one.
+ */
+const NAV_INDICATOR_OFF = 'off';
+const NAV_INDICATOR_SELECTOR = '.oyl-nav-link[aria-current] .oyl-nav-indicator';
+
+function removeNavIndicator(): number {
+  let removed = 0;
+  for (const sheet of [...document.styleSheets]) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (rule instanceof CSSStyleRule && rule.selectorText === NAV_INDICATOR_SELECTOR) {
+        sheet.deleteRule(index);
+        removed += 1;
+      }
+    }
+  }
+  return removed;
+}
+
+/**
  * `&update=slow` applies the `@media (update: slow)` block as a screen that
  * cannot cheaply repaint would (#936). ⚠️ **The engine cannot be told it is
  * such a screen**: neither Playwright nor the DevTools protocol emulates the
@@ -862,6 +890,21 @@ function main(): void {
     }
   }
 
+  // Since #944 the motion control applies to the whole page, not only to the
+  // illustration specimens: the navigation's indicator is measured with it too.
+  // ⚠️ BEFORE `update=slow` below, which rewrites that block's condition to
+  // `all`, after which a removal looking for `update` would find nothing.
+  const motionOff = params.get('motion-rule-off');
+  if (motionOff !== null) {
+    document.documentElement.dataset['oylMotionRulesRemoved'] = String(
+      removeMediaBlocks(motionOff),
+    );
+  }
+
+  if (params.get('nav-indicator') === NAV_INDICATOR_OFF) {
+    document.documentElement.dataset['oylNavIndicatorRemoved'] = String(removeNavIndicator());
+  }
+
   if (params.get('illustration') === ILLUSTRATION_SPECIMENS) {
     const illustration = document.createElement('div');
     region.append(illustration);
@@ -872,10 +915,6 @@ function main(): void {
         </StrictMode>,
       );
     });
-    const off = params.get('motion-rule-off');
-    if (off !== null) {
-      document.documentElement.dataset['oylMotionRulesRemoved'] = String(removeMediaBlocks(off));
-    }
     if (params.get('update') === 'slow') {
       document.documentElement.dataset['oylSlowUpdateForced'] = String(forceSlowUpdate());
     }

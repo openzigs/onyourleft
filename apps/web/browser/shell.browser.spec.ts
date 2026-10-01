@@ -49,9 +49,10 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 import {
   COLOUR_TOKENS,
+  CONTRAST_REQUIREMENTS,
   FONT_SIZE_TOKENS,
   ILLUSTRATION_TOKENS,
   PLATFORM_CHECK_MARK,
@@ -114,6 +115,27 @@ const VIEWPORTS = [
  * is 18.9 % at 1024×640 and fails, which is the measured control.
  */
 const PERSISTENT_CHROME_BUDGET = 0.17;
+
+/**
+ * Each viewport's published chrome area from the run before #944 restyled the
+ * navigation (main at 7f7241a7, 2026-10-01), in px² — and the most it may be
+ * now. #944's first criterion is that the published area is NO LARGER at any
+ * viewport, which the budget alone cannot say: the bar at 375×667 is 9.4 % of
+ * the viewport against a budget of 17 %, so a bar twelve pixels taller passes
+ * the budget and fails this. Measured after #944: 0, 22 811, 90 112, 101 248
+ * and 127 616 — the bar two pixels shorter, the rail unchanged.
+ *
+ * ⚠️ Rounded UP from the published figure, which is itself rounded: these are
+ * ceilings, not targets, and a figure under one is an improvement the next
+ * change may keep.
+ */
+const CHROME_AREA_BEFORE_944: Readonly<Record<(typeof VIEWPORTS)[number]['name'], number>> = {
+  '320×256 — the SC 1.4.10 viewport': 0,
+  '375×667 — a phone': 23_562,
+  '768×1024 — a tablet': 90_112,
+  '1024×640 — the smallest the sticky query admits': 101_248,
+  '1280×800 — a laptop': 127_616,
+};
 
 /**
  * How far clear of the chrome a heading has to land after a fragment jump, in
@@ -293,6 +315,12 @@ for (const viewport of VIEWPORTS) {
           'header left 78px for the content. theme.css bounds this with a media query; see the ' +
           'block below .oyl-main',
       ).toBeLessThanOrEqual(PERSISTENT_CHROME_BUDGET);
+      expect(
+        covered.visible,
+        `the header and the navigation cover ${covered.visible.toFixed(0)} px², more than the ` +
+          `${String(CHROME_AREA_BEFORE_944[viewport.name])} px² they covered before #944 — the ` +
+          'navigation grew. See CHROME_AREA_BEFORE_944',
+      ).toBeLessThanOrEqual(CHROME_AREA_BEFORE_944[viewport.name]);
     });
 
     /*
@@ -1267,7 +1295,13 @@ interface NavLinkBox {
   readonly minWidth: number;
   readonly minHeight: number;
   readonly current: string | null;
-  readonly iconBackground: string;
+  /** The computed background of the link's `.oyl-nav-indicator` (#944). */
+  readonly indicatorBackground: string;
+  readonly indicatorWidth: number;
+  readonly indicatorHeight: number;
+  readonly labelColour: string;
+  /** The icon's computed `transform`: `none`, or a matrix. */
+  readonly iconTransform: string;
 }
 
 async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
@@ -1276,6 +1310,8 @@ async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
       const box = link.getBoundingClientRect();
       const style = getComputedStyle(link);
       const icon = link.querySelector('svg');
+      const indicator = link.querySelector('.oyl-nav-indicator');
+      const label = link.querySelector('.oyl-nav-label');
       return {
         label: (link.textContent ?? '').trim(),
         width: box.width,
@@ -1283,7 +1319,11 @@ async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
         minWidth: Number.parseFloat(style.minWidth),
         minHeight: Number.parseFloat(style.minHeight),
         current: link.getAttribute('aria-current'),
-        iconBackground: icon === null ? '' : getComputedStyle(icon).backgroundColor,
+        indicatorBackground: indicator === null ? '' : getComputedStyle(indicator).backgroundColor,
+        indicatorWidth: indicator?.getBoundingClientRect().width ?? 0,
+        indicatorHeight: indicator?.getBoundingClientRect().height ?? 0,
+        labelColour: label === null ? '' : getComputedStyle(label).color,
+        iconTransform: icon === null ? '' : getComputedStyle(icon).transform,
       };
     }),
   );
@@ -1355,69 +1395,165 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
     test('marks where you are with a shape, not only a colour', async ({ page }) => {
       await openShell(page);
       const links = await navLinks(page);
-      const current = links.filter((link) => link.current !== null);
-      const others = links.filter((link) => link.current === null);
-      expect(current).toHaveLength(1);
-      // A filled pill behind the current icon, where the others have none.
-      expect(current[0]?.iconBackground).not.toBe('rgba(0, 0, 0, 0)');
-      for (const link of others) {
-        expect(link.iconBackground).toBe('rgba(0, 0, 0, 0)');
+      expect(links.length).toBeGreaterThan(2);
+      expect(paintedPillFaults(links)).toEqual([]);
+    });
+
+    test('#944 — the control: with the indicator rule deleted, only colour is left, and the case fails', async ({
+      page,
+    }) => {
+      await page.goto(`/shell.html?nav-indicator=${NAV_INDICATOR_OFF}`);
+      await page.waitForSelector('html[data-oyl-shell-ready]');
+      expect(
+        await page.evaluate(() => document.documentElement.dataset['oylNavIndicatorRemoved']),
+        'the harness removed no indicator rule, so this is not the control',
+      ).toBe('1');
+      const links = await navLinks(page);
+      const current = links.find((link) => link.current !== null);
+      const other = links.find((link) => link.current === null);
+      // What is left tells the current destination by its label's colour…
+      expect(current?.labelColour).not.toBe(other?.labelColour);
+      // …and the case above fails over it.
+      expect(paintedPillFaults(links)).not.toEqual([]);
+    });
+
+    test('#944 — is no larger than before the indicator', async ({ page }) => {
+      await openShell(page);
+      const box = await page.evaluate(() => {
+        const element = document.querySelector('nav[aria-label="Primary"]');
+        if (element === null) throw new Error('no Primary nav');
+        const rect = element.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      });
+      const published = `${box.width.toFixed(2)}×${box.height.toFixed(2)} px`;
+      console.log(`#944 navigation box, ${viewport.name}: ${published}`);
+      test.info().annotations.push({ type: 'navigation box', description: published });
+      // The row and the bar are bounded by their height, the rail by its width:
+      // the other axis is the viewport's in each.
+      if (viewport.expect === 'rail') {
+        expect(box.width).toBeLessThanOrEqual(NAV_BOX_BEFORE_944.rail);
+      } else {
+        expect(
+          box.height,
+          `the ${viewport.expect} is ${box.height.toFixed(2)} px tall, taller than before #944`,
+        ).toBeLessThanOrEqual(NAV_BOX_BEFORE_944[viewport.expect]);
       }
     });
   });
 }
 
-test.describe('#427 — a navigation target is declared rather than emergent', () => {
-  test.use({ viewport: { width: 375, height: 667 } });
+/** `shell-harness.tsx` §NAV_INDICATOR_OFF — the indicator rule deleted. */
+const NAV_INDICATOR_OFF = 'off';
 
-  test('the minimum is a declaration, in both axes', async ({ page }) => {
-    await openShell(page);
-    const links = await navLinks(page);
-    expect(links.length).toBeGreaterThan(2);
-    for (const link of links) {
-      expect(link.minHeight, `“${link.label}” declares no 44px min-height`).toBeGreaterThanOrEqual(
-        TOUCH_TARGET_PIXELS,
-      );
-      expect(link.minWidth, `“${link.label}” declares no 44px min-width`).toBeGreaterThanOrEqual(
-        TOUCH_TARGET_PIXELS,
+/**
+ * The navigation's own box before #944 (main at 7f7241a7), in CSS px: the
+ * row's and the bar's height, and the rail's width. Read the same way the
+ * case above reads it: 57.83, 62.83 and 88. #944 left them 55.83, 60.83 and
+ * 88. ⚠️ This is what makes #944's named mutation — 8 px of padding on the
+ * bar — red at 320×256, where the chrome AREA is 0 by design: the row is not
+ * pinned there (#427), so it scrolls away and covers nothing however tall it
+ * is, and only its own height can say it grew.
+ */
+const NAV_BOX_BEFORE_944 = { row: 57.84, bar: 62.84, rail: 88 } as const;
+
+const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+
+/** `NavIcon.tsx`'s icon size. */
+const NAV_ICON_PIXELS = 24;
+
+/**
+ * #944's "not colour alone", as a list of what is wrong: exactly one current
+ * destination, `aria-current="page"` on it (the shell opens at Home, a group
+ * of one page), its indicator painted where every other is transparent — a
+ * SHAPE — and its icon drawn larger. Empty is a pass.
+ */
+function paintedPillFaults(links: readonly NavLinkBox[]): readonly string[] {
+  const faults: string[] = [];
+  const current = links.filter((link) => link.current !== null);
+  if (current.length !== 1) faults.push(`${String(current.length)} current destinations`);
+  const here = current[0];
+  if (here !== undefined) {
+    if (here.current !== 'page') faults.push(`aria-current is ${String(here.current)}`);
+    if (here.indicatorBackground === TRANSPARENT || here.indicatorBackground === '') {
+      faults.push(`“${here.label}”'s indicator is not painted`);
+    }
+    // Behind the icon AND the label: at least the 24 px icon wide, and taller
+    // than the icon alone.
+    if (here.indicatorWidth < NAV_ICON_PIXELS || here.indicatorHeight <= NAV_ICON_PIXELS * 1.5) {
+      faults.push(
+        `“${here.label}”'s indicator is a ${here.indicatorWidth.toFixed(1)}×${here.indicatorHeight.toFixed(1)} sliver`,
       );
     }
-  });
-
-  test('the icon, the label and the padding reach the target on their own', async ({ page }) => {
-    // #316's third measurement: strip the floor and measure again, so the
-    // declaration above cannot hide a token that moved under it.
-    await openShell(page);
-    const stripped = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a')].map((link) => {
-        const before = link.style.cssText;
-        link.style.minHeight = '0px';
-        link.style.minWidth = '0px';
-        const box = link.getBoundingClientRect();
-        const measured = {
-          label: (link.textContent ?? '').trim(),
-          height: box.height,
-          width: box.width,
-          neutralised: getComputedStyle(link).minHeight,
-        };
-        link.style.cssText = before;
-        return measured;
-      }),
-    );
-    expect(stripped.length).toBeGreaterThan(2);
-    for (const link of stripped) {
-      expect(link.neutralised).toBe('0px');
-      expect(
-        link.height,
-        `“${link.label}” is ${link.height.toFixed(1)}px tall unfloored`,
-      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
-      expect(
-        link.width,
-        `“${link.label}” is ${link.width.toFixed(1)}px wide unfloored`,
-      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    if (here.iconTransform === 'none') faults.push(`“${here.label}”'s icon is not drawn larger`);
+  }
+  for (const link of links.filter((each) => each.current === null)) {
+    if (link.indicatorBackground !== TRANSPARENT) {
+      faults.push(`“${link.label}” is not current and its indicator is painted`);
     }
+    if (link.iconTransform !== 'none') faults.push(`“${link.label}”'s icon is transformed`);
+  }
+  return faults;
+}
+
+// #944: in the bar AND the rail — the indicator is laid out the same way in
+// both, and the rail stretches it, so each is measured.
+for (const viewport of [
+  { name: 'the bar, 375×667', width: 375, height: 667 },
+  { name: 'the rail, 1280×800', width: 1280, height: 800 },
+] as const) {
+  test.describe(`#427 — a navigation target is declared rather than emergent, in ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('the minimum is a declaration, in both axes', async ({ page }) => {
+      await openShell(page);
+      const links = await navLinks(page);
+      expect(links.length).toBeGreaterThan(2);
+      for (const link of links) {
+        expect(
+          link.minHeight,
+          `“${link.label}” declares no 44px min-height`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(link.minWidth, `“${link.label}” declares no 44px min-width`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+      }
+    });
+
+    test('the icon, the label and the padding reach the target on their own', async ({ page }) => {
+      // #316's third measurement: strip the floor and measure again, so the
+      // declaration above cannot hide a token that moved under it.
+      await openShell(page);
+      const stripped = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a')].map((link) => {
+          const before = link.style.cssText;
+          link.style.minHeight = '0px';
+          link.style.minWidth = '0px';
+          const box = link.getBoundingClientRect();
+          const measured = {
+            label: (link.textContent ?? '').trim(),
+            height: box.height,
+            width: box.width,
+            neutralised: getComputedStyle(link).minHeight,
+          };
+          link.style.cssText = before;
+          return measured;
+        }),
+      );
+      expect(stripped.length).toBeGreaterThan(2);
+      for (const link of stripped) {
+        expect(link.neutralised).toBe('0px');
+        expect(
+          link.height,
+          `“${link.label}” is ${link.height.toFixed(1)}px tall unfloored`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(
+          link.width,
+          `“${link.label}” is ${link.width.toFixed(1)}px wide unfloored`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      }
+    });
   });
-});
+}
 
 /**
  * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
@@ -2689,5 +2825,219 @@ test.describe('#936 — the menus’ motion collapses when it should', () => {
       'the harness removed no update block, so this is not the control',
     ).toBe('1');
     expect((await motionOnArrival(page)).onSpecimen).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/**
+ * #944 — the navigation's active indicator, read back from the engine: its
+ * colours in both palettes, its motion, and forced colours.
+ *
+ * - **Contrast.** The pill is `accent` with its label in `accentInk`, on a
+ *   bar and a rail of `surfaceOverlay`. Each computed colour is required to be
+ *   that token, in each palette, and each pair to be declared in
+ *   `tokens.ts` §CONTRAST_REQUIREMENTS at its threshold — text 4.5:1 for the
+ *   label on the pill, 3:1 (SC 1.4.11) for the pill against the bar.
+ *   `contrast.a11y.test.ts` then holds the declared ratios.
+ * - **Motion.** A press on another destination moves the pill: its fill is a
+ *   `transition-colors` on the short motion token and the icon's scale a
+ *   `transform` on the same. Read the moment `aria-current` moves (a
+ *   `MutationObserver`'s microtask, before the frame): with no preference the
+ *   navigation has a transition lasting longer than 1 ms; under
+ *   `prefers-reduced-motion: reduce` nothing on the page does, and once it has
+ *   settled `document.getAnimations()` is empty. The CONTROL is the same page
+ *   with the reduced-motion block deleted through the CSSOM, under the same
+ *   preference, and it must move.
+ * - **Forced colours.** The fill is dropped by a forced palette, so the
+ *   current pill is drawn as a 2 px border there, and the others have none.
+ */
+interface NavigationMotion {
+  readonly moved: boolean;
+  /** Transitions on the navigation the move created, collapsed or not. */
+  readonly createdOnNav: number;
+  /** Animations anywhere on the page lasting longer than 1 ms. */
+  readonly visible: number;
+  /** …of which on the navigation. */
+  readonly visibleOnNav: number;
+}
+
+async function navigateAndReadMotion(page: Page): Promise<NavigationMotion> {
+  return page.evaluate(async (visibleMs) => {
+    const nav = document.querySelector('nav[aria-label="Primary"]');
+    const ride = [
+      ...document.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Primary"] a'),
+    ].find((link) => (link.textContent ?? '').trim() === 'Ride');
+    if (nav === null || ride === undefined) throw new Error('no Primary nav, or no Ride in it');
+    if (ride.hasAttribute('aria-current')) throw new Error('Ride is already current');
+    return new Promise<NavigationMotion>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!ride.hasAttribute('aria-current')) return;
+        observer.disconnect();
+        // `getAnimations()` flushes style, so every transition this move
+        // starts is in the list, however short.
+        const animations = document.getAnimations();
+        const onNav = animations.filter((animation) => {
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          return target instanceof Element && nav.contains(target);
+        });
+        const lasting = (animation: Animation): boolean => {
+          const duration = animation.effect?.getComputedTiming().duration;
+          return typeof duration === 'number' ? duration > visibleMs : true;
+        };
+        resolve({
+          moved: true,
+          createdOnNav: onNav.length,
+          visible: animations.filter(lasting).length,
+          visibleOnNav: onNav.filter(lasting).length,
+        });
+      });
+      observer.observe(nav, { attributes: true, subtree: true, attributeFilter: ['aria-current'] });
+      ride.click();
+    });
+  }, VISIBLE_MOTION_MS);
+}
+
+test.describe('#944 — the indicator moves, and only when motion is wanted', () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  test('the apparatus — with no preference, the indicator’s transition runs', async ({ page }) => {
+    await openShell(page);
+    const motion = await navigateAndReadMotion(page);
+    expect(motion.moved).toBe(true);
+    expect(motion.visibleOnNav).toBeGreaterThanOrEqual(1);
+  });
+
+  test('under prefers-reduced-motion: reduce, nothing is running after a navigation', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openShell(page);
+    const motion = await navigateAndReadMotion(page);
+    expect(
+      motion.createdOnNav,
+      'the navigation started no transition, so this measured nothing',
+    ).toBeGreaterThanOrEqual(1);
+    expect(motion.visible, 'an animation a person could see ran on a navigation').toBe(0);
+    // And once it has settled, nothing at all.
+    await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+  });
+
+  test('the control — with the reduced-motion block deleted, the same navigation moves', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/shell.html?motion-rule-off=prefers-reduced-motion');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    expect(
+      await page.evaluate(() => document.documentElement.dataset['oylMotionRulesRemoved']),
+      'the harness removed no prefers-reduced-motion block, so this is not the control',
+    ).not.toBe('0');
+    expect((await navigateAndReadMotion(page)).visibleOnNav).toBeGreaterThanOrEqual(1);
+  });
+});
+
+for (const theme of THEMES) {
+  for (const viewport of [
+    { name: 'the bar, 375×667', width: 375, height: 667 },
+    { name: 'the rail, 1280×800', width: 1280, height: 800 },
+  ] as const) {
+    test.describe(`#944 — the indicator's colours in ${viewport.name} (${theme})`, () => {
+      test.use({
+        viewport: { width: viewport.width, height: viewport.height },
+        colorScheme: theme,
+      });
+
+      test('are the tokens, and each pair is declared at its threshold', async ({ page }) => {
+        await openShell(page);
+        const read = await page.evaluate(() => {
+          const nav = document.querySelector('nav[aria-label="Primary"]');
+          const current = document.querySelector('nav[aria-label="Primary"] a[aria-current]');
+          const indicator = current?.querySelector('.oyl-nav-indicator');
+          const label = current?.querySelector('.oyl-nav-label');
+          const icon = current?.querySelector('svg');
+          if (nav === null || indicator == null || label == null || icon == null) return undefined;
+          return {
+            theme: document.documentElement.dataset['theme'],
+            bar: getComputedStyle(nav).backgroundColor,
+            pill: getComputedStyle(indicator).backgroundColor,
+            label: getComputedStyle(label).color,
+            icon: getComputedStyle(icon).color,
+          };
+        });
+        expect(read, 'no current destination with an indicator, a label and an icon').toBeDefined();
+        expect(read?.theme, 'the page is not in the palette this case is about').toBe(theme);
+        expect(read?.bar).toBe(rgbOf('surfaceOverlay', theme));
+        expect(read?.pill).toBe(rgbOf('accent', theme));
+        expect(read?.label).toBe(rgbOf('accentInk', theme));
+        expect(read?.icon).toBe(rgbOf('accentInk', theme));
+
+        const declared = (
+          foreground: ColourToken,
+          background: ColourToken,
+          minimum: number,
+        ): boolean =>
+          CONTRAST_REQUIREMENTS.some(
+            (pair) =>
+              pair.foreground === foreground &&
+              pair.background === background &&
+              pair.minimum === minimum &&
+              pair.where.includes('#944'),
+          );
+        expect(declared('accentInk', 'accent', AA_TEXT)).toBe(true);
+        expect(declared('accent', 'surfaceOverlay', AA_LARGE_TEXT_OR_NON_TEXT)).toBe(true);
+        const colours = paletteColours(theme);
+        expect(contrastRatio(colours.accentInk, colours.accent)).toBeGreaterThanOrEqual(AA_TEXT);
+        expect(contrastRatio(colours.accent, colours.surfaceOverlay)).toBeGreaterThanOrEqual(
+          AA_LARGE_TEXT_OR_NON_TEXT,
+        );
+      });
+    });
+  }
+}
+
+test.describe('#944 — under forced colours the current destination keeps a shape', () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  async function borders(
+    page: Page,
+  ): Promise<readonly { current: boolean; style: string; width: string; height: number }[]> {
+    return page.evaluate(() =>
+      [...document.querySelectorAll('nav[aria-label="Primary"] a')].map((link) => {
+        const indicator = link.querySelector('.oyl-nav-indicator');
+        if (indicator === null) throw new Error('a destination has no indicator');
+        const style = getComputedStyle(indicator);
+        return {
+          current: link.hasAttribute('aria-current'),
+          style: style.borderTopStyle,
+          width: style.borderTopWidth,
+          height: indicator.getBoundingClientRect().height,
+        };
+      }),
+    );
+  }
+
+  test('a 2 px border on the current pill and on no other, and the pill no taller', async ({
+    page,
+  }) => {
+    await openShell(page);
+    const plain = await borders(page);
+    // The apparatus: with no forced palette there is no border at all, so the
+    // border below is the forced-colours block's and nothing else's.
+    expect(plain.every((each) => each.style === 'none')).toBe(true);
+
+    await page.emulateMedia({ forcedColors: 'active' });
+    const forced = await borders(page);
+    expect(
+      await page.evaluate(() => matchMedia('(forced-colors: active)').matches),
+      'the engine is not in forced colours, so this measured nothing',
+    ).toBe(true);
+    const current = forced.filter((each) => each.current);
+    expect(current).toHaveLength(1);
+    expect(current[0]?.style).toBe('solid');
+    expect(current[0]?.width).toBe('2px');
+    for (const other of forced.filter((each) => !each.current)) {
+      expect(other.style).toBe('none');
+    }
+    // The padding took the border back: the pill is the height it was.
+    expect(current[0]?.height).toBeCloseTo(plain.find((each) => each.current)?.height ?? 0, 1);
   });
 });

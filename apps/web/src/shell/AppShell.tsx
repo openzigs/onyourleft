@@ -859,6 +859,17 @@ export function AppShell(props: AppShellProps): JSX.Element {
  * the page only when the group IS one page (Routes); otherwise its page link
  * is in {@link SectionNav}, and the group's link says `true`: "the current
  * item of this set". Both are drawn with a visible shape as well as a colour.
+ *
+ * ## The indicator — #944
+ *
+ * The icon and the label sit inside ONE span, `.oyl-nav-indicator`, and on
+ * the current destination that span is a filled pill (`accent`, with the
+ * label and icon in `accentInk`) that no other destination has: a SHAPE, so
+ * where you are is not told by colour alone (SC 1.4.1). Its layout is token
+ * utilities (ADR 0042); its state — the fill, the larger icon, the forced
+ * colours border — is `theme.css` §"NAVIGATION", because a state keyed on
+ * `aria-current` is a rule a browser control can delete through the CSSOM.
+ * The span is not `aria-hidden`: it holds the label, which names the link.
  */
 function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
   return (
@@ -876,8 +887,13 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
           return (
             <li key={group.id}>
               <a className="oyl-nav-link" href={hrefFor(destination)} aria-current={current}>
-                <NavIcon name={group.icon} />
-                <span className="oyl-nav-label">{group.label}</span>
+                <span
+                  className="oyl-nav-indicator tw:flex tw:flex-col tw:items-center tw:px-sm tw:transition-colors"
+                  data-oyl-nav-indicator="true"
+                >
+                  <NavIcon name={group.icon} />
+                  <span className="oyl-nav-label">{group.label}</span>
+                </span>
               </a>
             </li>
           );

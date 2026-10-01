@@ -1212,6 +1212,29 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: { light: 5.9, dark: 6.53 },
     where: 'a navigation link on the app header',
   },
+  /*
+   * #944: the navigation's active indicator, a filled pill behind the current
+   * destination's icon and label, on the bar and the rail (both painted in
+   * `surfaceOverlay`). The label and icon drawn on the pill are text, 4.5:1;
+   * the pill against the bar is the shape that says where you are, so it is a
+   * non-text boundary, 3:1 (SC 1.4.11). Both colours already meet elsewhere —
+   * a primary button, a navigation link — and are repeated here, named for the
+   * indicator, so a change to either use has to face this one too.
+   */
+  {
+    foreground: 'accentInk',
+    background: 'accent',
+    minimum: AA_TEXT,
+    measured: { light: 7.85, dark: 8.72 },
+    where: "the current destination's label and icon, on the navigation's active indicator (#944)",
+  },
+  {
+    foreground: 'accent',
+    background: 'surfaceOverlay',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 5.9, dark: 6.53 },
+    where: "the navigation's active indicator, against the bar and the rail (SC 1.4.11, #944)",
+  },
   {
     foreground: 'focus',
     background: 'surfaceOverlay',
