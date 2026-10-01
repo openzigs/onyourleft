@@ -251,4 +251,24 @@ describe('the illustrated home — #939', () => {
     const [drawn, whole] = (fill?.getAttribute('stroke-dasharray') ?? '').split(' ').map(Number);
     expect((drawn ?? 0) / (whole ?? 1)).toBeCloseTo(2 / 7, 5);
   });
+
+  it('never says "0 of the last seven days" above a ride: one window for both — #939 second review', async () => {
+    // 23:00 UTC on the seventh calendar day back — inside 168 h of NOW, which
+    // is 14:13 UTC. Under the old pair of windows this was "Rides 1" beneath
+    // "You rode on 0 of the last seven days."
+    await openHome([
+      {
+        activity: stubActivity({
+          id: activityId('edge'),
+          name: 'Ride edge',
+          startedAt: unixSeconds(NOW - (NOW % DAY) - 6 * DAY - 3600),
+          startedAtTimeZone: 'UTC',
+          movingTime: seconds(3000),
+          distance: metres(30_000),
+        }),
+      },
+    ]);
+    expect(text()).not.toMatch(/You rode on 0 of/);
+    expect(text()).toContain('No rides in the last seven days.');
+  });
 });

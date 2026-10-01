@@ -14,7 +14,7 @@
  * | block | from |
  * |---|---|
  * | the last ride | the newest summary |
- * | this week | the summaries started in the last seven days |
+ * | this week | the summaries started today or on the six calendar days before it |
  * | fitness, fatigue, freshness | `fitnessSeries` over every summary's load, carried to today |
  *
  * ⚠️ **No stream is read, and `home.test.ts` counts that with the analysis
@@ -48,8 +48,22 @@ import type { AnalysisPort } from '../analysis/store-port';
 import { loadFromSummary } from '../analysis/summary';
 import { thresholdsFor } from '../analysis/thresholds';
 
-/** How far back "this week" reaches: seven days to the second, not a calendar week. */
-export const WEEK_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * How far back "this week" reaches: today and the six CALENDAR days before
+ * it, each ride on its own local day — #939's review.
+ *
+ * ⚠️ **One window for every figure in the panel, and it is this one.** Until
+ * #939's second review the ride count, moving time and load counted the last
+ * 7 × 24 h while the days ring counted these seven calendar days, so a ride
+ * 157 h ago (inside 168 h, on the seventh calendar day back) read
+ * "You rode on 0 of the last seven days." above "Rides 1". Deriving the days
+ * from the 168 h rows instead would not do: a 168 h window touches EIGHT
+ * calendar days whenever `now` is not midnight, so the sentence could read
+ * "8 of the last seven days". The calendar window is what the heading and the
+ * sentence already say, and it costs no read: the same rows, a different
+ * test on each.
+ */
+export const WEEK_DAYS = 7;
 
 /** Whole calendar days from `earlier` to `later`, both `YYYY-MM-DD`. */
 function calendarDaysBetween(earlier: CalendarDay, later: CalendarDay): number {
@@ -77,13 +91,20 @@ export interface HomeWeek {
   /** How many of {@link rides} carried a load — so "load 0" is never a guess. */
   readonly ridesWithLoad: number;
   /**
-   * On how many of the last seven CALENDAR days — today and the six before it
-   * — at least one ride started: #939's progress ring. A day is the ride's own
+   * On how many of the last seven CALENDAR days — today and the six before it,
+   * {@link WEEK_DAYS} — at least one ride started: #939's progress ring. A day is the ride's own
    * local day, in the zone it started in, the key the fitness series already
    * uses (`localDay`), and "today" is `now` in that same zone; so two rides at
    * 22:00 and 08:00 the next morning are two days, which 24-hour slices
-   * counted back from `now` called one. Never more than seven. Arithmetic over
-   * the rows already read: no read of its own.
+   * counted back from `now` called one. Arithmetic over the rows already
+   * read: no read of its own.
+   *
+   * Counted from exactly the rides {@link rides} counts, and by how many days
+   * BACK each one is rather than by its date string: two rides in zones a day
+   * apart can carry eight distinct dates inside one seven-day window, and the
+   * offset cannot. So `rides > 0` implies `daysRidden >= 1`, and
+   * `daysRidden <= min(rides, 7)`, by construction (`home.test.ts` §"one
+   * window").
    */
   readonly daysRidden: number;
 }
@@ -119,26 +140,27 @@ export async function loadHome(
 
   const entries: LoadEntry[] = [];
   let week: Omit<HomeWeek, 'daysRidden'> = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
-  const days = new Set<CalendarDay>();
+  const daysBack = new Set<number>();
   let lastRide: HomeLastRide | undefined;
   for (const summary of considered) {
     const load = loadFromSummary(summary, thresholds)?.load;
     if (load !== undefined) {
       entries.push({ startedAt: summary.startedAt, timeZone: summary.startedAtTimeZone, load });
     }
-    if (summary.startedAt > now - WEEK_SECONDS && summary.startedAt <= now) {
-      week = {
-        rides: week.rides + 1,
-        movingTime: week.movingTime + summary.movingTime,
-        load: week.load + (load ?? 0),
-        ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
-      };
-    }
     if (summary.startedAt <= now) {
-      const day = localDay(summary.startedAt, summary.startedAtTimeZone);
-      const back = calendarDaysBetween(day, localDay(now, summary.startedAtTimeZone));
-      if (back >= 0 && back <= 6) {
-        days.add(day);
+      // Days back from "today", both read in the zone the ride started in.
+      const back = calendarDaysBetween(
+        localDay(summary.startedAt, summary.startedAtTimeZone),
+        localDay(now, summary.startedAtTimeZone),
+      );
+      if (back >= 0 && back < WEEK_DAYS) {
+        week = {
+          rides: week.rides + 1,
+          movingTime: week.movingTime + summary.movingTime,
+          load: week.load + (load ?? 0),
+          ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
+        };
+        daysBack.add(back);
       }
     }
     // Ascending, so the last one seen is the newest.
@@ -162,7 +184,7 @@ export async function loadHome(
 
   return {
     lastRide,
-    week: { ...week, daysRidden: days.size },
+    week: { ...week, daysRidden: daysBack.size },
     fitness: fitnessSeries(dailyLoads(entries)),
     truncated: summaries.length > limit,
   };
