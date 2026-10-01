@@ -609,8 +609,8 @@ h3:first-child {
  * what the eleven links were.
  *
  * Every item declares its 44 px target in both axes (#316's rule: declared,
- * not emergent) and marks the current destination with a SHAPE — a filled
- * pill behind the icon — as well as weight and colour.
+ * not emergent) and marks the current destination with a SHAPE — since #944 a
+ * filled pill behind the icon AND the label — as well as weight and colour.
  */
 .oyl-nav-list {
   list-style: none;
@@ -626,36 +626,83 @@ h3:first-child {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   min-width: 2.75rem;
   min-height: 2.75rem;
-  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  padding: 2px;
   color: var(--oyl-color-ink);
   text-decoration: none;
   font-size: var(--oyl-font-size-sm);
   border-radius: var(--oyl-radius);
 }
 
+/*
+ * THE INDICATOR — #944. The icon and the label sit in one span, and on the
+ * current destination that span is a filled pill. Its layout (a column, the
+ * horizontal padding, the colour transition on the short motion token) is
+ * token utilities in `AppShell.tsx` (ADR 0042); what is here is the shape and
+ * the state.
+ *
+ * ⚠️ **Inside the chrome budget, and measured rather than read** (#944's first
+ * criterion). The pill is drawn INSIDE the box the link already had: the
+ * link's own vertical padding went from 4 px to 2 px to pay for the pill's
+ * 4 px above the icon and 2 px below the label, and the old pill's 10 px of
+ * padding either side of the icon is gone, so the bar is SHORTER than it was
+ * (60.8 px against 62.8) and the rail is the 5.5rem it was.
+ * `shell.browser.spec.ts` §`CHROME_AREA_BEFORE_944` and §`NAV_BOX_BEFORE_944`
+ * hold every viewport's published area and the navigation's own box to the
+ * figures from before.
+ *
+ * The larger icon on the current destination is a `transform`, so it moves
+ * nothing around it: a `width` would have grown the bar for one item.
+ *
+ * ⚠️ **The pill's width is the label's plus 4 px a side, and at least 3rem.**
+ * Five of them share a 320 px row (#427's row at 320×256, and the bar at
+ * 320×640), and a label is as wide as the platform's font makes it. #944's
+ * first version padded the pill 8 px a side and the link 4 px more: five
+ * items came to 299 px on a Mac and wrapped onto a second line on the CI
+ * runner's fonts — the row 115.7 px tall, caught by `NAV_BOX_BEFORE_944`. The
+ * 3rem floor keeps a short label's pill (Ride) a 44 px target with the
+ * link's own floor stripped (§4f's third measurement) and gives the five
+ * pills one rhythm.
+ */
+.oyl-nav-indicator {
+  gap: 2px;
+  min-width: 3rem;
+  padding-block: 4px 2px;
+  border-radius: 1rem;
+}
+
 .oyl-nav-icon {
   display: block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  box-sizing: content-box;
+  transition: transform var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 
 /*
- * The current destination is marked three ways and only one of them is colour:
- * `aria-current` for assistive technology, a heavier label, and a filled pill
- * behind the icon — a shape. Criterion 4 of #427, and #48's sixth.
+ * The current destination is marked four ways and only one of them is colour:
+ * `aria-current` for assistive technology, a heavier label, a larger icon, and
+ * the filled pill — a SHAPE the other destinations lack. Criterion 4 of #427,
+ * #48's sixth, and #944's third. The fill is `accent`, at 5.90 (light) and
+ * 6.53 (dark) against the bar and rail's `surfaceOverlay` (SC 1.4.11), and the
+ * label and icon on it are `accentInk`, at 7.85 and 8.72 — both declared pairs
+ * in `tokens.ts` §CONTRAST_REQUIREMENTS.
+ *
+ * ⚠️ The fill is its OWN rule, `.oyl-nav-link[aria-current] .oyl-nav-indicator`,
+ * because `shell.browser.spec.ts` §"#944"'s control deletes exactly that rule
+ * through the CSSOM (`shell-harness.tsx` §NAV_INDICATOR_OFF) and requires the
+ * case to fail: what is left is the accent label, which is colour.
  */
 .oyl-nav-link[aria-current] {
   font-weight: 700;
   color: var(--oyl-color-accent);
 }
 
-.oyl-nav-link[aria-current] .oyl-nav-icon {
+.oyl-nav-link[aria-current] .oyl-nav-indicator {
   background: var(--oyl-color-accent);
   color: var(--oyl-color-accent-ink);
+}
+
+.oyl-nav-link[aria-current] .oyl-nav-icon {
+  transform: scale(1.2);
 }
 
 .oyl-nav-link:hover .oyl-nav-label {
@@ -735,6 +782,12 @@ h3:first-child {
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
+  }
+
+  /* #944: in the rail the pill spans the item, so the current destination is
+     a wide rounded band rather than a disc around a short label. */
+  .oyl-nav-indicator {
+    align-self: stretch;
   }
 
   .oyl-shell:has(.oyl-nav) {
@@ -961,6 +1014,53 @@ h3:first-child {
   align-items: center;
   min-height: 2.75rem;
   font-weight: 700;
+}
+
+/*
+ * A card with its shape drawn on it — #941, epic #935: a route's climb or a
+ * workout's blocks, drawn as a strip across the foot of the card.
+ *
+ * ⚠️ **The drawing takes the place of space the card already had, and adds
+ * none.** The line of facts ended in its own 1 em bottom margin; that margin
+ * is now the drawing's row (`--oyl-shape-card-art-height` is that same 1 em),
+ * so a card is exactly as tall as it was before #941. A column beside the
+ * words was tried first and wrapped the facts — and the fixtures' long names
+ * — onto another line on a phone, 25 px further down for *Save workout*.
+ * Every primary's margin to the fold therefore stays where #670 recorded it:
+ * `list-detail.browser.spec.ts` §"#941" measures it against
+ * `reflow.html?shape=off`, and its control (`?shape=tall`) sets this height to
+ * three times its value, which must push *Import route* down on the upright
+ * tablet.
+ *
+ * The name's link keeps its own width (`justify-self: start`), as it had as an
+ * inline box, so the card is not one long target.
+ */
+.oyl-shape-card {
+  --oyl-shape-card-art-height: 1em;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.oyl-shape-card > a {
+  justify-self: start;
+}
+
+.oyl-shape-card > p {
+  margin-bottom: 0;
+}
+
+.oyl-shape-card__art {
+  position: relative;
+  height: var(--oyl-shape-card-art-height);
+}
+
+.oyl-shape-card__art > svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .oyl-home {
@@ -4345,6 +4445,23 @@ p > label + input[type='file'] {
     border-style: double;
     border-width: 4px;
     padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+  }
+
+  /* #944: a forced palette drops the indicator's fill, which is the shape
+     that says where you are. So the current destination's pill is drawn as a
+     border instead, in the forced text colour, with the padding taking the
+     two pixels back so neither the pill nor the bar grows. */
+  .oyl-nav-link[aria-current] .oyl-nav-indicator {
+    border: 2px solid;
+    padding: 2px calc(var(--oyl-space-xs) - 2px) 0;
+  }
+
+  /* The content box starts 4 px in here (border and padding), where it is
+     4 px of padding otherwise, so `scale(1.2)` — 2.4 px each way on a 24 px
+     icon — would reach 0.4 px into the border (#977's review). 1.15 grows it
+     1.8 px each way, inside the 2 px of padding. */
+  .oyl-nav-link[aria-current] .oyl-nav-icon {
+    transform: scale(1.15);
   }
 }
 

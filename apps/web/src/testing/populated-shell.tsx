@@ -106,6 +106,15 @@ export const PARAMETERS: Partial<Record<RouteId, string>> = {
 };
 
 /**
+ * The populated fixture's one workout's blocks — exported for #941's "no
+ * watts" test, which renders the Workouts list over this same workout.
+ */
+export const POPULATED_WORKOUT_BLOCKS: readonly WorkoutBlock[] = [
+  { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
+  { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.9) },
+];
+
+/**
  * The item each `list-detail` route (#670) selects in the populated fixture —
  * one the list holds. A `list-detail` route with no entry here is reported by
  * `routes.test.ts`, never skipped.
@@ -582,10 +591,6 @@ export function PopulatedShell({
     : [];
   const segment = theSegment();
   const segmentTrack = Array.from({ length: 30 }, (_unused, index) => north(index * 20));
-  const workoutBlocks: readonly WorkoutBlock[] = [
-    { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
-    { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.9) },
-  ];
   return (
     <AppShell
       capabilities={capabilities}
@@ -658,7 +663,7 @@ export function PopulatedShell({
                 id: workoutId('workout-1'),
                 createdBy: ATHLETE,
                 name: 'Sweet spot over-unders with a very long name for a small screen',
-                workout: { name: 'Sweet spot', blocks: workoutBlocks },
+                workout: { name: 'Sweet spot', blocks: POPULATED_WORKOUT_BLOCKS },
                 createdAt: unixSeconds(NOW),
                 updatedAt: unixSeconds(NOW),
               },
