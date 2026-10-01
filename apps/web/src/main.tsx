@@ -23,6 +23,7 @@ import {
 } from '@onyourleft/store';
 
 import './design/theme.css';
+import './design/tailwind.css';
 import { themeEraser } from './design/theme-selection';
 import {
   browserClock,

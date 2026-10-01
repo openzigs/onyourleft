@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   COLOUR_TOKENS,
@@ -28,6 +28,8 @@ import {
   MOTION_TOKENS,
   SPACE_TOKENS,
 } from '../design/tokens';
+
+import { shippedUtilities } from './tailwind-shipped-testing';
 
 const themeCss = readFileSync(
   fileURLToPath(new URL('../design/theme.css', import.meta.url)),
@@ -179,6 +181,23 @@ function customProperty(prefix: string, token: string): string {
  * nothing with it.
  */
 describe('every token is painted by something', () => {
+  /*
+   * #950: a rule in theme.css, OR a utility the product's source actually uses
+   * — since #950 a status tone's surface, ink and edge are read by
+   * `tw:bg-info-surface` and its siblings in `design/StatusMessage.tsx`, not by
+   * a rule here. What counts is the CSS Tailwind WRITES from the source
+   * (`tailwind-shipped-testing.ts`), never the `@theme` that merely maps every
+   * token: a mapping nothing uses paints nothing, which is this test's point.
+   */
+  let painted = referenced;
+  beforeAll(async () => {
+    const { css } = await shippedUtilities();
+    painted = new Set([
+      ...referenced,
+      ...[...css.matchAll(/var\(\s*(--oyl-[a-z0-9-]+)/g)].map((match) => match[1] ?? ''),
+    ]);
+  });
+
   it.each([
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
@@ -187,7 +206,7 @@ describe('every token is painted by something', () => {
   ])('has a rule reading each %s token', (prefix, tokens) => {
     const unread = Object.keys(tokens)
       .map((token) => customProperty(prefix, token))
-      .filter((property) => !referenced.has(property));
+      .filter((property) => !painted.has(property));
     expect(
       unread,
       'these custom properties are declared and no rule reads them. A token nothing paints ' +

@@ -14,6 +14,7 @@ import {
 import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -251,8 +252,14 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
   const [direction, setDirection] = useState<SortDirection>('descending');
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
-  /** The row a first Delete press armed. A second press on the same row deletes. */
-  const [armed, setArmed] = useState<string | undefined>(undefined);
+  /**
+   * The ride a Delete press asked about, while the confirmation is open
+   * (#950: a Radix alert dialog, where it used to be a second press on the
+   * same button).
+   */
+  const [confirming, setConfirming] = useState<LibraryRow | undefined>(undefined);
+  /** Set when a delete was confirmed, so focus does not go back to a row that is gone. */
+  const deletedOne = useRef(false);
   const [reloads, setReloads] = useState(0);
   const units = useUnits();
   const [container, layout] = useLibraryLayout(library !== undefined, selected);
@@ -343,15 +350,10 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
       if (library === undefined) {
         return;
       }
-      if (armed !== id) {
-        setArmed(id);
-        return;
-      }
-      setArmed(undefined);
       await library.store.deleteActivity(library.athleteId, id as never);
       setReloads((count) => count + 1);
     },
-    [library, armed],
+    [library],
   );
 
   if (library === undefined) {
@@ -389,10 +391,10 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
     <Button
       variant="secondary"
       onClick={() => {
-        void remove(row.id);
+        setConfirming(row);
       }}
     >
-      {armed === row.id ? 'Confirm delete' : 'Delete'}
+      Delete
       <VisuallyHidden> {row.name}</VisuallyHidden>
     </Button>
   );
@@ -540,13 +542,45 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         </ScrollTable>
       )}
 
-      {armed === undefined ? undefined : (
-        <StatusMessage tone="warning" live>
-          Deleting a ride cannot be undone. Press Confirm delete again to erase it. There is no
-          server and no backup, so the copy on this device may be the only one that exists — export
-          it first if you want to keep it.
-        </StatusMessage>
-      )}
+      {/*
+        #950: the question is a Radix alert dialog. Its first focus is *Keep
+        the ride*, so two presses of Enter lose nothing, and while it is open
+        Tab cannot leave it. The sentence is the one the armed button used to
+        show beside the list, less "press again", which the dialog replaces.
+      */}
+      <ConfirmDialog
+        open={confirming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirming(undefined);
+          }
+        }}
+        title={`Delete “${confirming?.name ?? ''}”?`}
+        confirmLabel="Delete the ride"
+        cancelLabel="Keep the ride"
+        onConfirm={() => {
+          if (confirming !== undefined) {
+            deletedOne.current = true;
+            void remove(confirming.id);
+          }
+        }}
+        onClosed={() => {
+          // The Delete button that opened it goes with its ride, so focus
+          // moves to the sort control above the list rather than to the page.
+          // A cancel leaves the button there, and the dialog hands focus back to it.
+          if (!deletedOne.current) {
+            return false;
+          }
+          deletedOne.current = false;
+          document.getElementById(SORT_ID)?.focus();
+          return true;
+        }}
+      >
+        <p>
+          Deleting a ride cannot be undone. There is no server and no backup, so the copy on this
+          device may be the only one that exists — export it first if you want to keep it.
+        </p>
+      </ConfirmDialog>
 
       <p className="oyl-muted">
         Rides are stored on this device and nowhere else. There is no account and no server, so

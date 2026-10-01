@@ -49,10 +49,29 @@ export interface ScrollTableProps {
   readonly children: ReactNode;
 }
 
+/**
+ * The region's box — #950, token utilities rather than a `theme.css` rule.
+ * `oyl-scroll-region` stays as the name the reflow harness finds a table by.
+ *
+ * - `max-w-full` stops the table's minimum width pushing `main` wider than the
+ *   window;
+ * - `overflow-x-auto` is the sideways scroll that is the whole point;
+ * - ⚠️ `relative` is load-bearing. A delete button's visually hidden ride
+ *   name is `position: absolute`, and an absolutely positioned box is clipped
+ *   by a scroll container only if that container is its containing block.
+ *   Without it the hidden text escaped the region and widened the PAGE — 137
+ *   px at 844×390, measured while the activity library was still a table of
+ *   unbreakable names. That figure does not reproduce on today's routes, so
+ *   what guards this class is `reflow.browser.spec.ts`' POSITIVE control alone
+ *   — this component with hidden text at the far end of a 1200 px row — which
+ *   goes red without it (the page scrolls 966 px at 320×256, #683).
+ */
+const REGION_CLASS = 'oyl-scroll-region tw:relative tw:max-w-full tw:overflow-x-auto';
+
 export function ScrollTable({ caption, className, children }: ScrollTableProps): JSX.Element {
   const captionId = useId();
   return (
-    <div className="oyl-scroll-region" role="region" aria-labelledby={captionId} tabIndex={0}>
+    <div className={REGION_CLASS} role="region" aria-labelledby={captionId} tabIndex={0}>
       <table {...(className === undefined ? {} : { className })}>
         <caption id={captionId}>{caption}</caption>
         {children}

@@ -8,11 +8,13 @@
  * contrast suite meaningful: without it the tokens could clear WCAG AA while
  * this file painted something else entirely.
  *
- * No CSS framework and no component library. At the size of a four-route local
- * shell a framework is a dependency, a licence question and a set of class
- * names to learn, in exchange for a grid and some spacing. The decision is
- * recorded in the pull request for #48; revisit it when a screen needs
- * something this file cannot say.
+ * ⚠️ This used to say "no CSS framework and no component library". Since #950
+ * (ADR 0042, the owner's ruling of 2026-09-30) there are two, and this file is
+ * still the base both sit on: Tailwind CSS v4's utilities are generated from
+ * these tokens by `tailwind.css`, which is loaded AFTER this file and imports
+ * no preflight, and Radix Primitives supply behaviour (`ConfirmDialog.tsx`)
+ * and no colour. A value is still defined here and in `tokens.ts`, and nowhere
+ * else.
  */
 
 :root {
@@ -1442,17 +1444,11 @@ a.oyl-button {
 /*
  * A status message carries its meaning in three places: the glyph, the word
  * before the message, and the colour. Remove the colour and the message still
- * reads correctly, which is the whole of criterion 6.
+ * reads correctly, which is the whole of criterion 6. Its box and its tone's
+ * colours are token utilities since #950 (`design/StatusMessage.tsx`
+ * §`BOX_CLASS`, §`TONE_CLASS`); the glyph, the label and the disclosure below
+ * are type and a pseudo-element, and stay here.
  */
-.oyl-status {
-  display: flex;
-  gap: var(--oyl-space-sm);
-  align-items: flex-start;
-  padding: var(--oyl-space-md);
-  border-radius: var(--oyl-radius);
-  border-left: 4px solid;
-  margin: 0 0 var(--oyl-space-md);
-}
 
 .oyl-status__glyph {
   font-weight: 700;
@@ -1514,30 +1510,6 @@ a.oyl-button {
 
 .oyl-status__more > p {
   margin: 0;
-}
-
-.oyl-status--info {
-  background: var(--oyl-color-info-surface);
-  color: var(--oyl-color-info-ink);
-  border-color: var(--oyl-color-info-border);
-}
-
-.oyl-status--success {
-  background: var(--oyl-color-success-surface);
-  color: var(--oyl-color-success-ink);
-  border-color: var(--oyl-color-success-border);
-}
-
-.oyl-status--warning {
-  background: var(--oyl-color-warning-surface);
-  color: var(--oyl-color-warning-ink);
-  border-color: var(--oyl-color-warning-border);
-}
-
-.oyl-status--danger {
-  background: var(--oyl-color-danger-surface);
-  color: var(--oyl-color-danger-ink);
-  border-color: var(--oyl-color-danger-border);
 }
 
 .oyl-panel {
@@ -2342,29 +2314,11 @@ p > label + input[type='file'] {
 }
 
 /*
- * #660 — WCAG 2.2 SC 1.4.10 (Reflow). A data table may keep its columns on a
- * phone only inside a box of its own that scrolls, never by making the page
- * scroll sideways; `design/ScrollTable.tsx` is that box, and it is focusable
- * and named so a keyboard can scroll it. `max-width` is what stops the table's
- * minimum width pushing `main` wider than the window.
+ * #660 — WCAG 2.2 SC 1.4.10 (Reflow): a data table scrolls sideways inside a
+ * box of its own, never the page. That box is `design/ScrollTable.tsx`, drawn
+ * with token utilities since #950 — its `position: relative` and the reason it
+ * is load-bearing are there.
  */
-.oyl-scroll-region {
-  max-width: 100%;
-  overflow-x: auto;
-  /* ⚠️ Load-bearing. A delete button's visually hidden ride name is
-     `position: absolute`, and an absolutely positioned box is clipped by a
-     scroll container only if that container is its containing block. Without
-     this the hidden text escaped the region and widened the PAGE — 137 px at
-     844×390, measured on this branch while the activity library was still a
-     table of unbreakable names, with the table itself scrolling correctly.
-     ⚠️ That figure does NOT reproduce on the shipped tree: with this line
-     removed every route in `reflow.browser.spec.ts`'s walk stays green,
-     because nothing it renders now puts hidden text past a region's edge. What
-     guards this line is that spec's POSITIVE control alone — the real
-     `ScrollTable` with hidden text at the far end of a 1200 px row — which
-     goes red with it removed (the page scrolls 966 px at 320×256, #683). */
-  position: relative;
-}
 
 /*
  * A ride's name may break inside a word when nothing else fits — a place name

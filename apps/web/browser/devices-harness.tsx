@@ -67,6 +67,7 @@ import { STRAP_NAME, TRAINER_NAME } from './devices-fixture';
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
+import '../src/design/tailwind.css';
 
 /** What the spec reads back. */
 export interface DevicesHarness {

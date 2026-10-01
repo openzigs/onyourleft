@@ -206,11 +206,48 @@ describe('#62 — the local activity library', () => {
     await activateWithKeyboard(remove as HTMLElement);
     await settle();
 
-    // Armed, not deleted.
+    // Asked, not deleted — and asked in a dialog (#950) that names the ride.
     expect(library.deleted).toStrictEqual([]);
-    expect(document.body.textContent).toContain('cannot be undone');
-    expect(document.body.textContent).toContain('only one that exists');
-    expect(buttonNamed('Confirm delete')).toBeDefined();
+    const asked = document.querySelector('[role="alertdialog"]');
+    expect(asked?.textContent).toContain('Delete “Tuesday hills”?');
+    expect(asked?.textContent).toContain('cannot be undone');
+    expect(asked?.textContent).toContain('only one that exists');
+    expect(buttonNamed('Delete the ride')).toBeDefined();
+    // Its first focus is the way out, so a second Enter deletes nothing.
+    expect(document.activeElement?.textContent).toBe('Keep the ride');
+  });
+
+  it('keeps the ride when the rider says so, and gives focus back to its Delete — #950', async () => {
+    const library = stubLibrary(OWNER, [summary('a', { name: 'Tuesday hills' })]);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    const remove = buttonNamed('Delete') as HTMLElement;
+    await activateWithKeyboard(remove);
+    await settle();
+    await activateWithKeyboard(buttonNamed('Keep the ride') as HTMLElement);
+    await settle();
+
+    expect(library.deleted).toStrictEqual([]);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(remove);
+  });
+
+  it('puts focus on the sort control once the ride and its Delete are gone — #950', async () => {
+    const library = stubLibrary(OWNER, [
+      summary('a', { name: 'Tuesday hills' }),
+      summary('b', { name: 'Sunday long' }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
+    await settle();
+
+    expect(library.deleted).toHaveLength(1);
+    expect(document.activeElement).toBe(sortControl());
   });
 
   it('deletes only on the second press, and the ride is gone from a fresh connection', async () => {
@@ -245,7 +282,7 @@ describe('#62 — the local activity library', () => {
 
     await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
     await settle();
-    await activateWithKeyboard(buttonNamed('Confirm delete') as HTMLElement);
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
     await settle();
 
     // Unmounted first, so the view cannot re-read through the handle the fresh
@@ -303,7 +340,7 @@ describe('#62 — the local activity library', () => {
     await settle();
     await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
     await settle();
-    await activateWithKeyboard(buttonNamed('Confirm delete') as HTMLElement);
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
     await settle();
     mounted.unmount();
     mounted = undefined;
@@ -508,7 +545,7 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
     await settle();
     expect(library.deleted).toStrictEqual([]);
-    await activateWithKeyboard(buttonNamed('Confirm delete') as HTMLElement);
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
     await settle();
     expect(library.deleted).toStrictEqual(['outdoor']);
   });
@@ -771,7 +808,15 @@ describe('each message is said once, in one live region', () => {
     );
     await activateWithKeyboard(remove as HTMLElement);
     await settle();
-    saidOnce('Deleting a ride cannot be undone.');
+    // #950: once on the screen, and said as the alert dialog's DESCRIPTION
+    // rather than by a live region — focus moving into an `alertdialog` is
+    // what announces it, and a live region too would say it twice.
+    const text = 'Deleting a ride cannot be undone.';
+    expect(timesSaid(document.body, text), `“${text}” is on the screen`).toBe(1);
+    expect(liveRegionsSaying(document.body, text)).toBe(0);
+    const dialog = document.querySelector('[role="alertdialog"]');
+    const description = document.getElementById(dialog?.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain(text);
   });
 
   it('when the rides cannot be read', async () => {

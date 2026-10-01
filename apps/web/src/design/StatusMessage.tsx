@@ -26,6 +26,42 @@ const DEFAULT_LABEL: Record<StatusTone, string> = {
 };
 
 /**
+ * The message's box — #950, the token utilities of `tailwind.css` rather than
+ * a `theme.css` rule. `oyl-status` stays on it as the name other rules and the
+ * gates find it by (`.oyl-ride__heading > .oyl-status`, the HUD's notices,
+ * `rideview-harness.tsx`); it styles nothing of its own any more.
+ *
+ * ⚠️ A more specific `theme.css` rule still wins over these, which is what the
+ * Ride screen's heading and the HUD's notice cell rely on to take the margin
+ * and padding away — a utility is one class, and they are two.
+ */
+const BOX_CLASS =
+  'oyl-status tw:flex tw:gap-sm tw:items-start tw:p-md tw:rounded tw:border-l-4 tw:mx-0 tw:mt-0 tw:mb-md';
+
+/**
+ * Each tone's colours: its surface, its ink and its edge, one declared
+ * contrast pair apiece (`tokens.ts` §`CONTRAST_REQUIREMENTS`), all three in
+ * ONE string so `a11y/tailwind.a11y.test.ts` reads the surface and the ink as
+ * the pair they are. `oyl-status--<tone>` stays as the name a gate finds a tone
+ * by (`theme.browser.spec.ts`, `keep-alive-notice.a11y.test.tsx`).
+ */
+const TONE_CLASS: Record<StatusTone, string> = {
+  info: 'oyl-status--info tw:bg-info-surface tw:text-info-ink tw:border-info-border',
+  success: 'oyl-status--success tw:bg-success-surface tw:text-success-ink tw:border-success-border',
+  warning: 'oyl-status--warning tw:bg-warning-surface tw:text-warning-ink tw:border-warning-border',
+  danger: 'oyl-status--danger tw:bg-danger-surface tw:text-danger-ink tw:border-danger-border',
+};
+
+/**
+ * The box and a tone's colours as one class list, for the one surface that is
+ * drawn as a status message without being one: `transfer/TransferView.tsx`'s
+ * import progress, a live sentence with no glyph and no leading word.
+ */
+export function statusSurfaceClass(tone: StatusTone): string {
+  return `${BOX_CLASS} ${TONE_CLASS[tone]}`;
+}
+
+/**
  * A second, redundant signal in the shape of the glyph.
  *
  * `aria-hidden`, because the word beside it already says the same thing and a
@@ -90,11 +126,7 @@ export function StatusMessage({
 }: StatusMessageProps): JSX.Element {
   if (more !== undefined) {
     return (
-      <div
-        className={`oyl-status oyl-status--${tone}`}
-        id={id}
-        {...(live ? { role: 'status' } : {})}
-      >
+      <div className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})}>
         <span className="oyl-status__glyph" aria-hidden="true">
           {GLYPH[tone]}
         </span>
@@ -112,7 +144,7 @@ export function StatusMessage({
     );
   }
   return (
-    <p className={`oyl-status oyl-status--${tone}`} id={id} {...(live ? { role: 'status' } : {})}>
+    <p className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})}>
       <span className="oyl-status__glyph" aria-hidden="true">
         {GLYPH[tone]}
       </span>

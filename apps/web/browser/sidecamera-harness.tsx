@@ -41,6 +41,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
+import '../src/design/tailwind.css';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 const PATIENCE_MS = 10_000;
