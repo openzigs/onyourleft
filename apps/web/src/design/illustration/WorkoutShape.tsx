@@ -51,7 +51,20 @@ export interface WorkoutShapeInput {
  * than that" and never a percentage or a watt — `workouts/library.ts`
  * §`WorkoutRow`'s rule, and why the rider's threshold is not an input at all.
  */
-function workoutOutlines({ segments }: WorkoutShapeInput): readonly string[] {
+function workoutOutlines(input: WorkoutShapeInput): readonly string[] {
+  // ⚠️ A segment with a NaN or an Infinity anywhere in it is dropped, not
+  // drawn: one non-finite `endsAt` is the drawing's `end`, and every
+  // coordinate becomes `NaN` (#967's review). `expandWorkout` cannot produce
+  // one; a row edited by hand, or a caller that did its own sums, can.
+  const finite = (value: number | undefined): boolean =>
+    value === undefined || Number.isFinite(value);
+  const segments = input.segments.filter(
+    (segment) =>
+      Number.isFinite(segment.startsAt) &&
+      Number.isFinite(segment.endsAt) &&
+      finite(segment.from) &&
+      finite(segment.to),
+  );
   const end = segments.reduce((latest, segment) => Math.max(latest, segment.endsAt), 0);
   if (end <= 0) {
     return [];

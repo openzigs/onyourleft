@@ -34,7 +34,7 @@ import {
 import * as kit from './index';
 import { ILLUSTRATION_PAINTS } from './paint';
 import { PROFILE_SHAPE_COLUMNS, PROFILE_SHAPE_MAX_POINTS } from './ProfileShape';
-import { illustrationFaults } from './rules-testing';
+import { colourLiteralIn, illustrationFaults } from './rules-testing';
 import {
   ILLUSTRATION_SPECIMENS,
   SPECIMEN_WORKOUT,
@@ -60,6 +60,11 @@ function draw(part: ComponentType<never>, props: object): Element {
 const parts = Object.entries(kit) as [IllustrationPartName, unknown][];
 
 /** Every coordinate pair in every path's `d`, which in this kit is all M/L/Z. */
+/** Every `d` in a drawing, joined — for a NaN or an Infinity that leaked in. */
+function allGeometry(root: Element): string {
+  return [...root.querySelectorAll('path')].map((path) => path.getAttribute('d') ?? '').join(' ');
+}
+
 function pointCount(root: Element): number {
   let numbers = 0;
   for (const path of root.querySelectorAll('path')) {
@@ -146,6 +151,51 @@ describe('the check can fail', () => {
     }
   });
 
+  it('fails a system colour, bare or as a var() fallback, and passes a custom property — #967', () => {
+    for (const [key, value] of [
+      ['CanvasText', 'CanvasText'],
+      ['Canvas', 'Canvas'],
+      ['ButtonFace', 'ButtonFace'],
+      ['AccentColor', 'AccentColor'],
+      ['Highlight', 'Highlight'],
+      ['Mark', 'Mark'],
+      ['GrayText', 'GrayText'],
+      ['deprecated WindowText', 'WindowText'],
+      ['fallback', 'var(--oyl-x, CanvasText)'],
+    ] as const) {
+      expect(
+        illustrationFaults(svg(<path {...painted} d="M0 0Z" fill={value} />)),
+        key,
+      ).toHaveLength(1);
+    }
+    expect(
+      illustrationFaults(
+        svg(<path {...painted} d="M0 0Z" style={{ fill: 'var(--oyl-x, Field)' }} />),
+      ),
+    ).toHaveLength(1);
+    expect(
+      illustrationFaults(
+        svg(<path {...painted} d="M0 0Z" style={{ fill: 'var(--oyl-color-canvas)' }} />),
+      ),
+    ).toEqual([]);
+    expect(colourLiteralIn('var(--oyl-color-mark-highlight)')).toBeUndefined();
+    expect(colourLiteralIn('oyl-illo__mark')).toBeUndefined();
+    expect(colourLiteralIn('background: var(--oyl-color-canvas)')).toBeUndefined();
+    expect(colourLiteralIn('background: Canvas')).toBe(
+      'the system colour “canvas” in “background: Canvas”',
+    );
+  });
+
+  it('fails an <image>, a <use> and a <foreignObject> — #967', () => {
+    expect(illustrationFaults(svg(<image href="a.png" />))).toEqual(['holds a <image>']);
+    expect(illustrationFaults(svg(<use href="#elsewhere" />))).toEqual([
+      'holds a <use>',
+      '<use href>: a colour literal in “#elsewhere”',
+    ]);
+    expect(illustrationFaults(svg(<use {...painted} />))).toEqual(['holds a <use>']);
+    expect(illustrationFaults(svg(<foreignObject />))).toEqual(['holds a <foreignobject>']);
+  });
+
   it('fails a shape with no paint class, a title, text, and a picture that is not hidden', () => {
     expect(illustrationFaults(svg(<path d="M0 0Z" />))).toEqual([
       'a <path> takes no paint from ILLUSTRATION_PAINTS',
@@ -182,15 +232,33 @@ describe('the paint table and theme.css say the same thing', () => {
   const kebab = (camel: string): string =>
     camel.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
+  // Every rule's prelude and body, comments out, at any depth: a prelude is the
+  // text between the last `{`, `}` or `;` and a `{`, so a rule nested in an
+  // `@media` is found as well as one at the top level.
+  const uncommented = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+  const preludes = [...uncommented.matchAll(/([^{};]+)\{/g)].map(([, prelude]) =>
+    (prelude ?? '').trim().replaceAll(/\s+/g, ' '),
+  );
+  const declarations = (className: string): readonly (readonly string[])[] =>
+    [
+      ...uncommented.matchAll(new RegExp(`(?:^|[{};])\\s*\\.${className}\\s*\\{([^{}]*)\\}`, 'g')),
+    ].map(([, body]) =>
+      (body ?? '')
+        .split(';')
+        .map((declaration) => declaration.trim().replaceAll(/\s+/g, ' '))
+        .filter((declaration) => declaration !== '')
+        .sort(),
+    );
+
   for (const [name, { className, token, property }] of Object.entries(ILLUSTRATION_PAINTS)) {
-    it(`${name}: .${className} sets ${property} to the ${token} token`, () => {
-      const rule = new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`).exec(css);
-      expect(rule, `no .${className} rule in theme.css`).not.toBeNull();
-      const body = rule?.[1] ?? '';
-      expect(body).toContain(`${property}: var(--oyl-color-${kebab(token)});`);
+    it(`${name}: .${className} sets exactly ${property} to the ${token} token`, () => {
+      const expected = [`${property}: var(--oyl-color-${kebab(token)})`];
       if (property === 'stroke') {
-        expect(body).toContain('fill: none;');
+        expected.push('fill: none');
       }
+      // ⚠️ Equal, not contains (#967's review): a `stroke: #ff0000` added
+      // beside the token passed every check while it was `toContain`.
+      expect(declarations(className)).toEqual([expected.sort()]);
     });
   }
 
@@ -201,6 +269,17 @@ describe('the paint table and theme.css say the same thing', () => {
     expect(declared).toEqual(
       new Set(Object.values(ILLUSTRATION_PAINTS).map(({ className }) => className)),
     );
+  });
+
+  it('paints a part in no rule but a bare class of its own — #967', () => {
+    // A descendant, compound or grouped selector (`.oyl-illo__mark path`,
+    // `svg .oyl-illo__sky`, `.a, .oyl-illo__road`) would repaint a shape
+    // around the table above, so any prelude naming the kit is one class alone.
+    const naming = preludes.filter((prelude) => prelude.includes('oyl-illo__'));
+    expect(naming.length).toBeGreaterThan(0);
+    for (const prelude of naming) {
+      expect(prelude, prelude).toMatch(/^\.oyl-illo__[a-z-]+$/);
+    }
   });
 });
 
@@ -255,6 +334,17 @@ describe('ProfileShape', () => {
   it('draws a level route as level ground, not as nothing', () => {
     const drawn = profile([40, 40, 40, 40]);
     expect(drawn.querySelectorAll('path').length).toBe(1);
+  });
+
+  it('reads a NaN or an Infinity as a gap, and still draws the finite parts — #967', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const drawn = profile([10, 20, bad, 30, 40]);
+      expect(allGeometry(drawn), String(bad)).not.toMatch(/NaN|Infinity/);
+      // The two finite runs either side of the bad sample, drawn apart.
+      expect(runExtents(drawn), String(bad)).toHaveLength(2);
+      expect(illustrationFaults(drawn)).toEqual([]);
+    }
+    expect(profile([Number.NaN, Number.NaN]).querySelectorAll('path')).toHaveLength(0);
   });
 
   it('puts the highest point higher than the lowest', () => {
@@ -315,6 +405,32 @@ describe('WorkoutShape', () => {
     // The drawing is 1000 units for 1500 s: nothing between 500 s and 1000 s.
     for (const { left, right } of runs) {
       expect(right <= 334 || left >= 666, `${String(left)}–${String(right)}`).toBe(true);
+    }
+  });
+
+  it('drops a segment with a NaN or an Infinity in it, and draws the rest — #967', () => {
+    const raw = (
+      startsAt: number,
+      endsAt: number,
+      from: number | undefined,
+      to = from,
+    ): WorkoutSegment => ({ startsAt, endsAt, from, to, block: 0 }) as unknown as WorkoutSegment;
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      for (const poisoned of [
+        raw(20, bad, 0.8),
+        raw(bad, 30, 0.8),
+        raw(20, 30, bad),
+        raw(20, 30, 0.8, bad),
+      ]) {
+        const drawn = shape([raw(0, 10, 0.5), raw(10, 20, 1), poisoned]);
+        expect(allGeometry(drawn), String(bad)).not.toMatch(/NaN|Infinity/);
+        expect(drawn.querySelectorAll('path'), String(bad)).toHaveLength(2);
+      }
+      // And sliced, past the one-for-one bound.
+      const many = Array.from({ length: 500 }, (_, index) => raw(index, index + 1, 0.7));
+      const drawn = shape([...many, raw(500, bad, 0.9)]);
+      expect(allGeometry(drawn), String(bad)).not.toMatch(/NaN|Infinity/);
+      expect(drawn.querySelectorAll('path').length).toBeGreaterThan(0);
     }
   });
 

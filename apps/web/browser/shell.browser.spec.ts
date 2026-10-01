@@ -60,6 +60,7 @@ import {
   type ColourToken,
   type Theme,
 } from '../src/design/tokens';
+import type * as illustrationKit from '../src/design/illustration/index';
 import { ILLUSTRATION_PAINTS } from '../src/design/illustration/paint';
 import { decodePng } from '../src/game/model-bytes-testing';
 import {
@@ -2537,6 +2538,24 @@ async function readKit(
   return { read, wrong, parts };
 }
 
+/**
+ * Every part the kit exports, held to `illustration/index.ts` by the TYPE
+ * checker rather than re-typed (#967's review): a `Record` over the module's
+ * export names, so a part added there with no line here, or a line here naming
+ * no part, is a compile error. ⚠️ The import is `import type` on purpose —
+ * erased before Playwright's transform runs, so the spec loads none of the
+ * client's React or `@onyourleft/domain` in Node.
+ */
+const ILLUSTRATION_PARTS = {
+  Hills: true,
+  ProfileShape: true,
+  RiderSilhouette: true,
+  RoadRibbon: true,
+  SensorGlyph: true,
+  Sky: true,
+  WorkoutShape: true,
+} as const satisfies Record<keyof typeof illustrationKit, true>;
+
 for (const theme of THEMES) {
   test.describe(`#938 — the illustration kit is painted with its tokens (${theme})`, () => {
     test.use({ viewport: { width: 390, height: 844 }, colorScheme: theme });
@@ -2548,15 +2567,7 @@ for (const theme of THEMES) {
       // Every part the kit exports is on the page (the harness reads the
       // exports), four sensor glyphs among them.
       expect(new Set(parts.map((key) => key.split('#')[0]))).toEqual(
-        new Set([
-          'Hills',
-          'ProfileShape',
-          'RiderSilhouette',
-          'RoadRibbon',
-          'SensorGlyph',
-          'Sky',
-          'WorkoutShape',
-        ]),
+        new Set(Object.keys(ILLUSTRATION_PARTS)),
       );
       expect(read).toBeGreaterThanOrEqual(parts.length);
       expect(wrong).toEqual([]);

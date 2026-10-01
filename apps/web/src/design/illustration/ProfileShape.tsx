@@ -56,7 +56,13 @@ export interface ProfileInput {
  * alone between two gaps is still a sliver rather than nothing.
  */
 function profileOutlines(input: ProfileInput): readonly string[] {
-  const columns = downsample(input.elevations, PROFILE_SHAPE_COLUMNS);
+  // ⚠️ A NaN or an Infinity is no reading, and a gap like a missing one: left
+  // in, one of them reaches `traceExtent` and every coordinate of the path
+  // with it (`L0 NaN`), and the whole silhouette is lost (#967's review).
+  const elevations = input.elevations.map((value) =>
+    value !== undefined && Number.isFinite(value) ? value : undefined,
+  );
+  const columns = downsample(elevations, PROFILE_SHAPE_COLUMNS);
   const extent = traceExtent(columns);
   if (extent === undefined) {
     return [];
