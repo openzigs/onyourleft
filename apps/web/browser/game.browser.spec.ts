@@ -440,13 +440,20 @@ function expectWordmarkRead(logos: LogoMeasurement): void {
   // Non-vacuity: a gate's board and a billboard's were drawn.
   expect(logos.gateBoards).toBeGreaterThanOrEqual(1);
   expect(logos.billboardBoards).toBeGreaterThanOrEqual(1);
+  // #978: the finish gate's board — the only board its frame can hold, the
+  // start being out of reach, so 1 is the finish's and 0 is #966's start only.
+  expect(logos.finishBoards).toBe(1);
   expect(logos.gateLettering / logos.stripPixels).toBeGreaterThan(WORDMARK_LETTERING_FLOOR);
   expect(logos.billboardLettering / logos.stripPixels).toBeGreaterThan(WORDMARK_LETTERING_FLOOR);
+  expect(logos.finishLettering / logos.stripPixels).toBeGreaterThan(WORDMARK_LETTERING_FLOOR);
   // The control: the same strips with the boards off.
   expect(logos.gateLetteringOff / logos.stripPixels).toBeLessThanOrEqual(
     WORDMARK_LETTERING_CONTROL_CEILING,
   );
   expect(logos.billboardLetteringOff / logos.stripPixels).toBeLessThanOrEqual(
+    WORDMARK_LETTERING_CONTROL_CEILING,
+  );
+  expect(logos.finishLetteringOff / logos.stripPixels).toBeLessThanOrEqual(
     WORDMARK_LETTERING_CONTROL_CEILING,
   );
   // One draw call for every board in a frame.
@@ -475,10 +482,15 @@ function expectWordmarkUpright(logos: LogoMeasurement): void {
   console.log(
     `#966 orientation: ${orientationText('gate', logos.gateOrientation)}; ` +
       `${orientationText('billboard', logos.billboardOrientation)}; ` +
+      `${orientationText('finish', logos.finishOrientation)}; ` +
       `${orientationText('gate drawn mirrored', logos.gateOrientationMirrored)}; ` +
       `${orientationText('gate drawn upside down', logos.gateOrientationUpsideDown)}`,
   );
-  for (const reading of [logos.gateOrientation, logos.billboardOrientation]) {
+  for (const reading of [
+    logos.gateOrientation,
+    logos.billboardOrientation,
+    logos.finishOrientation,
+  ]) {
     // Non-vacuity: most of the grid was on the screen.
     expect(reading.samples).toBeGreaterThan(200);
     expect(reading.upright - reading.mirrored).toBeGreaterThanOrEqual(WORDMARK_ORIENTATION_MARGIN);
@@ -2443,7 +2455,7 @@ test.describe('the scenery is models, not solids — #341', () => {
     );
   });
 
-  test('draws the wordmark on the start gate and on a billboard, and nothing with them off — #966', async ({
+  test('draws the wordmark on the start and finish gates and on a billboard, and nothing with them off — #966, #978', async ({
     harnessRun,
   }) => {
     const { logos } = await harness(harnessRun);
@@ -2453,7 +2465,9 @@ test.describe('the scenery is models, not solids — #341', () => {
         `lettering (off ${String(logos.gateLetteringOff)}); the billboard's ${String(logos.billboardLettering)} ` +
         `(off ${String(logos.billboardLetteringOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
         `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
-        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
+        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}; ` +
+        `#978: the finish gate's board ${String(logos.finishLettering)} (off ` +
+        `${String(logos.finishLetteringOff)}), ${String(logos.finishBoards)} board(s), mean ${logos.finishMean.join('/')}`,
     );
     expectWordmarkRead(logos);
   });
@@ -3692,7 +3706,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(gantry.trianglesMiddle).toBe(0);
   });
 
-  test('draws the wordmark on the start gate and on a billboard, from its KTX2, and nothing with them off — #966', async ({
+  test('draws the wordmark on the start and finish gates and on a billboard, from its KTX2, and nothing with them off — #966, #978', async ({
     harnessRun,
   }) => {
     const { logos } = await realistic(harnessRun);
@@ -3702,7 +3716,9 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
         `lettering (off ${String(logos.gateLetteringOff)}); the billboard's ${String(logos.billboardLettering)} ` +
         `(off ${String(logos.billboardLetteringOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
         `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
-        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
+        `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}; ` +
+        `#978: the finish gate's board ${String(logos.finishLettering)} (off ` +
+        `${String(logos.finishLetteringOff)}), ${String(logos.finishBoards)} board(s), mean ${logos.finishMean.join('/')}`,
     );
     expectWordmarkRead(logos);
   });
