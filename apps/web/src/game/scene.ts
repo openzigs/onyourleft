@@ -23,7 +23,7 @@
 
 import type { UnitSystem } from '@onyourleft/store';
 
-import { billboardsAt, clearOfBillboards, type Billboard } from './billboards';
+import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
 import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
@@ -257,12 +257,11 @@ function scenery(
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
   const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
-  const billboards = billboardsAt(input.profile, input.origin, seed, first.along, last.along)
-    .slice()
-    .sort(
-      (one, other) => Math.abs(one.along - riderDistance) - Math.abs(other.along - riderDistance),
-    )
-    .slice(0, structureBudget);
+  const billboards = nearestBillboards(
+    billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+    riderDistance,
+    structureBudget,
+  );
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
   // the natural scenery kept clear of every building, and of every billboard.

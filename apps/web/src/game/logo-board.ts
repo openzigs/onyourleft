@@ -27,9 +27,11 @@
  * Pure: names no rendering library.
  */
 
+import type { Billboard } from './billboards';
 import {
   GANTRY_BEAM_HEIGHT_METRES,
   GANTRY_BEAM_UNDERSIDE_METRES,
+  LINE_LAPS_IN_REACH,
   standPoint,
   type PlacedStand,
 } from './gantry';
@@ -124,6 +126,28 @@ export interface LogoPlace {
 }
 
 /**
+ * The most wordmark boards one frame draws — #966: the size of
+ * `three-renderer.ts` §`LogoBelt`'s one instanced mesh.
+ */
+export const LOGO_BOARDS_PER_FRAME = 8;
+
+/**
+ * The most START-GATE boards one frame can hold: one stand carries the logo
+ * ({@link carriesTheLogo}), and a short loop places it once a lap for
+ * `gantry.ts` §`LINE_LAPS_IN_REACH` laps.
+ */
+export const GATE_LOGO_BOARDS_PER_FRAME = LINE_LAPS_IN_REACH;
+
+/**
+ * The most billboards one frame carries — #966's review: what the belt has
+ * left once every gate board is drawn. `scene.ts` takes the nearest this many
+ * BEFORE it clears the scenery for them (`billboards.ts`
+ * §`nearestBillboards`), so the belt's capacity can never drop a board whose
+ * patch of ground was already cleared.
+ */
+export const BILLBOARDS_PER_FRAME = LOGO_BOARDS_PER_FRAME - GATE_LOGO_BOARDS_PER_FRAME;
+
+/**
  * The board on a gate: sitting on the beam's top, its middle over the road's
  * centreline, its face toward the rider riding at the gate — the banner's own
  * frame (`three-renderer.ts` §`GantryBelt`): across is the road's normal, the
@@ -141,6 +165,23 @@ export function gateLogoPlace(line: PlacedStand): LogoPlace {
     faceX: -line.headingX,
     faceZ: -line.headingZ,
     foot: BILLBOARD_BOARD_BOTTOM_METRES,
+  };
+}
+
+/** A billboard as a board's place: standing on its posts, facing as it was turned. */
+export function billboardLogoPlace(board: Billboard): LogoPlace {
+  // A yaw maps the board's `z` to `(sin, cos)` and its `x` to `(cos, −sin)`.
+  const sin = Math.sin(board.rotation);
+  const cos = Math.cos(board.rotation);
+  return {
+    x: board.x,
+    y: board.y,
+    z: board.z,
+    acrossX: cos,
+    acrossZ: -sin,
+    faceX: sin,
+    faceZ: cos,
+    foot: Number.NEGATIVE_INFINITY,
   };
 }
 

@@ -363,7 +363,14 @@ import {
 import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
-import { carriesTheLogo, gateLogoPlace, logoBoxes, type LogoPlace } from './logo-board';
+import {
+  LOGO_BOARDS_PER_FRAME,
+  billboardLogoPlace,
+  carriesTheLogo,
+  gateLogoPlace,
+  logoBoxes,
+  type LogoPlace,
+} from './logo-board';
 import gameWordmarkUrl from './brand/game-wordmark.png?url';
 import {
   FOLIAGE_SWAY_METRES,
@@ -7656,6 +7663,11 @@ const GANTRY_BANNER_CAPACITY = 4;
  */
 export class GantryBelt {
   readonly #boxes: InstancedMesh;
+  /**
+   * The boxes' lit and unlit materials — #966's review, for {@link LogoBelt}'s
+   * reason. One material in the realistic world, which has no flat rung.
+   */
+  readonly #boxMaterials: { readonly lit: Material; readonly flat: Material };
   readonly #banners: InstancedMesh;
   readonly #cells: InstancedBufferAttribute;
   readonly #atlas: BannerAtlas | undefined;
@@ -7681,6 +7693,13 @@ export class GantryBelt {
             ),
           )
         : constructed(new MeshLambertMaterial({ color: 0xffffff }));
+    this.#boxMaterials = {
+      lit: boxMaterial,
+      flat:
+        world === 'stylised'
+          ? constructed(new MeshBasicMaterial({ color: 0xffffff }))
+          : boxMaterial,
+    };
     this.#boxes = new InstancedMesh(new BoxGeometry(1, 1, 1), boxMaterial, GANTRY_BOX_CAPACITY);
     this.#boxes.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#boxes.count = 0;
@@ -7724,12 +7743,27 @@ export class GantryBelt {
     this.#switchedOn = on;
   }
 
+  /**
+   * Shades the gantries' boxes, or stops shading them — #286. The banners are
+   * the realistic world's alone (the stylised belt has no atlas and draws
+   * none), so they keep their one material. @see QualitySettings.shading
+   */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#boxes.material = this.#boxMaterials[shading];
+  }
+
   /** This frame's stands: their boxes and their banners, and nothing where there are none. */
   update(lines: readonly PlacedStand[]): void {
     let boxes = 0;
     let banners = 0;
     if (this.#shown && this.#switchedOn) {
       for (const line of lines) {
+        // #966's review: a "to go" board is its lettering on a post. With no
+        // atlas (the stylised world, which uploads one texture, the wordmark)
+        // there is no lettering, and a bare post before the finish says
+        // nothing — so the board is not drawn at all. A gantry is still a
+        // gantry unlettered.
+        if (this.#atlas === undefined && line.stand.kind === 'board') continue;
         for (const placed of line.boxes) {
           const box = placed.box;
           if (boxes >= GANTRY_BOX_CAPACITY) break;
@@ -7804,7 +7838,8 @@ export class GantryBelt {
 
   dispose(): void {
     this.#boxes.geometry.dispose();
-    (this.#boxes.material as Material).dispose();
+    this.#boxMaterials.lit.dispose();
+    if (this.#boxMaterials.flat !== this.#boxMaterials.lit) this.#boxMaterials.flat.dispose();
     this.#boxes.dispose();
     this.#banners.geometry.dispose();
     (this.#banners.material as Material).dispose();
@@ -7877,11 +7912,11 @@ const LOGO_BOARD_WHITE = 0xf4f4f0;
 const LOGO_POST_GREY = 0x8c9299;
 
 /**
- * The most boards one frame draws: a gate or two, and the billboards a
- * frame's reach of a route can hold — one site boundary in 700 m of road, so
- * at most two in view — with room.
+ * The most boards one frame draws — `logo-board.ts` §`LOGO_BOARDS_PER_FRAME`,
+ * which `scene.ts` holds every frame inside (the gate's boards and at most
+ * `BILLBOARDS_PER_FRAME` billboards), so `LogoBelt.update`'s cut never binds.
  */
-export const LOGO_BOARD_CAPACITY = 8;
+export const LOGO_BOARD_CAPACITY = LOGO_BOARDS_PER_FRAME;
 
 /** The board and its posts as one geometry: position, normal, uv, colour and the face flag. */
 function logoGeometry(): BufferGeometry {
@@ -7919,7 +7954,11 @@ function logoGeometry(): BufferGeometry {
  * how the gate's board folds its posts away into the beam. Constructed here
  * (D-11); and in the realistic world breathing the realistic air (#622).
  */
-function logoMaterial(map: Texture | undefined, world: 'stylised' | 'realistic'): Material {
+function logoMaterial(
+  map: Texture | undefined,
+  world: 'stylised' | 'realistic',
+  shading: QualitySettings['shading'] = 'lit',
+): Material {
   // ⚠️ **Lambert in the stylised world, and that is the allowlist's doing**: a
   // physically based material makes three upload its own DFG look-up texture
   // the first time one is drawn (`lights_physical_pars_fragment`), which the
@@ -7934,7 +7973,10 @@ function logoMaterial(map: Texture | undefined, world: 'stylised' | 'realistic')
           roughness: 0.7,
           metalness: 0,
         })
-      : new MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: map ?? null }),
+      : shading === 'flat'
+        ? // The floor rung's unlit twin (#286), as every other stylised belt has.
+          new MeshBasicMaterial({ color: 0xffffff, vertexColors: true, map: map ?? null })
+        : new MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: map ?? null }),
   );
   const spliced = "#966's wordmark";
   material.onBeforeCompile = (shader) => {
@@ -7968,7 +8010,7 @@ diffuseColor.rgb = mix(diffuseColor.rgb, oylMark.rgb, oylMark.a * vOylFace);
       spliced,
     );
   };
-  material.customProgramCacheKey = () => `oyl-logo-${world}`;
+  material.customProgramCacheKey = () => `oyl-logo-${world}-${shading}`;
   return world === 'realistic' ? withAtmosphere(material) : material;
 }
 
@@ -7985,6 +8027,13 @@ diffuseColor.rgb = mix(diffuseColor.rgb, oylMark.rgb, oylMark.a * vOylFace);
  */
 export class LogoBelt {
   readonly #mesh: InstancedMesh;
+  /**
+   * Lit and unlit — #966's review: the stylised world's floor rung takes the
+   * shading off every belt (#286), and a lit board in an unlit world is both
+   * the odd one out and a shading pass on the rung meant to save it. The
+   * realistic world has no flat rung, so its two are one material.
+   */
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
   readonly #feet: InstancedBufferAttribute;
   readonly #matrix = new Matrix4();
   #shown = true;
@@ -7996,7 +8045,12 @@ export class LogoBelt {
     this.#feet = new InstancedBufferAttribute(new Float32Array(LOGO_BOARD_CAPACITY), 1);
     this.#feet.setUsage(DynamicDrawUsage);
     geometry.setAttribute('oylFoot', this.#feet);
-    this.#mesh = new InstancedMesh(geometry, logoMaterial(map, world), LOGO_BOARD_CAPACITY);
+    const lit = logoMaterial(map, world, 'lit');
+    this.#materials = {
+      lit,
+      flat: world === 'stylised' ? logoMaterial(map, world, 'flat') : lit,
+    };
+    this.#mesh = new InstancedMesh(geometry, lit, LOGO_BOARD_CAPACITY);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.count = 0;
     this.#mesh.frustumCulled = false;
@@ -8020,6 +8074,24 @@ export class LogoBelt {
   /** @see logosShownOf */
   switchOn(on: boolean): void {
     this.#switchedOn = on;
+  }
+
+  /** Shades the boards, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /**
+   * Turns the wordmark the way the browser gate's control asks — #966's
+   * review: mirrored or upside down through the texture's own transform, and
+   * upright again. The product never calls it. @see wordmarkOrientationOf
+   */
+  orientWordmark(orientation: WordmarkOrientation): void {
+    const map = (this.#materials.lit as { map?: Texture | null }).map;
+    if (map === null || map === undefined) return;
+    map.repeat.set(orientation === 'mirrored' ? -1 : 1, orientation === 'upside-down' ? -1 : 1);
+    map.offset.set(orientation === 'mirrored' ? 1 : 0, orientation === 'upside-down' ? 1 : 0);
+    map.updateMatrix();
   }
 
   /** This frame's boards: the start gate's, if it is in reach, and the billboards in view. */
@@ -8065,26 +8137,10 @@ export class LogoBelt {
 
   dispose(): void {
     this.#mesh.geometry.dispose();
-    (this.#mesh.material as Material).dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
     this.#mesh.dispose();
   }
-}
-
-/** A billboard as a board's place: standing on its posts, facing as it was turned. */
-function billboardLogoPlace(board: Billboard): LogoPlace {
-  // A yaw maps the board's `z` to `(sin, cos)` and its `x` to `(cos, −sin)`.
-  const sin = Math.sin(board.rotation);
-  const cos = Math.cos(board.rotation);
-  return {
-    x: board.x,
-    y: board.y,
-    z: board.z,
-    acrossX: cos,
-    acrossZ: -sin,
-    faceX: sin,
-    faceZ: cos,
-    foot: Number.NEGATIVE_INFINITY,
-  };
 }
 
 /**
@@ -11693,6 +11749,27 @@ export function logosShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Which way up the wordmark is drawn: the product's, or one of the browser
+ * gate's controls — #966's review.
+ *
+ * @test-facing named by `game-harness.ts`, which turns the wordmark with
+ * {@link wordmarkOrientationOf}; the product draws it upright.
+ */
+export type WordmarkOrientation = 'upright' | 'mirrored' | 'upside-down';
+
+/**
+ * Draws a view's wordmark mirrored or upside down, or upright again — #966's
+ * review. The browser gate's control for the wordmark's orientation: drawn
+ * either way wrong, the probe's reading must agree with the wrong picture.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`; the
+ * product draws the wordmark upright.
+ */
+export function wordmarkOrientationOf(view: GameView, orientation: WordmarkOrientation): void {
+  if (view instanceof ThreeGameView) view.wordmarkOrientation(orientation);
+}
+
+/**
  * How many wordmark boards a view drew in its last frame, in the world it drew
  * — #966.
  *
@@ -12583,6 +12660,12 @@ class ThreeGameView implements GameView {
     this.#logos.switchOn(on);
   }
 
+  /** @see wordmarkOrientationOf */
+  wordmarkOrientation(orientation: WordmarkOrientation): void {
+    this.#realistic?.logos.orientWordmark(orientation);
+    this.#logos.orientWordmark(orientation);
+  }
+
   /** @see logoBoardsOf — the drawn world's. */
   get logoMesh(): InstancedMesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
@@ -12714,6 +12797,8 @@ class ThreeGameView implements GameView {
     this.#riders.setShading(shading);
     this.#terrain.setShading(shading);
     this.#bridges.setShading(shading);
+    this.#gantries.setShading(shading);
+    this.#logos.setShading(shading);
   }
 
   /**

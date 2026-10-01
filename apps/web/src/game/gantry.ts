@@ -200,6 +200,14 @@ export interface PlacedStand extends RoadFrame {
  * lap at once, by odometer, which is `CorridorPoint.along`'s reason for
  * existing.
  */
+/**
+ * How many laps' copies of a stand {@link linesNear} looks for near the rider
+ * on a loop: the lap before, this one and the next. So no frame holds more
+ * than this many placings of one stand — which is what bounds the start gate's
+ * wordmark boards (`logo-board.ts` §`GATE_LOGO_BOARDS_PER_FRAME`).
+ */
+export const LINE_LAPS_IN_REACH = 3;
+
 export function linesNear(
   profile: RouteProfile,
   corridor: RoadCorridor,
@@ -214,7 +222,7 @@ export function linesNear(
     // The odometer readings this stand is at near the rider: on a loop, every
     // lap's; on a point-to-point route, its distance.
     const lapsFrom = profile.loop ? Math.floor(riderDistance / total) - 1 : 0;
-    const lapsTo = profile.loop ? lapsFrom + 2 : 0;
+    const lapsTo = profile.loop ? lapsFrom + LINE_LAPS_IN_REACH - 1 : 0;
     for (let lap = lapsFrom; lap <= lapsTo; lap += 1) {
       const along = stand.distance + lap * total;
       const ahead = along - riderDistance;

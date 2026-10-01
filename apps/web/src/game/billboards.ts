@@ -61,7 +61,7 @@
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
-import { BILLBOARD_FOOTPRINT } from './logo-board';
+import { BILLBOARDS_PER_FRAME, BILLBOARD_FOOTPRINT, LOGO_POST_ACROSS_METRES } from './logo-board';
 import { TIGHT_BEND_RADIANS_PER_METRE, type ScatterItem } from './scatter';
 import { slotHash, uniformFrom } from './seeded';
 import {
@@ -180,7 +180,6 @@ function billboardAt(
   const frame = drawnRoadFrame(profile, origin, at);
   if (frame === undefined) return undefined;
   const lateral = BILLBOARD_LATERAL_METRES * side;
-  if (inWater(waterways(profile, seed), profile, at, lateral)) return undefined;
   // Facing the road, turned toward a rider riding at it: back along the
   // road's direction, `(normalZ, −normalX)`.
   const towardRoad = { x: -frame.normalX * side, z: -frame.normalZ * side };
@@ -189,6 +188,21 @@ function billboardAt(
   const sin = Math.sin(BILLBOARD_YAW_RADIANS);
   const faceX = towardRoad.x * cos + backAlong.x * sin;
   const faceZ = towardRoad.z * cos + backAlong.z * sin;
+  // Its middle and both posts out of the water — #966's review: the posts
+  // stand {@link LOGO_POST_ACROSS_METRES} either side along the board's
+  // across axis `(faceZ, −faceX)`, which at this yaw is mostly ALONG the
+  // road, so a board whose middle is dry beside a stream's bank can have a
+  // post in the channel.
+  const ways = waterways(profile, seed);
+  for (const post of [0, -1, 1]) {
+    const dx = post * LOGO_POST_ACROSS_METRES * faceZ;
+    const dz = -post * LOGO_POST_ACROSS_METRES * faceX;
+    // In the road's frame: along its heading `(normalZ, −normalX)`, and out along its normal.
+    const alongOffset = dx * frame.normalZ - dz * frame.normalX;
+    const lateralOffset = dx * frame.normalX + dz * frame.normalZ;
+    const foot = post === 0 ? at : distanceOnRoute(profile, along + alongOffset);
+    if (inWater(ways, profile, foot, lateral + lateralOffset)) return undefined;
+  }
   const board = {
     x: frame.x + frame.normalX * lateral,
     z: frame.z + frame.normalZ * lateral,
@@ -204,6 +218,24 @@ function billboardAt(
     along,
     side,
   };
+}
+
+/**
+ * The billboards one frame carries — #966: the nearest to the rider first, no
+ * more than the frame's structure budget allows and never more than
+ * `logo-board.ts` §`BILLBOARDS_PER_FRAME`, the wordmark belt's room once the
+ * gate's boards are drawn. Taken before any scenery is cleared for them, so a
+ * board the belt could not draw never leaves a bare patch.
+ */
+export function nearestBillboards(
+  billboards: readonly Billboard[],
+  riderMetres: number,
+  structureBudget: number,
+): readonly Billboard[] {
+  return billboards
+    .slice()
+    .sort((one, other) => Math.abs(one.along - riderMetres) - Math.abs(other.along - riderMetres))
+    .slice(0, Math.max(0, Math.min(structureBudget, BILLBOARDS_PER_FRAME)));
 }
 
 /**

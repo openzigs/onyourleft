@@ -37,6 +37,7 @@ import type {
   RideStartMeasurement,
   HorizonReading,
   LogoMeasurement,
+  OrientationAgreement,
   RealisticMeasurement,
   StylisedTextureMeasurement,
   RiderExtent,
@@ -450,6 +451,48 @@ function expectWordmarkRead(logos: LogoMeasurement): void {
   );
   // One draw call for every board in a frame.
   expect(logos.calls).toBe(1);
+}
+
+/**
+ * #966's review: how much better a board's reading must correlate with the
+ * wordmark the right way up than with it mirrored or upside down
+ * (`game-harness.ts` §`orientationOn`) — **0.15**. A count of dark pixels
+ * reads the same share however the texture is turned, so this is what makes
+ * "drawn the right way up" a claim that can fail. Measured on a Mac on
+ * 2026-10-01, upright / mirrored / upside down: stylised, the gate 0.74 /
+ * 0.18 / 0.45 and the billboard 0.68 / 0.16 / 0.46; realistic, 0.73 / 0.20 /
+ * 0.48 and 0.66 / 0.16 / 0.42 — the least gap 0.22. The controls, the gate's
+ * texture drawn turned, read the turned picture best by 0.27 or more.
+ */
+const WORDMARK_ORIENTATION_MARGIN = 0.15;
+
+const orientationText = (name: string, reading: OrientationAgreement): string =>
+  `${name} upright ${reading.upright.toFixed(3)}, mirrored ${reading.mirrored.toFixed(3)}, ` +
+  `upside down ${reading.upsideDown.toFixed(3)} over ${String(reading.samples)}`;
+
+/** The wordmark reads the right way up on both boards, and the controls turned read turned. */
+function expectWordmarkUpright(logos: LogoMeasurement): void {
+  console.log(
+    `#966 orientation: ${orientationText('gate', logos.gateOrientation)}; ` +
+      `${orientationText('billboard', logos.billboardOrientation)}; ` +
+      `${orientationText('gate drawn mirrored', logos.gateOrientationMirrored)}; ` +
+      `${orientationText('gate drawn upside down', logos.gateOrientationUpsideDown)}`,
+  );
+  for (const reading of [logos.gateOrientation, logos.billboardOrientation]) {
+    // Non-vacuity: most of the grid was on the screen.
+    expect(reading.samples).toBeGreaterThan(200);
+    expect(reading.upright - reading.mirrored).toBeGreaterThanOrEqual(WORDMARK_ORIENTATION_MARGIN);
+    expect(reading.upright - reading.upsideDown).toBeGreaterThanOrEqual(
+      WORDMARK_ORIENTATION_MARGIN,
+    );
+  }
+  // The controls: the texture turned, the reading agrees with the turned picture.
+  const mirrored = logos.gateOrientationMirrored;
+  expect(mirrored.mirrored - mirrored.upright).toBeGreaterThanOrEqual(WORDMARK_ORIENTATION_MARGIN);
+  const upsideDown = logos.gateOrientationUpsideDown;
+  expect(upsideDown.upsideDown - upsideDown.upright).toBeGreaterThanOrEqual(
+    WORDMARK_ORIENTATION_MARGIN,
+  );
 }
 
 /**
@@ -2414,6 +2457,14 @@ test.describe('the scenery is models, not solids — #341', () => {
     );
     expectWordmarkRead(logos);
   });
+
+  test('draws the wordmark the right way up, and a turned one reads turned — #966', async ({
+    harnessRun,
+  }) => {
+    const { logos } = await harness(harnessRun);
+    expect(logos.measured).toBe(true);
+    expectWordmarkUpright(logos);
+  });
 });
 
 /**
@@ -3654,6 +3705,14 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
         `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
     );
     expectWordmarkRead(logos);
+  });
+
+  test('draws the wordmark from its KTX2 the right way up, and a turned one reads turned — #966', async ({
+    harnessRun,
+  }) => {
+    const { logos } = await realistic(harnessRun);
+    expect(logos.measured).toBe(true);
+    expectWordmarkUpright(logos);
   });
 
   test('lets the water reflect the sky it is under, by Fresnel — the grazing water reflects more — #629', async ({

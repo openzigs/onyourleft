@@ -29,13 +29,22 @@ import {
   billboardsAt,
   clearOfBillboards,
   footprintsMeet,
+  nearestBillboards,
   turnAt,
   type Billboard,
 } from './billboards';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { BILLBOARD_FOOTPRINT, logoBoxes } from './logo-board';
+import {
+  BILLBOARDS_PER_FRAME,
+  BILLBOARD_FOOTPRINT,
+  GATE_LOGO_BOARDS_PER_FRAME,
+  LOGO_BOARDS_PER_FRAME,
+  carriesTheLogo,
+  logoBoxes,
+} from './logo-board';
+import { inWater, waterways } from './waterways';
 import {
   FIXTURE_LATITUDE,
   circuitRoute,
@@ -370,6 +379,57 @@ describe('billboards — #966', () => {
     expect(clearOfBillboards([item(0, 0)], [])).toHaveLength(1);
   });
 
+  it('stands no post in the water, nor its middle (#966’s review)', () => {
+    // Swept over seeds, because where a board stands is a hash of the seed and
+    // a post beside a stream's bank is a narrow band: each post is found here
+    // from the board's own pose and `logoBoxes`, and put back in the road's
+    // frame by brute force against the drawn road — not by the placer's sums.
+    let checked = 0;
+    for (const [, profile] of ROUTES) {
+      const ways = waterways(profile, scatterSeed(profile));
+      if (ways.crossings.length + ways.lakes.length === 0) continue;
+      const origin = corridorOrigin(profile);
+      const total = profile.totalDistance as number;
+      const road = drawnRoad(profile);
+      const roadFrames = road.map((_, at) =>
+        drawnRoadFrame(profile, origin, distanceOnRoute(profile, at)),
+      );
+      for (let seed = 0; seed < 400; seed += 1) {
+        for (const board of billboardsAt(profile, origin, seed, 0, total)) {
+          const sin = Math.sin(board.rotation);
+          const cos = Math.cos(board.rotation);
+          const feet = [
+            [board.x, board.z],
+            ...logoBoxes()
+              .filter((box) => box.role === 'post')
+              .map((box) => [
+                board.x + box.x * cos + box.z * sin,
+                board.z - box.x * sin + box.z * cos,
+              ]),
+          ];
+          for (const [px = 0, pz = 0] of feet) {
+            let nearest = 0;
+            let best = Number.POSITIVE_INFINITY;
+            road.forEach(([rx, rz], at) => {
+              const d = Math.hypot(px - rx, pz - rz);
+              if (d < best) {
+                best = d;
+                nearest = at;
+              }
+            });
+            const frame = roadFrames[nearest];
+            if (frame === undefined) continue;
+            const lateral = (px - frame.x) * frame.normalX + (pz - frame.z) * frame.normalZ;
+            expect(inWater(ways, profile, distanceOnRoute(profile, nearest), lateral)).toBe(false);
+            checked += 1;
+          }
+        }
+      }
+    }
+    // Something was checked: three feet a board, on routes that have water.
+    expect(checked).toBeGreaterThan(300);
+  }, 60_000);
+
   it('holds every box of the board inside the footprint it is cleared by', () => {
     for (const box of logoBoxes()) {
       expect(Math.abs(box.x) + box.width / 2).toBeLessThanOrEqual(BILLBOARD_FOOTPRINT.x);
@@ -377,6 +437,52 @@ describe('billboards — #966', () => {
       expect(box.z + box.depth / 2).toBeLessThanOrEqual(BILLBOARD_FOOTPRINT.front);
     }
   });
+
+  it('takes the nearest billboards a frame can draw, and never more than the belt holds', () => {
+    // The gate's boards and the billboards together fit the belt, so its cut
+    // never binds after the scenery has been cleared for a board.
+    expect(GATE_LOGO_BOARDS_PER_FRAME + BILLBOARDS_PER_FRAME).toBeLessThanOrEqual(
+      LOGO_BOARDS_PER_FRAME,
+    );
+    const many: Billboard[] = Array.from({ length: BILLBOARDS_PER_FRAME + 4 }, (_, at) => ({
+      x: 0,
+      y: 0,
+      z: 0,
+      rotation: 0,
+      along: 1_000 + (at % 2 === 0 ? at : -at) * 30,
+      side: 1,
+    }));
+    const kept = nearestBillboards(many, 1_000, 1_000);
+    expect(kept).toHaveLength(BILLBOARDS_PER_FRAME);
+    const furthestKept = Math.max(...kept.map((each) => Math.abs(each.along - 1_000)));
+    const dropped = many.filter((each) => !kept.includes(each));
+    for (const each of dropped) {
+      expect(Math.abs(each.along - 1_000)).toBeGreaterThanOrEqual(furthestKept);
+    }
+    // The structure budget still binds first where it is the smaller.
+    expect(nearestBillboards(many, 1_000, 2)).toHaveLength(2);
+    expect(nearestBillboards(many, 1_000, 0)).toEqual([]);
+  });
+
+  it('never puts more boards in a frame than the belt holds, riding every fixture', () => {
+    for (const [, profile] of ROUTES) {
+      const origin = corridorOrigin(profile);
+      const start = atStartLine(profile);
+      const total = profile.totalDistance as number;
+      // Two laps of a loop, so a short circuit's gate is seen lap after lap.
+      const end = profile.loop ? 2 * total : total;
+      for (let distance = 0; distance <= end; distance += 25) {
+        const frame = sceneFrame({
+          profile,
+          origin,
+          state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+        });
+        const gates = frame.lines.filter(carriesTheLogo).length;
+        expect(gates).toBeLessThanOrEqual(GATE_LOGO_BOARDS_PER_FRAME);
+        expect(frame.billboards.length).toBeLessThanOrEqual(BILLBOARDS_PER_FRAME);
+      }
+    }
+  }, 60_000);
 
   describe('in a frame', () => {
     // A level valley: structures beside the road, so the budget is shared.

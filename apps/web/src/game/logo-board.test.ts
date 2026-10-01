@@ -23,7 +23,7 @@ import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
-import { LOGO_BOARD_CAPACITY, LogoBelt } from './three-renderer';
+import { GantryBelt, LOGO_BOARD_CAPACITY, LogoBelt } from './three-renderer';
 
 function frameAt(profile: RouteProfile, distance: number): ReturnType<typeof sceneFrame> {
   const start = atStartLine(profile);
@@ -196,5 +196,29 @@ describe('the wordmark’s board — #966', () => {
     // The board and both posts.
     expect(logoBoxes().map((box) => box.role)).toEqual(['board', 'post', 'post']);
     belt.dispose();
+  });
+
+  it('gives up its shading on the floor rung, as every stylised belt does (#966’s review)', () => {
+    const stylised = new LogoBelt(undefined, 'stylised');
+    const lit = stylised.mesh.material;
+    expect((lit as { type: string }).type).toBe('MeshLambertMaterial');
+    stylised.setShading('flat');
+    const flat = stylised.mesh.material;
+    expect((flat as { type: string }).type).toBe('MeshBasicMaterial');
+    // Both exist from construction: back up is the same object, not a new one.
+    stylised.setShading('lit');
+    expect(stylised.mesh.material).toBe(lit);
+    stylised.dispose();
+    const gantries = new GantryBelt(undefined, 'stylised');
+    expect((gantries.meshes.boxes.material as { type: string }).type).toBe('MeshLambertMaterial');
+    gantries.setShading('flat');
+    expect((gantries.meshes.boxes.material as { type: string }).type).toBe('MeshBasicMaterial');
+    gantries.dispose();
+    // The realistic world has no flat rung: its board keeps its one material.
+    const realistic = new LogoBelt(undefined, 'realistic');
+    const standard = realistic.mesh.material;
+    realistic.setShading('flat');
+    expect(realistic.mesh.material).toBe(standard);
+    realistic.dispose();
   });
 });
