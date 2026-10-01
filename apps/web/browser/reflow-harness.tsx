@@ -56,6 +56,9 @@
  *
  * `?panes=page` is #723's control: the layout before the two panes scrolled
  * on their own, put back over the shipping stylesheet ({@link applyPanesControl}).
+ *
+ * `?shape=off` and `?shape=tall` are #941's: the cards without their drawn
+ * shape, and with it three times as tall ({@link applyShapeControl}).
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -1007,6 +1010,40 @@ function applyPanesControl(): void {
   document.head.append(style);
 }
 
+/**
+ * `?shape=off` and `?shape=tall` — #941. `off` takes the drawn shape off every
+ * route and workout card and puts the card back as a plain block, which is the
+ * page before #941: the margin `list-detail.browser.spec.ts` §"#941" holds the
+ * shipped cards to is read from it, in the same run and the same fonts. `tall`
+ * is that block's control: the shape at three times its declared height,
+ * so the card is taller than it was and must push the primary below it
+ * further down than `off` does.
+ */
+function applyShapeControl(): void {
+  const shape = new URLSearchParams(window.location.search).get('shape');
+  if (shape === null) {
+    return;
+  }
+  if (shape !== 'off' && shape !== 'tall') {
+    throw new Error(`reflow harness: ?shape must be "off" or "tall", not ${shape}`);
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', `shape=${shape}`);
+  style.textContent =
+    shape === 'off'
+      ? `
+    .oyl-shape-card { display: block !important; }
+    .oyl-shape-card > p { margin-bottom: 1em !important; }
+    .oyl-shape-card__art { display: none !important; }
+  `
+      : `
+    .oyl-shape-card {
+      --oyl-shape-card-art-height: 3em !important;
+    }
+  `;
+  document.head.append(style);
+}
+
 async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -1018,6 +1055,7 @@ async function main(): Promise<void> {
   }
   applyLayoutControl();
   applyPanesControl();
+  applyShapeControl();
   // A page opened with a hash keeps it (#670: a fresh load of a selection).
   if (window.location.hash === '') {
     window.location.hash = '#/';
