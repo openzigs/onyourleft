@@ -38,7 +38,8 @@
  */
 
 /** Where a ride-time control is rendered. */
-export type RideTimeSurface = 'ride-screen' | 'trainer-panel' | 'workout-panel' | 'game-hud';
+export type RideTimeSurface =
+  'ride-screen' | 'trainer-panel' | 'workout-panel' | 'game-hud' | 'stage-chooser';
 
 export interface RideTimeControl {
   readonly surface: RideTimeSurface;
@@ -78,6 +79,10 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
+  // #940: the trainer game's pre-ride chooser, `game/StageChooser.tsx`. Its
+  // *Ride* starts the ride, so it is *Start* in the ruling's four. A PREFIX,
+  // because it is named after the route ("Ride Box Hill").
+  { surface: 'stage-chooser', name: 'Ride ', match: 'prefix' },
 ];
 
 /** Whether a control's accessible name is the one an entry names. */

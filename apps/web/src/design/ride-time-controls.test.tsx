@@ -3,8 +3,8 @@
 
 /**
  * The fast half of #669: every control on `RIDE_TIME_CONTROLS` that the Ride
- * screen and the sound controls render wears the ride-time size, and nothing
- * else on those screens does.
+ * screen, the sound controls and the game's stage chooser (#940) render wears
+ * the ride-time size, and nothing else on those screens does.
  *
  * jsdom performs no layout, so this cannot say a box is 48 px — that is
  * `browser/ride-targets.browser.spec.ts`. What it can say, in the suite a
@@ -17,11 +17,27 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { expandWorkout, seconds, thresholdShare, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  expandWorkout,
+  geographicPosition,
+  routeProfile,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  watts,
+  type RoutePoint,
+} from '@onyourleft/domain';
 import { athleteId, workoutId, type AthleteRecord, type WorkoutRecord } from '@onyourleft/store';
 
 import { stubAnalysis } from '../analysis/testing';
+import { pacerChoice } from '../game/pacer-choice';
+import { DEFAULT_RIDING_POSITION } from '../game/rider';
 import { SoundControls } from '../game/SoundControls';
+import { RoutePicker, type RidableRoute } from '../game/StageChooser';
+import { windChoice } from '../game/wind-choice';
 import type { RideSnapshot } from '../ride/controller';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -98,7 +114,9 @@ afterEach(() => {
 
 describe('#669 — the ride-time size is on the controls the ruling names', () => {
   it('on the Ride screen, every listed control wears it and no other button does', async () => {
-    const screen = RIDE_TIME_CONTROLS.filter((entry) => entry.surface !== 'game-hud');
+    const screen = RIDE_TIME_CONTROLS.filter(
+      (entry) => entry.surface !== 'game-hud' && entry.surface !== 'stage-chooser',
+    );
     const found = new Set<RideTimeControl>();
     for (const snapshot of states()) {
       mounted = await mount(
@@ -138,5 +156,66 @@ describe('#669 — the ride-time size is on the controls the ruling names', () =
     );
     expect(mute?.name).toBe('Mute sounds');
     expect(mute?.ride).toBe(true);
+  });
+
+  it('on the stage chooser, Ride wears it and no other button does', async () => {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 20; index += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (index * 50) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(20),
+      });
+    }
+    const route: RidableRoute = {
+      id: 'box-hill',
+      name: 'Box Hill',
+      profile: routeProfile(points),
+      attempts: 1,
+    };
+    mounted = await mount(
+      <RoutePicker
+        routes={[route]}
+        picked={route.id}
+        onPick={() => undefined}
+        units="metric"
+        withGhost={false}
+        onGhost={() => undefined}
+        withPacer={false}
+        onPacer={() => undefined}
+        intensity="2.5"
+        onIntensity={() => undefined}
+        choice={pacerChoice(false, '2.5')}
+        withWind={false}
+        onWind={() => undefined}
+        windSpeed=""
+        onWindSpeed={() => undefined}
+        windFrom="270"
+        onWindFrom={() => undefined}
+        air={windChoice(false, '', '270', 'metric')}
+        windUnit="km/h"
+        trainerNotice={undefined}
+        trainerPromise={undefined}
+        asking={false}
+        releaseNotice={undefined}
+        position={DEFAULT_RIDING_POSITION}
+        onPosition={() => undefined}
+        worldChosen={false}
+        onStart={() => Promise.resolve()}
+      />,
+    );
+    await settle();
+    const chooser = RIDE_TIME_CONTROLS.filter((entry) => entry.surface === 'stage-chooser');
+    const rendered = buttons();
+    for (const button of rendered) {
+      const listed = chooser.some((entry) => namesControl(entry, button.name));
+      expect(button.ride, `“${button.name}”`).toBe(listed);
+    }
+    // The apparatus: every chooser entry is rendered.
+    expect(
+      chooser.filter((entry) => !rendered.some((button) => namesControl(entry, button.name))),
+    ).toEqual([]);
   });
 });

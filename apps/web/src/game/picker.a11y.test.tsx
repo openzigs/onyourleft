@@ -22,7 +22,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
-import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
+import {
+  auditAccessibility,
+  formatViolations,
+  keyboardReachableElements,
+  tabbableElements,
+} from '../a11y/audit';
 import {
   activateWithKeyboard,
   mount,
@@ -119,7 +124,11 @@ describe('the route picker', () => {
   it('puts every control in the tab order, so none of them needs a pointer', async () => {
     mounted = await mountPicker();
 
-    const reachable = tabbableElements(document);
+    // ⚠️ REACHABLE rather than a tab stop since #940: the routes are a radio
+    // group, which is ONE tab stop with the others an arrow key away (#698's
+    // model, `a11y/audit.ts` §`keyboardReachableElements`). Every control is
+    // still asked for, and a group with no stop still fails.
+    const reachable = keyboardReachableElements(document);
     const controls = queryAll(mounted.container, 'input, button').filter(
       (element) => !(element as HTMLInputElement | HTMLButtonElement).disabled,
     );

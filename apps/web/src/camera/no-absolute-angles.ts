@@ -137,7 +137,7 @@ export const EXEMPT: readonly {
   readonly why: string;
 }[] = [
   {
-    file: 'game/GameView.tsx',
+    file: 'game/StageChooser.tsx',
     text: 'Wind direction, degrees it blows from',
     why: 'a compass bearing the rider types for the wind (#326) — about the weather, not a body',
   },

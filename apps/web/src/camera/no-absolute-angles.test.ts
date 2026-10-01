@@ -270,7 +270,7 @@ describe('the scan itself can fire', () => {
     // The exempt wind label is a finding (then excused by `isExempt`); it must
     // not also excuse a split word beside it.
     const findings = angleClaimsIn(
-      'game/GameView.tsx',
+      'game/StageChooser.tsx',
       'const e = <div><p>Wind direction, degrees it blows from</p><p>hip <b>drop</b></p></div>;',
     );
     expect(findings.filter((finding) => !isExempt(finding))).toStrictEqual([
@@ -390,7 +390,7 @@ describe('the scan itself can fire', () => {
   });
 
   it('excuses only the exact text an exemption names, never a text that contains it', () => {
-    const entry = EXEMPT.find((each) => each.file === 'game/GameView.tsx');
+    const entry = EXEMPT.find((each) => each.file === 'game/StageChooser.tsx');
     expect(entry).toBeDefined();
     if (entry === undefined) {
       return;

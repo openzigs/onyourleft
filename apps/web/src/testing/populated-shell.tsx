@@ -156,7 +156,7 @@ export type PopulatedExpectation =
 export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   home: { kind: 'fixture', marker: '.oyl-main .oyl-home__facts' },
   ride: { kind: 'fixture', marker: '.oyl-main .oyl-metric--live' },
-  game: { kind: 'fixture', marker: '.oyl-game__picker li input[type="checkbox"]' },
+  game: { kind: 'fixture', marker: '.oyl-chooser__card input[type="radio"]' },
   workouts: { kind: 'fixture', marker: '.oyl-main a[data-oyl-select]' },
   activities: { kind: 'fixture', marker: '.oyl-main a[href^="#/activities/"]' },
   analysis: { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
