@@ -216,8 +216,11 @@ describe('the migrations (#769)', () => {
    * Before the walk, on `Tests and coverage report`: 505–993 ms on 34 of 38
    * green runs read on 2026-10-01 (36843950489 to 36882904839), then 1 140,
    * 1 829, 2 775 and 3 293 ms (36849145949, 36881644356, 36877000180,
-   * 36845803725), 6.7 s on #975's run and 11 237 ms on 36884103033 (#984),
-   * which timed out at Vitest's 5 s. 35 s is about three times the slowest.
+   * 36845803725); and over Vitest's 5 s, so red, 6 737 ms on 36860095171
+   * attempt 1 (#975) and 11 237 ms on 36884103033 attempt 1 (#984). Every
+   * figure over 2.5 s was an Intel Xeon 6973P-C. 35 s is about three times
+   * the slowest; the walk took 180–230 ms locally where the fresh files took
+   * 280–450 ms.
    */
   it(
     'each one, undone, leaves the schema and the rows exactly as they were before it',
