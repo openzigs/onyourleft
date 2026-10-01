@@ -22,6 +22,7 @@ import {
   ACTION_DONE_TEXT,
   actionLabel,
   MODERATION_IS_LOGGED,
+  MODERATION_LOG_UNREADABLE_TEXT,
   MODERATION_NO_PORT,
   MODERATION_STANDING_TEXT,
   ModerationView,
@@ -113,6 +114,18 @@ describe('the approval queue — #775, #955', () => {
     expect(text(section('Moderation log'))).toContain('Approved an account');
   });
 
+  // #957's review: the read-back failing must not take the notice with it,
+  // or a moderator is left to press again not knowing it was done.
+  it('keeps saying it was done when the read-back after an action fails', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    scripted.held.standing = 'unreachable';
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    expect(scripted.calls).toContain('approve pending-anna');
+    expect(text()).toContain(MODERATION_STANDING_TEXT.unreachable);
+    expect(text()).toContain(ACTION_DONE_TEXT);
+  });
+
   it('refuses, and says a refusal the instance gave beside the row', async () => {
     const scripted = scriptedModeration();
     await open(scripted);
@@ -192,6 +205,23 @@ describe('an account by its id — #955', () => {
     await decide(section('An account'), 'Rude name.', 'Hide the display name');
     expect(scripted.calls).toContain('hide_display_name rider-carys');
   });
+
+  // #957's review: the instance logs an action on a moderator as
+  // `refused_<action>`, so a refusal is read back too, and still said.
+  it('reads the log back after a refused action, keeping the refusal on the screen', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    const account = section('An account');
+    const [id] = [...account.querySelectorAll('input')] as HTMLInputElement[];
+    if (id === undefined) throw new Error('no id box');
+    await typeInto(id, SCRIPTED_MODERATOR);
+    await decide(account, 'Myself.', 'Suspend');
+    expect(scripted.calls.filter((call) => call === 'read')).toHaveLength(2);
+    expect(text(section('An account'))).toContain(NOTHING_CHANGED_TEXT);
+    expect(text()).not.toContain(ACTION_DONE_TEXT);
+    const [newest] = [...section('Moderation log').querySelectorAll('li')];
+    expect(text(newest)).toContain('Refused, and changed nothing: suspended an account');
+  });
 });
 
 describe('the moderation log — #891, #955', () => {
@@ -205,6 +235,16 @@ describe('the moderation log — #891, #955', () => {
     expect(lines[0]).toContain('Approved an account');
     expect(lines[0]).toContain('account pending-anna');
     expect(lines.at(-1)).toContain('account rider-carys');
+  });
+
+  it('says the log could not be read, and still shows the queues', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.logReadable = false;
+    await open(scripted);
+    expect(text(section('Moderation log'))).toContain(MODERATION_LOG_UNREADABLE_TEXT);
+    expect(section('Moderation log').querySelectorAll('li')).toHaveLength(0);
+    expect(text(section('Waiting for approval'))).toContain('Anna');
+    expect(text(section('Reports'))).toContain('Report 7');
   });
 
   it('names every action, a refused one included, and an unknown one by its own word', () => {

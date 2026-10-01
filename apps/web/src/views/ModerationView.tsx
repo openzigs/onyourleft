@@ -36,7 +36,11 @@ import { hrefFor, routeById } from '../shell/routes';
  *
  * After every action the queues and the log are read from the instance again,
  * never edited in place, so a row leaves the screen because the instance says
- * it has gone.
+ * it has gone. That includes an action the instance REFUSED (#957's review):
+ * a refusal can be logged — acting on a moderator is written as
+ * `refused_<action>` — and a log not read again would not show it. What the
+ * last action did stays on the page when that read-back fails, so a moderator
+ * is not left to press again not knowing it was done.
  *
  * ## Nothing here says whether an account exists — #891, #899
  *
@@ -84,6 +88,11 @@ export const MODERATION_STANDING_TEXT = {
 
 export const ACTION_DONE_TEXT = 'Done, and written to the moderation log.';
 
+/** Said in place of the log when the instance gave the queues and not the log. */
+export const MODERATION_LOG_UNREADABLE_TEXT =
+  'The moderation log could not be read from the instance, so it is not shown here. The ' +
+  'queues above are as the instance gave them.';
+
 /** What each logged action is called on this screen. */
 const ACTION_LABEL: Readonly<Record<string, string>> = {
   approve_registration: 'Approved an account',
@@ -111,10 +120,10 @@ function when(unixSeconds: number): string {
   return `${new Date(unixSeconds * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
-/** What a decision tells the page: that one is under way, and that one was done. */
+/** What a decision tells the page: that one is under way, and what it came to. */
 interface Done {
   readonly starting: () => void;
-  readonly done: () => Promise<void>;
+  readonly finished: (outcome: ModerationOutcome) => Promise<void>;
 }
 
 interface Choice {
@@ -143,14 +152,13 @@ function Decide({
     onDone.starting();
     const answer = await choice.run(reason);
     setBusy(false);
-    if (answer.kind === 'done') {
-      setReason('');
-      // Said by the page rather than here: the row this was pressed on may
-      // leave the screen once the queue is read again.
-      await onDone.done();
-    } else {
-      setOutcome(answer);
-    }
+    // A success is said by the page rather than here: the row this was pressed
+    // on may leave the screen once the queue is read again. A refusal is said
+    // here, beside what was pressed.
+    if (answer.kind === 'done') setReason('');
+    else setOutcome(answer);
+    // Read back either way: a refused action can be logged too.
+    await onDone.finished(answer);
   }
 
   return (
@@ -360,16 +368,20 @@ function Log({
   entries,
 }: {
   readonly me: string;
-  readonly entries: readonly ModerationLogEntry[];
+  readonly entries: readonly ModerationLogEntry[] | undefined;
 }): JSX.Element {
   // Newest first: the instance keeps it oldest first.
-  const newestFirst = [...entries].reverse();
+  const newestFirst = entries === undefined ? undefined : [...entries].reverse();
   const who = (id: string): JSX.Element => (id === me ? <>you</> : <code>{id}</code>);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-log">
       <h2 id="oyl-moderation-log">Moderation log</h2>
       <p>Every moderator action on this instance, newest first. This page cannot change it.</p>
-      {newestFirst.length === 0 ? (
+      {newestFirst === undefined ? (
+        <StatusMessage tone="warning" label="Not read">
+          {MODERATION_LOG_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : newestFirst.length === 0 ? (
         <p className="oyl-muted">Nothing has been logged yet.</p>
       ) : (
         <ol className="oyl-moderation__list oyl-moderation__log" reversed>
@@ -394,7 +406,8 @@ export function ModerationView({
   readonly port?: ModerationPort | undefined;
 }): JSX.Element {
   const [state, setState] = useState<ModerationRead | undefined>(undefined);
-  const [lastDone, setLastDone] = useState(false);
+  /** What the last action on this page came to, until the next one starts. */
+  const [last, setLast] = useState<ModerationOutcome | undefined>(undefined);
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
@@ -407,10 +420,10 @@ export function ModerationView({
 
   const onDone: Done = {
     starting: () => {
-      setLastDone(false);
+      setLast(undefined);
     },
-    done: async () => {
-      setLastDone(true);
+    finished: async (outcome) => {
+      setLast(outcome);
       await read();
     },
   };
@@ -426,6 +439,17 @@ export function ModerationView({
   if (state.kind !== 'moderator') {
     return (
       <>
+        {/* The read-back after an action failed: what the action did is not
+            lost with the queues, so it is not pressed again unknowingly. */}
+        {last === undefined ? null : last.kind === 'done' ? (
+          <StatusMessage tone="success" live>
+            {ACTION_DONE_TEXT}
+          </StatusMessage>
+        ) : (
+          <StatusMessage tone="warning" label="Not done" live>
+            {last.text}
+          </StatusMessage>
+        )}
         <StatusMessage tone="info" label="Not available">
           {MODERATION_STANDING_TEXT[state.kind]}
         </StatusMessage>
@@ -440,7 +464,7 @@ export function ModerationView({
       <KeptVisible>
         <p>{MODERATION_IS_LOGGED}</p>
       </KeptVisible>
-      {lastDone ? (
+      {last?.kind === 'done' ? (
         <StatusMessage tone="success" live>
           {ACTION_DONE_TEXT}
         </StatusMessage>

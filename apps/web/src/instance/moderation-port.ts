@@ -26,8 +26,18 @@
  * moderators' route answers `not_found` to anybody else — the same bytes as a
  * route that does not exist (#891, `moderation/choke-point.test.ts`). So
  * {@link ModerationPort.standing} asks one of them, `GET
- * /v1/moderation/registrations`, and reads a `200` as "moderator" and a `404`
- * as "not". That tells a rider nothing about anybody but themselves.
+ * /v1/moderation/registrations`, and reads a `200` as "moderator" and the
+ * instance's own `not_found` as "not". That tells a rider nothing about
+ * anybody but themselves.
+ *
+ * ⚠️ **The status alone is not the instance's answer** (#957's review). The
+ * project's instance sits behind a Cloudflare tunnel with an IP rule, and a
+ * proxy answers `404` or `403` with a page of HTML of its own. Read by status
+ * alone, that told the real moderator their account was not a moderator. So a
+ * `404` means "not" only with `error.code` `not_found`, and a `403` only with
+ * `registration_pending` or `account_suspended` — the caller's own account,
+ * refused before the route. Any other `404` or `403` is `unreachable`, which
+ * says the instance did not answer and nothing about any account.
  *
  * ## Nobody learns whether an id exists — #891, #899
  *
@@ -103,7 +113,12 @@ export type ModerationRead =
       readonly me: string;
       readonly registrations: readonly PendingRegistration[];
       readonly reports: readonly OpenReport[];
-      readonly log: readonly ModerationLogEntry[];
+      /**
+       * `undefined` when the log could not be read — too large, a row this
+       * client does not accept, or no answer — while the two queues could.
+       * The log is read on its own so that it cannot take the queues with it.
+       */
+      readonly log: readonly ModerationLogEntry[] | undefined;
     };
 
 /** What a moderator may do to an account, by the instance's own names. */
@@ -282,6 +297,24 @@ function errorCode(answer: InstanceAnswer): unknown {
   return record(record(answer.body)?.error)?.code;
 }
 
+/**
+ * Whether the probe's answer is the INSTANCE saying this account is not a
+ * moderator — its status AND its own error code, never the status alone (see
+ * the module header: a proxy's bare `404` or `403` is no answer at all).
+ *
+ * A moderators' route answers anybody else exactly as a route that does not
+ * exist: #891's choke point, `not_found`. An account still waiting for
+ * approval, or suspended, is refused before the route is reached
+ * (`registration_pending`, `account_suspended`: 403s about the caller's OWN
+ * account) — and is not a moderator either.
+ */
+function isNotAModerator(answer: InstanceAnswer): boolean {
+  const code = errorCode(answer);
+  if (answer.status === 404) return code === 'not_found';
+  if (answer.status === 403) return code === 'registration_pending' || code === 'account_suspended';
+  return false;
+}
+
 /** What one action's answer means to the screen. */
 function outcomeOf(answer: InstanceAnswer): ModerationOutcome {
   if (answer.status >= 200 && answer.status < 300) return { kind: 'done' };
@@ -327,14 +360,8 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         token: connection.token,
       });
       if (answer.status === 401) return { kind: 'signed-out' };
-      // A moderators' route answers anybody else exactly as a route that does
-      // not exist: #891's choke point, read as "not a moderator". An account
-      // still waiting for approval, or suspended, is refused before the route
-      // is reached (`registration_pending`, `account_suspended`: 403s about
-      // the caller's OWN account) — and is not a moderator either.
-      if (answer.status === 404 || answer.status === 403) return { kind: 'not-moderator' };
-      if (answer.status !== 200) return { kind: 'unreachable' };
-      return { kind: 'answer', answer };
+      if (answer.status === 200) return { kind: 'answer', answer };
+      return isNotAModerator(answer) ? { kind: 'not-moderator' } : { kind: 'unreachable' };
     } catch {
       return { kind: 'unreachable' };
     }
@@ -380,17 +407,22 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         const [reports, log] = await Promise.all([
           connection.http.call('GET', '/v1/moderation/reports', { token: connection.token }),
           // The log is every action the instance ever logged, in one answer:
-          // the largest this module reads (`instance-transport.ts`).
-          connection.http.call('GET', '/v1/moderation/log', {
-            token: connection.token,
-            maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
-          }),
+          // the largest this module reads (`instance-transport.ts`). It is
+          // read as a section of its own (#957's review): a log past that
+          // bound, or with one row this client does not accept, is `undefined`
+          // and the queues are still shown.
+          connection.http
+            .call('GET', '/v1/moderation/log', {
+              token: connection.token,
+              maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+            })
+            .catch(() => undefined),
         ]);
-        if (reports.status === 401 || log.status === 401) return { kind: 'signed-out' };
+        if (reports.status === 401 || log?.status === 401) return { kind: 'signed-out' };
         const registrationRows = rows(probed.answer, 'registrations', registrationFrom);
         const reportRows = rows(reports, 'reports', reportFrom);
-        const logRows = rows(log, 'entries', logEntryFrom);
-        if (registrationRows === undefined || reportRows === undefined || logRows === undefined) {
+        const logRows = log === undefined ? undefined : rows(log, 'entries', logEntryFrom);
+        if (registrationRows === undefined || reportRows === undefined) {
           return { kind: 'unreachable' };
         }
         return {
@@ -406,10 +438,11 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     },
 
     decideRegistration: async (athleteId, decision, reason) => {
-      if (!ATHLETE_ID.test(athleteId)) {
+      const typed = athleteId.trim();
+      if (!ATHLETE_ID.test(typed)) {
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
       }
-      return send(`/v1/moderation/registrations/${athleteId}/${decision}`, reason);
+      return send(`/v1/moderation/registrations/${typed}/${decision}`, reason);
     },
 
     dismissReport: async (reportId, reason) => {

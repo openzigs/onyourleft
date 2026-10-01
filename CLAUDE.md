@@ -3308,10 +3308,14 @@ The dispatch run straight after
 ([35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), `main`,
 `workflow_dispatch`) signed, verified *"Signed as required, targeting API 36."*, and printed the
 same certificate digest as 2026-09-16's run, with no `***` in the signing step's name or in
-`actions/upload-artifact`. Both halves were needed — the runner masks every secret in the job's map
-whether the workflow reads it or not. [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9 is why
-and §10 holds the results. ⚠️ **It has still never run on a tag**, so the GitHub Release step
-alone is untested, and no phone has installed the result —
+`actions/upload-artifact`. ⚠️ **That the variable alone would not have been enough is NOT
+measured** — that the runner masks every secret in the job's map whether the workflow reads it or
+not is read off GitHub's documented behaviour. Both changes were made before any run read them, so
+the variable-set, secret-present half never ran, and a reviewer who remembers this paragraph saying
+"both halves were needed" as a finding is reading #955's first draft.
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9 is why and §10 holds the results.
+⚠️ **It has still never run on a tag**, so the GitHub Release step alone is untested, and no phone
+has installed the result —
 [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 is the table of which is which.
 
 ⚠️ **A green `assembleRelease` is not a signed APK, and until #95 nothing here noticed the

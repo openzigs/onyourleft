@@ -98,6 +98,8 @@ interface World {
   readonly send: InstanceSend & ReturnType<typeof vi.fn>;
   /** This device's moderation port — the device the instance names as moderator. */
   readonly moderator: ModerationPort;
+  /** This device's storage, for a port over a `send` a test wraps. */
+  readonly moderatorStorage: InstanceStorage;
   /** The moderator's own id on the instance. */
   readonly me: string;
   /** Another device's port: an account waiting for approval, then an ordinary rider. */
@@ -171,6 +173,7 @@ async function moderatedWorld(): Promise<World> {
     send,
     me: moderatorDevice.athleteId(),
     moderator: createModerationPort({ storage: moderatorDevice.storage, send }),
+    moderatorStorage: moderatorDevice.storage,
     ordinary: createModerationPort({ storage: waitingDevice.storage, send }),
     ordinaryId: waitingDevice.athleteId(),
     rider: async (displayName) => {
@@ -189,6 +192,28 @@ async function moderatedWorld(): Promise<World> {
 function asModerator(read: ModerationRead) {
   if (read.kind !== 'moderator') throw new Error(`not a moderator's read: ${read.kind}`);
   return read;
+}
+
+/** A moderator's read's log, which must have been read. */
+function logOf(read: ModerationRead) {
+  const { log } = asModerator(read);
+  if (log === undefined) throw new Error('the log was not read');
+  return log;
+}
+
+/**
+ * The moderator’s port over the real instance, except that a request for
+ * `path` is answered `answer()` — a proxy's page, or a log this
+ * client must not accept — without reaching the instance.
+ */
+function answeredAt(
+  { send, moderatorStorage }: World,
+  path: string,
+  answer: () => Response,
+): ModerationPort {
+  const wrapped: InstanceSend = (url, init) =>
+    new URL(url).pathname === path ? Promise.resolve(answer()) : send(url, init);
+  return createModerationPort({ storage: moderatorStorage, send: wrapped });
 }
 
 describe('who is a moderator — #955', () => {
@@ -214,6 +239,29 @@ describe('who is a moderator — #955', () => {
     expect(await ordinary.standing()).toBe('not-moderator');
     expect(await ordinary.read()).toEqual({ kind: 'not-moderator' });
   });
+
+  // #957's review: the project's instance is behind a tunnel with an IP rule,
+  // whose own 404 or 403 is a page of HTML and not the instance's answer.
+  it.each([
+    ['a bare HTML 404', 404, '<html><body>Not Found</body></html>', 'text/html'],
+    ['a bare 403', 403, 'Forbidden', 'text/plain'],
+    ['a 404 with another code', 404, '{"error":{"code":"no_route"}}', 'application/json'],
+    ['a 403 with another code', 403, '{"error":{"code":"forbidden"}}', 'application/json'],
+  ] as const)(
+    'reads %s from a proxy as unreachable, never as "not a moderator"',
+    async (_name, status, body, type) => {
+      const world = await moderatedWorld();
+      const proxied = answeredAt(
+        world,
+        '/v1/moderation/registrations',
+        () => new Response(body, { status, headers: { 'content-type': type } }),
+      );
+      expect(await proxied.standing()).toBe('unreachable');
+      expect(await proxied.read()).toEqual({ kind: 'unreachable' });
+      // The control: the instance itself still says who moderates.
+      expect(await world.moderator.standing()).toBe('moderator');
+    },
+  );
 
   it('tells a rider who is not a moderator nothing about whether an account exists', async () => {
     const { moderator, ordinary, ordinaryId, rider } = await moderatedWorld();
@@ -253,7 +301,7 @@ describe('the approval queue — #775, #955', () => {
 
     const after = asModerator(await moderator.read());
     expect(after.registrations).toEqual([]);
-    expect(after.log.at(-1)).toMatchObject({
+    expect(logOf(after).at(-1)).toMatchObject({
       action: 'approve_registration',
       actorAthleteId: me,
       targetAthleteId: ordinaryId,
@@ -265,12 +313,13 @@ describe('the approval queue — #775, #955', () => {
 
   it('refuses an account, which then leaves the queue', async () => {
     const { moderator, ordinaryId } = await moderatedWorld();
-    expect(await moderator.decideRegistration(ordinaryId, 'refuse', 'Not known.')).toEqual({
+    // An id as it might be pasted, with space round it (#957's review).
+    expect(await moderator.decideRegistration(` ${ordinaryId} `, 'refuse', 'Not known.')).toEqual({
       kind: 'done',
     });
     const after = asModerator(await moderator.read());
     expect(after.registrations).toEqual([]);
-    expect(after.log.at(-1)).toMatchObject({
+    expect(logOf(after).at(-1)).toMatchObject({
       action: 'refuse_registration',
       targetAthleteId: ordinaryId,
     });
@@ -322,7 +371,7 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
 
     const after = asModerator(await moderator.read());
     expect(after.reports).toEqual([]);
-    expect(after.log.at(-1)).toMatchObject({
+    expect(logOf(after).at(-1)).toMatchObject({
       action: 'suspend',
       targetAthleteId: dafydd.athleteId,
       reportId: report?.reportId,
@@ -339,7 +388,7 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
     ).toEqual({
       kind: 'done',
     });
-    expect(asModerator(await moderator.read()).log.slice(-2)).toEqual([
+    expect(logOf(await moderator.read()).slice(-2)).toEqual([
       expect.objectContaining({ action: 'unsuspend', targetAthleteId: dafydd.athleteId }),
       expect.objectContaining({ action: 'hide_display_name', targetAthleteId: carys.athleteId }),
     ]);
@@ -397,12 +446,43 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
 });
 
 describe('the moderation log — #891, #899, #955', () => {
+  // #957's review: the log is read on its own, so a log the client cannot
+  // take does not take the two queues with it.
+  it.each([
+    [
+      'one row it does not accept',
+      () =>
+        Response.json({
+          entries: [{ logId: 1, action: 'suspend', actorAthleteId: '../x', reason: 'r', at: 1 }],
+        }),
+    ],
+    [
+      'an answer past its bound',
+      () =>
+        new Response(`{"entries":[],"pad":"${'x'.repeat(2 * 1024 * 1024 + 1)}"}`, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ],
+    ['no answer it can read', () => new Response('<html>Bad gateway</html>', { status: 502 })],
+  ] as const)('still gives the queues with %s in the log', async (_name, answer) => {
+    const world = await moderatedWorld();
+    const read = asModerator(await answeredAt(world, '/v1/moderation/log', answer).read());
+    expect(read.log).toBeUndefined();
+    expect(read.registrations).toEqual([
+      expect.objectContaining({ athleteId: world.ordinaryId, displayName: 'Waiting' }),
+    ]);
+    expect(read.reports).toEqual([]);
+    // The control: read straight, the same instance gives its log.
+    expect(logOf(await world.moderator.read())).toEqual(expect.any(Array));
+  });
+
   it('is read, newest last as the instance keeps it, and outlives an erased account', async () => {
     const { world, moderator, rider } = await moderatedWorld();
     const carys = await rider('Carys');
     await moderator.decideRegistration(carys.athleteId, 'approve', 'Known to the club.');
     await moderator.actOnAccount(carys.athleteId, 'hide_display_name', 'Rude name.');
-    const before = asModerator(await moderator.read()).log;
+    const before = logOf(await moderator.read());
 
     const erased = await world.call('DELETE', '/v1/account', {
       token: carys.token,
@@ -410,7 +490,7 @@ describe('the moderation log — #891, #899, #955', () => {
     });
     expect(erased.status).toBe(204);
 
-    const after = asModerator(await moderator.read()).log;
+    const after = logOf(await moderator.read());
     expect(after).toEqual(before);
     expect(after.filter((entry) => entry.targetAthleteId === carys.athleteId)).toHaveLength(2);
   });

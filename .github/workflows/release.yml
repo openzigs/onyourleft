@@ -91,9 +91,12 @@ jobs:
           # secret in the job's map whether this file references it or not, so
           # moving the reference alone changes nothing until
           # `ANDROID_KEY_ALIAS` is gone from the repository's secrets. ⚠️ That
-          # last part is read off GitHub's documented behaviour and has NOT been
-          # measured here: `apps/mobile/RELEASE.md` §10 is the procedure that
-          # would, and its result cells are empty.
+          # last part is read off GitHub's documented behaviour. The migration
+          # was run on 2026-09-17 (`apps/mobile/RELEASE.md` §10, results
+          # filled in): with the variable set and the secret deleted, run
+          # 35213089600 signed with `upload` unmasked. The other half, the
+          # variable set with the secret still present, never ran, so that is
+          # still NOT measured.
           KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           REF: ${{ github.ref }}
         run: |

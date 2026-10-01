@@ -140,6 +140,8 @@ export interface ScriptedModeration {
     registrations: PendingRegistration[];
     reports: OpenReport[];
     log: ModerationLogEntry[];
+    /** `false` to answer a read as the port does when the log alone could not be read. */
+    logReadable: boolean;
     /** Accounts suspended, by id. */
     suspended: Set<string>;
     /** Accounts that exist, by id: the pending ones, the reported and this one. */
@@ -217,6 +219,7 @@ export function scriptedModeration(
     registrations: [...queues.registrations],
     reports: [...queues.reports],
     log: [...queues.log],
+    logReadable: true,
     suspended: new Set(),
     accounts: new Set([
       SCRIPTED_MODERATOR,
@@ -246,6 +249,17 @@ export function scriptedModeration(
     nextLog += 1;
     return { kind: 'done' };
   };
+  // As the instance does: an action on a moderator changes nothing and IS
+  // logged, as `refused_<action>` (`apps/instance` §`moderation.ts`).
+  const refusedAndLogged = (
+    action: string,
+    targetAthleteId: string | null,
+    reportId: number | null,
+    reason: string,
+  ): Promise<ModerationOutcome> => {
+    const outcome = logged(`refused_${action}`, targetAthleteId, reportId, reason);
+    return Promise.resolve(outcome.kind === 'done' ? nothing : outcome);
+  };
   const port: ModerationPort = {
     standing: () => {
       calls.push('standing');
@@ -259,7 +273,7 @@ export function scriptedModeration(
         me: held.me,
         registrations: [...held.registrations],
         reports: [...held.reports],
-        log: [...held.log],
+        log: held.logReadable ? [...held.log] : undefined,
       });
     },
     decideRegistration: (athleteId, decision, reason) => {
@@ -276,9 +290,9 @@ export function scriptedModeration(
     dismissReport: (reportId, reason) => {
       calls.push(`dismiss ${String(reportId)}`);
       const report = held.reports.find((each) => each.reportId === reportId);
-      if (report === undefined || report.targetAthleteId === held.me) {
-        return Promise.resolve(nothing);
-      }
+      if (report === undefined) return Promise.resolve(nothing);
+      if (report.targetAthleteId === held.me)
+        return refusedAndLogged('dismiss_report', null, reportId, reason);
       const outcome = logged('dismiss_report', null, reportId, reason);
       if (outcome.kind === 'done') {
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
@@ -290,7 +304,8 @@ export function scriptedModeration(
         `${action} ${athleteId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
       );
       const id = athleteId.trim();
-      if (!held.accounts.has(id) || id === held.me) return Promise.resolve(nothing);
+      if (id === held.me) return refusedAndLogged(action, id, reportId ?? null, reason);
+      if (!held.accounts.has(id)) return Promise.resolve(nothing);
       if (action === 'suspend' && held.suspended.has(id)) return Promise.resolve(nothing);
       if (action === 'unsuspend' && !held.suspended.has(id)) return Promise.resolve(nothing);
       const outcome = logged(action, id, reportId ?? null, reason);
