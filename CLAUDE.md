@@ -2307,6 +2307,17 @@ pnpm --filter @onyourleft/web run realistic:stage
 pnpm --filter @onyourleft/web run glyphs:generate
 pnpm --filter @onyourleft/web run glyphs:generate --check
 
+# Regenerate the in-game wordmark (#966) from the owner's committed brand
+# sheet, `tools/brand/sources/gemini-assets-v2.jpeg`: writes
+# `src/game/brand/game-wordmark.png` (1024 × 128 RGBA) with its own baseline
+# JPEG decoder and nothing else on the PATH. Deterministic — on a clean tree it
+# leaves `git status` clean — and it has no `--check`: the ordinary suite makes
+# that comparison pixel for pixel (`tools/brand/game-wordmark.test.ts`), which
+# is the CI half. The realistic world's KTX2 of the same picture is
+# `realistic:process`'s, not this command's. After changing the script, update
+# the PNG's ASSETS.toml digest in the same commit.
+pnpm --filter @onyourleft/web run wordmark:generate
+
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
 # what makes a corpus that is committed and generated the same corpus. It writes
