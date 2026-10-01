@@ -226,9 +226,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         it cut from the v3 sheet by a rembg model is reading
                         the old file — rembg and its model are gone. ⚠️ Gemini
                         painted the "transparent" checkerboard INTO the sheets:
-                        nothing in them is transparent. The in-game wordmark is
-                        #966's, not this pipeline's. The name and the logo are
-                        trademarks too: `TRADEMARKS.md`
+                        nothing in them is transparent. The name and the logo
+                        are trademarks too: `TRADEMARKS.md`. ⚠️ The trainer
+                        game's wordmark (#966) is NOT this pipeline's: it is
+                        `game-wordmark.ts`, a Node script beside it with a
+                        baseline JPEG decoder of this repository's own
+                        (`jpeg-baseline.ts`), which keys the painted
+                        checkerboard out of `gemini-assets-v2.jpeg` — the same
+                        source picture, one `ASSETS.toml` row — and writes the
+                        stylised world's PNG (`src/game/brand/`, precached);
+                        `game-wordmark.test.ts` re-makes it pixel for pixel
+                        inside `pnpm run test`, so unlike `derive_brand.py` it
+                        IS checked in CI. The realistic world's KTX2 is the
+                        same pixels, made by `tools/realistic/`'s `wordmark`
+                        recipe because only that pipeline writes
+                        `public/realistic/`
     src/brand/          the wordmark (header) and the full logo (About), each in
                         a light- and a dark-palette picture switched by
                         `data-theme`; the pictures are `alt=""` and the words are
@@ -823,7 +835,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         bar costs 96 of its 12 000. ⚠️ **#546 spent one**: the
                         riders are FOUR instanced meshes since then, not three,
                         because the upper body rolls against the bicycle —
-                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS` is 9.
+                        `game.browser.spec.ts` §`SCENE_DRAW_CALLS` is 9 —
+                        11 since #966, which drew the start gate and its
+                        wordmark board in the stylised world too.
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -1408,6 +1422,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         cannot vary house by house beyond that: every house of
                         a shape is one instanced mesh. The realistic HOUSE is
                         this file's too; the stylised one is still Kenney's
+    src/game/billboards.ts
+                        the game's billboards (#966) — at a boundary between
+                        two settlement sites, never on a bend's inside (the
+                        outside, or none where the bend is tight), held off
+                        every stretch of the road by `settlements.ts`
+                        §`footprintClearance`, clear of every structure, and
+                        COUNTED in the structures budget (`scene.ts`). Not a
+                        structure kind, so the arrangement digest did not
+                        move. `logo-board.ts` is the board itself — the same
+                        shape on the start gate's beam — and
+                        `three-renderer.ts` §`LogoBelt` draws every board in a
+                        frame in ONE call, in both worlds. ⚠️ Since #966 the
+                        stylised world draws the gantries too (unlettered:
+                        their banner atlas would be a second texture)
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
     src/game/instance-tint.ts
@@ -2318,6 +2346,17 @@ pnpm --filter @onyourleft/web run realistic:stage
 # generator or the ranges — then update the six ASSETS.toml digests with it.
 pnpm --filter @onyourleft/web run glyphs:generate
 pnpm --filter @onyourleft/web run glyphs:generate --check
+
+# Regenerate the in-game wordmark (#966) from the owner's committed brand
+# sheet, `tools/brand/sources/gemini-assets-v2.jpeg`: writes
+# `src/game/brand/game-wordmark.png` (1024 × 128 RGBA) with its own baseline
+# JPEG decoder and nothing else on the PATH. Deterministic — on a clean tree it
+# leaves `git status` clean — and it has no `--check`: the ordinary suite makes
+# that comparison pixel for pixel (`tools/brand/game-wordmark.test.ts`), which
+# is the CI half. The realistic world's KTX2 of the same picture is
+# `realistic:process`'s, not this command's. After changing the script, update
+# the PNG's ASSETS.toml digest in the same commit.
+pnpm --filter @onyourleft/web run wordmark:generate
 
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
@@ -5313,7 +5352,10 @@ top of an issue **supersedes its body**.
 | Why a pack's own colour is darkened before it is drawn, and why the rule is applied rather than checked | `apps/web/src/game/scenery-palette.ts` §`tonedForTheSun`, §`MAXIMUM_LIT_CHANNEL` |
 | Which way up a glTF's texture coordinates are, and the measurement that settled it | `apps/web/src/game/scenery-palette.ts` §`atlasColourAt`, `scenery-palette.test.ts` §"an unused black quarter" |
 | Why a building's atlas is fetched where it used to be refused, and what is still refused | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `scenery-models.test.ts` §"never answers with a URL that is not one of ours" |
-| What proves no texture reaches the GPU, and why a zero is not enough on its own | `apps/web/browser/game.browser.spec.ts` §"uploads no texture to the GPU", `game-harness.ts` §`texturesBaseline` |
+| What proves the stylised world uploads one texture — the wordmark — and nothing else, and why a count is not enough on its own | `apps/web/browser/game.browser.spec.ts` §"uploads only the logo texture to the GPU", `game-harness.ts` §`texturesBaseline`, §`stylisedTextureProbe`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
+| Where the game's wordmark comes from, how it is keyed out of the owner's JPEG, and why the KTX2 is made by the realistic pipeline | `apps/web/tools/brand/game-wordmark.ts`, `apps/web/tools/brand/jpeg-baseline.ts`, `apps/web/tools/realistic/sources.ts` §`WORDMARK_FROM`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
+| Where a billboard may stand, why it is never on a bend's inside, and how it is counted in the structures budget | `apps/web/src/game/billboards.ts`, `apps/web/src/game/scene.ts` §`scenery`, [#966](https://github.com/openzigs/onyourleft/issues/966) |
+| How the start gate carries the wordmark, and why one instanced mesh draws the gate's board and every billboard | `apps/web/src/game/logo-board.ts` §`gateLogoPlace`, `apps/web/src/game/three-renderer.ts` §`LogoBelt` |
 | How many shapes a scenery kind may have, what that costs in draw calls, and who may raise it | `apps/web/src/game/scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`, `apps/web/browser/game.browser.spec.ts` §`SCATTER_MESH_CEILING`, [validation 0002](docs/validation/0002-android-shell-and-game.md) Part M |
 | Why an item's variant is drawn from six slots rather than three, and why the digest did not move | `apps/web/src/game/scatter.ts` §`SCATTER_VARIANT_SLOTS`, `apps/web/src/game/arrangement-unchanged.test.ts` §"changes WHAT stands somewhere" |
 | Which of the two scenery rungs has its call site covered, and which does not | `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setVariants`, §`ScatterBelt.setBudget` |

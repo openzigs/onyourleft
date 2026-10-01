@@ -529,7 +529,11 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
  * The worst a frame carries is two gantries and a board — a point-to-point
  * route shorter than the reach, whose start and finish are both in view —
- * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858.
+ * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858;
+ * and since #966 the wordmark's board on the start gate, 36 triangles
+ * (`logo-board.ts`' three boxes), counted twice for a loop shorter than the
+ * reach: **930**, still inside the 1 000. A billboard's board spends a
+ * STRUCTURE's slot (`scene.ts`), not this ceiling.
  *
  * @test-facing held by `realistic-budget.test.ts`, and by
  * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the

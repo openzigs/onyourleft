@@ -201,6 +201,7 @@ import {
   RGBAFormat,
   RGFormat,
   SRGBColorSpace,
+  TextureLoader,
   TorusGeometry,
   UnsignedByteType,
   RedFormat,
@@ -331,6 +332,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_WORDMARK,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -360,6 +362,16 @@ import {
 } from './banner-atlas';
 import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
+import type { Billboard } from './billboards';
+import {
+  LOGO_BOARDS_PER_FRAME,
+  billboardLogoPlace,
+  carriesTheLogo,
+  gateLogoPlace,
+  logoBoxes,
+  type LogoPlace,
+} from './logo-board';
+import gameWordmarkUrl from './brand/game-wordmark.png?url';
 import {
   FOLIAGE_SWAY_METRES,
   FOLIAGE_WAVES,
@@ -3035,8 +3047,8 @@ export class RiderBelt {
  *   clear of it by the same margin.
  *
  * ⚠️ **Black with a per-vertex ALPHA, not a texture.** A soft edge is usually
- * a radial texture; `game.browser.spec.ts` §"uploads no texture to the GPU"
- * holds this scene to none, so the fade is a colour attribute of four
+ * a radial texture; `game.browser.spec.ts` §"uploads only the logo texture"
+ * holds this scene to one, the wordmark (#966), so the fade is a colour attribute of four
  * components — alpha {@link CONTACT_SHADOW_DARKNESS} at the middle, nothing at
  * the rim — which three turns into vertex alphas by itself.
  *
@@ -5476,6 +5488,8 @@ interface RealisticWorld {
    * app's own glyph range. Absent where the loaders read no glyphs.
    */
   readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
+  /** The game's wordmark, KTX2 — #966: on the start gate and the billboards. */
+  readonly wordmark: Texture;
 }
 
 /**
@@ -5704,6 +5718,7 @@ interface RealisticTextureReport {
     | 'impostor-normals'
     | 'bicycle'
     | 'rider'
+    | 'wordmark'
     | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
@@ -5793,6 +5808,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   }
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const map of REALISTIC_RIDER_MAP_NAMES) add(world.rider[map], 'rider');
+  add(world.wordmark, 'wordmark');
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
       // #639: every layer of a merged material, not only its own two maps.
@@ -5832,6 +5848,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
+          world.wordmark,
           ...[...world.vegetation.values()].flatMap((shapes) =>
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
@@ -5915,6 +5932,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.normal))),
     };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
+    // #966: the wordmark, loaded and settled with everything else.
+    const wordmark = texture(() => loaders.texture(realisticUrl(REALISTIC_WORDMARK)));
     // #623: the rider's three maps, loaded and settled with everything else.
     const riderMaps = REALISTIC_RIDER_MAP_NAMES.map((map) => ({
       map,
@@ -5977,6 +5996,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       rock.colour,
       rock.normal,
       rider,
+      wordmark,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
@@ -6096,6 +6116,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     // threw, must leave the world a view draws intact — the first version of
     // this released first and lost both, which `realistic-renderer.test.ts`
     // §"never half a world" caught.
+    const wordmarkTexture = await wordmark;
+    wordmarkTexture.colorSpace = SRGBColorSpace;
+    wordmarkTexture.minFilter = LinearMipmapLinearFilter;
+    wordmarkTexture.wrapS = ClampToEdgeWrapping;
+    wordmarkTexture.wrapT = ClampToEdgeWrapping;
     const glyphBytes = await glyphs;
     const banners = bannersOf(glyphBytes);
     if (banners !== undefined) loaded.textures.push(banners.texture);
@@ -6112,6 +6137,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       rider: riderTextures,
       bicycle,
       ...(banners === undefined ? {} : { banners }),
+      wordmark: wordmarkTexture,
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -6244,6 +6270,7 @@ export function realisticWorldLoaded(): boolean {
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
+  world.wordmark.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
@@ -7613,8 +7640,14 @@ const GANTRY_BANNER_CAPACITY = 4;
 
 /**
  * The start and finish gantries, their barriers and the boards before them —
- * #679. Realistic rungs only (ADR 0026 D-3): the belt belongs to
- * {@link RealisticDrawing}, so the stylised world has none.
+ * #679. ⚠️ **In both worlds since #966**, and a reviewer who remembers
+ * "realistic rungs only: the stylised world has none" is reading the old file:
+ * the start gate carries the wordmark in both (the owner's ruling), so the
+ * stylised view builds a belt of its own — with no banners, because the
+ * lettering is a texture and the stylised world's one allowed texture is the
+ * wordmark (`game.browser.spec.ts` §"uploads only the logo texture") — and
+ * {@link RealisticDrawing} keeps the lettered one (ADR 0026 D-3: no rung
+ * mixes the two).
  *
  * **Two draw calls, and none away from a line**: every box — legs, beam,
  * barrier pieces, board posts — is one instance of one unit box, and every
@@ -7630,6 +7663,11 @@ const GANTRY_BANNER_CAPACITY = 4;
  */
 export class GantryBelt {
   readonly #boxes: InstancedMesh;
+  /**
+   * The boxes' lit and unlit materials — #966's review, for {@link LogoBelt}'s
+   * reason. One material in the realistic world, which has no flat rung.
+   */
+  readonly #boxMaterials: { readonly lit: Material; readonly flat: Material };
   readonly #banners: InstancedMesh;
   readonly #cells: InstancedBufferAttribute;
   readonly #atlas: BannerAtlas | undefined;
@@ -7639,11 +7677,29 @@ export class GantryBelt {
   /** Whether the browser gate has turned the gantries off — its control. */
   #switchedOn = true;
 
-  constructor(banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture }) {
+  constructor(
+    banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture },
+    world: 'stylised' | 'realistic' = 'realistic',
+  ) {
     this.#atlas = banners?.atlas;
-    const boxMaterial = withAtmosphere(
-      constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 })),
-    );
+    // #966: the stylised world's gantry breathes three's own fog, not the
+    // realistic air, whose uniforms only a realistic frame writes; and is
+    // Lambert, for `logoMaterial`'s reason — no DFG texture.
+    const boxMaterial =
+      world === 'realistic'
+        ? withAtmosphere(
+            constructed(
+              new MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 }),
+            ),
+          )
+        : constructed(new MeshLambertMaterial({ color: 0xffffff }));
+    this.#boxMaterials = {
+      lit: boxMaterial,
+      flat:
+        world === 'stylised'
+          ? constructed(new MeshBasicMaterial({ color: 0xffffff }))
+          : boxMaterial,
+    };
     this.#boxes = new InstancedMesh(new BoxGeometry(1, 1, 1), boxMaterial, GANTRY_BOX_CAPACITY);
     this.#boxes.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#boxes.count = 0;
@@ -7687,12 +7743,27 @@ export class GantryBelt {
     this.#switchedOn = on;
   }
 
+  /**
+   * Shades the gantries' boxes, or stops shading them — #286. The banners are
+   * the realistic world's alone (the stylised belt has no atlas and draws
+   * none), so they keep their one material. @see QualitySettings.shading
+   */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#boxes.material = this.#boxMaterials[shading];
+  }
+
   /** This frame's stands: their boxes and their banners, and nothing where there are none. */
   update(lines: readonly PlacedStand[]): void {
     let boxes = 0;
     let banners = 0;
     if (this.#shown && this.#switchedOn) {
       for (const line of lines) {
+        // #966's review: a "to go" board is its lettering on a post. With no
+        // atlas (the stylised world, which uploads one texture, the wordmark)
+        // there is no lettering, and a bare post before the finish says
+        // nothing — so the board is not drawn at all. A gantry is still a
+        // gantry unlettered.
+        if (this.#atlas === undefined && line.stand.kind === 'board') continue;
         for (const placed of line.boxes) {
           const box = placed.box;
           if (boxes >= GANTRY_BOX_CAPACITY) break;
@@ -7767,7 +7838,8 @@ export class GantryBelt {
 
   dispose(): void {
     this.#boxes.geometry.dispose();
-    (this.#boxes.material as Material).dispose();
+    this.#boxMaterials.lit.dispose();
+    if (this.#boxMaterials.flat !== this.#boxMaterials.lit) this.#boxMaterials.flat.dispose();
     this.#boxes.dispose();
     this.#banners.geometry.dispose();
     (this.#banners.material as Material).dispose();
@@ -7829,6 +7901,278 @@ diffuseColor.rgb = bannerGround;
   };
   material.customProgramCacheKey = () => `oyl-banner-${cells}`;
   return withAtmosphere(material);
+}
+
+/* ----------------------------------------------------------------------------
+ * The wordmark — #966: on the start gate and on the billboards, in both worlds
+ * ------------------------------------------------------------------------- */
+
+/** The board's colours: its own white, and galvanised posts. This repository's own. */
+const LOGO_BOARD_WHITE = 0xf4f4f0;
+const LOGO_POST_GREY = 0x8c9299;
+
+/**
+ * The most boards one frame draws — `logo-board.ts` §`LOGO_BOARDS_PER_FRAME`,
+ * which `scene.ts` holds every frame inside (the gate's boards and at most
+ * `BILLBOARDS_PER_FRAME` billboards), so `LogoBelt.update`'s cut never binds.
+ */
+export const LOGO_BOARD_CAPACITY = LOGO_BOARDS_PER_FRAME;
+
+/** The board and its posts as one geometry: position, normal, uv, colour and the face flag. */
+function logoGeometry(): BufferGeometry {
+  const white = new Color(LOGO_BOARD_WHITE);
+  const grey = new Color(LOGO_POST_GREY);
+  const parts = logoBoxes().map((box) => {
+    const part = new BoxGeometry(box.width, box.height, box.depth)
+      .toNonIndexed()
+      .translate(box.x, box.y, box.z);
+    const normal = part.getAttribute('normal');
+    const colour = box.role === 'board' ? white : grey;
+    const colours = new Float32Array(normal.count * 3);
+    const face = new Float32Array(normal.count);
+    for (let at = 0; at < normal.count; at += 1) {
+      colours[at * 3] = colour.r;
+      colours[at * 3 + 1] = colour.g;
+      colours[at * 3 + 2] = colour.b;
+      // The board's front, out of its face: the one face that reads.
+      face[at] = box.role === 'board' && normal.getZ(at) > 0.5 ? 1 : 0;
+    }
+    part.setAttribute('color', new BufferAttribute(colours, 3));
+    part.setAttribute('oylFace', new BufferAttribute(face, 1));
+    return part;
+  });
+  const joined = mergeGeometries(parts);
+  for (const part of parts) part.dispose();
+  if (joined === null) throw new Error('the logo board could not be merged into one geometry');
+  return joined;
+}
+
+/**
+ * The board's material — #966: lit like the world round it, white where the
+ * wordmark is clear and the wordmark where it is not, on the front face only,
+ * and with every vertex held at or above the instance's `oylFoot` — which is
+ * how the gate's board folds its posts away into the beam. Constructed here
+ * (D-11); and in the realistic world breathing the realistic air (#622).
+ */
+function logoMaterial(
+  map: Texture | undefined,
+  world: 'stylised' | 'realistic',
+  shading: QualitySettings['shading'] = 'lit',
+): Material {
+  // ⚠️ **Lambert in the stylised world, and that is the allowlist's doing**: a
+  // physically based material makes three upload its own DFG look-up texture
+  // the first time one is drawn (`lights_physical_pars_fragment`), which the
+  // browser gate's allowlist of one would rightly count. The stylised scenery
+  // is Lambert already.
+  const material = constructed(
+    world === 'realistic'
+      ? new MeshStandardMaterial({
+          color: 0xffffff,
+          vertexColors: true,
+          map: map ?? null,
+          roughness: 0.7,
+          metalness: 0,
+        })
+      : shading === 'flat'
+        ? // The floor rung's unlit twin (#286), as every other stylised belt has.
+          new MeshBasicMaterial({ color: 0xffffff, vertexColors: true, map: map ?? null })
+        : new MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: map ?? null }),
+  );
+  const spliced = "#966's wordmark";
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute float oylFace;\nattribute float oylFoot;\nvarying float vOylFace;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\ntransformed.y = max(transformed.y, oylFoot);\nvOylFace = oylFace;',
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylFace;',
+        'fragment',
+        spliced,
+      ),
+      '#include <map_fragment>',
+      `#ifdef USE_MAP
+vec4 oylMark = texture2D(map, vMapUv);
+diffuseColor.rgb = mix(diffuseColor.rgb, oylMark.rgb, oylMark.a * vOylFace);
+#endif`,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `oyl-logo-${world}-${shading}`;
+  return world === 'realistic' ? withAtmosphere(material) : material;
+}
+
+/**
+ * The wordmark's boards — #966: the one on the start gate's beam and the
+ * billboards beside the road. **One draw call** however many there are, one
+ * texture, and none at all where a frame holds neither: one instanced mesh of
+ * `logo-board.ts`' shape, hidden when its count is nought.
+ *
+ * A belt per world: the stylised view's wears the precached PNG
+ * ({@link loadGameWordmark}), the realistic world's the KTX2 it loaded with
+ * the rest of that world (ADR 0026 D-7, D-8). Without its texture a board is
+ * drawn plain white, never not at all.
+ */
+export class LogoBelt {
+  readonly #mesh: InstancedMesh;
+  /**
+   * Lit and unlit — #966's review: the stylised world's floor rung takes the
+   * shading off every belt (#286), and a lit board in an unlit world is both
+   * the odd one out and a shading pass on the rung meant to save it. The
+   * realistic world has no flat rung, so its two are one material.
+   */
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  readonly #feet: InstancedBufferAttribute;
+  readonly #matrix = new Matrix4();
+  #shown = true;
+  /** Whether the browser gate has turned the boards off — its control. */
+  #switchedOn = true;
+
+  constructor(map: Texture | undefined, world: 'stylised' | 'realistic') {
+    const geometry = logoGeometry();
+    this.#feet = new InstancedBufferAttribute(new Float32Array(LOGO_BOARD_CAPACITY), 1);
+    this.#feet.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('oylFoot', this.#feet);
+    const lit = logoMaterial(map, world, 'lit');
+    this.#materials = {
+      lit,
+      flat: world === 'stylised' ? logoMaterial(map, world, 'flat') : lit,
+    };
+    this.#mesh = new InstancedMesh(geometry, lit, LOGO_BOARD_CAPACITY);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** @see logosShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the boards, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /**
+   * Turns the wordmark the way the browser gate's control asks — #966's
+   * review: mirrored or upside down through the texture's own transform, and
+   * upright again. The product never calls it. @see wordmarkOrientationOf
+   */
+  orientWordmark(orientation: WordmarkOrientation): void {
+    const map = (this.#materials.lit as { map?: Texture | null }).map;
+    if (map === null || map === undefined) return;
+    map.repeat.set(orientation === 'mirrored' ? -1 : 1, orientation === 'upside-down' ? -1 : 1);
+    map.offset.set(orientation === 'mirrored' ? 1 : 0, orientation === 'upside-down' ? 1 : 0);
+    map.updateMatrix();
+  }
+
+  /** This frame's boards: the start gate's, if it is in reach, and the billboards in view. */
+  update(lines: readonly PlacedStand[], billboards: readonly Billboard[]): void {
+    let count = 0;
+    const place = (at: LogoPlace): void => {
+      if (count >= LOGO_BOARD_CAPACITY) return;
+      // Its axes: across, up, out of its face — a proper rotation, so the
+      // front face is the one `logo-board.ts` puts the wordmark on.
+      this.#matrix.set(
+        at.acrossX,
+        0,
+        at.faceX,
+        at.x,
+        0,
+        1,
+        0,
+        at.y,
+        at.acrossZ,
+        0,
+        at.faceZ,
+        at.z,
+        0,
+        0,
+        0,
+        1,
+      );
+      this.#mesh.setMatrixAt(count, this.#matrix);
+      this.#feet.setX(count, at.foot);
+      count += 1;
+    };
+    if (this.#shown && this.#switchedOn) {
+      for (const line of lines) {
+        if (carriesTheLogo(line)) place(gateLogoPlace(line));
+      }
+      for (const board of billboards) place(billboardLogoPlace(board));
+    }
+    this.#mesh.count = count;
+    this.#mesh.instanceMatrix.needsUpdate = count > 0;
+    this.#feet.needsUpdate = count > 0;
+    this.#mesh.visible = count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+    this.#mesh.dispose();
+  }
+}
+
+/**
+ * The stylised world's wordmark, once loaded — #966. Module state for
+ * {@link sceneryGeometries}' reason: a view is built synchronously, so the
+ * texture is loaded first, by {@link loadGameWordmark}.
+ */
+let gameWordmark: Texture | undefined;
+
+/** Reads the wordmark PNG through three's own loader. Replaced in tests. */
+async function readWordmarkTexture(url: string): Promise<Texture> {
+  return new TextureLoader().loadAsync(url);
+}
+
+/**
+ * Loads the stylised world's wordmark — #966. Called once, beside
+ * {@link loadSceneryModels}, before the first view is created. A wordmark that
+ * cannot be read costs the boards their lettering and nothing else: they are
+ * drawn plain white, and the ride goes on.
+ */
+export async function loadGameWordmark(
+  load: (url: string) => Promise<Texture> = readWordmarkTexture,
+): Promise<void> {
+  try {
+    const texture = await load(gameWordmarkUrl);
+    texture.colorSpace = SRGBColorSpace;
+    texture.anisotropy = 4;
+    gameWordmark?.dispose();
+    gameWordmark = texture;
+  } catch {
+    // Plain boards. @see the note above
+  }
 }
 
 function impostorQuad(): BufferGeometry {
@@ -10789,6 +11133,8 @@ class RealisticDrawing {
   readonly grounding: GroundBlobBelt;
   /** The start and finish gantries — #679. */
   readonly gantries: GantryBelt;
+  /** The wordmark's boards, on the start gate and the billboards — #966. */
+  readonly logos: LogoBelt;
   readonly road: MeshStandardMaterial;
   readonly ground: MeshStandardMaterial;
   readonly environment: Texture;
@@ -10839,6 +11185,7 @@ class RealisticDrawing {
     this.shadows = new RiderSilhouetteBelt(this.silhouette);
     this.grounding = new GroundBlobBelt();
     this.gantries = new GantryBelt(world.banners);
+    this.logos = new LogoBelt(world.wordmark, 'realistic');
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
     this.ground = photographicGroundMaterial(
@@ -10862,6 +11209,7 @@ class RealisticDrawing {
     this.shadows.addTo(scene);
     this.grounding.addTo(scene);
     this.gantries.addTo(scene);
+    this.logos.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -10871,6 +11219,7 @@ class RealisticDrawing {
     this.riders.setShown(on);
     this.grounding.setShown(on);
     this.gantries.setShown(on);
+    this.logos.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -10934,6 +11283,7 @@ class RealisticDrawing {
     this.shadows.dispose();
     this.grounding.dispose();
     this.gantries.dispose();
+    this.logos.dispose();
     this.road.dispose();
     this.ground.dispose();
     this.environment.dispose();
@@ -10999,6 +11349,7 @@ export function evictRealisticWorldFromGpu(): void {
   if (world === undefined) return;
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
+  world.wordmark.dispose();
   for (const texture of [
     world.road.colour,
     world.road.normal,
@@ -11385,6 +11736,52 @@ export function gantriesShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Turns a view's wordmark boards off, or on again — #966. The browser gate's
+ * control: with them off, the probe aimed at the start gate's board or a
+ * billboard must read no wordmark, and the stylised world must upload no
+ * texture at all.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function logosShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.logosShown(on);
+}
+
+/**
+ * Which way up the wordmark is drawn: the product's, or one of the browser
+ * gate's controls — #966's review.
+ *
+ * @test-facing named by `game-harness.ts`, which turns the wordmark with
+ * {@link wordmarkOrientationOf}; the product draws it upright.
+ */
+export type WordmarkOrientation = 'upright' | 'mirrored' | 'upside-down';
+
+/**
+ * Draws a view's wordmark mirrored or upside down, or upright again — #966's
+ * review. The browser gate's control for the wordmark's orientation: drawn
+ * either way wrong, the probe's reading must agree with the wrong picture.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`; the
+ * product draws the wordmark upright.
+ */
+export function wordmarkOrientationOf(view: GameView, orientation: WordmarkOrientation): void {
+  if (view instanceof ThreeGameView) view.wordmarkOrientation(orientation);
+}
+
+/**
+ * How many wordmark boards a view drew in its last frame, in the world it drew
+ * — #966.
+ *
+ * @test-facing read by `game-harness.ts`, which requires the gate's board
+ * near the start line and a billboard's where the frame holds one.
+ */
+export function logoBoardsOf(view: GameView): number {
+  const mesh = view instanceof ThreeGameView ? view.logoMesh : undefined;
+  return mesh?.visible === true ? mesh.count : 0;
+}
+
+/**
  * How many gantry boxes and banners a view drew in its last frame — #679.
  *
  * @test-facing read by `game-harness.ts`, which requires some near a line and
@@ -11736,6 +12133,16 @@ class ThreeGameView implements GameView {
    */
   readonly #scatter = new ScatterBelt();
   /**
+   * The stylised world's start and finish gantries, unlettered — #966. The
+   * realistic world draws its own, lettered ({@link RealisticDrawing}).
+   */
+  readonly #gantries = new GantryBelt(undefined, 'stylised');
+  /**
+   * The stylised world's wordmark boards — #966, wearing the precached PNG
+   * {@link loadGameWordmark} loaded before this view was built.
+   */
+  readonly #logos = new LogoBelt(gameWordmark, 'stylised');
+  /**
    * The sun and the sky it is in — #286. Two lamps, built once and pointed
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
    */
@@ -11810,6 +12217,9 @@ class ThreeGameView implements GameView {
     this.#scene.add(this.#road);
 
     this.#scatter.addTo(this.#scene);
+    // #966: the start gate and the billboards, in the stylised world.
+    this.#gantries.addTo(this.#scene);
+    this.#logos.addTo(this.#scene);
 
     // #349, #368. Added here rather than in `render`, so that a frame carrying
     // no rider draws nothing rather than adding one on the frame it appears.
@@ -11935,8 +12345,13 @@ class ThreeGameView implements GameView {
         ? realisticRemoteSplit(frame.markers)
         : undefined;
     this.#realistic?.riders.place(split?.realistic ?? frame.markers);
-    // #679: the gantries at the lines in reach, and none anywhere else.
+    // #679: the gantries at the lines in reach, and none anywhere else —
+    // and since #966 in both worlds, each drawing its own, with the wordmark
+    // on the start gate and the billboards. The hidden world's draw nothing.
     this.#realistic?.gantries.update(frame.lines);
+    this.#realistic?.logos.update(frame.lines, frame.billboards);
+    this.#gantries.update(frame.lines);
+    this.#logos.update(frame.lines, frame.billboards);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -12094,6 +12509,9 @@ class ThreeGameView implements GameView {
     }
     const drawing = realistic ? this.#realistic : undefined;
     this.#scatter.setShown(!realistic);
+    // #966: the stylised gate and boards, in the stylised world only.
+    this.#gantries.setShown(!realistic);
+    this.#logos.setShown(!realistic);
     // #783: shown in both worlds — in the realistic one it draws only the
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
@@ -12227,12 +12645,30 @@ class ThreeGameView implements GameView {
   /** @see gantriesShownOf */
   gantriesShown(on: boolean): void {
     this.#realistic?.gantries.switchOn(on);
+    this.#gantries.switchOn(on);
   }
 
-  /** @see gantryMeshesOf */
+  /** @see gantryMeshesOf — the drawn world's. */
   get gantryMeshes():
     { readonly boxes: InstancedMesh; readonly banners: InstancedMesh } | undefined {
-    return this.#realistic?.gantries.meshes;
+    return this.#drawing === 'realistic' ? this.#realistic?.gantries.meshes : this.#gantries.meshes;
+  }
+
+  /** @see logosShownOf */
+  logosShown(on: boolean): void {
+    this.#realistic?.logos.switchOn(on);
+    this.#logos.switchOn(on);
+  }
+
+  /** @see wordmarkOrientationOf */
+  wordmarkOrientation(orientation: WordmarkOrientation): void {
+    this.#realistic?.logos.orientWordmark(orientation);
+    this.#logos.orientWordmark(orientation);
+  }
+
+  /** @see logoBoardsOf — the drawn world's. */
+  get logoMesh(): InstancedMesh | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
   }
 
   /** @see roadWearOf */
@@ -12361,6 +12797,8 @@ class ThreeGameView implements GameView {
     this.#riders.setShading(shading);
     this.#terrain.setShading(shading);
     this.#bridges.setShading(shading);
+    this.#gantries.setShading(shading);
+    this.#logos.setShading(shading);
   }
 
   /**
@@ -12457,6 +12895,8 @@ class ThreeGameView implements GameView {
     this.#bridges.dispose();
     this.#roadMaterial.dispose();
     this.#scatter.dispose();
+    this.#gantries.dispose();
+    this.#logos.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
     for (const belt of this.#ownMeshes) belt.dispose();

@@ -504,4 +504,33 @@ describe('the start and finish gantries — #679', () => {
     expect(belt.meshes.boxes.visible).toBe(false);
     belt.dispose();
   });
+
+  it('draws no "to go" board where it has no lettering for one (#966’s review)', () => {
+    const route = northRoute(3_000, () => 0);
+    const board = lineStands(route, 'metric').find((stand) => stand.kind === 'board');
+    expect(board).toBeDefined();
+    const lines = frameAt(route, (board?.distance ?? 0) - 40).lines;
+    // The frame carries the board, so a belt that drew it would have boxes.
+    const boardLines = lines.filter((line) => line.stand.kind === 'board');
+    expect(boardLines.length).toBe(1);
+    const otherBoxes = lines
+      .filter((line) => line.stand.kind !== 'board')
+      .reduce((sum, line) => sum + line.boxes.length, 0);
+    // The stylised belt — no atlas — leaves the bare post out: nothing is drawn of it.
+    const unlettered = new GantryBelt(undefined, 'stylised');
+    unlettered.update(lines);
+    expect(unlettered.meshes.boxes.count).toBe(otherBoxes);
+    expect(unlettered.meshes.banners.count).toBe(0);
+    unlettered.dispose();
+    // The control: the lettered belt draws the board's post and its banner.
+    const glyphs = readGlyphRange(new Uint8Array(readFileSync(RANGE)));
+    const lettered = new GantryBelt({
+      atlas: bannerAtlas(glyphs, bannerCells()),
+      texture: {} as never,
+    });
+    lettered.update(lines);
+    expect(lettered.meshes.boxes.count).toBe(otherBoxes + (boardLines[0]?.boxes.length ?? 0));
+    expect(lettered.meshes.banners.count).toBe(1);
+    lettered.dispose();
+  });
 });
