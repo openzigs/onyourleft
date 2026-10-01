@@ -108,7 +108,7 @@ export function PersistenceNotice({ storage }: PersistenceNoticeProps): JSX.Elem
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-persistence-heading">
-      <h2 id="oyl-persistence-heading">Storage</h2>
+      <h3 id="oyl-persistence-heading">Storage</h3>
       <StatusMessage tone={TONE[settled]} label={LABEL[settled]}>
         {TEXT[settled]}
       </StatusMessage>

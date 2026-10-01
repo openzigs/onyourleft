@@ -47,6 +47,17 @@
  * `views/DevicesView.test.tsx` fails if a row's state is missing from its
  * text — *"names … in the row's own text"* and *"gives every state different
  * words"*.
+ *
+ * ## A garage, since #942
+ *
+ * Each kind of device is a CARD (epic #935): the illustration kit's
+ * {@link SensorGlyph} beside its name, then what is paired in it and in what
+ * state, then its controls. ⚠️ **Presentation only.** The rows are the same
+ * rows in the same order with the same buttons calling the same controller
+ * methods; `DevicesView.pairing.a11y.test.tsx` holds a snapshot of the calls
+ * pairing and forgetting one device make, taken before the cards. The glyph is
+ * `aria-hidden` decoration and never changes with a state: the state is the
+ * words, and the same test reads them with every decoration removed.
  */
 
 import type { JSX, ReactNode } from 'react';
@@ -54,6 +65,8 @@ import type { JSX, ReactNode } from 'react';
 import type { ConnectionState } from '@onyourleft/sensors';
 
 import { Button } from '../design/Button';
+// The part's own file, not the kit's index, which names every part.
+import { SensorGlyph, type SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { StatusMessage } from '../design/StatusMessage';
 import { hrefFor, routeById } from '../shell/routes';
 import type { PairedSensor, PairingRole, RideController, RideSnapshot } from './controller';
@@ -76,6 +89,14 @@ export const PAIRING_STEPS: readonly {
     label: 'Pair a speed or cadence sensor',
   },
 ];
+
+/** Which of the kit's glyphs each kind of device wears on its card (#942). */
+const GLYPH_FOR: Readonly<Record<PairingRole, SensorGlyphKind>> = {
+  trainer: 'trainer',
+  'heart-rate': 'heart-rate',
+  'power-meter': 'power',
+  'speed-cadence': 'cadence',
+};
 
 /** The words for a row with nothing paired in it. */
 export const NOT_PAIRED = 'Not paired';
@@ -143,7 +164,7 @@ export function PairingPanel({
           {snapshot.pairingError}
         </StatusMessage>
       )}
-      <ul className="oyl-pairing">
+      <ul className="oyl-pairing tw:mt-0">
         {PAIRING_STEPS.map((step) => (
           <PairingRow
             key={step.role}
@@ -185,37 +206,40 @@ function PairingRow({
   readonly controller: RideController;
 }): JSX.Element {
   return (
-    <li className="oyl-pairing__row">
-      <h3 className="oyl-pairing__kind">{step.kind}</h3>
-      {sensors.length === 0 ? (
-        <p className="oyl-pairing__state">{NOT_PAIRED}</p>
-      ) : (
-        <ul className="oyl-sensor-list">
-          {sensors.map((sensor) => (
-            <li key={sensor.id}>
-              <p className="oyl-pairing__state">
-                {sensor.name}: {connectionWords(sensor.state)}
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  void controller.unpair(sensor.id);
-                }}
-              >
-                Forget {sensor.name}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Button
-        variant="secondary"
-        onClick={() => {
-          void controller.pair(step.role);
-        }}
-      >
-        {step.label}
-      </Button>
+    <li className="oyl-pairing__row tw:bg-surface tw:border tw:border-border tw:rounded tw:p-md">
+      <SensorGlyph kind={GLYPH_FOR[step.role]} className="oyl-pairing__glyph" />
+      <div className="oyl-pairing__body">
+        <h3 className="oyl-pairing__kind">{step.kind}</h3>
+        {sensors.length === 0 ? (
+          <p className="oyl-pairing__state">{NOT_PAIRED}</p>
+        ) : (
+          <ul className="oyl-sensor-list">
+            {sensors.map((sensor) => (
+              <li key={sensor.id}>
+                <p className="oyl-pairing__state">
+                  {sensor.name}: {connectionWords(sensor.state)}
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    void controller.unpair(sensor.id);
+                  }}
+                >
+                  Forget {sensor.name}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void controller.pair(step.role);
+          }}
+        >
+          {step.label}
+        </Button>
+      </div>
     </li>
   );
 }

@@ -64,6 +64,8 @@ async function open(port: MaskedWordsPort | undefined): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Settings</h1>
+      {/* #942: the panel sits in Settings' “Your words” card, under its h2. */}
+      <h2>Your words</h2>
       <MaskedWordsPanel port={port} />
     </main>,
   );
