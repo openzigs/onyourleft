@@ -532,8 +532,11 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858;
  * and since #966 the wordmark's board on the start gate, 36 triangles
  * (`logo-board.ts`' three boxes), counted twice for a loop shorter than the
- * reach: **930**, still inside the 1 000. A billboard's board spends a
- * STRUCTURE's slot (`scene.ts`), not this ceiling.
+ * reach: **930**, still inside the 1 000. ⚠️ **#978 put a board on the finish
+ * gate too, and 930 did NOT move**: the frame above — both gates of a short
+ * point-to-point route — now holds two boards, the start's and the finish's,
+ * which is exactly the two the sum already priced. A billboard's board spends
+ * a STRUCTURE's slot (`scene.ts`), not this ceiling.
  *
  * @test-facing held by `realistic-budget.test.ts`, and by
  * `game.browser.spec.ts` §"#679", which counts what a gantry submits at the

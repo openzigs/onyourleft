@@ -53,18 +53,56 @@ const loop = circuitRoute(500);
 const approaching = frameAt(loop, (loop.totalDistance as number) - 40);
 
 describe('the wordmark’s board — #966', () => {
-  it('stands on the start gate — a loop’s lap line — and not on the finish’s', () => {
+  it('stands on the start gate — a loop’s lap line — and, since #978, on the finish’s', () => {
     const gate = approaching.lines.find(carriesTheLogo);
     expect(gate?.stand.kind).toBe('gantry');
     expect(gate?.stand.distance).toBe(0);
     const route = northRoute(3_000, () => 0);
-    const finish = frameAt(route, (route.totalDistance as number) - 40).lines;
-    // Non-vacuity: a gantry is in reach there, and it is not the start.
-    expect(finish.some((line) => line.stand.kind === 'gantry')).toBe(true);
-    expect(finish.filter(carriesTheLogo)).toEqual([]);
+    const total = route.totalDistance as number;
+    const finish = frameAt(route, total - 40).lines;
+    // #978: the finish gate carries it — the start is 2 960 m behind, out of
+    // reach, so the one board in this frame is the finish's.
+    const finishBoards = finish.filter(carriesTheLogo);
+    expect(finishBoards).toHaveLength(1);
+    expect(finishBoards[0]?.stand.distance).toBe(total);
+    // And never the "to go" board before the line, which is in reach here.
+    expect(frameAt(route, total - 1_100).lines.some((line) => line.stand.kind === 'board')).toBe(
+      true,
+    );
+    expect(
+      frameAt(route, total - 1_100)
+        .lines.filter(carriesTheLogo)
+        .every((line) => line.stand.kind === 'gantry'),
+    ).toBe(true);
     // And at a point-to-point route's start, the start's.
     const start = frameAt(route, 0).lines.filter(carriesTheLogo);
     expect(start).toHaveLength(1);
+    expect(start[0]?.stand.distance).toBe(0);
+  });
+
+  it('draws the start’s and the finish’s boards as two instances of the one mesh — #978', () => {
+    // A point-to-point route shorter than the reach: both gates in one frame.
+    const short = northRoute(300, () => 0);
+    const frame = frameAt(short, 0);
+    const gates = frame.lines.filter(carriesTheLogo);
+    expect(gates.map((line) => line.stand.distance).sort((a, b) => a - b)).toEqual([
+      0,
+      short.totalDistance as number,
+    ]);
+    const belt = new LogoBelt(undefined, 'stylised');
+    belt.update(frame.lines, []);
+    expect(belt.mesh.count).toBe(2);
+    // The finish's board on the finish gate's beam, facing a rider riding at it.
+    const finish = gates.find((line) => line.stand.distance !== 0);
+    if (finish === undefined) throw new Error('no finish gate in reach');
+    const { origin, z } = instance(belt, 1);
+    const place = gateLogoPlace(finish);
+    expect(origin[0]).toBeCloseTo(place.x, 6);
+    expect(origin[2]).toBeCloseTo(place.z, 6);
+    expect(z[0]).toBeCloseTo(-finish.headingX, 6);
+    expect(z[2]).toBeCloseTo(-finish.headingZ, 6);
+    expect(foot(belt, 1)).toBe(BILLBOARD_BOARD_BOTTOM_METRES);
+    belt.dispose();
   });
 
   it('sits on the gate’s beam, over the road’s middle, its posts folded away', () => {
