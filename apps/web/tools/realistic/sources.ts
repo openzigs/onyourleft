@@ -44,8 +44,19 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_WORDMARK,
   type RealisticBicycleMap,
 } from '../../src/game/realistic-assets';
+import {
+  WORDMARK_CREATOR,
+  WORDMARK_MODIFIED_WORDS,
+  WORDMARK_READ,
+  WORDMARK_SCRIPT,
+  WORDMARK_SOURCE,
+  WORDMARK_SOURCE_SHA256,
+  WORDMARK_SOURCE_WORDS,
+  WORDMARK_URL,
+} from '../brand/game-wordmark';
 
 import {
   BICYCLE_MAP_KINDS,
@@ -614,6 +625,13 @@ export type OutputRecipe =
    * and its digest is the row's `inputsha256`.
    */
   | { readonly how: 'drawn'; readonly map: RealisticBicycleMap; readonly ktx2: Ktx2Step }
+  /**
+   * The game's wordmark — #966: the owner's committed artwork, keyed and
+   * resampled by {@link WORDMARK_SCRIPT} and encoded by {@link KTX2_SCRIPT}.
+   * Nothing is in the lock: the input is a file committed in this repository,
+   * and the picture the encoder reads is its row's `inputsha256`.
+   */
+  | { readonly how: 'wordmark'; readonly ktx2: Ktx2Step }
   /** Made by a Blender script: {@link inputDigest} of the source's locked files is its input. */
   | {
       readonly how: 'blender';
@@ -702,6 +720,20 @@ export const DRAWN_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 
 /** The date #624's maps were drawn and dedicated — a drawn row's `read`. */
 export const DRAWN_ON = '2026-09-27';
+
+/** What a wordmark output's {@link OutputSpec.from} names — #966: the owner's committed artwork. */
+export const WORDMARK_FROM = 'the owner';
+
+/** The tools the wordmark is made with: the keying runs under the repository's own Node. */
+export const WORDMARK_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
+
+/**
+ * How the wordmark is encoded — #966: ETC1S with its alpha, because the
+ * lettering is a cut-out over the board; and flipped, because the stylised
+ * world's PNG is read by `TextureLoader` with `flipY`, and the two worlds'
+ * boards share one set of texture coordinates (`logo-board.ts`).
+ */
+const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
 /**
  * What `realistic:process --check` requires of a run's REPORT, as well as of
@@ -863,6 +895,13 @@ export const OUTPUTS: readonly OutputSpec[] = [
       modified: `${BICYCLE_MAP_WORDS[map]}; then ${encodingWords(ktx2)}${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}`,
     };
   }),
+  // #966: the game's wordmark, made from the owner's committed artwork.
+  {
+    file: REALISTIC_WORDMARK,
+    from: WORDMARK_FROM,
+    recipe: { how: 'wordmark', ktx2: WORDMARK_KTX2 },
+    modified: `${WORDMARK_MODIFIED_WORDS}; then ${encodingWords(WORDMARK_KTX2)}${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}`,
+  },
 ];
 
 /** The digest of the pixels a drawn map's encoder reads — its row's `inputsha256`. */
@@ -1212,6 +1251,22 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
       ['inputsha256', drawnDigest(output.recipe.map)],
       ['script', `${PIPELINE_DIRECTORY}${DRAW_SCRIPT}`],
       ['tool', DRAWN_TOOL],
+    ];
+  }
+  if (output.recipe.how === 'wordmark') {
+    return [
+      ['path', `${OUTPUT_DIRECTORY}/${file}`],
+      ['source', WORDMARK_SOURCE_WORDS],
+      ['licence', 'CC-BY-4.0'],
+      ['read', WORDMARK_READ],
+      ['sha256', sha256],
+      ['creator', WORDMARK_CREATOR],
+      ['url', WORDMARK_URL],
+      ['modified', output.modified ?? ''],
+      ['input', WORDMARK_SOURCE],
+      ['inputsha256', WORDMARK_SOURCE_SHA256],
+      ['script', WORDMARK_SCRIPT],
+      ['tool', WORDMARK_TOOL],
     ];
   }
   const source = lock.sources.find((each) => each.id === output.from);

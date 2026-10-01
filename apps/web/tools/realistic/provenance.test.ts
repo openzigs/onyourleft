@@ -24,8 +24,16 @@ import { parseAssetManifest } from '../../src/credits/manifest';
 import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_WORDMARK,
 } from '../../src/game/realistic-assets';
 import { fileKtx2Facts } from '../../src/game/realistic-bytes-testing';
+import {
+  WORDMARK_CREATOR,
+  WORDMARK_HEIGHT,
+  WORDMARK_SCRIPT,
+  WORDMARK_SOURCE,
+  WORDMARK_WIDTH,
+} from '../brand/game-wordmark';
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import {
@@ -45,6 +53,7 @@ import {
   shippedFiles,
   SOURCES,
   sourcesDigest,
+  WORDMARK_TOOL,
   type InputLock,
 } from './sources';
 
@@ -97,8 +106,15 @@ describe('the realistic files and the pipeline that makes them', () => {
   it('records a derived file’s input as the digest of what the lock downloaded', () => {
     // The one number in a derived row nothing else in CI recomputes.
     for (const output of OUTPUTS) {
-      // A drawn map has no download to digest: §"the bicycle's drawn maps".
-      if (output.recipe.how === 'verbatim' || output.recipe.how === 'drawn') continue;
+      // A drawn map has no download to digest: §"the bicycle's drawn maps";
+      // nor has the wordmark: §"the game's wordmark".
+      if (
+        output.recipe.how === 'verbatim' ||
+        output.recipe.how === 'drawn' ||
+        output.recipe.how === 'wordmark'
+      ) {
+        continue;
+      }
       const source = lock.sources.find((each) => each.id === output.from);
       const entry = manifest.entries.find(
         (each) => each.path === `${OUTPUT_DIRECTORY}/${output.file}`,
@@ -186,8 +202,15 @@ describe('the realistic files and the pipeline that makes them', () => {
     for (const output of OUTPUTS) {
       if (output.recipe.how === 'verbatim') continue;
       const recipe = output.recipe;
+      // #966: the wordmark's script is the brand tool's, outside this directory.
       const name =
-        recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.how === 'drawn' ? DRAW_SCRIPT : recipe.script;
+        recipe.how === 'wordmark'
+          ? join('..', '..', '..', '..', WORDMARK_SCRIPT)
+          : recipe.how === 'ktx2'
+            ? KTX2_SCRIPT
+            : recipe.how === 'drawn'
+              ? DRAW_SCRIPT
+              : recipe.script;
       const script = readFileSync(join(REPOSITORY, 'apps/web/tools/realistic', name), 'utf8');
       expect(script.split('\n').slice(0, 5).join('\n'), name).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
@@ -313,6 +336,46 @@ describe('the bicycle’s drawn maps — #624', () => {
         map,
       ).not.toContain(output?.from);
     }
+  });
+});
+
+describe('the game’s wordmark — #966', () => {
+  const row = (manifest.entries.find(
+    (each) => each.path === `${OUTPUT_DIRECTORY}/${REALISTIC_WORDMARK}`,
+  ) ?? {}) as Readonly<Record<string, string | undefined>>;
+
+  it('records the owner’s committed artwork as its input, under the owner’s licence', () => {
+    const source = createHash('sha256')
+      .update(readFileSync(join(REPOSITORY, WORDMARK_SOURCE)))
+      .digest('hex');
+    expect(row['input']).toBe(WORDMARK_SOURCE);
+    expect(row['inputsha256']).toBe(source);
+    expect(row['script']).toBe(WORDMARK_SCRIPT);
+    expect(row['tool']).toBe(WORDMARK_TOOL);
+    expect(row['licence']).toBe('CC-BY-4.0');
+    expect(row['creator']).toBe(WORDMARK_CREATOR);
+    expect(row['source']).toContain('Google Gemini');
+    expect(row['modified']).toContain(KTX2_SCRIPT_PATH);
+    expect(row['modified']).toContain(PINNED_KTX);
+  });
+
+  it('commits the texture the brand tool makes, ETC1S with alpha and sRGB, with its whole mipmap chain', () => {
+    const facts = fileKtx2Facts(join(REPOSITORY, OUTPUT_DIRECTORY, REALISTIC_WORDMARK));
+    expect(facts).toMatchObject({
+      width: WORDMARK_WIDTH,
+      height: WORDMARK_HEIGHT,
+      scheme: 'etc1s',
+      alpha: true,
+      transfer: 'srgb',
+      levels: Math.log2(Math.max(WORDMARK_WIDTH, WORDMARK_HEIGHT)) + 1,
+    });
+  });
+
+  it('is in no source and no lock: nothing was downloaded for it', () => {
+    const output = OUTPUTS.find((each) => each.file === REALISTIC_WORDMARK);
+    expect(output?.recipe.how).toBe('wordmark');
+    expect(SOURCES.map((source) => source.id)).not.toContain(output?.from);
+    expect(lock.sources.map((source) => source.id)).not.toContain(output?.from);
   });
 });
 

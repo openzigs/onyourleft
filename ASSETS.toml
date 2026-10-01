@@ -1276,3 +1276,50 @@ input = "https://github.com/googlefonts/roboto-2/releases/tag/v2.138"
 inputsha256 = "f3edb8058e523f5612bfd99d0745e661568ad85e1b6217bc62f786fabae624c6"
 script = "apps/web/tools/glyphs/generate-glyphs.ts"
 tool = "Node.js 24 (.nvmrc), no other tool"
+
+# ---------------------------------------------------------------------------
+# #966: the trainer game's wordmark — the starting gate and the billboards.
+# The owner's CC-BY-4.0 artwork (#965's rulings), committed as the source, and
+# the two textures `apps/web/tools/brand/game-wordmark.ts` makes from it: the
+# stylised world's PNG (precached) and the realistic world's KTX2 (made by the
+# realistic pipeline, under `public/realistic/`, so not precached — ADR 0026
+# D-7). `game-wordmark.test.ts` and `provenance.test.ts` hold these rows.
+# ---------------------------------------------------------------------------
+
+[[asset]]
+path = "apps/web/tools/brand/gemini-assets-v2.jpeg"
+source = "The On Your Left brand artwork (gemini-assets-v2.jpeg), by the project's owner, generated with Google Gemini — whose terms (ai.google.dev/gemini-api/terms, Use of Generated Content) claim no ownership of generated content — and licensed by the owner as CC-BY-4.0 (#965, #966); the owner's original file, byte for byte"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+creator = "mgcronin (the On Your Left project owner)"
+url = "https://github.com/openzigs/onyourleft/blob/main/apps/web/tools/brand/gemini-assets-v2.jpeg"
+modified = "no"
+
+[[asset]]
+path = "apps/web/src/game/brand/game-wordmark.png"
+source = "The On Your Left brand artwork (gemini-assets-v2.jpeg), by the project's owner, generated with Google Gemini — whose terms (ai.google.dev/gemini-api/terms, Use of Generated Content) claim no ownership of generated content — and licensed by the owner as CC-BY-4.0 (#965, #966)"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "1f5e4229d55bdbdc8128bc246485b692823ce0f9fb9d3885ae1262a723ca8a7e"
+creator = "mgcronin (the On Your Left project owner)"
+url = "https://github.com/openzigs/onyourleft/blob/main/apps/web/tools/brand/gemini-assets-v2.jpeg"
+modified = "the bottom band (the in-game wordmark) cropped from the source, the painted checkerboard keyed out by colour into an alpha channel, the edge unmixed from the checkerboard's grey, and resampled by area to 1008 px wide inside a 1024 × 128 RGBA texture, by apps/web/tools/brand/game-wordmark.ts with its own baseline JPEG decoder"
+input = "apps/web/tools/brand/gemini-assets-v2.jpeg"
+inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+script = "apps/web/tools/brand/game-wordmark.ts"
+tool = "Node.js 24 (.nvmrc), no other tool"
+
+[[asset]]
+path = "apps/web/public/realistic/game-wordmark.ktx2"
+source = "The On Your Left brand artwork (gemini-assets-v2.jpeg), by the project's owner, generated with Google Gemini — whose terms (ai.google.dev/gemini-api/terms, Use of Generated Content) claim no ownership of generated content — and licensed by the owner as CC-BY-4.0 (#965, #966)"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "e0cb0a84ae9795be55281a181261c84c5f86fca83828446814c02f9e9d06a35c"
+creator = "mgcronin (the On Your Left project owner)"
+url = "https://github.com/openzigs/onyourleft/blob/main/apps/web/tools/brand/gemini-assets-v2.jpeg"
+modified = "the bottom band (the in-game wordmark) cropped from the source, the painted checkerboard keyed out by colour into an alpha channel, the edge unmixed from the checkerboard's grey, and resampled by area to 1008 px wide inside a 1024 × 128 RGBA texture, by apps/web/tools/brand/game-wordmark.ts with its own baseline JPEG decoder; then encoded as KTX2 (Basis Universal ETC1S with alpha, sRGB, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "apps/web/tools/brand/gemini-assets-v2.jpeg"
+inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+script = "apps/web/tools/brand/game-wordmark.ts"
+tool = "Node.js 24 (.nvmrc), then KTX-Software v4.4.2"
