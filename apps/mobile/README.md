@@ -60,11 +60,14 @@ the thing it forbids, pointed the other way.
 
 The exemption list is [`.spdx-exempt`](../../.spdx-exempt) at the repository root, enforced by rule
 `LIC006`: exact paths only, no globs, no directories, and an entry naming a file that is not there
-is a violation. **Twelve files are exempt and five are not.** The five that carry the header —
+is a violation. **Nine files are exempt and six are not.** The six that carry the header —
 `android/app/src/main/AndroidManifest.xml`, `android/app/build.gradle`,
-`android/app/src/main/res/values/strings.xml`, `android/app/src/main/res/values/styles.xml` and
+`android/app/src/main/res/values/strings.xml`, `android/app/src/main/res/values/styles.xml`,
+`android/app/src/main/res/values/ic_launcher_background.xml` and
 `android/app/src/main/java/dev/openzigs/onyourleft/MainActivity.java` — all name this application
-and are all ours to maintain from here. ⚠️ This said *thirteen and four* until #672, which edited
+and are all ours to maintain from here. ⚠️ This said *twelve and five* until #965, which replaced
+Capacitor's launcher art with the owner's (`ASSETS.toml`, CC-BY-4.0), set the adaptive icon's
+background to the owner's blue, and deleted Capacitor's two unreferenced launcher vectors. ⚠️ This said *thirteen and four* until #672, which edited
 `styles.xml` to paint the launch and the window behind the WebView with the page's canvas, and so
 took it off the list: a file this repository edits carries the header (`CLAUDE.md` §3a).
 

@@ -41,6 +41,7 @@ import { Suspense, useEffect, useRef, useState, type JSX, type MouseEvent } from
 import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
+import { Wordmark } from '../brand/Brand';
 import { HomeView } from '../views/HomeView';
 import { NotFoundView } from '../views/NotFoundView';
 import type { RoutingProvider } from '@onyourleft/domain';
@@ -787,11 +788,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
           ⚠️ The label is what keeps the app's name available to assistive
           technology below the rail breakpoint, where `theme.css` folds the
           wordmark off the screen. It is the same string as the wordmark and
-          the document title's suffix.
+          the document title's suffix. Since #965 the wordmark is the owner's
+          picture (`brand/Brand.tsx`), and the name is still text beside it.
         */}
         {immersive ? null : (
           <header className="oyl-header" aria-label={APP_NAME}>
-            <p className="oyl-wordmark">{APP_NAME}</p>
+            <p className="oyl-wordmark">
+              <Wordmark text={APP_NAME} />
+            </p>
           </header>
         )}
 

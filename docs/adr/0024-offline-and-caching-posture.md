@@ -369,3 +369,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the stylised world's top and says so on the stage (`apps/web/src/game/realistic-assets.ts`
   §`realisticWorldChosenText`, §`realisticWorldNotice`; `realistic-choice.test.tsx`). Inside the
   Android shell the set ships in the APK and neither sentence mentions the network.
+
+- **2026-10-01** — **D-5's icon half is no longer true: the manifest's icons are not `CC0-1.0`
+  and are not drawn by this repository.** [#965](https://github.com/openzigs/onyourleft/issues/965)
+  replaced them with the owner's own icon mark, cut from the brand sheets the owner supplied
+  (generated with Google Gemini) by `apps/web/tools/brand/derive_brand.py`, under **`CC-BY-4.0`**,
+  credited to the owner on the Credits screen. D-5's reasoning rested on `ASSET004` admitting no
+  licence but `CC0-1.0` for such a picture under `apps/`; [ADR 0023](0023-cc-by-assets-and-attribution.md)
+  has since admitted `CC-BY-4.0` there with `ASSET006`'s attribution keys, which every row carries.
+  `apps/web/tools/icons/generate-icons.ts` no longer writes the icons; it still draws the two
+  chevrons the realistic rider's jersey wears. The precache is unchanged in kind: the icons are
+  files in `public/`, and a fourth, `favicon.png`, joins them. The decision this ADR records — a
+  worker, a derived precache, D-4's refusal inside the shell — is untouched.
