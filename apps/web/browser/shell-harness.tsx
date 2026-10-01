@@ -65,6 +65,11 @@ import { riderAnalysisPort } from '../src/camera/analysis-transport';
 import { CameraController } from '../src/camera/session';
 import { sidePairingPort } from '../src/camera/side-link';
 import { Button } from '../src/design/Button';
+import * as illustrationKit from '../src/design/illustration';
+import {
+  ILLUSTRATION_SPECIMENS as KIT_SPECIMENS,
+  type IllustrationPartName,
+} from '../src/design/illustration/specimens-testing';
 import { StatusMessage, type StatusTone } from '../src/design/StatusMessage';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
@@ -527,7 +532,58 @@ function IllustrationSpecimens(): JSX.Element {
       <p className="oyl-motion-enter" data-oyl-motion-specimen="true" data-oyl-entered="false">
         This line fades up into place.
       </p>
+      <KitSpecimens />
     </section>
+  );
+}
+
+/**
+ * The box each kind of part is drawn in. The harness's own sizes, not the
+ * kit's (a part sets none), chosen so the thinnest painted line is several
+ * pixels across: `shell.browser.spec.ts` §"#938" reads a pixel with a margin
+ * of two either side of it inside every painted region.
+ */
+const KIT_BOX: Readonly<
+  Record<IllustrationPartName, { readonly width: string; readonly height: string }>
+> = {
+  Sky: { width: '100%', height: '132px' },
+  Hills: { width: '100%', height: '132px' },
+  RoadRibbon: { width: '100%', height: '132px' },
+  RiderSilhouette: { width: '300px', height: '300px' },
+  SensorGlyph: { width: '96px', height: '96px' },
+  ProfileShape: { width: '100%', height: '96px' },
+  WorkoutShape: { width: '100%', height: '96px' },
+};
+
+/**
+ * #938: every part of the illustration kit, drawn from the same specimen table
+ * the Vitest suite holds to the rules (`specimens-testing.ts`), and read off
+ * the kit's own exports — so a part added to the kit is on this page, and
+ * measured, with no edit here. Each is in a box the harness sizes and tags
+ * with the part's name; the part itself is rendered as it ships.
+ */
+function KitSpecimens(): JSX.Element {
+  const parts = Object.entries(illustrationKit) as [
+    IllustrationPartName,
+    (props: { readonly className?: string }) => JSX.Element,
+  ][];
+  return (
+    <div data-oyl-illo-kit="true">
+      {/* The harness's own sizing: each part fills the box it is given. */}
+      <style>{'.oyl-illo-specimen { display: block; width: 100%; height: 100%; }'}</style>
+      {parts.flatMap(([name, Part]) =>
+        KIT_SPECIMENS[name].map((props, index) => (
+          <div
+            key={`${name}-${String(index)}`}
+            data-oyl-illo-part={name}
+            data-oyl-illo-specimen={String(index)}
+            style={{ maxWidth: '100%', ...KIT_BOX[name] }}
+          >
+            <Part {...props} className="oyl-illo-specimen" />
+          </div>
+        )),
+      )}
+    </div>
   );
 }
 

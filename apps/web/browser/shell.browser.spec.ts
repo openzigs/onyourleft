@@ -60,6 +60,8 @@ import {
   type ColourToken,
   type Theme,
 } from '../src/design/tokens';
+import type * as illustrationKit from '../src/design/illustration/index';
+import { ILLUSTRATION_PAINTS } from '../src/design/illustration/paint';
 import { decodePng } from '../src/game/model-bytes-testing';
 import {
   applyInsets,
@@ -2379,6 +2381,212 @@ for (const theme of THEMES) {
       const drawing = page.locator('[data-oyl-illustration-drawing]');
       await expect(drawing).toHaveAttribute('aria-hidden', 'true');
       expect(await drawing.evaluate((svg) => svg.textContent?.trim() ?? '')).toBe('');
+    });
+  });
+}
+
+/*
+ * #938 — the illustration kit, painted with its tokens, read off the pixels.
+ *
+ * Every part the kit exports is on `?illustration=specimens`
+ * (`shell-harness.tsx` §KitSpecimens, from the kit's own exports). For each,
+ * the page finds a point inside every painted region — a pixel whose
+ * neighbours two pixels away on every side hit-test to the same shape, so no
+ * edge and no antialiasing is read — and the spec reads that pixel off a
+ * screenshot and requires the token the shape's paint names
+ * (`illustration/paint.ts` §ILLUSTRATION_PAINTS), converted from `tokens.ts`
+ * for the palette under test and never re-typed.
+ *
+ * The CONTROL is the same read with `data-theme` forced to the other palette
+ * after the page loaded: it must fail for at least one part, which is what
+ * proves the reads above were of pixels that follow the palette rather than of
+ * a picture painted one way whatever the theme.
+ */
+
+/** A painted pixel the page found: which part, which paint, and where. */
+interface PaintedPoint {
+  readonly part: string;
+  readonly className: string;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** How far each side of a read pixel must still be the same shape. */
+const KIT_READ_MARGIN = 2;
+
+async function kitParts(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-oyl-illo-part]')].map(
+      (box) => `${box.dataset['oylIlloPart'] ?? ''}#${box.dataset['oylIlloSpecimen'] ?? ''}`,
+    ),
+  );
+}
+
+/** One part's painted points, in viewport pixels, with the part scrolled into view. */
+async function paintedPoints(
+  page: Page,
+  key: string,
+  classNames: readonly string[],
+): Promise<PaintedPoint[]> {
+  const [part, specimen] = key.split('#');
+  const box = page.locator(
+    `[data-oyl-illo-part="${part ?? ''}"][data-oyl-illo-specimen="${specimen ?? ''}"]`,
+  );
+  return box.evaluate(
+    (element, { key: name, classNames: paints, margin }) => {
+      // The middle of the viewport, clear of the navigation bar at its foot,
+      // which would otherwise cover a small part and hide every pixel of it.
+      element.scrollIntoView({ block: 'center' });
+      const svg = element.querySelector('svg');
+      if (svg === null) throw new Error(`${name} drew no svg`);
+      const paintOf = (shape: Element): string | undefined => {
+        for (let at: Element | null = shape; at !== null && at !== svg; at = at.parentElement) {
+          const found = paints.find((paint) => at?.classList.contains(paint));
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      };
+      const bounds = svg.getBoundingClientRect();
+      const found = new Map<string, { x: number; y: number }>();
+      const shapes = [...svg.querySelectorAll('path, circle, rect, line, ellipse, polygon')];
+      for (const shape of shapes) {
+        const paint = paintOf(shape);
+        if (paint === undefined || found.has(paint)) continue;
+        const area = shape.getBoundingClientRect();
+        const left = Math.ceil(Math.max(area.left, bounds.left)) + margin;
+        const right = Math.floor(Math.min(area.right, bounds.right)) - margin;
+        const top = Math.ceil(Math.max(area.top, bounds.top)) + margin;
+        const bottom = Math.floor(Math.min(area.bottom, bounds.bottom)) - margin;
+        search: for (let y = top; y < bottom; y += 1) {
+          for (let x = left; x < right; x += 1) {
+            let inside = true;
+            for (const dy of [-margin, 0, margin]) {
+              for (const dx of [-margin, 0, margin]) {
+                if (document.elementFromPoint(x + dx + 0.5, y + dy + 0.5) !== shape) {
+                  inside = false;
+                }
+              }
+            }
+            if (inside) {
+              found.set(paint, { x, y });
+              break search;
+            }
+          }
+        }
+      }
+      return [...found].map(([className, { x, y }]) => ({ part: name, className, x, y }));
+    },
+    { key, classNames, margin: KIT_READ_MARGIN },
+  );
+}
+
+/** The painted pixel at each point, as `#rrggbb`, off one screenshot. */
+async function pixelsAt(
+  page: Page,
+  points: readonly PaintedPoint[],
+  path: string,
+): Promise<string[]> {
+  await page.screenshot({ path });
+  const png = decodePng(path);
+  return points.map(({ x, y }) => {
+    const at = (y * png.width + x) * 4;
+    return `#${[0, 1, 2]
+      .map((channel) => (png.data[at + channel] ?? 0).toString(16).padStart(2, '0'))
+      .join('')}`;
+  });
+}
+
+const PAINT_TOKEN = new Map<string, ColourToken>(
+  Object.values(ILLUSTRATION_PAINTS).map(({ className, token }) => [className, token]),
+);
+const PAINT_CLASSES = [...PAINT_TOKEN.keys()];
+
+/** Every part's painted pixels against `theme`'s tokens: what matched, and what did not. */
+async function readKit(
+  page: Page,
+  theme: Theme,
+  path: (name: string) => string,
+): Promise<{ readonly read: number; readonly wrong: string[]; readonly parts: string[] }> {
+  const parts = await kitParts(page);
+  const wrong: string[] = [];
+  let read = 0;
+  for (const key of parts) {
+    const points = await paintedPoints(page, key, PAINT_CLASSES);
+    // The part's own markup says which paints it uses; every one is read.
+    const used = await page
+      .locator(
+        `[data-oyl-illo-part="${key.split('#')[0] ?? ''}"][data-oyl-illo-specimen="${key.split('#')[1] ?? ''}"] svg`,
+      )
+      .evaluate(
+        (svg, classes) => classes.filter((paint) => svg.querySelector(`.${paint}`) !== null).sort(),
+        PAINT_CLASSES,
+      );
+    expect(
+      points.map(({ className }) => className).sort(),
+      `${key}: no clear pixel found in a painted region`,
+    ).toEqual(used);
+    const pixels = await pixelsAt(page, points, path(`${key.replace('#', '-')}.png`));
+    points.forEach((point, index) => {
+      read += 1;
+      const token = PAINT_TOKEN.get(point.className) as ColourToken;
+      const expected = paletteColours(theme)[token];
+      if (pixels[index] !== expected) {
+        wrong.push(`${key} ${point.className}: ${pixels[index] ?? '?'}, not ${token} ${expected}`);
+      }
+    });
+  }
+  return { read, wrong, parts };
+}
+
+/**
+ * Every part the kit exports, held to `illustration/index.ts` by the TYPE
+ * checker rather than re-typed (#967's review): a `Record` over the module's
+ * export names, so a part added there with no line here, or a line here naming
+ * no part, is a compile error. ⚠️ The import is `import type` on purpose —
+ * erased before Playwright's transform runs, so the spec loads none of the
+ * client's React or `@onyourleft/domain` in Node.
+ */
+const ILLUSTRATION_PARTS = {
+  Hills: true,
+  ProfileShape: true,
+  RiderSilhouette: true,
+  RoadRibbon: true,
+  SensorGlyph: true,
+  Sky: true,
+  WorkoutShape: true,
+} as const satisfies Record<keyof typeof illustrationKit, true>;
+
+for (const theme of THEMES) {
+  test.describe(`#938 — the illustration kit is painted with its tokens (${theme})`, () => {
+    test.use({ viewport: { width: 390, height: 844 }, colorScheme: theme });
+
+    test('every part, every painted region, reads as its token', async ({ page }, info) => {
+      await openIllustration(page);
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      const { read, wrong, parts } = await readKit(page, theme, (name) => info.outputPath(name));
+      // Every part the kit exports is on the page (the harness reads the
+      // exports), four sensor glyphs among them.
+      expect(new Set(parts.map((key) => key.split('#')[0]))).toEqual(
+        new Set(Object.keys(ILLUSTRATION_PARTS)),
+      );
+      expect(read).toBeGreaterThanOrEqual(parts.length);
+      expect(wrong).toEqual([]);
+    });
+
+    test('the control — with the other palette forced, the same read fails', async ({
+      page,
+    }, info) => {
+      await openIllustration(page);
+      const other: Theme = theme === 'light' ? 'dark' : 'light';
+      await page.evaluate((forced) => {
+        document.documentElement.dataset['theme'] = forced;
+      }, other);
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(other);
+      const { wrong } = await readKit(page, theme, (name) => info.outputPath(name));
+      expect(
+        wrong.length,
+        'the kit reads the same in both palettes, so the case above measured nothing',
+      ).toBeGreaterThan(0);
     });
   });
 }
