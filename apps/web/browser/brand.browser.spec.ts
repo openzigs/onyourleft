@@ -123,8 +123,10 @@ test.describe('#965 — the owner’s wordmark and logo, in both palettes', () =
       return count;
     });
     expect(removed, 'the dark palette’s brand rules were not found').toBe(3);
-    const seen = await drawn(page, '.oyl-wordmark__image');
-    expect(seen.sources).toHaveLength(1);
-    expect(seen.sources[0]).toMatch(/\/wordmark-light-[^/]+\.png$/);
+    // The light picture was `display: none` until now: give the engine the
+    // frames it takes to lay it out (and, on a loaded runner, to decode it).
+    await expect
+      .poll(async () => (await drawn(page, '.oyl-wordmark__image')).sources)
+      .toEqual([expect.stringMatching(/\/wordmark-light-[^/]+\.png$/)]);
   });
 });
