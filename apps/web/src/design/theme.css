@@ -1112,7 +1112,10 @@ h3:first-child {
  * held at least as tall as the picture less the body's top padding, so the
  * line under it starts below the picture, and is padded clear of it on its
  * own row. The picture is a sibling of the card's link, never its ancestor,
- * so the stretched link (below) still covers it.
+ * so the stretched link (below) still covers it. 80 px wide, not 96: a
+ * heading beside it that wraps to a second line makes its card, and every
+ * card in its row, a line taller, which on the CI runner's fonts cost the
+ * first link 24 px at 640×360.
  * `home.browser.spec.ts` holds every card's picture to 44–56 px tall at every
  * fold viewport, and to the shape of a picture rather than a strip.
  */
@@ -1120,7 +1123,7 @@ h3:first-child {
   position: absolute;
   top: 0;
   inset-inline-end: 0;
-  width: 6rem;
+  width: 5rem;
   height: 3rem;
   overflow: hidden;
   border-end-start-radius: var(--oyl-radius);
@@ -1130,7 +1133,7 @@ h3:first-child {
   display: flex;
   align-items: center;
   min-height: calc(3rem - var(--oyl-space-md));
-  padding-inline-end: calc(6rem + var(--oyl-space-xs));
+  padding-inline-end: calc(5rem + var(--oyl-space-xs));
 }
 
 /*
@@ -1152,6 +1155,10 @@ h3:first-child {
 @media (max-height: 30rem) {
   .oyl-main:has(> .oyl-home-hero) {
     --oyl-home-ground: 3rem;
+    /* 2 : 1, a crop of the scene, so the summary keeps one line on the CI
+       runner's fonts at 640×360 (at 8 : 3 it wrapped, and the first link
+       cleared the fold by 14 px there). */
+    --oyl-home-ground-width: calc(var(--oyl-home-ground) * 2);
   }
 
   .oyl-main:has(> .oyl-home-hero) > h1 {

@@ -119,7 +119,7 @@ const TOUCH_TARGET_PIXELS = 44;
  * The owner's ruling of 2026-10-01 on #935: drawings on cards and panels are
  * MEDIUM — about 48 px tall, and not thin strips. A picture is held to a
  * height in this band and to a shape no wider than `MAXIMUM_DRAWING_ASPECT`
- * times its height: the scene's own 320 × 120 is 2.67, a card's picture is 2,
+ * times its height: the scene's own 320 × 120 is 2.67, a card's picture is 1.67,
  * and a 48 px band across a phone's card is 7.5.
  */
 const MEDIUM_DRAWING_PIXELS = { least: 44, most: 56 } as const;
@@ -184,7 +184,8 @@ test.describe('#939 — the hero is a band, and the first ride card starts above
       const margin = seen.fold - (first?.link.top ?? Infinity);
       console.log(
         `#939 ${viewport.name}: hero ${(seen.hero?.height ?? 0).toFixed(1)} px tall, ` +
-          `first card's link ${margin.toFixed(1)} px above the fold (${seen.fold.toFixed(1)})`,
+          `first card's link ${margin.toFixed(1)} px above the fold (${seen.fold.toFixed(1)}); ` +
+          `ride cards ${seen.rideCards.map((card) => card.card.height.toFixed(1)).join(' / ')} px tall`,
       );
       expect(margin).toBeGreaterThan(viewport.margin);
       // The words stand on the sky and never on the hills or the road: the
