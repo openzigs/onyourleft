@@ -1289,7 +1289,7 @@ tool = "Node.js 24 (.nvmrc), no other tool"
 
 [[asset]]
 path = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
-source = "The owner's brand art (#965), the owner's second sheet, the source of the in-game wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
+source = "The owner's brand art (#965), the owner's second sheet, the source of the header's wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
 licence = "CC-BY-4.0"
 read = "2026-10-01"
 sha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
