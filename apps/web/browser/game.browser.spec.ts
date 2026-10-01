@@ -423,25 +423,30 @@ const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 4 + 1 + 1 + 1;
 const SHADOW_MAP_EXTRA_DRAW_CALLS = -1 + 1 + 4;
 
 /**
- * #966: the least share of a board's strip that must read as the wordmark's
- * navy for the wordmark to have been drawn there — and, with the boards off,
- * the most the same strip may hold (the control: what is behind a board has
- * none of it).
+ * #966: the least share of a board's strip (31 × 5 pixels) that must read as
+ * the wordmark's lettering (`game-harness.ts` §`letteringIn`) for the wordmark
+ * to have been drawn there — **6 %**, nine pixels — and, with the boards off,
+ * the most the same strip may hold: **2 %**, three (the control: what is
+ * behind a board has none of it). Measured on a Mac on 2026-10-01: stylised,
+ * the gate 40 % and the billboard 31 %; realistic, 26 % and 13 %; every
+ * control 0.
  */
-const WORDMARK_NAVY_FLOOR = 0.12;
-const WORDMARK_NAVY_CONTROL_CEILING = 0.02;
+const WORDMARK_LETTERING_FLOOR = 0.06;
+const WORDMARK_LETTERING_CONTROL_CEILING = 0.02;
 
 /** The wordmark read on the gate and a billboard, against its control — either world. */
 function expectWordmarkRead(logos: LogoMeasurement): void {
   // Non-vacuity: a gate's board and a billboard's were drawn.
   expect(logos.gateBoards).toBeGreaterThanOrEqual(1);
   expect(logos.billboardBoards).toBeGreaterThanOrEqual(1);
-  expect(logos.gateNavy / logos.stripPixels).toBeGreaterThan(WORDMARK_NAVY_FLOOR);
-  expect(logos.billboardNavy / logos.stripPixels).toBeGreaterThan(WORDMARK_NAVY_FLOOR);
+  expect(logos.gateLettering / logos.stripPixels).toBeGreaterThan(WORDMARK_LETTERING_FLOOR);
+  expect(logos.billboardLettering / logos.stripPixels).toBeGreaterThan(WORDMARK_LETTERING_FLOOR);
   // The control: the same strips with the boards off.
-  expect(logos.gateNavyOff / logos.stripPixels).toBeLessThanOrEqual(WORDMARK_NAVY_CONTROL_CEILING);
-  expect(logos.billboardNavyOff / logos.stripPixels).toBeLessThanOrEqual(
-    WORDMARK_NAVY_CONTROL_CEILING,
+  expect(logos.gateLetteringOff / logos.stripPixels).toBeLessThanOrEqual(
+    WORDMARK_LETTERING_CONTROL_CEILING,
+  );
+  expect(logos.billboardLetteringOff / logos.stripPixels).toBeLessThanOrEqual(
+    WORDMARK_LETTERING_CONTROL_CEILING,
   );
   // One draw call for every board in a frame.
   expect(logos.calls).toBe(1);
@@ -2401,9 +2406,9 @@ test.describe('the scenery is models, not solids — #341', () => {
     const { logos } = await harness(harnessRun);
     expect(logos.measured).toBe(true);
     console.log(
-      `#966 (stylised): the gate's board ${String(logos.gateNavy)} of ${String(logos.stripPixels)} ` +
-        `navy (off ${String(logos.gateNavyOff)}); the billboard's ${String(logos.billboardNavy)} ` +
-        `(off ${String(logos.billboardNavyOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
+      `#966 (stylised): the gate's board ${String(logos.gateLettering)} of ${String(logos.stripPixels)} ` +
+        `lettering (off ${String(logos.gateLetteringOff)}); the billboard's ${String(logos.billboardLettering)} ` +
+        `(off ${String(logos.billboardLetteringOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
         `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
         `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
     );
@@ -3642,9 +3647,9 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     const { logos } = await realistic(harnessRun);
     expect(logos.measured).toBe(true);
     console.log(
-      `#966 (realistic): the gate's board ${String(logos.gateNavy)} of ${String(logos.stripPixels)} ` +
-        `navy (off ${String(logos.gateNavyOff)}); the billboard's ${String(logos.billboardNavy)} ` +
-        `(off ${String(logos.billboardNavyOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
+      `#966 (realistic): the gate's board ${String(logos.gateLettering)} of ${String(logos.stripPixels)} ` +
+        `lettering (off ${String(logos.gateLetteringOff)}); the billboard's ${String(logos.billboardLettering)} ` +
+        `(off ${String(logos.billboardLetteringOff)}); ${String(logos.gateBoards)} board(s) at the gate, ` +
         `${String(logos.billboardBoards)} at the billboard, +${String(logos.calls)} call; ` +
         `strip means ${logos.gateMean.join('/')} and ${logos.billboardMean.join('/')}`,
     );

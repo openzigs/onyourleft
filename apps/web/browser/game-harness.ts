@@ -5732,19 +5732,20 @@ function gantryProbe(
  * a loop, 15 m before its lap line, and on a billboard the placement rules
  * stood beside a valley road, 15 m ahead of it. Each is read as a strip aimed
  * from geometry at the board's middle, counting the pixels that are the
- * wordmark's navy ({@link isWordmarkNavy}); then the same frames with the
- * boards off — the control: the strip must read what is behind, and no navy.
+ * wordmark's lettering ({@link letteringIn}); then the same frames with the
+ * boards off — the control: the strip must read what is behind, and no
+ * lettering.
  */
 export interface LogoMeasurement {
   readonly measured: boolean;
   /** Boards the view drew approaching the gate, and approaching the billboard. */
   readonly gateBoards: number;
   readonly billboardBoards: number;
-  /** Navy pixels on each strip, the boards drawn and not. */
-  readonly gateNavy: number;
-  readonly gateNavyOff: number;
-  readonly billboardNavy: number;
-  readonly billboardNavyOff: number;
+  /** Lettering pixels on each strip, the boards drawn and not. */
+  readonly gateLettering: number;
+  readonly gateLetteringOff: number;
+  readonly billboardLettering: number;
+  readonly billboardLetteringOff: number;
   /** Pixels in each strip, for the counts' denominator. */
   readonly stripPixels: number;
   /** Each strip's mean colour, bytes, the boards drawn — published, not asserted. */
@@ -5758,10 +5759,10 @@ const NO_LOGO: LogoMeasurement = {
   measured: false,
   gateBoards: 0,
   billboardBoards: 0,
-  gateNavy: 0,
-  gateNavyOff: 0,
-  billboardNavy: 0,
-  billboardNavyOff: 0,
+  gateLettering: 0,
+  gateLetteringOff: 0,
+  billboardLettering: 0,
+  billboardLetteringOff: 0,
   stripPixels: 0,
   gateMean: [],
   billboardMean: [],
@@ -5772,12 +5773,21 @@ const NO_LOGO: LogoMeasurement = {
 const LOGO_STRIP = { width: 31, height: 5 } as const;
 
 /**
- * Whether a pixel is the wordmark's navy: darker than the white board and the
- * sky, and blue leading red — which neither the board, the galvanised beam,
- * the road nor the ground is. Bytes, as read back.
+ * How many pixels of a strip are the wordmark's lettering: darker than half
+ * the strip's median luminance. The board is white and most of the strip, so
+ * its median is the board's; the lettering is navy, under either world's tone
+ * mapping well under half of it (AgX takes the navy's hue but not its
+ * darkness). With the boards off the strip is the sky or the ground beyond,
+ * neither of which is half as dark as itself anywhere a strip this size reads.
  */
-function isWordmarkNavy(r: number, g: number, b: number): boolean {
-  return b - r >= 12 && (r + g + b) / 3 <= 130;
+function letteringIn(pixels: Uint8Array): number {
+  const values: number[] = [];
+  for (let at = 0; at + 3 < pixels.length; at += 4) {
+    values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+  }
+  const sorted = [...values].sort((one, other) => one - other);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  return values.filter((value) => value < median / 2).length;
 }
 
 /** @see LogoMeasurement */
@@ -5812,7 +5822,7 @@ function logoProbe(
   });
   const boardCentre = pixelFor(boardFrame, canvas, { x: board.x, y: board.y + middle, z: board.z });
   const means: number[][] = [];
-  const navyOn = (frame: SceneFrame, centre: { x: number; y: number }): number => {
+  const letteringOn = (frame: SceneFrame, centre: { x: number; y: number }): number => {
     view.render(frame);
     view.render(frame);
     const pixels = readRegion(
@@ -5822,20 +5832,18 @@ function logoProbe(
       LOGO_STRIP.width,
       LOGO_STRIP.height,
     );
-    let navy = 0;
     const mean = [0, 0, 0];
     for (let at = 0; at + 3 < pixels.length; at += 4) {
-      if (isWordmarkNavy(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0)) navy += 1;
       for (let channel = 0; channel < 3; channel += 1) {
         mean[channel] = (mean[channel] ?? 0) + (pixels[at + channel] ?? 0) / (pixels.length / 4);
       }
     }
     means.push(mean.map((each) => Math.round(each)));
-    return navy;
+    return letteringIn(pixels);
   };
-  const gateNavy = navyOn(gateFrame, gateCentre);
+  const gateLettering = letteringOn(gateFrame, gateCentre);
   const gateBoards = logoBoardsOf(view);
-  const billboardNavy = navyOn(boardFrame, boardCentre);
+  const billboardLettering = letteringOn(boardFrame, boardCentre);
   const billboardBoards = logoBoardsOf(view);
   let calls = 0;
   countingDrawCalls((counted) => {
@@ -5847,11 +5855,11 @@ function logoProbe(
     view.render(gateFrame);
     calls = on - (counted() - again);
   });
-  let gateNavyOff: number;
-  let billboardNavyOff: number;
+  let gateLetteringOff: number;
+  let billboardLetteringOff: number;
   try {
-    gateNavyOff = navyOn(gateFrame, gateCentre);
-    billboardNavyOff = navyOn(boardFrame, boardCentre);
+    gateLetteringOff = letteringOn(gateFrame, gateCentre);
+    billboardLetteringOff = letteringOn(boardFrame, boardCentre);
   } finally {
     logosShownOf(view, true);
   }
@@ -5859,10 +5867,10 @@ function logoProbe(
     measured: true,
     gateBoards,
     billboardBoards,
-    gateNavy,
-    gateNavyOff,
-    billboardNavy,
-    billboardNavyOff,
+    gateLettering,
+    gateLetteringOff,
+    billboardLettering,
+    billboardLetteringOff,
     stripPixels: LOGO_STRIP.width * LOGO_STRIP.height,
     gateMean: means[0] ?? [],
     billboardMean: means[1] ?? [],
