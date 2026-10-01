@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DRAWN_FROM,
+  WORDMARK_FROM,
   EXPECTED_REPORTS,
   inputDigest,
   licenceVerdict,
@@ -199,10 +200,16 @@ describe('the pipeline’s own table', () => {
         expect(output.from, output.file).toBe(DRAWN_FROM);
         continue;
       }
+      // #966: the wordmark is made from the owner's artwork, committed here.
+      if (output.recipe.how === 'wordmark') {
+        expect(output.from, output.file).toBe(WORDMARK_FROM);
+        continue;
+      }
       expect(ids, output.file).toContain(output.from);
     }
     // Non-vacuity: the four bicycle maps, and only they, are drawn.
     expect(OUTPUTS.filter((output) => output.recipe.how === 'drawn')).toHaveLength(4);
+    expect(OUTPUTS.filter((output) => output.recipe.how === 'wordmark')).toHaveLength(1);
   });
 
   it('downloads nothing it does not use', () => {
@@ -353,12 +360,15 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       const step = recipe.how === 'verbatim' ? undefined : recipe.ktx2;
       if (step === undefined) continue;
       // #624: a roughness map is data — linear, never sRGB colour.
+      // #966: the wordmark is a cut-out over its board, so it keeps its alpha.
       expect(step.encoding, output.file).toBe(
-        output.file.includes('_nor_gl_')
-          ? 'normal'
-          : output.file.includes('_rough_')
-            ? 'data'
-            : 'colour',
+        recipe.how === 'wordmark'
+          ? 'colour-alpha'
+          : output.file.includes('_nor_gl_')
+            ? 'normal'
+            : output.file.includes('_rough_')
+              ? 'data'
+              : 'colour',
       );
     }
   });

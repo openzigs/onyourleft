@@ -465,3 +465,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   scatter kinds, and of the fourteen kinds only the five D-3 named wear a model. D-3's rule that a
   new kind arrives as its own issue is what #460 followed, and it stands.
   ([#431](https://github.com/openzigs/onyourleft/issues/431))
+
+- **2026-10-01** — **The stylised world uploads one texture, the wordmark, and is no longer
+  Kenney's alone.** The 2026-09-19 entry above records that *"No texture reaches the GPU"*, and
+  D-1 and D-2 describe a stylised world of one author. By the owner's ruling in
+  [#966](https://github.com/openzigs/onyourleft/issues/966) — the On Your Left wordmark on a race's
+  start gate and on billboards beside the road, in **both** worlds — the stylised world now
+  uploads exactly one texture: `apps/web/src/game/brand/game-wordmark.png`, the owner's own
+  `CC-BY-4.0` artwork (#965), 1024 × 128, precached, on the boards
+  `three-renderer.ts` §`LogoBelt` draws. `game.browser.spec.ts`'s "uploads no texture" is an
+  allowlist of that one texture, with the boards turned off as its control (0 uploads). It is a
+  **brand mark, not scenery style**: no scenery kind wears it, every model is still Kenney's
+  upstream bytes with its colour baked into vertices, and D-7's purpose — no material
+  `GLTFLoader` builds reaches the scene unasserted — stands. Nothing else in this ADR's decisions
+  changes. ([#966](https://github.com/openzigs/onyourleft/issues/966))

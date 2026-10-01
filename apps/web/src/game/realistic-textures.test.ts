@@ -288,6 +288,8 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
+      // #966: the wordmark.
+      1 +
       REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]).reduce(
         (sum, model) =>
           sum +
@@ -309,9 +311,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
         'impostor-normals',
         'bicycle',
         'rider',
+        'wordmark',
       ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
+    // #966: the wordmark is a cut-out over its board, ETC2 with its alpha.
+    expect(worn.filter((each) => each.role === 'wordmark').map((each) => each.format)).toEqual([
+      'ETC2 RGBA',
+    ]);
     for (const texture of worn) {
       expect(['ASTC 4x4', 'ETC2 RGB', 'ETC2 RGBA'], JSON.stringify(texture)).toContain(
         texture.format,

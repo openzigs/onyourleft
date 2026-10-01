@@ -446,6 +446,16 @@ export const REALISTIC_BICYCLE_MAP_NAMES: readonly RealisticBicycleMap[] = [
 ];
 
 /**
+ * The game's wordmark — #966: the owner's CC-BY-4.0 artwork, keyed and
+ * resampled by `tools/brand/game-wordmark.ts` and encoded as KTX2 (ETC1S with
+ * alpha) by the realistic pipeline, which alone writes into this directory —
+ * so ADR 0026 D-7 keeps it out of the precache by the directory, as every
+ * other realistic file. The stylised world's copy is the same pixels as a PNG
+ * (`src/game/brand/game-wordmark.png`), precached with the app.
+ */
+export const REALISTIC_WORDMARK = 'game-wordmark.ktx2';
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -476,6 +486,7 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_RIDER,
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
+    REALISTIC_WORDMARK,
   ];
 }
 
