@@ -2,12 +2,15 @@
 
 /**
  * The board the game's wordmark is painted on — #966 — and where it stands on
- * the starting gate.
+ * the start and finish gates (#978).
  *
  * ## One shape, two places
  *
  * The owner ruled that the logo goes on a race's **starting gate** and on a
- * few **billboards** along a course, in both worlds. Both are this one shape,
+ * few **billboards** along a course, in both worlds (#966) — and, since #978,
+ * on the **finish gate** as well: on a point-to-point route the start gate's
+ * board hangs over the rider at the start and is never in frame, so the finish
+ * is where a rider riding at a gate sees it. Both are this one shape,
  * built from numbers the way `buildings.ts` builds a barn: a board
  * {@link LOGO_BOARD_WIDTH_METRES} × {@link LOGO_BOARD_HEIGHT_METRES} — the
  * wordmark texture's own 8 : 1 (`tools/brand/game-wordmark.ts`) — on two
@@ -132,11 +135,13 @@ export interface LogoPlace {
 export const LOGO_BOARDS_PER_FRAME = 8;
 
 /**
- * The most START-GATE boards one frame can hold: one stand carries the logo
- * ({@link carriesTheLogo}), and a short loop places it once a lap for
- * `gantry.ts` §`LINE_LAPS_IN_REACH` laps.
+ * The most GATE boards one frame can hold: every gantry carries the logo
+ * ({@link carriesTheLogo}). A loop has one gantry, and a short loop places it
+ * once a lap for `gantry.ts` §`LINE_LAPS_IN_REACH` laps; a point-to-point
+ * route has two, the start's and the finish's, each placed once — both in one
+ * frame only on a route shorter than the reach. Whichever is more.
  */
-export const GATE_LOGO_BOARDS_PER_FRAME = LINE_LAPS_IN_REACH;
+export const GATE_LOGO_BOARDS_PER_FRAME = Math.max(LINE_LAPS_IN_REACH, 2);
 
 /**
  * The most billboards one frame carries — #966's review: what the belt has
@@ -185,7 +190,14 @@ export function billboardLogoPlace(board: Billboard): LogoPlace {
   };
 }
 
-/** Which line a gate's logo goes on: the start, or a loop's one line — the race's start. */
+/**
+ * Which lines a gate's logo goes on: every gantry — a point-to-point route's
+ * start AND finish, or a loop's one line — and never the "to go" board before
+ * a line. ⚠️ **The finish since #978** (the owner's ruling of 2026-10-01): a
+ * reviewer who remembers "the start gate only" is reading #966's file. Both
+ * boards are instances of `three-renderer.ts` §`LogoBelt`'s one mesh, so the
+ * finish costs no draw call and no texture.
+ */
 export function carriesTheLogo(line: PlacedStand): boolean {
-  return line.stand.kind === 'gantry' && line.stand.distance === 0;
+  return line.stand.kind === 'gantry';
 }

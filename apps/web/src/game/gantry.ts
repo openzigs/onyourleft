@@ -4,9 +4,13 @@
  * Where the realistic world's start and finish gantries stand, and what they
  * are made of — #679.
  *
- * ⚠️ **Both worlds draw them since #966**: the start gate carries the game's
- * wordmark (`logo-board.ts`) in the stylised world too, so the stylised view
- * draws the same stands, unlettered (`three-renderer.ts` §`GantryBelt`).
+ * ⚠️ **Both worlds draw them since #966**: the gates carry the game's
+ * wordmark (`logo-board.ts`; the start's since #966, the finish's too since
+ * #978) in the stylised world too, so the stylised view draws the gantries and
+ * their barriers, unlettered — and leaves out the "to go" board before a line,
+ * which without its lettering would be a bare post (`three-renderer.ts`
+ * §`GantryBelt`). A reviewer who remembers "the same stands" is reading #966's
+ * first draft.
  *
  * ## At the line and nowhere else
  *
@@ -194,20 +198,20 @@ export interface PlacedStand extends RoadFrame {
 }
 
 /**
+ * How many laps' copies of a stand {@link linesNear} looks for near the rider
+ * on a loop: the lap before, this one and the next. So no frame holds more
+ * than this many placings of one stand — which is what bounds a loop's gate
+ * wordmark boards (`logo-board.ts` §`GATE_LOGO_BOARDS_PER_FRAME`).
+ */
+export const LINE_LAPS_IN_REACH = 3;
+
+/**
  * The stands within reach of the rider, placed on the DRAWN road — the
  * corridor this frame's road is built from — between the two corridor points
  * whose odometers bracket the stand's. On a loop a stand is matched on every
  * lap at once, by odometer, which is `CorridorPoint.along`'s reason for
  * existing.
  */
-/**
- * How many laps' copies of a stand {@link linesNear} looks for near the rider
- * on a loop: the lap before, this one and the next. So no frame holds more
- * than this many placings of one stand — which is what bounds the start gate's
- * wordmark boards (`logo-board.ts` §`GATE_LOGO_BOARDS_PER_FRAME`).
- */
-export const LINE_LAPS_IN_REACH = 3;
-
 export function linesNear(
   profile: RouteProfile,
   corridor: RoadCorridor,
