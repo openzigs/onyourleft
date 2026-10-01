@@ -141,8 +141,8 @@ const WorkoutCardArt = memo(function WorkoutCardArt({
   readonly timeline: WorkoutTimeline;
 }): JSX.Element {
   return (
-    <div className="oyl-shape-card__art">
-      <WorkoutShape workout={timeline} />
+    <div className="oyl-shape-card__art tw:h-(--oyl-shape-card-art-height)">
+      <WorkoutShape workout={timeline} className="tw:block tw:size-full" />
     </div>
   );
 });
@@ -445,15 +445,19 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             </p>
             <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
               {entries.map(({ row, timeline }) => (
-                <li key={row.id} className="oyl-pane-list__item oyl-shape-card">
+                <li
+                  key={row.id}
+                  className="oyl-pane-list__item oyl-shape-card tw:grid tw:grid-cols-1"
+                >
                   <a
+                    className="tw:justify-self-start"
                     href={hrefForSelection(routeById('workouts'), row.id)}
                     data-oyl-select={row.id}
                     aria-current={row.id === selected ? 'true' : undefined}
                   >
                     {row.name}
                   </a>
-                  <p className="oyl-muted">
+                  <p className="oyl-muted tw:mb-0">
                     {row.duration} · hardest: {hardestText(row)}
                   </p>
                   <WorkoutCardArt timeline={timeline} />

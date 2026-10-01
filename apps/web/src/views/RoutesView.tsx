@@ -371,15 +371,19 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
         </p>
         <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
           {routes.map((route) => (
-            <li key={route.id} className="oyl-pane-list__item oyl-shape-card">
+            <li
+              key={route.id}
+              className="oyl-pane-list__item oyl-shape-card tw:grid tw:grid-cols-1"
+            >
               <a
+                className="tw:justify-self-start"
                 href={hrefForSelection(routeById('routes'), route.id)}
                 data-oyl-select={route.id}
                 aria-current={route.id === selected ? 'true' : undefined}
               >
                 {route.name}
               </a>
-              <p className="oyl-muted">
+              <p className="oyl-muted tw:mb-0">
                 {routeLength(route.profile.totalDistance, units)} · climb{' '}
                 {routeClimb(route.profile.totalAscent, units)} ·{' '}
                 {route.profile.loop ? 'loop' : 'point to point'} · {route.visibility}
@@ -387,8 +391,8 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
               {/* #941: the route's climb, drawn from the profile this list
                   already read — no read of its own, and decoration only: the
                   words above say everything it does. */}
-              <div className="oyl-shape-card__art">
-                <ProfileShape profile={route.profile} />
+              <div className="oyl-shape-card__art tw:h-(--oyl-shape-card-art-height)">
+                <ProfileShape profile={route.profile} className="tw:block tw:size-full" />
               </div>
             </li>
           ))}

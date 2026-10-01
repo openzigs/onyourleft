@@ -121,8 +121,10 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   name and *Save workout* ahead of the block form (below it, the button was
  *   72 px under the landscape fold). On a phone, after the one-pane list —
  *   headed since #670's review by *Build a workout*, which moves focus to the
- *   builder — it ends about 4 px above the fold in this Chromium on a Mac, and
- *   the CI runner's fonts put this page's text about 50 px lower.
+ *   builder — it is above the fold, by too little to hold: re-taken for
+ *   #982, whose 48 px card drawings moved it down 32 px, it ends 45.9 px above
+ *   the fold in this Chromium on a Mac (77.9 before) and 21.1 px on
+ *   the CI runner (53.1 before, run 36881810211; after, run 36887027370).
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
@@ -1240,28 +1242,37 @@ test.describe('#723 — two panes scroll on their own', () => {
 });
 
 /**
- * #941 — route and workout cards with their shape drawn on them.
+ * #941 — route and workout cards with their shape drawn on them, and since
+ * #982 (the owner's ruling on epic #935) drawn about 48 px tall.
  *
  * Each Routes and Workouts card draws its route's climb or its workout's
- * blocks in a strip across its foot (`theme.css` §`.oyl-shape-card`). What
- * is held here, on the loads the blocks above already make:
+ * blocks across its foot (`theme.css` §`.oyl-shape-card`). What is held here,
+ * on the loads the blocks above already make:
  *
- * - **No primary moves down**, in both palettes. Every primary's margin to its line, on arrival
- *   and with the fixture's item chosen, at the four viewports #670 publishes,
- *   is at least what the same page measures with the shapes taken off
- *   (`reflow.html?shape=off`, the card as it was before #941) — read in the
- *   same run, so the fonts that differ between a Mac and the CI runner cancel.
- *   Where #670 holds a primary above the fold ({@link PRIMARY_ON_ARRIVAL},
- *   {@link PRIMARY_WHEN_SELECTED}) that hold still applies, in the block above.
+ * - **A primary moves down by the drawings' own cost and by no more**, in both
+ *   palettes. #941's strip took the facts line's 1 em bottom margin and added
+ *   no height, and this case held every margin at least equal to the same page
+ *   without the shapes (`reflow.html?shape=off`, the card as it was before
+ *   #941). A 48 px drawing cannot add nothing, so since #982 the hold is
+ *   {@link SHAPE_CARD_COST_PIXELS} per card ABOVE the primary in its own
+ *   column — counted on the page without the shapes — and not a pixel more:
+ *   a card that also wrapped its words, gained a gap or doubled its drawing
+ *   fails. Read in the same run, so the fonts that differ between a Mac and
+ *   the CI runner cancel. Where #670 holds a primary above the fold, and above
+ *   §4f's 50 px floor on the tablet ({@link PRIMARY_ON_ARRIVAL},
+ *   {@link PRIMARY_WHEN_SELECTED}), that hold still applies, in the block
+ *   above, unchanged.
  * - **The control**: `reflow.html?shape=tall` draws the shape at three times
- *   its declared height, and *Import route* on the upright tablet — the
- *   one place a held primary sits below the route cards — must then come out
- *   UNDER the margin `?shape=off` recorded. Without it a shape that never
- *   rendered, or a measurement of the wrong element, would pass.
- * - **The shapes are there, decoration, and painted with their tokens** in
- *   both palettes: one `aria-hidden` `<svg>` per card, holding at least one
- *   path, with no text, and each path's computed fill the kit's token for the
- *   palette (`illustration/paint.ts`), never a literal.
+ *   its declared height, and *Import route* on the upright tablet — the one
+ *   place a held primary sits below the route cards — must then come out
+ *   UNDER the bound above. Without it a shape that never rendered, or a
+ *   measurement of the wrong element, would pass.
+ * - **The shapes are there, decoration, 48 px tall, and painted with their
+ *   tokens** in both palettes: one `aria-hidden` `<svg>` per card, holding at
+ *   least one path, with no text, and each path's computed fill the kit's
+ *   token for the palette (`illustration/paint.ts`), never a literal. The
+ *   height is pinned because {@link SHAPE_CARD_COST_PIXELS} is derived from
+ *   it.
  * - **The card's one link is a 44 × 44 target**, #316's three ways: the box,
  *   the declared `min-height`, and the box with that floor stripped, which
  *   must fall under 44 on one line — so the target is the floor's doing.
@@ -1270,24 +1281,64 @@ const SHAPE_ROUTES = LIST_DETAIL.filter(
   (route) => route.id === 'routes' || route.id === 'workouts',
 );
 
+/** The drawing's declared height, `theme.css` §`.oyl-shape-card` (3rem). */
+const SHAPE_ART_PIXELS = 48;
+
+/**
+ * What one card's drawing costs the page below it: its height, less the facts
+ * line's 1 em bottom margin (16 px) that it takes the place of. #982.
+ */
+const SHAPE_CARD_COST_PIXELS = SHAPE_ART_PIXELS - 16;
+
+interface PrimaryMargin {
+  /** The primary's margin to its line, px. */
+  readonly margin: number;
+  /** How many laid-out shape cards end above it in its own column. */
+  readonly cardsAbove: number;
+}
+
 /** Every primary's margin to its line, keyed by route, state and text. */
-async function primaryMargins(page: Page, viewport: Viewport): Promise<Map<string, number>> {
-  const margins = new Map<string, number>();
+async function primaryMargins(page: Page, viewport: Viewport): Promise<Map<string, PrimaryMargin>> {
+  const margins = new Map<string, PrimaryMargin>();
   for (const route of SHAPE_ROUTES) {
     for (const [state, hash] of [
       ['arrival', hrefFor(route)],
       ['selected', hrefForSelection(route, await selectionOf(page, route))],
     ] as const) {
       const seen = await visit(page, route, hash);
-      for (const primary of seen.primaries) {
-        margins.set(
-          `${route.id} [${state}] “${primary.text}” @ ${viewport.name}`,
-          seenLine(seen, primary) - primary.bottom,
-        );
-      }
+      const above = await page.evaluate(
+        (primaries) => {
+          const panes = document.querySelector('[data-oyl-panes]')?.getAttribute('data-oyl-panes');
+          const cards = [...document.querySelectorAll('.oyl-main .oyl-shape-card')]
+            .filter((card) => card.getClientRects().length > 0)
+            .map((card) => ({
+              bottom: card.getBoundingClientRect().bottom + window.scrollY,
+              pane: card.closest('[data-oyl-pane]')?.getAttribute('data-oyl-pane') ?? null,
+            }));
+          return primaries.map(
+            (primary) =>
+              cards.filter(
+                (card) =>
+                  card.bottom <= primary.top && (panes === '1' || card.pane === primary.pane),
+              ).length,
+          );
+        },
+        seen.primaries.map(({ top, pane }) => ({ top, pane })),
+      );
+      seen.primaries.forEach((primary, index) => {
+        margins.set(`${route.id} [${state}] “${primary.text}” @ ${viewport.name}`, {
+          margin: seenLine(seen, primary) - primary.bottom,
+          cardsAbove: above[index] ?? 0,
+        });
+      });
     }
   }
   return margins;
+}
+
+/** The least margin the shipped cards may leave a primary: #982's bound. */
+function boundFor(before: PrimaryMargin): number {
+  return before.margin - before.cardsAbove * SHAPE_CARD_COST_PIXELS - 0.5;
 }
 
 test.describe('#941 — cards with their shape drawn on them', () => {
@@ -1303,7 +1354,9 @@ test.describe('#941 — cards with their shape drawn on them', () => {
       test.use({ colorScheme: theme });
 
       for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE, REFLOW]) {
-        test(`no primary moves down at ${viewport.name}, ${theme}`, async ({ page }) => {
+        test(`a primary moves down by the drawings' cost and no more at ${viewport.name}, ${theme}`, async ({
+          page,
+        }) => {
           await open(page, viewport, 'data=populated&shape=off');
           expect(await page.locator('style[data-oyl-control="shape=off"]').count()).toBe(1);
           expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
@@ -1314,10 +1367,14 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           console.log(
             `[#941] margins @ ${viewport.name}, ${theme}\n  ` +
               [...after]
-                .map(
-                  ([key, margin]) =>
-                    `${key}: ${margin.toFixed(1)} px (without shapes ${(before.get(key) ?? Number.NaN).toFixed(1)})`,
-                )
+                .map(([key, { margin }]) => {
+                  const was = before.get(key);
+                  return (
+                    `${key}: ${margin.toFixed(1)} px (without shapes ` +
+                    `${(was?.margin ?? Number.NaN).toFixed(1)}, ` +
+                    `${String(was?.cardsAbove ?? Number.NaN)} card(s) above)`
+                  );
+                })
                 .join('\n  '),
           );
           // Both maps hold something, or the comparison below holds over
@@ -1326,26 +1383,38 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           expect(before.size, `no primary measured without the shapes`).toBeGreaterThan(0);
           expect(after.size, `no primary measured with the shapes`).toBeGreaterThan(0);
           expect([...after.keys()]).toEqual([...before.keys()]);
-          const worse = [...after].filter(([key, margin]) => margin < (before.get(key) ?? 0) - 0.5);
+          const worse = [...after]
+            .filter(([key, { margin }]) => {
+              const was = before.get(key);
+              return was === undefined || margin < boundFor(was);
+            })
+            .map(([key, { margin }]) => `${key}: ${margin.toFixed(1)} px`);
           expect(worse).toEqual([]);
         });
       }
     });
   }
 
-  test('the control — a shape three times as tall pushes Import route down on the upright tablet', async ({
+  test('the control — a shape three times as tall pushes Import route past the bound on the upright tablet', async ({
     page,
   }) => {
     const key = `routes [arrival] “Import route” @ ${TABLET_UPRIGHT.name}`;
     await open(page, TABLET_UPRIGHT, 'data=populated&shape=off');
-    const floor = (await primaryMargins(page, TABLET_UPRIGHT)).get(key);
+    const before = (await primaryMargins(page, TABLET_UPRIGHT)).get(key);
     await open(page, TABLET_UPRIGHT, 'data=populated&shape=tall');
     expect(await page.locator('style[data-oyl-control="shape=tall"]').count()).toBe(1);
     const tall = (await primaryMargins(page, TABLET_UPRIGHT)).get(key);
-    console.log(`[#941] control: ${key}: ${String(tall)} px, floor ${String(floor)} px`);
-    expect(floor).toBeDefined();
+    expect(before).toBeDefined();
     expect(tall).toBeDefined();
-    expect(tall ?? Number.POSITIVE_INFINITY).toBeLessThan((floor ?? 0) - 0.5);
+    const bound = before === undefined ? Number.NaN : boundFor(before);
+    console.log(
+      `[#941] control: ${key}: ${String(tall?.margin)} px, without shapes ` +
+        `${String(before?.margin)} px, bound ${String(bound)} px`,
+    );
+    // A card must be above it, or the bound is the floor itself and the
+    // control says nothing about the drawing's cost.
+    expect(before?.cardsAbove ?? 0).toBeGreaterThan(0);
+    expect(tall?.margin ?? Number.POSITIVE_INFINITY).toBeLessThan(bound);
   });
 
   for (const theme of THEMES) {
@@ -1382,7 +1451,7 @@ test.describe('#941 — cards with their shape drawn on them', () => {
           expect(card.hidden).toBe('true');
           expect(card.text).toBe('');
           expect(card.width).toBeGreaterThan(0);
-          expect(card.height).toBeGreaterThanOrEqual(15);
+          expect(card.height, `${route.id}: the drawing's height`).toBeCloseTo(SHAPE_ART_PIXELS, 0);
           expect(card.fills.length).toBeGreaterThan(0);
           for (const fill of card.fills) {
             expect(fill, `${route.id} in ${theme}`).toBe(rgbOf(colours[token]));
@@ -1416,6 +1485,82 @@ test.describe('#941 — cards with their shape drawn on them', () => {
       expect(stripped, `${route.id}: the floor is what makes the target`).toBeLessThan(44);
     }
   });
+});
+
+/**
+ * #982 — how many cards fit before scrolling, published. The populated fixture
+ * holds one route and one workout, so a count of the cards it renders says
+ * nothing; the first card is COPIED, thirty times, into its own list, and every
+ * card whose bottom clears the line its pane is seen to (the fold, or the
+ * bottom of a pane that scrolls on its own) is counted. Real layout, real
+ * fonts, the copies removed again before anything else reads the page. Read
+ * under `?shape=off` and as shipped in the same run, so the two counts differ
+ * by the drawing alone. Published, not held: how many fit is the owner's
+ * trade (#982), and the fold the controls must clear is held above.
+ */
+async function cardsBeforeScrolling(
+  page: Page,
+  fold: number,
+): Promise<{ fit: number; top: number; height: number; seen: number }> {
+  return page.evaluate((line) => {
+    const first = document.querySelector('.oyl-main .oyl-shape-card');
+    const list = first?.parentElement;
+    if (first === null || first === undefined || list === null || list === undefined) {
+      return { fit: -1, top: 0, height: 0, seen: 0 };
+    }
+    const box = first.getBoundingClientRect();
+    const copies: Element[] = [];
+    for (let index = 0; index < 30; index += 1) {
+      const copy = first.cloneNode(true) as Element;
+      list.append(copy);
+      copies.push(copy);
+    }
+    const pane = first.closest('[data-oyl-pane]');
+    const paneBottom =
+      pane === null || getComputedStyle(pane).overflowY === 'visible'
+        ? Number.POSITIVE_INFINITY
+        : pane.getBoundingClientRect().bottom + window.scrollY;
+    const seen = Math.min(line, paneBottom);
+    const fit = [...list.querySelectorAll(':scope > .oyl-shape-card')].filter(
+      (card) => card.getBoundingClientRect().bottom + window.scrollY <= seen,
+    ).length;
+    for (const copy of copies) {
+      copy.remove();
+    }
+    return { fit, top: box.top + window.scrollY, height: box.height, seen };
+  }, fold);
+}
+
+test.describe('#982 — how many cards fit before scrolling, published', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE]) {
+    test(`at ${viewport.name}`, async ({ page }) => {
+      const counts = new Map<string, Record<'off' | 'shipped', string>>();
+      for (const [query, column] of [
+        ['data=populated&shape=off', 'off'],
+        ['data=populated', 'shipped'],
+      ] as const) {
+        await open(page, viewport, query);
+        for (const route of SHAPE_ROUTES) {
+          const seen = await visit(page, route, hrefFor(route));
+          const { fit, top, height, seen: line } = await cardsBeforeScrolling(page, seen.fold);
+          expect(fit, `${route.id}: no card on the page`).toBeGreaterThanOrEqual(0);
+          const entry = counts.get(route.id) ?? { off: '', shipped: '' };
+          counts.set(route.id, {
+            ...entry,
+            [column]:
+              `${String(fit)} (first card y ${top.toFixed(0)}, ${height.toFixed(1)} px tall, ` +
+              `seen to y ${line.toFixed(0)})`,
+          });
+        }
+      }
+      console.log(
+        `[#982] cards before scrolling @ ${viewport.name}\n  ` +
+          [...counts]
+            .map(([id, { off, shipped }]) => `${id}: ${shipped}; without shapes ${off}`)
+            .join('\n  '),
+      );
+    });
+  }
 });
 
 /** `#7db678` → `rgb(125, 182, 120)`, as `getComputedStyle` reports a fill. */

@@ -1037,10 +1037,11 @@ function applyPanesControl(): void {
  * `?shape=off` and `?shape=tall` — #941. `off` takes the drawn shape off every
  * route and workout card and puts the card back as a plain block, which is the
  * page before #941: the margin `list-detail.browser.spec.ts` §"#941" holds the
- * shipped cards to is read from it, in the same run and the same fonts. `tall`
- * is that block's control: the shape at three times its declared height,
- * so the card is taller than it was and must push the primary below it
- * further down than `off` does.
+ * shipped cards are measured against is read from it, in the same run and the
+ * same fonts. `tall` is that block's control: the shape at three times its
+ * declared height (9rem, since #982 made the declared height 3rem), so a card
+ * grows by far more than the drawing's own cost and must push the primary
+ * below it past the bound §"#941" holds.
  */
 function applyShapeControl(): void {
   const shape = new URLSearchParams(window.location.search).get('shape');
@@ -1061,7 +1062,7 @@ function applyShapeControl(): void {
   `
       : `
     .oyl-shape-card {
-      --oyl-shape-card-art-height: 3em !important;
+      --oyl-shape-card-art-height: 9rem !important;
     }
   `;
   document.head.append(style);

@@ -57,6 +57,10 @@ vi.mock('@onyourleft/domain', async (actual) => {
   const domain = await actual<typeof import('@onyourleft/domain')>();
   return { ...domain, expandWorkout: vi.fn(domain.expandWorkout) };
 });
+vi.mock('../workouts/library', async (actual) => {
+  const library = await actual<typeof import('../workouts/library')>();
+  return { ...library, workoutRow: vi.fn(library.workoutRow) };
+});
 vi.mock('../design/illustration/WorkoutShape', async (actual) => {
   const shape = await actual<typeof import('../design/illustration/WorkoutShape')>();
   return { ...shape, WorkoutShape: vi.fn(shape.WorkoutShape) };
@@ -72,6 +76,7 @@ afterEach(() => {
   mounted = undefined;
   vi.mocked(expandWorkout).mockClear();
   vi.mocked(WorkoutShape).mockClear();
+  vi.mocked(workoutRow).mockClear();
 });
 
 /**
@@ -130,18 +135,19 @@ function workout(id: string, name: string, blocks: readonly WorkoutBlock[]): Wor
 /**
  * The populated fixture's workout, and two that draw every kind of block.
  *
- * ⚠️ The ids hold no digit on purpose: a card carries its id in its link's
- * `href` and `data-oyl-select`, and the no-number check reads every attribute
- * on the card, so an id with a digit in it would need an exemption a number
- * could hide behind.
+ * ⚠️ The ids HOLD digits, on purpose (#980): a card carries its id in its
+ * link's `href` and `data-oyl-select`, and a real id is a generated string
+ * that may hold any. The no-number check strips the card's own id and nothing
+ * else before it looks — so a number anywhere else is still found, and the
+ * check does not depend on how ids happen to be spelt.
  */
 const WORKOUTS: readonly WorkoutRecord[] = [
   workout(
-    'workout-sweet',
+    'workout-sweet-1700',
     'Sweet spot over-unders with a very long name for a small screen',
     POPULATED_WORKOUT_BLOCKS,
   ),
-  workout('workout-ramp', 'Ramp and intervals', [
+  workout('workout-ramp-25', 'Ramp and intervals', [
     {
       kind: 'ramp',
       seconds: seconds(300),
@@ -157,7 +163,7 @@ const WORKOUTS: readonly WorkoutRecord[] = [
       easyTarget: thresholdShare(0.5),
     },
   ]),
-  workout('workout-free', 'Free ride', [{ kind: 'free-ride', seconds: seconds(900) }]),
+  workout('workout-free-900', 'Free ride', [{ kind: 'free-ride', seconds: seconds(900) }]),
 ];
 
 /** The cards on the page: every item of the list pane's list. */
@@ -186,6 +192,23 @@ function nonGeometryAttributes(card: HTMLElement): string[] {
       )
       .map((attribute) => `${element.tagName}[${attribute.name}=${attribute.value}]`),
   );
+}
+
+/**
+ * The card's own layout utilities (ADR 0042) whose names hold a digit — #982.
+ * Taken out of a `class` attribute by exact name before the no-number check,
+ * and nothing else is: a class that is not on this list and holds a digit
+ * still fails, so no number can hide behind the exemption.
+ */
+const LAYOUT_CLASSES_WITH_DIGITS: readonly string[] = ['tw:grid-cols-1', 'tw:mb-0'];
+
+function withoutLayoutClasses(value: string): string {
+  const match = /^([A-Za-z]+)\[class=(.*)\]$/.exec(value);
+  if (match === null) return value;
+  const kept = (match[2] ?? '')
+    .split(/\s+/)
+    .filter((name) => !LAYOUT_CLASSES_WITH_DIGITS.includes(name));
+  return `${match[1] ?? ''}[class=${kept.join(' ')}]`;
 }
 
 function expectDecoration(card: HTMLElement): void {
@@ -256,10 +279,37 @@ describe('#941 — the Workouts list', () => {
           ? 'No target'
           : `${String(row.hardestPercent)}% of threshold`);
       expect(card.textContent).toBe(before);
-      // Outside the drawing's path data and coordinate system, no attribute
-      // on the card holds a digit: no watt, percentage or score in a class, a
-      // label, a title, a `data-*` or an `aria-*`.
-      expect(nonGeometryAttributes(card).filter((value) => /\d/.test(value))).toEqual([]);
+      // Outside the drawing's path data and coordinate system, and once the
+      // card's own id (#980) and its named layout utilities (#982) are taken
+      // out, no attribute on the card holds a
+      // digit: no watt, percentage or score in a class, a label, a title, a
+      // `data-*` or an `aria-*`.
+      expect(
+        nonGeometryAttributes(card)
+          .map((value) => withoutLayoutClasses(value).replaceAll(record.id, ''))
+          .filter((value) => /\d/.test(value)),
+      ).toEqual([]);
+    }
+  });
+
+  it('hands each row the expansion of its OWN record (#980)', async () => {
+    mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
+    await settle();
+    expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
+    const expansions = vi.mocked(expandWorkout).mock;
+    const rows = vi.mocked(workoutRow).mock.calls;
+    expect(rows).toHaveLength(WORKOUTS.length);
+    for (const [record, timeline] of rows) {
+      // Handed a timeline, not left to expand its own — and that timeline is
+      // the very object `expandWorkout` returned for this record's workout.
+      expect(timeline, `${record.id}: no timeline handed`).toBeDefined();
+      const index = expansions.results.findIndex(
+        (result) => result.type === 'return' && result.value === timeline,
+      );
+      expect(index, `${record.id}: the timeline is no expansion the view made`).toBeGreaterThan(-1);
+      expect(expansions.calls[index]?.[0], `${record.id}: another workout's timeline`).toBe(
+        record.workout,
+      );
     }
   });
 

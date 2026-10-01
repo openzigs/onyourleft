@@ -837,12 +837,15 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   callers.
 - **Route and workout cards draw their shape** ([#941](https://github.com/openzigs/onyourleft/issues/941)).
   Each card in the Routes and Workouts list panes draws `ProfileShape` from the route's stored
-  profile, or `WorkoutShape` from the workout the list already expanded, as a strip across the
-  card's foot (`theme.css` §`.oyl-shape-card`). It costs no read — each list still reads the store
-  once (`views/shape-cards.test.tsx`) — and no height: the strip takes the place of the facts
-  line's own 1 em bottom margin, so every primary's margin to the fold is what it was
-  (`list-detail.browser.spec.ts` §"#941", against `reflow.html?shape=off`, with `?shape=tall` as
-  the control). Activities draws no trace on its cards: a ride's line is location data under
+  profile, or `WorkoutShape` from the workout the list already expanded, across the card's foot
+  (`theme.css` §`.oyl-shape-card`). It costs no read — each list still reads the store once
+  (`views/shape-cards.test.tsx`). ⚠️ **Since [#982](https://github.com/openzigs/onyourleft/issues/982)
+  the drawing is 48 px tall** (the owner's ruling on #935), and a reviewer who remembers a 16 px
+  strip that added no height is reading the old file: the drawing takes the facts line's 1 em
+  bottom margin and adds 32 px to a card, and every primary below the cards moves down by that
+  per card above it and by no more (`list-detail.browser.spec.ts` §"#941", against
+  `reflow.html?shape=off`, with `?shape=tall` as the control; §"#982" publishes how many cards
+  fit before scrolling). Activities draws no trace on its cards: a ride's line is location data under
   [ADR 0004](adr/0004-privacy-and-location.md), and drawing one on a list is its own question.
 - **A screen with nothing on it yet is one component** ([#943](https://github.com/openzigs/onyourleft/issues/943)).
   `design/EmptyState.tsx` is a drawing from the kit (about 48 px tall, the owner's ruling of
