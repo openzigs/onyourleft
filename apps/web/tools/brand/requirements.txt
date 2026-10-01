@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The packages derive_brand.py pins (brand.json "packages"), for Python 3.14:
+#   python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# derive_brand.py refuses any other version of these three.
+pillow==12.3.0
+numpy==2.5.3
+scipy==1.18.1

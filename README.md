@@ -239,6 +239,10 @@ patent grant.
 
 Reasoning, and what the choice forecloses: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md).
 
+The name, the logo and the icon are trademarks, which no code or art licence here grants: forks are
+welcome, and must not pass themselves off as On Your Left. [`TRADEMARKS.md`](TRADEMARKS.md) says what
+is fine ("based on On Your Left") and what is not.
+
 ## Privacy
 
 Nothing is collected. There is no account, no server, no analytics and no code in the client that

@@ -133,13 +133,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         production room port; its control is a third page with
                         fan-out switched off where the client meets it
     public/             what Vite copies verbatim into `dist` (#405) — the web app
-                        manifest and the three icons it names. A `.webmanifest`
-                        is on neither LIC001's nor LIC002's extension list and
-                        a JSON document has nowhere to put a header, so what
-                        records the icons is `ASSETS.toml`, and ⚠️ their licence
-                        is `CC0-1.0` rather than this tree's own
-                        `AGPL-3.0-or-later`, which `ASSET004` admits at no path
-                        at all (ADR 0024 D-5). ⚠️ Since #430 it also holds
+                        manifest, the three icons it names and (since #965) the
+                        favicon. A `.webmanifest` is on neither LIC001's nor
+                        LIC002's extension list and a JSON document has nowhere
+                        to put a header, so what records the icons is
+                        `ASSETS.toml`. ⚠️ Since #965 the icons are the OWNER's
+                        art, `CC-BY-4.0`, cut by `tools/brand/` — a reviewer who
+                        remembers them `CC0-1.0` chevrons drawn by
+                        `tools/icons/` is reading the old file (ADR 0024's
+                        2026-10-01 amendment). ⚠️ Since #430 it also holds
                         `realistic/` — the realistic world's 17 files, 30.8 MiB,
                         CC0, made by `tools/realistic/`, in `dist` and so in the
                         APK, and excluded from the precache BY THAT DIRECTORY
@@ -184,18 +186,6 @@ apps/                 AGPL-3.0-or-later, without exception
                         `inputsha256` is the digest of the pixels drawn, which
                         `provenance.test.ts` redraws in CI. What each bicycle
                         part samples on them is `src/game/bicycle-surfaces.ts`
-    tools/brand/        the trainer game's wordmark (#966) — the owner's
-                        CC-BY-4.0 artwork (`gemini-assets-v2.jpeg`, made
-                        with Google Gemini) committed as the source, a
-                        baseline JPEG decoder of this repository's own, and
-                        `game-wordmark.ts`, which keys the painted
-                        checkerboard out and writes the stylised world's
-                        PNG (`src/game/brand/`, precached);
-                        `game-wordmark.test.ts` re-makes it pixel for pixel
-                        inside `pnpm run test`. The realistic world's KTX2 is
-                        the same pixels, made by `tools/realistic/`'s
-                        `wordmark` recipe because only that pipeline writes
-                        `public/realistic/`
     tools/glyphs/       the map's label glyphs (#578) — a committed Roboto
                         v2.138, the LAST Apache-2.0 Roboto (v3 is OFL, which no
                         list here admits), and the reader, the signed-distance
@@ -215,12 +205,47 @@ apps/                 AGPL-3.0-or-later, without exception
                         the entry chunk's static graph
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
-                        beside the icon generator rather than in `src/`
-    tools/icons/        the drawing those icons are committed FROM (#405) — two
-                        chevrons from arithmetic, nothing downloaded and nothing
-                        traced (ADR 0009). Authoring-time code, the shape
-                        `packages/fit/tools` has: in the typecheck, in the test
-                        run, and out of the coverage report
+                        under `tools/` rather than in `src/`
+    tools/icons/        two chevrons from arithmetic (#405) — since #965 NOT the
+                        app's icons, only the mark the realistic rider's jersey
+                        wears (#623), whose kit bytes depend on it.
+                        Authoring-time code, the shape `packages/fit/tools`
+                        has: in the typecheck, in the test run, and out of the
+                        coverage report
+    tools/brand/        the owner's brand art (#965): the three source pictures
+                        (Google Gemini, `CC-BY-4.0`, credited to the owner),
+                        `derive_brand.py` — which cuts every icon, the wordmark
+                        and the logo out of them with pinned Pillow, NumPy and
+                        SciPy and fetches nothing — and `brand.json`, its table.
+                        `provenance.test.ts` holds `ASSETS.toml` to that table
+                        and reads the pictures back (safe zones, cut-outs, no
+                        green fringe, no tagline); CI cannot run the script, so
+                        `--check` is run by hand. ⚠️ The full logo is the
+                        owner's green-screen picture of 2026-10-01, cut by a
+                        chroma key, with NO tagline; a reviewer who remembers
+                        it cut from the v3 sheet by a rembg model is reading
+                        the old file — rembg and its model are gone. ⚠️ Gemini
+                        painted the "transparent" checkerboard INTO the sheets:
+                        nothing in them is transparent. The name and the logo
+                        are trademarks too: `TRADEMARKS.md`. ⚠️ The trainer
+                        game's wordmark (#966) is NOT this pipeline's: it is
+                        `game-wordmark.ts`, a Node script beside it with a
+                        baseline JPEG decoder of this repository's own
+                        (`jpeg-baseline.ts`), which keys the painted
+                        checkerboard out of `gemini-assets-v2.jpeg` — the same
+                        source picture, one `ASSETS.toml` row — and writes the
+                        stylised world's PNG (`src/game/brand/`, precached);
+                        `game-wordmark.test.ts` re-makes it pixel for pixel
+                        inside `pnpm run test`, so unlike `derive_brand.py` it
+                        IS checked in CI. The realistic world's KTX2 is the
+                        same pixels, made by `tools/realistic/`'s `wordmark`
+                        recipe because only that pipeline writes
+                        `public/realistic/`
+    src/brand/          the wordmark (header) and the full logo (About), each in
+                        a light- and a dark-palette picture switched by
+                        `data-theme`; the pictures are `alt=""` and the words are
+                        a visually hidden span, so no name is lost with the
+                        hidden one (#965)
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/athlete/        what the rider weighs (#325) — the one place a missing
                         mass is substituted, the one place a typed weight
@@ -242,8 +267,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         one line that inlines the manifest at build time, so
                         there is no generated file to drift. ⚠️ For a
                         `CC-BY-4.0` asset this screen IS the obligation
-                        (ADR 0023 D-3), and there is none in the tree yet — so a
-                        screen rendering nothing would look correct, and
+                        (ADR 0023 D-3) — since #965 the owner's brand art is
+                        the first in the tree — and a
+                        screen rendering nothing would look correct, so
                         `CreditsView.test.tsx` renders a fixture manifest for
                         exactly that reason. Since #664 it also lists the
                         SOFTWARE the app includes, read from the contents of
@@ -1194,8 +1220,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         On Your Left house kit, drawn by
                         `tools/realistic/blender/process_rider.py` from the
                         numbers in `rider_kit.py` (dedicated CC0-1.0, no text,
-                        no mark but the app's own chevrons from
-                        `tools/icons/`), MakeHuman's CC0 skin detail and brows
+                        no mark but the two chevrons `tools/icons/` draws —
+                        the app's icons until #965, not its mark since), MakeHuman's CC0 skin detail and brows
                         (ADR 0026's 2026-09-28 amendment: MakeHuman's own
                         system assets pack IS the D-4 MakeHuman row; the
                         site's community packs are not), an athletic build
@@ -2285,16 +2311,14 @@ pnpm --filter @onyourleft/store run test
 pnpm --filter @onyourleft/physics run test
 pnpm --filter @onyourleft/web run test
 
-# Redraw the web app manifest's icons (#405). They are COMMITTED bytes, not a
-# build step -- ADR 0024 D-5 and §3a between them say why a generated file
-# cannot land under `apps/` without an `.spdx-exempt` entry that §3a would
-# refuse. So this is provenance rather than a build, and
-# `tools/icons/generate-icons.test.ts` is what keeps the committed bytes and
-# this generator from drifting: it compares decoded PIXELS, not bytes, because
-# zlib's compressed form is not stable across versions of the library.
-# Re-run it after changing the drawing, then update the three ASSETS.toml
-# digests in the same commit.
-pnpm --filter @onyourleft/web run icons:generate
+# Re-cut the owner's brand art (#965): every app icon (web and Android), the
+# favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
+# gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
+# installed (any other version is refused); it fetches nothing. `--check`
+# writes nothing and fails unless every committed output is reproduced byte for
+# byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
+# it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.
+<venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
 # in CI: it needs the network and Blender 4.4.3 (set BLENDER to its path; the
@@ -3610,6 +3634,7 @@ browser runs**.
 | `controls-first.browser.spec.ts` | since [#666](https://github.com/openzigs/onyourleft/issues/666), controls first, detail tucked, on `reflow.html` (`reflow-harness.tsx` gained a first-control reading, a fold line, a section-prose reading and a store behind the Files screen): every route in `ALL_ROUTES`, over both fixtures at 390×844 and on the owner's tablet in the shell both ways up with the #439 insets and the 50 px floor, must START its first control (a button, a form control or a link drawn as a button) above the fold — the viewport less its bottom inset, or the top of a bottom navigation bar — unless everything in the way is a heading or marked `data-oyl-kept-visible` (`design/MoreAbout.tsx` §`KeptVisible`, the consent text a consent screen's box follows); and every section that tucks its explanation lays out at most 130 px of prose above its own first control. ⚠️ **Its control, `?disclosures=inline`, puts every "More about" back under its heading, open**, and Segments, Settings and Files must then fail — Camera is not among them because it tucks nothing: its first control came up by ORDER. It also presses the real Tab key through Settings and compares the sequence with `tabbableElements` over the live DOM, and measures a summary's 44 px row #316's three ways and its token-painted marker. ⚠️ **Two things it found**: Chromium gives the content of a CLOSED `<details>` a full-size `getBoundingClientRect()` (the slot is `content-visibility: hidden`), so "has a box" is not "is drawn" — `checkVisibility()` is; and a browser stops once per named radio group where the model stopped on every radio. ⚠️ **Since [#698](https://github.com/openzigs/onyourleft/issues/698) the model does too** (`a11y/audit.ts` §`oneStopPerRadioGroup`, Chromium's own rule: the checked radio, else the first met) and the WHOLE sequence is compared, Settings' units group included; `keyboardReachableElements` adds the radios an arrow key reaches, which is what `routes.a11y.test.tsx` criterion 3 asks |
 | `list-detail.browser.spec.ts` | since [#670](https://github.com/openzigs/onyourleft/issues/670), the list beside its detail on `reflow.html` (`reflow-harness.tsx` gained the panes' boxes, the rail's edge and every primary's place, keeps a hash it is opened with, and takes `?layout=prose`): every `list-detail` route of `ALL_ROUTES`, with the fixture's item chosen and not, lays out two panes side by side inside the viewport and spanning at least 80 % of what the rail leaves at 1280×800 with the #439 insets and at 1280×720; one pane, no sideways scroll, and Enter-then-back returning focus to the item at 800×1280, 390×844 and 320×256; a FRESH page at a selection shows it and at an unknown id says "not found"; rotating keeps the selection. ⚠️ **Its control, `?layout=prose`, switches the same routes of the real table back to the reading measure before anything renders, and the width assertion must fail on every one.** It publishes each primary action's place and margin to the fold at the four viewports #670 names, on arrival AND with the item chosen, and holds it above the fold only where `PRIMARY_ON_ARRIVAL` and `PRIMARY_WHEN_SELECTED` say the layout allows, with the reason for every gap — the selected state was unmeasured until #670's review, which found *Import route* 413 px under the tablet's fold there. It also rotates with focus on a list link and requires focus on the chosen item's heading after the rotation. ⚠️ **Since [#723](https://github.com/openzigs/onyourleft/issues/723) it also measures that the two panes scroll ON THEIR OWN** on the tablet with its insets and at 1280×720: the wheel over one moves neither the page nor the other (a list at its end included, over two new gestures, because Chromium does not chain the first), Enter on the lowest of forty rides leaves `window.scrollY` at 0 and lands focus — its ring too — inside the detail pane, and every pane lies between the header and the bottom inset at the page's top and at its furthest scroll, margins published. Its control is `reflow.html?panes=page`, the pre-#723 layout put back by a stylesheet of the harness's own. And a primary's margin is now to its pane's bottom where that clips it (`PrimaryPlace.clipBottom`): with the footer inside the viewport, *Import route* ended 23 px above the bottom of its pane and the fold said 125. ⚠️ Since [#726](https://github.com/openzigs/onyourleft/issues/726) its skip-link cases focus the link with `preventScroll`, so what they measure is the JUMP — which found it scrolled nothing from the end of a long page (`AppShell.tsx` §`skipToContent`). Since [#730](https://github.com/openzigs/onyourleft/issues/730) §"#730" holds the two panes' headings level on every route, with the 40 px `h2` gap put back as the control |
 | `confirm-dialog.browser.spec.ts` | since [#950](https://github.com/openzigs/onyourleft/issues/950), the Radix alert dialog before a ride is deleted, on `reflow.html?data=populated` at `#/activities` with the real keyboard: it opens on *Keep the ride*, five Tabs and five Shift+Tabs never leave it (past Radix's focus guards at the body's edges), Escape deletes nothing and hands focus back to that row's *Delete*, both answers fit and are topmost at 320×256 with no sideways scroll, and its surface, ink, edge and overlay read back as the tokens in both palettes. ⚠️ **Its control** is the same Tab presses with no dialog open, which must leave the list's controls; measured red with the buttons' Tab keydown kept from Radix's `FocusScope` |
+| `brand.browser.spec.ts` | since [#965](https://github.com/openzigs/onyourleft/issues/965), the owner's wordmark and logo against the PRODUCT build in both palettes: exactly one wordmark drawn in the header and one logo on About, each the palette's own variant, decoded, and the banner still named "On Your Left". ⚠️ Its control deletes `theme.css`'s dark-palette selectors for the switch through the CSSOM and requires the dark page to draw the LIGHT wordmark |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, **840 s since #682** — a reviewer who remembers 580 s is reading the old file) so the gate stops itself and names what was running before the job's `timeout-minutes` cancels it in silence. Playwright's default of two workers stays: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -5563,6 +5588,9 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 | Where the credits screen's rows come from, and why it is generated rather than listed | `apps/web/src/credits/credits.ts`, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3 |
+| Where the app icons, the wordmark and the logo come from, how they are cut out of the owner's sheets, and what holds `ASSETS.toml` to them | `apps/web/tools/brand/derive_brand.py`, `apps/web/tools/brand/brand.json`, `apps/web/tools/brand/provenance.test.ts`, [#965](https://github.com/openzigs/onyourleft/issues/965) |
+| Why the wordmark is two pictures and its name is text, and what shows the dark one | `apps/web/src/brand/Brand.tsx`, `apps/web/src/design/theme.css` §"The owner's wordmark and logo", `apps/web/browser/brand.browser.spec.ts` |
+| What a fork may and may not do with the name and the logo, and why the CC BY licence on the art does not decide it | [`TRADEMARKS.md`](TRADEMARKS.md) |
 | Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
 | Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
 | What the realistic world is, what is built of it, and how a rider chooses it | [ADR 0026](docs/adr/0026-realistic-game-world.md), [`docs/architecture.md`](docs/architecture.md) §"The realistic world", `apps/web/src/game/world-preference.ts`, `apps/web/src/game/realistic-offered.test.ts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |

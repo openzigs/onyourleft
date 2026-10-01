@@ -10,11 +10,12 @@
 #
 # NOT a reason to be on this list: "the header is awkward here", "it is only
 # config", "we will add it later". A file this repository authors or edits
-# carries the header, and five of the twenty `cap add` wrote are therefore
+# carries the header, and six of the twenty `cap add` wrote are therefore
 # absent from this list -- AndroidManifest.xml, app/build.gradle, strings.xml
 # and MainActivity.java all name this application and are all ours to maintain,
-# and since #672 res/values/styles.xml paints the launch window and the window
-# behind the WebView in the page's own canvas colour, per palette.
+# since #672 res/values/styles.xml paints the launch window and the window
+# behind the WebView in the page's own canvas colour, per palette, and since
+# #965 res/values/ic_launcher_background.xml is the owner's icon blue.
 #
 # Two template files are absent from this list and are NOT oversights:
 # `apps/mobile/android/gradlew` and `gradlew.bat` are Gradle's own launcher
@@ -39,12 +40,10 @@ apps/mobile/android/app/capacitor.build.gradle
 
 # --- Android resources: template art and template layout --------------------
 #
-# The launcher icons are Capacitor's own artwork, which is the clearest case on
-# this list: it is a creative asset under someone else's licence and relabelling
-# it would be the thing §3 exists to prevent, not a formality.
-apps/mobile/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
-apps/mobile/android/app/src/main/res/drawable/ic_launcher_background.xml
-apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml
+# The two adaptive-icon definitions are Capacitor's, verbatim. Since #965 the
+# launcher ART is the owner's (ASSETS.toml), the background colour
+# (values/ic_launcher_background.xml) is ours and carries our header, and
+# Capacitor's two vector drawables, which nothing referenced, are deleted.
 apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
 apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 apps/mobile/android/app/src/main/res/layout/activity_main.xml

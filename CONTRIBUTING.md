@@ -33,6 +33,11 @@ script on every pull request, so it is faster to run it yourself than to find ou
 Full reasoning: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md) and
 [`docs/adr/0005-tech-stack.md`](docs/adr/0005-tech-stack.md).
 
+**The name and the logo are not licensed by any of this.** The owner's logo, wordmark and icon are
+CC-BY-4.0 as art (`ASSETS.toml`), and CC BY 4.0 §2(b)(2) grants no trademark rights; a fork may say
+it is based on On Your Left and may not pass itself off as it. [`TRADEMARKS.md`](TRADEMARKS.md) is
+the policy.
+
 ## Sign your commits (DCO)
 
 Every commit must be signed off under the
