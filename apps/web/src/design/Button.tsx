@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useRef, type JSX, type ReactNode, type Ref } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type JSX,
+  type MouseEvent,
+  type ReactNode,
+  type Ref,
+} from 'react';
 
 /**
  * The three kinds of button — #668. A rider tells the action from the setting
@@ -184,5 +192,45 @@ export function Button({
     >
       {children}
     </button>
+  );
+}
+
+export interface ButtonLinkProps {
+  readonly children: ReactNode;
+  /** Where it goes — a hash route from `shell/routes.ts` §`hrefFor`. */
+  readonly href: string;
+  /** `primary` or `secondary`: a toggle changes a setting, and a link changes the page. */
+  readonly variant?: 'primary' | 'secondary';
+  readonly onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  /** `ListDetail.tsx` §`CreateLink`'s marker, which its tests and the panes' skip link find it by. */
+  readonly create?: boolean;
+}
+
+/**
+ * A link drawn as one of {@link Button}'s kinds — #943.
+ *
+ * An action that goes somewhere (*Start a ride*, *Import a route*) is a link,
+ * not a `<button>` with a click handler that sets the hash: a link keeps the
+ * browser's own open-in-new-tab and its status-bar preview, and it is what a
+ * screen reader announces as one. It wears exactly the classes a `Button` of
+ * the same variant wears, from the one table, so the one-primary walk
+ * (`a11y/button-hierarchy.ts`) counts it the same way.
+ */
+export function ButtonLink({
+  children,
+  href,
+  variant = 'primary',
+  onClick,
+  create = false,
+}: ButtonLinkProps): JSX.Element {
+  return (
+    <a
+      className={VARIANT_CLASS[variant]}
+      href={href}
+      onClick={onClick}
+      data-oyl-create={create ? '' : undefined}
+    >
+      {children}
+    </a>
   );
 }

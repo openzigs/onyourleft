@@ -79,15 +79,17 @@ import type { MapPort } from '../src/map/port';
 import { LOCAL_ATHLETE, localAthleteRecord } from '../src/local-athlete';
 import { PRIMARY_BUTTON_SELECTOR } from '../src/a11y/button-hierarchy';
 import { ALL_ROUTES, matchHash, type RouteId, type RouteLayout } from '../src/shell/routes';
-import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
 import {
+  AVAILABLE_BLUETOOTH,
+  EMPTY_STATES,
   PARAMETERS,
   POPULATED,
   PopulatedShell,
   SELECTIONS,
   fixtureRide,
+  type EmptyStateExpectation,
   type PopulatedExpectation,
 } from '../src/testing/populated-shell';
 
@@ -207,6 +209,20 @@ export interface ReflowMeasurement {
   readonly primaries: readonly PrimaryPlace[];
   /** The `main` element's layout class, e.g. `oyl-main--list-detail`. */
   readonly mainLayout: string | null;
+  /**
+   * Every `design/EmptyState.tsx` in `main` that is laid out, and the action
+   * inside each — #943. `actions` counts the buttons, which must be one;
+   * `top` is the first one's, like {@link FirstControl.top}.
+   */
+  readonly emptyStates: readonly EmptyStatePlace[];
+}
+
+/** One empty state's action — #943. */
+export interface EmptyStatePlace {
+  readonly art: string;
+  readonly actions: number;
+  readonly text: string;
+  readonly top: number | null;
 }
 
 /**
@@ -253,6 +269,8 @@ declare global {
       /** The item each `list-detail` route selects in the populated fixture — #670. */
       readonly selections: Partial<Record<RouteId, string>>;
       readonly populated: Partial<Record<RouteId, PopulatedExpectation>>;
+      /** `testing/populated-shell.tsx` §`EMPTY_STATES` — #943. */
+      readonly emptyStates: Partial<Record<RouteId, EmptyStateExpectation>>;
       readonly visit: (hash: string) => Promise<ReflowMeasurement>;
       /** Every id in `ALL_ROUTES` this page has not rendered. */
       readonly unvisited: () => readonly RouteId[];
@@ -364,20 +382,6 @@ const EXPECTATIONS: Record<RouteId, PopulatedExpectation> = {
     kind: 'fixture',
     marker: '.oyl-main:has(#oyl-export-ride option):has(.oyl-scroll-region tbody tr)',
   },
-};
-
-/**
- * A Bluetooth that answers "available" and is never asked to pair — #699's
- * review, N4. `?bluetooth=available` hands it to the shell so the Devices
- * screen renders its pairing rows, which the fixture's no-Bluetooth browser
- * leaves out of every other walk.
- */
-const AVAILABLE_BLUETOOTH: CapabilityProbe = {
-  bluetooth: {
-    getAvailability: async () => Promise.resolve(true),
-    requestDevice: async () => Promise.reject(new Error('the reflow harness pairs nothing')),
-  },
-  secureContext: true,
 };
 
 function shell(populated: boolean, transfer: TransferPort): JSX.Element {
@@ -898,6 +902,24 @@ function primaries(): PrimaryPlace[] {
   });
 }
 
+/** {@link ReflowMeasurement.emptyStates}. */
+function emptyStates(): EmptyStatePlace[] {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return [];
+  }
+  return [...main.querySelectorAll('[data-oyl-empty-state]')].filter(laidOut).map((element) => {
+    const actions = [...element.querySelectorAll('.oyl-button')];
+    const first = actions[0];
+    return {
+      art: element.getAttribute('data-oyl-empty-state') ?? '',
+      actions: actions.length,
+      text: (first?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60),
+      top: first === undefined ? null : first.getBoundingClientRect().top + window.scrollY,
+    };
+  });
+}
+
 /** {@link PrimaryPlace.clipBottom}: the bottom of a pane that scrolls on its own. */
 function clipBottomOf(element: Element): number | null {
   const pane = element.closest('[data-oyl-pane]');
@@ -964,6 +986,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     listDetail: listDetailBoxes(),
     railRight: railRight(),
     primaries: primaries(),
+    emptyStates: emptyStates(),
     mainLayout:
       [...(document.querySelector('main')?.classList ?? [])].find((name) =>
         name.startsWith('oyl-main--'),
@@ -1044,6 +1067,26 @@ function applyShapeControl(): void {
   document.head.append(style);
 }
 
+/**
+ * `?illustration=tall` — #943's control. Every empty state's drawing at half
+ * the viewport's height rather than its declared 48 px, so the spec's "the
+ * action starts above the fold" must FAIL — at least on Activities — or it is
+ * not measuring the action.
+ */
+function applyIllustrationControl(): void {
+  const illustration = new URLSearchParams(window.location.search).get('illustration');
+  if (illustration === null) {
+    return;
+  }
+  if (illustration !== 'tall') {
+    throw new Error(`reflow harness: ?illustration must be "tall", not ${illustration}`);
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', 'illustration=tall');
+  style.textContent = `.oyl-empty-state { --oyl-empty-state-art-height: 50vh !important; }`;
+  document.head.append(style);
+}
+
 async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -1056,6 +1099,7 @@ async function main(): Promise<void> {
   applyLayoutControl();
   applyPanesControl();
   applyShapeControl();
+  applyIllustrationControl();
   // A page opened with a hash keeps it (#670: a fresh load of a selection).
   if (window.location.hash === '') {
     window.location.hash = '#/';
@@ -1074,6 +1118,7 @@ async function main(): Promise<void> {
     parameters: PARAMETERS,
     selections: SELECTIONS,
     populated: EXPECTATIONS,
+    emptyStates: EMPTY_STATES,
     visit,
     unvisited: () => ALL_ROUTES.map((route) => route.id).filter((id) => !visited.has(id)),
   };
@@ -1121,6 +1166,7 @@ viewGroupsLoaded()
       parameters: PARAMETERS,
       selections: SELECTIONS,
       populated: EXPECTATIONS,
+      emptyStates: EMPTY_STATES,
       visit: () => Promise.reject(new Error('the reflow harness did not start')),
       unvisited: () => ALL_ROUTES.map((route) => route.id),
     };

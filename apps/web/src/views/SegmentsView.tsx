@@ -11,6 +11,7 @@ import {
 } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 import { MoreAbout } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import {
@@ -275,10 +276,90 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
   // at all rather than a sentence saying zero.
   const gapNote = swept?.kind === 'swept' ? abandonedSentence(swept.abandoned) : undefined;
 
+  // #943: with no segment yet, the list comes FIRST — its empty state and its
+  // one action are what a first visit is for, and below the two forms they
+  // were under the fold on a phone and on the tablet. So its sentence says
+  // the ride to cut from is "below", where with segments the list is last
+  // and the forms are above it.
+  const noSegments = segments?.length === 0;
+  const yours = (
+    <section aria-labelledby="segments-yours">
+      <h2 id="segments-yours">Your segments</h2>
+      {segments === undefined ? (
+        <p className="oyl-muted">Reading your segments…</p>
+      ) : segments.length === 0 ? (
+        // #943: secondary, because the form below holds this page's
+        // primary whenever there is a ride to cut from. The press takes
+        // focus to that form's heading rather than a fragment link, which
+        // the hash router would read as a route.
+        <EmptyState
+          art="road"
+          seed={9}
+          heading="Your first segment"
+          level={3}
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // Focus scrolls the heading into view on its own.
+                document.getElementById('segments-make')?.focus();
+              }}
+            >
+              Make a segment
+            </Button>
+          }
+        >
+          <p className="oyl-muted">No segments yet. Make one from a ride below.</p>
+        </EmptyState>
+      ) : (
+        <ScrollTable className="oyl-data-table" caption="Segments on this device, newest first">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Distance</th>
+              <th scope="col">Climb</th>
+              <th scope="col">Who can see it</th>
+            </tr>
+          </thead>
+          <tbody>
+            {segments.map((segment) => (
+              <tr key={segment.id}>
+                <td>
+                  {/* The link is the row's only affordance, and a plain
+                      anchor on purpose: the shell's hash routing means the
+                      browser's own middle-click, open-in-new-tab and every
+                      assistive technology's link handling work with no key
+                      handler of ours in the path (`shell/routes.ts`). */}
+                  <a href={hrefForSegment(segment.id)}>{segment.name}</a>
+                </td>
+                <td>{segmentLength(segment.distance, units)}</td>
+                {/*
+                  "Not measured", never "0 m". An unmeasured climb and a flat
+                  road are different claims, which is why the record's
+                  elevation fields are optional rather than defaulted.
+                */}
+                <td>
+                  {segment.elevationGain === undefined
+                    ? 'Not measured'
+                    : measurementText(formatSmallDistance(segment.elevationGain, units))}
+                </td>
+                {/* A word, not a colour. */}
+                <td>{segment.visibility === 'private' ? 'Only me' : 'Anyone'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </ScrollTable>
+      )}
+    </section>
+  );
+
   return (
     <>
+      {noSegments ? yours : null}
       <section aria-labelledby="segments-make">
-        <h2 id="segments-make">Make a segment</h2>
+        <h2 id="segments-make" tabIndex={-1}>
+          Make a segment
+        </h2>
         <p className="oyl-muted">
           A segment is a stretch of road with a direction, cut from one of your own rides.
         </p>
@@ -419,52 +500,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
         </section>
       )}
 
-      <section aria-labelledby="segments-yours">
-        <h2 id="segments-yours">Your segments</h2>
-        {segments === undefined ? (
-          <p className="oyl-muted">Reading your segments…</p>
-        ) : segments.length === 0 ? (
-          <p className="oyl-muted">No segments yet. Make one from a ride above.</p>
-        ) : (
-          <ScrollTable className="oyl-data-table" caption="Segments on this device, newest first">
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Distance</th>
-                <th scope="col">Climb</th>
-                <th scope="col">Who can see it</th>
-              </tr>
-            </thead>
-            <tbody>
-              {segments.map((segment) => (
-                <tr key={segment.id}>
-                  <td>
-                    {/* The link is the row's only affordance, and a plain
-                        anchor on purpose: the shell's hash routing means the
-                        browser's own middle-click, open-in-new-tab and every
-                        assistive technology's link handling work with no key
-                        handler of ours in the path (`shell/routes.ts`). */}
-                    <a href={hrefForSegment(segment.id)}>{segment.name}</a>
-                  </td>
-                  <td>{segmentLength(segment.distance, units)}</td>
-                  {/*
-                    "Not measured", never "0 m". An unmeasured climb and a flat
-                    road are different claims, which is why the record's
-                    elevation fields are optional rather than defaulted.
-                  */}
-                  <td>
-                    {segment.elevationGain === undefined
-                      ? 'Not measured'
-                      : measurementText(formatSmallDistance(segment.elevationGain, units))}
-                  </td>
-                  {/* A word, not a colour. */}
-                  <td>{segment.visibility === 'private' ? 'Only me' : 'Anyone'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </ScrollTable>
-        )}
-      </section>
+      {noSegments ? null : yours}
     </>
   );
 }

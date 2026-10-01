@@ -202,6 +202,75 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
+/**
+ * Which routes have an EMPTY STATE over the empty fixture — #943 — and the
+ * sentence that says so, which must render inside `design/EmptyState.tsx`.
+ *
+ * A `Record` over `RouteId`, as {@link POPULATED} is, so a route added to the
+ * table without an entry is a compile error rather than a route nobody checked.
+ * `a11y/empty-states.a11y.test.tsx` holds every entry both ways round — the
+ * sentence inside an `EmptyState` with one action, and no `EmptyState` on a
+ * `none` — and the browser gate (`controls-first.browser.spec.ts` §"#943")
+ * measures each action against the fold.
+ *
+ * `bluetooth`: the empty state is only reachable where a browser can pair —
+ * the Devices screen with nothing paired — so the route is opened with
+ * {@link AVAILABLE_BLUETOOTH}.
+ */
+export type EmptyStateExpectation =
+  | { readonly kind: 'empty-state'; readonly sentence: string; readonly bluetooth?: true }
+  | { readonly kind: 'none'; readonly reason: string };
+
+export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
+  activities: {
+    kind: 'empty-state',
+    sentence: 'Nothing recorded yet. A ride appears here the moment you finish one.',
+  },
+  workouts: { kind: 'empty-state', sentence: 'No workouts saved on this device yet.' },
+  routes: {
+    kind: 'empty-state',
+    sentence: 'You have no saved routes yet. Import a GPX file to add one.',
+  },
+  game: { kind: 'empty-state', sentence: 'You have no saved routes yet.' },
+  devices: {
+    kind: 'empty-state',
+    sentence: 'Start with your smart trainer: it is the one device here this app can control',
+    bluetooth: true,
+  },
+  segments: { kind: 'empty-state', sentence: 'No segments yet. Make one from a ride below.' },
+  analysis: {
+    kind: 'empty-state',
+    sentence: 'Nothing recorded yet. Zones appear here the moment you finish a ride.',
+  },
+  home: { kind: 'none', reason: 'a first run has its own welcome, the ride cards (#939)' },
+  ride: { kind: 'none', reason: 'nothing to be empty: it starts a ride' },
+  transfer: { kind: 'none', reason: 'a form, which is the same with nothing imported' },
+  camera: { kind: 'none', reason: 'a consent and a switch, the same in both walks' },
+  settings: { kind: 'none', reason: 'settings, which are never empty' },
+  about: { kind: 'none', reason: 'static prose' },
+  credits: { kind: 'none', reason: 'generated from ASSETS.toml, never empty' },
+  'route-builder': { kind: 'none', reason: 'a canvas to draw on, which is its own empty state' },
+  instance: { kind: 'none', reason: 'a form to connect, the same with nothing connected' },
+  moderation: { kind: 'none', reason: 'the queues of a moderator, not in the list #943 names' },
+  'side-camera': { kind: 'none', reason: 'a pairing flow, not a list' },
+  'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
+  'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
+  'not-found': { kind: 'none', reason: 'a heading and the route list' },
+};
+
+/**
+ * A Bluetooth that answers "available" and is never asked to pair — #699's
+ * review, N4, moved here from `browser/reflow-harness.tsx` by #943 so the
+ * jsdom empty-state walk reaches the Devices screen's pairing rows too.
+ */
+export const AVAILABLE_BLUETOOTH: CapabilityProbe = {
+  bluetooth: {
+    getAvailability: async () => Promise.resolve(true),
+    requestDevice: async () => Promise.reject(new Error('this fixture pairs nothing')),
+  },
+  secureContext: true,
+};
+
 /** How many rides the populated library holds — more than a page of cards. */
 export const POPULATED_RIDES = 40;
 

@@ -65,6 +65,7 @@ import type { JSX, ReactNode } from 'react';
 import type { ConnectionState } from '@onyourleft/sensors';
 
 import { Button } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 // The part's own file, not the kit's index, which names every part.
 import { SensorGlyph, type SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { StatusMessage } from '../design/StatusMessage';
@@ -97,6 +98,11 @@ const GLYPH_FOR: Readonly<Record<PairingRole, SensorGlyphKind>> = {
   'power-meter': 'power',
   'speed-cadence': 'cadence',
 };
+
+/** What the Devices screen says when nothing is paired at all — #943. */
+const START_WITH_THE_TRAINER =
+  'Start with your smart trainer: it is the one device here this app can control, and it ' +
+  'often reports your power and cadence too.';
 
 /** The words for a row with nothing paired in it. */
 export const NOT_PAIRED = 'Not paired';
@@ -164,6 +170,28 @@ export function PairingPanel({
           {snapshot.pairingError}
         </StatusMessage>
       )}
+      {snapshot.sensors.length === 0 ? (
+        // #943: the garage with nothing in it. Its one action pairs the
+        // trainer — the row below does the same, and a rider who reads the
+        // rows first loses nothing — and it is this screen's only primary:
+        // every row's control is secondary.
+        <EmptyState
+          art="trainer"
+          heading="Nothing paired yet"
+          level={3}
+          action={
+            <Button
+              onClick={() => {
+                void controller.pair('trainer');
+              }}
+            >
+              Pair your smart trainer
+            </Button>
+          }
+        >
+          <p>{START_WITH_THE_TRAINER}</p>
+        </EmptyState>
+      ) : null}
       <ul className="oyl-pairing tw:mt-0">
         {PAIRING_STEPS.map((step) => (
           <PairingRow

@@ -6,6 +6,7 @@ import { expandWorkout, type WorkoutBlock, type WorkoutTimeline } from '@onyourl
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { WorkoutShape } from '../design/illustration/WorkoutShape';
 import { StatusMessage } from '../design/StatusMessage';
@@ -423,7 +424,20 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       <>
         {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
         {entries.length === 0 ? (
-          <p>No workouts saved on this device yet.</p>
+          // #943: with nothing saved, *Build a workout* is the empty state's
+          // one action rather than a line above it.
+          <EmptyState
+            art="workout"
+            heading="Your first workout"
+            level={3}
+            action={
+              <CreateLink route={routeById('workouts')} selection={selected}>
+                Build a workout
+              </CreateLink>
+            }
+          >
+            <p>No workouts saved on this device yet.</p>
+          </EmptyState>
         ) : (
           <>
             <p className="oyl-muted" id={listCaptionId}>
@@ -453,11 +467,13 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
 
   const list = (
     <>
-      <p>
-        <CreateLink route={routeById('workouts')} selection={selected}>
-          Build a workout
-        </CreateLink>
-      </p>
+      {entries?.length === 0 ? null : (
+        <p>
+          <CreateLink route={routeById('workouts')} selection={selected}>
+            Build a workout
+          </CreateLink>
+        </p>
+      )}
       {listed}
     </>
   );

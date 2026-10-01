@@ -1063,6 +1063,52 @@ h3:first-child {
   height: 100%;
 }
 
+/*
+ * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
+ * screen's own sentences and one action, in that order, on a quiet surface so
+ * it reads as one thing rather than three paragraphs and a button.
+ *
+ * The drawing is about 48 px tall — the owner's ruling of 2026-10-01 on epic
+ * #935, "medium-sized" — and that is this ONE property, which the browser
+ * gate's control (`reflow-harness.tsx` §`applyIllustrationControl`) sets to
+ * 50vh to show an action can be pushed below the fold by it. Every layer of a
+ * drawing fills the box, so a landscape's sky, hills and road are one scene.
+ */
+.oyl-empty-state {
+  --oyl-empty-state-art-height: 3rem;
+  margin-block: var(--oyl-space-md);
+  padding: var(--oyl-space-md);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface);
+}
+
+.oyl-empty-state__art {
+  position: relative;
+  height: var(--oyl-empty-state-art-height);
+  max-width: 12rem;
+}
+
+.oyl-empty-state__layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.oyl-empty-state__heading {
+  margin-block: var(--oyl-space-sm) 0;
+}
+
+.oyl-empty-state > p {
+  margin-block: var(--oyl-space-xs) 0;
+}
+
+.oyl-empty-state > .oyl-empty-state__action {
+  margin-block-start: var(--oyl-space-sm);
+}
+
 .oyl-home {
   display: grid;
   gap: var(--oyl-space-md);

@@ -30,7 +30,8 @@ import { sampledPoints, trendReadings, trendSentence } from '../analysis/trend';
 import { ChartSlot } from '../design/ChartSlot';
 import type { AnalysisPort } from '../analysis/store-port';
 import { thresholdsToSave } from '../analysis/thresholds';
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
+import { EmptyState } from '../design/EmptyState';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
@@ -282,11 +283,23 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         {zones?.load === undefined ? undefined : <LoadPanel load={zones.load} />}
 
         {zones === undefined ? (
-          <p className="oyl-muted">
-            {state.kind === 'ready' && state.rides.length === 0
-              ? 'Nothing recorded yet. Zones appear here the moment you finish a ride.'
-              : 'Reading that ride…'}
-          </p>
+          state.kind === 'ready' && state.rides.length === 0 ? (
+            // #943: secondary, because *Save thresholds* is this page's primary.
+            <EmptyState
+              art="power"
+              heading="Zones after your first ride"
+              level={3}
+              action={
+                <ButtonLink variant="secondary" href={hrefFor(routeById('ride'))}>
+                  Start a ride
+                </ButtonLink>
+              }
+            >
+              <p>Nothing recorded yet. Zones appear here the moment you finish a ride.</p>
+            </EmptyState>
+          ) : (
+            <p className="oyl-muted">Reading that ride…</p>
+          )
         ) : (
           <>
             {zones.power === undefined && zones.heartRate === undefined ? (
