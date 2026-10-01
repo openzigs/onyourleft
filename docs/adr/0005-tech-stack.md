@@ -477,3 +477,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   creates nothing now"* is no longer a description of the plan: owner decision D6 is lifted by
   [ADR 0036](0036-a-self-hostable-instance-server-now.md), and that sibling is `apps/instance`. Nothing
   else in this ADR changes.
+- **2026-09-30** — **E's web client is no longer React and Vite alone.** The owner adopted
+  Tailwind CSS v4 (build-time) and Radix Primitives (runtime, lazily loaded) for the menus on #935,
+  and [ADR 0042](0042-tailwind-and-radix-over-the-tokens.md) records how, on
+  [#950](https://github.com/openzigs/onyourleft/issues/950): Tailwind's theme is cleared and rebuilt
+  from the design tokens, every utility is prefixed `tw:`, no preflight is imported, and Radix is
+  admitted one primitive at a time for behaviour only, never in the entry chunk. The stack table's
+  "Web framework" row is unchanged; the client now also carries a utility compiler and one headless
+  primitive (`@radix-ui/react-alert-dialog`). Nothing else in this ADR changes.

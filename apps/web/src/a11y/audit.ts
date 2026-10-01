@@ -492,9 +492,24 @@ function interactiveElements(root: Document | Element): Element[] {
   });
 }
 
-type Rule = (doc: Document) => AccessibilityViolation[];
+/**
+ * What a rule is run over — #950. Ordinarily the whole document; while a
+ * MODAL dialog is open, the dialog ({@link openModal}), because that is all a
+ * screen reader exposes and all a keyboard can reach: ARIA's `aria-modal`
+ * says the rest is inert, and the dialog's focus trap makes it so.
+ */
+interface AuditScope {
+  /** The document, for what is always document-wide: its language, its ids. */
+  readonly doc: Document;
+  /** Where the rules look: the document, or the open modal dialog. */
+  readonly root: Document | Element;
+  /** Whether {@link root} is an open modal dialog rather than the page. */
+  readonly modal: boolean;
+}
 
-const htmlHasLang: Rule = (doc) => {
+type Rule = (scope: AuditScope) => AccessibilityViolation[];
+
+const htmlHasLang: Rule = ({ doc }) => {
   const lang = doc.documentElement.getAttribute('lang')?.trim() ?? '';
   return lang === ''
     ? [
@@ -509,8 +524,12 @@ const htmlHasLang: Rule = (doc) => {
     : [];
 };
 
-const pageHasOneMain: Rule = (doc) => {
-  const mains = [...doc.querySelectorAll('main, [role="main"]')].filter(
+const pageHasOneMain: Rule = ({ root, modal }) => {
+  // A dialog has no `main` of its own: the page's was audited with it closed.
+  if (modal) {
+    return [];
+  }
+  const mains = [...root.querySelectorAll('main, [role="main"]')].filter(
     (element) => !isHiddenFromAssistiveTechnology(element),
   );
   if (mains.length === 1) {
@@ -529,8 +548,12 @@ const pageHasOneMain: Rule = (doc) => {
   ];
 };
 
-const pageHasOneH1: Rule = (doc) => {
-  const headings = [...doc.querySelectorAll('h1')].filter(
+const pageHasOneH1: Rule = ({ root, modal }) => {
+  // Nor an `h1`: its title is a heading at the page's next level down.
+  if (modal) {
+    return [];
+  }
+  const headings = [...root.querySelectorAll('h1')].filter(
     (element) => !isHiddenFromAssistiveTechnology(element),
   );
   if (headings.length === 1) {
@@ -548,15 +571,18 @@ const pageHasOneH1: Rule = (doc) => {
   ];
 };
 
-const headingOrder: Rule = (doc) => {
+const headingOrder: Rule = ({ root, modal }) => {
   const violations: AccessibilityViolation[] = [];
   let previous = 0;
-  for (const heading of doc.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+  for (const heading of root.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
     if (isHiddenFromAssistiveTechnology(heading)) {
       continue;
     }
     const level = Number.parseInt(heading.tagName.slice(1), 10);
-    if (previous === 0) {
+    if (previous === 0 && modal) {
+      // A modal's outline starts at its title, which sits below the page's
+      // `h1` (#950): only a level skipped INSIDE it is a missing section.
+    } else if (previous === 0) {
       // The FIRST heading is checked too, against an implied level 0, so a page
       // whose outline starts at `h3` fails. It used to be exempt, which meant a
       // document could open two levels down and this rule said nothing —
@@ -594,8 +620,8 @@ const headingOrder: Rule = (doc) => {
   return violations;
 };
 
-const controlHasAccessibleName: Rule = (doc) =>
-  interactiveElements(doc)
+const controlHasAccessibleName: Rule = ({ root }) =>
+  interactiveElements(root)
     .filter((element) => !isHiddenFromAssistiveTechnology(element))
     .filter((element) => accessibleName(element) === '')
     .map((element) => ({
@@ -606,8 +632,8 @@ const controlHasAccessibleName: Rule = (doc) =>
       html: snippet(element),
     }));
 
-const imageHasAlt: Rule = (doc) =>
-  [...doc.querySelectorAll('img')]
+const imageHasAlt: Rule = ({ root }) =>
+  [...root.querySelectorAll('img')]
     .filter((image) => !image.hasAttribute('alt'))
     .map((image) => ({
       rule: 'image-has-alt',
@@ -617,8 +643,8 @@ const imageHasAlt: Rule = (doc) =>
       html: snippet(image),
     }));
 
-const linkHasHref: Rule = (doc) =>
-  [...doc.querySelectorAll('a')]
+const linkHasHref: Rule = ({ root }) =>
+  [...root.querySelectorAll('a')]
     .filter((link) => !link.hasAttribute('href'))
     .filter((link) => !isHiddenFromAssistiveTechnology(link))
     .map((link) => ({
@@ -629,8 +655,8 @@ const linkHasHref: Rule = (doc) =>
       html: snippet(link),
     }));
 
-const noPositiveTabindex: Rule = (doc) =>
-  [...doc.querySelectorAll('[tabindex]')]
+const noPositiveTabindex: Rule = ({ root }) =>
+  [...root.querySelectorAll('[tabindex]')]
     .filter((element) => Number.parseInt(element.getAttribute('tabindex') ?? '0', 10) > 0)
     .map((element) => ({
       rule: 'no-positive-tabindex',
@@ -640,11 +666,11 @@ const noPositiveTabindex: Rule = (doc) =>
       html: snippet(element),
     }));
 
-const interactiveRoleIsFocusable: Rule = (doc) => {
+const interactiveRoleIsFocusable: Rule = ({ root }) => {
   // Reachable once every disclosure is opened: a control tucked in a closed
   // `<details>` is reached through its summary, and is not a keyboard trap.
-  const tabbable = new Set<Element>(tabStops(doc, true));
-  return interactiveElements(doc)
+  const tabbable = new Set<Element>(tabStops(root, true));
+  return interactiveElements(root)
     .filter((element) => !isHiddenFromAssistiveTechnology(element))
     .filter((element) => !isDisabled(element))
     .filter((element) => !tabbable.has(element))
@@ -657,8 +683,8 @@ const interactiveRoleIsFocusable: Rule = (doc) => {
     }));
 };
 
-const ariaHiddenNotFocusable: Rule = (doc) =>
-  [...doc.querySelectorAll('[aria-hidden="true"]')]
+const ariaHiddenNotFocusable: Rule = ({ root }) =>
+  [...root.querySelectorAll('[aria-hidden="true"]')]
     .flatMap((hidden) => [
       ...(hidden.matches(FOCUSABLE_SELECTOR) ? [hidden] : []),
       ...hidden.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
@@ -720,8 +746,8 @@ const NAME_PROHIBITED_TAGS = new Set([
  * that is entitled to drop it. Use visually hidden text, or give the element a
  * role that takes a name.
  */
-const nameOnProhibitedRole: Rule = (doc) =>
-  [...doc.querySelectorAll('[aria-label], [aria-labelledby]')]
+const nameOnProhibitedRole: Rule = ({ root }) =>
+  [...root.querySelectorAll('[aria-label], [aria-labelledby]')]
     .filter((element) => !element.hasAttribute('role'))
     .filter((element) => NAME_PROHIBITED_TAGS.has(element.tagName.toLowerCase()))
     .filter((element) => !element.matches(FOCUSABLE_SELECTOR))
@@ -734,10 +760,10 @@ const nameOnProhibitedRole: Rule = (doc) =>
       html: snippet(element),
     }));
 
-const ariaReferenceResolves: Rule = (doc) => {
+const ariaReferenceResolves: Rule = ({ root, doc }) => {
   const violations: AccessibilityViolation[] = [];
   for (const attribute of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
-    for (const element of doc.querySelectorAll(`[${attribute}]`)) {
+    for (const element of root.querySelectorAll(`[${attribute}]`)) {
       const ids = (element.getAttribute(attribute) ?? '').split(/\s+/).filter((id) => id !== '');
       for (const id of ids) {
         if (doc.getElementById(id) === null) {
@@ -755,7 +781,7 @@ const ariaReferenceResolves: Rule = (doc) => {
   return violations;
 };
 
-const uniqueIds: Rule = (doc) => {
+const uniqueIds: Rule = ({ doc }) => {
   const seen = new Set<string>();
   const violations: AccessibilityViolation[] = [];
   for (const element of doc.querySelectorAll('[id]')) {
@@ -774,8 +800,8 @@ const uniqueIds: Rule = (doc) => {
   return violations;
 };
 
-const listStructure: Rule = (doc) =>
-  [...doc.querySelectorAll('ul, ol')]
+const listStructure: Rule = ({ root }) =>
+  [...root.querySelectorAll('ul, ol')]
     .flatMap((list) => [...list.children])
     .filter((child) => !['LI', 'SCRIPT', 'TEMPLATE'].includes(child.tagName))
     .map((child) => ({
@@ -833,11 +859,11 @@ function distinguishableViolation(
  * unnamed `section` is not a region landmark at all (HTML-AAM), so it is not
  * held against one (#864).
  */
-const landmarksAreDistinguishable: Rule = (doc) => {
+const landmarksAreDistinguishable: Rule = ({ root }) => {
   const violations: AccessibilityViolation[] = [];
   const visible = (element: Element): boolean => !isHiddenFromAssistiveTechnology(element);
   for (const [role, tag, landmarkWhenUnnamed] of COMPARED_LANDMARKS) {
-    const landmarks = [...doc.querySelectorAll(tag)].filter(visible);
+    const landmarks = [...root.querySelectorAll(tag)].filter(visible);
     const names = landmarks.map((element) => landmarkName(element).toLowerCase());
     if (landmarks.length >= 2) {
       landmarks.forEach((element, index) => {
@@ -848,7 +874,7 @@ const landmarksAreDistinguishable: Rule = (doc) => {
       });
     }
 
-    const declared = [...doc.querySelectorAll(`[role="${role}"]:not(${tag})`)].filter(visible);
+    const declared = [...root.querySelectorAll(`[role="${role}"]:not(${tag})`)].filter(visible);
     const implicitNames = names.filter((name) => name !== '');
     // ⚠️ Until #864 this counted NAMED implicit landmarks only, which is right
     // for `section` and `form` and wrong for `nav` and `aside`: an unnamed
@@ -884,8 +910,8 @@ const landmarksAreDistinguishable: Rule = (doc) => {
  * The region must be the table's PARENT, so a page-wide region somewhere up
  * the tree cannot stand in for one around the table.
  */
-const tableInScrollRegion: Rule = (doc) =>
-  [...doc.querySelectorAll('table')]
+const tableInScrollRegion: Rule = ({ root }) =>
+  [...root.querySelectorAll('table')]
     .filter((table) => !isHiddenFromAssistiveTechnology(table))
     .filter((table) => {
       const region = table.parentElement;
@@ -931,9 +957,43 @@ export const ACCESSIBILITY_RULES: readonly (readonly [string, Rule])[] = [
   ['table-in-scroll-region', tableInScrollRegion],
 ];
 
-/** Run every rule against a rendered document. Empty means clean. */
+/**
+ * The modal dialog a document has open, if it has one — #950.
+ *
+ * A `dialog` or `alertdialog` that says `aria-modal="true"` and is not itself
+ * hidden. While one is open, the page behind it is hidden from assistive
+ * technology (Radix marks it `aria-hidden`) and out of the keyboard's reach
+ * (the dialog's focus trap), so auditing the page would report every control
+ * on it as focusable-and-hidden: true of the markup, and false of anything a
+ * rider can do. `design/ConfirmDialog.tsx` is the one there is, and its
+ * trap is held by `ConfirmDialog.test.tsx` and the browser gate — which is
+ * what makes narrowing the audit to the dialog honest rather than convenient.
+ *
+ * ⚠️ `aria-modal` alone decides it: a dialog that traps focus without saying
+ * so is audited as part of the page, and fails there.
+ */
+export function openModal(doc: Document): Element | null {
+  return (
+    [...doc.querySelectorAll('[aria-modal="true"]')].find(
+      (element) =>
+        ['dialog', 'alertdialog'].includes(roleOf(element) ?? '') &&
+        !isHiddenFromAssistiveTechnology(element),
+    ) ?? null
+  );
+}
+
+/**
+ * Run every rule against a rendered document. Empty means clean.
+ *
+ * While a modal dialog is open the rules run over the dialog alone
+ * ({@link openModal}); the page's own structure — one `main`, one `h1`, an
+ * outline from `h1` — was audited with the dialog closed.
+ */
 export function auditAccessibility(doc: Document): AccessibilityViolation[] {
-  return ACCESSIBILITY_RULES.flatMap(([, rule]) => rule(doc));
+  const modal = openModal(doc);
+  const scope: AuditScope =
+    modal === null ? { doc, root: doc, modal: false } : { doc, root: modal, modal: true };
+  return ACCESSIBILITY_RULES.flatMap(([, rule]) => rule(scope));
 }
 
 /** A one-line-per-violation report, for a test failure message worth reading. */

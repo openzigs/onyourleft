@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  eagerLazyOnlyPackages,
   eagerLazyViews,
   readLazyGroups,
   reExportSpecifiers,
@@ -119,6 +120,42 @@ describe('a view meant to load on demand is not in the entry — #674', () => {
         [GROUP],
       ),
     ).toEqual(['the build has no entry chunk, so there is nothing to check']);
+  });
+});
+
+describe('a Radix primitive is never in the entry — ADR 0034 D-5, #950', () => {
+  const RADIX =
+    '/repo/node_modules/.pnpm/@radix-ui+react-dialog@1.1.23/node_modules/@radix-ui/react-dialog/dist/index.mjs';
+
+  it('passes a build that keeps it in a group chunk', () => {
+    const build = goodBuild().map((each) =>
+      each.fileName === 'assets/more.js'
+        ? { ...each, moduleIds: [...each.moduleIds, RADIX] }
+        : each,
+    );
+    expect(eagerLazyOnlyPackages(build)).toEqual([]);
+  });
+
+  it('fails one in the entry, or in a chunk the entry imports statically', () => {
+    const inEntry = goodBuild().map((each) =>
+      each.isEntry ? { ...each, moduleIds: [...each.moduleIds, RADIX] } : each,
+    );
+    expect(eagerLazyOnlyPackages(inEntry)).toEqual([
+      `${RADIX} (@radix-ui/) is in assets/index.js, which the entry loads statically`,
+    ]);
+    const inShared = goodBuild().map((each) =>
+      each.fileName === 'assets/shared.js' ? { ...each, moduleIds: [RADIX] } : each,
+    );
+    expect(eagerLazyOnlyPackages(inShared)).toHaveLength(1);
+  });
+
+  it('leaves every other package alone', () => {
+    const build = goodBuild().map((each) =>
+      each.isEntry
+        ? { ...each, moduleIds: [...each.moduleIds, '/repo/node_modules/lucide-react/dist/x.js'] }
+        : each,
+    );
+    expect(eagerLazyOnlyPackages(build)).toEqual([]);
   });
 });
 

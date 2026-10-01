@@ -38,7 +38,7 @@ import type { Kilograms } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { MoreAbout } from '../design/MoreAbout';
-import { StatusMessage, type StatusTone } from '../design/StatusMessage';
+import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
 import { formatDistance, measurementText } from '../units/format';
 
@@ -399,7 +399,7 @@ function ImportPanel({
         a test can assert on. #51 asks that progress be *visible*; a number that
         is announced is more visible than a bar that is not.
       */}
-      <p className="oyl-status oyl-status--info" role="status">
+      <p className={statusSurfaceClass('info')} role="status">
         {progressSentence(progress, running, total)}
       </p>
 

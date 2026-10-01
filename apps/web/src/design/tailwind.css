@@ -1,0 +1,128 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/*
+ * Tailwind CSS v4, over the design tokens — #950, ADR 0042.
+ *
+ * ⚠️ **This file defines no value.** Every entry in the `@theme` below is a
+ * `var(--oyl-…)` that `theme.css` declares and `tokens.ts` holds, so a utility
+ * colour IS a token: `bg-accent` paints `var(--oyl-color-accent)`, which the
+ * dark palette re-points, and `contrast.a11y.test.ts` and `theme.a11y.test.ts`
+ * go on gating it in both palettes. `a11y/tailwind.a11y.test.ts` holds this
+ * block equal to the tokens in both directions, and compiles every class the
+ * source uses to prove the CSS it ships names no colour, duration or easing of
+ * its own.
+ *
+ * ## What is deliberately NOT here
+ *
+ * - **Tailwind's default theme.** `--*: initial` clears it, so `bg-red-500`,
+ *   `p-4`, `text-lg`'s own size, `shadow` and `rounded-lg` generate nothing:
+ *   the only colours, spaces, sizes and curves a class can reach are ours.
+ *   A class that generates nothing is itself a failure of the gate above.
+ * - **Preflight.** Not imported. `theme.css`'s base rules — the link states
+ *   (#661), the button kinds (#668), the one focus ring, the form controls
+ *   (#667) — stay the base, unchanged, so nothing `links.browser.spec.ts`,
+ *   `button-hierarchy.browser.spec.ts` or `shell.browser.spec.ts` holds can
+ *   drift under a reset nobody asked for.
+ * - **A layer.** `@tailwind utilities` is written bare rather than through
+ *   `@import 'tailwindcss'`, whose utilities sit in `@layer utilities` — and an
+ *   unlayered rule in `theme.css` beats any layered one whatever its
+ *   specificity, so a `p` margin there would silently win over `mb-md` here.
+ *   Unlayered and imported AFTER `theme.css` (`main.tsx`, every harness page),
+ *   a utility beats a `theme.css` rule of the same specificity by order, and a
+ *   more specific rule there (`.oyl-ride__heading > .oyl-status`) still wins,
+ *   which is what those rules were written for.
+ */
+
+@theme inline prefix(tw) {
+  --*: initial;
+
+  /* Every colour token, light and dark alike through the one custom property. */
+  --color-canvas: var(--oyl-color-canvas);
+  --color-surface: var(--oyl-color-surface);
+  --color-surface-raised: var(--oyl-color-surface-raised);
+  --color-surface-overlay: var(--oyl-color-surface-overlay);
+  --color-border: var(--oyl-color-border);
+  --color-ink: var(--oyl-color-ink);
+  --color-ink-muted: var(--oyl-color-ink-muted);
+  --color-accent: var(--oyl-color-accent);
+  --color-accent-hover: var(--oyl-color-accent-hover);
+  --color-accent-ink: var(--oyl-color-accent-ink);
+  --color-selected: var(--oyl-color-selected);
+  --color-link: var(--oyl-color-link);
+  --color-link-visited: var(--oyl-color-link-visited);
+  --color-link-hover: var(--oyl-color-link-hover);
+  --color-link-active: var(--oyl-color-link-active);
+  --color-focus: var(--oyl-color-focus);
+  --color-info-surface: var(--oyl-color-info-surface);
+  --color-info-ink: var(--oyl-color-info-ink);
+  --color-info-border: var(--oyl-color-info-border);
+  --color-success-surface: var(--oyl-color-success-surface);
+  --color-success-ink: var(--oyl-color-success-ink);
+  --color-success-border: var(--oyl-color-success-border);
+  --color-warning-surface: var(--oyl-color-warning-surface);
+  --color-warning-ink: var(--oyl-color-warning-ink);
+  --color-warning-border: var(--oyl-color-warning-border);
+  --color-danger-surface: var(--oyl-color-danger-surface);
+  --color-danger-ink: var(--oyl-color-danger-ink);
+  --color-danger-border: var(--oyl-color-danger-border);
+  --color-illo-sky: var(--oyl-color-illo-sky);
+  --color-illo-sun: var(--oyl-color-illo-sun);
+  --color-illo-hill-far: var(--oyl-color-illo-hill-far);
+  --color-illo-hill-near: var(--oyl-color-illo-hill-near);
+  --color-illo-road: var(--oyl-color-illo-road);
+  --color-hud-surface: var(--oyl-color-hud-surface);
+  --color-hud-ink: var(--oyl-color-hud-ink);
+  --color-hud-ink-muted: var(--oyl-color-hud-ink-muted);
+  --color-hud-border: var(--oyl-color-hud-border);
+  --color-hud-stale-ink: var(--oyl-color-hud-stale-ink);
+
+  /* Spacing — `p-md`, `gap-sm`, `mb-lg`. `0` is the one length that is not a
+     token, because nobody chooses it: `mt-0` has to exist to undo a margin. */
+  --spacing-0: 0px;
+  --spacing-xs: var(--oyl-space-xs);
+  --spacing-sm: var(--oyl-space-sm);
+  --spacing-md: var(--oyl-space-md);
+  --spacing-lg: var(--oyl-space-lg);
+  --spacing-xl: var(--oyl-space-xl);
+
+  /* The type scale — `text-sm` to `text-metric`. Size only: the line height
+     stays the one `body` sets. */
+  --text-sm: var(--oyl-font-size-sm);
+  --text-md: var(--oyl-font-size-md);
+  --text-lg: var(--oyl-font-size-lg);
+  --text-xl: var(--oyl-font-size-xl);
+  --text-xxl: var(--oyl-font-size-xxl);
+  --text-display: var(--oyl-font-size-display);
+  --text-metric: var(--oyl-font-size-metric);
+
+  /* The one radius — `rounded`. */
+  --radius: var(--oyl-radius);
+
+  /* Motion (#936, ADR 0041 D-5): the one curve, and the default a bare
+     `transition-colors` takes. `duration-short` and `duration-medium` are the
+     two utilities below; a numeric `duration-150` is refused by the gate. */
+  --ease-standard: var(--oyl-motion-ease-standard);
+  --default-transition-duration: var(--oyl-motion-short);
+  --default-transition-timing-function: var(--oyl-motion-ease-standard);
+}
+
+@utility duration-short {
+  --tw-duration: var(--oyl-motion-short);
+  transition-duration: var(--oyl-motion-short);
+}
+
+@utility duration-medium {
+  --tw-duration: var(--oyl-motion-medium);
+  transition-duration: var(--oyl-motion-medium);
+}
+
+/* What is scanned for class names: the client's own components, and nothing
+   that ships in no bundle. `source(none)` turns off Tailwind's walk of the
+   whole directory, which would read the harness pages, the tools and every
+   comment in a test as candidates. */
+@source '../**/*.{ts,tsx}';
+@source not '../**/*.test.{ts,tsx}';
+@source not '../**/*-testing.{ts,tsx}';
+@source not '../**/testing/**';
+
+@tailwind utilities source(none);
