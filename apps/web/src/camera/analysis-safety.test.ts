@@ -558,13 +558,18 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
   const WRITES_OUT =
     /(?<![\w$])(?:console\s*\.|localStorage|sessionStorage|indexedDB)|@onyourleft\/store/;
 
+  // It reads every source file in the client, so it grows with the tree, as the
+  // importer check above does. Under coverage on CI it took 5 073 ms (#973's run
+  // 36863398547) and 5 174 ms (run 36867838963) against Vitest's 5 s default, so
+  // it is given that check's 15 s, about three times its slowest figure (§4c). It
+  // is a timeout, not a performance claim.
   it('2. in the module graph, holds a reply only in the runner, the port and its builder', () => {
     const read = (path: string): string => readFileSync(join(SOURCE_ROOT, path), 'utf8');
     for (const path of REPLY_HOLDERS) {
       expect(sources(), path).toContain(path);
     }
     expect(strayHolders(sources(), read)).toStrictEqual([]);
-  });
+  }, 15_000);
 
   it('2. goes red on a planted view, and a planted store module, that import one', () => {
     const planted: Record<string, string> = {
