@@ -834,7 +834,7 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   Vitest suite uses (`illustration/specimens-testing.ts`), and `shell.browser.spec.ts` §"#938" reads
   a pixel inside every painted region of every part, in both palettes, against the token its paint
   names, with the other palette forced as the control. The menu screens of #939 to #943 are its
-  callers; #943's empty states were among the first.
+  callers.
 - **Route and workout cards draw their shape** ([#941](https://github.com/openzigs/onyourleft/issues/941)).
   Each card in the Routes and Workouts list panes draws `ProfileShape` from the route's stored
   profile, or `WorkoutShape` from the workout the list already expanded, as a strip across the
