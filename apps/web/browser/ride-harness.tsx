@@ -92,6 +92,11 @@ import { ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
+import {
+  REALISTIC_WORLD_STORAGE_KEY,
+  writeRealisticWorldChoice,
+} from '../src/game/world-preference';
+import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -219,6 +224,20 @@ const PICKER = new URLSearchParams(window.location.search).get('picker');
 const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
 
 /**
+ * `ride.html?picker=chooser&notices=all` — #940's review (B2): the chooser with
+ * the TALLEST stack of standing notices it can show above *Ride*. A release the
+ * trainer did not confirm (#372), the trainer notice a running workout makes
+ * (#362, the longest `trainerRoadNotice` sentence) and the realistic world
+ * chosen on this device (#475), written through the product's own preference
+ * module before the shell renders, as Settings would. The trainer promise
+ * (#503) is the one notice it does not carry: a workout's trainer is not
+ * offered the road, so the promise and the trainer notice never stand together
+ * (`GameView` §`trainerReading`), and the notice is the longer of the two.
+ */
+const ALL_NOTICES =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('notices') === 'all';
+
+/**
  * The chooser's other five routes. The LAST has the longest name, so the
  * *Ride* it names is the longest the fixture can make.
  */
@@ -296,6 +315,7 @@ const GAME: GamePort = {
  * by construction (`GameView` §`trainerReading`), so they are two fixtures.
  */
 const WITH_A_NOTICE =
+  ALL_NOTICES ||
   new URLSearchParams(window.location.search).get('trainer') === 'workout' ||
   new URLSearchParams(window.location.search).get('rescue') !== null;
 
@@ -412,7 +432,11 @@ const TRAINER: GameTrainerPort = {
   recordingMayStop: () => MAY_STOP,
   readTrainer: () =>
     WITH_A_NOTICE
-      ? { kind: 'workout', control: undefined }
+      ? {
+          kind: 'workout',
+          control: undefined,
+          ...(ALL_NOTICES ? { releaseFault: RELEASE_INCOMPLETE } : {}),
+        }
       : {
           kind: 'ready',
           control: {
@@ -604,6 +628,11 @@ async function run(): Promise<void> {
   localStorage.removeItem(CUES_STORAGE_KEY);
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
+  }
+  // #940's review: the realistic world's notice, only when the tallest stack was asked for.
+  localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
+  if (ALL_NOTICES) {
+    writeRealisticWorldChoice(localStorage, true);
   }
 
   // #674: the view groups first, so every view renders on the render that asks.

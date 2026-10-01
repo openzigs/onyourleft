@@ -1582,15 +1582,146 @@ interface ChooserRide {
   readonly minWidth: number;
 }
 
+/**
+ * Which notices stand above *Ride* — #940's review (B2). `promise` is the
+ * default fixture: a ready trainer, so only #503's promise. `all` is the
+ * TALLEST stack the chooser can show (`ride-harness.tsx` §`ALL_NOTICES`): the
+ * release fault, the trainer notice and the realistic world.
+ */
+type ChooserNotices = 'promise' | 'all';
+
 async function openChooser(
   page: Page,
   viewport: ChooserViewport,
   query: 'chooser' | 'list',
+  notices: ChooserNotices = 'promise',
 ): Promise<void> {
   if (viewport.insets) {
     await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
   }
-  await openRide(page, { ...viewport, unstagedFails: false }, `?picker=${query}`);
+  await openRide(
+    page,
+    { ...viewport, unstagedFails: false },
+    `?picker=${query}${notices === 'all' ? '&notices=all' : ''}`,
+  );
+}
+
+/** The notice labels each state must render, in order, every one above *Ride*. */
+const CHOOSER_NOTICE_LABELS: Readonly<Record<ChooserNotices, readonly string[]>> = {
+  promise: ['Your trainer'],
+  all: ['Not released', 'The road will not reach your trainer', 'Realistic world'],
+};
+
+/**
+ * Where every notice is, and *Ride*, in page coordinates at `scrollY === 0`.
+ * A notice is a `.oyl-status` inside the chooser; its label is its first words.
+ */
+async function readNoticesAndRide(page: Page): Promise<{
+  readonly notices: readonly {
+    readonly label: string;
+    readonly top: number;
+    readonly bottom: number;
+  }[];
+  readonly ride: { readonly top: number; readonly bottom: number };
+}> {
+  return page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const chooser = document.querySelector('.oyl-chooser');
+    if (chooser === null) throw new Error('no chooser');
+    const notices = [...chooser.querySelectorAll<HTMLElement>('.oyl-status')].map((each) => {
+      const box = each.getBoundingClientRect();
+      return {
+        label: each.querySelector('.oyl-status__label')?.textContent?.replace(/:\s*$/, '') ?? '',
+        top: box.top + window.scrollY,
+        bottom: box.bottom + window.scrollY,
+      };
+    });
+    const ride = [...chooser.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').startsWith('Ride '),
+    );
+    if (ride === undefined) throw new Error('the chooser has no Ride');
+    // Where Ride is IN THE FLOW, not where a sticky offset holds it: a notice is
+    // above Ride when it comes before Ride's own place on the page.
+    const bar = ride.closest<HTMLElement>('.oyl-chooser__go');
+    const barPosition = bar?.style.position ?? '';
+    if (bar !== null) bar.style.position = 'static';
+    const box = ride.getBoundingClientRect();
+    const flow = { top: box.top + window.scrollY, bottom: box.bottom + window.scrollY };
+    if (bar !== null) bar.style.position = barPosition;
+    return { notices, ride: flow };
+  });
+}
+
+/**
+ * #940's review (B1): Tab from the top of the page to *Ride*, and for every
+ * control in the chooser that takes focus, read how much of it lies behind
+ * whatever is pinned over the chooser — any box inside `.oyl-chooser` whose
+ * computed `position` is `sticky` or `fixed`, less the control's own box.
+ * Chromium scrolls a newly focused control just into the viewport, so a
+ * control at the bottom edge is exactly where a bar pinned there sits.
+ */
+async function tabWalkUnderThePin(page: Page): Promise<
+  readonly {
+    readonly name: string;
+    readonly covered: number;
+    readonly height: number;
+  }[]
+> {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  const seen: { name: string; covered: number; height: number }[] = [];
+  for (let press = 0; press < 60; press += 1) {
+    await page.keyboard.press('Tab');
+    const reading = await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement | null;
+      if (element === null || element === document.body) return { kind: 'nothing' as const };
+      const chooser = document.querySelector('.oyl-chooser');
+      if (chooser === null || !chooser.contains(element)) return { kind: 'outside' as const };
+      const isRide =
+        element.tagName === 'BUTTON' && (element.textContent ?? '').startsWith('Ride ');
+      const box = element.getBoundingClientRect();
+      const pinned = [...chooser.querySelectorAll<HTMLElement>('*')].filter((each) => {
+        const position = getComputedStyle(each).position;
+        return (position === 'sticky' || position === 'fixed') && !each.contains(element);
+      });
+      let covered = 0;
+      for (const pin of pinned) {
+        const over = pin.getBoundingClientRect();
+        const height = Math.min(box.bottom, over.bottom) - Math.max(box.top, over.top);
+        const width = Math.min(box.right, over.right) - Math.max(box.left, over.left);
+        if (height > 0 && width > 0) covered = Math.max(covered, height);
+      }
+      // A label's own words, without a `<select>`'s options inside it.
+      const label = (element as HTMLInputElement).labels?.[0];
+      const words =
+        label === undefined
+          ? ''
+          : [...label.childNodes]
+              .filter((node) => node.nodeType === Node.TEXT_NODE)
+              .map((node) => node.textContent ?? '')
+              .join('');
+      const name =
+        element.getAttribute('aria-label') ??
+        (words === '' ? (element.textContent ?? element.tagName) : words);
+      return {
+        kind: 'control' as const,
+        isRide,
+        name: name.trim().slice(0, 60),
+        covered,
+        height: box.height,
+      };
+    });
+    if (reading.kind === 'nothing') break;
+    if (reading.kind === 'outside') {
+      if (seen.length > 0) break;
+      continue;
+    }
+    seen.push({ name: reading.name, covered: reading.covered, height: reading.height });
+    if (reading.isRide) break;
+  }
+  return seen;
 }
 
 /** Choose the last card, as a rider does, then read *Ride* at the top of the page. */
@@ -1802,6 +1933,72 @@ test.describe('#940 — the pre-ride chooser', () => {
       expect(order.at(-1), order.join(' → ')).toBe('ride');
       expect(order, order.join(' → ')).not.toContain('card');
     });
+  }
+});
+
+/*
+ * #940's review — B1 and B2. The chooser in BOTH notice states, at the three
+ * viewports #940 names and at two it did not (a 1024 px window, between the
+ * 60 and 75 rem layouts, and the tablet upright), with:
+ *
+ * - every notice in its order, ABOVE *Ride*'s own place in the flow;
+ * - *Ride* on the screen at `scrollY === 0` after choosing the last route, and
+ *   on the tablet in the shell 50 px clear of the fold, its margin published;
+ * - a Tab walk from the top to *Ride* in which no focused control lies behind
+ *   anything pinned over the chooser — not wholly, and not by one pixel.
+ */
+const CHOOSER_REVIEW_VIEWPORTS: readonly ChooserViewport[] = [
+  ...CHOOSER_VIEWPORTS,
+  { name: 'a 1024×768 window', width: 1024, height: 768, insets: false },
+  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, insets: false },
+];
+
+test.describe('#940 — every notice state, and focus never under the pin', () => {
+  for (const notices of ['promise', 'all'] as const) {
+    for (const viewport of CHOOSER_REVIEW_VIEWPORTS) {
+      test(`notices ${notices}: each above Ride, and Ride on the screen — ${viewport.name}`, async ({
+        page,
+      }) => {
+        await openChooser(page, viewport, 'chooser', notices);
+        const ride = await chooseLastAndReadRide(page);
+        const margin = ride.fold - ride.bottom;
+        console.log(
+          `#940 notices ${notices} — ${viewport.name}: Ride at ${ride.top.toFixed(1)}–${ride.bottom.toFixed(1)} px, ${margin.toFixed(1)} px above the fold`,
+        );
+        expect(ride.scrollY).toBe(0);
+        expect(ride.top).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+        expect(margin).toBeGreaterThanOrEqual(viewport.insets ? CHOOSER_FOLD_FLOOR_PIXELS : 0);
+        expect(ride.onTop, 'something covers Ride at its own centre').toBe(true);
+
+        const placed = await readNoticesAndRide(page);
+        expect(placed.notices.map((each) => each.label)).toEqual(CHOOSER_NOTICE_LABELS[notices]);
+        for (const notice of placed.notices) {
+          expect(notice.bottom, `${notice.label} is not above Ride`).toBeLessThanOrEqual(
+            placed.ride.top + SUBPIXEL_TOLERANCE,
+          );
+        }
+      });
+
+      test(`notices ${notices}: Tab to Ride, and no focused control is under the pin — ${viewport.name}`, async ({
+        page,
+      }) => {
+        await openChooser(page, viewport, 'chooser', notices);
+        const walk = await tabWalkUnderThePin(page);
+        console.log(
+          `#940 Tab walk, notices ${notices} — ${viewport.name}: ${walk
+            .map((each) => `${each.name} ${each.covered.toFixed(0)}/${each.height.toFixed(0)}`)
+            .join(' | ')}`,
+        );
+        expect(walk.at(-1)?.name.startsWith('Ride '), 'the walk never reached Ride').toBe(true);
+        expect(walk.length).toBeGreaterThanOrEqual(6);
+        for (const step of walk) {
+          expect(
+            step.covered,
+            `${step.name} is behind the pinned box when focused`,
+          ).toBeLessThanOrEqual(0);
+        }
+      });
+    }
   }
 });
 

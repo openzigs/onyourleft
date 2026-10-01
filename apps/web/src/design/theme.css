@@ -2812,7 +2812,13 @@ p > label + input[type='file'] {
 
 /*
  * THE PRE-RIDE CHOOSER — #940, epic #935. `game/StageChooser.tsx` is the markup
- * and argues it; this is only how it is drawn.
+ * and argues it. Its boxes — every surface, border, padding, gap and margin —
+ * are `tw:` utilities over the tokens (ADR 0042); what is HERE is only what a
+ * utility cannot say without an arbitrary value or variant, which ADR 0042 D-5
+ * refuses: a grid template with `minmax()`, the 48 px drawing, a selector on
+ * `:has()` or `::after`, a length built from the safe-area inset, and every
+ * rule that depends on a media query (the token theme clears Tailwind's
+ * breakpoints).
  *
  * - **Route cards**: one native radio group, each card a list item whose
  *   heading is its radio's label, stretched over the card by `::after`, so the
@@ -2823,62 +2829,37 @@ p > label + input[type='file'] {
  *   offset onto `canvas` round the whole card, with the radio's own ring on
  *   `surface`. The drawing is the kit's `ProfileShape`, 3 rem (48 px) tall —
  *   the owner's ruling of 2026-10-01 on #935: medium, not a strip.
- * - **The loadout**: the ride's controls, as a panel.
- * - **Ride, with every standing notice above it** (`.oyl-chooser__go`):
- *   STICKY to the bottom of the screen, above the navigation bar and the
- *   bottom inset, so on a screen too short for the chooser *Ride* is still at
- *   `scrollY === 0` — and the trainer's promise with it, because #503 needs it
- *   read before the press. Where the whole chooser fits, it is simply in the
- *   flow. `browser/ride.browser.spec.ts` §"#940" measures both, and its control
- *   (`ride.html?picker=list`) puts the old list back and requires *Ride* under
- *   the tablet's floor.
+ * - **The standing notices come FIRST**, under the heading and above the
+ *   cards — where the picker before #940 had them — so every one of them is
+ *   above *Ride*, and #503's promise is what a rider reads before anything
+ *   they can press.
+ * - **Ride is pinned on its own** (`.oyl-chooser__go`): sticky to the bottom of
+ *   the screen, above the navigation bar and the bottom inset, so on a screen
+ *   too short for the chooser *Ride* is still at `scrollY === 0`.
+ *
+ * ⚠️ **#940's review, B1 and B2: nothing but *Ride* is pinned, and the page
+ * is padded for it.** The first version pinned every notice WITH *Ride*: with
+ * the release fault, the trainer notice and the realistic world standing the
+ * box was 467 px of a 390×844 phone and could not rise far enough to show
+ * *Ride* at 844×390 at all, and in every state Chromium scrolled a newly
+ * focused control to the bottom edge — under the box (WCAG 2.2 SC 2.4.11).
+ * The bar is now *Ride* alone, at most three lines of its label high, and the
+ * document's `scroll-padding-bottom` is that worst case, so a focused control
+ * is scrolled clear of it. `browser/ride.browser.spec.ts` §"#940 — every
+ * notice state" walks the keyboard through the chooser in both notice states
+ * at five viewports and holds the overlap with anything pinned to 0 px.
  *
  * ⚠️ On a narrow screen `.oyl-chooser__side` is `display: contents`. A sticky
  * box cannot leave its containing block, and a column that starts below the
  * fold would hold *Ride* below the fold with it; so there the bar's containing
  * block is the whole chooser, which starts at the top.
  */
-.oyl-chooser__routes {
-  border: 0;
-  margin: 0 0 var(--oyl-space-md);
-  padding: 0;
-  min-width: 0;
-}
-
 .oyl-chooser__cards {
-  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
-  gap: var(--oyl-space-sm);
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .oyl-chooser__card {
-  position: relative;
-  display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  column-gap: var(--oyl-space-sm);
-  align-items: center;
-  padding: var(--oyl-space-sm) var(--oyl-space-md);
-  background: var(--oyl-color-surface);
-  color: var(--oyl-color-ink);
-  border: 2px solid var(--oyl-color-border);
-  border-radius: var(--oyl-radius);
-}
-
-.oyl-chooser__radio {
-  margin: 0;
-}
-
-.oyl-chooser__name {
-  margin: 0;
-  font-size: var(--oyl-font-size-md);
-  overflow-wrap: anywhere;
-}
-
-.oyl-chooser__name > label {
-  cursor: pointer;
 }
 
 /* The whole card is the radio's label. */
@@ -2889,16 +2870,7 @@ p > label + input[type='file'] {
 }
 
 .oyl-chooser__shape {
-  grid-column: 1 / -1;
-  display: block;
-  inline-size: 100%;
   block-size: 3rem;
-  margin-block: var(--oyl-space-xs);
-}
-
-.oyl-chooser__facts {
-  grid-column: 1 / -1;
-  margin: 0;
 }
 
 .oyl-chooser__card:has(> .oyl-chooser__radio:checked) {
@@ -2915,53 +2887,21 @@ p > label + input[type='file'] {
   display: contents;
 }
 
-.oyl-chooser__loadout {
-  margin-bottom: var(--oyl-space-md);
-  padding: var(--oyl-space-md);
-  background: var(--oyl-color-surface);
-  border: 1px solid var(--oyl-color-border);
-  border-radius: var(--oyl-radius);
-}
-
-.oyl-chooser__loadout > h3 {
-  margin-top: 0;
-}
-
-/* Each control group a column: a box's words above it, never beside it. */
-.oyl-chooser__loadout > div {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--oyl-space-xs);
-  margin-bottom: var(--oyl-space-sm);
-}
-
-.oyl-chooser__loadout > div > p {
-  margin: 0;
-}
-
-.oyl-chooser__loadout label:has(> input[type='number']),
-.oyl-chooser__loadout label:has(> select) {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--oyl-space-xs);
-}
-
+/*
+ * The bar: *Ride*, and nothing else. Its height is *Ride*'s — 48 px, or up to
+ * three lines of a long route's name, 5.5 rem with the bar's padding — which is
+ * what `--oyl-chooser-pin` allows for.
+ */
 .oyl-chooser__go {
   position: sticky;
   bottom: var(--oyl-safe-bottom);
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: var(--oyl-space-sm);
-  padding-block: var(--oyl-space-sm);
-  background: var(--oyl-color-canvas);
-  border-top: 1px solid var(--oyl-color-border);
 }
 
-.oyl-chooser__go > .oyl-status {
-  margin-bottom: 0;
+:root:has(.oyl-chooser__go) {
+  --oyl-chooser-pin: 7rem;
+
+  scroll-padding-bottom: calc(var(--oyl-chooser-pin) + var(--oyl-safe-bottom));
 }
 
 /* Above the navigation BAR — the shell's own query, restated. */
@@ -2969,11 +2909,20 @@ p > label + input[type='file'] {
   .oyl-chooser__go {
     bottom: calc(4.5rem + var(--oyl-safe-bottom));
   }
+
+  :root:has(.oyl-chooser__go) {
+    scroll-padding-bottom: calc(var(--oyl-chooser-pin) + 4.5rem + var(--oyl-safe-bottom));
+  }
 }
 
-/* Wide: the cards beside a column of the loadout and Ride. */
+/*
+ * Wide: the cards beside a column of the loadout and Ride. The game route's
+ * layout is `prose` (`shell/routes.ts`), and that is what this undoes, for the
+ * chooser alone and only from 60 rem: `:has()` finds the chooser inside this
+ * `main`, which no other route renders.
+ */
 @media (min-width: 60rem) {
-  .oyl-main:has(.oyl-chooser) {
+  .oyl-main--prose:has(.oyl-chooser) {
     max-width: none;
   }
 
@@ -2984,7 +2933,8 @@ p > label + input[type='file'] {
     align-items: start;
   }
 
-  .oyl-chooser > h2 {
+  .oyl-chooser > h2,
+  .oyl-chooser > .oyl-chooser__notices {
     grid-column: 1 / -1;
   }
 
@@ -3014,11 +2964,11 @@ p > label + input[type='file'] {
 
 /*
  * Wider still — a landscape tablet: three columns, the cards, the loadout and
- * *Ride* with its notices, read left to right in the order they are tabbed
- * through. One column of the loadout over *Ride* was 600 px and more, and
- * pinned *Ride* to the bottom of the tablet's screen 8 px above the fold, inside
- * the 50 px floor every tablet control here is held to (#439); beside the
- * loadout, *Ride* stands near the top of the chooser in the flow.
+ * *Ride*, read left to right in the order they are tabbed through. One column
+ * of the loadout over *Ride* was 600 px and more, and pinned *Ride* to the
+ * bottom of the tablet's screen 8 px above the fold, inside the 50 px floor
+ * every tablet control here is held to (#439); beside the loadout, *Ride*
+ * stands near the top of the chooser in the flow, and nothing is pinned.
  */
 @media (min-width: 75rem) {
   .oyl-chooser {
@@ -3029,14 +2979,19 @@ p > label + input[type='file'] {
     display: contents;
   }
 
-  .oyl-chooser__loadout {
+  .oyl-chooser .oyl-chooser__loadout {
     margin-bottom: 0;
   }
 
-  .oyl-chooser__go {
+  .oyl-chooser .oyl-chooser__go {
+    position: static;
     align-self: start;
     padding-block-start: 0;
     border-top: 0;
+  }
+
+  :root:has(.oyl-chooser__go) {
+    scroll-padding-bottom: 0;
   }
 }
 

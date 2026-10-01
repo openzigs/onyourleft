@@ -179,6 +179,23 @@ describe('#940 — the order of the notices and Ride', () => {
     expect(rideButton(tree.container).getAttribute('aria-disabled')).toBe('true');
   });
 
+  it('puts every notice before the cards — in the flow, outside the pinned bar (#940 review, B1)', async () => {
+    const tree = await render({ notices: true, worldChosen: true });
+    const cards = tree.container.querySelector('.oyl-chooser__cards');
+    const bar = tree.container.querySelector('.oyl-chooser__go');
+    const notices = queryAll(tree.container, '.oyl-status');
+    expect(notices).toHaveLength(4);
+    for (const notice of notices) {
+      expect(
+        notice.compareDocumentPosition(cards as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(bar?.contains(notice)).toBe(false);
+    }
+    // The bar holds Ride and nothing else.
+    expect(bar?.children).toHaveLength(1);
+    expect(bar?.firstElementChild).toBe(rideButton(tree.container));
+  });
+
   it('puts the loadout between the cards and Ride', async () => {
     const tree = await render();
     const cards = tree.container.querySelector('.oyl-chooser__cards');
@@ -225,6 +242,20 @@ describe('#940 — the route cards', () => {
     expect(onStart).toHaveBeenCalledTimes(1);
     expect(onStart.mock.calls[0]?.[0].id).toBe('b');
     expect(onStart.mock.calls[0]?.[1]).toBe(true);
+  });
+
+  it('does not show a ghost ticked on one route as ticked on a route never ridden (#940 review)', async () => {
+    const tree = await render();
+    await activateWithKeyboard(radios(tree.container)[1] as HTMLInputElement);
+    await settle();
+    const ghost = (): HTMLInputElement =>
+      queryAll<HTMLInputElement>(tree.container, '.oyl-game__ghost input')[0] as HTMLInputElement;
+    await activateWithKeyboard(ghost());
+    expect(ghost().checked).toBe(true);
+    await activateWithKeyboard(radios(tree.container)[0] as HTMLInputElement);
+    await settle();
+    expect(ghost().disabled).toBe(true);
+    expect(ghost().checked).toBe(false);
   });
 
   it('offers the ghost disabled, with the reason as its label, on a route never ridden (#93)', async () => {

@@ -9,8 +9,8 @@
  * ONE *Ride*, for the chosen route. It was a bulleted list with a checkbox and
  * a button per route (`GameView.tsx` until #940), and everything that list did
  * is still done here — moved out of `GameView.tsx` so that what the picker
- * imports is its own graph (`stage-chooser.test.tsx` walks it: no renderer, no
- * map, no network).
+ * imports is its own graph (`stage-chooser-imports.test.ts` walks it: no
+ * renderer, no map, no network).
  *
  * ## What did NOT change, and must not
  *
@@ -19,9 +19,12 @@
  *   (#509, #503), the trainer notice (#362) and the realistic world (#475).
  *   #503 is the one that matters most: the promise is what makes the press
  *   that asks the trainer for control the rider's decision, so it has to be
- *   read before *Ride*. They sit in the same box as *Ride* (`.oyl-chooser__go`),
- *   so where *Ride* is pinned to the bottom of a small screen they are pinned
- *   with it, and a rider never sees the button without the sentences above it.
+ *   read before *Ride*. They come FIRST, under the heading and above the cards,
+ *   where the picker before #940 had them, and they are never pinned: #940's
+ *   review found a pinned stack of them covering the controls a rider tabs to
+ *   (WCAG 2.2 SC 2.4.11) and pushing *Ride* off a phone held sideways. Only
+ *   *Ride* is pinned, and `theme.css` §"THE PRE-RIDE CHOOSER" pads the page
+ *   for it.
  * - **A refused *Ride* is `aria-disabled` with `aria-describedby`**, never
  *   `disabled` (#255), and the handler still refuses.
  * - **A route with no attempt offers the ghost disabled, with the reason as
@@ -85,14 +88,14 @@ export interface RidableRoute {
  *
  * ⚠️ **A module constant rather than `useId`, and that is a decision.** The
  * refusal is referenced from two *different* components — the intensity box
- * inside {@link PacerControls} and every ride button inside
+ * inside {@link PacerControls} and the one *Ride* in
  * {@link RoutePicker} — so a generated id would have to be threaded through
  * both, and a mismatch would be a **dangling `aria-describedby`**: the one
  * failure `a11y/audit.ts`'s `aria-reference-resolves` rule exists to catch, and
  * silent to everyone who is not using a screen reader. A constant cannot
  * collide because the picker is rendered at most once — this screen has exactly
- * one intensity control, and `PacerControls`'s own header says why it is above
- * the list rather than in it.
+ * one intensity control, and `PacerControls`'s own header says why it belongs
+ * to the ride rather than to a route.
  */
 const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
 
@@ -102,7 +105,7 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
  *
  * Two independent refusals can be live at once: a rider may slip a decimal in
  * the pacer box *and* leave the wind speed blank. One shared id would make
- * `aria-describedby` on the ride button point at whichever of the two happened
+ * `aria-describedby` on *Ride* point at whichever of the two happened
  * to render, so the rider would be told about one problem and blocked by two.
  */
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
@@ -250,9 +253,62 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       .join(' ') || undefined;
   const chosen = props.routes.find((route) => route.id === props.picked) ?? first;
   const headingId = `${ids}-heading`;
+  const notices = [
+    props.releaseNotice === undefined ? undefined : (
+      // #372: first, because it is about the machine under the rider now
+      // rather than the road they are about to choose.
+      <StatusMessage key="release" tone="danger" label="Not released" live>
+        {props.releaseNotice}
+      </StatusMessage>
+    ),
+    props.asking ? (
+      // #509: the press has asked, and the machine has up to the FTMS
+      // procedure's timeout to answer. Said here, in the promise's place,
+      // and `live` because it is a change the rider caused.
+      <StatusMessage key="asking" tone="info" label="Your trainer" live>
+        Asking your trainer for control. The ride starts when it answers.
+      </StatusMessage>
+    ) : props.trainerPromise === undefined ? undefined : (
+      // ⚠️ #503: **the sentence that makes the Ride press the rider's
+      // decision** rather than the screen's. It is above the button, so a
+      // rider reads that the trainer will follow the hills before the press
+      // that asks it for control. Not `live`: nothing changed, it is simply
+      // what this screen says.
+      <StatusMessage key="promise" tone="info" label="Your trainer">
+        {props.trainerPromise}
+      </StatusMessage>
+    ),
+    props.trainerNotice === undefined ? undefined : (
+      // ⚠️ **Before the ride rather than only during it**, because a rider
+      // who can end a workout, or choose to ride without resistance, can only
+      // do so before they start. It does not block the ride: a rider who
+      // wants to ride a route with no resistance is allowed to, and #362's
+      // criterion is that they are told, not that they are stopped. Since
+      // #503 `no-control` is not one of these — the press asks.
+      <StatusMessage key="trainer" tone="warning" label="The road will not reach your trainer">
+        {props.trainerNotice}
+      </StatusMessage>
+    ),
+    props.worldChosen ? (
+      // #475: the offline fallback stated BEFORE the ride, where a rider can
+      // still act on it, and the way back to the choice.
+      // @see realisticWorldChosenText
+      <StatusMessage key="world" tone="info" label="Realistic world">
+        {realisticWorldChosenText()}{' '}
+        <a href={hrefFor(routeById('settings'))}>Change this in Settings</a>.
+      </StatusMessage>
+    ) : undefined,
+  ].filter((each) => each !== undefined);
   return (
     <div className="oyl-game__picker oyl-chooser">
       <h2 id={headingId}>Choose a route</h2>
+      {/*
+        ⚠️ **Every standing notice comes first, above the cards, the loadout and
+        Ride** — this file's header, and #940's review (B1, B2). They are in the
+        flow, never pinned: a pinned stack of them covered the controls a rider
+        tabs to and pushed Ride off a phone held sideways.
+      */}
+      {notices.length === 0 ? undefined : <div className="oyl-chooser__notices">{notices}</div>}
       <RouteCards
         routes={props.routes}
         chosen={chosen}
@@ -269,8 +325,8 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         that starts below the fold.
       */}
       <div className="oyl-chooser__side">
-        <div className="oyl-chooser__loadout">
-          <h3>Your ride</h3>
+        <div className="oyl-chooser__loadout tw:mb-md tw:p-md tw:bg-surface tw:border tw:border-border tw:rounded">
+          <h3 className="tw:mt-0">Your ride</h3>
           <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
           <PacerControls
             withPacer={props.withPacer}
@@ -293,66 +349,22 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           />
         </div>
         {/*
-          ⚠️ **Every notice is in the same box as Ride, above it** — this
-          file's header. Where the box is pinned to the bottom of a screen
-          too short for the chooser, the sentences are pinned with it.
+          ⚠️ **Ride, and nothing else, is pinned** to the bottom of a screen
+          too short for the chooser (`theme.css` §"THE PRE-RIDE CHOOSER"), and
+          the page is padded by the bar's height so a focused control is never
+          scrolled under it (WCAG 2.2 SC 2.4.11).
         */}
-        <div className="oyl-chooser__go">
-          {props.releaseNotice === undefined ? undefined : (
-            // #372: first, because it is about the machine under the rider now
-            // rather than the road they are about to choose.
-            <StatusMessage tone="danger" label="Not released" live>
-              {props.releaseNotice}
-            </StatusMessage>
-          )}
-          {props.asking ? (
-            // #509: the press has asked, and the machine has up to the FTMS
-            // procedure's timeout to answer. Said here, in the promise's place,
-            // and `live` because it is a change the rider caused.
-            <StatusMessage tone="info" label="Your trainer" live>
-              Asking your trainer for control. The ride starts when it answers.
-            </StatusMessage>
-          ) : props.trainerPromise === undefined ? undefined : (
-            // ⚠️ #503: **the sentence that makes the Ride press the rider's
-            // decision** rather than the screen's. It is above the button, so a
-            // rider reads that the trainer will follow the hills before the press
-            // that asks it for control. Not `live`: nothing changed, it is simply
-            // what this screen says.
-            <StatusMessage tone="info" label="Your trainer">
-              {props.trainerPromise}
-            </StatusMessage>
-          )}
-          {props.trainerNotice === undefined ? undefined : (
-            // ⚠️ **Before the ride rather than only during it**, because a rider
-            // who can end a workout, or choose to ride without resistance, can only
-            // do so before they start. It does not block the ride: a rider who
-            // wants to ride a route with no resistance is allowed to, and #362's
-            // criterion is that they are told, not that they are stopped. Since
-            // #503 `no-control` is not one of these — the press asks.
-            <StatusMessage tone="warning" label="The road will not reach your trainer">
-              {props.trainerNotice}
-            </StatusMessage>
-          )}
-          {props.worldChosen ? (
-            // #475: the offline fallback stated BEFORE the ride, where a rider can
-            // still act on it, and the way back to the choice.
-            // @see realisticWorldChosenText
-            <StatusMessage tone="info" label="Realistic world">
-              {realisticWorldChosenText()}{' '}
-              <a href={hrefFor(routeById('settings'))}>Change this in Settings</a>.
-            </StatusMessage>
-          ) : undefined}
+        <div className="oyl-chooser__go tw:flex tw:flex-col tw:py-sm tw:bg-canvas tw:border-t tw:border-border">
           {/*
             ⚠️ **`aria-disabled`, deliberately, and not the `disabled`
-            attribute** — #255's second defect. The attribute removes every
-            ride button on the screen from the tab order, so a rider who slips
-            a decimal point tabs from the intensity box straight past all of
-            them to whatever follows, with no indication that the controls
-            they were heading for exist at all. `aria-disabled` keeps the
-            button reachable and announced as unavailable, and
-            {@link PACER_PROBLEM_ID} tells it *why* — so the control that is
-            blocked says it is blocked, rather than only the field that
-            blocked it.
+            attribute** — #255's second defect. The attribute removes the
+            button from the tab order, so a rider who slips a decimal point
+            tabs from the intensity box straight past it to whatever follows,
+            with no indication that the control they were heading for exists
+            at all. `aria-disabled` keeps the button reachable and announced as
+            unavailable, and {@link PACER_PROBLEM_ID} tells it *why* — so the
+            control that is blocked says it is blocked, rather than only the
+            field that blocked it.
 
             The refusal itself is unchanged: `onStart` is not called. A
             guard in the handler is what enforces that now, because
@@ -409,15 +421,21 @@ function RouteCards(props: {
 }): JSX.Element {
   const group = `${props.idPrefix}-route`;
   return (
-    <fieldset className="oyl-chooser__routes" aria-labelledby={props.labelledBy}>
-      <ul className="oyl-chooser__cards">
+    <fieldset
+      className="oyl-chooser__routes tw:mt-0 tw:mx-0 tw:mb-md tw:p-0 tw:border-0 tw:min-w-0"
+      aria-labelledby={props.labelledBy}
+    >
+      <ul className="oyl-chooser__cards tw:grid tw:gap-sm tw:m-0 tw:p-0 tw:list-none">
         {props.routes.map((route, index) => {
           const radioId = `${group}-${String(index)}`;
           const factsId = `${radioId}-facts`;
           return (
-            <li key={route.id} className="oyl-chooser__card">
+            <li
+              key={route.id}
+              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:py-sm tw:px-md tw:bg-surface tw:text-ink tw:border-2 tw:border-border tw:rounded"
+            >
               <input
-                className="oyl-chooser__radio"
+                className="oyl-chooser__radio tw:m-0"
                 type="radio"
                 id={radioId}
                 name={group}
@@ -428,11 +446,16 @@ function RouteCards(props: {
                   props.onPick(route.id);
                 }}
               />
-              <h3 className="oyl-chooser__name">
-                <label htmlFor={radioId}>{route.name}</label>
+              <h3 className="oyl-chooser__name tw:m-0 tw:text-md tw:wrap-anywhere">
+                <label htmlFor={radioId} className="tw:cursor-pointer">
+                  {route.name}
+                </label>
               </h3>
-              <ProfileShape className="oyl-chooser__shape" profile={route.profile} />
-              <p className="oyl-chooser__facts oyl-muted" id={factsId}>
+              <ProfileShape
+                className="oyl-chooser__shape tw:col-span-full tw:block tw:w-full tw:my-xs"
+                profile={route.profile}
+              />
+              <p className="oyl-chooser__facts oyl-muted tw:col-span-full tw:m-0" id={factsId}>
                 {routeFacts(route.profile, props.units)}
               </p>
             </li>
@@ -458,11 +481,15 @@ function GhostControl(props: {
   readonly onGhost: (value: boolean) => void;
 }): JSX.Element {
   return (
-    <div className="oyl-game__ghost">
+    <div className="oyl-game__ghost tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
       <label>
         <input
           type="checkbox"
-          checked={props.withGhost}
+          // #940's review: the box is for the CHOSEN route, so a tick made on a
+          // route with an attempt does not show on one without — checked and
+          // disabled would read as "the ghost is on" beside "ride it once
+          // first". `onStart` already ignores it there (`attempts > 0`).
+          checked={props.withGhost && props.route.attempts > 0}
           disabled={props.route.attempts === 0}
           onChange={(event) => {
             props.onGhost(event.target.checked);
@@ -479,12 +506,9 @@ function GhostControl(props: {
 /**
  * Whether to be paced, and how hard.
  *
- * Once above the list rather than once per route, unlike the ghost control: a
- * ghost belongs to a particular route — it is *your* previous attempt on *that*
- * road — and a pacer belongs to the ride. Rendering the intensity box per route
- * would put several identically-labelled number inputs on one screen, which is
- * a worse answer for anybody reading the page with a screen reader than one
- * control that plainly governs the whole list.
+ * In the loadout, once for the ride: a pacer belongs to the ride, where a
+ * ghost belongs to a particular road — it is *your* previous attempt on
+ * *that* route, which is why the ghost's box follows the chosen card.
  */
 function PacerControls(props: {
   readonly withPacer: boolean;
@@ -494,7 +518,7 @@ function PacerControls(props: {
   readonly problem: string | undefined;
 }): JSX.Element {
   return (
-    <div className="oyl-game__pacer">
+    <div className="oyl-game__pacer tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
       <label>
         <input
           type="checkbox"
@@ -505,7 +529,7 @@ function PacerControls(props: {
         />
         Ride against a pacer
       </label>
-      <label>
+      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
         Pacer intensity, watts per kilogram
         <input
           type="number"
@@ -538,12 +562,12 @@ function PacerControls(props: {
         `botPacerPlan`'s own bounds, and it is what blocks the ride control.
 
         Rendered only when there is a problem, which is also what keeps the two
-        `aria-describedby` references above and in `RoutePicker` from dangling:
+        `aria-describedby` references above and on *Ride* from dangling:
         the attribute and the element it names appear and disappear together,
         under the same condition.
       */}
       {props.problem === undefined ? null : (
-        <p className="oyl-game__problem" id={PACER_PROBLEM_ID} role="alert">
+        <p className="oyl-game__problem tw:m-0" id={PACER_PROBLEM_ID} role="alert">
           {props.problem}
         </p>
       )}
@@ -572,8 +596,8 @@ function PositionControl(props: {
   readonly onPosition: (value: RidingPosition) => void;
 }): JSX.Element {
   return (
-    <div className="oyl-game__position">
-      <label>
+    <div className="oyl-game__position tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
         How you are riding
         <select
           value={props.position}
@@ -591,7 +615,7 @@ function PositionControl(props: {
           ))}
         </select>
       </label>
-      <p className="oyl-muted">
+      <p className="oyl-muted tw:m-0">
         This sets how much air you are pushing, which is most of what decides your speed on the
         flat. Your weight is set on the Settings screen and is most of it on a climb.
       </p>
@@ -602,10 +626,8 @@ function PositionControl(props: {
 /**
  * Whether there is a wind, how strong, and where from — #326.
  *
- * Once above the list, beside {@link PacerControls} and for its reason: a wind
- * belongs to the ride rather than to a route, and three identically-labelled
- * controls per route would be a worse page for anybody using a screen reader
- * than one set that plainly governs the whole list.
+ * In the loadout, beside {@link PacerControls} and for its reason: a wind
+ * belongs to the ride rather than to a route.
  *
  * ⚠️ **The speed's unit label arrives as a prop and is not written here.**
  * #238's fifth criterion and `units/no-inline-units.ts`: this client has
@@ -651,7 +673,7 @@ function WindControls(props: {
       ? { 'aria-invalid': true, 'aria-describedby': WIND_PROBLEM_ID }
       : { 'aria-invalid': undefined, 'aria-describedby': undefined };
   return (
-    <div className="oyl-game__wind">
+    <div className="oyl-game__wind tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
       <label>
         <input
           type="checkbox"
@@ -662,7 +684,7 @@ function WindControls(props: {
         />
         Ride in a wind
       </label>
-      <label>
+      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
         {`Wind speed, ${props.speedUnit}`}
         <input
           type="number"
@@ -676,7 +698,7 @@ function WindControls(props: {
           }}
         />
       </label>
-      <label>
+      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
         Wind direction, degrees it blows from
         <input
           type="number"
@@ -693,12 +715,12 @@ function WindControls(props: {
       </label>
       {/*
         Rendered only when there is a problem, which is what keeps every
-        `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on each
-        ride button — from dangling: the attribute and the element it names
+        `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on
+        *Ride* — from dangling: the attribute and the element it names
         appear and disappear together, under one condition.
       */}
       {props.problem === undefined ? null : (
-        <p className="oyl-game__problem" id={WIND_PROBLEM_ID} role="alert">
+        <p className="oyl-game__problem tw:m-0" id={WIND_PROBLEM_ID} role="alert">
           {props.problem}
         </p>
       )}
