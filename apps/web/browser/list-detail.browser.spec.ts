@@ -50,6 +50,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { paletteColours, THEMES } from '../src/design/tokens';
 import { ALL_ROUTES, hrefFor, hrefForSelection, type RouteDefinition } from '../src/shell/routes';
 
 import {
@@ -1237,3 +1238,168 @@ test.describe('#723 — two panes scroll on their own', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+/**
+ * #941 — route and workout cards with their shape drawn on them.
+ *
+ * Each Routes and Workouts card draws its route's climb or its workout's
+ * blocks in a strip across its foot (`theme.css` §`.oyl-shape-card`). What
+ * is held here, on the loads the blocks above already make:
+ *
+ * - **No primary moves down.** Every primary's margin to its line, on arrival
+ *   and with the fixture's item chosen, at the four viewports #670 publishes,
+ *   is at least what the same page measures with the shapes taken off
+ *   (`reflow.html?shape=off`, the card as it was before #941) — read in the
+ *   same run, so the fonts that differ between a Mac and the CI runner cancel.
+ *   Where #670 holds a primary above the fold ({@link PRIMARY_ON_ARRIVAL},
+ *   {@link PRIMARY_WHEN_SELECTED}) that hold still applies, in the block above.
+ * - **The control**: `reflow.html?shape=tall` draws the shape at three times
+ *   its declared height, and *Import route* on the upright tablet — the
+ *   one place a held primary sits below the route cards — must then come out
+ *   UNDER the margin `?shape=off` recorded. Without it a shape that never
+ *   rendered, or a measurement of the wrong element, would pass.
+ * - **The shapes are there, decoration, and painted with their tokens** in
+ *   both palettes: one `aria-hidden` `<svg>` per card, holding at least one
+ *   path, with no text, and each path's computed fill the kit's token for the
+ *   palette (`illustration/paint.ts`), never a literal.
+ * - **The card's one link is a 44 × 44 target**, #316's three ways: the box,
+ *   the declared `min-height`, and the box with that floor stripped, which
+ *   must fall under 44 on one line — so the target is the floor's doing.
+ */
+const SHAPE_ROUTES = LIST_DETAIL.filter(
+  (route) => route.id === 'routes' || route.id === 'workouts',
+);
+
+/** Every primary's margin to its line, keyed by route, state and text. */
+async function primaryMargins(page: Page, viewport: Viewport): Promise<Map<string, number>> {
+  const margins = new Map<string, number>();
+  for (const route of SHAPE_ROUTES) {
+    for (const [state, hash] of [
+      ['arrival', hrefFor(route)],
+      ['selected', hrefForSelection(route, await selectionOf(page, route))],
+    ] as const) {
+      const seen = await visit(page, route, hash);
+      for (const primary of seen.primaries) {
+        margins.set(
+          `${route.id} [${state}] “${primary.text}” @ ${viewport.name}`,
+          seenLine(seen, primary) - primary.bottom,
+        );
+      }
+    }
+  }
+  return margins;
+}
+
+test.describe('#941 — cards with their shape drawn on them', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT, PHONE, REFLOW]) {
+    test(`no primary moves down at ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&shape=off');
+      expect(await page.locator('style[data-oyl-control="shape=off"]').count()).toBe(1);
+      const before = await primaryMargins(page, viewport);
+      await open(page, viewport);
+      const after = await primaryMargins(page, viewport);
+      console.log(
+        `[#941] margins @ ${viewport.name}\n  ` +
+          [...after]
+            .map(
+              ([key, margin]) =>
+                `${key}: ${margin.toFixed(1)} px (without shapes ${(before.get(key) ?? Number.NaN).toFixed(1)})`,
+            )
+            .join('\n  '),
+      );
+      expect([...after.keys()]).toEqual([...before.keys()]);
+      const worse = [...after].filter(([key, margin]) => margin < (before.get(key) ?? 0) - 0.5);
+      expect(worse).toEqual([]);
+    });
+  }
+
+  test('the control — a shape three times as tall pushes Import route down on the upright tablet', async ({
+    page,
+  }) => {
+    const key = `routes [arrival] “Import route” @ ${TABLET_UPRIGHT.name}`;
+    await open(page, TABLET_UPRIGHT, 'data=populated&shape=off');
+    const floor = (await primaryMargins(page, TABLET_UPRIGHT)).get(key);
+    await open(page, TABLET_UPRIGHT, 'data=populated&shape=tall');
+    expect(await page.locator('style[data-oyl-control="shape=tall"]').count()).toBe(1);
+    const tall = (await primaryMargins(page, TABLET_UPRIGHT)).get(key);
+    console.log(`[#941] control: ${key}: ${String(tall)} px, floor ${String(floor)} px`);
+    expect(floor).toBeDefined();
+    expect(tall).toBeDefined();
+    expect(tall ?? Number.POSITIVE_INFINITY).toBeLessThan((floor ?? 0) - 0.5);
+  });
+
+  for (const theme of THEMES) {
+    test(`every card carries one painted, aria-hidden shape, in the ${theme} palette`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await open(page, TABLET_IN_THE_SHELL);
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+      const colours = paletteColours(theme);
+      for (const route of SHAPE_ROUTES) {
+        await visit(page, route, hrefFor(route));
+        const cards = await page.evaluate(() =>
+          [...document.querySelectorAll('.oyl-main .oyl-shape-card')].map((card) => {
+            const svgs = [...card.querySelectorAll('svg')];
+            const svg = svgs[0];
+            const box = svg?.getBoundingClientRect();
+            return {
+              svgs: svgs.length,
+              hidden: svg?.getAttribute('aria-hidden') ?? null,
+              text: svg?.textContent ?? null,
+              width: box?.width ?? 0,
+              height: box?.height ?? 0,
+              fills: [...(svg?.querySelectorAll('path') ?? [])].map(
+                (path) => getComputedStyle(path).fill,
+              ),
+            };
+          }),
+        );
+        expect(cards.length, `${route.id}: no card on the page`).toBeGreaterThan(0);
+        const token = route.id === 'routes' ? 'illoHillNear' : 'accent';
+        for (const card of cards) {
+          expect(card.svgs).toBe(1);
+          expect(card.hidden).toBe('true');
+          expect(card.text).toBe('');
+          expect(card.width).toBeGreaterThan(0);
+          expect(card.height).toBeGreaterThanOrEqual(15);
+          expect(card.fills.length).toBeGreaterThan(0);
+          for (const fill of card.fills) {
+            expect(fill, `${route.id} in ${theme}`).toBe(rgbOf(colours[token]));
+          }
+        }
+      }
+    });
+  }
+
+  test('the card’s link is a 44 × 44 target, measured three ways', async ({ page }) => {
+    await open(page, PHONE);
+    for (const route of SHAPE_ROUTES) {
+      await visit(page, route, hrefFor(route));
+      const link = page.locator('.oyl-main .oyl-shape-card a[data-oyl-select]').first();
+      const shipped = await link.boundingBox();
+      expect(shipped?.width ?? 0, `${route.id}: the link's width`).toBeGreaterThanOrEqual(44);
+      expect(shipped?.height ?? 0, `${route.id}: the link's height`).toBeGreaterThanOrEqual(44);
+      expect(await link.evaluate((element) => getComputedStyle(element).minHeight)).toBe('44px');
+      // On one line, as #316's specimen is: the fixtures' names are long
+      // enough to wrap to 44 px on a phone by themselves, which would make
+      // this read the wrapping and not the floor.
+      const stripped = await link.evaluate((element) => {
+        const style = (element as HTMLElement).style;
+        style.minHeight = '0';
+        style.whiteSpace = 'nowrap';
+        const height = element.getBoundingClientRect().height;
+        style.minHeight = '';
+        style.whiteSpace = '';
+        return height;
+      });
+      expect(stripped, `${route.id}: the floor is what makes the target`).toBeLessThan(44);
+    }
+  });
+});
+
+/** `#7db678` → `rgb(125, 182, 120)`, as `getComputedStyle` reports a fill. */
+function rgbOf(hex: string): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${String((value >> 16) & 255)}, ${String((value >> 8) & 255)}, ${String(value & 255)})`;
+}

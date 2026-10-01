@@ -828,6 +828,15 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   a pixel inside every painted region of every part, in both palettes, against the token its paint
   names, with the other palette forced as the control. The kit has no production caller yet: the
   menu screens of #939 to #943 are its first.
+- **Route and workout cards draw their shape** ([#941](https://github.com/openzigs/onyourleft/issues/941)).
+  Each card in the Routes and Workouts list panes draws `ProfileShape` from the route's stored
+  profile, or `WorkoutShape` from the workout the list already expanded, as a strip across the
+  card's foot (`theme.css` §`.oyl-shape-card`). It costs no read — each list still reads the store
+  once (`views/shape-cards.test.tsx`) — and no height: the strip takes the place of the facts
+  line's own 1 em bottom margin, so every primary's margin to the fold is what it was
+  (`list-detail.browser.spec.ts` §"#941", against `reflow.html?shape=off`, with `?shape=tall` as
+  the control). Activities draws no trace on its cards: a ride's line is location data under
+  [ADR 0004](adr/0004-privacy-and-location.md), and drawing one on a list is its own question.
 
 `browser/shell.html?illustration=specimens` paints every new token until a screen does, and since
 #938 draws every part of the kit.

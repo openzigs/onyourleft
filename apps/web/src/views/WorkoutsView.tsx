@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
 
-import type { WorkoutBlock } from '@onyourleft/domain';
+import { expandWorkout, type WorkoutBlock, type WorkoutTimeline } from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+// The part's own module, not the kit's index: this list reaches only what it draws (#941).
+import { WorkoutShape } from '../design/illustration/WorkoutShape';
 import { StatusMessage } from '../design/StatusMessage';
 import type { DownloadableFile } from '../transfer/store-port';
 import {
@@ -112,8 +114,19 @@ interface WorkoutEntry {
   readonly record: WorkoutRecord;
 }
 
+/** A workout in the list: its entry, and what its card draws. */
+interface ListedWorkout extends WorkoutEntry {
+  /**
+   * The workout expanded, for the card's drawn shape — #941. From the record
+   * already in hand: drawing it costs no read. `workoutRow` expands it too, and
+   * `workouts/library.ts` is left as it is rather than made to hand back its
+   * timeline, because a row is a summary built for reading.
+   */
+  readonly timeline: WorkoutTimeline;
+}
+
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
-  const [entries, setEntries] = useState<readonly WorkoutEntry[] | undefined>(undefined);
+  const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
   const [saved, setSaved] = useState<string | undefined>(undefined);
@@ -146,7 +159,13 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       // A row that cannot be expanded is a row that could not be ridden, so the
       // list reports the failure rather than rendering a name a rider could
       // press.
-      setEntries(list.map((record) => ({ row: workoutRow(record), record })));
+      setEntries(
+        list.map((record) => ({
+          row: workoutRow(record),
+          record,
+          timeline: expandWorkout(record.workout),
+        })),
+      );
       setLoadFault(undefined);
     } catch {
       // A store that throws is what "offline" looks like on this device: there
@@ -391,8 +410,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
               Workouts saved on this device, newest first.
             </p>
             <ul className="oyl-pane-list" aria-labelledby={listCaptionId}>
-              {entries.map(({ row }) => (
-                <li key={row.id} className="oyl-pane-list__item">
+              {entries.map(({ row, timeline }) => (
+                <li key={row.id} className="oyl-pane-list__item oyl-shape-card">
                   <a
                     href={hrefForSelection(routeById('workouts'), row.id)}
                     data-oyl-select={row.id}
@@ -403,6 +422,12 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   <p className="oyl-muted">
                     {row.duration} · hardest: {hardestText(row)}
                   </p>
+                  {/* #941: the blocks as bars of relative height, from the
+                      timeline the list already expanded. Decoration: no number
+                      reaches it, and the words above carry the workout. */}
+                  <div className="oyl-shape-card__art">
+                    <WorkoutShape workout={timeline} />
+                  </div>
                 </li>
               ))}
             </ul>
