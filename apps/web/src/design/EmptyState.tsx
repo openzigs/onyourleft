@@ -36,11 +36,12 @@ import { expandWorkout, seconds, thresholdShare } from '@onyourleft/domain';
 
 import { Hills, RiderSilhouette, RoadRibbon, SensorGlyph, Sky, WorkoutShape } from './illustration';
 
-/** What an empty state draws. Each is one or more parts of the kit, layered. */
-export const EMPTY_STATE_ART = ['rider', 'road', 'workout', 'trainer', 'power'] as const;
-
-/** One of {@link EMPTY_STATE_ART}. */
-export type EmptyStateArt = (typeof EMPTY_STATE_ART)[number];
+/**
+ * What an empty state draws. Each is one or more parts of the kit, layered.
+ * A union rather than an exported list: nothing outside this file reads a
+ * list of them, only the type (#987's review).
+ */
+export type EmptyStateArt = 'rider' | 'road' | 'workout' | 'trainer' | 'power';
 
 /**
  * The shape the workout drawing is drawn from: a warm-up, three efforts and
@@ -89,7 +90,7 @@ function drawing(art: EmptyStateArt, seed: number): JSX.Element {
 }
 
 export interface EmptyStateProps {
-  /** Which drawing — {@link EMPTY_STATE_ART}. */
+  /** Which drawing — {@link EmptyStateArt}. */
   readonly art: EmptyStateArt;
   /** For a landscape: which hills, so two screens do not look stamped. */
   readonly seed?: number;

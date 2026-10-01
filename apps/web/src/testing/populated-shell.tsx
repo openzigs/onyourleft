@@ -237,7 +237,11 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
     sentence: 'Start with your smart trainer: it is the one device here this app can control',
     bluetooth: true,
   },
-  segments: { kind: 'empty-state', sentence: 'No segments yet. Make one from a ride below.' },
+  segments: {
+    kind: 'empty-state',
+    sentence:
+      'No segments yet. A segment is cut from a ride with a track: import one from a file to begin.',
+  },
   analysis: {
     kind: 'empty-state',
     sentence: 'Nothing recorded yet. Zones appear here the moment you finish a ride.',

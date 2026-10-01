@@ -91,6 +91,9 @@ export const PAIRING_STEPS: readonly {
   },
 ];
 
+/** The trainer row's button label, which the empty garage's action shares (#943). */
+const TRAINER_PAIRING_LABEL = PAIRING_STEPS.find((step) => step.role === 'trainer')?.label ?? '';
+
 /** Which of the kit's glyphs each kind of device wears on its card (#942). */
 const GLYPH_FOR: Readonly<Record<PairingRole, SensorGlyphKind>> = {
   trainer: 'trainer',
@@ -174,7 +177,10 @@ export function PairingPanel({
         // #943: the garage with nothing in it. Its one action pairs the
         // trainer — the row below does the same, and a rider who reads the
         // rows first loses nothing — and it is this screen's only primary:
-        // every row's control is secondary.
+        // every row's control is secondary. Since #987's review it wears the
+        // trainer row's OWN label, read from `PAIRING_STEPS`, so the two
+        // controls that do one thing have one name (WCAG 2.2 SC 3.2.4) and
+        // cannot drift apart.
         <EmptyState
           art="trainer"
           heading="Nothing paired yet"
@@ -185,7 +191,7 @@ export function PairingPanel({
                 void controller.pair('trainer');
               }}
             >
-              Pair your smart trainer
+              {TRAINER_PAIRING_LABEL}
             </Button>
           }
         >

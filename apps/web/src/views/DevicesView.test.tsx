@@ -195,7 +195,12 @@ describe('in a browser that can pair — #659, pairing lives here', () => {
     const { stub, container } = await withController();
     const empty = container.querySelector('[data-oyl-empty-state]');
     expect(empty?.textContent).toContain('Nothing paired yet');
-    await activateWithKeyboard(button(container, 'Pair your smart trainer'));
+    // The action wears the trainer row's own label (#987's review), so it is
+    // found INSIDE the empty state rather than by name alone.
+    const action = empty?.querySelector('.oyl-empty-state__action button');
+    expect(action?.textContent?.trim()).toBe('Pair a smart trainer');
+    if (!(action instanceof HTMLButtonElement)) throw new Error('the empty garage has no button');
+    await activateWithKeyboard(action);
     expect(stub.calls.pair).toEqual(['trainer']);
   });
 

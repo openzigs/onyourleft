@@ -56,7 +56,14 @@
  * still renders on the populated walk, which this file holds unchanged. One
  * sentence is REWORDED, in the record in the same commit: Segments' "Make one
  * from a ride above." is "below" with no segment yet, because the list moved
- * ahead of the forms to keep its action above the fold.
+ * ahead of the forms to keep its action above the fold. And since #987's
+ * review that "below" sentence is said only where there IS a ride with a
+ * track below: with none — which is the empty walk — the form below is the
+ * *Nothing to cut from* refusal, so pointing at it was false, and the empty
+ * state says "No segments yet. A segment is cut from a ride with a track:
+ * import one from a file to begin." over a primary *Import a ride* instead.
+ * The record's Segments line is that sentence; the "below" one is still in
+ * the source, for a device that has a ride to cut from.
  *
  * ## What it does not check
  *

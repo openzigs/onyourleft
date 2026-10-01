@@ -10,7 +10,7 @@ import {
   type UnitSystem,
 } from '@onyourleft/store';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { MoreAbout } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
@@ -29,7 +29,7 @@ import {
   SWEEP_ACTIVITY_BUDGET,
   type SweepResult,
 } from '../segments/sweep';
-import { hrefForSegment } from '../shell/routes';
+import { hrefFor, hrefForSegment, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
 import { ScrollTable } from '../design/ScrollTable';
@@ -288,28 +288,41 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       {segments === undefined ? (
         <p className="oyl-muted">Reading your segments…</p>
       ) : segments.length === 0 ? (
-        // #943: secondary, because the form below holds this page's
-        // primary whenever there is a ride to cut from. The press takes
-        // focus to that form's heading rather than a fragment link, which
-        // the hash router would read as a route.
+        // #943: the action is chosen from what there is to cut from. With a
+        // ride that has a track, the form below holds this page's primary,
+        // so *Make a segment* is secondary and takes focus to that form's
+        // heading (not a fragment link, which the hash router would read as
+        // a route). With none — every first run, and every indoor-only
+        // device — that form is a refusal and the page has no primary, so
+        // the one action is a PRIMARY that leads somewhere usable: Files,
+        // where a ride with a track can be imported. #987's review found
+        // the secondary leading straight to "Nothing to cut from".
         <EmptyState
           art="road"
           seed={9}
           heading="Your first segment"
           level={3}
           action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                // Focus scrolls the heading into view on its own.
-                document.getElementById('segments-make')?.focus();
-              }}
-            >
-              Make a segment
-            </Button>
+            withTrack.length === 0 ? (
+              <ButtonLink href={hrefFor(routeById('transfer'))}>Import a ride</ButtonLink>
+            ) : (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  // Focus scrolls the heading into view on its own.
+                  document.getElementById('segments-make')?.focus();
+                }}
+              >
+                Make a segment
+              </Button>
+            )
           }
         >
-          <p className="oyl-muted">No segments yet. Make one from a ride below.</p>
+          <p className="oyl-muted">
+            {withTrack.length === 0
+              ? 'No segments yet. A segment is cut from a ride with a track: import one from a file to begin.'
+              : 'No segments yet. Make one from a ride below.'}
+          </p>
         </EmptyState>
       ) : (
         <ScrollTable className="oyl-data-table" caption="Segments on this device, newest first">

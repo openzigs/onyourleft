@@ -29,6 +29,8 @@ import { openRoute } from '../testing/hierarchy-walk';
 import type { Mounted } from '../testing/mount';
 import { AVAILABLE_BLUETOOTH, EMPTY_STATES } from '../testing/populated-shell';
 
+import { PRIMARY_BUTTON_SELECTOR } from './button-hierarchy';
+
 let mounted: Mounted | undefined;
 
 afterEach(() => {
@@ -109,10 +111,25 @@ describe('#943 — every empty state renders through design/EmptyState.tsx', () 
       expect(action?.closest('.oyl-empty-state__action')).not.toBeNull();
       expect(action?.classList.contains('oyl-button--toggle')).toBe(false);
       expect(['A', 'BUTTON']).toContain(action?.tagName);
+      // EXACTLY one primary on the empty page — #943's "primary, unless the
+      // view already has a primary" — never at most one, which a view whose
+      // only action had been made secondary passed with none (#987's review
+      // found Segments so). The empty fixture opens no list–detail route at
+      // two panes, so the page is one view here.
+      const primaries = [...main.querySelectorAll(PRIMARY_BUTTON_SELECTOR)];
+      expect(
+        primaries.map((each) => normalise(each.textContent)),
+        `${route.id}: an empty screen has exactly one primary`,
+      ).toHaveLength(1);
     });
   }
 
   for (const route of ALL_ROUTES) {
+    // Devices is not walked populated: the populated fixture opens it with no
+    // Bluetooth, so the pairing panel (and its empty garage) never renders
+    // there at all, and a green case would hold nothing.
+    // `DevicesView.test.tsx` › "with a device paired, there is no empty
+    // garage" is the case that holds it.
     if (EMPTY_STATES[route.id].kind !== 'empty-state' || route.id === 'devices') continue;
     it(`${route.id} (${route.path}), populated, shows no empty state`, async () => {
       mounted = await openRoute(route, true);

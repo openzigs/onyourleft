@@ -65,7 +65,13 @@ async function walkHomeToPaired(page: Page): Promise<void> {
     .getByRole('link', { name: 'Pair a sensor or a smart trainer' })
     .click({ timeout: STEP_MS });
   await expect(page).toHaveURL(/#\/devices$/, { timeout: STEP_MS });
-  await page.getByRole('button', { name: 'Pair a smart trainer' }).click({ timeout: STEP_MS });
+  // With nothing paired there are TWO: the empty garage's one action and the
+  // trainer row's own, one name for one function since #987's review. The
+  // first is the empty state's, which a first-run rider meets first.
+  await page
+    .getByRole('button', { name: 'Pair a smart trainer' })
+    .first()
+    .click({ timeout: STEP_MS });
   await expect(row(page, 'Smart trainer').locator('.oyl-pairing__state')).toHaveText(
     `${TRAINER_NAME}: Connected`,
     { timeout: STEP_MS },
@@ -133,7 +139,12 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
   await expect(page).toHaveURL(/#\/devices$/);
   // The hash moves before the route renders; measure the screen, not the gap.
   // `toBeVisible` does not scroll, so this also says nothing about the fold.
-  await expect(page.getByRole('button', { name: 'Pair a smart trainer' })).toBeVisible();
+  // Two of that name with nothing paired (the empty garage's action and the
+  // row's, #987); both must be drawn.
+  await expect(page.getByRole('button', { name: 'Pair a smart trainer' })).toHaveCount(2);
+  for (const pair of await page.getByRole('button', { name: 'Pair a smart trainer' }).all()) {
+    await expect(pair).toBeVisible();
+  }
 
   const measured = await page.evaluate(() => {
     const buttons = [...document.querySelectorAll<HTMLElement>('.oyl-pairing__row .oyl-button')];
