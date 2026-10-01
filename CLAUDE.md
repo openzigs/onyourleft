@@ -212,18 +212,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         Authoring-time code, the shape `packages/fit/tools`
                         has: in the typecheck, in the test run, and out of the
                         coverage report
-    tools/brand/        the owner's brand art (#965): the two source sheets
+    tools/brand/        the owner's brand art (#965): the three source pictures
                         (Google Gemini, `CC-BY-4.0`, credited to the owner),
                         `derive_brand.py` — which cuts every icon, the wordmark
-                        and the logo out of them with pinned Python packages
-                        and a digest-checked rembg model it fetches, never at
-                        run time — and `brand.json`, its table.
+                        and the logo out of them with pinned Pillow, NumPy and
+                        SciPy and fetches nothing — and `brand.json`, its table.
                         `provenance.test.ts` holds `ASSETS.toml` to that table
-                        and reads the pictures back (safe zones, cut-outs); CI
-                        cannot run the script, so `--check` is run by hand.
-                        ⚠️ Gemini painted the "transparent" checkerboard INTO
-                        the JPEGs: nothing in them is transparent. The name and
-                        the logo are trademarks too: `TRADEMARKS.md`
+                        and reads the pictures back (safe zones, cut-outs, no
+                        green fringe, no tagline); CI cannot run the script, so
+                        `--check` is run by hand. ⚠️ The full logo is the
+                        owner's green-screen picture of 2026-10-01, cut by a
+                        chroma key, with NO tagline; a reviewer who remembers
+                        it cut from the v3 sheet by a rembg model is reading
+                        the old file — rembg and its model are gone. ⚠️ Gemini
+                        painted the "transparent" checkerboard INTO the sheets:
+                        nothing in them is transparent. The in-game wordmark is
+                        #966's, not this pipeline's. The name and the logo are
+                        trademarks too: `TRADEMARKS.md`
     src/brand/          the wordmark (header) and the full logo (About), each in
                         a light- and a dark-palette picture switched by
                         `data-theme`; the pictures are `alt=""` and the words are
@@ -2264,8 +2269,7 @@ pnpm --filter @onyourleft/web run test
 # Re-cut the owner's brand art (#965): every app icon (web and Android), the
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
-# installed (any other version is refused) and, the first time, the network for
-# the rembg model, which it checks against brand.json's digest. `--check`
+# installed (any other version is refused); it fetches nothing. `--check`
 # writes nothing and fails unless every committed output is reproduced byte for
 # byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
 # it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.

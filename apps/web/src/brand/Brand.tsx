@@ -22,7 +22,10 @@
  *
  * ⚠️ A logo is exempt from WCAG 2.2 SC 1.4.3 ("Logotypes"), so the arrow's blue
  * is not held to a contrast pair; the letters are legible on both headers all
- * the same, which is why there are two variants.
+ * the same, which is why there are two wordmark variants. The full logo's navy
+ * letters sit on its own white sticker in both palettes; what differs is that
+ * the light variant is laid on a soft shadow of its outline, so the white
+ * sticker has an edge on the light palette's white canvas.
  */
 
 import type { JSX } from 'react';
@@ -72,10 +75,10 @@ export function Wordmark(props: { readonly text: string }): JSX.Element {
   );
 }
 
-/** The words of the full logo: the name and the owner's tagline. */
-export const FULL_LOGO_TEXT = 'On Your Left: agentic cycling trainer';
+/** The words of the full logo: the name, and nothing else (the owner dropped the tagline). */
+export const FULL_LOGO_TEXT = 'On Your Left';
 
-/** The full logo — the emblem, the wordmark and the tagline — as About shows it. */
+/** The full logo — the emblem, the wordmark and its sticker outline — as About shows it. */
 export function FullLogo(): JSX.Element {
   return (
     <p className="oyl-brand-logo">

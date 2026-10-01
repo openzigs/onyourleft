@@ -1166,7 +1166,7 @@ tool = "Node.js 24 (.nvmrc), no other tool"
 
 [[asset]]
 path = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
-source = "The owner's brand art (#965), the owner's third sheet: the full logo (shield, rider and arrow, the wordmark and the tagline), the icon mark on blue, and the wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
+source = "The owner's brand art (#965), the owner's third sheet, the source of the icon mark on blue; generated with Google Gemini, whose terms claim no ownership of what it generates"
 licence = "CC-BY-4.0"
 read = "2026-10-01"
 sha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
@@ -1176,10 +1176,20 @@ modified = "no"
 
 [[asset]]
 path = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
-source = "The owner's brand art (#965), the owner's second sheet, the source of the in-game wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
+source = "The owner's brand art (#965), the owner's second sheet, the source of the header's wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
 licence = "CC-BY-4.0"
 read = "2026-10-01"
 sha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "no"
+
+[[asset]]
+path = "apps/web/tools/brand/sources/gemini-logo-green.jpeg"
+source = "The owner's brand art (#965), the owner's full logo (the shield, the rider, the arrow, the ON YOUR LEFT wordmark and the white sticker outline) on a flat green screen; generated with Google Gemini, whose terms claim no ownership of what it generates"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "37fb98f704f257c497d4cf4fcda32febc6129ae5f0ea30f7a526c723f09ce2ba"
 creator = "Matthew Cronin"
 url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
 modified = "no"
@@ -1196,7 +1206,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/icon-512.png"
@@ -1210,7 +1220,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/icon-maskable-512.png"
@@ -1224,7 +1234,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/favicon.png"
@@ -1238,7 +1248,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/wordmark-light.png"
@@ -1252,7 +1262,7 @@ modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the ch
 input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
 inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/wordmark-dark.png"
@@ -1266,35 +1276,35 @@ modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the ch
 input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
 inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/logo-light.png"
-source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-logo-green.jpeg by apps/web/tools/brand/derive_brand.py"
 licence = "CC-BY-4.0"
 read = "2026-10-01"
-sha256 = "576a72fe3868f769a766a08eb349d49d6b2f4e23cc6005c1df7cb4c709678ecc"
+sha256 = "990d9f79d107fba691915f8d299c0f4c6084fcc763841bc2687ad3844d23cb5e"
 creator = "Matthew Cronin"
 url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
-modified = "the full logo cut out of the sheet: the emblem by the isnet-general-use background-removal model, with the inside of its shield filled back as one flat white, and the wordmark and the tagline by colour, their letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9), then resized"
-input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
-inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized"
+input = "apps/web/tools/brand/sources/gemini-logo-green.jpeg"
+inputsha256 = "37fb98f704f257c497d4cf4fcda32febc6129ae5f0ea30f7a526c723f09ce2ba"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/logo-dark.png"
-source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-logo-green.jpeg by apps/web/tools/brand/derive_brand.py"
 licence = "CC-BY-4.0"
 read = "2026-10-01"
-sha256 = "95d3e313a0fff94e9f3e368a60a198afa2bf23b8c3dc218ac0cf96b3ac628870"
+sha256 = "68a7e777a56c2e2f35938921a10baa54e0e0582a42d5e450d2343faec11193e4"
 creator = "Matthew Cronin"
 url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
-modified = "the full logo cut out of the sheet: the emblem by the isnet-general-use background-removal model, with the inside of its shield filled back as one flat white, and the wordmark and the tagline by colour, their letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9), then resized"
-input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
-inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized"
+input = "apps/web/tools/brand/sources/gemini-logo-green.jpeg"
+inputsha256 = "37fb98f704f257c497d4cf4fcda32febc6129ae5f0ea30f7a526c723f09ce2ba"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"
@@ -1308,7 +1318,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png"
@@ -1322,7 +1332,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
@@ -1336,7 +1346,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
@@ -1350,7 +1360,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
@@ -1364,7 +1374,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png"
@@ -1378,7 +1388,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png"
@@ -1392,7 +1402,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png"
@@ -1406,7 +1416,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png"
@@ -1420,7 +1430,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"
@@ -1434,7 +1444,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png"
@@ -1448,7 +1458,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png"
@@ -1462,7 +1472,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"
@@ -1476,7 +1486,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"
@@ -1490,7 +1500,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"
@@ -1504,4 +1514,5 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+

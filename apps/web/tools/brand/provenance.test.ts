@@ -3,8 +3,9 @@
 /**
  * The owner's brand art, as `ASSETS.toml` records it and as it is drawn — #965.
  *
- * `derive_brand.py` needs Python, rembg and a 170 MB model, so CI cannot re-run
- * it — `--check` is run by hand and quoted in the pull request that changes it,
+ * `derive_brand.py` needs Python with Pillow, NumPy and SciPy at pinned
+ * versions, which CI does not install, so CI does not re-run it — `--check` is
+ * run by hand and quoted in the pull request that changes it,
  * the shape `tools/realistic/provenance.test.ts` has for Blender. What runs
  * here, on every pull request, is everything that does not need the pipeline:
  *
@@ -21,10 +22,16 @@
  *    a wordmark or a logo is cut out — its corners transparent, not the
  *    checkerboard Gemini painted into the sheet.
  * 3. **The Android background layer is the icons' own blue.**
+ * 4. **The full logo is off its green screen, cleanly, and says no tagline.**
+ *    No pixel of either logo that is more than a quarter covered is greener
+ *    than the key's despill allows (a wrong key, or no despill, leaves a green
+ *    fringe here); the light variant's white sticker has a visible edge on the
+ *    white canvas; and no text the app ships carries the tagline the owner
+ *    dropped on 2026-10-01.
  */
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -293,5 +300,68 @@ describe('the Android launcher icon — #965', () => {
     panelBlue().forEach((channel, index) => {
       expect(Math.abs(channel - (declared[index] ?? 0))).toBeLessThanOrEqual(1);
     });
+  });
+});
+
+describe('the full logo, off its green screen — #965', () => {
+  const logos = [...outputs('logo-light'), ...outputs('logo-dark')];
+
+  it.each(logos)('$path has no green fringe', (output) => {
+    // `derive_brand.py` holds green to 10 above the larger of red and blue;
+    // the resampler's rounding at a faint edge pixel may add a few more, so
+    // the bound is on pixels at least a quarter covered, with room for that.
+    const image = picture(output.path);
+    let fringe = 0;
+    for (let index = 0; index < image.rgba.length; index += 4) {
+      if ((image.rgba[index + 3] ?? 0) < 64) continue;
+      const [red = 0, green = 0, blue = 0] = image.rgba.subarray(index, index + 3);
+      if (green - Math.max(red, blue) > 16) fringe += 1;
+    }
+    expect(fringe).toBe(0);
+  });
+
+  it('gives the light logo’s white sticker an edge the white canvas can see', () => {
+    // Laid on the light palette's canvas (white), the pixel two to the left of
+    // each row's first fully opaque one is the sticker's outside edge. Without
+    // the shadow it is the canvas's own white.
+    const image = picture(outputs('logo-light')[0]?.path ?? '');
+    const edges: number[] = [];
+    for (let y = 0; y < image.height; y += 1) {
+      let first = -1;
+      for (let x = 0; x < image.width; x += 1) {
+        if (pixel(image, x, y)[3] === 255) {
+          first = x;
+          break;
+        }
+      }
+      if (first < 3) continue;
+      const [red = 0, green = 0, blue = 0, alpha = 0] = pixel(image, first - 2, y);
+      const over = alpha / 255;
+      edges.push(((red + green + blue) / 3) * over + 255 * (1 - over));
+    }
+    edges.sort((a, b) => a - b);
+    expect(edges.length).toBeGreaterThan(100);
+    expect(edges[Math.floor(edges.length / 2)]).toBeLessThan(235);
+  });
+
+  it('carries no tagline in anything the app ships', () => {
+    // Assembled, so this file does not match itself.
+    const tagline = ['agentic', 'cycling', 'trainer'].join(' ');
+    const roots = ['apps/web/src', 'apps/web/public', 'apps/web/index.html', 'ASSETS.toml'];
+    const texts: string[] = [];
+    const walk = (path: string): void => {
+      const full = join(REPOSITORY, path);
+      if (statSync(full).isDirectory()) {
+        for (const name of readdirSync(full)) walk(join(path, name));
+      } else if (/\.(ts|tsx|css|html|json|toml|txt|webmanifest|md)$/.test(path)) {
+        texts.push(path);
+      }
+    };
+    roots.forEach(walk);
+    expect(texts.length).toBeGreaterThan(100);
+    const carrying = texts.filter((path) =>
+      readFileSync(join(REPOSITORY, path), 'utf8').toLowerCase().includes(tagline),
+    );
+    expect(carrying).toEqual([]);
   });
 });

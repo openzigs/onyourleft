@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-Every brand image the app ships, made from the owner's two source sheets -- #965.
+Every brand image the app ships, made from the owner's three source pictures -- #965.
 
     python3 apps/web/tools/brand/derive_brand.py            # write the outputs
     python3 apps/web/tools/brand/derive_brand.py --check    # write nothing; fail
@@ -10,16 +10,15 @@ Every brand image the app ships, made from the owner's two source sheets -- #965
 
 Run it with the interpreter of a virtual environment holding exactly the
 packages `brand.json` pins (`pip install -r apps/web/tools/brand/requirements.txt`);
-any other version is refused, because a different resampler or a different
-inference runtime makes different bytes. Nothing in CI runs it: CI holds
-`ASSETS.toml` to `brand.json` instead (`provenance.test.ts`), the shape
-`apps/web/tools/realistic/` has for Blender.
+any other version is refused, because a different resampler makes different
+bytes. Nothing in CI runs it: CI holds `ASSETS.toml` to `brand.json` instead
+(`provenance.test.ts`), the shape `apps/web/tools/realistic/` has for Blender.
 
-## The sources, and why they are cut rather than used
+## The sources, and how each is cut
 
-The owner made the art with Google Gemini (#965's comment of 2026-10-01). Both
-sheets are JPEGs, and Gemini PAINTED the "transparent" checkerboard into their
-pixels, so nothing in them is transparent. Every output is therefore cut out:
+The owner made the art with Google Gemini (#965's comments of 2026-10-01).
+Every source is a JPEG, so nothing in them is transparent and every output is
+cut out:
 
 - **The icon mark** -- the shield with the rider and the arrow on the blue
   panel of `gemini-assets-v3.jpeg`. The panel's background is one flat blue and
@@ -27,29 +26,33 @@ pixels, so nothing in them is transparent. Every output is therefore cut out:
   that is not that blue. The panel's baked rounded corners and the light sheet
   around them are thrown away: every icon is drawn on the panel's own flat
   blue, so the only rounding is the one a launcher's mask applies.
-- **The wordmark** -- "ON YOUR LEFT" from `gemini-assets-v2.jpeg`. The
-  checkerboard is light (no channel below 197) and the letters are dark, so
-  coverage is read from the darkest channel. The letters are set in one flat
-  navy rather than the JPEG's mottled one; the arrow keeps its own colours.
-- **The full logo** -- from `gemini-assets-v3.jpeg`. Its checker squares are
-  the same white as its sticker rim and the inside of its shield, so colour
-  cannot cut it: the emblem is cut by the `isnet-general-use` background-removal
-  model (through rembg), whose mask drops the shield's white fill, so the
-  mask's holes are filled back as one flat white. The wordmark and the tagline
-  under it are cut by colour, as above.
+- **The wordmark** -- "ON YOUR LEFT" from `gemini-assets-v2.jpeg`, whose
+  "transparent" checkerboard Gemini painted into the pixels. The checkerboard
+  is light (no channel below 197) and the letters are dark, so coverage is read
+  from the darkest channel. The letters are set in one flat navy rather than
+  the JPEG's mottled one; the arrow keeps its own colours.
+- **The full logo** -- `gemini-logo-green.jpeg`: the shield, the rider, the
+  arrow, the wordmark and the white sticker outline, and NO tagline (the owner's
+  ruling of 2026-10-01), on a flat #00FF00 green screen. It is cut by the
+  owner's chroma key (`chroma_key`), with the green spill taken out of its
+  edges. The light-palette variant is laid on a soft navy shadow of its own
+  outline, because its white sticker outline would otherwise vanish on the
+  light palette's white canvas; the dark variant is the keyed logo alone.
+
+## No model, and no download
+
+Until the owner's green-screen logo (2026-10-01) the full logo was cut from
+`gemini-assets-v3.jpeg` by a background-removal model (rembg's
+`isnet-general-use`, fetched at run time and checked against a digest). A
+chroma key is three lines of arithmetic and needs neither, so rembg,
+onnxruntime and the model are gone from this pipeline: it reads only the
+committed sources and fetches nothing.
 
 ## Determinism
 
-Every step is integer or float arithmetic on NumPy arrays, Pillow's resampler,
-and one ONNX inference on ONE thread (a thread pool may sum in another order).
-PNGs are written with no metadata at a fixed compression level. `--check`
-re-makes everything in memory and compares bytes.
-
-## The model is fetched here and never at run time
-
-`brand.json` names its URL and SHA-256. It is downloaded into
-`apps/web/tools/brand/build/` (ignored) the first time, checked against the
-digest every time, and is a TOOL: nothing the app ships contains or fetches it.
+Every step is integer or float arithmetic on NumPy arrays, SciPy's filters and
+Pillow's resampler. PNGs are written with no metadata at a fixed compression
+level. `--check` re-makes everything in memory and compares bytes.
 """
 
 from __future__ import annotations
@@ -59,7 +62,6 @@ import hashlib
 import io
 import json
 import sys
-import urllib.request
 from importlib import metadata
 from pathlib import Path
 
@@ -69,7 +71,6 @@ from scipy import ndimage
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
-BUILD = HERE / "build"
 TABLE = json.loads((HERE / "brand.json").read_text(encoding="utf-8"))
 
 
@@ -106,22 +107,6 @@ def read_source(path: str) -> bytes:
     raise AssertionError  # unreachable
 
 
-def model_path() -> Path:
-    model = TABLE["model"]
-    path = BUILD / f"{model['name']}.onnx"
-    if not path.exists():
-        BUILD.mkdir(parents=True, exist_ok=True)
-        print(f"derive_brand: fetching {model['url']}", file=sys.stderr)
-        with urllib.request.urlopen(model["url"]) as response:
-            data = response.read()
-        if sha256(data) != model["sha256"]:
-            refuse(f"{model['url']} did not match the digest brand.json records")
-        path.write_bytes(data)
-    if sha256(path.read_bytes()) != model["sha256"]:
-        refuse(f"{path} is not the model brand.json records; delete it and run again")
-    return path
-
-
 # --- The pieces ----------------------------------------------------------------
 
 # The icon panel of gemini-assets-v3.jpeg, measured on the sheet: its flat blue
@@ -136,29 +121,15 @@ PANEL_EDGE = 70
 
 # The bottom wordmark of gemini-assets-v2.jpeg, with a margin.
 WORDMARK_BOX = (590, 1200, 2245, 1392)
-# The full logo of gemini-assets-v3.jpeg: the emblem above, the words below.
-LOGO_EMBLEM_BOX = (300, 100, 1220, 850)
-LOGO_WORDS_BOX = (230, 850, 1380, 1070)
-
 # The checkerboard's darkest channel is never below 197; a letter's is below 60.
 CHECKER_FLOOR = 196.0
 INK_CEILING = 70.0
 
 # The letters' one navy, and the dark palette's ink (`tokens.ts`
-# DARK_COLOUR_TOKENS.ink), which the dark variants are set in.
+# DARK_COLOUR_TOKENS.ink), which the dark wordmark is set in. The logo keeps
+# its navy letters in both palettes: they sit on its own white sticker.
 NAVY = (17, 36, 64)
 DARK_INK = (0xE4, 0xEB, 0xE9)
-# The shield's fill where the model's mask dropped it.
-SHIELD_WHITE = (255, 255, 255)
-# The model's coverage above which a pixel is the emblem's for the purpose of
-# finding what the shield's rim encloses; how far in from that outline the
-# coverage is taken as whole; and how light, and how colourless, a pixel inside
-# must be to be white.
-EMBLEM_FLOOR = 0.1
-EMBLEM_EDGE = 3
-WHITE_FLOOR = 188.0
-GREY_CHROMA = 24.0
-
 # Where a mark sits. A square icon carries the mark at the share of its side the
 # owner's panel does (its widest extent about 0.78 of the panel). A maskable web
 # icon keeps the mark inside the circle a launcher may crop to -- the middle 80 %
@@ -289,61 +260,67 @@ def wordmark(sheet: Image.Image, ink: tuple[int, int, int], height: int) -> Imag
     return picture.resize((width, height), Image.Resampling.LANCZOS)
 
 
-class LocalModel:
-    """rembg's isnet-general-use session over the digest-checked model, on one thread."""
+# The full logo's green screen, and the key that takes it out -- the owner's
+# key of 2026-10-01, written down exactly. `k` is how much greener than its
+# other two channels a pixel is: about 255 on the screen, near nought on the
+# art (whose greens are none: the palette is navy, blue, orange, grey and
+# white). Below `KEY_FLOOR` a pixel is wholly the art's, above
+# `KEY_FLOOR + KEY_RAMP` wholly the screen's, and linear between. The green the
+# screen spills into the art's edges is then taken out by holding green to at
+# most `DESPILL` above the larger of red and blue.
+KEY_FLOOR = 60.0
+KEY_RAMP = 90.0
+DESPILL = 10.0
 
-    def __init__(self) -> None:
-        import onnxruntime as ort
-        from rembg.sessions.dis_general_use import DisSession
-
-        path = model_path()
-
-        class Pinned(DisSession):
-            @classmethod
-            def download_models(cls, *args, **kwargs):
-                return str(path)
-
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = 1
-        options.inter_op_num_threads = 1
-        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        self.session = Pinned("isnet-general-use", options, providers=["CPUExecutionProvider"])
-
-    def mask(self, picture: Image.Image) -> np.ndarray:
-        return np.asarray(self.session.predict(picture)[0], dtype=np.float64) / 255.0
+# The light palette's canvas is white (`tokens.ts` COLOUR_TOKENS.canvas), and so
+# is the logo's sticker outline, which would vanish against it. The light
+# variant is therefore laid on a soft shadow of its own outline, in the
+# letters' navy, so the sticker's edge reads; the dark variant needs none --
+# the white outline is the edge, on a near-black canvas. Measured at the
+# keyed logo's own size (about 1 900 px across), before it is resized.
+SHADOW_SIGMA = 9.0
+SHADOW_OPACITY = 0.45
+SHADOW_PAD = 36
 
 
-def logo(sheet: Image.Image, ink: tuple[int, int, int], width: int, model: LocalModel) -> Image.Image:
-    left, top, right, bottom = LOGO_EMBLEM_BOX
-    emblem_area = sheet.crop(LOGO_EMBLEM_BOX)
-    coverage = model.mask(emblem_area)
-    # The model keeps the rider, the arrow and the shield's rim and leaves the
-    # white inside the shield half covered or not at all. Everything the rim
-    # encloses is the emblem: fully covered, and where it is near-white, one
-    # flat white rather than the JPEG's speckle.
-    enclosed = ndimage.binary_fill_holes(coverage > EMBLEM_FLOOR)
-    inside = ndimage.binary_erosion(enclosed, iterations=EMBLEM_EDGE)
-    colour = as_float(emblem_area)
-    # The checkerboard shows through inside the front wheel, so a light grey
-    # with no colour in it is white here too.
-    chroma = colour.max(axis=2) - colour.min(axis=2)
-    whitish = inside & (colour.min(axis=2) > WHITE_FLOOR) & (chroma < GREY_CHROMA)
-    colour[whitish] = SHIELD_WHITE
-    alpha = coverage.copy()
-    alpha[inside] = 1.0
-    emblem = np.dstack([colour, alpha * 255.0])
+def chroma_key(screen: np.ndarray) -> np.ndarray:
+    """The logo off its green screen, as straight RGBA floats, cropped to what it covers."""
+    red, green, blue = screen[..., 0], screen[..., 1], screen[..., 2]
+    others = np.maximum(red, blue)
+    k = green - others
+    alpha = np.clip(1.0 - (k - KEY_FLOOR) / KEY_RAMP, 0.0, 1.0)
+    colour = screen.copy()
+    colour[..., 1] = np.minimum(green, others + DESPILL)
+    rows = np.nonzero(alpha.max(axis=1) > 0)[0]
+    cols = np.nonzero(alpha.max(axis=0) > 0)[0]
+    if len(rows) == 0:
+        refuse("the logo's sheet is nothing but green screen")
+    top, bottom, left, right = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1
+    return np.dstack([colour, alpha * 255.0])[top:bottom, left:right]
 
-    w_left, w_top, w_right, w_bottom = LOGO_WORDS_BOX
-    words = lettering(as_float(sheet.crop(LOGO_WORDS_BOX)), ink)
 
-    canvas = np.zeros((w_bottom - top, w_right - w_left, 4), dtype=np.float64)
-    canvas[0 : bottom - top, left - w_left : right - w_left] = emblem
-    region = canvas[w_top - top : w_bottom - top, 0 : w_right - w_left]
-    # The words are below the emblem's box; where the two boxes meet, the
-    # opaquer of the two wins.
-    take = words[..., 3] > region[..., 3]
-    region[take] = words[take]
-    picture = to_image(trimmed(canvas))
+def shadowed(rgba: np.ndarray) -> np.ndarray:
+    """`rgba` over a soft navy shadow of its own outline, on a padded canvas."""
+    pad = SHADOW_PAD
+    height, width, _ = rgba.shape
+    canvas = np.zeros((height + 2 * pad, width + 2 * pad, 4), dtype=np.float64)
+    canvas[pad : pad + height, pad : pad + width] = rgba
+    under = ndimage.gaussian_filter(canvas[..., 3] / 255.0, SHADOW_SIGMA) * SHADOW_OPACITY
+    over = canvas[..., 3] / 255.0
+    out_alpha = over + under * (1.0 - over)
+    safe = np.maximum(out_alpha, 1e-9)[..., None]
+    navy = np.array(NAVY, dtype=np.float64)
+    out_colour = (canvas[..., :3] * over[..., None] + navy * (under * (1.0 - over))[..., None]) / safe
+    return np.dstack([out_colour, out_alpha * 255.0])
+
+
+def logo(sheet: Image.Image, kind: str, width: int) -> Image.Image:
+    rgba = chroma_key(as_float(sheet))
+    if kind == "logo-light":
+        rgba = shadowed(rgba)
+    elif kind != "logo-dark":
+        refuse(f"unknown logo kind {kind}")
+    picture = to_image(rgba)
     height = round(picture.height * width / picture.width)
     return picture.resize((width, height), Image.Resampling.LANCZOS)
 
@@ -361,7 +338,6 @@ def derive() -> dict[str, bytes]:
     }
     families = TABLE["families"]
     mark, blue = icon_mark(sheets[families["icon"]["source"]])
-    model: LocalModel | None = None
     made: dict[str, bytes] = {}
     for output in TABLE["outputs"]:
         family, kind, size = output["family"], output["kind"], output["size"]
@@ -371,9 +347,7 @@ def derive() -> dict[str, bytes]:
         elif family == "wordmark":
             picture = wordmark(sheet, NAVY if kind == "wordmark-light" else DARK_INK, size)
         elif family == "logo":
-            if model is None:
-                model = LocalModel()
-            picture = logo(sheet, NAVY if kind == "logo-light" else DARK_INK, size, model)
+            picture = logo(sheet, kind, size)
         else:
             refuse(f"unknown family {family}")
         made[output["path"]] = png(picture)
