@@ -1661,6 +1661,7 @@ function frameWithScatter(): SceneFrame {
     },
     // #679: no line in reach.
     lines: [],
+    billboards: [],
   };
 }
 

@@ -154,12 +154,29 @@ import {
   foliageStillOf,
   gantriesShownOf,
   gantryCountsOf,
+  loadGameWordmark,
+  logoBoardsOf,
+  logosShownOf,
+  wordmarkOrientationOf,
+  type WordmarkOrientation,
   waterFresnelOf,
   waterReflectsOf,
   remoteRiderControlOf,
 } from '../src/game/three-renderer';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
+import { billboardsAt } from '../src/game/billboards';
+import {
+  BILLBOARD_BOARD_BOTTOM_METRES,
+  billboardLogoPlace,
+  carriesTheLogo,
+  gateLogoPlace,
+  LOGO_BOARD_DEPTH_METRES,
+  LOGO_BOARD_HEIGHT_METRES,
+  LOGO_BOARD_WIDTH_METRES,
+  type LogoPlace,
+} from '../src/game/logo-board';
+import gameWordmarkPngUrl from '../src/game/brand/game-wordmark.png?url';
 import { FINISH_WORD } from '../src/game/gantry-wording';
 import { PATCH_CELL_METRES, patchInCell, WHEEL_TRACK_OFFSETS_METRES } from '../src/game/road-wear';
 import { groundBlobAlpha, groundUnder } from '../src/game/ground-blob';
@@ -727,7 +744,9 @@ declare global {
       /**
        * WebGL textures created across a whole sweep — #366's fourth criterion.
        *
-       * ⚠️ **Zero is the assertion, and it is the only way to make it.** The
+       * ⚠️ **Since #966 ONE is the assertion — the start gate's wordmark, the
+       * stylised world's one allowed texture — and {@link stylisedTextures}
+       * says which texture it was.** Until then zero was. The
        * buildings' colour comes out of a 512 × 512 atlas that is fetched,
        * sampled once at load and thrown away, and every step of that is
        * invisible from outside: a renderer that kept the `Texture` and bound it
@@ -747,6 +766,10 @@ declare global {
        * declare, whether or not this program has an image anywhere.
        */
       readonly texturesBaseline: number;
+      /** #966: the one texture the stylised world uploads, and its control. @see stylisedTextureProbe */
+      readonly stylisedTextures: StylisedTextureMeasurement;
+      /** #966: the wordmark on the gate and a billboard, read back, stylised. @see logoProbe */
+      readonly logos: LogoMeasurement;
       /**
        * A broadleaf tree's own pixels, split by which channel leads — #366.
        *
@@ -2554,7 +2577,11 @@ function colourProbes(probe: SceneFrame): {
     // this program has an image anywhere. What #366's fourth criterion is
     // about is whether the **scenery** adds one, so the baseline is taken
     // after the first frame and what is published is the difference.
-    view.render({ ...probe, markers: [], scatter: [] });
+    // ⚠️ **And with no gate and no billboard in it — #966**: the start gate's
+    // wordmark is the one texture the stylised world may upload, and it is
+    // uploaded the first time a frame draws a board, so the baseline frame
+    // must not, or the count below could not see it.
+    view.render({ ...probe, markers: [], scatter: [], lines: [], billboards: [] });
     const baseline = counted();
     baselineTextures = baseline;
 
@@ -4489,6 +4516,8 @@ export interface RealisticMeasurement {
   readonly groundBlend: GroundBlendMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
+  /** #966: the wordmark on the gate and a billboard, read back, realistic. @see logoProbe */
+  readonly logos: LogoMeasurement;
   /** #629: a lake's near and grazing water, reflecting and held. @see waterReflectionProbe */
   readonly waterReflection: WaterReflectionMeasurement;
   /**
@@ -5705,6 +5734,496 @@ function gantryProbe(
   };
 }
 
+/**
+ * The wordmark, read back off the drawing buffer — #966: on the start gate of
+ * a loop, 15 m before its lap line, and on a billboard the placement rules
+ * stood beside a valley road, 15 m ahead of it. Each is read as a strip aimed
+ * from geometry at the board's middle, counting the pixels that are the
+ * wordmark's lettering ({@link letteringIn}); then the same frames with the
+ * boards off — the control: the strip must read what is behind, and no
+ * lettering.
+ */
+export interface LogoMeasurement {
+  readonly measured: boolean;
+  /** Boards the view drew approaching the gate, and approaching the billboard. */
+  readonly gateBoards: number;
+  readonly billboardBoards: number;
+  /** Lettering pixels on each strip, the boards drawn and not. */
+  readonly gateLettering: number;
+  readonly gateLetteringOff: number;
+  readonly billboardLettering: number;
+  readonly billboardLetteringOff: number;
+  /** Pixels in each strip, for the counts' denominator. */
+  readonly stripPixels: number;
+  /** Each strip's mean colour, bytes, the boards drawn — published, not asserted. */
+  readonly gateMean: readonly number[];
+  readonly billboardMean: readonly number[];
+  /** Draw calls the boards add to the gate's frame. */
+  readonly calls: number;
+  /**
+   * Which way up the wordmark reads — #966's review: how well a grid read
+   * over each board's face correlates with the committed picture, upright,
+   * mirrored and upside down. Drawn right, the upright picture must agree
+   * best. @see orientationOn
+   */
+  readonly gateOrientation: OrientationAgreement;
+  readonly billboardOrientation: OrientationAgreement;
+  /**
+   * The control: the gate's board read again with the texture drawn mirrored,
+   * then upside down (`wordmarkOrientationOf`) — each must now agree best with
+   * the picture turned that way, or the reading could not tell.
+   */
+  readonly gateOrientationMirrored: OrientationAgreement;
+  readonly gateOrientationUpsideDown: OrientationAgreement;
+}
+
+/**
+ * How well a board's reading agrees with the wordmark each way up: the
+ * correlation, −1 to 1, between each grid point's darkness and the picture's
+ * share of lettering over that point's cell.
+ */
+export interface OrientationAgreement {
+  readonly upright: number;
+  readonly mirrored: number;
+  readonly upsideDown: number;
+  /** Grid points read on the board, for the shares' denominator. */
+  readonly samples: number;
+}
+
+const NO_ORIENTATION: OrientationAgreement = { upright: 0, mirrored: 0, upsideDown: 0, samples: 0 };
+
+/**
+ * The committed wordmark's lettering, as a mask — #966's review: alpha over
+ * half is lettering, the rest is the board. Read by the harness itself from
+ * the PNG the stylised world draws (the realistic world's KTX2 is the same
+ * picture, encoded), so what the reading is compared with is the artwork
+ * rather than anything the renderer decided.
+ */
+interface WordmarkMask {
+  readonly width: number;
+  readonly height: number;
+  readonly lettering: Uint8Array;
+}
+
+let wordmarkMask: WordmarkMask | undefined;
+
+async function loadWordmarkMask(): Promise<WordmarkMask> {
+  const image = new Image();
+  image.src = gameWordmarkPngUrl;
+  await image.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext('2d');
+  if (context === null) throw new Error('#966: no 2D context to read the wordmark with');
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+  const lettering = new Uint8Array(canvas.width * canvas.height);
+  for (let at = 0; at < lettering.length; at += 1) {
+    lettering[at] = (data[at * 4 + 3] ?? 0) > 127 ? 1 : 0;
+  }
+  return { width: canvas.width, height: canvas.height, lettering };
+}
+
+/** The grid read over a board's face: across its width, and up its height, inset from each edge. */
+const ORIENTATION_GRID = { across: 64, up: 6, insetU: 0.02, insetV: 0.12 } as const;
+
+/**
+ * Reads a board's face on a grid and says how well it agrees with the
+ * wordmark upright, mirrored and upside down — #966's review. Each grid point
+ * `(u, v)` is put in the world on the board's front face (the box's `+z` face:
+ * `u` to its `+x`, `v` up, which is how three's `BoxGeometry` lays its
+ * coordinates there) and projected, and its darkness is correlated with the
+ * picture's share of lettering over the point's cell. A count of dark pixels
+ * reads the same share however the texture is turned; a correlation does not.
+ * The picture is sampled at `(u, 1 − v)` from its top, as the PNG's `flipY`
+ * and the KTX2's `bottom-left` both mean.
+ */
+function orientationOn(
+  gl: WebGL2RenderingContext,
+  frame: SceneFrame,
+  canvas: HTMLCanvasElement,
+  place: LogoPlace,
+): OrientationAgreement {
+  const mask = wordmarkMask;
+  if (mask === undefined) return NO_ORIENTATION;
+  const points: { u: number; v: number; x: number; y: number }[] = [];
+  for (let column = 0; column < ORIENTATION_GRID.across; column += 1) {
+    for (let row = 0; row < ORIENTATION_GRID.up; row += 1) {
+      const u =
+        ORIENTATION_GRID.insetU +
+        ((1 - 2 * ORIENTATION_GRID.insetU) * (column + 0.5)) / ORIENTATION_GRID.across;
+      const v =
+        ORIENTATION_GRID.insetV +
+        ((1 - 2 * ORIENTATION_GRID.insetV) * (row + 0.5)) / ORIENTATION_GRID.up;
+      const across = (u - 0.5) * LOGO_BOARD_WIDTH_METRES;
+      const out = LOGO_BOARD_DEPTH_METRES / 2;
+      const at = pixelFor(frame, canvas, {
+        x: place.x + place.acrossX * across + place.faceX * out,
+        y: place.y + BILLBOARD_BOARD_BOTTOM_METRES + v * LOGO_BOARD_HEIGHT_METRES,
+        z: place.z + place.acrossZ * across + place.faceZ * out,
+      });
+      points.push({ u, v, x: Math.round(at.x), y: Math.round(at.y) });
+    }
+  }
+  const left = Math.max(0, Math.min(...points.map((each) => each.x)));
+  const bottom = Math.max(0, Math.min(...points.map((each) => each.y)));
+  const right = Math.min(canvas.width - 1, Math.max(...points.map((each) => each.x)));
+  const top = Math.min(canvas.height - 1, Math.max(...points.map((each) => each.y)));
+  if (right < left || top < bottom) return NO_ORIENTATION;
+  const width = right - left + 1;
+  const pixels = readRegion(gl, left, bottom, width, top - bottom + 1);
+  const read: { u: number; v: number; luminance: number }[] = [];
+  for (const point of points) {
+    if (point.x < left || point.x > right || point.y < bottom || point.y > top) continue;
+    const at = ((point.y - bottom) * width + (point.x - left)) * 4;
+    read.push({
+      u: point.u,
+      v: point.v,
+      luminance: relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0),
+    });
+  }
+  if (read.length === 0) return NO_ORIENTATION;
+  // The picture's share of lettering over each grid point's own cell, so a
+  // reading blurred by distance and mipmapping is compared with the picture
+  // blurred the same way rather than with one texel.
+  const cellU = (1 - 2 * ORIENTATION_GRID.insetU) / ORIENTATION_GRID.across;
+  const cellV = (1 - 2 * ORIENTATION_GRID.insetV) / ORIENTATION_GRID.up;
+  const coverage = (u: number, v: number): number => {
+    const fromColumn = Math.max(0, Math.floor((u - cellU / 2) * mask.width));
+    const toColumn = Math.min(mask.width, Math.ceil((u + cellU / 2) * mask.width));
+    const fromRow = Math.max(0, Math.floor((1 - v - cellV / 2) * mask.height));
+    const toRow = Math.min(mask.height, Math.ceil((1 - v + cellV / 2) * mask.height));
+    let sum = 0;
+    let count = 0;
+    for (let row = fromRow; row < toRow; row += 1) {
+      for (let column = fromColumn; column < toColumn; column += 1) {
+        sum += mask.lettering[row * mask.width + column] ?? 0;
+        count += 1;
+      }
+    }
+    return count === 0 ? 0 : sum / count;
+  };
+  // Darkness against the face's bright end — its ninetieth percentile, which
+  // is the board's white however much of a row is lettering.
+  const sorted = read.map((each) => each.luminance).sort((one, other) => one - other);
+  const bright = sorted[Math.floor(0.9 * (sorted.length - 1))] ?? 0;
+  const darkness = read.map((each) => (bright > 0 ? 1 - each.luminance / bright : 0));
+  const correlation = (picture: (u: number, v: number) => number): number => {
+    const expected = read.map((each) => picture(each.u, each.v));
+    const meanOf = (values: readonly number[]): number =>
+      values.reduce((sum, value) => sum + value, 0) / values.length;
+    const meanRead = meanOf(darkness);
+    const meanExpected = meanOf(expected);
+    let product = 0;
+    let readSquares = 0;
+    let expectedSquares = 0;
+    darkness.forEach((value, at) => {
+      const one = value - meanRead;
+      const other = (expected[at] ?? 0) - meanExpected;
+      product += one * other;
+      readSquares += one * one;
+      expectedSquares += other * other;
+    });
+    const scale = Math.sqrt(readSquares * expectedSquares);
+    return scale === 0 ? 0 : product / scale;
+  };
+  return {
+    upright: correlation((u, v) => coverage(u, v)),
+    mirrored: correlation((u, v) => coverage(1 - u, v)),
+    upsideDown: correlation((u, v) => coverage(u, 1 - v)),
+    samples: read.length,
+  };
+}
+
+/** {@link orientationOn} with the view's wordmark drawn one way, and upright again after. */
+function orientedReading(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  frame: SceneFrame,
+  canvas: HTMLCanvasElement,
+  place: LogoPlace,
+  orientation: WordmarkOrientation,
+): OrientationAgreement {
+  wordmarkOrientationOf(view, orientation);
+  try {
+    view.render(frame);
+    view.render(frame);
+    return orientationOn(gl, frame, canvas, place);
+  } finally {
+    wordmarkOrientationOf(view, 'upright');
+  }
+}
+
+const NO_LOGO: LogoMeasurement = {
+  measured: false,
+  gateBoards: 0,
+  billboardBoards: 0,
+  gateLettering: 0,
+  gateLetteringOff: 0,
+  billboardLettering: 0,
+  billboardLetteringOff: 0,
+  stripPixels: 0,
+  gateMean: [],
+  billboardMean: [],
+  calls: 0,
+  gateOrientation: NO_ORIENTATION,
+  billboardOrientation: NO_ORIENTATION,
+  gateOrientationMirrored: NO_ORIENTATION,
+  gateOrientationUpsideDown: NO_ORIENTATION,
+};
+
+/** The strip read on a board, in pixels: wide, because the wordmark runs across it. */
+const LOGO_STRIP = { width: 31, height: 5 } as const;
+
+/**
+ * How many pixels of a strip are the wordmark's lettering: darker than half
+ * the strip's median luminance. The board is white and most of the strip, so
+ * its median is the board's; the lettering is navy, under either world's tone
+ * mapping well under half of it (AgX takes the navy's hue but not its
+ * darkness). With the boards off the strip is the sky or the ground beyond,
+ * neither of which is half as dark as itself anywhere a strip this size reads.
+ */
+function letteringIn(pixels: Uint8Array): number {
+  const values: number[] = [];
+  for (let at = 0; at + 3 < pixels.length; at += 4) {
+    values.push(relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0));
+  }
+  const sorted = [...values].sort((one, other) => one - other);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  return values.filter((value) => value < median / 2).length;
+}
+
+/** @see LogoMeasurement */
+function logoProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): LogoMeasurement {
+  const bare = (frame: SceneFrame): SceneFrame => ({ ...frame, markers: [], scatter: [] });
+  const loop = circuitRoute(500);
+  const gateFrame = bare(riding(loop, (loop.totalDistance as number) - 15));
+  const gate = gateFrame.lines.find(carriesTheLogo);
+  const valley = valleyRoute();
+  const placed = billboardsAt(
+    valley,
+    corridorOrigin(valley),
+    scatterSeed(valley),
+    0,
+    valley.totalDistance,
+  )[0];
+  if (gate === undefined || placed === undefined) return { ...NO_LOGO, measured: true };
+  const boardFrame = bare(riding(valley, placed.along - 15));
+  const board = boardFrame.billboards.find((each) => each.along === placed.along);
+  if (board === undefined) return { ...NO_LOGO, measured: true };
+  const middle = BILLBOARD_BOARD_BOTTOM_METRES + LOGO_BOARD_HEIGHT_METRES / 2;
+  const gateAim = gateLogoPlace(gate);
+  const gateCentre = pixelFor(gateFrame, canvas, {
+    x: gateAim.x,
+    y: gateAim.y + middle,
+    z: gateAim.z,
+  });
+  const boardCentre = pixelFor(boardFrame, canvas, { x: board.x, y: board.y + middle, z: board.z });
+  const means: number[][] = [];
+  const letteringOn = (frame: SceneFrame, centre: { x: number; y: number }): number => {
+    view.render(frame);
+    view.render(frame);
+    const pixels = readRegion(
+      gl,
+      Math.round(centre.x) - (LOGO_STRIP.width - 1) / 2,
+      Math.round(centre.y) - (LOGO_STRIP.height - 1) / 2,
+      LOGO_STRIP.width,
+      LOGO_STRIP.height,
+    );
+    const mean = [0, 0, 0];
+    for (let at = 0; at + 3 < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        mean[channel] = (mean[channel] ?? 0) + (pixels[at + channel] ?? 0) / (pixels.length / 4);
+      }
+    }
+    means.push(mean.map((each) => Math.round(each)));
+    return letteringIn(pixels);
+  };
+  const gateLettering = letteringOn(gateFrame, gateCentre);
+  const gateBoards = logoBoardsOf(view);
+  const billboardLettering = letteringOn(boardFrame, boardCentre);
+  const billboardBoards = logoBoardsOf(view);
+  // #966's review: which way up, on both boards, and the gate's two controls.
+  const billboardPlace = billboardLogoPlace(board);
+  const gateOrientation = orientedReading(view, gl, gateFrame, canvas, gateAim, 'upright');
+  const billboardOrientation = orientedReading(
+    view,
+    gl,
+    boardFrame,
+    canvas,
+    billboardPlace,
+    'upright',
+  );
+  const gateOrientationMirrored = orientedReading(view, gl, gateFrame, canvas, gateAim, 'mirrored');
+  const gateOrientationUpsideDown = orientedReading(
+    view,
+    gl,
+    gateFrame,
+    canvas,
+    gateAim,
+    'upside-down',
+  );
+  let calls = 0;
+  countingDrawCalls((counted) => {
+    const before = counted();
+    view.render(gateFrame);
+    const on = counted() - before;
+    logosShownOf(view, false);
+    const again = counted();
+    view.render(gateFrame);
+    calls = on - (counted() - again);
+  });
+  let gateLetteringOff: number;
+  let billboardLetteringOff: number;
+  try {
+    gateLetteringOff = letteringOn(gateFrame, gateCentre);
+    billboardLetteringOff = letteringOn(boardFrame, boardCentre);
+  } finally {
+    logosShownOf(view, true);
+  }
+  return {
+    measured: true,
+    gateBoards,
+    billboardBoards,
+    gateLettering,
+    gateLetteringOff,
+    billboardLettering,
+    billboardLetteringOff,
+    stripPixels: LOGO_STRIP.width * LOGO_STRIP.height,
+    gateMean: means[0] ?? [],
+    billboardMean: means[1] ?? [],
+    calls,
+    gateOrientation,
+    billboardOrientation,
+    gateOrientationMirrored,
+    gateOrientationUpsideDown,
+  };
+}
+
+/** {@link logoProbe} in the stylised world, on a canvas and a view of its own. */
+function stylisedLogoProbe(): LogoMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2');
+  try {
+    if (gl === null) return NO_LOGO;
+    return logoProbe(view, gl, canvas, (profile, distance) => {
+      const start = atStartLine(profile);
+      return sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      });
+    });
+  } finally {
+    view.destroy();
+  }
+}
+
+/**
+ * The stylised world's one texture — #966: what a view uploads when it first
+ * draws the start gate's wordmark, counted from a frame drawn without it, and
+ * the size of every 2D image handed to the GPU meanwhile — with the control: a
+ * second view, the boards off, the same frames, which must upload nothing.
+ */
+export interface StylisedTextureMeasurement {
+  readonly measured: boolean;
+  readonly created: number;
+  /** `width×height` of every 2D texture storage allocated or image uploaded. */
+  readonly uploads: readonly string[];
+  readonly controlCreated: number;
+}
+
+const NO_STYLISED_TEXTURES: StylisedTextureMeasurement = {
+  measured: false,
+  created: 0,
+  uploads: [],
+  controlCreated: 0,
+};
+
+/** @see StylisedTextureMeasurement */
+function stylisedTextureProbe(): StylisedTextureMeasurement {
+  const loop = circuitRoute(500);
+  const origin = corridorOrigin(loop);
+  const start = atStartLine(loop);
+  const gateFrame: SceneFrame = {
+    ...sceneFrame({
+      profile: loop,
+      origin,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres((loop.totalDistance as number) - 35) },
+      },
+    }),
+    markers: [],
+  };
+  const without: SceneFrame = { ...gateFrame, lines: [], billboards: [] };
+  const measure = (boardsOn: boolean): { created: number; uploads: string[] } => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 300;
+    canvas.height = 200;
+    const uploads: string[] = [];
+    let created = 0;
+    const gl = WebGL2RenderingContext.prototype;
+    /* eslint-disable @typescript-eslint/unbound-method */
+    const realStorage = gl.texStorage2D;
+    const realImage = gl.texImage2D;
+    /* eslint-enable @typescript-eslint/unbound-method */
+    let watching = false;
+    gl.texStorage2D = function patchedStorage(
+      this: WebGL2RenderingContext,
+      ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
+    ) {
+      if (watching) uploads.push(`${String(args[3])}x${String(args[4])}`);
+      realStorage.apply(this, args);
+    };
+    gl.texImage2D = function patchedImage(this: WebGL2RenderingContext, ...args: unknown[]) {
+      if (watching && typeof args[3] === 'number' && typeof args[4] === 'number') {
+        uploads.push(`${String(args[3])}x${String(args[4])}`);
+      }
+      (realImage as (...each: unknown[]) => void).apply(this, args);
+    };
+    try {
+      countingTextures((counted) => {
+        const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+        view.resize(300, 200);
+        logosShownOf(view, boardsOn);
+        // Baselined on a frame with no gate and no billboard in it: three's
+        // own four default textures exist after any first frame.
+        view.render(without);
+        const baseline = counted();
+        watching = true;
+        view.render(gateFrame);
+        view.render(gateFrame);
+        watching = false;
+        created = counted() - baseline;
+        view.destroy();
+      });
+    } finally {
+      gl.texStorage2D = realStorage;
+      gl.texImage2D = realImage;
+    }
+    return { created, uploads };
+  };
+  const shown = measure(true);
+  const control = measure(false);
+  return {
+    measured: true,
+    created: shown.created,
+    uploads: shown.uploads,
+    controlCreated: control.created,
+  };
+}
+
 /** What {@link airProbe} reports when it did not run. */
 const NO_AIR: AirMeasurement = {
   measured: false,
@@ -5730,6 +6249,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
   gantry: NO_GANTRY,
+  logos: NO_LOGO,
   waterReflection: NO_WATER_REFLECTION,
   atmosphere: {
     realisticTaught: 0,
@@ -7013,6 +7533,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
 
+  // #966: the wordmark on the start gate and a billboard, read.
+  const logos = logoProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: wordmark — #966');
+
   // #629: the water, on the lake.
   const waterReflection = waterReflectionProbe(view, gl, canvas, riding);
   phaseEnds('realistic: water reflection — #629');
@@ -7476,6 +8000,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     roadWear,
     groundBlend,
     gantry,
+    logos,
     waterReflection,
     waterReflectsAfterStepDown,
     textures,
@@ -7965,6 +8490,8 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     sceneryInstances: {},
     texturesCreated: 0,
     texturesBaseline: 0,
+    stylisedTextures: NO_STYLISED_TEXTURES,
+    logos: NO_LOGO,
     treeRedPixels: 0,
     treeGreenPixels: 0,
     buildingGreenPixels: 0,
@@ -8021,6 +8548,14 @@ async function run(): Promise<void> {
   // the same place and for exactly the same reason. A harness that skipped it
   // would draw the primitive world and every assertion below would pass.
   await loadSceneryModels();
+  // #966: and the wordmark, on the same seam `main.tsx` loads it on.
+  await loadGameWordmark();
+  // #966's review: and the picture the orientation reading is compared with.
+  try {
+    wordmarkMask = await loadWordmarkMask();
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
   phaseEnds('scenery models');
   // ADR 0026. A run of its own, so the default run fetches none of the
   // realistic set — which `game.browser.spec.ts` asserts off the requests it
@@ -8094,6 +8629,8 @@ async function run(): Promise<void> {
     straightOff: NO_LINE,
   };
   let bend = { right: NO_BEND, mirrored: NO_BEND };
+  let stylisedTextures = NO_STYLISED_TEXTURES;
+  let logos = NO_LOGO;
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -8709,6 +9246,10 @@ async function run(): Promise<void> {
       // #583, on a canvas of its own. @see bendProbe
       bend = bendProbe(640, 360);
       phaseEnds('default: bend');
+      // #966, on canvases of their own. @see stylisedTextureProbe, logoProbe
+      stylisedTextures = stylisedTextureProbe();
+      logos = stylisedLogoProbe();
+      phaseEnds('default: wordmark');
     }
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -8797,6 +9338,8 @@ async function run(): Promise<void> {
     sceneryInstances,
     texturesCreated,
     texturesBaseline,
+    stylisedTextures,
+    logos,
     treeRedPixels,
     treeGreenPixels,
     buildingGreenPixels,

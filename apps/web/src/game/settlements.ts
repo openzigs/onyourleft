@@ -353,13 +353,38 @@ export function structureClearance(
   origin: CorridorOrigin,
   item: ScatterItem,
 ): number {
-  const footprint = STRUCTURE_FOOTPRINTS[item.kind as StructureKind];
+  return footprintClearance(
+    profile,
+    origin,
+    item,
+    STRUCTURE_FOOTPRINTS[item.kind as StructureKind],
+  );
+}
+
+/** A footprint in its owner's frame, as {@link STRUCTURE_FOOTPRINTS} gives one. */
+export interface Footprint {
+  readonly x: number;
+  readonly back: number;
+  readonly front: number;
+}
+
+/**
+ * {@link structureClearance} for any footprint standing anywhere — #966: the
+ * billboards (`billboards.ts`) are held off every stretch of the road by the
+ * same measure as a house, and are not a structure kind.
+ */
+export function footprintClearance(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  at: { readonly x: number; readonly z: number; readonly rotation: number },
+  footprint: Footprint,
+): number {
   const reach =
     Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + ROAD_CLEARANCE_METRES;
-  boxQuery.x = item.x;
-  boxQuery.z = item.z;
-  boxQuery.cos = Math.cos(item.rotation);
-  boxQuery.sin = Math.sin(item.rotation);
+  boxQuery.x = at.x;
+  boxQuery.z = at.z;
+  boxQuery.cos = Math.cos(at.rotation);
+  boxQuery.sin = Math.sin(at.rotation);
   boxQuery.half = footprint.x;
   boxQuery.back = footprint.back;
   boxQuery.front = footprint.front;

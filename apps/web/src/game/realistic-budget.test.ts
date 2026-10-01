@@ -15,6 +15,7 @@
 
 import { BANNER_CELL_HEIGHT, BANNER_CELL_WIDTH, BANNER_CELLS } from './banner-atlas';
 import { standBoxes } from './gantry';
+import { logoBoxes } from './logo-board';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -319,10 +320,15 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     readonly gantries: number;
   } => {
     return {
-      // #679: two gantries and the board before a line, a quad a banner.
+      // #679: two gantries and the board before a line, a quad a banner —
+      // and since #966 the wordmark's board on each gantry, the start gate's
+      // (a loop shorter than the reach holds two). A billboard's board is a
+      // STRUCTURE in the budget (`scene.ts`), lighter than any, so the
+      // structures' term below covers it.
       gantries:
         2 * (standBoxes('gantry').length * BOX_TRIANGLES + 2) +
-        (standBoxes('board').length * BOX_TRIANGLES + 2),
+        (standBoxes('board').length * BOX_TRIANGLES + 2) +
+        2 * logoBoxes().length * BOX_TRIANGLES,
       // #620: the ground blobs, every one the belt has room for, a quad each.
       blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
       vegetation: worstVegetation(),
@@ -350,6 +356,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     // of detailed buildings — rather than a term that rounds to nothing.
     expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
     expect(heaviestStructure).toBeGreaterThan(300);
+    // #966: a billboard spends a structure's slot, so it must be no heavier
+    // than the heaviest structure the term above prices every slot at.
+    expect(logoBoxes().length * BOX_TRIANGLES).toBeLessThan(heaviestStructure);
   });
 
   it('holds it with a room’s remote riders in it too: two realistic and the stylised rest — #783', () => {

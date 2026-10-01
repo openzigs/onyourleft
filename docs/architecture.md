@@ -107,7 +107,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         which also makes every web and Android icon; the name
                         and the logo are trademarks as well (TRADEMARKS.md).
                         Since #965 the CC-BY section of Credits is no longer
-                        empty: it credits the owner for exactly these files
+                        empty: it credits the owner for exactly these files,
+                        and since #966 for the trainer game's wordmark too —
+                        src/game/brand/game-wordmark.png and its realistic
+                        KTX2, keyed out of the same sheet by
+                        tools/brand/game-wordmark.ts and painted on one board
+                        (game/logo-board.ts) on the starting gate
+                        (game/gantry.ts) and on a few roadside billboards
+                        (game/billboards.ts), in both worlds
     src/credits/        the in-app attribution, generated from ASSETS.toml (#358):
                         the reader for the manifest's own TOML subset, which
                         entries are credited and why, and the one line that
