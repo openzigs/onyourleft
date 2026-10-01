@@ -43,6 +43,28 @@
  * renders after its warning's "No local store:" label in one block and is
  * recorded so.
  *
+ * ⚠️ **Re-recorded by #943**, when the empty states became
+ * `design/EmptyState.tsx`. Every empty-state sentence is still recorded, in
+ * the same words; each screen gained a heading over it ("Your first ride" and
+ * so on) and its action moved into it, which reorders a few lines. Two lines
+ * changed on Activities' empty walk and are not lost words: "Start a ride
+ * Import or export files" is now two lines, because *Start a ride* is the
+ * empty state's action and no longer shares a paragraph with the import; and
+ * the six column headings of the EMPTY table ("Ride", "Started", "Duration",
+ * "Distance (km)", "Avg power (W)", "Actions") are gone with that table — a
+ * table with no rows is what the empty state replaces. Every one of them
+ * still renders on the populated walk, which this file holds unchanged. One
+ * sentence is REWORDED, in the record in the same commit: Segments' "Make one
+ * from a ride above." is "below" with no segment yet, because the list moved
+ * ahead of the forms to keep its action above the fold. And since #987's
+ * review that "below" sentence is said only where there IS a ride with a
+ * track below: with none — which is the empty walk — the form below is the
+ * *Nothing to cut from* refusal, so pointing at it was false, and the empty
+ * state says "No segments yet. A segment is cut from a ride with a track:
+ * import one from a file to begin." over a primary *Import a ride* instead.
+ * The record's Segments line is that sentence; the "below" one is still in
+ * the source, for a device that has a ride to cut from.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

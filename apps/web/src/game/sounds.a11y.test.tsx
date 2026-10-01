@@ -202,7 +202,9 @@ describe('the game — #400', () => {
       />,
     );
     await settle();
-    const ghost = document.querySelector<HTMLInputElement>('li input[type="checkbox"]');
+    const ghost = document.querySelector<HTMLInputElement>(
+      '.oyl-game__ghost input[type="checkbox"]',
+    );
     await press(ghost ?? undefined);
     expect(ghost?.checked, 'the ghost was not chosen, so no await is taken').toBe(true);
     const ride = button('Ride ');

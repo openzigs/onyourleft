@@ -73,6 +73,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { ButtonLink } from '../design/Button';
+
 import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
 
 /** The custom property `theme.css` declares the two-pane width in. */
@@ -360,13 +362,13 @@ export function CreateLink({ route, selection, children }: CreateLinkProps): JSX
     }
   }
   return (
-    <a
-      className={chosen ? 'oyl-button' : 'oyl-button oyl-button--secondary'}
+    <ButtonLink
       href={hrefFor(route)}
-      data-oyl-create=""
-      onClick={chosen ? undefined : jumpToForm}
+      variant={chosen ? 'primary' : 'secondary'}
+      create
+      {...(chosen ? {} : { onClick: jumpToForm })}
     >
       {children}
-    </a>
+    </ButtonLink>
   );
 }

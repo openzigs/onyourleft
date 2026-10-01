@@ -92,6 +92,12 @@ import { ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
+import {
+  REALISTIC_WORLD_STORAGE_KEY,
+  writeRealisticWorldChoice,
+} from '../src/game/world-preference';
+import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -203,10 +209,123 @@ function route(): RouteProfile {
   return routeProfile(points);
 }
 
+/**
+ * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
+ * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
+ * `ride.browser.spec.ts` §"#940" can choose the last card and measure where
+ * *Ride* is. The first route is the ridden fixture's own, so everything the
+ * chooser shows above *Ride* is what the ridden page's rider saw.
+ *
+ * `?picker=list` is its control: the same chooser with the old picker's
+ * layout put back by a stylesheet of this page's own ({@link restoreTheList})
+ * — the notices, the loadout, the routes one per row, and *Ride* after them
+ * rather than straight after the notices. *Ride* must then fall under the
+ * tablet's floor.
+ */
+const PICKER = new URLSearchParams(window.location.search).get('picker');
+const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
+
+/**
+ * `ride.html?picker=chooser&notices=all` — #940's review (B2): the chooser with
+ * the TALLEST stack of standing notices it can show above *Ride*. A release the
+ * trainer did not confirm (#372), the trainer notice a running workout makes
+ * (#362, the longest `trainerRoadNotice` sentence) and the realistic world
+ * chosen on this device (#475), written through the product's own preference
+ * module before the shell renders, as Settings would. The trainer promise
+ * (#503) is the one notice it does not carry: a workout's trainer is not
+ * offered the road, so the promise and the trainer notice never stand together
+ * (`GameView` §`trainerReading`), and the notice is the longer of the two.
+ */
+const ALL_NOTICES =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('notices') === 'all';
+
+/**
+ * `ride.html?picker=chooser&notices=release` — #940's second review: a READY
+ * trainer whose last release was not confirmed (#372), so the chooser shows
+ * the release fault AND #503's promise above *Ride*. It is the state in which
+ * the pinned *Ride* hid the whole promise on every landscape phone, and the
+ * reason the promise is measured under a release fault as well as alone.
+ */
+const RELEASE_AND_PROMISE =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('notices') === 'release';
+
+/**
+ * The longest name a route can have — `routes/save.ts`
+ * §`MAXIMUM_ROUTE_NAME_LENGTH` characters, read from the constant rather than
+ * counted here, so a longer bound is measured the day it ships. #940's second
+ * review: the fixture's longest was 70 characters, and a 119-character name
+ * wrapped the pinned *Ride* past the padding made for it.
+ */
+const LONGEST_ROUTE_NAME = (() => {
+  const words =
+    'Box Hill, Leith Hill, Ranmore Common, Coldharbour, Holmbury St Mary, Peaslake, Shere, ' +
+    'Abinger and every lane between them, twice over, the long way round';
+  const name = words.slice(0, MAXIMUM_ROUTE_NAME_LENGTH);
+  if (name.length !== MAXIMUM_ROUTE_NAME_LENGTH || name !== name.trim()) {
+    throw new Error('ride harness: the longest route name is not the store’s bound');
+  }
+  return name;
+})();
+
+/**
+ * The chooser's other routes. The LAST has the longest name a route can have
+ * ({@link LONGEST_ROUTE_NAME}), so the *Ride* it names is the tallest there is.
+ */
+function chooserRoutes(): readonly {
+  id: string;
+  name: string;
+  profile: RouteProfile;
+  attempts: number;
+}[] {
+  const names = [
+    'Reservoir loop',
+    'The coast road',
+    'Two bridges',
+    'Old railway line',
+    'Box Hill, Leith Hill and every lane between them the long way round',
+    LONGEST_ROUTE_NAME,
+  ];
+  return names.map((name, index) => {
+    const points: RoutePoint[] = [];
+    const count = 120 + index * 40;
+    for (let step = 0; step <= count; step += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (step * 100) / 111_320),
+          degreesLongitude(-0.12 + index * 0.05),
+        ),
+        elevation: altitudeMetres(
+          40 + (index + 1) * 15 * Math.sin((step / count) * (index + 2) * Math.PI) ** 2,
+        ),
+      });
+    }
+    return { id: `chooser-${String(index)}`, name, profile: routeProfile(points), attempts: 0 };
+  });
+}
+
+/** The old picker's layout, as the control's stylesheet. @see PICKER */
+function restoreTheList(): void {
+  const style = document.createElement('style');
+  style.textContent = [
+    '.oyl-main:has(.oyl-chooser) { max-width: var(--oyl-measure) !important; }',
+    '.oyl-chooser { display: flex !important; flex-direction: column; }',
+    '.oyl-chooser__lead { display: contents !important; }',
+    '.oyl-chooser > h2 { order: -3; }',
+    '.oyl-chooser__notices { order: -2; }',
+    '.oyl-chooser__loadout { order: -1; }',
+    '.oyl-chooser__cards { grid-template-columns: minmax(0, 1fr) !important; }',
+    '.oyl-chooser__go { order: 1; }',
+  ].join('\n');
+  document.head.append(style);
+}
+
 const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
-    Promise.resolve([{ id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 }]),
+    Promise.resolve([
+      { id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 },
+      ...(AT_THE_PICKER ? chooserRoutes() : []),
+    ]),
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
@@ -228,6 +347,7 @@ const GAME: GamePort = {
  * by construction (`GameView` §`trainerReading`), so they are two fixtures.
  */
 const WITH_A_NOTICE =
+  ALL_NOTICES ||
   new URLSearchParams(window.location.search).get('trainer') === 'workout' ||
   new URLSearchParams(window.location.search).get('rescue') !== null;
 
@@ -344,9 +464,14 @@ const TRAINER: GameTrainerPort = {
   recordingMayStop: () => MAY_STOP,
   readTrainer: () =>
     WITH_A_NOTICE
-      ? { kind: 'workout', control: undefined }
+      ? {
+          kind: 'workout',
+          control: undefined,
+          ...(ALL_NOTICES ? { releaseFault: RELEASE_INCOMPLETE } : {}),
+        }
       : {
           kind: 'ready',
+          ...(RELEASE_AND_PROMISE ? { releaseFault: RELEASE_INCOMPLETE } : {}),
           control: {
             setSimulationParameters: async () =>
               REFUSED ? Promise.reject(new Error('control-not-permitted')) : Promise.resolve(),
@@ -537,6 +662,11 @@ async function run(): Promise<void> {
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
   }
+  // #940's review: the realistic world's notice, only when the tallest stack was asked for.
+  localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
+  if (ALL_NOTICES) {
+    writeRealisticWorldChoice(localStorage, true);
+  }
 
   // #674: the view groups first, so every view renders on the render that asks.
   await viewGroupsLoaded();
@@ -559,6 +689,25 @@ async function run(): Promise<void> {
   const ride = await until('the picker to offer a ride', () =>
     labelled<HTMLButtonElement>('button', 'Ride '),
   );
+  if (AT_THE_PICKER) {
+    // #940: the chooser is what is measured, so the page stops here.
+    if (PICKER === 'list') {
+      restoreTheList();
+    }
+    // The store's bound, for the spec, which does not import the client.
+    document.documentElement.dataset.oylMaximumRouteName = String(MAXIMUM_ROUTE_NAME_LENGTH);
+    await document.fonts.ready;
+    window.__oylRide = {
+      ready: true,
+      errors,
+      measure,
+      unstage,
+      setSafeArea,
+      restoreFullHeightShell,
+      restoreNoticeTakesTheRoute,
+    };
+    return;
+  }
   for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
     const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
     if (box === undefined || box.disabled) {

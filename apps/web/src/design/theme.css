@@ -1041,6 +1041,52 @@ h3:first-child {
   --oyl-shape-card-art-height: 3rem;
 }
 
+/*
+ * AN EMPTY STATE — #943 (`design/EmptyState.tsx`). A drawing, a heading, the
+ * screen's own sentences and one action, in that order, on a quiet surface so
+ * it reads as one thing rather than three paragraphs and a button.
+ *
+ * The drawing is about 48 px tall — the owner's ruling of 2026-10-01 on epic
+ * #935, "medium-sized" — and that is this ONE property, which the browser
+ * gate's control (`reflow-harness.tsx` §`applyIllustrationControl`) sets to
+ * 50vh to show an action can be pushed below the fold by it. Every layer of a
+ * drawing fills the box, so a landscape's sky, hills and road are one scene.
+ */
+.oyl-empty-state {
+  --oyl-empty-state-art-height: 3rem;
+  margin-block: var(--oyl-space-md);
+  padding: var(--oyl-space-md);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface);
+}
+
+.oyl-empty-state__art {
+  position: relative;
+  height: var(--oyl-empty-state-art-height);
+  max-width: 12rem;
+}
+
+.oyl-empty-state__layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.oyl-empty-state__heading {
+  margin-block: var(--oyl-space-sm) 0;
+}
+
+.oyl-empty-state > p {
+  margin-block: var(--oyl-space-xs) 0;
+}
+
+.oyl-empty-state > .oyl-empty-state__action {
+  margin-block-start: var(--oyl-space-sm);
+}
+
 .oyl-home {
   display: grid;
   gap: var(--oyl-space-md);
@@ -3065,6 +3111,189 @@ p > label + input[type='file'] {
   border-color: var(--oyl-color-border);
   background: var(--oyl-color-surface);
   color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * THE PRE-RIDE CHOOSER — #940, epic #935. `game/StageChooser.tsx` is the markup
+ * and argues it. Its boxes — every surface, border, padding, gap and margin —
+ * are `tw:` utilities over the tokens (ADR 0042); what is HERE is only what a
+ * utility cannot say without an arbitrary value or variant, which ADR 0042 D-5
+ * refuses: a grid template with `minmax()`, the 48 px drawing, a selector on
+ * `:has()` or `::after`, a length built from the safe-area inset, and every
+ * rule that depends on a media query (the token theme clears Tailwind's
+ * breakpoints).
+ *
+ * - **Route cards**: one native radio group, each card a list item whose
+ *   heading is its radio's label, stretched over the card by `::after`, so the
+ *   whole card is the target and still holds ONE control. The chosen card is
+ *   told by SHAPE twice — the radio's dot, and a doubled `accent` border — and
+ *   never by a fill alone (SC 1.4.1). Every colour is a declared pair: `ink`
+ *   and `inkMuted` on `surface`, `accent` on `surface`, and the focus ring
+ *   offset onto `canvas` round the whole card, with the radio's own ring on
+ *   `surface`. The drawing is the kit's `ProfileShape`, 3 rem (48 px) tall —
+ *   the owner's ruling of 2026-10-01 on #935: medium, not a strip.
+ * - **The standing notices come FIRST**, under the heading, and **Ride comes
+ *   straight after them** (`.oyl-chooser__lead`) — before the cards and the
+ *   loadout, in the flow, NOTHING pinned. #503's promise is therefore above
+ *   *Ride* on the page whatever the screen, and no box can cover it.
+ *
+ * ⚠️ **#940's two reviews, and why nothing here is pinned.** The first version
+ * pinned every notice WITH *Ride* to the bottom of the screen: a 467 px box on
+ * a 390×844 phone that covered the controls a rider tabs to (WCAG 2.2 SC
+ * 2.4.11). The second pinned *Ride* alone under a 7 rem `scroll-padding`: on a
+ * phone held sideways it covered #503's promise or held *Ride* on the screen
+ * while the promise was below the fold (0 % of the promise reachable at
+ * 640×360, and with a release fault at every landscape phone), and a route
+ * name of `routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH` wrapped *Ride* past
+ * the padding. Both came from pinning a box whose height and whose neighbours'
+ * visibility vary; in the flow neither can happen, by construction, and
+ * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
+ *
+ * The two `scroll-padding` rules left are not this chooser's pin — it has none
+ * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
+ * and the header (sticky, `--oyl-header-height`, on a large one) would
+ * otherwise sit over a control Tab scrolls to the edge. They are scoped to
+ * the chooser; the app-wide gap is a follow-up.
+ */
+.oyl-chooser__cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+}
+
+.oyl-chooser__card {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+/* The whole card is the radio's label. */
+.oyl-chooser__name > label::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.oyl-chooser__shape {
+  block-size: 3rem;
+}
+
+.oyl-chooser__card:has(> .oyl-chooser__radio:checked) {
+  border-color: var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+}
+
+.oyl-chooser__card:has(> .oyl-chooser__radio:focus-visible) {
+  outline: 3px solid var(--oyl-color-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * *Ride*'s label is ONE line, cut with an ellipsis: a route's name may be 120
+ * characters (`routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH`) and wrapped it
+ * made *Ride* five lines tall. The cut text stays in the button, so the
+ * accessible name is the whole name and the visible label a prefix of it
+ * (SC 2.5.3).
+ */
+.oyl-chooser__go > .oyl-button {
+  max-width: 100%;
+}
+
+.oyl-chooser__ride-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two notices to a row where there is the width, so *Ride* stays near the top. */
+.oyl-chooser__notices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  column-gap: var(--oyl-space-md);
+  align-items: start;
+}
+
+/*
+ * A SHORT screen — a phone held sideways. What the shell puts above the
+ * chooser (its header, the route's title and summary) is about 220 px of a
+ * 390 px screen, so the notices are set tighter here — half their padding and
+ * half the space after each, the words and the order untouched — which is
+ * what leaves room for *Ride* under #503's promise at the top of the page
+ * (#940's own criterion, at 844×390).
+ */
+@media (max-height: 30rem) {
+  .oyl-chooser__notices > .oyl-status {
+    padding-block: var(--oyl-space-sm);
+    margin-bottom: var(--oyl-space-sm);
+  }
+}
+
+/* The navigation BAR — the shell's own query and height, restated. */
+@media (max-width: 37.49rem) and (min-height: 30rem) {
+  :root:has(.oyl-chooser) {
+    scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
+  }
+}
+
+/* The sticky HEADER — the shell's own query and height, restated. */
+@media (min-width: 64rem) and (min-height: 40rem) {
+  :root:has(.oyl-chooser) {
+    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
+  }
+}
+
+/*
+ * Wide: the cards beside the loadout, under the notices and *Ride*. The game
+ * route's layout is `prose` (`shell/routes.ts`), and that is what this undoes,
+ * for the chooser alone and only from 60 rem: `:has()` finds the chooser
+ * inside this `main`, which no other route renders.
+ */
+@media (min-width: 60rem) {
+  .oyl-main--prose:has(.oyl-chooser) {
+    max-width: none;
+  }
+
+  .oyl-chooser {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 32rem);
+    grid-template-areas:
+      'lead lead'
+      'heading loadout'
+      'cards loadout';
+    grid-template-rows: auto auto 1fr;
+    column-gap: var(--oyl-space-lg);
+    align-items: start;
+  }
+
+  .oyl-chooser > .oyl-chooser__lead {
+    grid-area: lead;
+  }
+
+  .oyl-chooser > h2 {
+    grid-area: heading;
+  }
+
+  .oyl-chooser > .oyl-chooser__routes {
+    grid-area: cards;
+  }
+
+  .oyl-chooser > .oyl-chooser__loadout {
+    grid-area: loadout;
+  }
+
+  /*
+   * Two boxes to a row in the loadout's column: a pacer's box beside its
+   * switch, and the wind's speed beside its direction.
+   */
+  .oyl-chooser__loadout > .oyl-game__pacer,
+  .oyl-chooser__loadout > .oyl-game__wind {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--oyl-space-md);
+    align-items: end;
+  }
+
+  .oyl-chooser__loadout > .oyl-game__wind > label:first-child,
+  .oyl-chooser__loadout > div > .oyl-game__problem {
+    grid-column: 1 / -1;
+  }
 }
 
 /*

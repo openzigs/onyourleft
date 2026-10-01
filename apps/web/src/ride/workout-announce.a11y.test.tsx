@@ -221,6 +221,7 @@ describe('no production path pre-empts with an alert — #394', () => {
         /aria-live=["']assertive/,
       );
     }
-    expect(found.sort()).toEqual(['game/GameView.tsx', 'game/GameView.tsx']);
+    // #940 moved both, with the picker, into the chooser's own module.
+    expect(found.sort()).toEqual(['game/StageChooser.tsx', 'game/StageChooser.tsx']);
   });
 });

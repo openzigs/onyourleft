@@ -34,6 +34,7 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { PRIMARY_BUTTON_SELECTOR } from '../a11y/button-hierarchy';
 import { holdFirstLibraryPage, stubMatchPort, type HeldPage } from '../segments/match-testing';
 import { stubSegments, type StubSegments } from '../segments/testing';
 import {
@@ -208,6 +209,34 @@ describe('choosing a ride', () => {
     const container = await show(port);
     expect(textOf(container)).toContain('is normal and is not a fault');
     expect(container.querySelector('form')).toBeNull();
+  });
+
+  // #987's review: the empty state's ONE action is chosen from what there is
+  // to cut from, so the page holds exactly one primary either way and no
+  // sentence points at the *Nothing to cut from* refusal.
+  it('with no ride to cut from, the empty state is the primary and leads to Files — #943', async () => {
+    const port = stubSegments(OWNER, [{ activity: ride(undefined, { hasPosition: false }) }]);
+    const container = await show(port);
+    const empty = container.querySelector('[data-oyl-empty-state]');
+    const action = empty?.querySelector('.oyl-empty-state__action .oyl-button');
+    expect(action?.tagName).toBe('A');
+    expect(action?.textContent?.trim()).toBe('Import a ride');
+    expect(action?.getAttribute('href')).toBe('#/transfer');
+    expect(action?.classList.contains('oyl-button--secondary')).toBe(false);
+    expect(queryAll(container, PRIMARY_BUTTON_SELECTOR)).toEqual([action]);
+    expect(empty?.textContent).not.toContain('below');
+  });
+
+  it('with a ride to cut from, the empty state is secondary and the form holds the primary — #943', async () => {
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    const container = await show(port);
+    const empty = container.querySelector('[data-oyl-empty-state]');
+    const action = empty?.querySelector('.oyl-empty-state__action .oyl-button');
+    expect(action?.textContent?.trim()).toBe('Make a segment');
+    expect(action?.classList.contains('oyl-button--secondary')).toBe(true);
+    expect(empty?.textContent).toContain('No segments yet. Make one from a ride below.');
+    const primaries = queryAll(container, PRIMARY_BUTTON_SELECTOR);
+    expect(primaries.map((each) => each.textContent?.trim())).toEqual(['Make the segment']);
   });
 
   it('states that there is no map yet rather than leaving it to be inferred', async () => {
