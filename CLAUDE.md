@@ -3323,14 +3323,26 @@ are set, and a reviewer who remembers that is reading the old file.**
 [#338](https://github.com/openzigs/onyourleft/issues/338): Actions redacts every occurrence of a
 secret's **value**, and this one is the word `upload`, which rendered the pinned
 `actions/upload-artifact` as `actions/***-artifact` — taking an action's own name out of the audit
-trail §8 pins it for. The workflow reads `vars.ANDROID_KEY_ALIAS` instead. ⚠️ **That variable is
-NOT set yet and the secret is NOT deleted yet, so the next release run fails at the signing step**,
-loudly and deliberately rather than falling through to an unsigned build. Both halves are needed —
-the runner masks every secret in the job's map whether the workflow reads it or not, so a variable
-without the deletion leaves the logs exactly as redacted. Neither is a change a pull request can
-make: [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9 is why and §10 is the two commands,
-with its result cells still empty. ⚠️ **It has still never run on a tag**, so the GitHub Release step
-alone is untested, and no phone has installed the result —
+trail §8 pins it for. The workflow reads `vars.ANDROID_KEY_ALIAS` instead. ⚠️ **The variable IS
+set and the secret IS deleted — both on 2026-09-17 — and a reviewer who remembers "that variable
+is NOT set yet and the secret is NOT deleted yet, so the next release run fails at the signing
+step" is reading the old file** (corrected 2026-09-30 by #955, read with `gh variable list`,
+`gh secret list` and `gh run list --workflow release.yml`). The variable was set at 09:05:22 UTC.
+The dispatch run straight after
+([35203263648](https://github.com/openzigs/onyourleft/actions/runs/35203263648)) failed at
+*Assemble* — the keystore then held no key under the alias the variable names — and after
+`ANDROID_KEYSTORE_BASE64` was set again at 10:56:12 the next one
+([35213089600](https://github.com/openzigs/onyourleft/actions/runs/35213089600), `main`,
+`workflow_dispatch`) signed, verified *"Signed as required, targeting API 36."*, and printed the
+same certificate digest as 2026-09-16's run, with no `***` in the signing step's name or in
+`actions/upload-artifact`. ⚠️ **That the variable alone would not have been enough is NOT
+measured** — that the runner masks every secret in the job's map whether the workflow reads it or
+not is read off GitHub's documented behaviour. Both changes were made before any run read them, so
+the variable-set, secret-present half never ran, and a reviewer who remembers this paragraph saying
+"both halves were needed" as a finding is reading #955's first draft.
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9 is why and §10 holds the results.
+⚠️ **It has still never run on a tag**, so the GitHub Release step alone is untested, and no phone
+has installed the result —
 [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 is the table of which is which.
 
 ⚠️ **A green `assembleRelease` is not a signed APK, and until #95 nothing here noticed the
@@ -5606,6 +5618,7 @@ top of an issue **supersedes its body**.
 | What one press on a ride's page does, which source is offered first, what a cancel says on each path, and why a failed run keeps the earlier write-up | `apps/web/src/ride-analysis/ride-analysis.ts` §`CANCELLED_TEXT`, §`ASK_FAILURE_TEXT`, `apps/web/src/ride-analysis/ride-analysis-port.ts`, `apps/web/src/ride-analysis/RideWriteUpControl.tsx`, `ride-analysis-wiring.test.tsx`, [#804](https://github.com/openzigs/onyourleft/issues/804) |
 | How a model's write-up is shown on a ride's page, why a saved one is screened again, what every state says, and what a rider with no model set up sees | `apps/web/src/detail/RideWriteUpSection.tsx`, `apps/web/src/detail/write-up.ts` §`shownWriteUp`, `apps/web/src/camera/write-up-screen.ts` §`screenSavedWriteUp`, `RideWriteUpSection.test.tsx`, [#805](https://github.com/openzigs/onyourleft/issues/805) |
 | What a ride-analysis step sends to the rider's own computer, what it refuses to send, how a cut-off reply is told apart, and what a cancel does in the Android shell | `apps/web/src/ride-analysis/own-computer-step.ts`, `apps/web/src/camera/analysis-transport.ts` §`riderModelStepPort`, `docs/privacy-policy.md` §"A ride sent to your own computer", `own-computer-policy.test.ts`, [#802](https://github.com/openzigs/onyourleft/issues/802) |
+| How the instance's moderator approves, refuses, decides reports, suspends and hides names from the app, how the app finds out who the moderator is, why a missing account and a refused action read the same, and why a report about the moderator has no control | `apps/web/src/instance/moderation-port.ts`, `apps/web/src/views/ModerationView.tsx`, `apps/web/src/instance/moderation-port.test.ts`, `apps/web/browser/moderation.browser.spec.ts`, [#955](https://github.com/openzigs/onyourleft/issues/955) |
 | What a ride analysis sends to a hosted model on the rider's key, why only a step the runner sealed can be sent, where the consent is checked on every step, and what the consent, the policy and Play Data Safety say about it | `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/sealed-step.ts`, `apps/web/src/camera/hosted-transport.ts` §`isBuiltRequest`, `apps/web/src/camera/hosted-model.ts` §`HOSTED_CONSENT`, [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) §Amendments 2026-09-29, `docs/privacy-policy.md` §"Questions sent to a service you chose, on your own key", `apps/mobile/src/android/data-safety.ts`, [#803](https://github.com/openzigs/onyourleft/issues/803) |
 | Where the history index lives, what it may never hold, where its embedding model may be, and what a model change does | `apps/instance/src/history/`, `apps/instance/src/store/migrations/0010-history-index.ts`, [ADR 0040](docs/adr/0040-a-history-index-on-the-riders-instance.md), `docs/operating-an-instance.md` §"The history index", [#835](https://github.com/openzigs/onyourleft/issues/835) |
 | Which step a passage of the rider's history reaches, how it is fenced, what happens to a reply that obeys a planted note, and why a hosted run never gets one | `apps/web/src/ride-analysis/template-v2.ts` §`HISTORY_FENCE_BEGIN`, `apps/web/src/ride-analysis/history.ts`, `apps/web/src/ride-analysis/template.ts` §`acceptHistoryNote`, `apps/web/src/ride-analysis/hosted-step.ts`, `apps/web/src/ride-analysis/history.test.ts` §"a note planted with instructions" |

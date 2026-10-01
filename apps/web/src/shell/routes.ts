@@ -52,6 +52,7 @@ export type RouteId =
   | 'about'
   | 'credits'
   | 'instance'
+  | 'moderation'
   | 'not-found';
 
 /**
@@ -432,6 +433,29 @@ export const INSTANCE_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Moderating the instance this device is connected to (#955): the approval
+ * queue, the report queue, suspending, hiding a display name and the log.
+ *
+ * **Not in {@link ROUTES}**: only an instance's moderator has any use for it,
+ * so it has no navigation entry at all. The Instance screen links to it when
+ * `instance/moderation-port.ts` §`ModerationPort.standing` says this device's
+ * account moderates its instance, and anybody else who opens its address is
+ * told only that their own account is not a moderator. In {@link ALL_ROUTES},
+ * so the accessibility gate and the reflow walk audit it unasked.
+ */
+export const MODERATION_ROUTE: RouteDefinition = {
+  id: 'moderation',
+  group: 'more',
+  layout: 'prose',
+  path: '/settings/instance/moderation',
+  navLabel: 'Moderation',
+  title: 'Moderation',
+  summary:
+    'Approve and refuse new accounts, decide reports, suspend accounts and hide names on the ' +
+    'instance you moderate.',
+};
+
+/**
  * The tripod phone's side-camera screen (#528, ADR 0033).
  *
  * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is a mode
@@ -532,6 +556,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
+  MODERATION_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,

@@ -74,7 +74,7 @@ import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
-import { scriptedInstance } from '../instance/testing';
+import { scriptedInstance, scriptedModeration } from '../instance/testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -188,6 +188,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   },
   // #777/#773: connected, the instance's devices are listed; not, the form.
   instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__devices li' },
+  // #955: a moderator's queues; empty, an account that moderates nothing.
+  moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -594,6 +596,7 @@ export function PopulatedShell({
       maskedWords={maskedWordsPort(populated)}
       riderText={riderTextPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
+      moderation={scriptedModeration({ standing: populated ? 'moderator' : 'not-moderator' }).port}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}
