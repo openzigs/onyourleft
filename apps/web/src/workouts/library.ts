@@ -23,7 +23,12 @@
  * for every rider.
  */
 
-import { expandWorkout, type Workout, type WorkoutBlock } from '@onyourleft/domain';
+import {
+  expandWorkout,
+  type Workout,
+  type WorkoutBlock,
+  type WorkoutTimeline,
+} from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
 
 export interface WorkoutRow {
@@ -139,9 +144,15 @@ export function hardestShare(workout: Workout): number | undefined {
  * here.** An intervals block's length is `repeats × (hard + easy)` and writing
  * that arithmetic again is how a row comes to disagree with the clock the rider
  * watches. The expansion is the one place that knows, and it is cheap.
+ *
+ * A caller that has already expanded the workout — the Workouts list, which
+ * draws the timeline on the card (#941) — hands it in rather than expanding it
+ * a second time. It must be `record.workout`'s own expansion.
  */
-export function workoutRow(record: WorkoutRecord): WorkoutRow {
-  const timeline = expandWorkout(record.workout);
+export function workoutRow(
+  record: WorkoutRecord,
+  timeline: WorkoutTimeline = expandWorkout(record.workout),
+): WorkoutRow {
   const hardest = hardestShare(record.workout);
   return {
     id: record.id,
