@@ -102,6 +102,19 @@ function outputs(kind: string): readonly BrandOutput[] {
   return found;
 }
 
+/** The Android background layer's colour, as `ic_launcher_background.xml` declares it. */
+function launcherBlue(): readonly number[] {
+  const xml = readFileSync(
+    join(REPOSITORY, 'apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml'),
+    'utf8',
+  );
+  const colour = /<color name="ic_launcher_background">#([0-9A-Fa-f]{6})<\/color>/.exec(xml)?.[1];
+  if (colour === undefined) {
+    throw new Error('ic_launcher_background.xml declares no ic_launcher_background colour');
+  }
+  return [0, 2, 4].map((at) => Number.parseInt(colour.slice(at, at + 2), 16));
+}
+
 /** The flat blue every icon is drawn on, read from the largest square icon's corner. */
 function panelBlue(): readonly number[] {
   return pixel(picture('apps/web/public/icon-512.png'), 0, 0).slice(0, 3);
@@ -163,10 +176,31 @@ describe('the brand pictures — #965', () => {
     }
   });
 
-  it.each(outputs('square'))('$path is opaque from edge to edge', (output) => {
-    const image = picture(output.path);
-    expect(image.hasAlpha).toBe(false);
-  });
+  it.each([...outputs('square'), ...outputs('maskable')])(
+    '$path is opaque, and the flat blue all the way to its corners',
+    (output) => {
+      // The sheet's icon has rounded corners baked in on a light background;
+      // a launcher's mask must be the only rounding, so every edge pixel is
+      // the Android background layer's blue.
+      const image = picture(output.path);
+      expect(image.hasAlpha).toBe(false);
+      const blue = launcherBlue();
+      const last = image.width - 1;
+      for (let at = 0; at <= last; at += 1) {
+        for (const [x, y] of [
+          [at, 0],
+          [at, last],
+          [0, at],
+          [last, at],
+        ] as const) {
+          const edge = pixel(image, x, y);
+          blue.forEach((channel, index) => {
+            expect(Math.abs((edge[index] ?? 0) - channel)).toBeLessThanOrEqual(2);
+          });
+        }
+      }
+    },
+  );
 
   it.each(outputs('maskable'))(
     '$path keeps the mark inside the middle 80 % a browser may crop to',
@@ -255,13 +289,7 @@ describe('the brand pictures — #965', () => {
 
 describe('the Android launcher icon — #965', () => {
   it('draws its background layer in the icons’ own blue', () => {
-    const xml = readFileSync(
-      join(REPOSITORY, 'apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml'),
-      'utf8',
-    );
-    const colour = /<color name="ic_launcher_background">#([0-9A-Fa-f]{6})<\/color>/.exec(xml)?.[1];
-    expect(colour, 'no ic_launcher_background colour').toBeDefined();
-    const declared = [0, 2, 4].map((at) => Number.parseInt(colour?.slice(at, at + 2) ?? '', 16));
+    const declared = launcherBlue();
     panelBlue().forEach((channel, index) => {
       expect(Math.abs(channel - (declared[index] ?? 0))).toBeLessThanOrEqual(1);
     });

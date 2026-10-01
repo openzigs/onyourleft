@@ -99,6 +99,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         own network and switched on — with the port it
                         implements, the address rule, the answer read as
                         untrusted input, and the deadline in useAnalysis.ts
+    src/brand/          the owner's wordmark (the header) and full logo (About),
+                        each a light- and a dark-palette picture switched by
+                        data-theme, with the words as visually hidden text so
+                        the hidden picture takes no name with it (#965). Cut
+                        from the owner's CC-BY-4.0 sheets by tools/brand/,
+                        which also makes every web and Android icon; the name
+                        and the logo are trademarks as well (TRADEMARKS.md).
+                        Since #965 the CC-BY section of Credits is no longer
+                        empty: it credits the owner for exactly these files
     src/credits/        the in-app attribution, generated from ASSETS.toml (#358):
                         the reader for the manifest's own TOML subset, which
                         entries are credited and why, and the one line that
@@ -751,7 +760,8 @@ rather than a form to fill in, and the style is set as tokens before any art is 
 
 - **The illustration style is flat, geometric landscape art drawn from code in this repository**
   (D-1): sky, hills, a road ribbon, a sun, and a rider built from `game/bicycle.ts`'s proportions,
-  as the app icons (`tools/icons/`) and the bicycle already are. It is ours, so it needs no
+  as the bicycle already is (and as the app icons were until #965 made them the owner's art). It
+  is ours, so it needs no
   `ASSETS.toml` row and cannot be a copy of anyone's look.
 - **Art paints with tokens, never literals.** Five illustration colours (`tokens.ts` §`illoSky`,
   `illoSun`, `illoHillFar`, `illoHillNear`, `illoRoad`) have a value in each palette, and a shape

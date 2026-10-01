@@ -133,13 +133,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         production room port; its control is a third page with
                         fan-out switched off where the client meets it
     public/             what Vite copies verbatim into `dist` (#405) — the web app
-                        manifest and the three icons it names. A `.webmanifest`
-                        is on neither LIC001's nor LIC002's extension list and
-                        a JSON document has nowhere to put a header, so what
-                        records the icons is `ASSETS.toml`, and ⚠️ their licence
-                        is `CC0-1.0` rather than this tree's own
-                        `AGPL-3.0-or-later`, which `ASSET004` admits at no path
-                        at all (ADR 0024 D-5). ⚠️ Since #430 it also holds
+                        manifest, the three icons it names and (since #965) the
+                        favicon. A `.webmanifest` is on neither LIC001's nor
+                        LIC002's extension list and a JSON document has nowhere
+                        to put a header, so what records the icons is
+                        `ASSETS.toml`. ⚠️ Since #965 the icons are the OWNER's
+                        art, `CC-BY-4.0`, cut by `tools/brand/` — a reviewer who
+                        remembers them `CC0-1.0` chevrons drawn by
+                        `tools/icons/` is reading the old file (ADR 0024's
+                        2026-10-01 amendment). ⚠️ Since #430 it also holds
                         `realistic/` — the realistic world's 17 files, 30.8 MiB,
                         CC0, made by `tools/realistic/`, in `dist` and so in the
                         APK, and excluded from the precache BY THAT DIRECTORY
@@ -204,11 +206,29 @@ apps/                 AGPL-3.0-or-later, without exception
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
-    tools/icons/        the drawing those icons are committed FROM (#405) — two
-                        chevrons from arithmetic, nothing downloaded and nothing
-                        traced (ADR 0009). Authoring-time code, the shape
-                        `packages/fit/tools` has: in the typecheck, in the test
-                        run, and out of the coverage report
+    tools/icons/        two chevrons from arithmetic (#405) — since #965 NOT the
+                        app's icons, only the mark the realistic rider's jersey
+                        wears (#623), whose kit bytes depend on it.
+                        Authoring-time code, the shape `packages/fit/tools`
+                        has: in the typecheck, in the test run, and out of the
+                        coverage report
+    tools/brand/        the owner's brand art (#965): the two source sheets
+                        (Google Gemini, `CC-BY-4.0`, credited to the owner),
+                        `derive_brand.py` — which cuts every icon, the wordmark
+                        and the logo out of them with pinned Python packages
+                        and a digest-checked rembg model it fetches, never at
+                        run time — and `brand.json`, its table.
+                        `provenance.test.ts` holds `ASSETS.toml` to that table
+                        and reads the pictures back (safe zones, cut-outs); CI
+                        cannot run the script, so `--check` is run by hand.
+                        ⚠️ Gemini painted the "transparent" checkerboard INTO
+                        the JPEGs: nothing in them is transparent. The name and
+                        the logo are trademarks too: `TRADEMARKS.md`
+    src/brand/          the wordmark (header) and the full logo (About), each in
+                        a light- and a dark-palette picture switched by
+                        `data-theme`; the pictures are `alt=""` and the words are
+                        a visually hidden span, so no name is lost with the
+                        hidden one (#965)
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/athlete/        what the rider weighs (#325) — the one place a missing
                         mass is substituted, the one place a typed weight
@@ -2241,16 +2261,15 @@ pnpm --filter @onyourleft/store run test
 pnpm --filter @onyourleft/physics run test
 pnpm --filter @onyourleft/web run test
 
-# Redraw the web app manifest's icons (#405). They are COMMITTED bytes, not a
-# build step -- ADR 0024 D-5 and §3a between them say why a generated file
-# cannot land under `apps/` without an `.spdx-exempt` entry that §3a would
-# refuse. So this is provenance rather than a build, and
-# `tools/icons/generate-icons.test.ts` is what keeps the committed bytes and
-# this generator from drifting: it compares decoded PIXELS, not bytes, because
-# zlib's compressed form is not stable across versions of the library.
-# Re-run it after changing the drawing, then update the three ASSETS.toml
-# digests in the same commit.
-pnpm --filter @onyourleft/web run icons:generate
+# Re-cut the owner's brand art (#965): every app icon (web and Android), the
+# favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
+# gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
+# installed (any other version is refused) and, the first time, the network for
+# the rembg model, which it checks against brand.json's digest. `--check`
+# writes nothing and fails unless every committed output is reproduced byte for
+# byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
+# it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.
+<venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
 # in CI: it needs the network and Blender 4.4.3 (set BLENDER to its path; the
@@ -5505,6 +5524,9 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 | Where the credits screen's rows come from, and why it is generated rather than listed | `apps/web/src/credits/credits.ts`, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3 |
+| Where the app icons, the wordmark and the logo come from, how they are cut out of the owner's sheets, and what holds `ASSETS.toml` to them | `apps/web/tools/brand/derive_brand.py`, `apps/web/tools/brand/brand.json`, `apps/web/tools/brand/provenance.test.ts`, [#965](https://github.com/openzigs/onyourleft/issues/965) |
+| Why the wordmark is two pictures and its name is text, and what shows the dark one | `apps/web/src/brand/Brand.tsx`, `apps/web/src/design/theme.css` §"The owner's wordmark and logo", `apps/web/browser/brand.browser.spec.ts` |
+| What a fork may and may not do with the name and the logo, and why the CC BY licence on the art does not decide it | [`TRADEMARKS.md`](TRADEMARKS.md) |
 | Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
 | Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
 | What the realistic world is, what is built of it, and how a rider chooses it | [ADR 0026](docs/adr/0026-realistic-game-world.md), [`docs/architecture.md`](docs/architecture.md) §"The realistic world", `apps/web/src/game/world-preference.ts`, `apps/web/src/game/realistic-offered.test.ts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
