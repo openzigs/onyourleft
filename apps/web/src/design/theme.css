@@ -1113,6 +1113,59 @@ h3:first-child {
   }
 }
 
+/*
+ * A SHORT viewport — a phone on its side (#939's review, B2). Above 48rem wide
+ * a landscape phone took the tablet's framed 8rem picture, the display step
+ * and 7rem of card art: at 844×390 the hero was 41 % of the screen and the
+ * first ride control 115 px under the fold, where it had been 161 px above it
+ * before #939. Keyed to HEIGHT, at the 30rem the ride stage's short layout
+ * uses: the picture framed at the band's right at 3rem tall whatever the
+ * width (so it costs no height under the words), the title one step down from
+ * the display size, tighter margins, and 3rem of card art. Declared after
+ * every Home rule it overrides, which is what makes it win.
+ * `home.browser.spec.ts` measures 844×390 and 640×360, and its control
+ * (`home.html?short=off`) deletes this rule.
+ */
+@media (max-height: 30rem) {
+  .oyl-main:has(> .oyl-home-hero) {
+    --oyl-home-ground: 3rem;
+    --oyl-home-ground-width: calc(var(--oyl-home-ground) * 8 / 3);
+  }
+
+  .oyl-main:has(> .oyl-home-hero) > h1 {
+    padding-top: var(--oyl-space-sm);
+    font-size: var(--oyl-font-size-xl);
+  }
+
+  .oyl-main:has(> .oyl-home-hero) > h1,
+  .oyl-main:has(> .oyl-home-hero) > h1 + p {
+    padding-inline-end: calc(var(--oyl-home-ground-width) + 2 * var(--oyl-space-md));
+  }
+
+  .oyl-main:has(> .oyl-home-hero) > h1 + p {
+    padding-bottom: var(--oyl-space-sm);
+  }
+
+  .oyl-home-hero {
+    min-height: calc(var(--oyl-home-ground) + 2 * var(--oyl-space-sm));
+  }
+
+  .oyl-home-hero__ground {
+    inset: var(--oyl-space-sm) var(--oyl-space-md) auto auto;
+    width: var(--oyl-home-ground-width);
+    overflow: hidden;
+    border-radius: var(--oyl-radius);
+  }
+
+  .oyl-main:has(> .oyl-home-hero) > .oyl-home {
+    margin-top: var(--oyl-space-sm);
+  }
+
+  .oyl-ride-card__art {
+    height: 3rem;
+  }
+}
+
 .oyl-ride-card__rider {
   top: var(--oyl-space-sm);
   height: calc(100% - var(--oyl-space-sm) - var(--oyl-space-xs));
@@ -1134,17 +1187,12 @@ h3:first-child {
  * positioned. `home.browser.spec.ts` hit-tests each card's middle.
  */
 /*
- * The card's link is the screen's biggest control: a 48 px floor, the size
- * the ride-time controls get (#669), where every other button keeps 44. It is
- * DECLARED, and `home.browser.spec.ts` measures it #316's three ways — with
- * the floor stripped it falls back to the 44.8 px `.oyl-button`'s tokens make,
- * short of the 48 declared, so the floor is what holds it.
+ * The card's link is an ordinary `.oyl-button`, at its 44 px floor: 48 is for
+ * the ride-time controls alone (#669, the owner's ruling), and Home's cards are
+ * not pressed during a ride. `home.browser.spec.ts` measures it #316's three
+ * ways, the third as `shell.browser.spec.ts` does for every `.oyl-button`:
+ * with the floor stripped the tokens still hold it at 44.
  */
-.oyl-ride-card .oyl-ride-card__link {
-  min-height: 3rem;
-  min-width: 3rem;
-}
-
 .oyl-ride-card__link::after {
   content: '';
   position: absolute;

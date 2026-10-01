@@ -108,13 +108,25 @@ for (const [width, height] of [
  * this is where the band itself, and its control, are measured.
  */
 const FOLD_MARGIN_PIXELS = 50;
-/** SC 2.5.5 (AAA) — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`. */
+/**
+ * SC 2.5.5 (AAA) — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`. The card
+ * links are ordinary `.oyl-button`s and declare exactly this: 48 is the
+ * ride-time controls' alone (#669, `design/ride-time-controls.ts`).
+ */
 const TOUCH_TARGET_PIXELS = 44;
-/** What `theme.css` §`.oyl-ride-card__link` declares: the screen's biggest control. */
-const RIDE_CARD_TARGET_PIXELS = 48;
 
 const FOLD_VIEWPORTS = [
   { name: 'phone 390×844', width: 390, height: 844, insets: undefined, margin: 0 },
+  // #939's review (B2): a phone on its side, a #660 reflow viewport, where
+  // the tablet's framed picture once put the first control 115 px under.
+  { name: 'phone on its side 844×390', width: 844, height: 390, insets: undefined, margin: 0 },
+  {
+    name: 'small phone on its side 640×360',
+    width: 640,
+    height: 360,
+    insets: undefined,
+    margin: 0,
+  },
   {
     name: 'tablet in the shell, landscape 1280×800',
     width: 1280,
@@ -173,18 +185,40 @@ test.describe('#939 — the hero is a band, and the first ride card starts above
   test('the control — the hero at 60 vh puts the first control under a phone’s fold', async ({
     page,
   }) => {
+    const shipped = await open(page, 390, 844);
     const seen = await open(page, 390, 844, { query: '?hero=tall' });
     const first = seen.rideCards[0];
+    const grew = (seen.hero?.height ?? 0) - (shipped.hero?.height ?? 0);
+    const moved = (first?.link.top ?? 0) - (shipped.rideCards[0]?.link.top ?? 0);
     console.log(
-      `#939 control: hero ${(seen.hero?.height ?? 0).toFixed(1)} px, first link top ` +
-        `${(first?.link.top ?? 0).toFixed(1)} against the fold ${seen.fold.toFixed(1)}`,
+      `#939 control: hero ${(seen.hero?.height ?? 0).toFixed(1)} px (+${grew.toFixed(1)}), ` +
+        `first link top ${(first?.link.top ?? 0).toFixed(1)} (+${moved.toFixed(1)}) against ` +
+        `the fold ${seen.fold.toFixed(1)}`,
     );
     expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(0.6 * 844 - SUBPIXEL_TOLERANCE);
     expect(first?.link.top ?? 0).toBeGreaterThan(seen.fold);
+    // Whatever the fonts: the band is what moved the control, by as much as
+    // the band grew (#939's review, N2) — not a margin of a few pixels that a
+    // line of wrapping could close.
+    expect(grew).toBeGreaterThan(100);
+    expect(moved).toBeGreaterThanOrEqual(grew - 2 * SUBPIXEL_TOLERANCE);
+  });
+
+  test('the control — without the short-viewport rule a phone on its side has its first control under the fold', async ({
+    page,
+  }) => {
+    const seen = await open(page, 844, 390, { query: '?short=off' });
+    const margin = seen.fold - (seen.rideCards[0]?.link.top ?? -Infinity);
+    console.log(
+      `#939 short-viewport control at 844×390: hero ${(seen.hero?.height ?? 0).toFixed(1)} px, ` +
+        `first link ${margin.toFixed(1)} px above the fold`,
+    );
+    expect(margin).toBeLessThan(0);
+    expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(390 / 3);
   });
 });
 
-test.describe('#939 — three equal cards, each one link at least 44×44', () => {
+test.describe('#939 — three equal cards, each one `.oyl-button` link at 44×44', () => {
   for (const [width, height] of [
     [390, 844],
     [1280, 800],
@@ -205,13 +239,18 @@ test.describe('#939 — three equal cards, each one link at least 44×44', () =>
         // 1. The shipped box.
         expect(card.link.height, card.linkText).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
         expect(card.link.width, card.linkText).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
-        // 2. The declaration.
-        expect(card.declaredMinHeight, card.linkText).toBe(RIDE_CARD_TARGET_PIXELS);
-        expect(card.declaredMinWidth, card.linkText).toBe(RIDE_CARD_TARGET_PIXELS);
+        // 2. The declaration: `.oyl-button`'s own 44, and not #669's 48.
+        expect(card.declaredMinHeight, card.linkText).toBe(TOUCH_TARGET_PIXELS);
+        expect(card.declaredMinWidth, card.linkText).toBe(TOUCH_TARGET_PIXELS);
         expect(card.link.height, card.linkText).toBeGreaterThanOrEqual(card.declaredMinHeight);
-        // 3. With the floor stripped the box falls short of it: the floor
-        // holds the target, not the arithmetic of the tokens under it.
-        expect(card.stripped.height, card.linkText).toBeLessThan(card.declaredMinHeight);
+        // 3. With the floor stripped, the tokens still hold the target — the
+        // measurement `shell.browser.spec.ts` §#316 makes for every
+        // `.oyl-button` (44.8 px: padding, line box and border). #939 asked
+        // that the stripped box fall SHORT; for an `.oyl-button` it cannot,
+        // and #316/#669 govern. The floor must really be off, or this is
+        // measurement 1 again.
+        expect(card.strippedMinHeight, `${card.linkText}: the floor was not stripped`).toBe('0px');
+        expect(card.stripped.height, card.linkText).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
         // The stretched link: the card's middle is this card's link, and no other.
         expect(card.middleHitsOwnLink, `${card.linkText}: hit ${card.middleHit}`).toBe(true);
       }

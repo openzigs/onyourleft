@@ -110,6 +110,50 @@ describe('the three states — #428', () => {
     expect(home.week.daysRidden).toBe(3);
   });
 
+  // #939's review (N1): the sentence says DAYS, so a day is a calendar day in
+  // the ride's own zone and not a 24-hour slice counted back from `now`.
+  const TUESDAY_NOON = unixSeconds(Date.UTC(2026, 8, 22, 12) / 1000);
+  const HOUR = 3600;
+  const at = (id: string, hoursBeforeNoon: number, timeZone = 'UTC'): StubAnalysisRide =>
+    ride(id, 0, {
+      startedAt: unixSeconds(TUESDAY_NOON - hoursBeforeNoon * HOUR),
+      startedAtTimeZone: timeZone,
+    });
+
+  it('counts Monday 22:00 and Tuesday 08:00 as two days, though they are ten hours apart', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [at('monday', 14), at('tuesday', 4)]),
+      TUESDAY_NOON,
+    );
+    expect(home.week.daysRidden).toBe(2);
+  });
+
+  it('counts two rides on one calendar day as one day, though they straddle 24 hours back', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [at('monday-morning', 25), at('monday-afternoon', 23)]),
+      TUESDAY_NOON,
+    );
+    expect(home.week.daysRidden).toBe(1);
+  });
+
+  it('reads the day in the zone the ride started in', async () => {
+    // 03:00 UTC on Tuesday is 20:00 on Monday in Los Angeles.
+    const home = await loadHome(
+      stubAnalysis(OWNER, [at('evening', 9, 'America/Los_Angeles'), at('later', 8, 'UTC')]),
+      TUESDAY_NOON,
+    );
+    expect(home.week.daysRidden).toBe(2);
+  });
+
+  it('counts today and the six days before it, and not the seventh', async () => {
+    // Wednesday 2026-09-16 is six days back; Tuesday 2026-09-15 is seven.
+    const home = await loadHome(
+      stubAnalysis(OWNER, [at('six-back', 6 * 24 + 11), at('seven-back', 7 * 24 - 11)]),
+      TUESDAY_NOON,
+    );
+    expect(home.week.daysRidden).toBe(1);
+  });
+
   it('rides nothing on a day it has nothing for', async () => {
     const home = await loadHome(stubAnalysis(OWNER, [ride('old', 30)]), NOW);
     expect(home.week.daysRidden).toBe(0);

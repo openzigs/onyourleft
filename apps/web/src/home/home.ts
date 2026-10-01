@@ -33,6 +33,8 @@
 import {
   dailyLoads,
   fitnessSeries,
+  localDay,
+  type CalendarDay,
   type FitnessPoint,
   type LoadEntry,
   type Metres,
@@ -49,7 +51,12 @@ import { thresholdsFor } from '../analysis/thresholds';
 /** How far back "this week" reaches: seven days to the second, not a calendar week. */
 export const WEEK_SECONDS = 7 * 24 * 60 * 60;
 
-const DAY_SECONDS = 24 * 60 * 60;
+/** Whole calendar days from `earlier` to `later`, both `YYYY-MM-DD`. */
+function calendarDaysBetween(earlier: CalendarDay, later: CalendarDay): number {
+  return Math.round(
+    (Date.parse(`${later}T00:00:00Z`) - Date.parse(`${earlier}T00:00:00Z`)) / (24 * 60 * 60 * 1000),
+  );
+}
 
 export interface HomeLastRide {
   readonly name: string;
@@ -70,10 +77,13 @@ export interface HomeWeek {
   /** How many of {@link rides} carried a load — so "load 0" is never a guess. */
   readonly ridesWithLoad: number;
   /**
-   * On how many of the last seven days at least one ride started — #939's
-   * progress ring. A "day" is a 24-hour slice counted back from `now`, the
-   * same window as {@link rides}, so it is never more than seven and needs no
-   * time zone. Arithmetic over the rows already read: no read of its own.
+   * On how many of the last seven CALENDAR days — today and the six before it
+   * — at least one ride started: #939's progress ring. A day is the ride's own
+   * local day, in the zone it started in, the key the fitness series already
+   * uses (`localDay`), and "today" is `now` in that same zone; so two rides at
+   * 22:00 and 08:00 the next morning are two days, which 24-hour slices
+   * counted back from `now` called one. Never more than seven. Arithmetic over
+   * the rows already read: no read of its own.
    */
   readonly daysRidden: number;
 }
@@ -109,7 +119,7 @@ export async function loadHome(
 
   const entries: LoadEntry[] = [];
   let week: Omit<HomeWeek, 'daysRidden'> = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
-  const days = new Set<number>();
+  const days = new Set<CalendarDay>();
   let lastRide: HomeLastRide | undefined;
   for (const summary of considered) {
     const load = loadFromSummary(summary, thresholds)?.load;
@@ -123,7 +133,13 @@ export async function loadHome(
         load: week.load + (load ?? 0),
         ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
       };
-      days.add(Math.min(6, Math.floor((now - summary.startedAt) / DAY_SECONDS)));
+    }
+    if (summary.startedAt <= now) {
+      const day = localDay(summary.startedAt, summary.startedAtTimeZone);
+      const back = calendarDaysBetween(day, localDay(now, summary.startedAtTimeZone));
+      if (back >= 0 && back <= 6) {
+        days.add(day);
+      }
     }
     // Ascending, so the last one seen is the newest.
     lastRide = {

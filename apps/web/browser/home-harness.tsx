@@ -94,6 +94,11 @@ export interface RideCardMeasurement {
   readonly declaredMinWidth: number;
   /** The link's box with `min-height` and `min-width` set to 0. */
   readonly stripped: Box;
+  /**
+   * The computed `min-height` while it was stripped — `0px`, or the strip did
+   * not take and `stripped` is the floored box again.
+   */
+  readonly strippedMinHeight: string;
   /** Whether `elementFromPoint` at the card's middle is this card's link. */
   readonly middleHitsOwnLink: boolean;
   /** The text of whatever link the middle hit, for a failure message. */
@@ -163,6 +168,7 @@ function measureCard(card: Element): RideCardMeasurement {
   link.style.minHeight = '0';
   link.style.minWidth = '0';
   const stripped = boxOf(link);
+  const strippedMinHeight = getComputedStyle(link).minHeight;
   link.style.minHeight = '';
   link.style.minWidth = '';
   const box = boxOf(card);
@@ -180,6 +186,7 @@ function measureCard(card: Element): RideCardMeasurement {
     declaredMinHeight: Number.parseFloat(style.minHeight),
     declaredMinWidth: Number.parseFloat(style.minWidth),
     stripped,
+    strippedMinHeight,
     middleHitsOwnLink: hitLink === link,
     middleHit: (hitLink?.textContent ?? hit?.tagName ?? 'nothing').trim(),
   };
@@ -212,6 +219,31 @@ function constrain(): void {
   main.classList.replace('oyl-main--dashboard', 'oyl-main--prose');
 }
 
+/** `?short=off`: delete Home's short-viewport rule, and fail if there is none. */
+function deleteShortViewportRule(): void {
+  let deleted = 0;
+  for (const sheet of document.styleSheets) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (
+        rule instanceof CSSMediaRule &&
+        // The build writes `(max-height: 30rem)` in range syntax.
+        ['(max-height: 30rem)', '(height <= 30rem)'].includes(rule.conditionText) &&
+        rule.cssText.includes('.oyl-home-hero')
+      ) {
+        sheet.deleteRule(index);
+        deleted += 1;
+      }
+    }
+  }
+  if (deleted !== 1) {
+    throw new Error(
+      `home harness: expected one short-viewport Home rule, deleted ${String(deleted)}`,
+    );
+  }
+}
+
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
   const deadline = performance.now() + PATIENCE_MS;
   for (;;) {
@@ -241,6 +273,9 @@ async function run(): Promise<void> {
     const tall = document.createElement('style');
     tall.textContent = '.oyl-home-hero { min-height: 60vh; }';
     document.head.append(tall);
+  }
+  if (new URLSearchParams(window.location.search).get('short') === 'off') {
+    deleteShortViewportRule();
   }
   const now = Math.floor(Date.now() / 1000);
   const rides = Array.from({ length: 60 }, (_unused, index) => ({
