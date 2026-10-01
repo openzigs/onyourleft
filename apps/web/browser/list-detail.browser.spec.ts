@@ -121,8 +121,10 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   name and *Save workout* ahead of the block form (below it, the button was
  *   72 px under the landscape fold). On a phone, after the one-pane list —
  *   headed since #670's review by *Build a workout*, which moves focus to the
- *   builder — it ends about 4 px above the fold in this Chromium on a Mac, and
- *   the CI runner's fonts put this page's text about 50 px lower.
+ *   builder — it is above the fold, by too little to hold: re-taken for
+ *   #982, whose 48 px card drawings moved it down 32 px, it ends 45.9 px above
+ *   the fold in this Chromium on a Mac (77.9 before) and CI_PHONE_AFTER px on
+ *   the CI runner (53.1 before, run 36881810211).
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
