@@ -295,6 +295,22 @@ apps/                 AGPL-3.0-or-later, without exception
                         focus handed back — and never on a ride-time screen;
                         no `@radix-ui/` module may be in the entry chunk
                         (`tools/bundle/entry-graph.ts` §`LAZY_ONLY_PACKAGES`)
+    src/design/illustration/
+                        the menus' illustration kit (#938): `Sky`, `Hills`,
+                        `RoadRibbon`, `RiderSilhouette` (`game/bicycle.ts`'s own
+                        parts and leg solve, side on), `SensorGlyph`,
+                        `ProfileShape` and `WorkoutShape`, each an
+                        `<svg aria-hidden="true" focusable="false">` with no
+                        text, painted only by `paint.ts`' classes (one table
+                        with `theme.css` §`.oyl-illo__*`). ⚠️ `index.ts`
+                        exports PARTS ONLY: `illustration.test.tsx` renders
+                        every export and fails a colour literal, a `<title>`
+                        or an unpainted shape, and the harness draws every
+                        export for `shell.browser.spec.ts` §"#938" to read in
+                        both palettes. The two data parts are bounded at
+                        100 000 inputs, draw nothing for nothing, and keep a
+                        gap; `WorkoutShape` renders no digit. No production
+                        caller until #939–#943
     src/camera/side-report*.ts
                         the side camera's post-ride report (#388) — the pose
                         numbers of one session reduced to SENTENCES, first third
