@@ -187,26 +187,37 @@ const ATHLETE = {
   registrationState: 'active',
 } as const;
 
-describe('a write while another connection holds the lock past the busy timeout (#985)', () => {
-  it('lands once the lock is let go, rather than failing with "database is locked"', async () => {
-    const path = await migrated();
-    // A 50 ms busy timeout against a 200 ms hold: the first attempt cannot
-    // get the lock, so only the retry lands the write. The pauses add up to
-    // 3.7 s, so a loaded runner that is slow to wake the holder still lands.
-    const store = await openSqlStore(path, {
-      busyTimeoutMilliseconds: 50,
-      busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
-    });
-    const holder = holdTheLock(path, 200);
-    await holder.held;
-    await store.putAthlete(ATHLETE);
-    await holder.released;
-    expect((await store.getAthlete('rider'))?.displayName).toBe('Rider');
-    expect((await store.getAthlete('holder'))?.displayName).toBe('Holder');
-    await store.close();
-  });
+/**
+ * Each case below took 0.7–2.0 s with ten busy loops on a two-CPU container
+ * (Node 24.21, 2026-10-01) and about 0.1 s idle; there is no CI figure yet, so
+ * the timeout is ten times the loaded one rather than three times a CI one.
+ */
+const LOADED = { timeout: 20_000 };
 
-  it('a transaction lands too: its BEGIN IMMEDIATE is what is run again', async () => {
+describe('a write while another connection holds the lock past the busy timeout (#985)', () => {
+  it(
+    'lands once the lock is let go, rather than failing with "database is locked"',
+    LOADED,
+    async () => {
+      const path = await migrated();
+      // A 50 ms busy timeout against a 200 ms hold: the first attempt cannot
+      // get the lock, so only the retry lands the write. The pauses add up to
+      // 3.7 s, so a loaded runner that is slow to wake the holder still lands.
+      const store = await openSqlStore(path, {
+        busyTimeoutMilliseconds: 50,
+        busyRetryDelaysMilliseconds: [200, 500, 1_000, 2_000],
+      });
+      const holder = holdTheLock(path, 200);
+      await holder.held;
+      await store.putAthlete(ATHLETE);
+      await holder.released;
+      expect((await store.getAthlete('rider'))?.displayName).toBe('Rider');
+      expect((await store.getAthlete('holder'))?.displayName).toBe('Holder');
+      await store.close();
+    },
+  );
+
+  it('a transaction lands too: its BEGIN IMMEDIATE is what is run again', LOADED, async () => {
     const path = await migrated();
     const store = await openSqlStore(path, {
       busyTimeoutMilliseconds: 50,
@@ -227,18 +238,22 @@ describe('a write while another connection holds the lock past the busy timeout 
     await store.close();
   });
 
-  it('fails, bounded, when the lock is never let go — and nothing was written', async () => {
-    const path = await migrated();
-    const store = await openSqlStore(path, {
-      busyTimeoutMilliseconds: 20,
-      busyRetryDelaysMilliseconds: [10, 10],
-    });
-    const holder = holdTheLock(path, 30_000);
-    await holder.held;
-    await expect(store.putAthlete(ATHLETE)).rejects.toThrow(/database is locked/);
-    holder.letGo();
-    await holder.released;
-    expect(await store.getAthlete('rider')).toBeUndefined();
-    await store.close();
-  });
+  it(
+    'fails, bounded, when the lock is never let go — and nothing was written',
+    LOADED,
+    async () => {
+      const path = await migrated();
+      const store = await openSqlStore(path, {
+        busyTimeoutMilliseconds: 20,
+        busyRetryDelaysMilliseconds: [10, 10],
+      });
+      const holder = holdTheLock(path, 30_000);
+      await holder.held;
+      await expect(store.putAthlete(ATHLETE)).rejects.toThrow(/database is locked/);
+      holder.letGo();
+      await holder.released;
+      expect(await store.getAthlete('rider')).toBeUndefined();
+      await store.close();
+    },
+  );
 });
