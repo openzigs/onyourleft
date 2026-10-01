@@ -19,8 +19,9 @@
  * passing somebody. The realistic rider's jersey wears it (#623,
  * `tools/realistic/process-assets.ts` hands {@link drawMark}'s pixels to
  * `process_rider.py`), and whether the kit moves to the owner's new mark is the
- * owner's call (#965), so the drawing stays exactly as it was: the kit's bytes,
- * which `realistic:process --check` reproduces, depend on it.
+ * owner's call (#968), so the drawing stays exactly as it was: the kit's bytes,
+ * which `realistic:process --check` reproduces, depend on it, and
+ * `generate-icons.test.ts` pins its pixels to `main`'s before #965.
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';

@@ -70,12 +70,25 @@ from PIL import Image
 from scipy import ndimage
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[3]
+ROOT = HERE.parents[3].resolve()
 TABLE = json.loads((HERE / "brand.json").read_text(encoding="utf-8"))
 
 
 def refuse(message: str) -> None:
     raise SystemExit(f"derive_brand: {message}")
+
+
+def inside_root(path: str) -> Path:
+    """A brand.json path as a file in this repository, or a refusal.
+
+    Every path the table names is read or written relative to the repository
+    root, so a `..` or an absolute path in a committed table would reach a file
+    outside it. Resolved before it is compared, so a symlink out is refused too.
+    """
+    target = (ROOT / path).resolve()
+    if not target.is_relative_to(ROOT):
+        refuse(f"{path} is not inside the repository")
+    return target
 
 
 def check_tools() -> None:
@@ -99,7 +112,7 @@ def sha256(data: bytes) -> str:
 def read_source(path: str) -> bytes:
     for source in TABLE["sources"]:
         if source["path"] == path:
-            data = (ROOT / path).read_bytes()
+            data = inside_root(path).read_bytes()
             if sha256(data) != source["sha256"]:
                 refuse(f"{path} is not the source brand.json records")
             return data
@@ -378,7 +391,7 @@ def records() -> str:
     for output in TABLE["outputs"]:
         family = TABLE["families"][output["family"]]
         source = next(s for s in TABLE["sources"] if s["path"] == family["source"])
-        digest = sha256((ROOT / output["path"]).read_bytes())
+        digest = sha256(inside_root(output["path"]).read_bytes())
         entries.append(
             "[[asset]]\n"
             f'path = "{output["path"]}"\n'
@@ -407,7 +420,7 @@ def main() -> None:
     check_tools()
     made = derive()
     if arguments.check:
-        differ = [path for path, data in made.items() if not (ROOT / path).exists() or (ROOT / path).read_bytes() != data]
+        differ = [path for path, data in made.items() if not inside_root(path).exists() or inside_root(path).read_bytes() != data]
         for path in differ:
             print(f"derive_brand: {path} is not what this script makes", file=sys.stderr)
         if differ:
@@ -415,7 +428,7 @@ def main() -> None:
         print(f"derive_brand: all {len(made)} outputs reproduced byte for byte")
         return
     for path, data in made.items():
-        target = ROOT / path
+        target = inside_root(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         print(f"{sha256(data)}  {path}")

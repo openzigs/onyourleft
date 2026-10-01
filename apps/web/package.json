@@ -7,7 +7,6 @@
   "description": "Browser client — the Phase 1 product.",
   "scripts": {
     "dev": "vite",
-    "brand:derive": "python3 tools/brand/derive_brand.py",
     "glyphs:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/glyphs/generate-glyphs.ts",
     "realistic:fetch": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/fetch-assets.ts",
     "realistic:process": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/process-assets.ts",

@@ -11,11 +11,40 @@
  * colour map depends on (`realistic:process --check`).
  */
 
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
+import { RIDER_MARK_PIXELS } from '../realistic/sources';
 import { decodePng, drawMark, encodePng } from './generate-icons';
 
+/**
+ * The mark's raw pixels, as SHA-256, taken from `main`'s drawing before #965
+ * (`git show origin/main:apps/web/tools/icons/generate-icons.ts`).
+ *
+ * ⚠️ **This is the only thing in CI that pins the drawing.** The realistic
+ * kit's committed colour map is made from `drawMark(RIDER_MARK_PIXELS)`, and
+ * the one check that would notice a change there, `realistic:process --check`,
+ * needs Blender and never runs in CI. Until #965 the icon comparison caught a
+ * changed stroke; since the icons are the owner's art, this does (#969's
+ * review: `STROKE_HALF_WIDTH` 0.055 → 0.07 was green everywhere else). A
+ * deliberate change to the mark is a change to the kit: re-run
+ * `realistic:process` and re-take these in the same commit.
+ */
+const MARK_DIGESTS: Readonly<Record<number, string>> = {
+  [RIDER_MARK_PIXELS]: '99f444825016aeadde84052bc11a3d5a0c74514ce628b484cf27cf01665f86b5',
+  16: '76bde774aeea8aed63af1cfecae296254c43a27e5f4a1407e016ad31d92c4e78',
+};
+
 describe('the kit’s two-chevron mark', () => {
+  it.each(Object.entries(MARK_DIGESTS))(
+    'draws exactly the pixels it drew before #965 at %s px',
+    (size, digest) => {
+      const pixels = drawMark(Number(size));
+      expect(createHash('sha256').update(pixels).digest('hex')).toBe(digest);
+    },
+  );
+
   it('round-trips through this module’s own encoder and decoder', () => {
     const pixels = drawMark(64);
     expect([...decodePng(encodePng(64, pixels)).pixels]).toEqual([...pixels]);

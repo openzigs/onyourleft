@@ -344,7 +344,7 @@ describe('the full logo, off its green screen — #965', () => {
     expect(edges[Math.floor(edges.length / 2)]).toBeLessThan(235);
   });
 
-  it('carries no tagline in anything the app ships', () => {
+  it('no shipped text carries the tagline', () => {
     // Assembled, so this file does not match itself.
     const tagline = ['agentic', 'cycling', 'trainer'].join(' ');
     const roots = ['apps/web/src', 'apps/web/public', 'apps/web/index.html', 'ASSETS.toml'];
