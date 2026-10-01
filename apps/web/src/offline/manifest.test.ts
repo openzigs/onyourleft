@@ -87,8 +87,22 @@ describe('the web app manifest', () => {
     }
   });
 
-  it('commits no icon the manifest does not name, so a stale file cannot linger', () => {
-    const named = new Set(manifest.icons.map((icon) => icon.src.replace(/^\.\//, '')));
+  it('names a favicon index.html links and public/ holds — #965', () => {
+    const href = /<link rel="icon" type="image\/png" sizes="48x48" href="\/([^"]+)" \/>/.exec(
+      indexHtml,
+    )?.[1];
+    expect(href).toBe('favicon.png');
+    expect(readdirSync(fileURLToPath(PUBLIC_DIRECTORY))).toContain(href);
+  });
+
+  it('commits no icon the manifest or the page does not name, so a stale file cannot linger', () => {
+    // Since #965 the page's favicon is the one PNG in `public/` the manifest
+    // does not name; every other one is a manifest icon.
+    const favicon = /<link rel="icon"[^>]* href="\/([^"]+)"/.exec(indexHtml)?.[1];
+    const named = new Set([
+      ...manifest.icons.map((icon) => icon.src.replace(/^\.\//, '')),
+      ...(favicon === undefined ? [] : [favicon]),
+    ]);
     const pngs = readdirSync(fileURLToPath(PUBLIC_DIRECTORY)).filter((file) =>
       file.endsWith('.png'),
     );

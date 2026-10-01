@@ -172,111 +172,6 @@ read = "2026-09-16"
 sha256 = "5cf98b4451bd99b20df26f9e608a46946118be6b0ae90762f9ca1786a30c76ff"
 
 [[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "32baa10d2632a4417454a579f992bd640e0a3cec79321423559b2c9940de58a9"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "bfcc1b0fa931b14bb241372c76ab4f04374b67d02363c98d9cb12edfdacdf5f3"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "72b71c3581ca3b5a23b1c168d69b9d855b3f184fa079902a01f088eb4f0607d5"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "58e78a618778926b1f6d9472a6468de878de8530970934e94aab5ba4ba08cc00"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "0166fc333074c373fbd0ce6b5defd71552166165ac778121ca9c9dff6b83f0fc"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "27ed3603010ebc278f64f8645741ab132ff517abb5308eb9df6c8e42a48956b2"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "6f88083b8166cc559102f7044688de7525287632ebe09ac45d001ac8bf4b3eae"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "40911a00922868686854a4804b93fd6e56b503664696de03f450bff690affb6d"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "d35dbfff175b83c13ef59cf924abfc810f7b6a158595d7417c5498ea8c7c7ed1"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "4a82bc1e9923576275869998925ce0ae021a79aa18b24a0dd87ad6b61ca85053"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "1ee4cd9ff371dcb2e3938097e434f6fb8731688ed7165e61fc63693ad5b2f455"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "ed346eb1e3f0280f15709393705899b3ff55c20b88f4e0308006b3c33cf5fe14"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "bd24fd383253bf8d43f0a81f11c071d76d1d555114376dd647cd9fb38fa0a9da"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "ab93096331e7cd8ec379f73f1e9adcaaa9ee1115c9f4ff10411a811fb9700174"
-
-[[asset]]
-path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
-source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
-licence = "MIT"
-read = "2026-09-16"
-sha256 = "87cb2f2ffe992652bb4fa768c73719a37b5852ab17fbf8e170e888f7a42b0761"
-
-[[asset]]
 path = "apps/mobile/android/gradle/wrapper/gradle-wrapper.jar"
 source = "Gradle 8.14.3 wrapper, supplied with the same `npx cap add android` template — https://services.gradle.org/distributions/gradle-8.14.3-all.zip"
 licence = "Apache-2.0"
@@ -402,27 +297,6 @@ sha256 = "a5051944fbfae7900cef8314c4a5d977b6b29bcd4e4ae5dea9d80980e65a411a"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
 modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
-
-[[asset]]
-path = "apps/web/public/icon-192.png"
-source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the 192x192 Chrome requires. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
-licence = "CC0-1.0"
-read = "2026-09-20"
-sha256 = "07291e61d4b35bfed32f250425b60c65baf89032d4af708ca16708ce39d3d5f1"
-
-[[asset]]
-path = "apps/web/public/icon-512.png"
-source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the 512x512 Chrome requires. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
-licence = "CC0-1.0"
-read = "2026-09-20"
-sha256 = "df69993b815580a71e3b198987fce7cded27baf09564a3798166b1c35d212ec6"
-
-[[asset]]
-path = "apps/web/public/icon-maskable-512.png"
-source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the maskable variant, the same drawing scaled to 80% about the centre so a launcher may crop it to any shape. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
-licence = "CC0-1.0"
-read = "2026-09-20"
-sha256 = "dbcfb32cf6ef664874625ae5b42d563e9d74eed601933e37f37223fa7b2debb8"
 
 [[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
@@ -1143,6 +1017,7 @@ tool = "Node.js 24 (.nvmrc), then KTX-Software v4.4.2"
 #
 # `creator` and `url` are recorded as a courtesy, which puts the model on the
 # in-app credits screen; Apache-2.0 asks for no such line.
+
 [[asset]]
 path = "apps/web/public/pose/pose_landmarker_lite.task"
 source = "Google MediaPipe, Pose Landmarker lite (BlazePose GHUM 3D), float16, version 1; upstream bytes, unmodified — https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
@@ -1159,6 +1034,7 @@ modified = "no"
 # CC0 ("Creative Commons Zero, Public Domain Dedication"), read 2026-09-25. A
 # photograph of a stranger riding past a wall in Cambridge, side-on, which is
 # what the model has to find a rider in.
+
 [[asset]]
 path = "apps/web/browser/side-rider.jpg"
 source = "Wikimedia Commons, File:Man_riding_bicycle_(Unsplash).jpg by Clem Onojeghuo (2016), Commons' 500px rendition, upstream bytes, unmodified — https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Man_riding_bicycle_%28Unsplash%29.jpg/500px-Man_riding_bicycle_%28Unsplash%29.jpg"
@@ -1180,6 +1056,7 @@ sha256 = "897a3100514f097acfa26045b4ef15b916135f973ab404666bd4f3360aa876df"
 # range files below are what the app serves. It carries no `creator`, so it is
 # not on the credits screen, which lists what ships; the ranges carry one, and
 # the copyright notice the font's name table records is in it.
+
 [[asset]]
 path = "apps/web/tools/glyphs/Roboto-Regular.ttf"
 source = "Roboto v2.138, Roboto-Regular.ttf from the unhinted release archive (SHA-256 70f64c718510a601fbcf752aafe644314dacaeb85474dc689c89787c4a72a728); upstream bytes, unmodified — https://github.com/googlefonts/roboto-2/releases/download/v2.138/roboto-unhinted.zip"
@@ -1193,6 +1070,7 @@ sha256 = "f3edb8058e523f5612bfd99d0745e661568ad85e1b6217bc62f786fabae624c6"
 # repository's own arithmetic on the Node .nvmrc pins, and
 # `tools/glyphs/generate-glyphs.test.ts` regenerates every range inside the
 # ordinary suite and compares it byte for byte.
+
 [[asset]]
 path = "apps/web/public/glyphs/Roboto-Regular/0-255.pbf"
 source = "Roboto v2.138 Regular, rasterised by this repository's glyph generator (#578) from apps/web/tools/glyphs/Roboto-Regular.ttf"
@@ -1276,3 +1154,354 @@ input = "https://github.com/googlefonts/roboto-2/releases/tag/v2.138"
 inputsha256 = "f3edb8058e523f5612bfd99d0745e661568ad85e1b6217bc62f786fabae624c6"
 script = "apps/web/tools/glyphs/generate-glyphs.ts"
 tool = "Node.js 24 (.nvmrc), no other tool"
+
+# --- The owner's brand art (#965) -------------------------------------------
+#
+# CC-BY-4.0, credited on the Credits screen (ADR 0023). The two source sheets are
+# committed as the owner supplied them; every other file here is made from one of
+# them by apps/web/tools/brand/derive_brand.py, which `--check` re-runs byte for
+# byte, and apps/web/tools/brand/provenance.test.ts holds these rows to
+# apps/web/tools/brand/brand.json. The name and the logo are also trademarks:
+# TRADEMARKS.md, because CC BY 4.0 §2(b)(2) licenses no trademark.
+
+[[asset]]
+path = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+source = "The owner's brand art (#965), the owner's third sheet: the full logo (shield, rider and arrow, the wordmark and the tagline), the icon mark on blue, and the wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "no"
+
+[[asset]]
+path = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
+source = "The owner's brand art (#965), the owner's second sheet, the source of the in-game wordmark; generated with Google Gemini, whose terms claim no ownership of what it generates"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "no"
+
+[[asset]]
+path = "apps/web/public/icon-192.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "9100b1de559761c9efa4a8083b72c202f925fb90059b60c9b98602637188216d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/public/icon-512.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "cccb1601708e7cde742267fa3f6f39b4db37f1c8740e07db20cbab48992e1a3d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/public/icon-maskable-512.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "32c680705ad75732f2011db079c664d2ae55f81d95f5931d4f8fa59a326ac227"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/public/favicon.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "fb6081a309e6d1beaa4953b0907e2b4fc02d8b2df6ed8302d55e1167c5da428c"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/src/brand/wordmark-light.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v2.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "1ede34f74d8cbdf6a1838332931e9297449472cbdb1dc926740427477d88b24c"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the checkerboard painted into its pixels, its letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9) and its arrow kept, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
+inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/src/brand/wordmark-dark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v2.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "1c5d4f2a82f9ee242115dd2eb2d5363fcb73b453e9efc49b97ccda87413ae15f"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the checkerboard painted into its pixels, its letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9) and its arrow kept, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
+inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/src/brand/logo-light.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "576a72fe3868f769a766a08eb349d49d6b2f4e23cc6005c1df7cb4c709678ecc"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the full logo cut out of the sheet: the emblem by the isnet-general-use background-removal model, with the inside of its shield filled back as one flat white, and the wordmark and the tagline by colour, their letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9), then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/web/src/brand/logo-dark.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "95d3e313a0fff94e9f3e368a60a198afa2bf23b8c3dc218ac0cf96b3ac628870"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the full logo cut out of the sheet: the emblem by the isnet-general-use background-removal model, with the inside of its shield filled back as one flat white, and the wordmark and the tagline by colour, their letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9), then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "fb6081a309e6d1beaa4953b0907e2b4fc02d8b2df6ed8302d55e1167c5da428c"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "768409842a7b3632a4fc80c176d3773349299d617407c68a36e8bd4068f53f1d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "4ca4ec9bb55a24d1ab6014debe92e09b045c1996bf75235776ba544017cf5d0a"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "9907b1d1a371f6bd7c170072e21d0661608ee56fabab5885a13485fb2b89d5d5"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "9100b1de559761c9efa4a8083b72c202f925fb90059b60c9b98602637188216d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "44ea2b4393427b13d6950f0e5e2225a1a95f8ebfd42fc7e0422bcfaee9afbcf6"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "908106c424185cc787570e5884e48e5d465bc4c4578f33bdf5bed49bf43d0b86"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "1f40705f03cb685dd77179abecf0f6fc79d8fec61ec2f28e2017e88a68b59d35"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "8573f615526f64d6e1c4f0bb1fa38aec83b6ef511dca05341eade242a47357c8"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "19b32ef268f8f745fe31b17f8c04661bbada849b33b53b0b5a693720819e198d"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "695643e2fa0ac47809bfc357396096f14169ac317b813135757bbd7210f651c7"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "df1de1b025928acb57f5ea831fa385cd2cc6b395620aec6970a686607dc676a8"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "777393d68e8c1de8685f0dc27ae1779211500a81f6ef956bbbf332aab9c70f95"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "f232b60b76ca167502e3c74b412a951df6ad8d5dd49a7eb6c449b37003b24567"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"
+source = "The owner's brand art (#965), generated with Google Gemini; made from apps/web/tools/brand/sources/gemini-assets-v3.jpeg by apps/web/tools/brand/derive_brand.py"
+licence = "CC-BY-4.0"
+read = "2026-10-01"
+sha256 = "3e1f4e628f2fddfd6de64dc7d4515c4dafd34f59e7c54b5a2c7835f8fbbb0d80"
+creator = "Matthew Cronin"
+url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
+modified = "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
+inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
+script = "apps/web/tools/brand/derive_brand.py"
+tool = "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"

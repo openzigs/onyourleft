@@ -484,6 +484,54 @@ h3:first-child {
 }
 
 /*
+ * The owner's wordmark and logo — #965 (`brand/Brand.tsx`).
+ *
+ * Each picture comes in a light-palette and a dark-palette variant, and the
+ * page shows the one for the palette in force by the same `data-theme` switch
+ * every colour token follows (#672). `display: none` takes the other out of
+ * the accessibility tree as well as off the screen, which is safe because both
+ * are `alt=""`: the name is a visually hidden span beside them.
+ *
+ * ⚠️ The wordmark is INLINE, in the paragraph's own line box, and 1.5 rem tall —
+ * shorter than the line `.oyl-wordmark`'s type sets, so the paragraph is the
+ * height it was as text and the header's measured height did not move
+ * (`shell.browser.spec.ts` §"#671", whose control lays the old rules over it).
+ */
+.oyl-wordmark__image {
+  display: inline-block;
+  height: 1.5rem;
+  width: auto;
+  vertical-align: middle;
+}
+
+.oyl-brand-logo {
+  margin: 0 0 var(--oyl-space-md);
+}
+
+.oyl-brand-logo__image {
+  display: block;
+  width: 100%;
+  max-width: 16rem;
+  height: auto;
+}
+
+.oyl-brand--dark {
+  display: none;
+}
+
+:root[data-theme='dark'] .oyl-brand--light {
+  display: none;
+}
+
+:root[data-theme='dark'] .oyl-wordmark__image.oyl-brand--dark {
+  display: inline-block;
+}
+
+:root[data-theme='dark'] .oyl-brand-logo__image.oyl-brand--dark {
+  display: block;
+}
+
+/*
  * The top safe-area inset, painted in the header's surface — #671.
  *
  * `body` is padded by the inset, so the header starts BELOW the status bar and

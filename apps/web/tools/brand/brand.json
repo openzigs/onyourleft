@@ -1,0 +1,171 @@
+{
+  "about": "The owner's brand art and everything derive_brand.py makes from it (#965). Read by derive_brand.py, which makes the outputs, and by provenance.test.ts, which holds ASSETS.toml to this table.",
+  "creator": "Matthew Cronin",
+  "url": "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand",
+  "read": "2026-10-01",
+  "tool": "Python 3.14 with rembg 2.0.85 (isnet-general-use on onnxruntime 1.30.0, one thread), Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1",
+  "packages": {
+    "rembg": "2.0.85",
+    "onnxruntime": "1.30.0",
+    "pillow": "12.3.0",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  },
+  "python": "3.14",
+  "model": {
+    "name": "isnet-general-use",
+    "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+    "sha256": "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a"
+  },
+  "sources": [
+    {
+      "path": "apps/web/tools/brand/sources/gemini-assets-v3.jpeg",
+      "sha256": "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03",
+      "what": "the owner's third sheet: the full logo (shield, rider and arrow, the wordmark and the tagline), the icon mark on blue, and the wordmark"
+    },
+    {
+      "path": "apps/web/tools/brand/sources/gemini-assets-v2.jpeg",
+      "sha256": "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6",
+      "what": "the owner's second sheet, the source of the in-game wordmark"
+    }
+  ],
+  "families": {
+    "icon": {
+      "source": "apps/web/tools/brand/sources/gemini-assets-v3.jpeg",
+      "modified": "the icon mark (the shield with the rider and the arrow) cut out of the sheet's blue panel, its baked rounded corners and light background replaced by the panel's own flat blue so that a launcher's mask is the only rounding, and set on that flat blue at a size, or on a transparent layer inside a safe zone, then resized"
+    },
+    "wordmark": {
+      "source": "apps/web/tools/brand/sources/gemini-assets-v2.jpeg",
+      "modified": "the ON YOUR LEFT wordmark cut out of the sheet by colour from the checkerboard painted into its pixels, its letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9) and its arrow kept, then resized"
+    },
+    "logo": {
+      "source": "apps/web/tools/brand/sources/gemini-assets-v3.jpeg",
+      "modified": "the full logo cut out of the sheet: the emblem by the isnet-general-use background-removal model, with the inside of its shield filled back as one flat white, and the wordmark and the tagline by colour, their letters set in one flat navy (or, for the dark palette, in the app's dark ink #e4ebe9), then resized"
+    }
+  },
+  "outputs": [
+    { "path": "apps/web/public/icon-192.png", "family": "icon", "kind": "square", "size": 192 },
+    { "path": "apps/web/public/icon-512.png", "family": "icon", "kind": "square", "size": 512 },
+    {
+      "path": "apps/web/public/icon-maskable-512.png",
+      "family": "icon",
+      "kind": "maskable",
+      "size": 512
+    },
+    { "path": "apps/web/public/favicon.png", "family": "icon", "kind": "square", "size": 48 },
+    {
+      "path": "apps/web/src/brand/wordmark-light.png",
+      "family": "wordmark",
+      "kind": "wordmark-light",
+      "size": 64
+    },
+    {
+      "path": "apps/web/src/brand/wordmark-dark.png",
+      "family": "wordmark",
+      "kind": "wordmark-dark",
+      "size": 64
+    },
+    {
+      "path": "apps/web/src/brand/logo-light.png",
+      "family": "logo",
+      "kind": "logo-light",
+      "size": 512
+    },
+    {
+      "path": "apps/web/src/brand/logo-dark.png",
+      "family": "logo",
+      "kind": "logo-dark",
+      "size": 512
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "family": "icon",
+      "kind": "square",
+      "size": 48
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "family": "icon",
+      "kind": "square",
+      "size": 72
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "family": "icon",
+      "kind": "square",
+      "size": 96
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "family": "icon",
+      "kind": "square",
+      "size": 144
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "family": "icon",
+      "kind": "square",
+      "size": 192
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "family": "icon",
+      "kind": "round",
+      "size": 48
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "family": "icon",
+      "kind": "round",
+      "size": 72
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "family": "icon",
+      "kind": "round",
+      "size": 96
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "family": "icon",
+      "kind": "round",
+      "size": 144
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "family": "icon",
+      "kind": "round",
+      "size": 192
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+      "family": "icon",
+      "kind": "foreground",
+      "size": 108
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+      "family": "icon",
+      "kind": "foreground",
+      "size": 162
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+      "family": "icon",
+      "kind": "foreground",
+      "size": 216
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "family": "icon",
+      "kind": "foreground",
+      "size": 324
+    },
+    {
+      "path": "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "family": "icon",
+      "kind": "foreground",
+      "size": 432
+    }
+  ]
+}

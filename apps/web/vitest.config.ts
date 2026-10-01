@@ -33,10 +33,10 @@ export default defineConfig({
     // into a client's denominator is the thing #110 decided against for
     // `packages/fit/tools`.
     //
-    // ⚠️ And `tools/` since #405, which is the same kind of file again: the
-    // web app manifest's icons are committed binaries drawn by
-    // `tools/icons/generate-icons.ts`, and the test beside it is what says the
-    // committed bytes are still that drawing.
+    // ⚠️ And `tools/` since #405, which is the same kind of file again:
+    // committed binaries made by a generator beside them, and the test that
+    // says the committed bytes are still what it makes — since #965,
+    // `tools/brand/provenance.test.ts` for the owner's art and icons.
     include: ['src/**/*.test.{ts,tsx}', 'browser/**/*.test.{ts,tsx}', 'tools/**/*.test.{ts,tsx}'],
   },
 });

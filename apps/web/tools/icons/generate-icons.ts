@@ -1,53 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web app manifest's icons, drawn from arithmetic (#405).
+ * The house kit's two-chevron mark, drawn from arithmetic (#405, #623).
  *
- * ## Why a generator rather than an artwork file somebody drew
+ * ⚠️ **This file used to draw the web app manifest's icons, and since #965 it
+ * does not.** A reviewer who remembers `icons:generate` writing
+ * `public/icon-*.png` is reading the old file. The owner supplied the
+ * project's own logo and icon (CC-BY-4.0, `ASSETS.toml`), and every app icon is
+ * now cut from those sheets by `tools/brand/derive_brand.py`. The two
+ * constraints this file was written against both changed: ADR 0024 D-5
+ * dedicated the drawn icons `CC0-1.0` because `ASSET004` admitted nothing else
+ * for a picture this repository made, and ADR 0023 has since admitted
+ * `CC-BY-4.0` under `apps/`; and ADR 0009's worry — an appearance derived from
+ * another product — does not arise for art the owner made for this one. ADR
+ * 0024 carries a dated amendment saying so.
  *
- * Three constraints meet here and only one shape satisfies all of them.
- *
- * 1. **`ASSET004` fails closed and `AGPL-3.0-or-later` is on none of its three
- *    lists.** A PNG this repository authors, committed under `apps/`, is a red
- *    build unless it is declared as something the gate admits — so
- *    [ADR 0024](../../../../docs/adr/0024-offline-and-caching-posture.md) D-5
- *    dedicates these to `CC0-1.0`, which is already admitted under `apps/` and
- *    is a dedication this project is entitled to make of its own work.
- * 2. **ADR 0009 forbids deriving an appearance from another product**, so
- *    nothing here may be traced, downloaded or recalled from a competitor's
- *    launcher. A mark defined by four numbers cannot accidentally be.
- * 3. **The bytes have to be committed rather than generated at build time.**
- *    #405 records why: a file generated into the tree under `apps/` would need
- *    an `.spdx-exempt` entry, and §3a permits exactly one reason for one —
- *    *"verbatim output of a third-party generator, whose own licence notice we
- *    reproduce instead"* — which artwork this project chose is not.
- *
- * So the bytes are committed and this file is their **provenance**, named in
- * `ASSETS.toml`'s `source` column. `generate-icons.test.ts` is what keeps the
- * two from drifting: it redraws each icon and compares the result with the
- * committed file's own decoded pixels.
- *
- * ⚠️ **It compares PIXELS rather than bytes, and that is deliberate.** A
- * byte comparison would pin zlib's output as well as the drawing, and zlib's
- * compressed form is not guaranteed stable across versions of the library — so
- * a contributor on a different Node 24 patch could see a red build about an
- * image that is identical. Inflating the committed `IDAT` and comparing
- * scanlines asks the question actually worth asking.
- *
- * ## The mark
- *
- * Two chevrons pointing left, in `accent` on `accentInk` — the call a rider
- * makes passing somebody, which is this project's name. Every number below is
- * in unit coordinates so the same drawing produces every size, and the maskable
- * variant is the same drawing scaled to 80% about the centre, which is the safe
- * zone Android's adaptive icons mask to.
- *
- * Run it with `pnpm --filter @onyourleft/web run icons:generate`.
+ * What is left is the MARK: two chevrons pointing left, the call a rider makes
+ * passing somebody. The realistic rider's jersey wears it (#623,
+ * `tools/realistic/process-assets.ts` hands {@link drawMark}'s pixels to
+ * `process_rider.py`), and whether the kit moves to the owner's new mark is the
+ * owner's call (#965), so the drawing stays exactly as it was: the kit's bytes,
+ * which `realistic:process --check` reproduces, depend on it.
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';
-import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 /**
  * The mark, in unit coordinates with y running down.
@@ -63,40 +39,6 @@ const CHEVRON_DEPTH = 0.2;
 const CHEVRON_TOP_Y = 0.28;
 const CHEVRON_BOTTOM_Y = 0.72;
 const STROKE_HALF_WIDTH = 0.055;
-
-/** The fraction of the box the maskable variant's drawing occupies. */
-const MASKABLE_SCALE = 0.8;
-
-/** A colour as three 0–255 channels. */
-export interface Rgb {
-  readonly r: number;
-  readonly g: number;
-  readonly b: number;
-}
-
-/**
- * The two colours, as the design tokens spell them.
- *
- * ⚠️ **Written out rather than imported from `design/tokens.ts`.** This file is
- * authoring-time code under `tools/` and the tokens module is client source; an
- * import would put a build-time generator in the shipped module graph's
- * neighbourhood for no benefit. `generate-icons.test.ts` asserts the two agree,
- * which is the `theme.a11y.test.ts` precedent applied to a second artefact.
- */
-export const ICON_FOREGROUND = '#ffffff';
-export const ICON_BACKGROUND = '#0b5c55';
-
-export function parseHex(hex: string): Rgb {
-  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(hex);
-  if (match === null) {
-    throw new Error(`a colour must be six-digit hex, and this is ${hex}`);
-  }
-  return {
-    r: Number.parseInt(match[1] ?? '', 16),
-    g: Number.parseInt(match[2] ?? '', 16),
-    b: Number.parseInt(match[3] ?? '', 16),
-  };
-}
 
 /** The shortest distance from a point to a line segment, all in unit coordinates. */
 function distanceToSegment(
@@ -135,7 +77,7 @@ function distanceToMark(px: number, py: number): number {
 /**
  * How much of a pixel the mark covers, 0 to 1, at a point in unit coordinates
  * (y running down), for a pixel `pixel` units wide — the coverage
- * {@link drawIcon} blends its two colours by.
+ * {@link drawMark} writes.
  */
 function markCoverage(ux: number, uy: number, pixel: number): number {
   return Math.max(0, Math.min(1, (STROKE_HALF_WIDTH - distanceToMark(ux, uy)) / pixel + 0.5));
@@ -158,61 +100,6 @@ export function drawMark(size: number): Uint8Array {
     for (let x = 0; x < size; x += 1) {
       const value = Math.round(markCoverage((x + 0.5) * pixel, (y + 0.5) * pixel, pixel) * 255);
       pixels.fill(value, (y * size + x) * 3, (y * size + x) * 3 + 3);
-    }
-  }
-  return pixels;
-}
-
-export interface IconSpec {
-  /** The file, relative to `apps/web/public/`. */
-  readonly file: string;
-  readonly size: number;
-  /** `true` for the variant a launcher may crop to any shape. */
-  readonly maskable: boolean;
-}
-
-/**
- * Every icon this repository commits.
- *
- * 192 and 512 because Chrome's install criteria name exactly those two sizes,
- * and a third at 512 with `purpose: "maskable"` because Android crops an
- * adaptive icon and a mark drawn to the edge loses its corners. A single entry
- * carrying both purposes would have to satisfy both, and the safe zone is
- * enough smaller that the result reads as a small mark in a large field
- * everywhere it is not cropped.
- */
-export const ICON_SPECS: readonly IconSpec[] = [
-  { file: 'icon-192.png', size: 192, maskable: false },
-  { file: 'icon-512.png', size: 512, maskable: false },
-  { file: 'icon-maskable-512.png', size: 512, maskable: true },
-];
-
-/**
- * Draw one icon as raw 8-bit RGB, row-major, with no filter bytes.
- *
- * Antialiased by coverage rather than by supersampling: the distance to the
- * stroke's centre line is known exactly, so the fraction of a pixel the stroke
- * covers is a smooth function of it and needs no samples. That also makes the
- * output a pure function of the size, which is what the reproduction test
- * rests on.
- */
-export function drawIcon(spec: IconSpec): Uint8Array {
-  const foreground = parseHex(ICON_FOREGROUND);
-  const background = parseHex(ICON_BACKGROUND);
-  const scale = spec.maskable ? MASKABLE_SCALE : 1;
-  const pixel = 1 / spec.size;
-  const pixels = new Uint8Array(spec.size * spec.size * 3);
-  for (let y = 0; y < spec.size; y += 1) {
-    for (let x = 0; x < spec.size; x += 1) {
-      // The pixel's centre, mapped back through the maskable scale so one
-      // drawing serves both variants.
-      const ux = ((x + 0.5) * pixel - 0.5) / scale + 0.5;
-      const uy = ((y + 0.5) * pixel - 0.5) / scale + 0.5;
-      const coverage = markCoverage(ux, uy, pixel / scale);
-      const offset = (y * spec.size + x) * 3;
-      pixels[offset] = Math.round(background.r + (foreground.r - background.r) * coverage);
-      pixels[offset + 1] = Math.round(background.g + (foreground.g - background.g) * coverage);
-      pixels[offset + 2] = Math.round(background.b + (foreground.b - background.b) * coverage);
     }
   }
   return pixels;
@@ -354,21 +241,4 @@ export function decodePng(png: Uint8Array): { size: number; pixels: Uint8Array }
     pixels.set(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), y * stride);
   }
   return { size, pixels };
-}
-
-/** Where the committed icons live. */
-export const PUBLIC_DIRECTORY = new URL('../../public/', import.meta.url);
-
-function main(): void {
-  for (const spec of ICON_SPECS) {
-    const png = encodePng(spec.size, drawIcon(spec));
-    const path = fileURLToPath(new URL(spec.file, PUBLIC_DIRECTORY));
-    writeFileSync(path, png);
-    console.log(`${spec.file}: ${String(png.length)} bytes`);
-  }
-}
-
-// Run only when this file is the program, never when a test imports it.
-if (process.argv[1]?.endsWith('generate-icons.ts') === true) {
-  main();
 }

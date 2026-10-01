@@ -2,6 +2,7 @@
 
 import type { JSX } from 'react';
 
+import { FullLogo } from '../brand/Brand';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
@@ -65,10 +66,14 @@ import { hrefFor, routeById } from '../shell/routes';
  * gameplay, and an app in scope must carry the policy link *inside the app* as
  * well as in the listing. This page is where it lives; `privacy/policy.ts` is
  * the one place the URL is written down.
+ *
+ * Since #965 the page opens with the owner's full logo (`brand/Brand.tsx`);
+ * its words are text.
  */
 export function AboutView(): JSX.Element {
   return (
     <>
+      <FullLogo />
       <h2>Where your data lives</h2>
       <p>
         On this device. There is no account to create and no server to sign in to unless you choose

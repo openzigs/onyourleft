@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!--
+      The adaptive launcher icon's background layer (#965): the flat blue of the
+      owner's icon panel, as apps/web/tools/brand/derive_brand.py measures it.
+      The foreground layer is mipmap-*/ic_launcher_foreground.png, the mark on a
+      transparent 108 dp layer inside its 66 dp safe zone. The art is the
+      owner's, CC-BY-4.0 (ASSETS.toml); this file is ours, and
+      apps/web/tools/brand/provenance.test.ts holds the colour to the icons.
+    -->
+    <color name="ic_launcher_background">#1F5D91</color>
 </resources>
