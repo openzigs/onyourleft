@@ -321,8 +321,10 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   } => {
     return {
       // #679: two gantries and the board before a line, a quad a banner —
-      // and since #966 the wordmark's board on each gantry, the start gate's
-      // (a loop shorter than the reach holds two). A billboard's board is a
+      // and since #966 the wordmark's board on each gantry: a loop shorter
+      // than the reach holds its one gate twice, and since #978 a short
+      // point-to-point route holds the start's and the finish's, two either
+      // way, so the sum did not move. A billboard's board is a
       // STRUCTURE in the budget (`scene.ts`), lighter than any, so the
       // structures' term below covers it.
       gantries:
