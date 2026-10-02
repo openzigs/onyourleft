@@ -114,6 +114,26 @@ describe('the approval queue — #775, #955', () => {
     expect(text(section('Moderation log'))).toContain('Approved an account');
   });
 
+  // #1009, the owner's ruling: the log note is read before acting, as consent
+  // text is, so it stands above every action — and kept visible.
+  it('says every action is logged above the first action, not below it', async () => {
+    await open(scriptedModeration());
+    const note = [...container().querySelectorAll('p')].find(
+      (each) => each.textContent === MODERATION_IS_LOGGED,
+    );
+    if (note === undefined) throw new Error('the log note is not on the screen');
+    expect(note.closest('[data-oyl-kept-visible]')).not.toBeNull();
+    expect(note.closest('details')).toBeNull();
+    const controls = [...container().querySelectorAll('button, input, textarea, select')];
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) {
+      expect(
+        note.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `${control.tagName} “${control.textContent ?? ''}” comes before the log note`,
+      ).toBeTruthy();
+    }
+  });
+
   // #957's review: the read-back failing must not take the notice with it,
   // or a moderator is left to press again not knowing it was done.
   it('keeps saying it was done when the read-back after an action fails', async () => {

@@ -65,6 +65,18 @@
  * The record's Segments line is that sentence; the "below" one is still in
  * the source, for a device that has a ride to cut from.
  *
+ * ⚠️ **Edited by #1009, the owner's rulings of 2026-10-02.** Camera's note was
+ * "Nothing is sent anywhere, and a picture is thrown away once it has been
+ * looked at." — false on a screen that offers to send pictures to the rider's
+ * own computer and ride text to a hosted model, and its second half false
+ * once "keep this ride's pictures" is on. It is REWORDED, in the owner's
+ * approved words: "Pictures and ride details stay on this device unless you
+ * turn on sending them below." Nothing is lost by it: that a picture is thrown
+ * away once looked at is still said, with its exception, by the consent text
+ * on the same route (`camera/consent.ts`). And Moderation's two log sentences
+ * moved from below the actions to above them, which reorders that route's
+ * populated walk and changes no word.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -201,6 +201,21 @@ const MUST_FAIL_INLINE = ['segments', 'settings', 'transfer'] as const;
 const CONSENT_BEFORE_CONTROL: readonly RouteId[] = ['side-camera'];
 
 /**
+ * The routes where kept-visible text is read BEFORE acting and so stands above
+ * the first control — #1009, the owner's ruling — and the opening of the text
+ * that must stand there. Unlike {@link CONSENT_BEFORE_CONTROL} this is no fold
+ * exemption: the first control must still clear the fold. It only lifts #993's
+ * "kept-visible text below the controls" for the text named, and REQUIRES that
+ * text above the first control, so moving it back below the actions is a
+ * fault. Moderation: that every action is logged, names the moderator and
+ * outlives an erased account (`views/ModerationView.tsx`
+ * §`MODERATION_IS_LOGGED`), which a moderator reads before deciding.
+ */
+const READ_BEFORE_ACTING: Partial<Record<RouteId, string>> = {
+  moderation: 'Everything you do here is written to the instance’s moderation log',
+};
+
+/**
  * The sections that tuck their explanation, by heading, route by route —
  * #699's review, B2. The harness measures a section only where it finds a
  * "More about" disclosure, so a section put back the way it was before #666 —
@@ -287,7 +302,9 @@ const SECTION_PROSE_BUDGET_PIXELS = 130;
  *   {@link Viewport.summaryLines};
  * - **kept-visible text below the controls** — nothing marked
  *   `data-oyl-kept-visible` before the first control, except on a consent
- *   route ({@link CONSENT_BEFORE_CONTROL}), whose box says the text was read;
+ *   route ({@link CONSENT_BEFORE_CONTROL}), whose box says the text was read,
+ *   or the text a route names in {@link READ_BEFORE_ACTING} (#1009) — which
+ *   must stand above the first control there;
  * - **a help control a thumb and a screen reader can use** — where the route
  *   declares help, the ⓘ is a 44 × 44 target named "Help with …" whose panel
  *   holds the route's words while it is closed (in the page, so offline).
@@ -302,10 +319,24 @@ function lineFaults(route: RouteDefinition, seen: ReflowMeasurement, viewport: V
         `more than ${String(viewport.summaryLines)}: “${seen.summary.text}”`,
     );
   }
-  if (seen.keptBeforeFirstControl.length > 0 && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
+  const readFirst = READ_BEFORE_ACTING[route.id];
+  const keptAbove = seen.keptBeforeFirstControl.filter(
+    (text) => readFirst === undefined || !text.startsWith(readFirst),
+  );
+  if (keptAbove.length > 0 && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
     faults.push(
       `${route.id}: kept-visible text stands above the first control, where #993 puts it below: ` +
-        seen.keptBeforeFirstControl.map((text) => `“${text}”`).join(', '),
+        keptAbove.map((text) => `“${text}”`).join(', '),
+    );
+  }
+  // #1009: text read before acting must BE before the first action.
+  if (
+    readFirst !== undefined &&
+    seen.firstControl !== null &&
+    !seen.keptBeforeFirstControl.some((text) => text.startsWith(readFirst))
+  ) {
+    faults.push(
+      `${route.id}: “${readFirst}…” does not stand above the first control, where #1009 puts it`,
     );
   }
   if (route.help === undefined) {
