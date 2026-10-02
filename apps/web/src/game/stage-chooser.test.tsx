@@ -64,6 +64,7 @@ interface Options {
   readonly worldChosen?: boolean;
   readonly notices?: boolean;
   readonly intensity?: string;
+  readonly onIntensity?: (value: string) => void;
   readonly onStart?: (route: RidableRoute, ghost: boolean) => Promise<void>;
 }
 
@@ -88,7 +89,7 @@ function Chooser(options: Options): JSX.Element {
         withPacer={withPacer}
         onPacer={() => undefined}
         intensity={intensity}
-        onIntensity={() => undefined}
+        onIntensity={options.onIntensity ?? (() => undefined)}
         choice={pacerChoice(withPacer, intensity)}
         withWind={false}
         onWind={() => undefined}
@@ -135,7 +136,9 @@ function rideButton(root: ParentNode): HTMLButtonElement {
 }
 
 function radios(root: ParentNode): HTMLInputElement[] {
-  return queryAll<HTMLInputElement>(root, 'input[type="radio"]');
+  // The route cards' group. Since #994 the loadout holds a second radio group,
+  // the riding position, which is not a route.
+  return queryAll<HTMLInputElement>(root, '.oyl-chooser__card input[type="radio"]');
 }
 
 describe('#940 — the order of the notices and Ride', () => {
@@ -310,5 +313,50 @@ describe('#940 — a refused Ride (#255)', () => {
     expect(reason?.textContent).toContain('70');
     await activateWithKeyboard(ride);
     expect(onStart).not.toHaveBeenCalled();
+  });
+});
+
+describe('#994 — game-style controls in the loadout', () => {
+  it('draws each on/off as a switch that is still a checkbox', async () => {
+    const tree = await render({ intensity: '2.5' });
+    for (const kind of ['ghost', 'pacer', 'wind']) {
+      const box = tree.container.querySelector<HTMLInputElement>(`.oyl-game__${kind} input`);
+      expect(box?.type, kind).toBe('checkbox');
+      expect(box?.getAttribute('role'), kind).toBe('switch');
+    }
+  });
+
+  it('offers the riding position as three radios, all on the screen at once', async () => {
+    const tree = await render();
+    const group = queryAll<HTMLInputElement>(
+      tree.container,
+      '.oyl-game__position input[type="radio"]',
+    );
+    expect(group.map((radio) => radio.value)).toEqual(['upright', 'hoods', 'drops']);
+    expect(new Set(group.map((radio) => radio.name)).size).toBe(1);
+    expect(tree.container.querySelector('.oyl-game__position legend')?.textContent).toBe(
+      'How you are riding',
+    );
+    expect(group.find((radio) => radio.checked)?.value).toBe(DEFAULT_RIDING_POSITION);
+    await activateWithKeyboard(group[2] as HTMLInputElement);
+    await settle();
+    expect(
+      queryAll<HTMLInputElement>(tree.container, '.oyl-game__position input:checked')[0]?.value,
+    ).toBe('drops');
+  });
+
+  it('steps the pacer intensity with − and +, and the box keeps its own name', async () => {
+    const typed: string[] = [];
+    const tree = await render({ intensity: '2.5', onIntensity: (value) => typed.push(value) });
+    const box = tree.container.querySelector<HTMLInputElement>('#oyl-game-pacer-intensity');
+    // The buttons are beside the box, not in its label, so the box is named by
+    // its words alone and not "… Decrease 2.5 Increase".
+    expect(box?.labels?.[0]?.textContent).toBe('Pacer intensity, watts per kilogram');
+    const increase = queryAll<HTMLButtonElement>(tree.container, 'button').find(
+      (button) => button.getAttribute('aria-label') === 'Increase pacer intensity',
+    );
+    await activateWithKeyboard(increase as HTMLButtonElement);
+    expect(typed).toEqual(['2.6']);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });

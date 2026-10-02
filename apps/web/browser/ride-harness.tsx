@@ -500,7 +500,14 @@ async function until<T>(what: string, look: () => T | undefined | null): Promise
 
 function labelled<T extends HTMLElement>(selector: string, text: string): T | undefined {
   return [...document.querySelectorAll<T>(selector)].find((each) =>
-    (each.closest('label')?.textContent ?? each.textContent ?? '').includes(text),
+    // A control's own label, wrapped round it or pointing at it with `for` —
+    // the picker's number boxes are labelled the second way since #994.
+    (
+      (each instanceof HTMLInputElement ? each.labels?.[0]?.textContent : undefined) ??
+      each.closest('label')?.textContent ??
+      each.textContent ??
+      ''
+    ).includes(text),
   );
 }
 

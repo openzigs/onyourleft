@@ -69,6 +69,7 @@ import { Button, ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { StatusMessage } from '../design/StatusMessage';
+import { Stepper } from '../design/Stepper';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
@@ -121,6 +122,16 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
  * to render, so the rider would be told about one problem and blocked by two.
  */
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
+
+/**
+ * The three number boxes' ids — #994. Each box is labelled by a `<label for>`
+ * now rather than by a label wrapped round it, because its − and + buttons sit
+ * beside it (`design/Stepper.tsx`) and a button inside a label is read as part
+ * of the box's name.
+ */
+const PACER_INTENSITY_ID = 'oyl-game-pacer-intensity';
+const WIND_SPEED_ID = 'oyl-game-wind-speed';
+const WIND_BEARING_ID = 'oyl-game-wind-bearing';
 
 /** Everything the chooser is handed. */
 interface RoutePickerProps {
@@ -506,6 +517,7 @@ function GhostControl(props: {
       <label>
         <input
           type="checkbox"
+          role="switch"
           // #940's review: the box is for the CHOSEN route, so a tick made on a
           // route with an attempt does not show on one without — checked and
           // disabled would read as "the ghost is on" beside "ride it once
@@ -543,6 +555,7 @@ function PacerControls(props: {
       <label>
         <input
           type="checkbox"
+          role="switch"
           checked={props.withPacer}
           onChange={(event) => {
             props.onPacer(event.target.checked);
@@ -550,32 +563,41 @@ function PacerControls(props: {
         />
         Ride against a pacer
       </label>
-      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        Pacer intensity, watts per kilogram
-        <input
-          type="number"
-          // `inputMode` rather than only `type`, because this is read and typed
-          // on a phone clamped to a handlebar: a decimal keypad is the
-          // difference between 2.5 and 25 at the moment a rider is setting up.
-          inputMode="decimal"
+      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+        <label htmlFor={PACER_INTENSITY_ID}>Pacer intensity, watts per kilogram</label>
+        <Stepper
+          name="pacer intensity"
+          step={0.1}
           min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
           max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
-          step={0.1}
-          value={props.intensity}
-          // ⚠️ **The two attributes that make the refusal part of the control
-          // rather than text near it — #255.** A `role="alert"` is announced
-          // once, when it appears. A rider who tabs *back* to this box
-          // afterwards heard "Pacer intensity, watts per kilogram, 70" and
-          // nothing about why nothing worked; `aria-describedby` is what makes
-          // the reason travel with the field, every time it is reached, and
-          // `aria-invalid` is what says the value in it is the problem.
-          aria-invalid={props.problem === undefined ? undefined : true}
-          aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
-          onChange={(event) => {
-            props.onIntensity(event.target.value);
-          }}
-        />
-      </label>
+        >
+          <input
+            id={PACER_INTENSITY_ID}
+            className="oyl-input"
+            type="number"
+            // `inputMode` rather than only `type`, because this is read and typed
+            // on a phone clamped to a handlebar: a decimal keypad is the
+            // difference between 2.5 and 25 at the moment a rider is setting up.
+            inputMode="decimal"
+            min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+            max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+            step={0.1}
+            value={props.intensity}
+            // ⚠️ **The two attributes that make the refusal part of the control
+            // rather than text near it — #255.** A `role="alert"` is announced
+            // once, when it appears. A rider who tabs *back* to this box
+            // afterwards heard "Pacer intensity, watts per kilogram, 70" and
+            // nothing about why nothing worked; `aria-describedby` is what makes
+            // the reason travel with the field, every time it is reached, and
+            // `aria-invalid` is what says the value in it is the problem.
+            aria-invalid={props.problem === undefined ? undefined : true}
+            aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
+            onChange={(event) => {
+              props.onIntensity(event.target.value);
+            }}
+          />
+        </Stepper>
+      </div>
       {/*
         ⚠️ `min`/`max` above are a hint to the browser and nothing more — they
         are trivially bypassed by typing, and they do not exist at all for the
@@ -599,7 +621,9 @@ function PacerControls(props: {
 /**
  * Where the rider's hands are — #365.
  *
- * ⚠️ **A `<select>` rather than three numbers**, and the labels name hands
+ * ⚠️ **A choice of three rather than three numbers** — a `<select>` until
+ * #994, a segmented radio group since, so all three are on the screen at
+ * once and each is a 44 px target — and the labels name hands
  * rather than square metres: a drag area is a wind-tunnel measurement nobody
  * knows about themselves, and #365's first criterion is that the choice be
  * rider-facing. `rider.ts` §`ridingPositionDragArea` is where each one becomes
@@ -618,24 +642,26 @@ function PositionControl(props: {
 }): JSX.Element {
   return (
     <div className="oyl-game__position tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
-      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        How you are riding
-        <select
-          value={props.position}
-          onChange={(event) => {
-            // The cast is safe because every option below is a `RidingPosition`
-            // this component itself rendered; `select.value` is simply typed as
-            // `string` by the DOM.
-            props.onPosition(event.target.value as RidingPosition);
-          }}
-        >
+      <fieldset className="oyl-segmented tw:mb-0">
+        <legend>How you are riding</legend>
+        <div className="oyl-segmented__options">
           {RIDING_POSITION_ORDER.map((id) => (
-            <option key={id} value={id}>
+            <label key={id} htmlFor={`oyl-position-${id}`}>
+              <input
+                type="radio"
+                id={`oyl-position-${id}`}
+                name="oyl-riding-position"
+                value={id}
+                checked={props.position === id}
+                onChange={() => {
+                  props.onPosition(id);
+                }}
+              />
               {RIDING_POSITIONS[id].label}
-            </option>
+            </label>
           ))}
-        </select>
-      </label>
+        </div>
+      </fieldset>
       <p className="oyl-muted tw:m-0">
         This sets how much air you are pushing, which is most of what decides your speed on the
         flat. Your weight is set on the Settings screen and is most of it on a climb.
@@ -698,6 +724,7 @@ function WindControls(props: {
       <label>
         <input
           type="checkbox"
+          role="switch"
           checked={props.withWind}
           onChange={(event) => {
             props.onWind(event.target.checked);
@@ -705,35 +732,43 @@ function WindControls(props: {
         />
         Ride in a wind
       </label>
-      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        {`Wind speed, ${props.speedUnit}`}
-        <input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step={0.1}
-          value={props.speed}
-          {...markedFor('speed')}
-          onChange={(event) => {
-            props.onSpeed(event.target.value);
-          }}
-        />
-      </label>
-      <label className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
-        Wind direction, degrees it blows from
-        <input
-          type="number"
-          inputMode="numeric"
-          min={0}
-          max={MAXIMUM_BEARING_DEGREES}
-          step={1}
-          value={props.fromBearing}
-          {...markedFor('fromBearing')}
-          onChange={(event) => {
-            props.onFromBearing(event.target.value);
-          }}
-        />
-      </label>
+      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+        <label htmlFor={WIND_SPEED_ID}>{`Wind speed, ${props.speedUnit}`}</label>
+        <Stepper name="wind speed" step={1} min={0}>
+          <input
+            id={WIND_SPEED_ID}
+            className="oyl-input"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={0.1}
+            value={props.speed}
+            {...markedFor('speed')}
+            onChange={(event) => {
+              props.onSpeed(event.target.value);
+            }}
+          />
+        </Stepper>
+      </div>
+      <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+        <label htmlFor={WIND_BEARING_ID}>Wind direction, degrees it blows from</label>
+        <Stepper name="wind direction" step={15} min={0} max={MAXIMUM_BEARING_DEGREES}>
+          <input
+            id={WIND_BEARING_ID}
+            className="oyl-input"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={MAXIMUM_BEARING_DEGREES}
+            step={1}
+            value={props.fromBearing}
+            {...markedFor('fromBearing')}
+            onChange={(event) => {
+              props.onFromBearing(event.target.value);
+            }}
+          />
+        </Stepper>
+      </div>
       {/*
         Rendered only when there is a problem, which is what keeps every
         `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on

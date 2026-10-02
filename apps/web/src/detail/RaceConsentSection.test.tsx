@@ -122,6 +122,11 @@ describe('the consent is off by default, and says what it allows', () => {
     expect(described?.textContent).toBe(RACE_CONSENT_SENTENCE);
   });
 
+  it('stays a checkbox, not a switch: it is an agreement the rider makes (#994)', async () => {
+    const box = await open(stub(), 'ride-1');
+    expect(box.getAttribute('role')).toBeNull();
+  });
+
   it('shows a consent already given as given', async () => {
     const box = await open(stub({ activity: stubActivity({ mayBeRaced: true }) }), 'ride-1');
     expect(box.checked).toBe(true);

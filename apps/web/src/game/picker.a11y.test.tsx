@@ -115,7 +115,7 @@ describe('the route picker', () => {
     for (const words of ['pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
-          (input.closest('label')?.textContent ?? '').includes(words),
+          (input.labels?.[0]?.textContent ?? '').includes(words),
         ),
       ).toHaveLength(1);
     }
@@ -277,7 +277,7 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
   /** A number box, found by the words beside it rather than by its position. */
   function boxLabelled(root: ParentNode, words: string): HTMLInputElement | undefined {
     return queryAll<HTMLInputElement>(root, 'input[type="number"]').find((input) =>
-      (input.closest('label')?.textContent ?? '').includes(words),
+      (input.labels?.[0]?.textContent ?? '').includes(words),
     );
   }
 

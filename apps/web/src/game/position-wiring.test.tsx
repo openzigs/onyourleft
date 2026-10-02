@@ -149,14 +149,16 @@ async function rideSittingAs(position: string | undefined): Promise<number> {
   await settle();
 
   if (position !== undefined) {
-    const select = queryAll<HTMLSelectElement>(mounted.container, 'select').find((element) =>
-      (element.closest('label')?.textContent ?? '').includes('How you are riding'),
+    // A segmented radio group since #994 (a `<select>` before): the rider
+    // presses the position, as they would.
+    const radio = queryAll<HTMLInputElement>(mounted.container, 'input[type="radio"]').find(
+      (element) =>
+        element.value === position &&
+        (element.closest('fieldset')?.textContent ?? '').includes('How you are riding'),
     );
-    expect(select).toBeDefined();
+    expect(radio).toBeDefined();
     await act(async () => {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
-      descriptor?.set?.call(select, position);
-      select?.dispatchEvent(new Event('change', { bubbles: true }));
+      radio?.click();
       await Promise.resolve();
     });
   }
