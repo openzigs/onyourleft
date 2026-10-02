@@ -466,14 +466,17 @@ export function ModerationView({
           {ACTION_DONE_TEXT}
         </StatusMessage>
       ) : null}
-      <Registrations port={port} registrations={state.registrations} onDone={onDone} />
-      <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
-      <AnAccount port={port} onDone={onDone} />
-      {/* #993: that every action is logged stays on the screen, as a note
-          below the actions and above the log it names, not above them. */}
+      {/* #1009, the owner's ruling: that every action is logged, names the
+          moderator and outlives an erased account is read BEFORE acting, as
+          consent text is, so it stands above the actions — not below them,
+          where #993 first put it. Kept visible. `controls-first` allows it
+          there by name (§`READ_BEFORE_ACTING`) and requires it there. */}
       <KeptVisible>
         <p className="oyl-note">{MODERATION_IS_LOGGED}</p>
       </KeptVisible>
+      <Registrations port={port} registrations={state.registrations} onDone={onDone} />
+      <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <AnAccount port={port} onDone={onDone} />
       <Log me={state.me} entries={state.log} />
     </div>
   );

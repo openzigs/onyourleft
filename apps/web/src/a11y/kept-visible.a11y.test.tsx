@@ -215,7 +215,7 @@ const NOTES: Partial<Record<RouteId, readonly string[]>> = {
     'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
       'cannot be shared at all.',
   ],
-  camera: ['Nothing is sent anywhere, and a picture is thrown away once it has been looked at.'],
+  camera: ['Pictures and ride details stay on this device unless you turn on sending them below.'],
   settings: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
   instance: ['Your rides stay on this device.'],
   'side-camera': ['This phone keeps nothing about you afterwards.'],
