@@ -26,7 +26,8 @@ import { Button } from './Button';
  * **Only for a destructive action the rider asked for**, which is why it is an
  * `alertdialog`: its first focus is the choice that keeps things as they are
  * (Radix focuses `Cancel`), so a rider who presses Enter twice has lost
- * nothing. It is never opened by anything but a press, and it never carries a
+ * nothing. That choice is also the FILLED button, and the destructive one is
+ * `danger` — red, and lighter than it (#1002). It is never opened by anything but a press, and it never carries a
  * safety or privacy sentence a screen must keep visible (#666): it is closed
  * until asked for, and a closed dialog renders nothing at all.
  *
@@ -119,11 +120,20 @@ export function ConfirmDialog({
               <div className="tw:mb-lg">{children}</div>
             </AlertDialog.Description>
             <div className="tw:flex tw:flex-wrap tw:gap-sm">
+              {/*
+                #1002, the owner's ruling of 2026-10-02: the SAFE answer is the
+                filled primary and takes focus (Radix focuses `Cancel`); the
+                destructive one is `danger`, red and lighter than it. #996 had
+                them the other way round, and the irreversible answer was the
+                heaviest thing on the screen.
+              */}
               <AlertDialog.Cancel asChild>
-                <Button variant="tertiary">{cancelLabel}</Button>
+                <Button>{cancelLabel}</Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
-                <Button onClick={onConfirm}>{confirmLabel}</Button>
+                <Button variant="danger" onClick={onConfirm}>
+                  {confirmLabel}
+                </Button>
               </AlertDialog.Action>
             </div>
           </AlertDialog.Content>

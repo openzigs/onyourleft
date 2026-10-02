@@ -65,6 +65,8 @@
   --color-danger-surface: var(--oyl-color-danger-surface);
   --color-danger-ink: var(--oyl-color-danger-ink);
   --color-danger-border: var(--oyl-color-danger-border);
+  --color-danger-action: var(--oyl-color-danger-action);
+  --color-danger-action-ink: var(--oyl-color-danger-action-ink);
   --color-illo-sky: var(--oyl-color-illo-sky);
   --color-illo-sun: var(--oyl-color-illo-sun);
   --color-illo-hill-far: var(--oyl-color-illo-hill-far);
