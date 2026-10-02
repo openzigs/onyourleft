@@ -2379,7 +2379,11 @@ test.describe('#1011 — route tiles, one full-width Ride, the realistic world i
         const world = document.querySelector<HTMLElement>('.oyl-chooser__world');
         const notices = [...document.querySelectorAll('.oyl-chooser__notices > *')];
         const summary = world?.querySelector('summary')?.getBoundingClientRect();
+        const words = world?.querySelector('p');
+        const range = document.createRange();
+        if (words) range.selectNodeContents(words);
         return {
+          slack: (words?.getBoundingClientRect().width ?? 0) - range.getBoundingClientRect().width,
           height: world?.getBoundingClientRect().height ?? 0,
           first: notices[0] === world,
           summaryHeight: summary?.height ?? 0,
@@ -2388,7 +2392,7 @@ test.describe('#1011 — route tiles, one full-width Ride, the realistic world i
         };
       });
       console.log(
-        `#1011 the realistic world's line — ${viewport.name}: ${line.height.toFixed(1)} px tall`,
+        `#1011 the realistic world's line — ${viewport.name}: ${line.height.toFixed(1)} px tall, ${line.slack.toFixed(1)} px to spare beside its words`,
       );
       expect(line.first).toBe(true);
       expect(line.link).toBe('Change in Settings');

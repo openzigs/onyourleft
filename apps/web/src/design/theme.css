@@ -3799,6 +3799,12 @@ input[type='checkbox'][role='switch']:disabled {
   border-radius: var(--oyl-radius-card);
 }
 
+/* The line's words at the small size `.oyl-note` uses: on the CI runner's
+   wider fonts the body size wrapped it to two rows on a 390 px phone. */
+.oyl-chooser__world > p {
+  font-size: var(--oyl-font-size-sm);
+}
+
 .oyl-chooser__world-label {
   font-weight: 700;
 }
