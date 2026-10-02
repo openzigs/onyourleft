@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useState, type FormEvent, type JSX } fro
 import { LOOP_CLOSURE_METRES, unixSeconds, type Metres } from '@onyourleft/domain';
 import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
 
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
@@ -644,21 +645,27 @@ function SelectedRoute({
           Delete
         </Button>
       </p>
-      {pendingDelete !== undefined && (
-        <div>
-          <h3>Delete this route?</h3>
-          <p>
-            “{pendingDelete.name}” will be removed from this device, including the line itself. This
-            cannot be undone.
-          </p>
-          <Button variant="secondary" type="button" onClick={() => void onDelete(pendingDelete)}>
-            Delete “{pendingDelete.name}”
-          </Button>
-          <Button variant="secondary" type="button" onClick={() => setPendingDelete(undefined)}>
-            Keep it
-          </Button>
-        </div>
-      )}
+      <ConfirmDialog
+        open={pendingDelete !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDelete(undefined);
+          }
+        }}
+        title="Delete this route?"
+        confirmLabel={`Delete “${pendingDelete?.name ?? ''}”`}
+        cancelLabel="Keep it"
+        onConfirm={() => {
+          if (pendingDelete !== undefined) {
+            void onDelete(pendingDelete);
+          }
+        }}
+      >
+        <p>
+          “{pendingDelete?.name ?? ''}” will be removed from this device, including the line itself.
+          This cannot be undone.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }
