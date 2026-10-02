@@ -2313,6 +2313,62 @@ printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\nsource = "Some P
 assert_violation "an entry with no licence at all is rejected" ASSET004 \
   "apps/web/public/models/rider.glb: no licence recorded"
 
+# --- ASSET004 and OFL-1.1: a font licence for a font file, under apps/ only ----
+#
+# ADR 0043 D-1, #991. Four cases, and each pair is what makes it a rule about
+# BOTH the extension and the path rather than about the identifier: an OFL font
+# under apps/ passes; the same licence on a picture under apps/ does not; the
+# same font under packages/ does not; and the Reserved-Font-Name variant, which
+# ADR 0043 D-3 leaves to a ruling of its own, does not either.
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/src/design/fonts/display-800.woff2
+append_asset_entry apps/web/src/design/fonts/display-800.woff2 OFL-1.1 \
+  "$(fixture_digest apps/web/src/design/fonts/display-800.woff2)"
+assert_clean "an OFL-1.1 font file under apps/ passes"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/tools/fonts/display/Display-Bold.ttf
+append_asset_entry apps/web/tools/fonts/display/Display-Bold.ttf OFL-1.1 \
+  "$(fixture_digest apps/web/tools/fonts/display/Display-Bold.ttf)"
+assert_clean "an OFL-1.1 TrueType input under apps/ passes"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb OFL-1.1 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation "OFL-1.1 on a file that is not a font is rejected" ASSET004 \
+  "apps/web/public/models/rider.glb: licence OFL-1.1 is not permitted at this path"
+
+# A name that merely CONTAINS a font extension is not a font file: the rule
+# reads the last extension, not a substring.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/fonts/specimen.woff2.png
+append_asset_entry apps/web/public/fonts/specimen.woff2.png OFL-1.1 \
+  "$(fixture_digest apps/web/public/fonts/specimen.woff2.png)"
+assert_violation "OFL-1.1 on a picture whose name contains a font extension is rejected" ASSET004 \
+  "licence OFL-1.1 is not permitted at this path"
+
+new_fixture
+write_good_package domain
+write_binary_asset packages/domain/fixtures/display-800.woff2
+append_asset_entry packages/domain/fixtures/display-800.woff2 OFL-1.1 \
+  "$(fixture_digest packages/domain/fixtures/display-800.woff2)"
+assert_violation "an OFL-1.1 font under packages/ is rejected" ASSET004 \
+  "packages/domain/fixtures/display-800.woff2: licence OFL-1.1 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/src/design/fonts/display-800.woff2
+append_asset_entry apps/web/src/design/fonts/display-800.woff2 OFL-1.1-RFN \
+  "$(fixture_digest apps/web/src/design/fonts/display-800.woff2)"
+assert_violation "the Reserved-Font-Name OFL variant is not admitted by the suffix" ASSET004 \
+  "licence OFL-1.1-RFN is not permitted"
+
 # --- ASSET006: a licence that requires attribution, and the entry that owes it -
 #
 # #357 and [ADR 0023](../docs/adr/0023-cc-by-assets-and-attribution.md). CC-BY is

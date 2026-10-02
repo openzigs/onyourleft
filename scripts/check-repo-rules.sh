@@ -1485,6 +1485,23 @@ ASSET_LICENCES_WEAK="CC0-1.0 MPL-2.0 BlueOak-1.0.0 MIT-0 0BSD Unlicense"
 # only thing that can read a key at all; this half only knows which licences care.
 ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 
+# ADR 0043, #991. The SIL Open Font License 1.1, admitted for a FONT FILE under
+# `apps/` and for nothing else -- not a picture, not a model, not a file under
+# `packages/`. Most free display faces are OFL, and until #991 a bundled
+# display face could only be Apache-2.0 or CC0 (CLAUDE.md §2 on the map's
+# Roboto, pinned at v2.138 for exactly this reason).
+#
+# ⚠️ Matched on the identifier by EQUALITY, like every set here, so
+# `OFL-1.1-RFN` and `OFL-1.1-no-RFN` fall through to the fail-closed branch:
+# a face that declares a Reserved Font Name obliges a modified copy to be
+# renamed, and ADR 0043 D-3 says that is ruled on face by face rather than
+# admitted by a suffix. And the extension list is the whole of "a font file":
+# OFL §1's "Font Software" is a font, and an OFL-licensed picture of a font
+# specimen, or code that happens to carry the licence, is not what the ADR
+# admitted.
+ASSET_LICENCES_FONT="OFL-1.1"
+ASSET_FONT_FILES="woff2 woff ttf otf"
+
 # `shasum` is what CLAUDE.md §4a documents and what macOS ships; `sha256sum` is
 # what the GNU coreutils on the CI runner ship. The same pair, and the same
 # order, as check-licence-hashes.sh -- a second spelling of "take a digest"
@@ -1800,7 +1817,7 @@ asset_manifest_records() {
 # A loop rather than a `case` over a packed string: a licence identifier is
 # interpolated into the pattern there, and a pattern is not a literal.
 asset_licence_permitted() {
-  local licence="$1" path="$2" candidate
+  local licence="$1" path="$2" candidate extension
   for candidate in ${ASSET_LICENCES_PERMISSIVE}; do
     [ "${candidate}" = "${licence}" ] && return 0
   done
@@ -1809,6 +1826,14 @@ asset_licence_permitted() {
   esac
   for candidate in ${ASSET_LICENCES_WEAK} ${ASSET_LICENCES_ATTRIBUTED}; do
     [ "${candidate}" = "${licence}" ] && return 0
+  done
+  # A font licence admits a font file and nothing else (ADR 0043 D-1).
+  for candidate in ${ASSET_LICENCES_FONT}; do
+    [ "${candidate}" = "${licence}" ] || continue
+    for extension in ${ASSET_FONT_FILES}; do
+      [ "${path##*.}" = "${extension}" ] && return 0
+    done
+    return 1
   done
   return 1
 }
@@ -1907,7 +1932,7 @@ check_assets() {
         if [ -z "${licence}" ]; then
           report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no licence recorded; an asset whose terms nobody wrote down is an asset nobody has read (#339)"
         elif ! asset_licence_permitted "${licence}" "${path}"; then
-          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) and attribution-requiring (${ASSET_LICENCES_ATTRIBUTED}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2, ADR 0023 D-1)"
+          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) and attribution-requiring (${ASSET_LICENCES_ATTRIBUTED}) under apps/ only, a font licence (${ASSET_LICENCES_FONT}) for a font file (${ASSET_FONT_FILES}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2, ADR 0023 D-1, ADR 0043 D-1)"
         elif asset_attribution_required "${licence}" && [ -n "${absent}" ]; then
           # ⚠️ Reported for a PERMITTED licence, which is what makes it a rule
           # of its own rather than a branch of ASSET004: the entry's licence is

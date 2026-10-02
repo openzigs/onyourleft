@@ -262,10 +262,30 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
     expect(links).toContain('https://github.com/BinomialLLC/basis_universal');
   });
 
+  it('credits the display face with its copyright notice and the OFL it ships — #991', async () => {
+    // OFL-1.1 condition 2: the copyright notice and the licence travel with
+    // the font. The notice is the credit's creator; the licence, the link.
+    await render();
+    const section = mounted?.container.querySelector('[data-terms="licence-copy"]');
+    expect(section?.textContent).toContain('Copyright 2017 The Barlow Project Authors');
+    for (const file of [
+      'apps/web/src/design/fonts/barlow-latin-700.woff2',
+      'apps/web/src/design/fonts/barlow-latin-800.woff2',
+    ]) {
+      expect(sectionOf(file), `${file} is not in the licence-copy section`).toBe('licence-copy');
+      expect(linksOfCreditFor(file)).toContain('./licences/OFL-1.1.txt');
+      expect(linksOfCreditFor(file)).toContain('https://github.com/jpt/barlow');
+    }
+    // The inputs ship in nothing and are not credited as if they did.
+    expect(text()).not.toContain('tools/fonts/barlow/Barlow-Bold.ttf');
+  });
+
   it('links every Apache-2.0 credit to the licence copy this app ships', async () => {
     const { licenceCopy } = creditsFrom(parseAssetManifest(ASSET_MANIFEST_SOURCE));
-    // Not vacuous: the Roboto glyphs and the pose model are both credited.
+    // Not vacuous: the Roboto glyphs and the pose model are both credited,
+    // and since #991 the display face under OFL-1.1.
     expect(licenceCopy.map((work) => work.licence)).toContain('Apache-2.0');
+    expect(licenceCopy.map((work) => work.licence)).toContain('OFL-1.1');
     await render();
     for (const work of licenceCopy) {
       for (const file of work.files) {

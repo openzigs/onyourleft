@@ -17,6 +17,40 @@
  * else.
  */
 
+/*
+ * THE DISPLAY FACE — #991, ADR 0043. Barlow 1.408 (SIL Open Font License 1.1),
+ * subset to the Latin range and committed beside this file as WOFF2 by
+ * `tools/fonts/subset-fonts.ts`. A RELATIVE `url()`, so Vite hashes each file
+ * into the build and the service worker precaches it with the rest: the face
+ * comes from this app's own origin, in a browser and inside the Android shell,
+ * and never from a font CDN (`privacy/stylesheet-origins.test.ts`, and the
+ * browser gate's §"#991"). `unicode-range` is `tools/fonts/font-recipe.ts`
+ * §LATIN_RANGES, so a character outside it is drawn in the system face rather
+ * than as a missing glyph; `font-display: swap` draws the system face until
+ * the file has loaded, rather than nothing.
+ */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/barlow-latin-700.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/barlow-latin-800.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   /* #672: the light palette. `color-scheme` is what reaches the controls this
      file does not draw itself — a scrollbar, the date picker, a `base-select`
@@ -97,6 +131,11 @@
   /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
   --oyl-font-size-metric: 3.814697265625rem;
 
+  /* The display face (#991, ADR 0043), and the page's own stack behind it:
+     a weight the face does not carry, or a character outside its range, is
+     drawn by the system face, never as a missing glyph. */
+  --oyl-font-family-display: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   /*
    * The menus' motion (#936). Every duration in this file reads one of these,
    * and `theme.a11y.test.ts` refuses a duration literal above 200 ms anywhere
@@ -108,13 +147,11 @@
   --oyl-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
   /*
-   * The two faces — #992. Both are the page's own `system-ui` today; the
-   * display face (page titles, `.oyl-display`) is its own token so that
-   * swapping in ADR 0043's face (#991) is a change to this ONE line.
+   * The body face — #992. Every word that is not a view's title or
+   * `.oyl-display`; the display face above is ADR 0043's (#991).
    * `tokens.ts` §`FONT_FAMILY_TOKENS` holds the values.
    */
   --oyl-font-family-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --oyl-font-family-display: system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --oyl-radius: 0.375rem;
   /* A card's or a panel's corner — #992: a filled tile is rounder than a
@@ -316,12 +353,13 @@ h3 {
 }
 
 /*
- * THE DISPLAY STEP — #936, the owner's D-5 on #935: a menu's hero title, one
- * rung above the view title on the same ladder, in the page's own `system-ui`
- * at a heavier weight. No font file: a display face would be a new asset, and
- * the one committed face is the map's Roboto for a licence reason (§3 of
- * CLAUDE.md, #578). A class, not an element rule, because the `h1` a hero
- * title sits in is still the view's `h1` and keeps its place in the outline.
+ * THE DISPLAY STEP — #936: a menu's hero title, one rung above the view title
+ * on the same ladder, at a heavier weight. ⚠️ Since #991 (Phase 2 of #935, the
+ * owner's ruling of 2026-10-02, ADR 0043) it is set in the bundled display
+ * face, Barlow, and a reviewer who remembers "the page's own `system-ui`, no
+ * font file" here is reading the old file. A class, not an element rule,
+ * because the `h1` a hero title sits in is still the view's `h1` and keeps its
+ * place in the outline.
  *
  * `overflow-wrap: break-word` because one long word at 39 px is wider than a
  * 320 px viewport less its padding, and SC 1.4.10 forbids the sideways scroll
@@ -1168,6 +1206,7 @@ h3:first-child {
   padding-top: var(--oyl-space-md);
   padding-inline-end: calc(var(--oyl-home-ground-width) + 2 * var(--oyl-space-md));
   min-height: calc(var(--oyl-home-ground) + var(--oyl-space-md));
+  font-family: var(--oyl-font-family-display);
   font-size: var(--oyl-font-size-display);
   font-weight: 800;
   letter-spacing: -0.02em;

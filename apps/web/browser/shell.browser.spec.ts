@@ -2797,6 +2797,11 @@ test.describe('#936 — the display step at 320×256', () => {
     page,
   }) => {
     await openIllustration(page);
+    // Measured in the face the step draws with (#991), never the system face
+    // `font-display: swap` shows while the file is on its way.
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
     const read = await page.locator('[data-oyl-display]').evaluate((heading) => {
       const style = getComputedStyle(heading);
       return {
@@ -2822,6 +2827,9 @@ test.describe('#936 — the display step at 320×256', () => {
     page,
   }) => {
     await openIllustration(page);
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
     const overflow = await page.locator('[data-oyl-display]').evaluate((heading) => {
       heading.style.overflowWrap = 'normal';
       return heading.scrollWidth - heading.clientWidth;
@@ -2830,6 +2838,73 @@ test.describe('#936 — the display step at 320×256', () => {
       overflow,
       'the heading fits at 320 px without `overflow-wrap`, so the case above measured nothing',
     ).toBeGreaterThan(0);
+  });
+});
+
+/*
+ * #991, ADR 0043 D-4 — the display face is the bundled one, and it comes from
+ * this app's own origin. Read from the network and from the engine's own font
+ * set, on the #936 specimen load: every font the page requested is
+ * same-origin, the 800 subset is among them, and the face the display step
+ * names is the one that LOADED — not the system face behind it in the stack.
+ *
+ * The CONTROL is the same page with every `.woff2` request aborted: the face
+ * must then fail to load, so a page that fell back to `system-ui` cannot pass
+ * the case above. `privacy/stylesheet-origins.test.ts` is the static half.
+ */
+async function displayFace(page: Page): Promise<{
+  readonly family: string;
+  readonly status: string;
+  readonly check: boolean;
+}> {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
+    const heading = document.querySelector('[data-oyl-display]');
+    if (heading === null) throw new Error('no display heading on the page');
+    const style = getComputedStyle(heading);
+    // `load` asks for the face the heading would draw with, and settles
+    // whether it arrives or not.
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} Barlow`).catch(() => []);
+    const face = [...document.fonts].find(
+      (candidate) =>
+        candidate.family.replaceAll(/['"]/g, '') === 'Barlow' && candidate.weight === '800',
+    );
+    return {
+      family: style.fontFamily,
+      status: face?.status ?? 'absent',
+      check: document.fonts.check(`800 ${style.fontSize} Barlow`),
+    };
+  });
+}
+
+test.describe('#991 — the display face is the bundled one, from this app’s own origin', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('loads Barlow 800 from the page’s origin, and requests no font from anywhere else', async ({
+    page,
+  }) => {
+    const fonts: string[] = [];
+    page.on('request', (request) => {
+      if (request.resourceType() === 'font') fonts.push(request.url());
+    });
+    await openIllustration(page);
+    const read = await displayFace(page);
+    const origin = new URL(page.url()).origin;
+    expect(read.family.startsWith('Barlow')).toBe(true);
+    expect(read.status, 'the bundled face did not load').toBe('loaded');
+    expect(read.check).toBe(true);
+    expect(fonts.some((url) => /\/assets\/barlow-latin-800-[^/]+\.woff2$/.test(url))).toBe(true);
+    expect(fonts.filter((url) => new URL(url).origin !== origin)).toEqual([]);
+  });
+
+  test('the control — with the font files refused, the face does not load', async ({ page }) => {
+    await page.route('**/*.woff2', (route) => route.abort());
+    await openIllustration(page);
+    const read = await displayFace(page);
+    expect(
+      read.status,
+      'the face loaded with its file refused, so the case above measured something else',
+    ).not.toBe('loaded');
   });
 });
 

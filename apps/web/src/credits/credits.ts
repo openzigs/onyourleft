@@ -85,6 +85,12 @@ export const ATTRIBUTION_LICENCES: readonly string[] = ['CC-BY-4.0'];
  * `.tflite` files and nothing else (both read 2026-09-26). A new Apache-2.0
  * asset re-asks that question; see `ASSETS.toml` above the pose model.
  *
+ * `OFL-1.1` since #991 (ADR 0043 D-2): the SIL Open Font License's condition
+ * 2 is that each copy of the font "contains the above copyright notice and
+ * this license" — the same shape as Apache-2.0 §4(a). The notice is the
+ * credit's creator, and travels in each font's name table too; the licence is
+ * the copy linked here.
+ *
  * ⚠️ Every licence here must have a {@link SHIPPED_LICENCE_TEXTS} entry, or
  * {@link creditsFrom} reports the work as shipping without its licence.
  * `MIT` and the BSDs ask for their notice to travel too, and are deliberately
@@ -92,7 +98,7 @@ export const ATTRIBUTION_LICENCES: readonly string[] = ['CC-BY-4.0'];
  * one that did would land in {@link Credits.unclassified} rather than under a
  * sentence nobody checked.
  */
-export const LICENCE_COPY_LICENCES: readonly string[] = ['Apache-2.0'];
+export const LICENCE_COPY_LICENCES: readonly string[] = ['Apache-2.0', 'OFL-1.1'];
 
 /**
  * The licences that ask for nothing at all, which is what the courtesy
@@ -113,6 +119,10 @@ export const NOTHING_ASKED_LICENCES: readonly string[] = ['CC0-1.0'];
  */
 export const SHIPPED_LICENCE_TEXTS: Readonly<Record<string, string>> = {
   'Apache-2.0': './licences/Apache-2.0.txt',
+  // Written by `tools/fonts/subset-fonts.ts` from the display face's own
+  // OFL.txt, the licence's text without Barlow's copyright line above it
+  // (#991): the line is the credit's creator, so one text serves any OFL face.
+  'OFL-1.1': './licences/OFL-1.1.txt',
 };
 
 /**

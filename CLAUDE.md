@@ -194,6 +194,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         pinned Node, so `generate-glyphs.test.ts` regenerates
                         every range byte for byte inside `pnpm run test`.
                         ⚠️ A newer Roboto is a licence change, not an upgrade
+    tools/fonts/        the display face (#991, ADR 0043) — Barlow 1.408's two
+                        upstream weights and its OFL.txt, committed as INPUTS;
+                        `font-recipe.ts`, every pin; `subset-fonts.ts`
+                        (`fonts:subset`), which runs a PINNED fontTools to write
+                        the WOFF2 subsets into `src/design/fonts/`; and
+                        `woff2.ts`, the reader `fonts.test.ts` holds each subset
+                        with in CI, where there is no fontTools. ⚠️ The first
+                        OFL-1.1 files here: `ASSET004` admits OFL for a FONT
+                        FILE under `apps/` and nothing else
     tools/theme/        the plugin that writes `src/design/theme-selection.ts`'s
                         inline palette script into every page Vite builds —
                         product and harness — straight after the charset, so
@@ -1993,6 +2002,11 @@ What this means in practice:
   **`lightningcss` from `packages/domain` included**, which the bullet above records as reaching
   there. Both probes were re-run for #143 and that is what they said; a "not resolvable" therefore
   proves the package cannot be imported by name, and nothing about the licence boundary.
+- **`OFL-1.1` is admitted for a committed FONT FILE under `apps/` and for nothing else**, since
+  [ADR 0043](docs/adr/0043-ofl-display-typeface.md) (#991): not a picture, not a file under
+  `packages/`, not a dependency (`DEP001` is unchanged, so a font *package* is still refused), and
+  not `OFL-1.1-RFN`. Enforced by `ASSET004`. A subset stays `OFL-1.1` in `ASSETS.toml` — the font
+  keeps its licence, as a CC0 model does.
 - Anything **non-OSI** — BUSL, SSPL, CC-BY-NC, "commercial use requires a licence" — fails
   everywhere and needs an ADR before it is even discussed.
 - Where a change lands is therefore a **licence question answered before you write the code**, not a
@@ -2363,6 +2377,14 @@ pnpm --filter @onyourleft/web run realistic:stage
 pnpm --filter @onyourleft/web run glyphs:generate
 pnpm --filter @onyourleft/web run glyphs:generate --check
 
+# Subset the display face (#991, ADR 0043 D-5). NOT a gate and NOT in CI: it
+# needs a Python with fontTools 4.66.1 and Brotli 1.2.0 exactly (FONTTOOLS_PYTHON
+# names it; `tools/fonts/subset-fonts.ts`' header says how to make one), and
+# refuses any other. `--check` writes nothing and fails unless the WOFF2s and
+# `public/licences/OFL-1.1.txt` are reproduced byte for byte — run on
+# 2026-10-02. In CI, `tools/fonts/fonts.test.ts` reads each WOFF2 back instead.
+FONTTOOLS_PYTHON=… pnpm --filter @onyourleft/web run fonts:subset --check
+
 # Regenerate the in-game wordmark (#966) from the owner's committed brand
 # sheet, `tools/brand/sources/gemini-assets-v2.jpeg`: writes
 # `src/game/brand/game-wordmark.png` (1024 × 128 RGBA) with its own baseline
@@ -2595,7 +2617,7 @@ bash apps/instance/deploy/home/deploy.sh
 | `ASSET001` | a committed **binary** exists that `ASSETS.toml` does not name. #339, filed before the first `.glb` exists rather than after. ⚠️ Discovery walks for binaries by **content** — a NUL byte in the first 8000, which is git's own rule — and deliberately **not** by an extension list: a list fails closed against deleting a format and **open** against adding one, which is #142's defect exactly |
 | `ASSET002` | `ASSETS.toml` names a path that is not there. A stale entry records the provenance of nothing. A glob lands here rather than being refused as syntax, unlike `.spdx-exempt`: the lookup is string equality, so a pattern truly names no file |
 | `ASSET003` | a named file's SHA-256 does not reproduce, or none is recorded. ⚠️ It pins **what is committed**, so a substitution is visible; it does **not** establish that the bytes are the upstream artefact they name, which nothing offline can — `apps/mobile/README.md` §4 still stands on `gradle-wrapper.jar` |
-| `ASSET004` | an entry's licence is absent, on **no** list, or not permitted where the file lands. Permissive anywhere; weak (`CC0-1.0` and friends) and — since #357 — attribution-requiring (`CC-BY-4.0`) under `apps/` only. ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**, and this row used to name `CC-BY-4.0` as an example of that: [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) ruled on it, so the examples are now GPL, AGPL, `CC-BY-SA-4.0` and **`CC-BY-NC-4.0`**, which is two letters from an admitted one and non-OSI |
+| `ASSET004` | an entry's licence is absent, on **no** list, or not permitted where the file lands. Permissive anywhere; weak (`CC0-1.0` and friends) and — since #357 — attribution-requiring (`CC-BY-4.0`) under `apps/` only; and — since #991, [ADR 0043](docs/adr/0043-ofl-display-typeface.md) D-1 — `OFL-1.1` for a **font file** (`woff2`, `woff`, `ttf`, `otf`) under `apps/` only. ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**, and this row used to name `CC-BY-4.0` as an example of that: [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) ruled on it, so the examples are now GPL, AGPL, `CC-BY-SA-4.0` and **`CC-BY-NC-4.0`**, which is two letters from an admitted one and non-OSI |
 | `ASSET005` | `ASSETS.toml` is absent, or does not parse. ⚠️ Five ids where #339 names four, and the fifth is the reason the other four cannot pass vacuously — the same move `LIC006` made for `.spdx-exempt`. An unrecognised key is **refused rather than ignored** (ADR 0017 D-4's choice, for the same reason), and a manifest that does not parse **stops the walk** rather than reporting every entry after the bad line as unnamed |
 | `ASSET007` | a **derived** entry — one this repository made from an upstream input rather than committed as the upstream bytes — records its `input`, `inputsha256`, `script` and `tool` together, with `modified`, and the `script` it names is committed. #430, [ADR 0026](docs/adr/0026-realistic-game-world.md) D-5. ⚠️ The four keys are ACCEPTED on any entry and REQUIRED together, so a derived row cannot be half-recorded; what `ASSET003` pins is still the committed bytes, and what these add is that they can be **made again** — `realistic:process --check`, run by hand because CI has no Blender, and `provenance.test.ts` holding every row to the pipeline's own table |
 | `ASSET006` | an entry whose licence **requires attribution** records no `creator`, no `url` or no `modified`. #357, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3. ⚠️ It fires on a licence `ASSET004` has just **permitted**, which is what makes it a rule rather than a branch: CC-BY is the only identifier in either set whose obligation is **continuing** — discharged by the shipped app crediting the work every time it ships, not by the manifest row existing — so the data [#358](https://github.com/openzigs/onyourleft/issues/358) generates the credits screen from is checked where the asset enters the tree. Widening a list alone would have satisfied "a CC-BY asset now passes" and left the obligation unchecked, which is this repository's own recurring defect shape |
@@ -4007,6 +4029,7 @@ its text, so it could never have seen this. The second half is a separate gate:
 | The native half | `apps/mobile/native-closure.json`, a **reviewed** list, because CI cannot run Gradle. `apps/mobile/src/android/native-closure.test.ts` holds it to `./gradlew :app:dependencies --configuration releaseRuntimeClasspath` in both directions wherever `native:closure` has written a report, and **skips loudly** elsewhere — #318's shape, and like it **not a CI gate** |
 | Code no closure lists | ⚠️ **Vite's module-preload polyfill and `__vitePreload` helper are in the entry chunk, and Rolldown's CommonJS-interop runtime is `assets/rolldown-runtime-*.js`** — both MIT, both shipped, and both from **devDependencies**, so `--prod` never lists them (#676's review, read off a real `dist`). `WRITTEN_BY_THE_BUNDLER` in the script names the two, resolved from `apps/web` as Node resolves them, and each needs a reviewed `writtenByTheBundler` entry at its **installed** version — so a Vite or Rolldown bump fails closed (NOT008) until somebody re-reads what it writes. A new bundler is a new line there, and nothing finds one for you |
 | Files copied out of a package | `copiedIntoBuild` is a reviewed list; what holds it complete is the **build**, not `check:notices`, which deliberately needs no build. `apps/web/tools/notices/copied-into-build.ts` is a plugin in the product's `vite.config.ts` that fails `pnpm run build` when the bundle holds a non-code asset (not `.js`/`.css`/`.html`/`.map`) that came from a package — no origin module at all, which is how a plugin's `emitFile` arrives, or one under `node_modules` — and the list does not name it; and when the list names a file the build did not write. ⚠️ **Its limits**: it reads the one product build, so the service-worker sub-build and the harness build are not read; `public/` is not in the bundle and is `ASSETS.toml`'s; and a package's bytes passed off as this repository's own source (copied into `src/` and imported from there) look like ours, which is `ASSET001`'s to catch |
+| Fonts the repository commits | ⚠️ **Part 5**, since #991 ([ADR 0043](docs/adr/0043-ofl-display-typeface.md) D-2): a committed font is a file and in no closure, so `committedFonts` in `apps/web/third-party-notices.json` names it and its notice is the upstream `OFL.txt` committed beside its input, reproduced verbatim. A file or licence file that is not there is NOT005; `tools/fonts/fonts.test.ts` holds the list to what `fonts:subset` writes |
 | Where a rider reads it | Credits §"Software this app includes", reached from About. The screen inlines the document's **contents** (the list, ~5 KiB) rather than the document (~125 KiB); both are the generator's output and `check:notices` compares both |
 
 ⚠️ **A SERVER is not in the app's union, and has a document of its own**
@@ -4873,7 +4896,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0043.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0044.**
+  ⚠️ **0043 is [ADR 0043](docs/adr/0043-ofl-display-typeface.md)**, taken by
+  [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02 for the OFL display face. A
+  reviewer who remembers this sentence offering 0043 is reading the old file.
   ⚠️ **0042 is [ADR 0042](docs/adr/0042-tailwind-and-radix-over-the-tokens.md)**, taken by
   [#950](https://github.com/openzigs/onyourleft/issues/950) for Tailwind CSS and Radix over the
   tokens. A reviewer who remembers this sentence offering 0042 is reading the old file.
@@ -5737,5 +5763,6 @@ top of an issue **supersedes its body**.
 | What deleting an account on an instance needs beyond a session token | `apps/instance/src/auth/identity.ts` §`stepUp`, `apps/instance/src/sync/routes.ts` §`eraseAccount` |
 | How a suspended rider still takes their data out and deletes their account, and what stops that session reaching anything else | `apps/instance/src/auth/identity.ts` §"A suspended rider's way out", `apps/instance/src/route-kit.ts` §`admitsSuspended`, `apps/instance/src/moderation/choke-point.test.ts` |
 | What happens when two devices change the same goals, note or document before syncing | `apps/web/src/instance/sync.ts` rule 8 and §`conflictCopyName`, [#924](https://github.com/openzigs/onyourleft/issues/924) |
+| Why the display face is Barlow, why OFL is admitted for a font file and nothing else, how its copyright and licence travel, and how the WOFF2s are made again | [ADR 0043](docs/adr/0043-ofl-display-typeface.md), `apps/web/tools/fonts/font-recipe.ts`, `apps/web/tools/fonts/fonts.test.ts`, `apps/web/src/privacy/stylesheet-origins.test.ts`, [#991](https://github.com/openzigs/onyourleft/issues/991) |
 
-<!-- Last updated: 2026-09-30 by delivery:code-issue resolving #784 #785 (private rooms: a code, the creator's route, a race's result; who may start a race); also #898, #901 and #924 (sync safety); before that 2026-09-29, #841 (the Docker Hub dependency named, the image checker's suite, and where CI time comes from next) -->
+<!-- Last updated: 2026-10-02 by delivery:code-issue resolving #991 (ADR 0043: OFL-1.1 for a bundled display face, Barlow) -->

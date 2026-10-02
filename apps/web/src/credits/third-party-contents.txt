@@ -9,7 +9,8 @@ which the Android app carries too. Part 2 is the native libraries only the
 Android app contains. Part 3 names the files the build copies whole out of a
 package in part 1, and the files a package there vendors from somebody else
 that the build bundles into the app's own code. Part 4 is code the build
-tools write into the app, which no package in part 1 accounts for.
+tools write into the app, which no package in part 1 accounts for. Part 5
+is the fonts this app's source repository commits and the app serves.
 
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
@@ -154,3 +155,6 @@ Part 3 — files copied out of a package into the build
 Part 4 — code the build tools write into the app
   vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
   rolldown 1.2.6 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
+
+Part 5 — fonts committed in the source repository and served by the app
+  Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)

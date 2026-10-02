@@ -56,6 +56,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   COLOUR_TOKENS,
   CONTRAST_REQUIREMENTS,
+  FONT_FAMILY_TOKENS,
   FONT_SIZE_TOKENS,
   SPACE_TOKENS,
   type ColourToken,
@@ -131,6 +132,9 @@ function expectedTheme(): Map<string, string> {
   }
   for (const token of Object.keys(FONT_SIZE_TOKENS)) {
     expected.set(`--text-${token}`, `var(--oyl-font-size-${token})`);
+  }
+  for (const token of Object.keys(FONT_FAMILY_TOKENS)) {
+    expected.set(`--font-${token}`, `var(--oyl-font-family-${token})`);
   }
   expected.set('--radius', 'var(--oyl-radius)');
   expected.set('--radius-card', 'var(--oyl-radius-card)');
