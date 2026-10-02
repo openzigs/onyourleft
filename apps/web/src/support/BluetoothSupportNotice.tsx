@@ -30,10 +30,11 @@
 
 import type { JSX } from 'react';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
 import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
+import { hrefFor, routeById } from '../shell/routes';
 import type { BluetoothSupport } from './bluetooth-support';
 
 /**
@@ -146,9 +147,11 @@ export function BluetoothSupportNotice({
     case 'absent':
       // #1023: the status is one short line — what is missing, and that it is
       // not the reader's doing. Why there is no setting is behind its "more".
-      // Where pairing does work and what still works here are information,
-      // not danger, so they are their own boxes after it, kept on the screen
-      // (ADR 0003 D-7: name the browsers that work; never hide the limits).
+      // Then the one thing a rider CAN do here, as the screen's first control
+      // (a summary is not one, `reflow-harness.tsx` §`CONTROL_SELECTOR`), and
+      // after it — #993 puts kept-visible text below the first control —
+      // where pairing does work and what still works here: information, not
+      // danger, kept on the screen (ADR 0003 D-7: name the browsers that work).
       return (
         <>
           <StatusMessage
@@ -161,6 +164,11 @@ export function BluetoothSupportNotice({
           >
             {BLUETOOTH_ABSENT_LINE}
           </StatusMessage>
+          <p>
+            <ButtonLink variant="secondary" href={hrefFor(routeById('transfer'))}>
+              Import or export files
+            </ButtonLink>
+          </p>
           <KeptVisible>
             <StatusMessage tone="info" label="Where pairing works">
               {BLUETOOTH_ABSENT_WHERE}

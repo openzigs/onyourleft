@@ -118,11 +118,13 @@ describe('the Safari and Firefox path keeps its status to one line — #1023', (
       // Kept on the screen, never in a disclosure …
       expect(box?.closest('[data-oyl-kept-visible]'), kept).not.toBeNull();
       expect(box?.closest('details'), kept).toBeNull();
-      // … and after the first control, the status's own "more" (#993).
-      const summary = danger?.querySelector('summary');
-      expect(summary).not.toBeNull();
+      // … and after the first control (#993), which is the one thing a rider
+      // can do here: a summary is not a control to the browser gate.
+      const first = document.querySelector('button, input, select, textarea, a[href].oyl-button');
+      expect(first?.textContent).toBe('Import or export files');
+      expect(first?.getAttribute('href')).toBe('#/transfer');
       expect(
-        (summary as Element).compareDocumentPosition(box as Element) &
+        (first as Element).compareDocumentPosition(box as Element) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     }
