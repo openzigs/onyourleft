@@ -1636,7 +1636,9 @@ async function openChooser(
 const CHOOSER_NOTICE_LABELS: Readonly<Record<ChooserNotices, readonly string[]>> = {
   promise: ['Your trainer'],
   release: ['Not released', 'Your trainer'],
-  all: ['Not released', 'The road will not reach your trainer', 'Realistic world'],
+  // #1011: the realistic world is a compact line FIRST, so #503's promise —
+  // or here the trainer notice standing in its place — is last before Ride.
+  all: ['Realistic world', 'Not released', 'The road will not reach your trainer'],
 };
 
 /**
@@ -1690,40 +1692,47 @@ async function sightsAt(page: Page, scrolls: readonly number[] | 'sweep'): Promi
       const cy = rideBox.top + rideBox.height / 2;
       const inView = cx >= 0 && cx < window.innerWidth && cy >= 0 && cy < window.innerHeight;
       const hit = inView ? document.elementFromPoint(cx, cy) : null;
-      const notices = [...chooser.querySelectorAll<HTMLElement>('.oyl-status')].map((each) => {
-        const box = each.getBoundingClientRect();
-        let reached = 0;
-        let offScreen = 0;
-        let obscured = 0;
-        let points = 0;
-        // Every 6 px down and across over the WHOLE box, inset only by its
-        // corner radius: a hit test 1 px inside a rounded corner is outside
-        // the shape and lands on whatever is behind it.
-        const inset =
-          Math.max(1, Number.parseFloat(getComputedStyle(each).borderTopLeftRadius)) + 1;
-        for (let y = box.top + inset; y <= box.bottom - inset; y += 6) {
-          for (let x = box.left + inset; x <= box.right - inset; x += 6) {
-            points += 1;
-            if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
-              offScreen += 1;
-              continue;
+      // Every notice above Ride: each status box, and since #1011 the
+      // realistic world's one line.
+      const notices = [...chooser.querySelectorAll<HTMLElement>('.oyl-chooser__notices > *')].map(
+        (each) => {
+          const box = each.getBoundingClientRect();
+          let reached = 0;
+          let offScreen = 0;
+          let obscured = 0;
+          let points = 0;
+          // Every 6 px down and across over the WHOLE box, inset only by its
+          // corner radius: a hit test 1 px inside a rounded corner is outside
+          // the shape and lands on whatever is behind it.
+          const inset =
+            Math.max(1, Number.parseFloat(getComputedStyle(each).borderTopLeftRadius)) + 1;
+          for (let y = box.top + inset; y <= box.bottom - inset; y += 6) {
+            for (let x = box.left + inset; x <= box.right - inset; x += 6) {
+              points += 1;
+              if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {
+                offScreen += 1;
+                continue;
+              }
+              const at = document.elementFromPoint(x, y);
+              if (at !== null && each.contains(at)) reached += 1;
+              else if (at !== null && header !== null && header.contains(at)) offScreen += 1;
+              else obscured += 1;
             }
-            const at = document.elementFromPoint(x, y);
-            if (at !== null && each.contains(at)) reached += 1;
-            else if (at !== null && header !== null && header.contains(at)) offScreen += 1;
-            else obscured += 1;
           }
-        }
-        return {
-          label: each.querySelector('.oyl-status__label')?.textContent?.replace(/:\s*$/, '') ?? '',
-          reached,
-          offScreen,
-          obscured,
-          points,
-          top: box.top + window.scrollY,
-          bottom: box.bottom + window.scrollY,
-        };
-      });
+          return {
+            label:
+              each
+                .querySelector('.oyl-status__label, .oyl-chooser__world-label')
+                ?.textContent?.replace(/:\s*$/, '') ?? '',
+            reached,
+            offScreen,
+            obscured,
+            points,
+            top: box.top + window.scrollY,
+            bottom: box.bottom + window.scrollY,
+          };
+        },
+      );
       readings.push({
         scrollY: window.scrollY,
         rideOnTop: hit !== null && ride.contains(hit),
@@ -1937,7 +1946,7 @@ test.describe('#940 — the pre-ride chooser', () => {
         const margin = ride.fold - ride.bottom;
         const lastNotice = await page.evaluate(() =>
           Math.max(
-            ...[...document.querySelectorAll('.oyl-chooser .oyl-status')].map(
+            ...[...document.querySelectorAll('.oyl-chooser__notices > *')].map(
               (each) => each.getBoundingClientRect().bottom,
             ),
           ),
@@ -2228,3 +2237,169 @@ function hexOf(rgb: string): string {
     .map((channel) => Number(channel).toString(16).padStart(2, '0'))
     .join('')}`;
 }
+
+/*
+ * #1011 — Phase 2 of epic #935: the routes as TILES (the drawing fills the
+ * tile, the facts on a solid band at its foot, the chosen tile told by a tick
+ * and a word as well as its edge), two columns on a tablet and one on a phone,
+ * one full-width *Ride*, and the realistic world as one line. Every #940 case
+ * above still runs on this layout; these read what is new.
+ *
+ * Its control, `?picker=list` (the old layout, one route per row), must read
+ * ONE column on the tablets — which is what makes "two columns" a measurement
+ * of the shipped rule rather than of the harness.
+ */
+const TILE_VIEWPORTS: readonly (ChooserViewport & { readonly columns: number })[] = [
+  { ...(CHOOSER_VIEWPORTS[0] as ChooserViewport), columns: 1 },
+  { ...(CHOOSER_VIEWPORTS[1] as ChooserViewport), columns: 1 },
+  { ...TABLET_IN_THE_SHELL_CHOOSER, columns: 2 },
+  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, insets: false, columns: 2 },
+];
+
+interface TileReading {
+  readonly columns: number;
+  readonly tiles: readonly {
+    readonly width: number;
+    readonly shapeWidth: number;
+    readonly shapeHeight: number;
+    readonly shapeLeftInset: number;
+    readonly bandBottomInset: number;
+    readonly shapeToBand: number;
+    readonly bandBackground: string;
+    readonly bandText: string;
+    readonly chosenMark: boolean;
+    readonly chosenVisible: boolean;
+    readonly doubledEdge: string;
+  }[];
+  readonly rideWidth: number;
+  readonly goWidth: number;
+  readonly rideHeight: number;
+  readonly overlay: string;
+}
+
+async function readTiles(page: Page): Promise<TileReading> {
+  return page.evaluate(() => {
+    const cards = [...document.querySelectorAll<HTMLElement>('.oyl-chooser__card')];
+    const firstTop = cards[0]?.getBoundingClientRect().top ?? 0;
+    const columns = cards.filter(
+      (card) => Math.abs(card.getBoundingClientRect().top - firstTop) < 1,
+    ).length;
+    const ride = [...document.querySelectorAll<HTMLElement>('.oyl-chooser__go button')][0];
+    const go = document.querySelector<HTMLElement>('.oyl-chooser__go');
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--oyl-color-surface-overlay)';
+    document.body.append(probe);
+    const overlay = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      columns,
+      tiles: cards.map((card) => {
+        const box = card.getBoundingClientRect();
+        const border = Number.parseFloat(getComputedStyle(card).borderLeftWidth);
+        const shape = card.querySelector('svg.oyl-chooser__shape')?.getBoundingClientRect();
+        const band = card.querySelector<HTMLElement>('.oyl-chooser__facts');
+        const bandBox = band?.getBoundingClientRect();
+        const mark = card.querySelector<HTMLElement>('.oyl-chooser__chosen');
+        const markBox = mark?.getBoundingClientRect();
+        return {
+          width: box.width - 2 * border,
+          shapeWidth: shape?.width ?? 0,
+          shapeHeight: shape?.height ?? 0,
+          shapeLeftInset: (shape?.left ?? 0) - (box.left + border),
+          bandBottomInset: box.bottom - border - (bandBox?.bottom ?? 0),
+          shapeToBand: (bandBox?.top ?? 0) - (shape?.bottom ?? 0),
+          bandBackground: band === null ? '' : getComputedStyle(band).backgroundColor,
+          bandText: band?.textContent ?? '',
+          chosenMark: mark !== null,
+          chosenVisible:
+            mark !== null &&
+            markBox !== undefined &&
+            markBox.width > 0 &&
+            getComputedStyle(mark).visibility === 'visible',
+          doubledEdge: getComputedStyle(card, '::before').boxShadow,
+        };
+      }),
+      rideWidth: ride?.getBoundingClientRect().width ?? 0,
+      goWidth: go?.getBoundingClientRect().width ?? 0,
+      rideHeight: ride?.getBoundingClientRect().height ?? 0,
+      overlay,
+    };
+  });
+}
+
+test.describe('#1011 — route tiles, one full-width Ride, the realistic world in one line', () => {
+  for (const viewport of TILE_VIEWPORTS) {
+    test(`tiles in ${String(viewport.columns)} column(s), each filled by its drawing over a solid band — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, viewport, 'chooser');
+      const read = await readTiles(page);
+      console.log(
+        `#1011 ${viewport.name}: ${String(read.columns)} column(s), tile ${read.tiles[0]?.width.toFixed(0) ?? '?'} px, drawing ${read.tiles[0]?.shapeWidth.toFixed(0) ?? '?'}×${read.tiles[0]?.shapeHeight.toFixed(0) ?? '?'} px; Ride ${read.rideWidth.toFixed(0)} of ${read.goWidth.toFixed(0)} px`,
+      );
+      expect(read.columns).toBe(viewport.columns);
+      expect(read.tiles.length).toBeGreaterThan(1);
+      for (const [index, tile] of read.tiles.entries()) {
+        // The drawing fills the tile, edge to edge.
+        expect(Math.abs(tile.shapeLeftInset)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+        expect(tile.shapeWidth).toBeGreaterThanOrEqual(tile.width - SUBPIXEL_TOLERANCE);
+        expect(tile.shapeHeight).toBeGreaterThanOrEqual(100);
+        // The facts on a solid band at the foot, in the declared surface.
+        expect(Math.abs(tile.bandBottomInset)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+        // ...and the drawing stands on it: the slack in a row is sky, above.
+        expect(Math.abs(tile.shapeToBand)).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+        expect(tile.bandBackground).toBe(read.overlay);
+        expect(tile.bandText).toMatch(/ · climb .+ · steepest \d+%$/);
+        // The chosen tile: a tick and a word, and the doubled edge.
+        expect(tile.chosenMark).toBe(index === 0);
+        if (index === 0) {
+          expect(tile.chosenVisible).toBe(true);
+          expect(tile.doubledEdge).toContain('inset');
+        } else {
+          expect(tile.doubledEdge).toBe('none');
+        }
+      }
+      // One full-width Ride, still 48 px.
+      expect(read.rideWidth).toBeGreaterThanOrEqual(read.goWidth - SUBPIXEL_TOLERANCE);
+      expect(read.rideHeight).toBeGreaterThanOrEqual(CHOOSER_RIDE_TARGET_PIXELS);
+    });
+  }
+
+  test('control: the old one-per-row layout reads ONE column on the tablet', async ({ page }) => {
+    await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'list');
+    expect((await readTiles(page)).columns).toBe(1);
+  });
+
+  for (const viewport of CHOOSER_VIEWPORTS) {
+    test(`the realistic world is ONE line, first, and the promise’s place is last — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, viewport, 'chooser', 'all');
+      const line = await page.evaluate(() => {
+        const world = document.querySelector<HTMLElement>('.oyl-chooser__world');
+        const notices = [...document.querySelectorAll('.oyl-chooser__notices > *')];
+        const summary = world?.querySelector('summary')?.getBoundingClientRect();
+        const words = world?.querySelector('p');
+        const range = document.createRange();
+        if (words) range.selectNodeContents(words);
+        return {
+          slack: (words?.getBoundingClientRect().width ?? 0) - range.getBoundingClientRect().width,
+          height: world?.getBoundingClientRect().height ?? 0,
+          first: notices[0] === world,
+          summaryHeight: summary?.height ?? 0,
+          summaryWidth: summary?.width ?? 0,
+          link: world?.querySelector('a')?.textContent ?? '',
+        };
+      });
+      console.log(
+        `#1011 the realistic world's line — ${viewport.name}: ${line.height.toFixed(1)} px tall, ${line.slack.toFixed(1)} px to spare beside its words`,
+      );
+      expect(line.first).toBe(true);
+      expect(line.link).toBe('Change in Settings');
+      // One row: the ⓘ's 44 px target and the border, and nothing else.
+      expect(line.height).toBeLessThanOrEqual(44 + 4 + SUBPIXEL_TOLERANCE);
+      expect(line.summaryHeight).toBeGreaterThanOrEqual(44);
+      expect(line.summaryWidth).toBeGreaterThanOrEqual(44);
+    });
+  }
+});

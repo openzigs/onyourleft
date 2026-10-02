@@ -20,6 +20,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradePercent,
   routeProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -30,7 +31,7 @@ import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { pacerChoice } from './pacer-choice';
 import { DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
-import { RoutePicker, type RidableRoute } from './StageChooser';
+import { LOADOUT_HELP, RoutePicker, steepestClimbPercent, type RidableRoute } from './StageChooser';
 import { windChoice } from './wind-choice';
 
 function ridable(id: string, name: string, attempts: number, rise: number): RidableRoute {
@@ -135,6 +136,11 @@ function rideButton(root: ParentNode): HTMLButtonElement {
   return found[0] as HTMLButtonElement;
 }
 
+/** The standing notices above Ride: each box, and the realistic world's line. */
+function noticesOf(root: ParentNode): Element[] {
+  return queryAll(root, '.oyl-chooser__notices > *');
+}
+
 function radios(root: ParentNode): HTMLInputElement[] {
   // The route cards' group. Since #994 the loadout holds a second radio group,
   // the riding position, which is not a route.
@@ -142,7 +148,7 @@ function radios(root: ParentNode): HTMLInputElement[] {
 }
 
 describe('#940 — the order of the notices and Ride', () => {
-  it('puts every standing notice before Ride, in their old order', async () => {
+  it('puts every standing notice before Ride, with #503’s promise last (#1011)', async () => {
     const tree = await render({ notices: true, worldChosen: true });
     const ride = rideButton(tree.container);
     const text = tree.container.textContent ?? '';
@@ -153,23 +159,25 @@ describe('#940 — the order of the notices and Ride', () => {
       return index;
     };
     const order = [
+      at('Realistic world'),
       at(NOTICES.releaseNotice),
-      at(NOTICES.trainerPromise),
       at(NOTICES.trainerNotice),
-      at('Your rides are in the realistic world'),
+      at(NOTICES.trainerPromise),
       at(ride.textContent ?? ''),
     ];
     expect(order).toEqual([...order].sort((a, b) => a - b));
 
     // And by the DOM's own reckoning, element against element.
-    const statuses = queryAll(tree.container, '.oyl-status');
-    expect(statuses).toHaveLength(4);
-    for (const status of statuses) {
+    const notices = noticesOf(tree.container);
+    expect(notices).toHaveLength(4);
+    for (const notice of notices) {
       expect(
-        status.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING,
-        `${status.textContent ?? ''} comes before Ride`,
+        notice.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `${notice.textContent ?? ''} comes before Ride`,
       ).toBeTruthy();
     }
+    // The promise is the LAST notice: nothing stands between it and Ride.
+    expect(notices.at(-1)?.textContent).toContain(NOTICES.trainerPromise);
   });
 
   it('says it is asking in the promise’s place, still before Ride, and marks Ride unavailable', async () => {
@@ -186,7 +194,7 @@ describe('#940 — the order of the notices and Ride', () => {
     const tree = await render({ notices: true, worldChosen: true });
     const cards = tree.container.querySelector('.oyl-chooser__cards');
     const ride = rideButton(tree.container);
-    const notices = queryAll(tree.container, '.oyl-status');
+    const notices = noticesOf(tree.container);
     expect(notices).toHaveLength(4);
     for (const notice of notices) {
       expect(notice.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -266,7 +274,7 @@ describe('#940 — the route cards', () => {
   });
 
   for (const units of ['metric', 'imperial'] as const) {
-    it(`states each route's distance and climb in words, in ${units} units`, async () => {
+    it(`states each route's distance, climb and steepest gradient in words, in ${units} units`, async () => {
       const tree = await render({ units });
       const cards = queryAll(tree.container, '.oyl-chooser__card');
       expect(cards).toHaveLength(ROUTES.length);
@@ -275,7 +283,9 @@ describe('#940 — the route cards', () => {
         const distance = measurementText(formatDistance(route.profile.totalDistance, units));
         const climb = measurementText(formatSmallDistance(route.profile.totalAscent, units));
         const facts = card.querySelector('.oyl-chooser__facts');
-        expect(facts?.textContent).toBe(`${distance} · climb ${climb}`);
+        expect(facts?.textContent).toBe(
+          `${distance} · climb ${climb} · steepest ${String(steepestClimbPercent(route.profile))}%`,
+        );
         // The radio is described by the words, so a screen reader hears them.
         const radio = card.querySelector('input[type="radio"]');
         expect(radio?.getAttribute('aria-describedby')).toBe(facts?.id);
@@ -286,7 +296,7 @@ describe('#940 — the route cards', () => {
 
   it('draws each route’s shape, hidden from assistive technology', async () => {
     const tree = await render();
-    const shapes = queryAll(tree.container, '.oyl-chooser__card svg');
+    const shapes = queryAll(tree.container, '.oyl-chooser__card svg.oyl-chooser__shape');
     expect(shapes).toHaveLength(ROUTES.length);
     for (const shape of shapes) {
       expect(shape.getAttribute('aria-hidden')).toBe('true');
@@ -358,5 +368,83 @@ describe('#994 — game-style controls in the loadout', () => {
     await activateWithKeyboard(increase as HTMLButtonElement);
     expect(typed).toEqual(['2.6']);
     expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+});
+
+describe('#1011 — tiles, the loadout behind an ⓘ, and the realistic world in one line', () => {
+  it('reads the steepest CLIMB off the profile the trainer is sent, in whole per cent', () => {
+    const [low, high] = ROUTES as [RidableRoute, RidableRoute];
+    const climbOf = (route: RidableRoute): number =>
+      Math.max(0, ...route.profile.grades.map((grade) => grade as number));
+    expect(steepestClimbPercent(low.profile)).toBe(Math.round(climbOf(low)));
+    expect(steepestClimbPercent(high.profile)).toBe(Math.round(climbOf(high)));
+    // The steeper hill reads steeper, so the number is not a constant.
+    expect(steepestClimbPercent(high.profile)).toBeGreaterThan(steepestClimbPercent(low.profile));
+    // A route that only falls has no climb, rather than its steepest descent.
+    const falling = ridable('c', 'Down', 0, 0);
+    const descent = {
+      ...falling.profile,
+      grades: falling.profile.grades.map((grade) => gradePercent(-Math.abs(grade) - 3)),
+    };
+    expect(steepestClimbPercent(descent)).toBe(0);
+  });
+
+  it('marks the chosen tile with a tick and a word, hidden from assistive technology', async () => {
+    const tree = await render();
+    const marks = (): Element[] => queryAll(tree.container, '.oyl-chooser__chosen');
+    expect(marks()).toHaveLength(1);
+    const card = (index: number): Element =>
+      queryAll(tree.container, '.oyl-chooser__card')[index] as Element;
+    expect(card(0).contains(marks()[0] as Element)).toBe(true);
+    expect(marks()[0]?.textContent).toBe('Chosen');
+    expect(marks()[0]?.getAttribute('aria-hidden')).toBe('true');
+    await activateWithKeyboard(radios(tree.container)[1] as HTMLInputElement);
+    await settle();
+    expect(marks()).toHaveLength(1);
+    expect(card(1).contains(marks()[0] as Element)).toBe(true);
+  });
+
+  it('puts the facts on their own band, after the drawing', async () => {
+    const tree = await render();
+    for (const card of queryAll(tree.container, '.oyl-chooser__card')) {
+      const shape = card.querySelector('svg');
+      const facts = card.querySelector('.oyl-chooser__facts');
+      expect(card.lastElementChild).toBe(facts);
+      expect(
+        (shape as Element).compareDocumentPosition(facts as Element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('puts the loadout’s explanations behind one closed ⓘ, named for the loadout', async () => {
+    const tree = await render();
+    const loadout = tree.container.querySelector('.oyl-chooser__loadout') as Element;
+    const help = loadout.querySelector<HTMLDetailsElement>('details.oyl-chooser__help');
+    expect(help?.open).toBe(false);
+    expect(help?.querySelector('summary')?.textContent).toBe('Help with your ride');
+    expect([...(help?.querySelectorAll('p') ?? [])].map((each) => each.textContent)).toEqual(
+      LOADOUT_HELP,
+    );
+    // Nothing explains itself outside the ⓘ: the position's paragraph moved.
+    const outside = [...loadout.querySelectorAll('p')].filter(
+      (each) => !(help as Element).contains(each),
+    );
+    expect(outside.map((each) => each.textContent)).toEqual([]);
+    await activateWithKeyboard(help?.querySelector('summary') as HTMLElement);
+    expect(help?.open).toBe(true);
+  });
+
+  it('shows the realistic world as one line with its link, the fallback one press away', async () => {
+    const tree = await render({ worldChosen: true });
+    const line = tree.container.querySelector('.oyl-chooser__world');
+    expect(line).not.toBeNull();
+    expect(line?.classList.contains('oyl-status')).toBe(false);
+    const link = line?.querySelector('a');
+    expect(link?.textContent).toBe('Change in Settings');
+    expect(link?.getAttribute('href')).toBe('#/settings');
+    const more = line?.querySelector<HTMLDetailsElement>('details');
+    expect(more?.open).toBe(false);
+    expect(more?.textContent).toContain('the ride is in the standard world instead');
   });
 });

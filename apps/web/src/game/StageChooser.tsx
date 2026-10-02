@@ -3,8 +3,9 @@
 /**
  * The trainer game's pre-ride chooser — #940, epic #935.
  *
- * What a rider sees before a ride: the routes as CARDS, each with its own
- * elevation drawn from its profile and its distance and climb in words; the
+ * What a rider sees before a ride: the routes as TILES, each filled by its own
+ * elevation drawn from its profile, with its distance, climb and steepest
+ * gradient in words on a solid band (#1011); the
  * ride's LOADOUT (the ghost, the pacer, the riding position and the wind); and
  * ONE *Ride*, for the chosen route. It was a bulleted list with a checkbox and
  * a button per route (`GameView.tsx` until #940), and everything that list did
@@ -14,12 +15,13 @@
  *
  * ## What did NOT change, and must not
  *
- * - **Every standing notice is ABOVE *Ride*, in its old order and words**:
- *   the release fault (#372), *Asking your trainer* or the trainer promise
- *   (#509, #503), the trainer notice (#362) and the realistic world (#475).
- *   #503 is the one that matters most: the promise is what makes the press
- *   that asks the trainer for control the rider's decision, so it has to be
- *   read before *Ride*. They come FIRST, under the heading, and *Ride* comes
+ * - **Every standing notice is ABOVE *Ride***, in this order since #1011:
+ *   the realistic world as one compact line (#475), the release fault (#372),
+ *   the trainer notice (#362), and *Asking your trainer* or the trainer
+ *   promise (#509, #503) LAST, straight before *Ride*. #503 is the one that
+ *   matters most: the promise is what makes the press that asks the trainer
+ *   for control the rider's decision, so it is the last thing read before
+ *   *Ride*. They come FIRST, under the heading, and *Ride* comes
  *   straight after them — before the cards and the loadout — all in the flow
  *   and none of it pinned. #940's first review found a pinned stack of the
  *   notices covering the controls a rider tabs to (WCAG 2.2 SC 2.4.11); its
@@ -53,6 +55,7 @@
  * target and still holds exactly one control.
  */
 
+import { Check, Info } from 'lucide-react';
 import { useId, type JSX } from 'react';
 
 import {
@@ -211,9 +214,30 @@ function routeClimb(climb: number, units: UnitSystem): string {
   return measurementText(formatSmallDistance(climb, units));
 }
 
-/** What a card says about its route, in words: the drawing above it says nothing more. */
-function routeFacts(profile: RouteProfile, units: UnitSystem): string {
-  return `${routeLength(profile.totalDistance, units)} · climb ${routeClimb(profile.totalAscent, units)}`;
+/**
+ * The steepest climb on a route, in whole per cent — #1011.
+ *
+ * Read off `RouteProfile.grades`, which is the gradient the trainer is sent
+ * (#89's three windows, so one bad elevation reading is not a 40 % wall), and
+ * the CLIMB only: "the hardest gradient" a rider asks about before a ride is
+ * the one they have to push up. A route that only falls is `0`.
+ */
+export function steepestClimbPercent(profile: RouteProfile): number {
+  let steepest = 0;
+  for (const grade of profile.grades) {
+    if (grade > steepest) {
+      steepest = grade;
+    }
+  }
+  return Math.round(steepest);
+}
+
+/**
+ * What a tile says about its route, in words: the drawing above it says
+ * nothing more. Distance, climb and — since #1011 — the steepest gradient.
+ */
+export function routeFacts(profile: RouteProfile, units: UnitSystem): string {
+  return `${routeLength(profile.totalDistance, units)} · climb ${routeClimb(profile.totalAscent, units)} · steepest ${String(steepestClimbPercent(profile))}%`;
 }
 
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */
@@ -283,28 +307,19 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const chosen = props.routes.find((route) => route.id === props.picked) ?? first;
   const headingId = `${ids}-heading`;
   const notices = [
+    props.worldChosen ? (
+      // #475, and since #1011 ONE compact line rather than a box: which world,
+      // and the way back to the choice, with D-7's offline fallback one press
+      // away. FIRST, because it is about the world rather than the machine,
+      // and #503's promise has to be the last thing before Ride.
+      // @see RealisticWorldLine
+      <RealisticWorldLine key="world" />
+    ) : undefined,
     props.releaseNotice === undefined ? undefined : (
-      // #372: first, because it is about the machine under the rider now
-      // rather than the road they are about to choose.
+      // #372: about the machine under the rider now rather than the road they
+      // are about to choose.
       <StatusMessage key="release" tone="danger" label="Not released" live>
         {props.releaseNotice}
-      </StatusMessage>
-    ),
-    props.asking ? (
-      // #509: the press has asked, and the machine has up to the FTMS
-      // procedure's timeout to answer. Said here, in the promise's place,
-      // and `live` because it is a change the rider caused.
-      <StatusMessage key="asking" tone="info" label="Your trainer" live>
-        Asking your trainer for control. The ride starts when it answers.
-      </StatusMessage>
-    ) : props.trainerPromise === undefined ? undefined : (
-      // ⚠️ #503: **the sentence that makes the Ride press the rider's
-      // decision** rather than the screen's. It is above the button, so a
-      // rider reads that the trainer will follow the hills before the press
-      // that asks it for control. Not `live`: nothing changed, it is simply
-      // what this screen says.
-      <StatusMessage key="promise" tone="info" label="Your trainer">
-        {props.trainerPromise}
       </StatusMessage>
     ),
     props.trainerNotice === undefined ? undefined : (
@@ -318,15 +333,24 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         {props.trainerNotice}
       </StatusMessage>
     ),
-    props.worldChosen ? (
-      // #475: the offline fallback stated BEFORE the ride, where a rider can
-      // still act on it, and the way back to the choice.
-      // @see realisticWorldChosenText
-      <StatusMessage key="world" tone="info" label="Realistic world">
-        {realisticWorldChosenText()}{' '}
-        <a href={hrefFor(routeById('settings'))}>Change this in Settings</a>.
+    props.asking ? (
+      // #509: the press has asked, and the machine has up to the FTMS
+      // procedure's timeout to answer. Said here, in the promise's place,
+      // and `live` because it is a change the rider caused.
+      <StatusMessage key="asking" tone="info" label="Your trainer" live>
+        Asking your trainer for control. The ride starts when it answers.
       </StatusMessage>
-    ) : undefined,
+    ) : props.trainerPromise === undefined ? undefined : (
+      // ⚠️ #503: **the sentence that makes the Ride press the rider's
+      // decision** rather than the screen's. LAST of the notices since
+      // #1011, so it is straight before the button: a rider reads that the
+      // trainer will follow the hills, and the next thing is the press that
+      // asks it for control. Not `live`: nothing changed, it is simply what
+      // this screen says.
+      <StatusMessage key="promise" tone="info" label="Your trainer">
+        {props.trainerPromise}
+      </StatusMessage>
+    ),
   ].filter((each) => each !== undefined);
   return (
     <div className="oyl-game__picker oyl-chooser">
@@ -405,8 +429,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         labelledBy={headingId}
         idPrefix={ids}
       />
-      <div className="oyl-chooser__loadout tw:mb-md tw:bg-surface-raised tw:rounded-card">
-        <h3 className="tw:mt-0">Your ride</h3>
+      <div className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card">
+        <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
+        <LoadoutHelp />
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         <PacerControls
           withPacer={props.withPacer}
@@ -461,33 +486,53 @@ function RouteCards(props: {
         {props.routes.map((route, index) => {
           const radioId = `${group}-${String(index)}`;
           const factsId = `${radioId}-facts`;
+          const chosen = route.id === props.chosen.id;
           return (
             <li
               key={route.id}
-              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:py-sm tw:px-md tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card"
+              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:overflow-hidden tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card"
             >
               <input
-                className="oyl-chooser__radio tw:m-0"
+                className="oyl-chooser__radio tw:my-sm tw:ml-md tw:mr-0"
                 type="radio"
                 id={radioId}
                 name={group}
                 value={route.id}
-                checked={route.id === props.chosen.id}
+                checked={chosen}
                 aria-describedby={factsId}
                 onChange={() => {
                   props.onPick(route.id);
                 }}
               />
-              <h3 className="oyl-chooser__name tw:m-0 tw:text-md tw:wrap-anywhere">
+              <h3 className="oyl-chooser__name tw:my-sm tw:mx-0 tw:text-md tw:wrap-anywhere">
                 <label htmlFor={radioId} className="tw:cursor-pointer">
                   {route.name}
                 </label>
               </h3>
+              {/*
+                ⚠️ #1011: the chosen tile is told by more than colour — the
+                radio's dot, the doubled border, and THIS: a tick and a word.
+                Hidden from assistive technology, because the radio already
+                says "checked"; it is for the eye, and it survives a forced
+                palette, which flattens the border's colour.
+              */}
+              {chosen ? (
+                <span
+                  className="oyl-chooser__chosen tw:inline-flex tw:items-center tw:gap-xs tw:mr-md tw:text-accent"
+                  aria-hidden="true"
+                >
+                  <Check focusable="false" />
+                  Chosen
+                </span>
+              ) : undefined}
               <ProfileShape
-                className="oyl-chooser__shape tw:col-span-full tw:block tw:w-full tw:my-xs"
+                className="oyl-chooser__shape tw:col-span-full tw:block tw:w-full"
                 profile={route.profile}
               />
-              <p className="oyl-chooser__facts oyl-muted tw:col-span-full tw:m-0" id={factsId}>
+              <p
+                className="oyl-chooser__facts tw:col-span-full tw:m-0 tw:py-sm tw:px-md tw:bg-surface-overlay tw:text-ink"
+                id={factsId}
+              >
                 {routeFacts(route.profile, props.units)}
               </p>
             </li>
@@ -495,6 +540,67 @@ function RouteCards(props: {
         })}
       </ul>
     </fieldset>
+  );
+}
+
+/**
+ * The realistic world, as ONE compact line — #1011 (#475 before it).
+ *
+ * It was a full notice box, the tallest thing above *Ride* on a phone. What a
+ * rider must be able to act on before the ride is that the world is the
+ * realistic one and where to change it, so that is the line, with the link.
+ * ADR 0026 D-7's offline fallback — the realistic world is not kept for use
+ * offline, and a ride that cannot load it is in the standard world — is one
+ * press away under it, in the page (so offline and to a screen reader's
+ * page search alike), and the ride screen says so again if it happens.
+ * Nothing on this line is a safety sentence: the trainer's notices stay boxes.
+ */
+function RealisticWorldLine(): JSX.Element {
+  return (
+    <div className="oyl-chooser__world">
+      <p className="tw:m-0 tw:flex-1">
+        <span className="oyl-chooser__world-label">Realistic world</span>
+        {' · '}
+        <a href={hrefFor(routeById('settings'))}>Change in Settings</a>
+      </p>
+      <details className="oyl-chooser__world-more">
+        <summary>
+          <Info aria-hidden="true" focusable="false" />
+          <span className="oyl-visually-hidden">If the realistic world cannot load</span>
+        </summary>
+        <p className="tw:m-0">{realisticWorldChosenText()}</p>
+      </details>
+    </div>
+  );
+}
+
+/**
+ * The loadout's explanations, behind an ⓘ — #1011, the owner's #993 ruling
+ * applied to the loadout: each control keeps its one label, and what it does
+ * is here. A native disclosure, `ScreenHelp`'s reasons; not `ScreenHelp`
+ * itself, because that one is drawn beside a SCREEN's title and the game
+ * route already has one. No safety sentence is in here.
+ */
+export const LOADOUT_HELP: readonly string[] = [
+  'Your ghost is your own fastest ride of the chosen route, replayed beside you. A route you have not ridden yet has none.',
+  'A pacer rides beside you at the intensity you set, in watts per kilogram. Its own weight is fixed, so it rides the same whatever you weigh.',
+  'How you are riding is where your hands are. This sets how much air you are pushing, which is most of what decides your speed on the flat. Your weight is set on the Settings screen and is most of it on a climb.',
+  'A wind blows from the direction you set for the whole ride, so it is a headwind or a tailwind as the road turns.',
+];
+
+function LoadoutHelp(): JSX.Element {
+  return (
+    <details className="oyl-chooser__help">
+      <summary>
+        <Info aria-hidden="true" focusable="false" />
+        <span className="oyl-visually-hidden">Help with your ride</span>
+      </summary>
+      <div className="oyl-chooser__help-panel">
+        {LOADOUT_HELP.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -662,10 +768,6 @@ function PositionControl(props: {
           ))}
         </div>
       </fieldset>
-      <p className="oyl-muted tw:m-0">
-        This sets how much air you are pushing, which is most of what decides your speed on the
-        flat. Your weight is set on the Settings screen and is most of it on a climb.
-      </p>
     </div>
   );
 }

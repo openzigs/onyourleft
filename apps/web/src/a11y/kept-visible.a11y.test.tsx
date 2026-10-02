@@ -158,7 +158,11 @@ const KEPT: Record<RouteId, Kept> = {
     reason:
       'the release, the stall rescue, the recording-service notices and a lost control render only in states the walk does not reach; two mounted cases below cover them',
   },
-  game: { sentences: [], reason: NOTHING_TUCKED },
+  game: {
+    sentences: [],
+    reason:
+      'what it tucks (#1011) is how the loadout works and where the realistic world goes when it cannot load; every trainer notice and #503’s promise stay boxes above Ride',
+  },
   workouts: { sentences: [], reason: NOTHING_TUCKED },
   activities: { sentences: [], reason: NOTHING_TUCKED },
   analysis: { sentences: [], reason: NOTHING_TUCKED },
