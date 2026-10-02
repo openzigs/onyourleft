@@ -2798,8 +2798,10 @@ async function countingLinks<T>(body: (links: () => number) => Promise<T>): Prom
  * probe was being written a `prepare` that linked everything without the
  * ride's first frame staged left 600 of a 610 ms first frame where it was,
  * with a link count of zero (`three-renderer.ts` §`prepare`).
- * So the spec also holds the prepared frames' worst against the control's
- * first, by a wide factor. A software rasteriser's milliseconds are not a
+ * So the spec also holds the prepared first frame's excess over the frames
+ * after it against the control's, by a factor of two (`ride-start.ts`; until
+ * #997 it was the worst of ten prepared frames against the control's first,
+ * which flaked). A software rasteriser's milliseconds are not a
  * phone's; the tablet's are validation 0002 Part T's to re-take.
  *
  * ⚠️ **Not the GPU process's program cache.** The control's first frame costs
