@@ -356,7 +356,9 @@ export function WorkoutPanel({
           </StatusMessage>
         )}
         {!trainer.hasControl ? (
-          <p>
+          // #1013: trainer-control text, kept on the screen (the mark, not a
+          // wrapper, so the measured layout does not move).
+          <p data-oyl-kept-visible="">
             Ask the trainer for control first. A workout sets targets on the trainer, and it will
             refuse every one until control is granted.
           </p>
@@ -365,7 +367,7 @@ export function WorkoutPanel({
           // threshold, so a substituted threshold would put a made-up number on a
           // trainer — and `analysis/thresholds.ts` is the one place in this
           // program that supplies a default, deliberately.
-          <p>
+          <p data-oyl-kept-visible="">
             Set your threshold power on the Analysis screen first. A workout&rsquo;s targets are a
             share of it, so there is no number to send without one.
           </p>

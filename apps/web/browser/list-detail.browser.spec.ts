@@ -343,7 +343,11 @@ test.describe('#730 — the two panes’ headings are level', () => {
         await open(page, TABLET_IN_THE_SHELL);
         if (control) {
           await page.addStyleTag({
-            content: '.oyl-pane-skip + h2 { margin-top: var(--oyl-space-xl) !important; }',
+            // #1013: a list heading with an ⓘ is its wrapper's, so the gap goes
+            // back on both forms of the rule.
+            content:
+              '.oyl-pane-skip + h2, .oyl-pane-skip + .oyl-section-head ' +
+              '{ margin-top: var(--oyl-space-xl) !important; }',
           });
         }
         const lines: string[] = [];

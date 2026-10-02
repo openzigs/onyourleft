@@ -14,6 +14,7 @@ import {
 } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { useUnits } from '../units/context';
@@ -282,12 +283,23 @@ export function RouteBuilderView({
         </StatusMessage>
       ) : null}
 
-      <h2>Waypoints</h2>
-      <p>
-        Place waypoints in order; the roads between them are worked out for you. Every control here
-        works from the keyboard — a nudge moves a waypoint about{' '}
-        {measurementText(formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units))}.
-      </p>
+      {/* #1013: how waypoints work and the keyboard are the section's help, so
+        an empty route keeps its one line, "No waypoints yet". */}
+      <SectionHeading
+        level={2}
+        help={
+          <p>
+            Place waypoints in order; the roads between them are worked out for you. Every control
+            here works from the keyboard — a nudge moves a waypoint about{' '}
+            {measurementText(
+              formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units),
+            )}
+            .
+          </p>
+        }
+      >
+        Waypoints
+      </SectionHeading>
 
       {/*
         ⚠️ **A control that cannot act is absent, not disabled.**

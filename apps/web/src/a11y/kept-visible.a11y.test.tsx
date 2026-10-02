@@ -40,6 +40,7 @@ import { watts } from '@onyourleft/domain';
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
 import { CameraController } from '../camera/session';
+import { CAMERA_NOTICE_SENTENCES, CAMERA_NOTICES } from '../camera/notice';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 
 import { OSM_ATTRIBUTION, PUBLISHED_BASEMAP_URL } from '../map/basemap';
@@ -58,11 +59,21 @@ import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
 import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
 import { DEVICES_KEPT_VISIBLE, DevicesView } from '../views/DevicesView';
-import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD } from '../detail/write-up';
+import {
+  COMPUTER_SENDS,
+  COMPUTER_SENDS_LEAD,
+  WRITE_UP_FRAMING_LEAD,
+  WRITE_UP_FRAMING_REST,
+  WRITE_UP_POSE_TEXT,
+  WRITE_UP_SOURCE_TEXT,
+} from '../detail/write-up';
+import { ACTIVITY_DETAIL_KEPT_VISIBLE } from '../views/ActivityDetailView';
 import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RACE_CONSENT_SENTENCE } from '../detail/RaceConsentSection';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
+import { ACTIVITIES_KEPT_VISIBLE } from '../views/ActivitiesView';
 import { RideView } from '../views/RideView';
+import { ROUTES_KEPT_VISIBLE } from '../views/RoutesView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
 import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
@@ -98,6 +109,10 @@ const RIDE_KEPT_VISIBLE: readonly string[] = ['Everything stays on this device.'
 /** What the populated walk's Ride screen renders: a trainer under this app's control, in ERG. */
 const RIDE_POPULATED_KEPT_VISIBLE: readonly string[] = [
   'This app has control of the trainer.',
+  // #1013: the workout's refusal while no threshold is set, and the trainer's
+  // range, are marked kept.
+  'Set your threshold power on the Analysis screen first.',
+  'This trainer accepts',
   'ERG, optional:',
   'A target is quantised to that step before it is written.',
   'A workout’s targets are a share of it, so there is no number to send without one.',
@@ -118,6 +133,8 @@ const RIDE_CONTROLLED_KEPT_VISIBLE: readonly string[] = [
 /** A controllable trainer this app does not hold, after the link dropped. */
 const RIDE_UNCONTROLLED_KEPT_VISIBLE: readonly string[] = [
   'This app does not have control of the trainer.',
+  // #1013: the rest of the control sentence, now marked kept.
+  'Ask for it to ride a workout or set ERG; the trainer game asks when you press Ride.',
   'Control lost',
   LOSS_REASON['link-lost'],
   'Ask the trainer for control first.',
@@ -128,10 +145,14 @@ const RIDE_UNCONTROLLED_KEPT_VISIBLE: readonly string[] = [
 const KEPT: Record<RouteId, Kept> = {
   settings: { sentences: SETTINGS_KEPT_VISIBLE },
   camera: {
-    sentences: CAMERA_KEPT_VISIBLE.filter(
-      (sentence) => !CAMERA_AGREED_KEPT_VISIBLE.includes(sentence),
-    ),
-    elsewhere: CAMERA_AGREED_KEPT_VISIBLE,
+    sentences: [
+      ...CAMERA_KEPT_VISIBLE.filter((sentence) => !CAMERA_AGREED_KEPT_VISIBLE.includes(sentence)),
+      // #1013: the camera's own state before it is agreed to — that it has never
+      // been on and has captured nothing — which both walks render.
+      CAMERA_NOTICES['no-consent'].explanation,
+    ],
+    // #1013: a camera notice is kept whole; the walk meets only `no-consent`.
+    elsewhere: [...CAMERA_AGREED_KEPT_VISIBLE, ...CAMERA_NOTICE_SENTENCES],
     reason:
       '“Your own computer” and the hosted model (#518) render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
   },
@@ -164,9 +185,9 @@ const KEPT: Record<RouteId, Kept> = {
       'what it tucks (#1011) is how the loadout works and where the realistic world goes when it cannot load; every trainer notice and #503’s promise stay boxes above Ride',
   },
   workouts: { sentences: [], reason: NOTHING_TUCKED },
-  activities: { sentences: [], reason: NOTHING_TUCKED },
+  activities: { sentences: ACTIVITIES_KEPT_VISIBLE },
   analysis: { sentences: [], reason: NOTHING_TUCKED },
-  routes: { sentences: [], reason: NOTHING_TUCKED },
+  routes: { sentences: ROUTES_KEPT_VISIBLE },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   // #778: what an instance receives, before sign-in and after; and, once
@@ -194,6 +215,18 @@ const KEPT: Record<RouteId, Kept> = {
       // #836: the note box's disclosure (ADR 0040 D-11) — where the note goes and
       // that a model reads it.
       ...RIDER_TEXT_KEPT_VISIBLE,
+      // #1013: the write-up's framing (ADR 0035 D-9 A), and what a shared copy
+      // would hide.
+      WRITE_UP_FRAMING_LEAD,
+      WRITE_UP_FRAMING_REST,
+      ...ACTIVITY_DETAIL_KEPT_VISIBLE,
+    ],
+    // #1013: where the write-up came from, what it was sent and what it leaves
+    // out — the fixture's write-up says one of each.
+    elsewhere: [
+      ...Object.values(WRITE_UP_SOURCE_TEXT),
+      ...Object.values(WRITE_UP_POSE_TEXT),
+      'could not be analysed, so the write-up says nothing about',
     ],
     reason:
       'the empty walk opens a ride that is not on the device, so nothing of the write-up renders there',

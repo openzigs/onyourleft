@@ -9,6 +9,8 @@ import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
+import { KeptVisible } from '../design/MoreAbout';
+import { SectionHeading } from '../design/SectionHelp';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { Reading } from '../design/Reading';
@@ -339,8 +341,7 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       <a className="oyl-button oyl-button--secondary" href={hrefFor(ROUTE_BUILDER_ROUTE)}>
         Draw a route on this device
       </a>{' '}
-      — place waypoints and have the roads between them worked out. A half-drawn route survives
-      closing the tab.
+      — place waypoints and have the roads between them worked out.
     </p>
   );
 
@@ -456,6 +457,8 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       route={routeById('routes')}
       selection={selected}
       listLabel="Saved routes"
+      // #1013: the list keeps its one line, and this is behind its ⓘ.
+      listHelp={<p>A half-drawn route survives closing the tab.</p>}
       detailLabel="Route"
       backLabel="All routes"
       detailWithoutSelection
@@ -464,21 +467,47 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
         <>
           {chosen ?? (
             <>
-              <h2 id={CREATE_HEADING_ID} tabIndex={-1}>
+              {/*
+        #1013: the import keeps one line — what the file is, and that it stays on
+        this device — and the rest is behind the section's ⓘ: what an import
+        here becomes (#232's third criterion; the wording is a constant in
+        `routes/two-importers.ts`, shared with the Files screen and the Trainer
+        game's empty picker, so one distinction is not explained three ways),
+        and what the loop switch asks of the file — which names the switch now,
+        because it is read above the switch rather than under it.
+      */}
+              <SectionHeading
+                level={2}
+                id={CREATE_HEADING_ID}
+                tabIndex={-1}
+                help={
+                  <>
+                    <p>
+                      {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is
+                      where those go.
+                    </p>
+                    {/*
+          ⚠️ The threshold is shown in the rider's own units (#238) while the
+          refusal quotes the importer's metres, because the refusal's numbers
+          come from `packages/domain`, which has no unit preference and must not
+          acquire one — a profile is arithmetic and a rider's choice of units is
+          a client's. Both name the same distance.
+        */}
+                    <p>
+                      Turn on &ldquo;{LOOP_CHECKBOX_LABEL}&rdquo; for a circuit that finishes where
+                      it starts, so riding past the finish begins another lap. The file has to
+                      close: if its two ends are more than{' '}
+                      {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart,
+                      nothing is saved and the import says how far apart they are.
+                    </p>
+                  </>
+                }
+              >
                 Import a route
-              </h2>
+              </SectionHeading>
               <p>
                 A GPX file from a route planner. The file is read on this device and never sent
                 anywhere.
-              </p>
-              {/*
-        #232's third criterion. The wording is a constant in
-        `routes/two-importers.ts`, shared with the Files screen and the Trainer
-        game's empty picker, so one distinction is not explained three ways.
-      */}
-              <p>
-                {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is where
-                those go.
               </p>
               {/* Named: #670's audit of a populated screen found two unnamed forms. */}
               <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
@@ -504,19 +533,6 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
                   <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
                   <input id="route-loop" name={LOOP_FIELD} type="checkbox" role="switch" />
                 </p>
-                {/*
-          ⚠️ The threshold is shown in the rider's own units (#238) while the
-          refusal quotes the importer's metres, because the refusal's numbers
-          come from `packages/domain`, which has no unit preference and must not
-          acquire one — a profile is arithmetic and a rider's choice of units is
-          a client's. Both name the same distance.
-        */}
-                <p>
-                  Turn it on for a circuit that finishes where it starts, so riding past the finish
-                  begins another lap. The file has to close: if its two ends are more than{' '}
-                  {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart, nothing
-                  is saved and the import says how far apart they are.
-                </p>
                 <Button type="submit">Import route</Button>
               </form>
             </>
@@ -539,12 +555,21 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
             </StatusMessage>
           )}
           <h2>Before you share a route</h2>
-          <p>{PUBLIC_ROUTE_WARNING}</p>
+          {/* #1013: a privacy warning, so it is kept on the screen whole. */}
+          <KeptVisible>
+            <p>{PUBLIC_ROUTE_WARNING}</p>
+          </KeptVisible>
         </>
       }
     />
   );
 }
+
+/**
+ * What the Routes screen keeps on the screen whatever its length — #1013: who
+ * can see a shared route, and what a privacy zone does and does not hide.
+ */
+export const ROUTES_KEPT_VISIBLE: readonly string[] = [PUBLIC_ROUTE_WARNING];
 
 interface SelectedRouteProps {
   readonly route: RouteRecord;

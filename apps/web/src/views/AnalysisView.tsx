@@ -32,6 +32,7 @@ import type { AnalysisPort } from '../analysis/store-port';
 import { thresholdsToSave } from '../analysis/thresholds';
 import { Button, ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
@@ -254,7 +255,14 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       ) : undefined}
 
       <section className="oyl-panel" aria-labelledby="oyl-zones-heading">
-        <h2 id="oyl-zones-heading">Time in zone</h2>
+        {/* #1013: each section keeps one line, and its explanation is behind its ⓘ. */}
+        <SectionHeading
+          level={2}
+          id="oyl-zones-heading"
+          help={<p>A ride recorded without a power meter or a strap carries neither.</p>}
+        >
+          Time in zone
+        </SectionHeading>
 
         <p>
           <label htmlFor="oyl-zone-ride">Ride</label>{' '}
@@ -304,8 +312,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           <>
             {zones.power === undefined && zones.heartRate === undefined ? (
               <p className="oyl-muted">
-                That ride has no power and no heart-rate data, so there are no zones to show. A ride
-                recorded without a power meter or a strap carries neither.
+                That ride has no power and no heart-rate data, so there are no zones to show.
               </p>
             ) : undefined}
 
@@ -335,13 +342,20 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       </section>
 
       <section className="oyl-panel" aria-labelledby="oyl-fitness-heading">
-        <h2 id="oyl-fitness-heading">Fitness and fatigue</h2>
-        <p className="oyl-muted">
-          Your training load, smoothed two ways: <strong>fitness</strong> over about six weeks and{' '}
-          <strong>fatigue</strong> over about one. <strong>Freshness</strong> is the gap between
-          them. Rising fatigue is what training looks like, not a warning — this page reports what
-          moved and by how much, and does not tell you whether that is good.
-        </p>
+        <SectionHeading
+          level={2}
+          id="oyl-fitness-heading"
+          help={
+            <p>
+              Your training load, smoothed two ways: <strong>fitness</strong> over about six weeks
+              and <strong>fatigue</strong> over about one. <strong>Freshness</strong> is the gap
+              between them. Rising fatigue is what training looks like, not a warning — this page
+              reports what moved and by how much, and does not tell you whether that is good.
+            </p>
+          }
+        >
+          Fitness and fatigue
+        </SectionHeading>
 
         {history === undefined ? (
           <p className="oyl-muted">Reading your history…</p>
@@ -358,11 +372,20 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       </section>
 
       <section className="oyl-panel" aria-labelledby="oyl-thresholds-heading">
-        <h2 id="oyl-thresholds-heading">Your thresholds</h2>
+        <SectionHeading
+          level={2}
+          id="oyl-thresholds-heading"
+          help={
+            <p>
+              Every zone boundary and every load on this page is derived from these two numbers.
+              Leave one blank to go back to the assumed default.
+            </p>
+          }
+        >
+          Your thresholds
+        </SectionHeading>
         <p className="oyl-muted">
-          Every zone boundary and every load on this page is derived from these two numbers. Leave
-          one blank to go back to the assumed default. Nothing is sent anywhere — they are stored on
-          this device with your rides.
+          Nothing is sent anywhere — they are stored on this device with your rides.
         </p>
 
         <div className="oyl-trainer__form">
@@ -411,13 +434,20 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       </section>
 
       <section className="oyl-panel" aria-labelledby="oyl-bests-heading">
-        <h2 id="oyl-bests-heading">Duration personal bests</h2>
-        <p className="oyl-muted">
-          The best average power you have held for each length of time, anywhere in any ride on this
-          device. These are <strong>not</strong> segment bests: a duration best is a span of time, a
-          segment best is a named stretch of road. This device does not hold segment bests — they
-          are a separate feature and they will be shown separately.
-        </p>
+        <SectionHeading
+          level={2}
+          id="oyl-bests-heading"
+          help={
+            <p>
+              The best average power you have held for each length of time, anywhere in any ride on
+              this device. These are <strong>not</strong> segment bests: a duration best is a span
+              of time, a segment best is a named stretch of road. This device does not hold segment
+              bests — they are a separate feature and they will be shown separately.
+            </p>
+          }
+        >
+          Duration personal bests
+        </SectionHeading>
 
         {state.kind === 'ready' ? <BestsTable bests={state.bests} /> : undefined}
       </section>

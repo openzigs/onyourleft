@@ -259,7 +259,13 @@ export function TrainerPanel({
 
   return (
     <>
-      <p className="oyl-trainer__state">{controlSentence(trainer)}</p>
+      {/* #1013: trainer-control text is kept on the screen, never tucked behind
+        a section's help, and the mark says so to the gates that read it. A mark
+        on the paragraph rather than a wrapper, so the layout the Ride screen's
+        fold is measured against does not move. */}
+      <p className="oyl-trainer__state" data-oyl-kept-visible="">
+        {controlSentence(trainer)}
+      </p>
 
       {/*
         ⚠️ The observable half of the precedence rule (#370).
@@ -380,7 +386,7 @@ export function TrainerPanel({
             above the notice in one column — `controller.ts`
             §`MANUAL_ERG_DURING_WORKOUT`, held by `rideview.browser.spec.ts`.
           */}
-          <p className="oyl-trainer__erg">
+          <p className="oyl-trainer__erg" data-oyl-kept-visible="">
             <strong>ERG, optional:</strong> {targetSentence(trainer)}
             {refuseByHand ? ` ${MANUAL_ERG_DURING_WORKOUT}` : null}
           </p>
@@ -405,7 +411,7 @@ export function TrainerPanel({
                 End ERG
               </Button>
               {range === undefined ? null : (
-                <p className="oyl-muted">
+                <p className="oyl-muted" data-oyl-kept-visible="">
                   This trainer accepts {range.minimum} W to {range.maximum} W in steps of{' '}
                   {range.increment} W. A target is quantised to that step before it is written.
                 </p>

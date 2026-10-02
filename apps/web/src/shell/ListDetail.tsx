@@ -75,6 +75,7 @@ import {
 
 import { ButtonLink } from '../design/Button';
 import { ScreenNotes } from '../design/ScreenHelp';
+import { SectionHeading } from '../design/SectionHelp';
 
 import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
 
@@ -149,6 +150,11 @@ export interface ListDetailProps {
   readonly selection: string | undefined;
   /** The list pane's heading, and so its region's name. */
   readonly listLabel: string;
+  /**
+   * What the list's ⓘ holds, beside its heading — #1013. Absent where the
+   * list explains nothing beyond its one line.
+   */
+  readonly listHelp?: ReactNode;
   /** The detail pane's region name. */
   readonly detailLabel: string;
   /** What the one-pane back link says, e.g. "All rides". */
@@ -167,6 +173,7 @@ export function ListDetail({
   route,
   selection,
   listLabel,
+  listHelp,
   detailLabel,
   backLabel,
   list,
@@ -324,7 +331,13 @@ export function ListDetail({
               Skip to {detailLabel.toLowerCase()}
             </a>
           ) : null}
-          <h2 id={listHeadingId}>{listLabel}</h2>
+          {listHelp === undefined ? (
+            <h2 id={listHeadingId}>{listLabel}</h2>
+          ) : (
+            <SectionHeading level={2} id={listHeadingId} help={listHelp}>
+              {listLabel}
+            </SectionHeading>
+          )}
           {list}
           {two ? notes : null}
         </section>

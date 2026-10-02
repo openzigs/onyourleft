@@ -36,6 +36,7 @@ import { useState, type JSX } from 'react';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import type {
   CreateRoomAnswer,
@@ -122,14 +123,23 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
   const settings = hrefFor(routeById('settings'));
-  const heading = <h2 id="oyl-rooms-heading">Ride with others</h2>;
+  // #1013: what a room is held on is the section's help; each state keeps its
+  // one line of what to do.
+  const heading = (
+    <SectionHeading
+      level={2}
+      id="oyl-rooms-heading"
+      help={<p>A private group ride or race is held on an instance.</p>}
+    >
+      Ride with others
+    </SectionHeading>
+  );
 
   if (props.rooms === undefined) {
     return (
       <section className="oyl-rooms" aria-labelledby="oyl-rooms-heading">
         {heading}
         <p>
-          A private group ride or race is held on an instance.{' '}
           <a href={settings}>Connect this device to one in Settings</a> to make a room or join one
           by its code.
         </p>

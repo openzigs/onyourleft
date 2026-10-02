@@ -36,6 +36,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { PairingCode } from '../camera/PairingCode';
 import type { CameraFacing } from '../camera/camera-port';
@@ -123,12 +124,24 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
 
   return (
     <section aria-labelledby={TITLE_ID}>
-      <h3 id={TITLE_ID}>A side camera on a tripod</h3>
-      <p>
-        Pair a spare phone on a tripod beside the bike, and start and stop its camera from this
-        tablet. Both devices must be on the same Wi-Fi. Nothing about the pairing is remembered: you
-        scan again every session.
-      </p>
+      {/* #1013: what the pairing needs is the section's one line; what it is
+        and what is not remembered are behind its ⓘ. */}
+      <SectionHeading
+        level={3}
+        id={TITLE_ID}
+        help={
+          <>
+            <p>
+              Pair a spare phone on a tripod beside the bike, and start and stop its camera from
+              this tablet.
+            </p>
+            <p>Nothing about the pairing is remembered: you scan again every session.</p>
+          </>
+        }
+      >
+        A side camera on a tripod
+      </SectionHeading>
+      <p>Both devices must be on the same Wi-Fi.</p>
       {current === undefined ? (
         <>
           <Button variant="secondary" onClick={pair} disabled={busy}>

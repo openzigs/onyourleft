@@ -95,6 +95,15 @@ export const CAMERA_NOTICES: Readonly<Record<CameraProblemKind, CameraNotice>> =
   },
 };
 
+/**
+ * Every sentence a camera notice can say — #1013. The Camera screen keeps a
+ * notice on the screen whole (`data-oyl-kept-visible`), and
+ * `a11y/kept-visible.a11y.test.tsx` bounds that mark by this list.
+ */
+export const CAMERA_NOTICE_SENTENCES: readonly string[] = Object.values(CAMERA_NOTICES).flatMap(
+  (notice) => [notice.explanation, ...(notice.instruction === null ? [] : [notice.instruction])],
+);
+
 /** The notice for a kind. Total, so there is no `undefined` to render. */
 export function cameraNotice(kind: CameraProblemKind): CameraNotice {
   return CAMERA_NOTICES[kind];

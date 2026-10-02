@@ -888,3 +888,69 @@ test.describe('#993 — the help control beside a title', () => {
     await expect(details).not.toHaveAttribute('open');
   });
 });
+
+test.describe('#1013 — the help control beside a section heading', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('is a 44 px target three ways (#316), beside its heading, named, and opened and closed from the keyboard', async ({
+    page,
+  }) => {
+    await open(page, PHONE, 'data=empty');
+    await visit(page, routeById('analysis'));
+    const head = page.locator('main .oyl-section-head').filter({ hasText: 'Your thresholds' });
+    const summary = head.locator('details.oyl-section-help > summary');
+    const read = await summary.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const shipped = element.getBoundingClientRect();
+      const declared = {
+        width: Number.parseFloat(style.minWidth),
+        height: Number.parseFloat(style.minHeight),
+      };
+      (element as HTMLElement).style.minWidth = '0';
+      (element as HTMLElement).style.minHeight = '0';
+      const stripped = element.getBoundingClientRect();
+      (element as HTMLElement).style.minWidth = '';
+      (element as HTMLElement).style.minHeight = '';
+      const heading = element.closest('.oyl-section-head')?.querySelector('h2, h3, h4');
+      const box = heading?.getBoundingClientRect();
+      const text = document.createRange();
+      if (heading !== null && heading !== undefined) text.selectNodeContents(heading);
+      const words = [...text.getClientRects()];
+      return {
+        shipped: { width: shipped.width, height: shipped.height },
+        declared,
+        stripped: { width: stripped.width, height: stripped.height },
+        middle: shipped.top + shipped.height / 2,
+        headingTop: box?.top ?? Number.NaN,
+        headingBottom: box?.bottom ?? Number.NaN,
+        wordsRight: Math.max(...words.map((rect) => rect.right)),
+        left: shipped.left,
+      };
+    });
+    console.log(`#1013 section help control: ${JSON.stringify(read)}`);
+    expect(read.shipped.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.shipped.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.declared.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.declared.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    // The control: without the declaration the glyph alone is far short.
+    expect(read.stripped.width).toBeLessThan(TOUCH_TARGET_PIXELS);
+    expect(read.stripped.height).toBeLessThan(TOUCH_TARGET_PIXELS);
+    // Beside the heading: on its row, and the heading's words stop short of it.
+    expect(read.middle).toBeGreaterThan(read.headingTop);
+    expect(read.middle).toBeLessThan(read.headingBottom);
+    expect(read.wordsRight).toBeLessThanOrEqual(read.left);
+
+    await expect(summary).toHaveAccessibleName('Help with Your thresholds');
+    const details = head.locator('details.oyl-section-help');
+    const panel = head.locator('.oyl-section-help__panel');
+    await expect(details).not.toHaveAttribute('open');
+    await expect(panel).toBeHidden();
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(details).toHaveAttribute('open', '');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('derived from these two numbers');
+    await page.keyboard.press('Space');
+    await expect(details).not.toHaveAttribute('open');
+  });
+});

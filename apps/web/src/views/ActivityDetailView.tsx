@@ -191,6 +191,16 @@ function WayOut(): JSX.Element {
   );
 }
 
+/**
+ * What a ride's page keeps on the screen whatever its length — #1013: whose
+ * track the rider is looking at, and what a published copy would have done to
+ * it first.
+ */
+export const ACTIVITY_DETAIL_KEPT_VISIBLE: readonly string[] = [
+  'Your own view shows your own track, whole — this ride is yours.',
+  'A copy published anywhere else would have your privacy zones applied to it first.',
+];
+
 export function ActivityDetailView({
   port,
   activityId,
@@ -631,7 +641,9 @@ export function ActivityDetailView({
             <SharedSummary track={shared} own={activity.distance} />
           ) : (
             <>
-              <p className="oyl-muted">
+              {/* #1013: what a published copy would hide is a privacy sentence,
+                kept on the screen whole. */}
+              <p className="oyl-muted" data-oyl-kept-visible="">
                 Your own view shows your own track, whole — this ride is yours. A copy published
                 anywhere else would have your privacy zones applied to it first.
               </p>
