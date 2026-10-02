@@ -546,13 +546,17 @@ export const FONT_SIZE_TOKENS = {
   lg: '1.25rem',
   /** Step 2. A section heading inside a view. */
   xl: '1.5625rem',
-  /** Step 3. The title of the view. */
+  /**
+   * Step 3. A reading's numerals (#992): a time, a distance, a power, a climb
+   * or a count, set large and tabular by `design/Reading.tsx`. Until #992 this
+   * was the view title, which is `display` now.
+   */
   xxl: '1.953125rem',
   /**
-   * Step 4 (#936). A hero title on a menu — the one line on a screen that says
-   * what the screen is for, set above the view title on the same ladder, at a
-   * heavier weight and — since #991 — in {@link FONT_FAMILY_TOKENS}' display
-   * face; `theme.css` §`.oyl-display` is the rule that sets all three.
+   * Step 4 (#936). The title of every view since #992 — the one line on a
+   * screen that says what the screen is for — at a heavier weight and, since
+   * #991, in {@link FONT_FAMILY_TOKENS}' display face; `theme.css`
+   * §`h1, .oyl-display` is the rule that sets all three.
    */
   display: '2.44140625rem',
   /**
@@ -576,17 +580,20 @@ export const FONT_SIZE_TOKENS = {
 } as const satisfies Record<string, string>;
 
 /**
- * The font families, by role — #991, ADR 0043.
+ * The font families, by role — #992 and #991 (ADR 0043).
  *
- * `display` is the bundled face, Barlow (SIL OFL 1.1, subset and committed
- * under `design/fonts/` by `tools/fonts/subset-fonts.ts`), in front of the
- * same system stack `body` uses, so a weight it does not carry or a character
- * outside its Latin range falls back to the page's own face rather than to a
- * missing glyph. Chosen against Barlow Condensed, Saira, Archivo, Exo 2 and
- * Rajdhani on legibility, true tabular figures, weights and size; ADR 0043
- * D-6 records the measurements.
+ * `body` is every word that is not a view's title or `.oyl-display`: the
+ * page's own `system-ui` stack. `display` is the bundled face, Barlow (SIL OFL
+ * 1.1, subset and committed under `design/fonts/` by
+ * `tools/fonts/subset-fonts.ts`), in front of the same system stack, so a
+ * weight it does not carry or a character outside its Latin range falls back
+ * to the page's own face rather than to a missing glyph. Chosen against Barlow
+ * Condensed, Saira, Archivo, Exo 2 and Rajdhani on legibility, true tabular
+ * figures, weights and size; ADR 0043 D-6 records the measurements.
+ * `theme.a11y.test.ts` holds this table and `theme.css` equal.
  */
 export const FONT_FAMILY_TOKENS = {
+  body: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   display: "'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif",
 } as const satisfies Record<string, string>;
 
@@ -1026,6 +1033,13 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 11.01, dark: 11.65 },
     where: 'the border of a button under a pointer, on the page (#668, #688)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'canvas',
+    minimum: AA_TEXT,
+    measured: { light: 11.01, dark: 11.65 },
+    where: 'the label of a tertiary (text) button under a pointer or a press, on the page (#992)',
   },
   {
     foreground: 'accentHover',

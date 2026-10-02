@@ -68,6 +68,7 @@ describe('Button', () => {
       <>
         <Button>Start</Button>
         <Button variant="secondary">Pause</Button>
+        <Button variant="tertiary">Keep the ride</Button>
         <Button variant="toggle" pressed={false}>
           Mute sounds
         </Button>
@@ -76,6 +77,7 @@ describe('Button', () => {
     expect([...mounted.container.querySelectorAll('button')].map((b) => b.className)).toEqual([
       'oyl-button',
       'oyl-button oyl-button--secondary',
+      'oyl-button oyl-button--tertiary',
       'oyl-button oyl-button--toggle',
     ]);
   });

@@ -5,7 +5,8 @@
  *
  * A view has three kinds of button (`design/Button.tsx` §`ButtonVariant`):
  * **primary** for the one action the view exists for, **secondary** for every
- * other action, and **toggle** for a control that changes how something is
+ * other action, **tertiary** (#992) for the lowest of them, drawn as text, and
+ * **toggle** for a control that changes how something is
  * shown rather than what happens. A rider tells the action from the setting by
  * weight, and weight only means something if there is one heaviest control —
  * so a `main` may hold **at most one** primary.
@@ -42,7 +43,7 @@
 
 /** Every element drawn as a primary button. */
 export const PRIMARY_BUTTON_SELECTOR =
-  '.oyl-button:not(.oyl-button--secondary):not(.oyl-button--toggle)';
+  '.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle)';
 
 /** Every element drawn as a button of any kind. */
 export const ANY_BUTTON_SELECTOR = '.oyl-button';

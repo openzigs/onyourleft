@@ -95,11 +95,15 @@
   --text-display: var(--oyl-font-size-display);
   --text-metric: var(--oyl-font-size-metric);
 
-  /* The font families (#991, ADR 0043) — `font-display` is the bundled face. */
+  /* The font families (#992, #991 and ADR 0043) — `font-body` is the page's
+     own stack and `font-display` the bundled face. */
+  --font-body: var(--oyl-font-family-body);
   --font-display: var(--oyl-font-family-display);
 
-  /* The one radius — `rounded`. */
+  /* The two radii — `rounded` for a control, `rounded-card` for a filled tile
+     (#992). */
   --radius: var(--oyl-radius);
+  --radius-card: var(--oyl-radius-card);
 
   /* Motion (#936, ADR 0041 D-5): the one curve, and the default a bare
      `transition-colors` takes. `duration-short` and `duration-medium` are the

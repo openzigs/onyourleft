@@ -39,6 +39,7 @@ import {
   UNITS_SAVED,
   ANNOUNCEMENTS_NOT_KEPT,
   ANNOUNCEMENTS_SAVED,
+  APPEARANCE_STARTS_DARK,
   KIT_NO_ATHLETE,
   KIT_KEPT,
   KIT_NO_STORE,
@@ -1294,7 +1295,7 @@ describe('appearance — #672', () => {
     return found;
   }
 
-  it('offers three choices as native radios in one group, following the device by default', async () => {
+  it('offers three choices as native radios in one group, dark by default (#992)', async () => {
     const { store } = themeDisk();
     const mounted = await mountWith(store);
     const radios = [
@@ -1306,7 +1307,7 @@ describe('appearance — #672', () => {
       'Dark',
     ]);
     expect(radios.every((input) => input.type === 'radio')).toBe(true);
-    expect(radios.find((input) => input.checked)?.value).toBe('device');
+    expect(radios.find((input) => input.checked)?.value).toBe('dark');
     expect(radios[0]?.closest('fieldset')?.querySelector('legend')?.textContent).toBe(
       'Light or dark?',
     );
@@ -1317,26 +1318,27 @@ describe('appearance — #672', () => {
     const { store, values } = themeDisk();
     const mounted = await mountWith(store);
     await act(async () => {
-      radio(mounted.container, 'Dark').click();
-      await Promise.resolve();
-    });
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(values.get(THEME_STORAGE_KEY)).toBe('dark');
-    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
-
-    await act(async () => {
       radio(mounted.container, 'Light').click();
       await Promise.resolve();
     });
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(values.get(THEME_STORAGE_KEY)).toBe('light');
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
 
-    // Following the device again is NO stored value, not a third word.
+    await act(async () => {
+      radio(mounted.container, 'Dark').click();
+      await Promise.resolve();
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(values.get(THEME_STORAGE_KEY)).toBe('dark');
+
+    // #992: following the device is a stored word, because NO stored value is
+    // now the dark default.
     await act(async () => {
       radio(mounted.container, 'Match this device').click();
       await Promise.resolve();
     });
-    expect(values.has(THEME_STORAGE_KEY)).toBe(false);
+    expect(values.get(THEME_STORAGE_KEY)).toBe('device');
     mounted.unmount();
   });
 
@@ -1353,10 +1355,10 @@ describe('appearance — #672', () => {
     disk.refuse = true;
     const mounted = await mountWith(disk.store);
     await act(async () => {
-      radio(mounted.container, 'Dark').click();
+      radio(mounted.container, 'Light').click();
       await Promise.resolve();
     });
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
     mounted.unmount();
   });
@@ -1387,6 +1389,18 @@ describe('appearance — #672', () => {
   it('says the ride screen does not change, beside the control', async () => {
     const mounted = await mountWith(themeDisk().store);
     expect(mounted.container.textContent).toContain(APPEARANCE_STAYS_HERE);
+    mounted.unmount();
+  });
+
+  it('says a device that has not chosen starts dark, and keeps every choice’s sentence (#992)', async () => {
+    const mounted = await mountWith(themeDisk().store);
+    const more = [...mounted.container.querySelectorAll('details')].find(
+      (details) => details.querySelector('summary')?.textContent === 'More about light and dark',
+    );
+    expect(more?.textContent).toContain(APPEARANCE_STARTS_DARK);
+    expect(more?.textContent).toContain(
+      'Light or dark as this device is set, and it changes when the device does.',
+    );
     mounted.unmount();
   });
 });

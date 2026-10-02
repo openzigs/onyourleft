@@ -120,7 +120,7 @@ export function ConfirmDialog({
             </AlertDialog.Description>
             <div className="tw:flex tw:flex-wrap tw:gap-sm">
               <AlertDialog.Cancel asChild>
-                <Button variant="secondary">{cancelLabel}</Button>
+                <Button variant="tertiary">{cancelLabel}</Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
                 <Button onClick={onConfirm}>{confirmLabel}</Button>
