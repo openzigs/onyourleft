@@ -438,6 +438,26 @@ function saveButton(container: HTMLElement): HTMLButtonElement {
 }
 
 describe('SettingsView — your weight (#325)', () => {
+  it('describes the box with how to clear it, under it and never tucked — #1023', async () => {
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        mass={port}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+    const ids = (massBox(mounted.container).getAttribute('aria-describedby') ?? '').split(' ');
+    const hints = ids.map((id) => document.getElementById(id));
+    expect(hints.map((hint) => hint?.textContent?.replace(/\s+/g, ' '))).toEqual([
+      'Leave it blank to go back to the assumed 71.0 kg.',
+    ]);
+    // On the screen: no closed disclosure between the hint and the page.
+    expect(hints[0]?.closest('details')).toBeNull();
+    mounted.unmount();
+  });
+
   it('writes what the rider typed, in kilograms, scoped to the athlete', async () => {
     const { port, writes } = massPort();
     const mounted = await mount(

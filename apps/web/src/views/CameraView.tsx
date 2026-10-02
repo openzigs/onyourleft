@@ -410,20 +410,21 @@ function Camera({
         y = 1,400 px under the consent text.
       */}
       <section aria-labelledby="oyl-camera-side-way">
-        {/* #1013: the section keeps one line, and the rest is behind its ⓘ. */}
+        {/* #1013: the section keeps one line, and the rest is behind its ⓘ.
+          #1023: the line introduces the phone itself, so it reads alone. */}
         <SectionHeading
           level={3}
           id="oyl-camera-side-way"
           help={
             <p>
-              The way to use the camera with a ride is a spare phone on a tripod beside the bike,
-              paired with the tablet you ride with.
+              The phone is paired with the tablet you ride with, which is the one way to use the
+              camera with a ride.
             </p>
           }
         >
           {SIDE_CAMERA_WAY_TITLE}
         </SectionHeading>
-        <p>The phone films; the tablet starts and stops it.</p>
+        <p>A spare phone on a tripod beside the bike films; the tablet starts and stops it.</p>
         {sidePairing === undefined ? (
           <p>{SIDE_CAMERA_UNAVAILABLE}</p>
         ) : (

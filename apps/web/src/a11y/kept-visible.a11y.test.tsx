@@ -58,7 +58,11 @@ import { sentencesIn } from '../testing/route-sentences';
 import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
 import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
-import { DEVICES_KEPT_VISIBLE, DevicesView } from '../views/DevicesView';
+import {
+  DEVICES_KEPT_VISIBLE,
+  DEVICES_NO_BLUETOOTH_KEPT_VISIBLE,
+  DevicesView,
+} from '../views/DevicesView';
 import {
   COMPUTER_SENDS,
   COMPUTER_SENDS_LEAD,
@@ -161,10 +165,13 @@ const KEPT: Record<RouteId, Kept> = {
   // the export's own privacy sentence — is on the page (#699's review, N2).
   transfer: { sentences: FILES_KEPT_VISIBLE },
   devices: {
-    sentences: [],
+    // #1023: the walk hands Devices a browser with no Bluetooth, whose status
+    // is one line with its "more"; where pairing works and what still works
+    // here are kept on the screen after it.
+    sentences: DEVICES_NO_BLUETOOTH_KEPT_VISIBLE,
     elsewhere: DEVICES_KEPT_VISIBLE,
     reason:
-      'the walk hands Devices a browser with no Bluetooth, which tucks nothing; the can-pair state, where the disclosure is, is mounted below with DEVICES_KEPT_VISIBLE',
+      'the can-pair state, where the disclosure is, is mounted below with DEVICES_KEPT_VISIBLE',
   },
   segments: {
     sentences: [],

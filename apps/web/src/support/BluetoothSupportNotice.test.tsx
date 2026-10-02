@@ -22,9 +22,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
 import { accessibleName } from '../a11y/audit';
+import { SECTION_LINE_CHARACTERS } from '../a11y/section-lines';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
-import { BluetoothSupportNotice } from './BluetoothSupportNotice';
+import {
+  BLUETOOTH_ABSENT_LINE,
+  BLUETOOTH_ABSENT_STILL_WORKS,
+  BLUETOOTH_ABSENT_WHERE,
+  BluetoothSupportNotice,
+} from './BluetoothSupportNotice';
 import {
   readBluetoothSupport,
   type BluetoothSupport,
@@ -88,6 +94,40 @@ describe('the Safari and Firefox path', () => {
     // nobody re-reads.
     const text = await noticeFor({ bluetooth: undefined, secureContext: true });
     expect(text).not.toMatch(/\d+(\.\d+)?\s*%/);
+  });
+});
+
+describe('the Safari and Firefox path keeps its status to one line — #1023', () => {
+  it('puts where pairing works and what still works here after it, as information', async () => {
+    await noticeFor({ bluetooth: undefined, secureContext: true });
+    const danger = document.querySelector('.oyl-status--danger');
+    const sentence = danger?.querySelector('.oyl-status__sentence')?.cloneNode(true) as
+      Element | undefined;
+    sentence?.querySelector('.oyl-status__label')?.remove();
+    // The status says what is missing and whose it is, in one line …
+    expect((sentence?.textContent ?? '').trim()).toBe(BLUETOOTH_ABSENT_LINE);
+    expect(BLUETOOTH_ABSENT_LINE.length).toBeLessThanOrEqual(SECTION_LINE_CHARACTERS);
+    // … and neither reassurance is coloured as danger.
+    expect(danger?.textContent).not.toContain(BLUETOOTH_ABSENT_WHERE);
+    expect(danger?.textContent).not.toContain(BLUETOOTH_ABSENT_STILL_WORKS);
+    for (const kept of [BLUETOOTH_ABSENT_WHERE, BLUETOOTH_ABSENT_STILL_WORKS]) {
+      const box = [...document.querySelectorAll('.oyl-status--info')].find((element) =>
+        (element.textContent ?? '').replace(/\s+/g, ' ').includes(kept),
+      );
+      expect(box, kept).toBeDefined();
+      // Kept on the screen, never in a disclosure …
+      expect(box?.closest('[data-oyl-kept-visible]'), kept).not.toBeNull();
+      expect(box?.closest('details'), kept).toBeNull();
+      // … and after the first control (#993), which is the one thing a rider
+      // can do here: a summary is not a control to the browser gate.
+      const first = document.querySelector('button, input, select, textarea, a[href].oyl-button');
+      expect(first?.textContent).toBe('Import or export files');
+      expect(first?.getAttribute('href')).toBe('#/transfer');
+      expect(
+        (first as Element).compareDocumentPosition(box as Element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 });
 
