@@ -28,14 +28,23 @@
  * - **A phone is unchanged**: one column on every one of these routes.
  * - **The detail panes**: Routes with nothing chosen and with a route chosen,
  *   and Workouts with nothing chosen, in two columns both ways up.
+ * - **Rows, read across** (#1014's review). On every `sections` route at the
+ *   tablet both ways up, the sections of one row start level, and the first
+ *   section of the next row starts no lower than the tallest section of the
+ *   row before ends plus one gap — and no higher than it ends. That is the
+ *   row-major property: a rider reads across a row and on to the next, never
+ *   1500 px down one column and back up for the second, which is what CSS
+ *   columns did (Files 2287 px tall at 1280×800). Each route's height is
+ *   published under the grid and under the columns it replaced.
  *
  * What is NOT held here, because other gates already hold it unchanged by
  * #1014: the first control above the fold with the 50 px floor both ways up
  * (`controls-first.browser.spec.ts`), reflow at 320 px and on a phone on its
  * side (`reflow.browser.spec.ts`), the list–detail panes (`list-detail`), and
- * the kept-visible text (`a11y/kept-visible.a11y.test.tsx`). CSS columns keep
- * the DOM's order, so the reading and tab order are not something this layout
- * can change.
+ * the kept-visible text (`a11y/kept-visible.a11y.test.tsx`). The grid places
+ * the sections in the DOM's order with no `dense` packing, so the tab order is
+ * not something this layout can change; the visual order is row-major, which
+ * is what the rows check holds.
  *
  * ## The controls
  *
@@ -44,6 +53,9 @@
  *   one column, `main` short of the edge, a garage two cards wide.
  * - `?sections=uncontained` takes the container off the detail pane. Each
  *   detail pane must then be one column.
+ * - `?sections=columns` deletes the grid through the CSSOM and puts back
+ *   #1014's first cut, CSS columns. Every route the grid lays in two or more
+ *   rows of two or more columns must then fail the rows check.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -95,6 +107,14 @@ const DETAIL_PANES = [
   { route: 'workouts', selected: false },
 ] as const;
 
+/** One child of `.oyl-sections`, in DOM order. */
+interface SectionBox {
+  readonly top: number;
+  readonly bottom: number;
+  /** Across every column: a title, or a section holding a table. */
+  readonly spans: boolean;
+}
+
 /** What a screen of sections lays out, read back from the engine. */
 interface SectionsLayout {
   readonly h1: string | null;
@@ -110,6 +130,13 @@ interface SectionsLayout {
   /** The line under the title: its width, and the `max-width` it is held to. */
   readonly summaryWidth: number | null;
   readonly summaryMaxWidth: string | null;
+  /** Every child with a box, in DOM order. */
+  readonly boxes: readonly SectionBox[];
+  /** `.oyl-sections`' row gap in pixels; 0 where it is `normal` (columns). */
+  readonly rowGap: number;
+  /** `.oyl-sections`' own height, and the document's. */
+  readonly sectionsHeight: number;
+  readonly pageHeight: number;
 }
 
 async function open(page: Page, viewport: Viewport, control = ''): Promise<void> {
@@ -138,19 +165,29 @@ async function layoutAt(page: Page, hash: string, root: string): Promise<Section
     const scope = document.querySelector(selector);
     const grid = scope?.querySelector('.oyl-sections') ?? null;
     const lefts = new Set<number>();
+    const boxes: SectionBox[] = [];
     let counted = 0;
     if (grid !== null) {
       for (const child of grid.children) {
         const box = child.getBoundingClientRect();
-        // Spanning every column (a title, a table) is not a column; nor is a
-        // child with no box.
-        if (box.width === 0 || box.height === 0 || getComputedStyle(child).columnSpan === 'all') {
+        if (box.width === 0 || box.height === 0) {
+          continue;
+        }
+        // Spanning every column (a title, a table) is not a column: a grid
+        // track `1 / -1`, or the first cut's `column-span: all` (the control).
+        const style = getComputedStyle(child);
+        const spans =
+          (getComputedStyle(grid).display === 'grid' && style.gridColumnEnd === '-1') ||
+          style.columnSpan === 'all';
+        boxes.push({ top: box.top + window.scrollY, bottom: box.bottom + window.scrollY, spans });
+        if (spans) {
           continue;
         }
         counted += 1;
         lefts.add(Math.round(box.left));
       }
     }
+    const rowGap = grid === null ? 0 : Number.parseFloat(getComputedStyle(grid).rowGap) || 0;
     let garageRow: number | null = null;
     const cards = [...document.querySelectorAll('main .oyl-pairing > li')];
     if (cards.length > 0) {
@@ -171,8 +208,79 @@ async function layoutAt(page: Page, hash: string, root: string): Promise<Section
       viewportWidth: window.innerWidth,
       summaryWidth: summary?.getBoundingClientRect().width ?? null,
       summaryMaxWidth: summary === null ? null : getComputedStyle(summary).maxWidth,
+      boxes,
+      rowGap,
+      sectionsHeight: grid?.getBoundingClientRect().height ?? 0,
+      pageHeight: document.documentElement.scrollHeight,
     };
   }, root);
+}
+
+/** A pixel for the engine's rounding of a box's edges. */
+const ROUNDING_PIXELS = 1;
+
+/**
+ * The rows `columns` columns make of `boxes` placed row by row in DOM order:
+ * a spanning child is a row of its own, and any other fills the current row
+ * until it holds `columns`. This is how the grid auto-places them with no
+ * `dense`, so it is also the order a rider should read them in.
+ */
+function rowsOf(boxes: readonly SectionBox[], columns: number): SectionBox[][] {
+  const rows: SectionBox[][] = [];
+  let current: SectionBox[] = [];
+  for (const box of boxes) {
+    if (box.spans) {
+      if (current.length > 0) rows.push(current);
+      rows.push([box]);
+      current = [];
+      continue;
+    }
+    current.push(box);
+    if (current.length === Math.max(columns, 1)) {
+      rows.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) rows.push(current);
+  return rows;
+}
+
+/**
+ * Every way `seen` is not row-major, in words: a row whose sections do not
+ * start level, or a row that does not start between where the row before it
+ * ends and one gap below that. Empty when it is.
+ */
+function rowMajorFaults(seen: SectionsLayout): string[] {
+  // One column is a stack, whatever its margins: there is no row to read across.
+  if (seen.columns < 2) return [];
+  const rows = rowsOf(seen.boxes, seen.columns);
+  const faults: string[] = [];
+  rows.forEach((row, index) => {
+    const tops = row.map((box) => box.top);
+    const spread = Math.max(...tops) - Math.min(...tops);
+    if (spread > ROUNDING_PIXELS) {
+      faults.push(
+        `row ${String(index + 1)}'s sections start ${String(Math.round(spread))} px apart`,
+      );
+    }
+    const before = rows[index - 1];
+    if (before === undefined) return;
+    const ends = Math.max(...before.map((box) => box.bottom));
+    const starts = Math.min(...tops);
+    if (starts > ends + seen.rowGap + ROUNDING_PIXELS || starts < ends - ROUNDING_PIXELS) {
+      faults.push(
+        `row ${String(index + 1)} starts ${String(Math.round(starts - ends))} px from the end of ` +
+          `row ${String(index)} (gap ${String(seen.rowGap)} px)`,
+      );
+    }
+  });
+  return faults;
+}
+
+/** Rows of two or more sections side by side, which is what a row check can say anything about. */
+function hasSideBySideRows(seen: SectionsLayout): boolean {
+  const rows = rowsOf(seen.boxes, seen.columns);
+  return seen.columns >= 2 && rows.filter((row) => row.length >= 2).length >= 2;
 }
 
 function hashOf(route: RouteDefinition): string {
@@ -277,6 +385,45 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
       }
     }
   });
+});
+
+test.describe('#1014 — the sections are read across, in rows', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT]) {
+    test(`row-major at ${viewport.name}, and fails under the first cut's columns`, async ({
+      page: grid,
+      context,
+    }) => {
+      const columns = await context.newPage();
+      await open(grid, viewport);
+      await open(columns, viewport, '&sections=columns');
+      const report: string[] = [];
+      for (const route of SECTIONS) {
+        const now = await layoutAt(grid, hashOf(route), 'main');
+        const before = await layoutAt(columns, hashOf(route), 'main');
+        expect(now.h1, `${route.id} did not render its own page`).toBe(route.title);
+        expect(before.h1, `${route.id} did not render its own page (control)`).toBe(route.title);
+        const beforeFaults = rowMajorFaults(before);
+        report.push(
+          `  ${route.id}: page ${String(Math.round(before.pageHeight))} → ` +
+            `${String(Math.round(now.pageHeight))} px, sections ` +
+            `${String(Math.round(before.sectionsHeight))} → ${String(Math.round(now.sectionsHeight))} px` +
+            ` (columns → grid, ${String(now.columns)} columns, ` +
+            `${String(rowsOf(now.boxes, now.columns).length)} rows)` +
+            `${beforeFaults.length === 0 ? '' : `; columns: ${beforeFaults[0] ?? ''}`}`,
+        );
+        expect(rowMajorFaults(now), `${route.id}: the sections are not in rows`).toEqual([]);
+        if (hasSideBySideRows(now)) {
+          // The control: the first cut's columns must fail the same check.
+          expect(
+            beforeFaults.length,
+            `${route.id}: CSS columns passed the row check, so it measures nothing`,
+          ).toBeGreaterThan(0);
+        }
+      }
+      console.log(`[#1014] rows at ${viewport.name}\n${report.join('\n')}`);
+      await columns.close();
+    });
+  }
 });
 
 test.describe('#1014 — a detail pane decides its own columns', () => {

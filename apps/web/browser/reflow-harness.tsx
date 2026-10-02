@@ -61,8 +61,9 @@
  * shape, and with it three times as tall ({@link applyShapeControl}).
  *
  * `?sections=prose` and `?sections=uncontained` are #1014's: a screen of
- * sections, and a detail pane, with nothing to decide their columns
- * ({@link applySectionsControl}).
+ * sections, and a detail pane, with nothing to decide their columns; and
+ * `?sections=columns` is its review's, the sections in #1014's first CSS
+ * columns rather than in rows ({@link applySectionsControl}).
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -1170,14 +1171,71 @@ function applyPanesControl(): void {
 }
 
 /**
- * `?sections=prose` and `?sections=uncontained` — #1014's two controls, one
- * for each container its columns are decided by. `prose` switches the
- * `sections` routes of the REAL table back to the reading measure before
- * anything renders, so `main` is no container and their sections are one
- * column again; `uncontained` takes the container off a list–detail route's
- * detail pane, by a stylesheet of the harness's own after the shipping one,
- * so the pane's sections are one column again. `sections.browser.spec.ts`'s
- * column assertions must FAIL under each.
+ * #1014's first cut, verbatim: CSS columns, which flowed the sections DOWN the
+ * first column and on into the next. `?sections=columns` deletes the shipped
+ * grid's rules through the CSSOM and puts these back, so
+ * `sections.browser.spec.ts`' row-major check has the layout it replaced to
+ * fail on, and the heights it publishes have a "before".
+ */
+const FIRST_CUT_COLUMNS = `
+.oyl-sections > * { break-inside: avoid; }
+.oyl-sections :is(h2, h3) { break-after: avoid; }
+.oyl-sections > .oyl-sections__title,
+.oyl-sections > :has(.oyl-scroll-region) { column-span: all; }
+@container oyl-pane (min-width: 40rem) {
+  .oyl-sections:not(.oyl-sections--broad) { columns: 2; column-gap: var(--oyl-space-lg); }
+  .oyl-sections > .oyl-panel + .oyl-panel { margin-block-start: var(--oyl-space-md); }
+}
+@container oyl-pane (min-width: 64rem) {
+  .oyl-sections:not(.oyl-sections--broad) { columns: 3; }
+}
+@container oyl-pane (min-width: 54rem) {
+  .oyl-sections--broad { columns: 2; column-gap: var(--oyl-space-lg); }
+}
+`;
+
+/**
+ * Deletes every shipped rule that names `.oyl-sections` — the grid's
+ * top-level rules (two in `theme.css`, three once the build splits the
+ * title's selector list from its `:has()`) and its three container queries —
+ * and fails unless it found all three queries and a top-level rule: a control
+ * that deleted nothing would measure the shipped page and call it the defect.
+ */
+function deleteSectionsGrid(): void {
+  let containers = 0;
+  let styles = 0;
+  for (const sheet of document.styleSheets) {
+    const rules = sheet.cssRules;
+    for (let index = rules.length - 1; index >= 0; index -= 1) {
+      const rule = rules[index];
+      if (rule instanceof CSSStyleRule && rule.selectorText.includes('.oyl-sections')) {
+        sheet.deleteRule(index);
+        styles += 1;
+      } else if (rule instanceof CSSContainerRule && rule.cssText.includes('.oyl-sections')) {
+        sheet.deleteRule(index);
+        containers += 1;
+      }
+    }
+  }
+  if (containers !== 3 || styles < 2) {
+    throw new Error(
+      `reflow harness: expected three .oyl-sections container queries and two or more rules, ` +
+        `deleted ${String(containers)} and ${String(styles)}`,
+    );
+  }
+}
+
+/**
+ * `?sections=prose`, `?sections=uncontained` and `?sections=columns` — #1014's
+ * controls, one for each container its columns are decided by and one for the
+ * rows. `prose` switches the `sections` routes of the REAL table back to the
+ * reading measure before anything renders, so `main` is no container and their
+ * sections are one column again; `uncontained` takes the container off a
+ * list–detail route's detail pane, by a stylesheet of the harness's own after
+ * the shipping one, so the pane's sections are one column again; `columns`
+ * puts the first cut's CSS columns in place of the grid
+ * ({@link FIRST_CUT_COLUMNS}). `sections.browser.spec.ts`' column assertions
+ * must FAIL under the first two, and its row-major one under the third.
  */
 function applySectionsControl(): void {
   const sections = new URLSearchParams(window.location.search).get('sections');
@@ -1191,6 +1249,12 @@ function applySectionsControl(): void {
     const style = document.createElement('style');
     style.setAttribute('data-oyl-control', 'sections=uncontained');
     style.textContent = '.oyl-list-detail__detail { container: none !important; }';
+    document.head.append(style);
+  } else if (sections === 'columns') {
+    deleteSectionsGrid();
+    const style = document.createElement('style');
+    style.setAttribute('data-oyl-control', 'sections=columns');
+    style.textContent = FIRST_CUT_COLUMNS;
     document.head.append(style);
   }
 }

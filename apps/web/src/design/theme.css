@@ -1105,22 +1105,29 @@ h3:first-child {
  *   (an upright tablet's `main` is 42.5rem, a phone on its side 45rem), three
  *   from 64rem (a landscape tablet's is 72.5rem). Under 40rem nothing changes:
  *   one column, as before #1014.
- * - **Columns, not a grid.** CSS columns flow the sections in DOM order down
- *   the first column and on into the next, so the reading order, the tab
+ * - **A grid in rows, in the DOM's order.** The sections are placed row by
+ *   row, left to right, with no `dense` packing, so the DOM order, the tab
  *   order and every "first control" the controls-first walk measures are what
- *   they were; a grid's rows would each be as tall as their tallest section,
- *   and Settings' cards differ by four times. Each section is
- *   `break-inside: avoid`, so a card is never cut across two columns, and a
- *   heading never ends a column (`break-after: avoid`).
+ *   they were, and the eye reads across a row and on to the next. Each row is
+ *   as tall as its tallest section (`align-items: start` keeps the shorter
+ *   ones their own height), which costs some empty space under a short card;
+ *   CSS columns, which this replaced in #1014's review, cost more: Files was
+ *   2287 px tall in three columns at 1280×800, so a rider read 1500 px down
+ *   the first column and scrolled back up for the second, beside an emptied
+ *   right side. The gap spaces the sections, so their own block margins are
+ *   dropped inside the grid.
  * - **The prose keeps its measure.** The line under the title, a screen's
  *   notes and the paragraphs left straight under `main` stay at
  *   `--oyl-measure`; each column is narrower than it. Devices gathers nothing
  *   into `.oyl-sections`: its garage of cards (#942) is already a grid of as
  *   many columns as its width holds, and the width is what it was missing.
  *
- * `browser/sections.browser.spec.ts` measures the columns on the owner's
- * tablet both ways up with the #439 insets, with `?layout=prose` — the same
- * routes of the real table switched back — as the control that must fail.
+ * `browser/sections.browser.spec.ts` measures the columns and the rows on
+ * the owner's tablet both ways up with the #439 insets. Its controls, in
+ * `reflow.html`: `?sections=prose` (the same routes of the real table switched
+ * back to the reading measure) must fail the columns, and `?sections=columns`
+ * (these rules deleted and #1014's first CSS columns put back) must fail the
+ * rows.
  */
 .oyl-main--sections {
   max-width: none;
@@ -1140,38 +1147,36 @@ h3:first-child {
 }
 
 .oyl-sections > * {
-  break-inside: avoid;
-}
-
-.oyl-sections :is(h2, h3) {
-  break-after: avoid;
+  min-width: 0;
 }
 
 /*
  * Across every column: a title that heads the sections (Camera's), and a
  * section holding a table, which a column would make scroll sideways inside
- * its region for no reason but the column (`design/ScrollTable.tsx`).
+ * its region for no reason but the column (`design/ScrollTable.tsx`). Outside
+ * a grid (a phone) it does nothing.
  */
 .oyl-sections > .oyl-sections__title,
 .oyl-sections > :has(.oyl-scroll-region) {
-  column-span: all;
+  grid-column: 1 / -1;
 }
 
 @container oyl-pane (min-width: 40rem) {
   .oyl-sections:not(.oyl-sections--broad) {
-    columns: 2;
-    column-gap: var(--oyl-space-lg);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--oyl-space-md) var(--oyl-space-lg);
+    align-items: start;
   }
 
-  /* Panels that sat edge to edge in one column are apart in a column. */
-  .oyl-sections > .oyl-panel + .oyl-panel {
-    margin-block-start: var(--oyl-space-md);
+  .oyl-sections:not(.oyl-sections--broad) > * {
+    margin-block: 0;
   }
 }
 
 @container oyl-pane (min-width: 64rem) {
   .oyl-sections:not(.oyl-sections--broad) {
-    columns: 3;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1185,8 +1190,17 @@ h3:first-child {
  */
 @container oyl-pane (min-width: 54rem) {
   .oyl-sections--broad {
-    columns: 2;
-    column-gap: var(--oyl-space-lg);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--oyl-space-md) var(--oyl-space-lg);
+    align-items: start;
+  }
+
+  /* `.oyl-settings-card + .oyl-settings-card` stacks the cards with a margin;
+     in the grid the gap does that. */
+  .oyl-sections--broad > *,
+  .oyl-sections--broad > .oyl-settings-card + .oyl-settings-card {
+    margin-block: 0;
   }
 }
 

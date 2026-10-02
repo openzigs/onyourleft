@@ -74,112 +74,128 @@ export function AboutView(): JSX.Element {
   return (
     <>
       <FullLogo />
-      {/* #1014: the page reads in columns where `main` is wide enough. */}
+      {/*
+        #1014: each heading and its paragraphs are one group, and the groups
+        lie in rows where `main` is wide enough (`theme.css` §"A screen of
+        sections") — grouped, so a heading is never in one cell and its
+        paragraphs in the next.
+      */}
       <div className="oyl-sections">
-        <h2>Where your data lives</h2>
-        <p>
-          On this device. There is no account to create and no server to sign in to unless you
-          choose to connect to an instance, and nothing is uploaded — rides are recorded, stored and
-          read back locally, and they leave this device only when you export them yourself. That is
-          a deliberate choice rather than a missing feature.
-        </p>
-        <p>
-          Your data is local, and so is the app. The first visit needs a connection, because that is
-          when the browser fetches it; after that it keeps its own copy, and opening it in a fresh
-          tab with the network off works — recording a ride, riding the trainer game and reading
-          your history all do. The exception is the map&rsquo;s background imagery, which is fetched
-          from the web when you look at it.
-        </p>
-        <p>
-          The consequence is the honest one: clearing this browser&rsquo;s site data removes your
-          rides, and there is no copy anywhere else to restore from.
-        </p>
+        <div>
+          <h2>Where your data lives</h2>
+          <p>
+            On this device. There is no account to create and no server to sign in to unless you
+            choose to connect to an instance, and nothing is uploaded — rides are recorded, stored
+            and read back locally, and they leave this device only when you export them yourself.
+            That is a deliberate choice rather than a missing feature.
+          </p>
+          <p>
+            Your data is local, and so is the app. The first visit needs a connection, because that
+            is when the browser fetches it; after that it keeps its own copy, and opening it in a
+            fresh tab with the network off works — recording a ride, riding the trainer game and
+            reading your history all do. The exception is the map&rsquo;s background imagery, which
+            is fetched from the web when you look at it.
+          </p>
+          <p>
+            The consequence is the honest one: clearing this browser&rsquo;s site data removes your
+            rides, and there is no copy anywhere else to restore from.
+          </p>
+        </div>
 
-        <h2>If the app closes mid-ride</h2>
-        <p>
-          A ride is written to this device&rsquo;s storage as it happens, not when you press Stop.
-          If the tab is closed, the laptop goes to sleep or the browser discards the page, what was
-          recorded up to then is still here.
-        </p>
-        <p>
-          At most {String(MAX_DATA_LOSS_SECONDS)} seconds of a ride can be lost to a crash: the
-          recorder saves a checkpoint every few seconds, and the moments since the last one may not
-          have been written yet.
-        </p>
-        <p>
-          The next time you open the Ride screen it lists the rides this device is still holding and
-          offers each one back: continue it, save what there is to your activities, or discard it.
-          Each is offered as up to a length — the time from its start to its last checkpoint —
-          because a recording with a gap in it recovers a little less than that. A ride you had
-          already finished is offered save and discard but not continue: a finished ride still on
-          this device is one whose save failed, and you ended it on purpose.
-        </p>
+        <div>
+          <h2>If the app closes mid-ride</h2>
+          <p>
+            A ride is written to this device&rsquo;s storage as it happens, not when you press Stop.
+            If the tab is closed, the laptop goes to sleep or the browser discards the page, what
+            was recorded up to then is still here.
+          </p>
+          <p>
+            At most {String(MAX_DATA_LOSS_SECONDS)} seconds of a ride can be lost to a crash: the
+            recorder saves a checkpoint every few seconds, and the moments since the last one may
+            not have been written yet.
+          </p>
+          <p>
+            The next time you open the Ride screen it lists the rides this device is still holding
+            and offers each one back: continue it, save what there is to your activities, or discard
+            it. Each is offered as up to a length — the time from its start to its last checkpoint —
+            because a recording with a gap in it recovers a little less than that. A ride you had
+            already finished is offered save and discard but not continue: a finished ride still on
+            this device is one whose save failed, and you ended it on purpose.
+          </p>
+        </div>
 
-        <h2>Sensors</h2>
-        <p>
-          Sensors connect over Bluetooth Low Energy, and only over Bluetooth Low Energy. Whether
-          that works depends on the browser rather than on the sensor — the{' '}
-          <a href={hrefFor(routeById('devices'))}>Devices page</a> says what yours can do and why.
-        </p>
+        <div>
+          <h2>Sensors</h2>
+          <p>
+            Sensors connect over Bluetooth Low Energy, and only over Bluetooth Low Energy. Whether
+            that works depends on the browser rather than on the sensor — the{' '}
+            <a href={hrefFor(routeById('devices'))}>Devices page</a> says what yours can do and why.
+          </p>
+        </div>
 
-        <h2>Privacy</h2>
-        <p>
-          Nothing is sent to us unless you connect to this project&rsquo;s instance. There are no
-          analytics, and the app contains no code that transmits your rides, your heart rate or your
-          position anywhere. The one thing it can send is a picture from the camera, to a computer
-          of your own on your own network — and only if you set that computer up on the Camera page,
-          switch it on, and press the button that sends the picture. A side camera&rsquo;s pictures
-          go there too, as they are taken, only if you also switch that on.
-        </p>
-        {/* #777, #778: an instance is the one other place something goes, and only
-          when the rider connects. ⚠️ Draft wording awaiting the owner's approval
-          (#880). `AboutView.test.tsx` pins it. */}
-        <p>
-          If you <a href={hrefFor(routeById('instance'))}>connect to an instance</a>, it is sent
-          this device&rsquo;s public key, the name other riders will see if you type one, and your
-          internet address and device or browser type, as any server sees them — and nothing else of
-          yours: no ride, route, position or heart rate.
-        </p>
-        <p>
-          {/* target="_blank" so that following it inside the Android shell hands
-            the URL to the system browser rather than navigating the WebView the
-            app is running in. The trailing note is visible text rather than an
-            aria-label, because a sighted mouse user gets no warning otherwise. */}
-          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer">
-            Read the full privacy policy
-          </a>{' '}
-          (opens in a new tab).
-        </p>
+        <div>
+          <h2>Privacy</h2>
+          <p>
+            Nothing is sent to us unless you connect to this project&rsquo;s instance. There are no
+            analytics, and the app contains no code that transmits your rides, your heart rate or
+            your position anywhere. The one thing it can send is a picture from the camera, to a
+            computer of your own on your own network — and only if you set that computer up on the
+            Camera page, switch it on, and press the button that sends the picture. A side
+            camera&rsquo;s pictures go there too, as they are taken, only if you also switch that
+            on.
+          </p>
+          {/* #777, #778: an instance is the one other place something goes, and only
+            when the rider connects. ⚠️ Draft wording awaiting the owner's approval
+            (#880). `AboutView.test.tsx` pins it. */}
+          <p>
+            If you <a href={hrefFor(routeById('instance'))}>connect to an instance</a>, it is sent
+            this device&rsquo;s public key, the name other riders will see if you type one, and your
+            internet address and device or browser type, as any server sees them — and nothing else
+            of yours: no ride, route, position or heart rate.
+          </p>
+          <p>
+            {/* target="_blank" so that following it inside the Android shell hands
+              the URL to the system browser rather than navigating the WebView the
+              app is running in. The trailing note is visible text rather than an
+              aria-label, because a sighted mouse user gets no warning otherwise. */}
+            <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer">
+              Read the full privacy policy
+            </a>{' '}
+            (opens in a new tab).
+          </p>
+        </div>
 
-        <h2>Licence</h2>
-        <p>
-          Free and open source. This client is licensed under the GNU Affero General Public License,
-          version 3 or later; the packages it is built from are Apache-2.0.
-        </p>
-        {/* ⚠️ Not a courtesy: AGPL-3.0 section 6 requires whoever conveys object
-          code to say where the source is, and ADR 0025 D-7 makes this link a
-          CONDITION of the permission a store build ships under. A rider who
-          installed from a store has never seen the repository — the same fact
-          the Credits link below rests on. `AboutView.test.tsx` pins it. */}
-        <p>
-          <a href={SOURCE_CODE_URL} target="_blank" rel="noreferrer">
-            Get the source code of this app
-          </a>{' '}
-          (opens in a new tab). You may copy, change and share it under that licence.
-        </p>
-        {/* ⚠️ This link is the reachable half of an obligation, not a courtesy.
-          ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0
-          §3(a)(2) judges "a reasonable manner" by the medium, and the medium is
-          an APK whose user never sees the repository. `AboutView.test.tsx`
-          asserts the link is here for that reason. Since #664 it is also the
-          way to the software notices: MIT, ISC, the BSDs and Apache-2.0 all
-          ask for their notice to travel with copies, and a store user reaches
-          them from here or not at all. */}
-        <p>
-          The artwork this app ships was made by other people, and so is much of the open-source
-          software it is built from. <a href={hrefFor(routeById('credits'))}>Credits</a> says who,
-          and under what terms, and carries every software licence notice in full.
-        </p>
+        <div>
+          <h2>Licence</h2>
+          <p>
+            Free and open source. This client is licensed under the GNU Affero General Public
+            License, version 3 or later; the packages it is built from are Apache-2.0.
+          </p>
+          {/* ⚠️ Not a courtesy: AGPL-3.0 section 6 requires whoever conveys object
+            code to say where the source is, and ADR 0025 D-7 makes this link a
+            CONDITION of the permission a store build ships under. A rider who
+            installed from a store has never seen the repository — the same fact
+            the Credits link below rests on. `AboutView.test.tsx` pins it. */}
+          <p>
+            <a href={SOURCE_CODE_URL} target="_blank" rel="noreferrer">
+              Get the source code of this app
+            </a>{' '}
+            (opens in a new tab). You may copy, change and share it under that licence.
+          </p>
+          {/* ⚠️ This link is the reachable half of an obligation, not a courtesy.
+            ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0
+            §3(a)(2) judges "a reasonable manner" by the medium, and the medium is
+            an APK whose user never sees the repository. `AboutView.test.tsx`
+            asserts the link is here for that reason. Since #664 it is also the
+            way to the software notices: MIT, ISC, the BSDs and Apache-2.0 all
+            ask for their notice to travel with copies, and a store user reaches
+            them from here or not at all. */}
+          <p>
+            The artwork this app ships was made by other people, and so is much of the open-source
+            software it is built from. <a href={hrefFor(routeById('credits'))}>Credits</a> says who,
+            and under what terms, and carries every software licence notice in full.
+          </p>
+        </div>
       </div>
     </>
   );

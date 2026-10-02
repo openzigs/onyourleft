@@ -105,7 +105,7 @@ export type RouteId =
  * - `sections` drops it for a screen made of sections a rider works through —
  *   Devices, Settings, Files, Camera, Analysis, Segments and About (#1014,
  *   epic #935 Phase 2). On a phone nothing changes; given a tablet's width the
- *   view's `.oyl-sections` flows its sections into two or three columns,
+ *   view's `.oyl-sections` lays its sections in rows of two or three,
  *   decided by a container query on `main` rather than on the window
  *   (`theme.css` §"A screen of sections"). The prose directly under `main` —
  *   the line under the title, a screen's notes — keeps the reading measure,
