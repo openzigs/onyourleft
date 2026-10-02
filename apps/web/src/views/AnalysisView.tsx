@@ -257,214 +257,217 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         </StatusMessage>
       ) : undefined}
 
-      <section className="oyl-panel" aria-labelledby="oyl-zones-heading">
-        {/* #1013: each section keeps one line, and its explanation is behind its ⓘ. */}
-        <SectionHeading
-          level={2}
-          id="oyl-zones-heading"
-          help={
-            <p>
-              Zones need power or heart rate, so a ride recorded without a power meter or a
-              heart-rate strap has none to show.
-            </p>
-          }
-        >
-          Time in zone
-        </SectionHeading>
-
-        <p>
-          <label htmlFor="oyl-zone-ride">Ride</label>{' '}
-          <select
-            className="oyl-input"
-            id="oyl-zone-ride"
-            value={selected ?? ''}
-            onChange={(event) => {
-              setSelected(event.target.value === '' ? undefined : activityId(event.target.value));
-            }}
-          >
-            {state.kind === 'ready' && state.rides.length > 0 ? (
-              state.rides.map((ride) => (
-                <option key={ride.id} value={ride.id}>
-                  {ride.name} — {formatStartedAt(ride.startedAt, ride.startedAtTimeZone)}
-                </option>
-              ))
-            ) : (
-              <option value="">
-                {state.kind === 'loading' ? 'Reading your rides…' : 'No rides on this device'}
-              </option>
-            )}
-          </select>
-        </p>
-
-        {zones?.load === undefined ? undefined : <LoadPanel load={zones.load} />}
-
-        {zones === undefined ? (
-          state.kind === 'ready' && state.rides.length === 0 ? (
-            // #943: secondary, because *Save thresholds* is this page's primary.
-            <EmptyState
-              art="power"
-              heading="Zones after your first ride"
-              level={3}
-              action={
-                <ButtonLink variant="secondary" href={hrefFor(routeById('ride'))}>
-                  Start a ride
-                </ButtonLink>
-              }
-            >
-              <p>Nothing recorded yet. Zones appear here the moment you finish a ride.</p>
-            </EmptyState>
-          ) : (
-            <p className="oyl-muted">Reading that ride…</p>
-          )
-        ) : (
-          <>
-            {zones.power === undefined && zones.heartRate === undefined ? (
-              <p className="oyl-muted">
-                That ride has no power and no heart-rate data, so there are no zones to show.
+      {/* #1014: the four panels flow into columns where `main` is wide enough. */}
+      <div className="oyl-sections">
+        <section className="oyl-panel" aria-labelledby="oyl-zones-heading">
+          {/* #1013: each section keeps one line, and its explanation is behind its ⓘ. */}
+          <SectionHeading
+            level={2}
+            id="oyl-zones-heading"
+            help={
+              <p>
+                Zones need power or heart rate, so a ride recorded without a power meter or a
+                heart-rate strap has none to show.
               </p>
-            ) : undefined}
-
-            {zones.power === undefined ? undefined : (
-              <ZoneTable
-                breakdown={zones.power}
-                movingTime={zones.movingTime}
-                unit={POWER_UNIT}
-                heading="Power zones"
-                thresholdNoun="threshold power"
-                assumed={zones.thresholds.assumed.power}
-              />
-            )}
-
-            {zones.heartRate === undefined ? undefined : (
-              <ZoneTable
-                breakdown={zones.heartRate}
-                movingTime={zones.movingTime}
-                unit="bpm"
-                heading="Heart-rate zones"
-                thresholdNoun="threshold heart rate"
-                assumed={zones.thresholds.assumed.heartRate}
-              />
-            )}
-          </>
-        )}
-      </section>
-
-      <section className="oyl-panel" aria-labelledby="oyl-fitness-heading">
-        <SectionHeading
-          level={2}
-          id="oyl-fitness-heading"
-          help={
-            <p>
-              Your training load, smoothed two ways: <strong>fitness</strong> over about six weeks
-              and <strong>fatigue</strong> over about one. <strong>Freshness</strong> is the gap
-              between them. Rising fatigue is what training looks like, not a warning — this page
-              reports what moved and by how much, and does not tell you whether that is good.
-            </p>
-          }
-        >
-          Fitness and fatigue
-        </SectionHeading>
-
-        {history === undefined ? (
-          <p className="oyl-muted">Reading your history…</p>
-        ) : (
-          <FitnessPanel
-            history={history}
-            backfilling={backfilling}
-            note={backfillNote}
-            onBackfill={() => {
-              void runBackfill();
-            }}
-          />
-        )}
-      </section>
-
-      <section className="oyl-panel" aria-labelledby="oyl-thresholds-heading">
-        <SectionHeading
-          level={2}
-          id="oyl-thresholds-heading"
-          help={
-            <p>
-              Every zone boundary and every load on this page is derived from these two numbers.
-            </p>
-          }
-        >
-          Your thresholds
-        </SectionHeading>
-        <p className="oyl-muted">
-          Nothing is sent anywhere — they are stored on this device with your rides.
-        </p>
-
-        <div className="oyl-trainer__form">
-          <p>
-            <label htmlFor="oyl-threshold-power">Threshold power ({POWER_UNIT})</label>{' '}
-            <input
-              className="oyl-input"
-              id="oyl-threshold-power"
-              inputMode="numeric"
-              aria-describedby={THRESHOLD_HINT_ID}
-              value={powerField}
-              placeholder="not set"
-              onChange={(event) => {
-                setPowerField(event.target.value);
-                setSaved(undefined);
-              }}
-            />
-          </p>
-          <p>
-            <label htmlFor="oyl-threshold-heart-rate">Threshold heart rate (bpm)</label>{' '}
-            <input
-              className="oyl-input"
-              id="oyl-threshold-heart-rate"
-              inputMode="numeric"
-              aria-describedby={THRESHOLD_HINT_ID}
-              value={heartRateField}
-              placeholder="not set"
-              onChange={(event) => {
-                setHeartRateField(event.target.value);
-                setSaved(undefined);
-              }}
-            />
-          </p>
-          {/* #1023: the two fields' instruction is under them and is their
-            description (WCAG 2.2 SC 3.3.2), not behind the section's ⓘ. */}
-          <p id={THRESHOLD_HINT_ID} className="oyl-muted oyl-field-hint">
-            Leave one blank to go back to the assumed default.
-          </p>
-          <Button
-            onClick={() => {
-              void saveThresholds();
-            }}
+            }
           >
-            Save thresholds
-          </Button>
-        </div>
+            Time in zone
+          </SectionHeading>
 
-        {saved === undefined ? undefined : (
-          <StatusMessage tone={saved.startsWith('Saved') ? 'success' : 'warning'} live>
-            {saved}
-          </StatusMessage>
-        )}
-      </section>
+          <p>
+            <label htmlFor="oyl-zone-ride">Ride</label>{' '}
+            <select
+              className="oyl-input"
+              id="oyl-zone-ride"
+              value={selected ?? ''}
+              onChange={(event) => {
+                setSelected(event.target.value === '' ? undefined : activityId(event.target.value));
+              }}
+            >
+              {state.kind === 'ready' && state.rides.length > 0 ? (
+                state.rides.map((ride) => (
+                  <option key={ride.id} value={ride.id}>
+                    {ride.name} — {formatStartedAt(ride.startedAt, ride.startedAtTimeZone)}
+                  </option>
+                ))
+              ) : (
+                <option value="">
+                  {state.kind === 'loading' ? 'Reading your rides…' : 'No rides on this device'}
+                </option>
+              )}
+            </select>
+          </p>
 
-      <section className="oyl-panel" aria-labelledby="oyl-bests-heading">
-        <SectionHeading
-          level={2}
-          id="oyl-bests-heading"
-          help={
+          {zones?.load === undefined ? undefined : <LoadPanel load={zones.load} />}
+
+          {zones === undefined ? (
+            state.kind === 'ready' && state.rides.length === 0 ? (
+              // #943: secondary, because *Save thresholds* is this page's primary.
+              <EmptyState
+                art="power"
+                heading="Zones after your first ride"
+                level={3}
+                action={
+                  <ButtonLink variant="secondary" href={hrefFor(routeById('ride'))}>
+                    Start a ride
+                  </ButtonLink>
+                }
+              >
+                <p>Nothing recorded yet. Zones appear here the moment you finish a ride.</p>
+              </EmptyState>
+            ) : (
+              <p className="oyl-muted">Reading that ride…</p>
+            )
+          ) : (
+            <>
+              {zones.power === undefined && zones.heartRate === undefined ? (
+                <p className="oyl-muted">
+                  That ride has no power and no heart-rate data, so there are no zones to show.
+                </p>
+              ) : undefined}
+
+              {zones.power === undefined ? undefined : (
+                <ZoneTable
+                  breakdown={zones.power}
+                  movingTime={zones.movingTime}
+                  unit={POWER_UNIT}
+                  heading="Power zones"
+                  thresholdNoun="threshold power"
+                  assumed={zones.thresholds.assumed.power}
+                />
+              )}
+
+              {zones.heartRate === undefined ? undefined : (
+                <ZoneTable
+                  breakdown={zones.heartRate}
+                  movingTime={zones.movingTime}
+                  unit="bpm"
+                  heading="Heart-rate zones"
+                  thresholdNoun="threshold heart rate"
+                  assumed={zones.thresholds.assumed.heartRate}
+                />
+              )}
+            </>
+          )}
+        </section>
+
+        <section className="oyl-panel" aria-labelledby="oyl-fitness-heading">
+          <SectionHeading
+            level={2}
+            id="oyl-fitness-heading"
+            help={
+              <p>
+                Your training load, smoothed two ways: <strong>fitness</strong> over about six weeks
+                and <strong>fatigue</strong> over about one. <strong>Freshness</strong> is the gap
+                between them. Rising fatigue is what training looks like, not a warning — this page
+                reports what moved and by how much, and does not tell you whether that is good.
+              </p>
+            }
+          >
+            Fitness and fatigue
+          </SectionHeading>
+
+          {history === undefined ? (
+            <p className="oyl-muted">Reading your history…</p>
+          ) : (
+            <FitnessPanel
+              history={history}
+              backfilling={backfilling}
+              note={backfillNote}
+              onBackfill={() => {
+                void runBackfill();
+              }}
+            />
+          )}
+        </section>
+
+        <section className="oyl-panel" aria-labelledby="oyl-thresholds-heading">
+          <SectionHeading
+            level={2}
+            id="oyl-thresholds-heading"
+            help={
+              <p>
+                Every zone boundary and every load on this page is derived from these two numbers.
+              </p>
+            }
+          >
+            Your thresholds
+          </SectionHeading>
+          <p className="oyl-muted">
+            Nothing is sent anywhere — they are stored on this device with your rides.
+          </p>
+
+          <div className="oyl-trainer__form">
             <p>
-              The best average power you have held for each length of time, anywhere in any ride on
-              this device. These are <strong>not</strong> segment bests: a duration best is a span
-              of time, a segment best is a named stretch of road. This device does not hold segment
-              bests — they are a separate feature and they will be shown separately.
+              <label htmlFor="oyl-threshold-power">Threshold power ({POWER_UNIT})</label>{' '}
+              <input
+                className="oyl-input"
+                id="oyl-threshold-power"
+                inputMode="numeric"
+                aria-describedby={THRESHOLD_HINT_ID}
+                value={powerField}
+                placeholder="not set"
+                onChange={(event) => {
+                  setPowerField(event.target.value);
+                  setSaved(undefined);
+                }}
+              />
             </p>
-          }
-        >
-          Duration personal bests
-        </SectionHeading>
+            <p>
+              <label htmlFor="oyl-threshold-heart-rate">Threshold heart rate (bpm)</label>{' '}
+              <input
+                className="oyl-input"
+                id="oyl-threshold-heart-rate"
+                inputMode="numeric"
+                aria-describedby={THRESHOLD_HINT_ID}
+                value={heartRateField}
+                placeholder="not set"
+                onChange={(event) => {
+                  setHeartRateField(event.target.value);
+                  setSaved(undefined);
+                }}
+              />
+            </p>
+            {/* #1023: the two fields' instruction is under them and is their
+              description (WCAG 2.2 SC 3.3.2), not behind the section's ⓘ. */}
+            <p id={THRESHOLD_HINT_ID} className="oyl-muted oyl-field-hint">
+              Leave one blank to go back to the assumed default.
+            </p>
+            <Button
+              onClick={() => {
+                void saveThresholds();
+              }}
+            >
+              Save thresholds
+            </Button>
+          </div>
 
-        {state.kind === 'ready' ? <BestsTable bests={state.bests} /> : undefined}
-      </section>
+          {saved === undefined ? undefined : (
+            <StatusMessage tone={saved.startsWith('Saved') ? 'success' : 'warning'} live>
+              {saved}
+            </StatusMessage>
+          )}
+        </section>
+
+        <section className="oyl-panel" aria-labelledby="oyl-bests-heading">
+          <SectionHeading
+            level={2}
+            id="oyl-bests-heading"
+            help={
+              <p>
+                The best average power you have held for each length of time, anywhere in any ride
+                on this device. These are <strong>not</strong> segment bests: a duration best is a
+                span of time, a segment best is a named stretch of road. This device does not hold
+                segment bests — they are a separate feature and they will be shown separately.
+              </p>
+            }
+          >
+            Duration personal bests
+          </SectionHeading>
+
+          {state.kind === 'ready' ? <BestsTable bests={state.bests} /> : undefined}
+        </section>
+      </div>
 
       <p>
         <a href={hrefFor(routeById('activities'))}>Your rides</a>

@@ -101,8 +101,17 @@ export type RouteId =
  *   `theme.css` §`--oyl-list-detail-from` is the one breakpoint. A route that
  *   declares it also declares {@link RouteDefinition.selection}, the URL a
  *   selected item lives at, and `routes.test.ts` holds the two together.
+ *
+ * - `sections` drops it for a screen made of sections a rider works through —
+ *   Devices, Settings, Files, Camera, Analysis, Segments and About (#1014,
+ *   epic #935 Phase 2). On a phone nothing changes; given a tablet's width the
+ *   view's `.oyl-sections` lays its sections in rows of two or three,
+ *   decided by a container query on `main` rather than on the window
+ *   (`theme.css` §"A screen of sections"). The prose directly under `main` —
+ *   the line under the title, a screen's notes — keeps the reading measure,
+ *   and each column is narrower than it anyway.
  */
-export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail';
+export type RouteLayout = 'prose' | 'instruments' | 'dashboard' | 'list-detail' | 'sections';
 
 /**
  * Which of the primary destinations a route belongs to — #427.
@@ -305,7 +314,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'analysis',
     group: 'history',
-    layout: 'prose',
+    layout: 'sections',
     path: '/analysis',
     navLabel: 'Analysis',
     title: 'Analysis',
@@ -317,7 +326,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'segments',
     group: 'history',
-    layout: 'prose',
+    layout: 'sections',
     path: '/segments',
     navLabel: 'Segments',
     title: 'Segments',
@@ -341,7 +350,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'devices',
     group: 'more',
-    layout: 'prose',
+    layout: 'sections',
     path: '/devices',
     navLabel: 'Devices',
     title: 'Devices',
@@ -351,7 +360,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'transfer',
     group: 'more',
-    layout: 'prose',
+    layout: 'sections',
     path: '/transfer',
     // "Files", not "Import", because the page is both directions and because
     // ADR 0009 R3 forbids naming one of our features after somebody else's
@@ -372,7 +381,7 @@ export const ROUTES: readonly RouteDefinition[] = [
     // make Camera the destination the "More" tab navigates to. It is a niche
     // screen a rider visits once; Devices is the one they visit when a strap
     // will not pair.
-    layout: 'prose',
+    layout: 'sections',
     path: '/camera',
     navLabel: 'Camera',
     title: 'Camera',
@@ -385,7 +394,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'settings',
     group: 'more',
-    layout: 'prose',
+    layout: 'sections',
     path: '/settings',
     navLabel: 'Settings',
     title: 'Settings',
@@ -395,7 +404,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'about',
     group: 'more',
-    layout: 'prose',
+    layout: 'sections',
     path: '/about',
     navLabel: 'About',
     title: 'About On Your Left',

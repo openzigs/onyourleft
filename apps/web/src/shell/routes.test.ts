@@ -303,12 +303,23 @@ describe('which routes are read and which are operated (#422)', () => {
     expect(ALL_ROUTES.length - operated.length).toBeGreaterThan(10);
   });
 
-  it('gives every route one of the four, so the shell never writes a class naming no rule', () => {
+  it('gives every route one of the five, so the shell never writes a class naming no rule', () => {
     for (const route of ALL_ROUTES) {
-      expect(['prose', 'instruments', 'dashboard', 'list-detail'], route.id).toContain(
+      expect(['prose', 'instruments', 'dashboard', 'list-detail', 'sections'], route.id).toContain(
         route.layout,
       );
     }
+  });
+
+  it('lays out the screens of sections in columns, and nothing else — #1014', () => {
+    // Epic #935 Phase 2: the screens #1014 names. Home, the game picker and
+    // Ride have their own layouts and issues; the list–detail screens' detail
+    // panes are columned by their pane's own container query instead.
+    expect(
+      ALL_ROUTES.filter((route) => route.layout === 'sections')
+        .map((route) => route.id)
+        .sort(),
+    ).toEqual(['about', 'analysis', 'camera', 'devices', 'segments', 'settings', 'transfer']);
   });
 
   it('lays out Activities, Workouts and Routes as a list beside its detail, and nothing else — #670', () => {

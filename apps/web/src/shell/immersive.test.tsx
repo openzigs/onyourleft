@@ -326,9 +326,17 @@ describe('which routes keep the reading measure — #422', () => {
   });
 
   it('leaves a page that is read at the measure', async () => {
-    globalThis.location.hash = hrefFor(routeById('about'));
+    // Credits, not About: since #1014 About is a screen of sections.
+    globalThis.location.hash = hrefFor(routeById('credits'));
     await openTheGame();
 
     expect(document.querySelector('main')?.className).toBe('oyl-main oyl-main--prose');
+  });
+
+  it('marks a screen of sections on the element the stylesheet makes their container — #1014', async () => {
+    globalThis.location.hash = hrefFor(routeById('about'));
+    await openTheGame();
+
+    expect(document.querySelector('main')?.className).toBe('oyl-main oyl-main--sections');
   });
 });

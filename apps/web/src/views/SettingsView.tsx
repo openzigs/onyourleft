@@ -419,7 +419,10 @@ export function SettingsView({
   }
 
   return (
-    <>
+    // #1014: the cards flow into columns where `main` is wide enough
+    // (`theme.css` §"A screen of sections"), in this order — broad ones,
+    // because each segmented choice stays on one row.
+    <div className="oyl-sections oyl-sections--broad">
       <SettingsCard
         id="oyl-settings-you"
         title={SETTINGS_CARD_TITLES.you}
@@ -621,7 +624,7 @@ export function SettingsView({
 
         <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
       </SettingsCard>
-    </>
+    </div>
   );
 }
 
