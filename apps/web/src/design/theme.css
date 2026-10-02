@@ -799,17 +799,20 @@ h3:first-child {
   padding: 2px 0 0 2px;
 }
 
+/* ⚠️ `space-sm` each side and the body weight, so a row of segments is no
+   wider than the row of links with `space-md` gaps it replaced: wider, More's
+   five pages wrapped to one more row on a phone and pushed Instance's first
+   control 19 px under the fold on the CI runner's fonts. */
 .oyl-subnav-link {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
-  padding: 0 var(--oyl-space-md);
+  padding: 0 var(--oyl-space-sm);
   margin-block-start: -2px;
   margin-inline-start: -2px;
   border: 2px solid var(--oyl-color-accent);
   background: var(--oyl-color-canvas);
   color: var(--oyl-color-accent);
-  font-weight: 600;
   text-decoration: none;
 }
 
@@ -5115,11 +5118,16 @@ input[type='checkbox'][role='switch']:disabled {
 
   /* #994: the chosen chip and the current tab lose their fill and their
      inset ring, so each is given the doubled edge the toggle above has. */
-  .oyl-chips__options > label:has(> input:checked),
-  .oyl-subnav-link[aria-current='page'] {
+  .oyl-chips__options > label:has(> input:checked) {
     border-style: double;
     border-width: 4px;
     padding: 0 calc(var(--oyl-space-md) - 2px);
+  }
+
+  .oyl-subnav-link[aria-current='page'] {
+    border-style: double;
+    border-width: 4px;
+    padding: 0 calc(var(--oyl-space-sm) - 2px);
   }
 
   /* #992: a filled tile is a fill, which a forced palette flattens into the
