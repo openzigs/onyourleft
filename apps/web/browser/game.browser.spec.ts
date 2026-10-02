@@ -71,6 +71,7 @@ import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
+import { firstFrameExcess, prepareTookTheStall } from './ride-start';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -318,16 +319,6 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
  * at that point does.
  */
 const RIDER_BOX_TOLERANCE = 0.02;
-
-/**
- * How much cheaper than the control's first frame every prepared frame must be
- * — #547. **4**, where the pinned Chromium measured about 60 (≈ 9 ms against
- * ≈ 540 ms): wide enough that a busy runner does not flip it, and narrow enough
- * that a `prepare` which built the programs without the ride's first frame
- * staged — ≈ 600 ms left in the first frame, measured while it was written —
- * fails it, and so does one that does not wait for the GPU (≈ 560 ms). `game-harness.ts` §`rideStartProbe`.
- */
-const RIDE_START_STALL_FACTOR = 4;
 
 /**
  * What one frame of the harness route costs, with the scenery taken out: **11**.
@@ -2184,9 +2175,13 @@ test.describe('the world is lit, and can stop being — #286', () => {
    * `GameView` does now, which must build none.
    *
    * ⚠️ **Both halves are asserted, and neither is a phone.** No program is
-   * linked in the prepared frames, and none of them costs a
-   * {@link RIDE_START_STALL_FACTOR}th of the control's first. What the tablet
-   * pays at the start of a ride is validation 0002 Part T's to re-take.
+   * linked in the prepared frames, and the prepared FIRST frame keeps under
+   * half of what the control's first frame cost over the frames after it
+   * (`ride-start.ts` §`prepareTookTheStall`). ⚠️ Until #997 it held the
+   * slowest of ten prepared frames under a quarter of the control's first, and
+   * flaked whenever one busy-runner frame met a fast control (120 ms against
+   * 362). What the tablet pays at the start of a ride is validation 0002
+   * Part T's to re-take.
    */
   test('builds no GPU program in the first frames of a ride on the shadow map rung — #547', async ({
     harnessRun,
@@ -2200,18 +2195,24 @@ test.describe('the world is lit, and can stop being — #286', () => {
     expect(start.linksInPrepare).toBeGreaterThanOrEqual(start.unpreparedLinks);
     expect(start.preparedLinks).toBe(0);
     expect(start.preparedFrameMs).toHaveLength(start.unpreparedFrameMs.length);
-    // And the first frame's COST went, not only its links: no prepared frame
-    // costs a quarter of the control's first. Measured on this machine, about
-    // 9 ms against 540. `rideStartProbe` says why links alone were not enough.
-    const [controlFirst = 0] = start.unpreparedFrameMs;
-    expect(Math.max(...start.preparedFrameMs)).toBeLessThan(controlFirst / RIDE_START_STALL_FACTOR);
+    // And the first frame's COST went, not only its links: the prepared first
+    // frame keeps under half the control's first-frame excess. Measured on this
+    // machine, about 9 ms against 540. `rideStartProbe` says why links alone
+    // were not enough; `ride-start.ts` why this is the excess and not the max.
+    const preparedExcess = firstFrameExcess(start.preparedFrameMs);
+    const controlExcess = firstFrameExcess(start.unpreparedFrameMs);
+    expect(
+      prepareTookTheStall(start.preparedFrameMs, start.unpreparedFrameMs),
+      `prepared first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`,
+    ).toBe(true);
     const list = (values: readonly number[]) => values.map((each) => each.toFixed(1)).join(' / ');
     const measured =
       `without prepare: ${String(start.unpreparedLinks)} programs linked in the first ` +
       `${String(start.unpreparedFrameMs.length)} frames, ms ${list(start.unpreparedFrameMs)}; ` +
       `with prepare (${start.prepareMs.toFixed(1)} ms, ${String(start.linksInPrepare)} programs, ` +
       `KHR_parallel_shader_compile ${start.parallelCompile ? 'offered' : 'absent'}): ` +
-      `${String(start.preparedLinks)} linked in those frames, ms ${list(start.preparedFrameMs)}`;
+      `${String(start.preparedLinks)} linked in those frames, ms ${list(start.preparedFrameMs)}; ` +
+      `first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`;
     testInfo.annotations.push({
       type: 'first frames of a ride on the shadow map',
       description: measured,
