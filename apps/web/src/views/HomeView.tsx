@@ -438,7 +438,7 @@ function RideChoices(): JSX.Element {
             className="oyl-ride-card tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
           >
             <div className="oyl-ride-card__art">{choice.art}</div>
-            <div className="oyl-ride-card__body tw:flex tw:grow tw:flex-col tw:gap-sm tw:p-lg">
+            <div className="oyl-ride-card__body tw:flex tw:grow tw:flex-col tw:gap-sm">
               <h3 id={`oyl-home-ride-${choice.id}`} className="tw:m-0">
                 {choice.title}
               </h3>

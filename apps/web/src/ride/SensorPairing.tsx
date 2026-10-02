@@ -240,7 +240,7 @@ function PairingRow({
   readonly controller: RideController;
 }): JSX.Element {
   return (
-    <li className="oyl-pairing__row tw:bg-surface-raised tw:rounded-card tw:p-lg">
+    <li className="oyl-pairing__row tw:bg-surface-raised tw:rounded-card">
       <SensorGlyph kind={GLYPH_FOR[step.role]} className="oyl-pairing__glyph" />
       <div className="oyl-pairing__body">
         <h3 className="oyl-pairing__kind">{step.kind}</h3>

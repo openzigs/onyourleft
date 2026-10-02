@@ -665,7 +665,7 @@ function SettingsCard({
 }): JSX.Element {
   return (
     <section
-      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card tw:p-lg"
+      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card"
       aria-labelledby={id}
     >
       <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">

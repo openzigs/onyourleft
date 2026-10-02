@@ -394,7 +394,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         labelledBy={headingId}
         idPrefix={ids}
       />
-      <div className="oyl-chooser__loadout tw:mb-md tw:p-lg tw:bg-surface-raised tw:rounded-card">
+      <div className="oyl-chooser__loadout tw:mb-md tw:bg-surface-raised tw:rounded-card">
         <h3 className="tw:mt-0">Your ride</h3>
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         <PacerControls

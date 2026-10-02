@@ -2071,12 +2071,30 @@ a.oyl-button {
   background: var(--oyl-color-surface-raised);
   border: 0;
   border-radius: var(--oyl-radius-card);
+}
+
+/*
+ * A tile's inset, here rather than as a `tw:p-lg` on the tiles drawn with
+ * utilities: the menus' theme clears Tailwind's breakpoints (ADR 0042 D-2), and
+ * a PHONE keeps the old 16 px. At 24 px a side, Settings' card left the units
+ * choice too narrow for "Kilometres" and "Miles" on one row at 320 px on the
+ * CI runner's fonts (#992's first CI run), which is the row
+ * `button-hierarchy.browser.spec.ts` §"Settings' units choice" holds.
+ */
+.oyl-panel,
+.oyl-settings-card,
+.oyl-pairing__row,
+.oyl-chooser__loadout,
+.oyl-ride-card__body {
   padding: var(--oyl-space-lg);
 }
 
-/* A phone keeps the old inset: 24 px a side is 15 % of a 320 px screen. */
 @media (max-width: 37.49rem) {
-  .oyl-panel {
+  .oyl-panel,
+  .oyl-settings-card,
+  .oyl-pairing__row,
+  .oyl-chooser__loadout,
+  .oyl-ride-card__body {
     padding: var(--oyl-space-md);
   }
 }
