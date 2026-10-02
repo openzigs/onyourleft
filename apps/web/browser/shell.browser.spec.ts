@@ -2142,7 +2142,10 @@ for (const viewport of VIEWPORTS) {
       expect(boxes.length, 'no announcement switch on Settings to measure').toBeGreaterThan(0);
       for (const box of boxes) {
         expect(box.row).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
-        expect(box.width, 'a switch squeezed by its row').toBe(box.height);
+        // Since #994 each is drawn as a SWITCH, a 44 × 24 track (`theme.css`
+        // §"A SWITCH"), not a square box: squeezed by its row, it would be
+        // narrower than the track it declares.
+        expect(box.width, 'a switch squeezed by its row').toBe(TOUCH_TARGET_PIXELS);
         expect(box.height).toBeGreaterThanOrEqual(24);
       }
     });

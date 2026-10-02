@@ -7,6 +7,7 @@ import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/s
 
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
+import { FileDrop } from '../design/FileDrop';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';
 import { Reading } from '../design/Reading';
@@ -482,7 +483,9 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
               <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
                 <p>
                   <label htmlFor="route-file">GPX file</label>
-                  <input id="route-file" name={FILE_FIELD} type="file" />
+                  <FileDrop hint="Or drop a GPX file here">
+                    <input id="route-file" name={FILE_FIELD} type="file" />
+                  </FileDrop>
                 </p>
                 {/*
           #296. Until this box existed, nothing in this product could produce a
@@ -498,7 +501,7 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
         */}
                 <p>
                   <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
-                  <input id="route-loop" name={LOOP_FIELD} type="checkbox" />
+                  <input id="route-loop" name={LOOP_FIELD} type="checkbox" role="switch" />
                 </p>
                 {/*
           ⚠️ The threshold is shown in the rider's own units (#238) while the
@@ -508,7 +511,7 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
           a client's. Both name the same distance.
         */}
                 <p>
-                  Tick it for a circuit that finishes where it starts, so riding past the finish
+                  Turn it on for a circuit that finishes where it starts, so riding past the finish
                   begins another lap. The file has to close: if its two ends are more than{' '}
                   {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart, nothing
                   is saved and the import says how far apart they are.

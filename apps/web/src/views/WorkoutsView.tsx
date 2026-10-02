@@ -7,9 +7,11 @@ import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
+import { FileDrop } from '../design/FileDrop';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { WorkoutShape } from '../design/illustration/WorkoutShape';
 import { StatusMessage } from '../design/StatusMessage';
+import { Stepper } from '../design/Stepper';
 import type { DownloadableFile } from '../transfer/store-port';
 import {
   blockFromDraft,
@@ -689,14 +691,16 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                 <label htmlFor="block-minutes">
                   {draft.kind === 'intervals' ? 'Hard interval, minutes' : 'Minutes'}
                 </label>
-                <input
-                  id="block-minutes"
-                  name="minutes"
-                  type="text"
-                  inputMode="decimal"
-                  value={draft.minutes}
-                  onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
-                />
+                <Stepper name="minutes" step={1} min={1}>
+                  <input
+                    id="block-minutes"
+                    name="minutes"
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.minutes}
+                    onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
+                  />
+                </Stepper>
               </p>
               {needsTarget ? (
                 <p>
@@ -707,63 +711,77 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                         ? 'Hard target, % of threshold'
                         : 'Target, % of threshold'}
                   </label>
-                  <input
-                    id="block-percent"
-                    name="percent"
-                    type="text"
-                    inputMode="decimal"
-                    value={draft.percent}
-                    onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
-                  />
+                  <Stepper name="target percentage" step={5} min={0}>
+                    <input
+                      id="block-percent"
+                      name="percent"
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.percent}
+                      onChange={(event) => setDraft({ ...draft, percent: event.target.value })}
+                    />
+                  </Stepper>
                 </p>
               ) : null}
               {draft.kind === 'ramp' ? (
                 <p>
                   <label htmlFor="block-to-percent">Finishing target, % of threshold</label>
-                  <input
-                    id="block-to-percent"
-                    name="toPercent"
-                    type="text"
-                    inputMode="decimal"
-                    value={draft.toPercent}
-                    onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
-                  />
+                  <Stepper name="finishing target percentage" step={5} min={0}>
+                    <input
+                      id="block-to-percent"
+                      name="toPercent"
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.toPercent}
+                      onChange={(event) => setDraft({ ...draft, toPercent: event.target.value })}
+                    />
+                  </Stepper>
                 </p>
               ) : null}
               {draft.kind === 'intervals' ? (
                 <>
                   <p>
                     <label htmlFor="block-repeats">How many times</label>
-                    <input
-                      id="block-repeats"
-                      name="repeats"
-                      type="text"
-                      inputMode="numeric"
-                      value={draft.repeats}
-                      onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
-                    />
+                    <Stepper name="number of repeats" step={1} min={1}>
+                      <input
+                        id="block-repeats"
+                        name="repeats"
+                        type="text"
+                        inputMode="numeric"
+                        value={draft.repeats}
+                        onChange={(event) => setDraft({ ...draft, repeats: event.target.value })}
+                      />
+                    </Stepper>
                   </p>
                   <p>
                     <label htmlFor="block-easy-minutes">Recovery, minutes</label>
-                    <input
-                      id="block-easy-minutes"
-                      name="easyMinutes"
-                      type="text"
-                      inputMode="decimal"
-                      value={draft.easyMinutes}
-                      onChange={(event) => setDraft({ ...draft, easyMinutes: event.target.value })}
-                    />
+                    <Stepper name="recovery minutes" step={1} min={1}>
+                      <input
+                        id="block-easy-minutes"
+                        name="easyMinutes"
+                        type="text"
+                        inputMode="decimal"
+                        value={draft.easyMinutes}
+                        onChange={(event) =>
+                          setDraft({ ...draft, easyMinutes: event.target.value })
+                        }
+                      />
+                    </Stepper>
                   </p>
                   <p>
                     <label htmlFor="block-easy-percent">Recovery target, % of threshold</label>
-                    <input
-                      id="block-easy-percent"
-                      name="easyPercent"
-                      type="text"
-                      inputMode="decimal"
-                      value={draft.easyPercent}
-                      onChange={(event) => setDraft({ ...draft, easyPercent: event.target.value })}
-                    />
+                    <Stepper name="recovery target percentage" step={5} min={0}>
+                      <input
+                        id="block-easy-percent"
+                        name="easyPercent"
+                        type="text"
+                        inputMode="decimal"
+                        value={draft.easyPercent}
+                        onChange={(event) =>
+                          setDraft({ ...draft, easyPercent: event.target.value })
+                        }
+                      />
+                    </Stepper>
                   </p>
                 </>
               ) : null}
@@ -790,7 +808,14 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
               <p>
                 <label htmlFor="workout-file">Workout file</label>
-                <input id="workout-file" name="file" type="file" accept=".json,application/json" />
+                <FileDrop hint="Or drop a workout file here">
+                  <input
+                    id="workout-file"
+                    name="file"
+                    type="file"
+                    accept=".json,application/json"
+                  />
+                </FileDrop>
               </p>
               <Button variant="secondary" type="submit">
                 Import workout

@@ -37,6 +37,7 @@ import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
+import { FileDrop } from '../design/FileDrop';
 import { MoreAbout } from '../design/MoreAbout';
 import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
@@ -337,13 +338,15 @@ function ImportPanel({
           happened to each is the behaviour asked for. A filter that quietly
           drops them before the batch sees them reports on nothing.
         */}
-        <input
-          id="oyl-import-files"
-          className="oyl-input oyl-input--file"
-          type="file"
-          multiple
-          onChange={choose}
-        />
+        <FileDrop hint="Or drop activity files here">
+          <input
+            id="oyl-import-files"
+            className="oyl-input oyl-input--file"
+            type="file"
+            multiple
+            onChange={choose}
+          />
+        </FileDrop>
 
         <label htmlFor="oyl-import-folder">Or a whole folder</label>
         {/*

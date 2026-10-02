@@ -96,6 +96,7 @@ import {
   type ThemeStorage,
 } from '../design/theme-selection';
 import { StatusMessage } from '../design/StatusMessage';
+import { Stepper } from '../design/Stepper';
 import { CLEARING_STILL_REMOVES, PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
@@ -831,6 +832,7 @@ function AnnouncementsPanel({
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
+            role="switch"
             checked={preference.enabled}
             onChange={(event) => {
               save({ ...preference, enabled: event.currentTarget.checked });
@@ -947,6 +949,7 @@ function SoundsPanel({
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
+            role="switch"
             checked={preference.enabled}
             onChange={(event) => {
               save({ ...preference, enabled: event.currentTarget.checked });
@@ -1028,6 +1031,7 @@ function GameWorldPanel({
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
+            role="switch"
             checked={chosen}
             onChange={(event) => {
               const next = event.currentTarget.checked;
@@ -1135,6 +1139,7 @@ function MapTilesPanel({
             <label className="oyl-announce__switch">
               <input
                 type="checkbox"
+                role="switch"
                 checked={drawn}
                 onChange={(event) => {
                   const next = event.currentTarget.checked;
@@ -1430,9 +1435,9 @@ function KitChoice({
   readonly choose: (chosen: KitColour) => Promise<void>;
 }): JSX.Element {
   return (
-    <fieldset className="oyl-kit">
+    <fieldset className="oyl-kit oyl-chips">
       <legend>What colour is your kit in the trainer game?</legend>
-      <div className="oyl-kit__options">
+      <div className="oyl-kit__options oyl-chips__options">
         {KIT_COLOURS.map((option) => (
           <label key={option} htmlFor={`oyl-kit-${option}`}>
             <input
@@ -1534,17 +1539,30 @@ function WeightField({
     <div className="oyl-trainer__form">
       <p>
         <label htmlFor="oyl-rider-mass">Your weight ({massUnit(units)})</label>{' '}
-        <input
-          className="oyl-input"
-          id="oyl-rider-mass"
-          inputMode="decimal"
-          value={typed}
-          placeholder="not set"
-          onChange={(event) => {
-            setTyped(event.target.value);
-            onMessage(undefined);
-          }}
-        />
+        {/*
+          #994: − and + beside the box, which still takes typing. A box left
+          blank starts from the assumed weight the sentence below names, in
+          the rider's own units, so the first press is not a step from nothing.
+          Nothing is saved until *Save weight*, exactly as with typing.
+        */}
+        <Stepper
+          name="weight"
+          step={0.5}
+          min={0}
+          start={Number(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units).value)}
+        >
+          <input
+            className="oyl-input"
+            id="oyl-rider-mass"
+            inputMode="decimal"
+            value={typed}
+            placeholder="not set"
+            onChange={(event) => {
+              setTyped(event.target.value);
+              onMessage(undefined);
+            }}
+          />
+        </Stepper>
       </p>
       <p className="oyl-muted">
         Leave it blank to go back to the assumed{' '}

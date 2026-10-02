@@ -126,7 +126,7 @@ async function type(input: HTMLInputElement | undefined, value: string): Promise
 /** A control found the way a rider finds it: by the words next to it. */
 function boxLabelled(words: string): HTMLInputElement | undefined {
   return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input').find((input) =>
-    (input.closest('label')?.textContent ?? '').includes(words),
+    (input.labels?.[0]?.textContent ?? '').includes(words),
   );
 }
 
@@ -344,7 +344,7 @@ describe("the wind box is read in the RIDER's own units (#238, #326)", () => {
   }
 
   function labelOf(words: string): string {
-    return boxLabelled(words)?.closest('label')?.textContent ?? '';
+    return boxLabelled(words)?.labels?.[0]?.textContent ?? '';
   }
 
   function problemText(): string {

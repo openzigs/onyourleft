@@ -892,6 +892,17 @@ describe('the game world — #475', () => {
     );
   }
 
+  it('draws every on/off setting on the screen as a switch, still a checkbox (#994)', async () => {
+    const mounted = await settings(disk());
+    for (const panel of ['.oyl-announce', '.oyl-sounds', '.oyl-world']) {
+      const box = mounted.container.querySelector<HTMLInputElement>(
+        `${panel} input[role="switch"]`,
+      );
+      expect(box?.type, panel).toBe('checkbox');
+    }
+    mounted.unmount();
+  });
+
   it('is the standard world until the rider chooses otherwise, and keeps the choice on this device', async () => {
     const store = disk();
     const mounted = await settings(store);

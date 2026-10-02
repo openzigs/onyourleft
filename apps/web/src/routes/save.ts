@@ -113,9 +113,9 @@ export interface ImportOptions {
 }
 
 /**
- * The words beside the loop checkbox, quoted back in the refusal below.
+ * The words beside the loop switch (a checkbox until #994), quoted back in the refusal below.
  *
- * One constant, so the control a rider is told to untick is named the way the
+ * One constant, so the control a rider is told to turn off is named the way the
  * control they are looking at is actually labelled.
  */
 export const LOOP_CHECKBOX_LABEL = 'This route is a loop';
@@ -134,7 +134,7 @@ export const LOOP_CHECKBOX_LABEL = 'This route is a loop';
 export function loopRefusalText(fileName: string, because: string): string {
   return (
     `${fileName} was not saved: ${because}. Import it again without “${LOOP_CHECKBOX_LABEL}” ` +
-    'ticked to save it as a point-to-point route.'
+    'turned on to save it as a point-to-point route.'
   );
 }
 

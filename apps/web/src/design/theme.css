@@ -766,31 +766,73 @@ h3:first-child {
   text-decoration: underline;
 }
 
-/* The group's own pages — the secondary layer. Scrolls with the page. */
+/*
+ * The group's own pages — the secondary layer. Scrolls with the page.
+ *
+ * Segmented tabs since #994, not underlined links. They stay LINKS, because a
+ * page is a URL (back, a shared link and open-in-new-tab all still work), and
+ * are drawn as one row of joined segments the way `.oyl-segmented` draws a
+ * radio group. Each is a 44 px target (SC 2.5.5), declared here and measured
+ * the #316 three ways by `browser/controls.browser.spec.ts` §"#994".
+ *
+ * ⚠️ **The current page is told by more than colour** (SC 1.4.1): it is
+ * FILLED (`accentInk` on `accent`, a declared text pair) where the others are
+ * outlined, it is bold, and it is the only one underlined. The underline and
+ * the weight are what survive forced colours, where the fill is flattened —
+ * and the forced-colours block below doubles its border as well. The
+ * `[aria-current]` rule is its own rule so `controls.browser.spec.ts`' control
+ * can delete exactly it and find the current tab indistinguishable.
+ */
+/* ⚠️ Every pixel of this block's height is above every view's first control,
+   which `controls-first.browser.spec.ts` holds above a phone's fold: a
+   `space-sm` padding here put Instance's *Disconnect* 2 px under it. */
 .oyl-subnav {
   border-bottom: 1px solid var(--oyl-color-border);
-  padding: 0 var(--oyl-space-md);
+  padding: var(--oyl-space-xs) var(--oyl-space-md);
 }
 
 .oyl-subnav-list {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--oyl-space-md);
   margin: 0;
-  padding: 0;
+  padding: 2px 0 0 2px;
 }
 
 .oyl-subnav-link {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
+  padding: 0 var(--oyl-space-md);
+  margin-block-start: -2px;
+  margin-inline-start: -2px;
+  border: 2px solid var(--oyl-color-accent);
+  background: var(--oyl-color-canvas);
   color: var(--oyl-color-accent);
-  text-decoration: underline;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.oyl-subnav-list > li:first-child > .oyl-subnav-link {
+  border-start-start-radius: var(--oyl-radius);
+  border-end-start-radius: var(--oyl-radius);
+}
+
+.oyl-subnav-list > li:last-child > .oyl-subnav-link {
+  border-start-end-radius: var(--oyl-radius);
+  border-end-end-radius: var(--oyl-radius);
+}
+
+.oyl-subnav-link:hover {
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-accent-hover);
 }
 
 .oyl-subnav-link[aria-current='page'] {
+  background: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-ink);
   font-weight: 700;
+  text-decoration: underline;
   text-decoration-thickness: 3px;
   text-underline-offset: 4px;
 }
@@ -1992,30 +2034,12 @@ a.oyl-button {
 }
 
 /*
- * THE RIDER'S KIT COLOUR — #623. A column of #667's radio ROWS (each label is
- * the 44 px target declared above), because five options are not a segmented
- * control (#668 stops at three). The swatch is decoration and is hidden from
- * assistive technology: each option is its NAME. Its border is the one token
- * declared at 3:1 against the page, so a dark swatch still has an edge.
+ * THE RIDER'S KIT COLOUR — #623, drawn as CHIPS since #994 (`.oyl-chips`
+ * below), because five options are not a segmented control (#668 stops at
+ * three). The swatch is decoration and is hidden from assistive technology:
+ * each option is its NAME. Its border is the one token declared at 3:1
+ * against the page, so a dark swatch still has an edge.
  */
-.oyl-kit {
-  border: 0;
-  margin: 0 0 var(--oyl-space-md);
-  padding: 0;
-  min-width: 0;
-}
-
-.oyl-kit > legend {
-  padding: 0;
-  margin-bottom: var(--oyl-space-xs);
-}
-
-.oyl-kit__options {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
 .oyl-kit__swatch {
   flex-shrink: 0;
   inline-size: 1.25rem;
@@ -2815,6 +2839,214 @@ input[type='file']::file-selector-button:hover {
 /* A token's gap between a file input and the label before it. */
 p > label + input[type='file'] {
   margin-inline-start: var(--oyl-space-sm);
+}
+
+/*
+ * A SWITCH — #994. An on/off setting is a native checkbox that says
+ * `role="switch"`, drawn as a track with a thumb. It stays a checkbox in the
+ * DOM — the platform's keyboard (Space), its form value and its `checked` —
+ * and the role is what a screen reader announces: "on" and "off" rather than
+ * "checked".
+ *
+ * **Which boxes are switches.** A SETTING that is on or off: the trainer
+ * game's *Race your own best*, *Ride against a pacer* and *Ride in a wind*;
+ * Routes' *It is a loop*; Settings' announcements, sounds, game world and map
+ * tiles; Camera's *Keep the pictures* and *Pause my ride when nobody is on the
+ * bike*. **Which stay checkboxes, and why.** Every box that AGREES to
+ * something — the camera's acknowledgements, being raced by another rider
+ * (#793), the side camera's pictures and the hosted model's — because "I
+ * agree" ticked is a statement the rider made, where a switch reads as a
+ * preference flipped, and ADR 0029's consents must not read lighter than they
+ * are; and Segments' choice of efforts to compare, which is a SELECTION of
+ * several rather than one thing on or off.
+ *
+ * ⚠️ Not `@radix-ui/react-switch`, which #994 names. ADR 0042 D-6 admits a Radix
+ * primitive only where a hand-written control "would have to re-implement that
+ * behaviour"; a native checkbox with the switch role re-implements nothing, and
+ * a Radix switch is a `<button>`, so it would have dropped every form value and
+ * `checked` the screens and their tests read.
+ *
+ * ⚠️ **The state is the thumb's POSITION**, left off and right on — a shape —
+ * and the fill only confirms it (SC 1.4.1). The thumb is a gradient rather than
+ * a pseudo-element, because a pseudo-element on an `input` is drawn by one
+ * engine and not another. Its colours are pairs `tokens.ts` declares at 3:1:
+ * `border` on `canvas` off, `accentInk` on `accent` on.
+ *
+ * The track is 44 × 24 (SC 2.5.8's 24 at its height, as #397's switch), and the
+ * ROW it sits in is the 44 px target #667 declares on every checkbox label.
+ * Under forced colours the switch is handed back to the platform as a checkbox
+ * (below), which draws its state in the user's own colours.
+ */
+input[type='checkbox'][role='switch'] {
+  appearance: none;
+  flex-shrink: 0;
+  inline-size: 2.75rem;
+  block-size: 1.5rem;
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  border: 2px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius-card);
+  background: radial-gradient(
+      circle 0.4375rem at 0.625rem 50%,
+      var(--oyl-color-border) 96%,
+      transparent 100%
+    )
+    var(--oyl-color-canvas);
+}
+
+input[type='checkbox'][role='switch']:checked {
+  border-color: var(--oyl-color-accent);
+  background: radial-gradient(
+      circle 0.4375rem at calc(100% - 0.625rem) 50%,
+      var(--oyl-color-accent-ink) 96%,
+      transparent 100%
+    )
+    var(--oyl-color-accent);
+}
+
+input[type='checkbox'][role='switch']:disabled {
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/*
+ * CHIPS — #994. A single choice of more than three (#668 stops a segmented
+ * control at three): a `fieldset` of NATIVE radios, each label a separate
+ * rounded chip, wrapping. The platform supplies the arrow keys and the group's
+ * one tab stop. The 44 px floor is #667's on a radio row; the chosen chip is
+ * told by its radio's dot (SHAPE), a doubled `accent` edge and the `selected`
+ * fill — the same three marks as a segment.
+ */
+.oyl-chips {
+  border: 0;
+  margin: 0 0 var(--oyl-space-md);
+  padding: 0;
+  min-width: 0;
+}
+
+.oyl-chips > legend {
+  padding: 0;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-chips__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-chips__options > label {
+  cursor: pointer;
+  padding: 0 var(--oyl-space-md);
+  border: 2px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-canvas);
+  color: var(--oyl-color-ink);
+}
+
+.oyl-chips__options > label:hover {
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-accent-hover);
+}
+
+.oyl-chips__options > label:has(> input:checked) {
+  background: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+  border-color: var(--oyl-color-accent);
+  box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
+}
+
+/*
+ * A STEPPER — #994: − value +, around a number box that still takes typing
+ * (`design/Stepper.tsx`). Each step button is a 44 × 44 target, declared, so a
+ * thumb on a handlebar does not have to land in a text box to change a number.
+ * The box keeps its own label; the buttons are named for it ("Increase pacer
+ * intensity"), and neither sits inside the label, so neither is read as part
+ * of the box's name.
+ */
+.oyl-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  max-width: 100%;
+}
+
+.oyl-stepper > input {
+  inline-size: 6rem;
+  min-inline-size: 0;
+  text-align: center;
+}
+
+.oyl-stepper__step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  border: 2px solid var(--oyl-color-surface-overlay);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface-overlay);
+  color: var(--oyl-color-accent);
+}
+
+.oyl-stepper__step:hover {
+  background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+}
+
+/*
+ * A DROP ZONE — #994. Around a file input, which stays the way in for a
+ * keyboard, a screen reader and a phone: its button is drawn above as the
+ * secondary button. On a window wide enough to be a tablet or a desktop the
+ * zone is drawn as a dashed box with one line saying a file can be dropped
+ * there; narrower it is drawn as nothing, because a phone has nothing to drag.
+ * `design/FileDrop.tsx` hands a dropped file to the input itself, so the
+ * screen's own `change` handler or form reads it as though it was chosen.
+ */
+.oyl-drop {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-xs);
+  max-width: 100%;
+}
+
+.oyl-drop__hint {
+  display: none;
+}
+
+/* In a ROW on a tablet, the hint beside the button rather than under it,
+   and a `space-sm` padding: the zone is above Routes' *Import route*, which
+   `list-detail.browser.spec.ts` holds 50 px clear of the tablet's fold, and a
+   stacked zone with `space-md` left it 45 px clear. */
+@media (min-width: 48rem) {
+  .oyl-drop {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--oyl-space-sm);
+    padding: var(--oyl-space-sm);
+    border: 2px dashed var(--oyl-color-border);
+    border-radius: var(--oyl-radius-card);
+  }
+
+  .oyl-drop__hint {
+    display: block;
+    margin: 0;
+    color: var(--oyl-color-ink-muted);
+  }
+
+  .oyl-drop[data-oyl-dragging] {
+    border-style: solid;
+    border-color: var(--oyl-color-accent);
+    background: var(--oyl-color-selected);
+  }
 }
 
 .oyl-input {
@@ -4870,6 +5102,24 @@ p > label + input[type='file'] {
     border-style: double;
     border-width: 4px;
     padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+  }
+
+  /* #994: a switch is handed back to the platform, which draws a checkbox in
+     the user's own colours — the gradient thumb would be flattened away. */
+  input[type='checkbox'][role='switch'] {
+    appearance: auto;
+    inline-size: 1.5rem;
+    background: none;
+    border: 0;
+  }
+
+  /* #994: the chosen chip and the current tab lose their fill and their
+     inset ring, so each is given the doubled edge the toggle above has. */
+  .oyl-chips__options > label:has(> input:checked),
+  .oyl-subnav-link[aria-current='page'] {
+    border-style: double;
+    border-width: 4px;
+    padding: 0 calc(var(--oyl-space-md) - 2px);
   }
 
   /* #992: a filled tile is a fill, which a forced palette flattens into the

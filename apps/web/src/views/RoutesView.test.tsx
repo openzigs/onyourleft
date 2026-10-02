@@ -37,7 +37,7 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { FILE_FIELD, loopChosen, routeFromImportForm } from '../routes/import-form';
+import { FILE_FIELD, LOOP_FIELD, loopChosen, routeFromImportForm } from '../routes/import-form';
 import { LOOP_CHECKBOX_LABEL } from '../routes/save';
 import { loopGpx, routeStub, stubRouteId, type RouteStub } from '../routes/testing';
 import type { DownloadableFile } from '../transfer/store-port';
@@ -393,6 +393,14 @@ describe('the loop box — #296', () => {
     expect(box?.labels?.[0]?.textContent).toContain(LOOP_CHECKBOX_LABEL);
     // The rule the geometry is held to, where the rider is making the claim.
     expect(view.container.textContent).toContain(`${String(LOOP_CLOSURE_METRES)} m apart`);
+  });
+
+  it('draws the loop box as a switch that still posts as a checkbox (#994)', async () => {
+    const view = await render(routeStub(ATHLETE));
+    const box = view.container.querySelector<HTMLInputElement>('#route-loop');
+    expect(box?.type).toBe('checkbox');
+    expect(box?.getAttribute('role')).toBe('switch');
+    expect(box?.name).toBe(LOOP_FIELD);
   });
 
   it('lists a route imported as a loop as a Loop', async () => {

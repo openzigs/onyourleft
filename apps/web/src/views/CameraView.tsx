@@ -562,6 +562,7 @@ function Camera({
             <label>
               <input
                 type="checkbox"
+                role="switch"
                 checked={keeping}
                 onChange={(event) => {
                   controller.setKeeping(event.target.checked);
@@ -596,6 +597,7 @@ function Camera({
               <label>
                 <input
                   type="checkbox"
+                  role="switch"
                   checked={watchingPresence}
                   onChange={(event) => {
                     controller.watchPresence(event.target.checked);
