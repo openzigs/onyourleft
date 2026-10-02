@@ -799,10 +799,12 @@ h3:first-child {
   padding: 2px 0 0 2px;
 }
 
-/* ⚠️ `space-sm` each side and the body weight, so a row of segments is no
-   wider than the row of links with `space-md` gaps it replaced: wider, More's
-   five pages wrapped to one more row on a phone and pushed Instance's first
-   control 19 px under the fold on the CI runner's fonts. */
+/* ⚠️ The body weight, and on a phone `space-xs` each side, so a row of
+   segments is no wider than the row of links with `space-md` gaps it
+   replaced. Wider, More's five pages wrapped to a second row on a 390 px
+   phone (351 of 358 px on a Mac's fonts, over on the CI runner's) and pushed
+   Instance's first control 19 px under the fold
+   (`controls-first.browser.spec.ts`). */
 .oyl-subnav-link {
   display: inline-flex;
   align-items: center;
@@ -814,6 +816,12 @@ h3:first-child {
   background: var(--oyl-color-canvas);
   color: var(--oyl-color-accent);
   text-decoration: none;
+}
+
+@media (max-width: 37.49rem) {
+  .oyl-subnav-link {
+    padding: 0 var(--oyl-space-xs);
+  }
 }
 
 .oyl-subnav-list > li:first-child > .oyl-subnav-link {
@@ -5128,6 +5136,13 @@ input[type='checkbox'][role='switch']:disabled {
     border-style: double;
     border-width: 4px;
     padding: 0 calc(var(--oyl-space-sm) - 2px);
+  }
+
+  /* The phone's narrower segment, so the doubled edge does not widen it. */
+  @media (max-width: 37.49rem) {
+    .oyl-subnav-link[aria-current='page'] {
+      padding: 0 calc(var(--oyl-space-xs) - 2px);
+    }
   }
 
   /* #992: a filled tile is a fill, which a forced palette flattens into the
