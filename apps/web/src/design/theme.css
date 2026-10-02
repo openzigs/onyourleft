@@ -1818,9 +1818,10 @@ a.oyl-button {
  * so the box and its 44 px floor are the other kinds'), the accent's label
  * underlined so it is told from a sentence by more than colour (SC 1.4.1), a
  * thicker line and `accent-hover` under a pointer, as a link in running text
- * (#661). Its label sits on whatever is behind it, and `accent` and
- * `accentHover` are declared text pairs on the canvas and every surface a
- * button is placed on.
+ * (#661). Its label sits on whatever is behind it; `accent` and `accentHover`
+ * are declared text pairs on the canvas, and `accent` on `surfaceRaised` and
+ * `surfaceOverlay` is declared too. `accentHover` on a tile is NOT declared,
+ * so a tertiary placed inside a tile owes that pair first.
  */
 .oyl-button--tertiary {
   background: transparent;
@@ -4837,12 +4838,17 @@ p > label + input[type='file'] {
      list, told by an inset ring a forced palette removes, by a heavier one. */
   .oyl-panel,
   .oyl-empty-state,
-  .oyl-pane-list__item {
+  .oyl-pane-list__item,
+  .oyl-settings-card,
+  .oyl-ride-card,
+  .oyl-pairing__row,
+  .oyl-chooser__loadout {
     border: 1px solid;
   }
 
   .oyl-pane-list__item[aria-current='true'] {
     border-width: 3px;
+    padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
   }
 
   /* #944: a forced palette drops the indicator's fill, which is the shape

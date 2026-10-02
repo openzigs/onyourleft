@@ -177,6 +177,102 @@ for (const theme of THEMES) {
   });
 }
 
+/** Every tile kind, for the forced-colours edge (#996's review). */
+const FORCED_TILES = [
+  '.oyl-panel:not(.oyl-settings-card .oyl-panel)',
+  '.oyl-pane-list__item',
+  '.oyl-empty-state',
+  '.oyl-settings-card',
+  '.oyl-ride-card',
+  '.oyl-pairing__row',
+  '.oyl-chooser__loadout',
+];
+
+async function forcedEdges(page: Page): Promise<{ seen: Set<string>; bare: string[] }> {
+  const seen = new Set<string>();
+  const bare: string[] = [];
+  for (const route of ALL_ROUTES) {
+    const hash = await hashFor(page, route);
+    if (hash === undefined) continue;
+    await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
+    const found = await page.evaluate((selectors) => {
+      // Neither is on a route the portless harness renders (Devices' pairing
+      // row needs a ride controller, the chooser a game port), so a specimen
+      // of each, in the class the views use, stands in for it.
+      for (const kind of ['oyl-pairing__row', 'oyl-chooser__loadout']) {
+        const specimen = document.createElement('div');
+        specimen.className = kind;
+        specimen.textContent = kind;
+        document.querySelector('main')?.append(specimen);
+      }
+      const out: { kind: string; border: number }[] = [];
+      for (const kind of selectors) {
+        for (const tile of document.querySelectorAll<HTMLElement>(`main ${kind}`)) {
+          if (tile.checkVisibility()) {
+            out.push({ kind, border: Number.parseFloat(getComputedStyle(tile).borderTopWidth) });
+          }
+        }
+      }
+      return out;
+    }, FORCED_TILES);
+    for (const tile of found) {
+      seen.add(tile.kind);
+      if (tile.border < 1) bare.push(`${route.id}: ${tile.kind}`);
+    }
+  }
+  return { seen, bare };
+}
+
+test.describe('#996 — forced colours', () => {
+  test.use({ colorScheme: 'dark' });
+
+  test('every kind of tile keeps an edge', async ({ page }) => {
+    test.setTimeout(120_000);
+    await open(page);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const { seen, bare } = await forcedEdges(page);
+    expect(bare).toEqual([]);
+    for (const kind of [
+      '.oyl-settings-card',
+      '.oyl-ride-card',
+      '.oyl-pairing__row',
+      '.oyl-chooser__loadout',
+    ]) {
+      expect(seen.has(kind), `${kind} never rendered`).toBe(true);
+    }
+  });
+
+  test('control: without the forced-colours rule the tiles are bare', async ({ page }) => {
+    test.setTimeout(120_000);
+    await open(page);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const removed = await page.evaluate(() => {
+      let count = 0;
+      for (const sheet of [...document.styleSheets]) {
+        for (const rule of [...sheet.cssRules]) {
+          if (rule instanceof CSSMediaRule && rule.conditionText.includes('forced-colors')) {
+            for (let i = rule.cssRules.length - 1; i >= 0; i -= 1) {
+              const inner = rule.cssRules[i];
+              if (
+                inner instanceof CSSStyleRule &&
+                inner.selectorText.includes('.oyl-settings-card') &&
+                !inner.selectorText.includes('[')
+              ) {
+                rule.deleteRule(i);
+                count += 1;
+              }
+            }
+          }
+        }
+      }
+      return count;
+    });
+    expect(removed).toBe(1);
+    const { bare } = await forcedEdges(page);
+    expect(bare.length).toBeGreaterThan(0);
+  });
+});
+
 test.describe('#992 — the controls', () => {
   test.use({ colorScheme: 'dark' });
 
