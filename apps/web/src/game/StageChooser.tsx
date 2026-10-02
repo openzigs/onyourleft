@@ -394,7 +394,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         labelledBy={headingId}
         idPrefix={ids}
       />
-      <div className="oyl-chooser__loadout tw:mb-md tw:p-md tw:bg-surface tw:border tw:border-border tw:rounded">
+      <div className="oyl-chooser__loadout tw:mb-md tw:p-lg tw:bg-surface-raised tw:rounded-card">
         <h3 className="tw:mt-0">Your ride</h3>
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         <PacerControls
@@ -453,7 +453,7 @@ function RouteCards(props: {
           return (
             <li
               key={route.id}
-              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:py-sm tw:px-md tw:bg-surface tw:text-ink tw:border-2 tw:border-border tw:rounded"
+              className="oyl-chooser__card tw:relative tw:grid tw:gap-x-sm tw:items-center tw:py-sm tw:px-md tw:bg-surface-raised tw:text-ink tw:border-2 tw:border-surface-raised tw:rounded-card"
             >
               <input
                 className="oyl-chooser__radio tw:m-0"

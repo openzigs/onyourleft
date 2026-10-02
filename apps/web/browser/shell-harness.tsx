@@ -394,6 +394,7 @@ function HierarchySpecimens(): JSX.Element {
     <section data-oyl-hierarchy="true" aria-label="Button hierarchy specimens">
       <p>
         <Button>Start recording</Button> <Button variant="secondary">Pause</Button>{' '}
+        <Button variant="tertiary">Keep the ride</Button>{' '}
         <Button variant="toggle" pressed={false}>
           Mute sounds
         </Button>{' '}
@@ -882,7 +883,9 @@ function main(): void {
         ? `toggle-${button.getAttribute('aria-pressed') === 'true' ? 'on' : 'off'}`
         : button.classList.contains('oyl-button--secondary')
           ? 'secondary'
-          : 'primary';
+          : button.classList.contains('oyl-button--tertiary')
+            ? 'tertiary'
+            : 'primary';
       button.dataset['oylKind'] = button.disabled ? `${kind}-disabled` : kind;
     }
     if (params.get('hover-rule') === HOVER_RULE_OFF) {

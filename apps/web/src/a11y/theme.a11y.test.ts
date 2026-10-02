@@ -23,6 +23,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   COLOUR_TOKENS,
   DARK_COLOUR_TOKENS,
+  FONT_FAMILY_TOKENS,
   FONT_SIZE_TOKENS,
   MOTION_DURATION_MS,
   MOTION_TOKENS,
@@ -93,6 +94,7 @@ describe('theme.css and tokens.ts cannot drift', () => {
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
     ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
+    ['font-family', FONT_FAMILY_TOKENS as Record<string, string>],
     ['motion', MOTION_TOKENS as Record<string, string>],
   ])('declares exactly the %s tokens in `:root`, with the same values', (prefix, tokens) => {
     const declared = declarationsWithPrefix(prefix, blockOf(LIGHT_BLOCK));
@@ -119,9 +121,9 @@ describe('theme.css and tokens.ts cannot drift', () => {
       .replace(blockOf(LIGHT_BLOCK), '')
       .replace(blockOf(DARK_BLOCK), '')
       .replace(blockOf(HUD_BLOCK), '');
-    expect([...outside.matchAll(/--oyl-(?:color|space|font-size|motion)-[a-z0-9-]+\s*:/g)]).toEqual(
-      [],
-    );
+    expect([
+      ...outside.matchAll(/--oyl-(?:color|space|font-size|font-family|motion)-[a-z0-9-]+\s*:/g),
+    ]).toEqual([]);
   });
 
   it('pins the HUD to the light palette: every page colour token, at its light value (#672)', () => {
@@ -202,6 +204,7 @@ describe('every token is painted by something', () => {
     ['color', COLOUR_TOKENS as Record<string, string>],
     ['space', SPACE_TOKENS as Record<string, string>],
     ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
+    ['font-family', FONT_FAMILY_TOKENS as Record<string, string>],
     ['motion', MOTION_TOKENS as Record<string, string>],
   ])('has a rule reading each %s token', (prefix, tokens) => {
     const unread = Object.keys(tokens)
@@ -212,6 +215,28 @@ describe('every token is painted by something', () => {
       'these custom properties are declared and no rule reads them. A token nothing paints ' +
         'with can hold any value at all and every other check in this suite stays green.',
     ).toEqual([]);
+  });
+});
+
+/**
+ * #992: a reading (`design/Reading.tsx`) is large tabular numerals and a small
+ * unit, both from tokens — one size for every menu's facts.
+ */
+describe('#992 — a reading', () => {
+  function body(selector: string): string {
+    const escaped = selector.replaceAll('.', '\\.');
+    const bodies = [...themeCss.matchAll(new RegExp(`\\n${escaped} \\{([^}]*)\\}`, 'g'))];
+    expect(bodies, `theme.css has ${String(bodies.length)} rules for ${selector}`).toHaveLength(1);
+    return bodies[0]?.[1] ?? '';
+  }
+
+  it('sets the numerals large and tabular, and the unit small and muted', () => {
+    const value = body('.oyl-reading__value');
+    expect(value).toContain('font-size: var(--oyl-font-size-xxl);');
+    expect(value).toContain('font-variant-numeric: tabular-nums;');
+    const unit = body('.oyl-reading__unit');
+    expect(unit).toContain('font-size: var(--oyl-font-size-sm);');
+    expect(unit).toContain('color: var(--oyl-color-ink-muted);');
   });
 });
 

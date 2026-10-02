@@ -11,17 +11,26 @@
  *    its own port). An init script — which runs before any script of the
  *    page's own — registers a `requestAnimationFrame`, and the callback reads
  *    the body's computed background: that is the colour of the first frame.
- *    Under a dark device with nothing chosen it must be the dark canvas; with
- *    *Light* chosen under a dark device, the light one; with *Dark* chosen
- *    under a light device, the dark one. **Control:** the same page with the
- *    inline theme script cut out of the HTML must paint its first frame LIGHT
- *    under a dark device — which is the flash this issue exists to remove, and
- *    what makes the positive reads a statement about the script rather than
- *    about a page that happened to be dark.
- * 2. **The choice survives a reload**: Settings' *Dark*, pressed on the
- *    product, then the page reloaded and a second page opened, each reading
- *    `data-theme` and its first frame — and the second page's *Match this
- *    device* reaching the first, still open, through the `storage` event.
+ *    With NOTHING chosen it must be the dark canvas under a dark device AND a
+ *    light one (#992, the owner's ruling of 2026-10-02: dark by default);
+ *    with *Match this device* chosen, the device's; with *Light* chosen under
+ *    a dark device, the light one; with *Dark* chosen under a light device,
+ *    the dark one. **Controls:** the same page with the inline theme script
+ *    cut out of the HTML must paint its first frame LIGHT under a dark device
+ *    — which is the flash #672 exists to remove — and LIGHT under a light
+ *    device with nothing chosen, which is what makes "dark by default" a
+ *    statement about the script rather than about a page that happened to be
+ *    dark.
+ * 2. **The choice survives a reload**: a new device opens Settings on *Dark*;
+ *    *Light*, pressed on the product, then the page reloaded and a second page
+ *    opened, each reading `data-theme` and its first frame — and the second
+ *    page's *Match this device* reaching the first, still open, through the
+ *    `storage` event.
+ *
+ * ⚠️ Every OTHER spec starts with *Match this device* stored
+ * (`playwright.config.ts` §`FOLLOW_THE_DEVICE`), so its `colorScheme` still
+ * picks the palette it reads. These two parts empty that storage, because
+ * what they measure is a device that has chosen nothing.
  * 3. **Every route is painted from the dark palette** under a dark device —
  *    `shell.html` with the real `AppShell` and route table: the body, the
  *    header's surface (#671's alias), every link in running text and every
@@ -102,7 +111,7 @@ async function probeFirstFrame(page: Page): Promise<void> {
 }
 
 /** Choose a palette on this device before the page runs, as Settings would have. */
-async function chooseBeforeLoad(page: Page, choice: 'light' | 'dark'): Promise<void> {
+async function chooseBeforeLoad(page: Page, choice: 'device' | 'light' | 'dark'): Promise<void> {
   await page.addInitScript(
     ([key, value]) => {
       localStorage.setItem(key, value);
@@ -134,14 +143,22 @@ async function withoutTheScript(page: Page): Promise<{ cut: () => number }> {
   return { cut: () => cut };
 }
 
+/** A device that has chosen nothing — not even `FOLLOW_THE_DEVICE`. */
+const NOTHING_CHOSEN = { cookies: [], origins: [] };
+
 test.describe('#672 — no frame is painted in the wrong palette', () => {
+  test.use({ storageState: NOTHING_CHOSEN });
+
   const cases: readonly {
     readonly device: 'light' | 'dark';
-    readonly chosen?: 'light' | 'dark';
+    readonly chosen?: 'device' | 'light' | 'dark';
     readonly expected: Theme;
   }[] = [
     { device: 'dark', expected: 'dark' },
-    { device: 'light', expected: 'light' },
+    // #992: nothing chosen is dark whatever the device says.
+    { device: 'light', expected: 'dark' },
+    { device: 'light', chosen: 'device', expected: 'light' },
+    { device: 'dark', chosen: 'device', expected: 'dark' },
     { device: 'dark', chosen: 'light', expected: 'light' },
     { device: 'light', chosen: 'dark', expected: 'dark' },
   ];
@@ -176,10 +193,25 @@ test.describe('#672 — no frame is painted in the wrong palette', () => {
     expect(frame.theme).toBeNull();
     expect(frame.background).toBe(rgb('light', 'canvas'));
   });
+
+  test('the control for #992 — without the inline script, nothing chosen on a light device is LIGHT', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await probeFirstFrame(page);
+    const control = await withoutTheScript(page);
+    await page.goto(`${PRODUCT_ORIGIN}/`);
+    const frame = await firstFrame(page);
+    expect(control.cut(), 'the theme script was not found in dist/index.html to cut').toBe(1);
+    expect(frame.theme).toBeNull();
+    expect(frame.background).toBe(rgb('light', 'canvas'));
+  });
 });
 
 test.describe('#672 — a choice made in Settings survives a reload', () => {
-  test('Dark, pressed on the product under a light device, is dark from the first frame after', async ({
+  test.use({ storageState: NOTHING_CHOSEN });
+
+  test('a new device opens on Dark; Light, pressed under a dark device, is light from the first frame after', async ({
     page,
     context,
   }) => {
@@ -189,47 +221,50 @@ test.describe('#672 — a choice made in Settings survives a reload', () => {
     await expect(group).toBeVisible();
     const radios = group.getByRole('radio');
     await expect(radios).toHaveCount(3);
-    await expect(group.getByRole('radio', { name: 'Match this device' })).toBeChecked();
-    expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
-
-    await group.getByText('Dark', { exact: true }).click();
+    // #992: a device that has chosen nothing is dark, under a light device.
     await expect(group.getByRole('radio', { name: 'Dark' })).toBeChecked();
     expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe('dark');
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await group.getByText('Light', { exact: true }).click();
+    await expect(group.getByRole('radio', { name: 'Light' })).toBeChecked();
+    expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
     expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(
-      rgb('dark', 'canvas'),
+      rgb('light', 'canvas'),
     );
 
     await probeFirstFrame(page);
     await page.reload();
     const reloaded = await firstFrame(page);
-    expect(reloaded.theme).toBe('dark');
-    expect(reloaded.background).toBe(rgb('dark', 'canvas'));
+    expect(reloaded.theme).toBe('light');
+    expect(reloaded.background).toBe(rgb('light', 'canvas'));
 
     // A fresh page in the same browser — the next launch, as near as a gate gets.
     const next = await context.newPage();
-    await next.emulateMedia({ colorScheme: 'light' });
+    await next.emulateMedia({ colorScheme: 'dark' });
     await probeFirstFrame(next);
     await next.goto(`${PRODUCT_ORIGIN}/#/settings`);
-    expect((await firstFrame(next)).theme).toBe('dark');
+    expect((await firstFrame(next)).theme).toBe('light');
     await expect(
-      next.getByRole('group', { name: 'Light or dark?' }).getByRole('radio', { name: 'Dark' }),
+      next.getByRole('group', { name: 'Light or dark?' }).getByRole('radio', { name: 'Light' }),
     ).toBeChecked();
 
-    // And back to the device, which is followed again with no reload.
+    // And to the device, which is followed with no reload.
     await next
       .getByRole('group', { name: 'Light or dark?' })
       .getByText('Match this device', { exact: true })
       .click();
-    expect(await next.evaluate(() => document.documentElement.dataset['theme'])).toBe('light');
-    // #744's review: the FIRST page, still open and still dark, is another tab
-    // — the `storage` event carries the choice across with no reload.
+    expect(await next.evaluate(() => document.documentElement.dataset['theme'])).toBe('dark');
+    // #744's review: the FIRST page, still open and still light, is another
+    // tab — the `storage` event carries the choice across with no reload.
     await expect
       .poll(() => page.evaluate(() => document.documentElement.dataset['theme']))
-      .toBe('light');
-    await next.emulateMedia({ colorScheme: 'dark' });
+      .toBe('dark');
+    // Following the device: it moves when the device does.
+    await next.emulateMedia({ colorScheme: 'light' });
     await expect
       .poll(() => next.evaluate(() => document.documentElement.dataset['theme']))
-      .toBe('dark');
+      .toBe('light');
   });
 });
 
@@ -254,7 +289,7 @@ async function readRoute(page: Page): Promise<RoutePaint> {
       ),
       primaries: [
         ...document.querySelectorAll<HTMLButtonElement>(
-          'button.oyl-button:not(.oyl-button--secondary):not(.oyl-button--toggle):not(:disabled)',
+          'button.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle):not(:disabled)',
         ),
       ].map((button) => {
         const style = getComputedStyle(button);

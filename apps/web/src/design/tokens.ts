@@ -546,13 +546,17 @@ export const FONT_SIZE_TOKENS = {
   lg: '1.25rem',
   /** Step 2. A section heading inside a view. */
   xl: '1.5625rem',
-  /** Step 3. The title of the view. */
+  /**
+   * Step 3. A reading's numerals (#992): a time, a distance, a power, a climb
+   * or a count, set large and tabular by `design/Reading.tsx`. Until #992 this
+   * was the view title, which is `display` now.
+   */
   xxl: '1.953125rem',
   /**
-   * Step 4 (#936). A hero title on a menu — the one line on a screen that says
-   * what the screen is for, set above the view title on the same ladder. The
-   * owner's D-5 on #935: `system-ui` at a heavier weight, and no font file;
-   * `theme.css` §`.oyl-display` is the rule that sets both.
+   * Step 4 (#936). The title of every view since #992 — the one line on a
+   * screen that says what the screen is for. The owner's D-5 on #935: the
+   * display face at a heavier weight, and no font file;
+   * `theme.css` §`h1, .oyl-display` is the rule that sets both.
    */
   display: '2.44140625rem',
   /**
@@ -573,6 +577,18 @@ export const FONT_SIZE_TOKENS = {
    * criterion still holds with room.
    */
   metric: '3.814697265625rem',
+} as const satisfies Record<string, string>;
+
+/**
+ * The two faces — #992. The body face is every word; the display face is a
+ * view's title and `.oyl-display`. Both are the page's own `system-ui` stack
+ * today, and the display face is its own token so that the face ADR 0043
+ * chooses (#991) is a change to one value here and its line in `theme.css`.
+ * `theme.a11y.test.ts` holds the two files equal.
+ */
+export const FONT_FAMILY_TOKENS = {
+  body: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  display: "system-ui, -apple-system, 'Segoe UI', sans-serif",
 } as const satisfies Record<string, string>;
 
 /**
@@ -1011,6 +1027,13 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 11.01, dark: 11.65 },
     where: 'the border of a button under a pointer, on the page (#668, #688)',
+  },
+  {
+    foreground: 'accentHover',
+    background: 'canvas',
+    minimum: AA_TEXT,
+    measured: { light: 11.01, dark: 11.65 },
+    where: 'the label of a tertiary (text) button under a pointer or a press, on the page (#992)',
   },
   {
     foreground: 'accentHover',

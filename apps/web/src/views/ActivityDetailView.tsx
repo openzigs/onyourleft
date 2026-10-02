@@ -64,6 +64,7 @@ import { activityId as toActivityId, type ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
+import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
@@ -400,24 +401,33 @@ export function ActivityDetailView({
         </div>
         <div>
           <dt>Elapsed</dt>
-          <dd>{formatDuration(activity.elapsedTime)}</dd>
+          <dd>
+            <Reading value={formatDuration(activity.elapsedTime)} />
+          </dd>
         </div>
         <div>
           <dt>Moving</dt>
-          <dd>{formatDuration(activity.movingTime)}</dd>
+          <dd>
+            <Reading value={formatDuration(activity.movingTime)} />
+          </dd>
         </div>
         <div>
           <dt>Distance</dt>
           <dd>
-            {formatDistance(activity.distance, units).value} {distanceUnit(units)}
+            <Reading
+              value={formatDistance(activity.distance, units).value}
+              unit={distanceUnit(units)}
+            />
           </dd>
         </div>
         <div>
           <dt>Average power</dt>
           <dd>
-            {activity.averagePower === undefined
-              ? 'No power meter'
-              : `${formatPowerValue(activity.averagePower)} ${POWER_UNIT}`}
+            {activity.averagePower === undefined ? (
+              'No power meter'
+            ) : (
+              <Reading value={formatPowerValue(activity.averagePower)} unit={POWER_UNIT} />
+            )}
           </dd>
         </div>
         <div>

@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_THEME_CHOICE,
   DEVICE_DARK_QUERY,
   THEME_META_ATTRIBUTE,
   THEME_OVERRIDE_ATTRIBUTE,
@@ -33,7 +34,7 @@ import {
 } from './theme-selection';
 
 /** What a device's storage holds, or that it throws when read. */
-type Stored = 'absent' | 'light' | 'dark' | 'garbage' | 'throws';
+type Stored = 'absent' | 'device' | 'light' | 'dark' | 'garbage' | 'throws';
 /** What the device prefers, or that asking it fails. */
 type Device = 'dark' | 'light' | 'throws' | 'absent';
 
@@ -147,7 +148,7 @@ function state(): { theme: string | null; media: (string | null)[] } {
   };
 }
 
-const STORED: readonly Stored[] = ['absent', 'light', 'dark', 'garbage', 'throws'];
+const STORED: readonly Stored[] = ['absent', 'device', 'light', 'dark', 'garbage', 'throws'];
 const DEVICES: readonly Device[] = ['dark', 'light', 'throws', 'absent'];
 const HELD: readonly Held[] = ['none', 'device', 'light', 'dark'];
 
@@ -178,13 +179,16 @@ describe('the inline script and the module leave the page in the same state', ()
   });
 
   it('comes to the palette the rules say, not merely the same one twice', () => {
-    // Agreement alone passes over two copies that are wrong together.
+    // Agreement alone passes over two copies that are wrong together. #992:
+    // nothing stored, something unreadable, and storage that throws are all
+    // DARK whatever the device says; only a stored `device` follows it.
     const expected: Record<Stored, Record<Device, string>> = {
-      absent: { dark: 'dark', light: 'light', throws: 'light', absent: 'light' },
+      absent: { dark: 'dark', light: 'dark', throws: 'dark', absent: 'dark' },
+      device: { dark: 'dark', light: 'light', throws: 'light', absent: 'light' },
       light: { dark: 'light', light: 'light', throws: 'light', absent: 'light' },
       dark: { dark: 'dark', light: 'dark', throws: 'dark', absent: 'dark' },
-      garbage: { dark: 'dark', light: 'light', throws: 'light', absent: 'light' },
-      throws: { dark: 'dark', light: 'light', throws: 'light', absent: 'light' },
+      garbage: { dark: 'dark', light: 'dark', throws: 'dark', absent: 'dark' },
+      throws: { dark: 'dark', light: 'dark', throws: 'dark', absent: 'dark' },
     };
     for (const stored of STORED) {
       for (const device of DEVICES) {
@@ -195,11 +199,14 @@ describe('the inline script and the module leave the page in the same state', ()
   });
 
   it('points the metas at the palette in force', () => {
-    runScript(freshPage('absent', 'dark'));
+    runScript(freshPage('device', 'dark'));
     expect(state().media).toEqual([
       '(prefers-color-scheme: light)',
       '(prefers-color-scheme: dark)',
     ]);
+    // #992: nothing chosen is the dark palette on every device.
+    runScript(freshPage('absent', 'light'));
+    expect(state().media).toEqual(['not all', 'all']);
     runScript(freshPage('light', 'dark'));
     expect(state().media).toEqual(['all', 'not all']);
     runScript(freshPage('dark', 'light'));
@@ -207,10 +214,10 @@ describe('the inline script and the module leave the page in the same state', ()
   });
 });
 
-describe('the inline script follows the device, and only while nothing is chosen', () => {
+describe('the inline script follows the device, and only while that is the choice', () => {
   let page: Page;
   beforeEach(() => {
-    page = freshPage('absent', 'light');
+    page = freshPage('device', 'light');
     runScript(page);
   });
 
@@ -236,9 +243,32 @@ describe('the inline script follows the device, and only while nothing is chosen
   });
 });
 
+describe('a device that has never chosen is dark — #992', () => {
+  it('is dark under a light device, and a device change does not move it', () => {
+    const page = freshPage('absent', 'light');
+    runScript(page);
+    expect(state().theme).toBe('dark');
+    deviceBecomesDark(page, true);
+    deviceBecomesDark(page, false);
+    expect(state().theme).toBe('dark');
+    expect(DEFAULT_THEME_CHOICE).toBe('dark');
+    expect(currentThemeChoice(document, page.storage)).toBe('dark');
+  });
+
+  it('keeps "Match this device" as a word, so it is not read back as the default', () => {
+    const page = freshPage('absent', 'light');
+    runScript(page);
+    expect(chooseTheme(page.window, 'device')).toBe(true);
+    expect(page.storage.values.get(THEME_STORAGE_KEY)).toBe('device');
+    expect(state().theme).toBe('light');
+    runScript(freshPage('device', 'light'));
+    expect(state().theme).toBe('light');
+  });
+});
+
 describe('another tab’s choice reaches this one (#744’s review)', () => {
   it('applies a choice another tab kept, with no reload and no device change', () => {
-    const page = freshPage('absent', 'light');
+    const page = freshPage('device', 'light');
     runScript(page);
     expect(state().theme).toBe('light');
     page.storage.values.set(THEME_STORAGE_KEY, 'dark');
@@ -247,17 +277,17 @@ describe('another tab’s choice reaches this one (#744’s review)', () => {
     expect(state().media).toEqual(['not all', 'all']);
   });
 
-  it('follows the device again when another tab clears storage', () => {
-    const page = freshPage('dark', 'light');
+  it('goes back to the default when another tab clears storage', () => {
+    const page = freshPage('light', 'light');
     runScript(page);
-    expect(state().theme).toBe('dark');
+    expect(state().theme).toBe('light');
     page.storage.values.clear();
     storageEvent(page, null);
-    expect(state().theme).toBe('light');
+    expect(state().theme).toBe('dark');
   });
 
   it('ignores a write to any other key', () => {
-    const page = freshPage('absent', 'light');
+    const page = freshPage('device', 'light');
     runScript(page);
     page.storage.values.set(THEME_STORAGE_KEY, 'dark');
     storageEvent(page, 'oyl.something.else');
@@ -320,24 +350,26 @@ describe('a choice the device refuses to keep holds for the page’s life (#744�
 });
 
 describe('the stored choice', () => {
-  it('reads anything but light or dark as following the device, and never throws', () => {
+  it('reads anything but the three words as the default, dark, and never throws (#992)', () => {
     const storage = new MemoryStorage();
-    expect(readThemeChoice(undefined)).toBe('device');
-    expect(readThemeChoice(storage)).toBe('device');
-    storage.values.set(THEME_STORAGE_KEY, 'sepia');
-    expect(readThemeChoice(storage)).toBe('device');
-    storage.values.set(THEME_STORAGE_KEY, 'dark');
+    expect(readThemeChoice(undefined)).toBe('dark');
     expect(readThemeChoice(storage)).toBe('dark');
-    storage.throws = true;
+    storage.values.set(THEME_STORAGE_KEY, 'sepia');
+    expect(readThemeChoice(storage)).toBe('dark');
+    storage.values.set(THEME_STORAGE_KEY, 'light');
+    expect(readThemeChoice(storage)).toBe('light');
+    storage.values.set(THEME_STORAGE_KEY, 'device');
     expect(readThemeChoice(storage)).toBe('device');
+    storage.throws = true;
+    expect(readThemeChoice(storage)).toBe('dark');
   });
 
-  it('keeps following the device as NO stored value', () => {
+  it('keeps every choice as its own word, "Match this device" included (#992)', () => {
     const storage = new MemoryStorage();
     expect(writeThemeChoice(storage, 'dark')).toBe(true);
     expect(storage.values.get(THEME_STORAGE_KEY)).toBe('dark');
     expect(writeThemeChoice(storage, 'device')).toBe(true);
-    expect(storage.values.has(THEME_STORAGE_KEY)).toBe(false);
+    expect(storage.values.get(THEME_STORAGE_KEY)).toBe('device');
   });
 
   it('says so when the device refuses to keep it', () => {
@@ -372,27 +404,24 @@ describe('the script is one a page can inline', () => {
   });
 });
 
-describe('an erase forgets the choice and puts the page back on the device (#672)', () => {
-  it('removes the key and follows the device at once, with no reload', () => {
-    const page = freshPage('light', 'dark');
+describe('an erase forgets the choice and puts the page back on the default (#672, #992)', () => {
+  it('removes the key and goes back to dark at once, with no reload', () => {
+    const page = freshPage('light', 'light');
     runScript(page);
     expect(state().theme).toBe('light');
     themeEraser(page.window).forget();
     expect(page.storage.values.has(THEME_STORAGE_KEY)).toBe(false);
     expect(state().theme).toBe('dark');
-    expect(state().media).toEqual([
-      '(prefers-color-scheme: light)',
-      '(prefers-color-scheme: dark)',
-    ]);
+    expect(state().media).toEqual(['not all', 'all']);
   });
 
   it('lets go of a choice the page held, too', () => {
-    const page = freshPage('throws', 'light', 'dark');
+    const page = freshPage('throws', 'light', 'light');
     runScript(page);
-    expect(state().theme).toBe('dark');
+    expect(state().theme).toBe('light');
     themeEraser(page.window).forget();
     expect(document.documentElement.hasAttribute(THEME_OVERRIDE_ATTRIBUTE)).toBe(false);
-    expect(state().theme).toBe('light');
+    expect(state().theme).toBe('dark');
   });
 
   it('does not throw where the device refuses', () => {
@@ -420,7 +449,7 @@ describe('what a map reads and watches — #672 part b', () => {
   });
 
   it('hears every change of palette, whoever writes it, until it is stopped', async () => {
-    const page = freshPage('absent', 'light');
+    const page = freshPage('device', 'light');
     runScript(page);
     const heard: string[] = [];
     const stop = watchDocumentTheme(document, (theme) => heard.push(theme));
@@ -435,7 +464,7 @@ describe('what a map reads and watches — #672 part b', () => {
     page.storage.values.set(THEME_STORAGE_KEY, 'dark');
     storageEvent(page, THEME_STORAGE_KEY);
     await Promise.resolve();
-    // An erase, back to the device — which is dark: no change, nothing heard.
+    // An erase, back to the default — which is dark: no change, nothing heard.
     themeEraser(page.window).forget();
     await Promise.resolve();
     expect(heard).toEqual(['dark', 'light', 'dark']);

@@ -121,6 +121,20 @@ describe('the home screen — #428', () => {
     expect(text()).toContain('30.0 km');
     expect(text()).toContain('50:00');
     expect(text()).not.toContain('Nothing recorded yet');
+    // #992: every figure in the last ride's facts is a reading — large
+    // numerals, and the unit in its own small label.
+    const readings = [...document.querySelectorAll('.oyl-home__facts .oyl-reading')].map(
+      (reading) => [
+        reading.querySelector('.oyl-reading__value')?.textContent,
+        reading.querySelector('.oyl-reading__unit')?.textContent ?? null,
+      ],
+    );
+    expect(readings).toEqual(
+      expect.arrayContaining([
+        ['50:00', null],
+        ['30.0', 'km'],
+      ]),
+    );
     expectClean('home, one ride');
   });
 

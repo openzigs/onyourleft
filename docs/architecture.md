@@ -597,10 +597,25 @@ it did not have, and each is checkable rather than a matter of taste:
   §`ELEVATION_DIRECTION` states the direction per palette and `tokens.test.ts` holds each ramp to
   its own, and which palette paints is decided before the first paint by
   `design/theme-selection.ts`'s inline script, which `tools/theme/` writes into every page. The ride
-  HUD keeps the light palette in both (`theme.css` §`.oyl-hud`).
+  HUD keeps the light palette in both (`theme.css` §`.oyl-hud`). ⚠️ **A device that has never chosen
+  is DARK since [#992](https://github.com/openzigs/onyourleft/issues/992)** (the owner's ruling of
+  2026-10-02): *Match this device* is now a stored word like *Light* and *Dark*, and an empty key is
+  the default. Every browser-gate context starts with *Match this device* stored
+  (`playwright.config.ts` §`FOLLOW_THE_DEVICE`), so a spec's `colorScheme` still picks its palette,
+  and `theme.browser.spec.ts` empties it to measure the default.
+- **Cards and panels are filled tiles** ([#992](https://github.com/openzigs/onyourleft/issues/992)):
+  `surfaceRaised`, no 1 px outline, `--oyl-radius-card` (12 px) and `--oyl-space-lg` inside — a
+  panel, a list–detail list item, an empty state, a Settings card, a Home ride card, a stage
+  chooser card, a pairing row. A forced palette gives each the edge it no longer draws.
+  `browser/look.browser.spec.ts` reads every route's tiles and title back in both palettes, with
+  the rules deleted as its control.
 - **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading, 4 for a menu's
   hero title (`display`, since [#936](https://github.com/openzigs/onyourleft/issues/936)) and 6 for a live
-  ride metric. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
+  ride metric. ⚠️ Since [#992](https://github.com/openzigs/onyourleft/issues/992) EVERY view's title is
+  the display step at weight 800 in the display face (`--oyl-font-family-display`, the one token
+  ADR 0043's face will replace), `h2` and `h3` step down from it, and a reading — a time, a distance,
+  a power, a climb, a count — is `xxl` tabular numerals with a small unit, through one component,
+  `design/Reading.tsx`. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
   its own ratio agrees by construction and could not fail.
 - **Every token is painted by a rule.** `theme.a11y.test.ts` fails on a custom property no `var()`
   reads. It found two that nothing read: `--oyl-font-size-xl` and `--oyl-space-xl`, both declared,
@@ -623,14 +638,15 @@ accessibility tree. The forced-colours revert comes after it and undoes it. Chec
 range and a progress bar take `accent-color` from the accent token, the file input's button is the
 secondary button, and a checkbox or radio row is a declared 44 px target.
 
-**Three kinds of button, and one primary per view** ([#668](https://github.com/openzigs/onyourleft/issues/668)).
+**Kinds of button, and one primary per view** ([#668](https://github.com/openzigs/onyourleft/issues/668), [#992](https://github.com/openzigs/onyourleft/issues/992)).
 A rider tells the action from the setting by weight, so `design/Button.tsx` §`ButtonVariant` has
-three kinds with one rule each:
+four kinds with one rule each — every one but the tertiary FILLED since #992:
 
 | Kind | Use | Drawn as |
 |---|---|---|
-| **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — the only filled button |
-| **Secondary** | Every other action | `variant="secondary"` — an outline |
+| **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — filled with the accent |
+| **Secondary** | Every other action | `variant="secondary"` — TONAL: `surfaceOverlay`, no outline (an outline until #992) |
+| **Tertiary** | The lowest action beside a primary — a dialog's way out | `variant="tertiary"` — text: the accent underlined, no fill and no edge (#992) |
 | **Toggle** | Changes how something is shown or heard, not what happens | A single on/off: `variant="toggle"`, which **requires** `pressed` and renders `aria-pressed` (a toggle without it does not compile). An exclusive choice of two or three: native radios in a `fieldset.oyl-segmented`. Four or more: a native `<select>` |
 
 "One primary per view" is a **gate**, not a guideline: `a11y/button-hierarchy.a11y.test.tsx` renders

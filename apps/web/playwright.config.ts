@@ -40,6 +40,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 import { NIGHTLY } from './browser/nightly';
+import { THEME_STORAGE_KEY } from './src/design/theme-selection';
 
 /**
  * A fixed, unusual port.
@@ -179,6 +180,28 @@ export const LAUNCH_ARGS = [
  */
 export const GATE_BUDGET_MS = 840_000;
 
+/**
+ * Every context this gate opens starts with "Match this device" chosen — #992.
+ *
+ * The owner's ruling of 2026-10-02 made a device that has never chosen DARK.
+ * Every spec here that reads a palette says which one with Playwright's
+ * `colorScheme` (light unless it says otherwise), so each origin's storage
+ * starts with the palette choice set to `device`: the page then follows that
+ * `colorScheme` exactly as it did before #992, and a light read is still a
+ * light read. ⚠️ **What the default itself does is `theme.browser.spec.ts`'s**,
+ * which empties this storage for the cases that measure it. A context a test
+ * opens with `browser.newContext()` inherits this as it inherits `baseURL`; a
+ * persistent context (`offline.browser.spec.ts`) does not, and reads no
+ * palette.
+ */
+export const FOLLOW_THE_DEVICE = {
+  cookies: [],
+  origins: [HARNESS_ORIGIN, PRODUCT_ORIGIN].map((origin) => ({
+    origin,
+    localStorage: [{ name: THEME_STORAGE_KEY, value: 'device' }],
+  })),
+};
+
 /** The game spec, which runs as a project of its own — see `projects`. */
 const GAME_SPEC = /game\.browser\.spec\.ts$/;
 
@@ -203,6 +226,7 @@ export default defineConfig({
   use: {
     baseURL: HARNESS_ORIGIN,
     launchOptions: { args: LAUNCH_ARGS },
+    storageState: FOLLOW_THE_DEVICE,
   },
   webServer: [
     {

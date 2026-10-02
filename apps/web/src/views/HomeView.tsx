@@ -56,6 +56,7 @@ import {
   Sky,
   WorkoutShape,
 } from '../design/illustration';
+import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration, formatStartedAt } from '../format';
 import { loadHome, type HomeData } from '../home/home';
@@ -63,7 +64,7 @@ import type { RideController } from '../ride/controller';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
-import { formatDistance, measurementText } from '../units/format';
+import { formatDistance } from '../units/format';
 
 export interface HomeViewProps {
   readonly analysis: AnalysisPort | undefined;
@@ -171,16 +172,24 @@ function Rides({ data }: { readonly data: HomeData }): JSX.Element {
             </div>
             <div>
               <dt>Moving time</dt>
-              <dd>{formatDuration(last.movingTime)}</dd>
+              <dd>
+                <Reading value={formatDuration(last.movingTime)} />
+              </dd>
             </div>
             <div>
               <dt>Distance</dt>
-              <dd>{measurementText(formatDistance(last.distance, units))}</dd>
+              <dd>
+                <Reading {...formatDistance(last.distance, units)} />
+              </dd>
             </div>
             <div>
               <dt>Load</dt>
               <dd>
-                {last.load === undefined ? 'not worked out yet' : String(Math.round(last.load))}
+                {last.load === undefined ? (
+                  'not worked out yet'
+                ) : (
+                  <Reading value={String(Math.round(last.load))} />
+                )}
               </dd>
             </div>
           </dl>
@@ -203,16 +212,20 @@ function Rides({ data }: { readonly data: HomeData }): JSX.Element {
             <dl className="oyl-home__facts">
               <div>
                 <dt>Rides</dt>
-                <dd>{String(data.week.rides)}</dd>
+                <dd>
+                  <Reading value={String(data.week.rides)} />
+                </dd>
               </div>
               <div>
                 <dt>Moving time</dt>
-                <dd>{formatDuration(data.week.movingTime)}</dd>
+                <dd>
+                  <Reading value={formatDuration(data.week.movingTime)} />
+                </dd>
               </div>
               <div>
                 <dt>Load</dt>
                 <dd>
-                  {String(Math.round(data.week.load))}
+                  <Reading value={String(Math.round(data.week.load))} />
                   {data.week.ridesWithLoad < data.week.rides
                     ? ` (from ${String(data.week.ridesWithLoad)} of ${String(data.week.rides)} rides)`
                     : ''}
@@ -422,10 +435,10 @@ function RideChoices(): JSX.Element {
         {RIDE_CHOICES.map((choice) => (
           <li
             key={choice.id}
-            className="oyl-ride-card tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded tw:border tw:border-border tw:bg-surface"
+            className="oyl-ride-card tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
           >
             <div className="oyl-ride-card__art">{choice.art}</div>
-            <div className="oyl-ride-card__body tw:flex tw:grow tw:flex-col tw:gap-sm tw:p-md">
+            <div className="oyl-ride-card__body tw:flex tw:grow tw:flex-col tw:gap-sm tw:p-lg">
               <h3 id={`oyl-home-ride-${choice.id}`} className="tw:m-0">
                 {choice.title}
               </h3>

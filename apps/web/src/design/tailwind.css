@@ -95,8 +95,10 @@
   --text-display: var(--oyl-font-size-display);
   --text-metric: var(--oyl-font-size-metric);
 
-  /* The one radius — `rounded`. */
+  /* The two radii — `rounded` for a control, `rounded-card` for a filled tile
+     (#992). */
   --radius: var(--oyl-radius);
+  --radius-card: var(--oyl-radius-card);
 
   /* Motion (#936, ADR 0041 D-5): the one curve, and the default a bare
      `transition-colors` takes. `duration-short` and `duration-medium` are the

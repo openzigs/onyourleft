@@ -15,6 +15,7 @@ import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '
 
 import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
+import { Reading } from '../design/Reading';
 import { EmptyState } from '../design/EmptyState';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
@@ -508,18 +509,24 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
                     </div>
                     <div>
                       <dt>Duration</dt>
-                      <dd>{row.duration}</dd>
+                      <dd>
+                        <Reading value={row.duration} />
+                      </dd>
                     </div>
                     <div>
                       <dt>Distance</dt>
                       <dd>
-                        {row.distance} {distanceUnit(units)}
+                        <Reading value={row.distance} unit={distanceUnit(units)} />
                       </dd>
                     </div>
                     <div>
                       <dt>Avg power</dt>
                       <dd>
-                        {row.averagePower === undefined ? '—' : `${row.averagePower} ${POWER_UNIT}`}
+                        {row.averagePower === undefined ? (
+                          '—'
+                        ) : (
+                          <Reading value={row.averagePower} unit={POWER_UNIT} />
+                        )}
                       </dd>
                     </div>
                   </dl>

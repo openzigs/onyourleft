@@ -665,7 +665,7 @@ function SettingsCard({
 }): JSX.Element {
   return (
     <section
-      className="oyl-settings-card tw:bg-surface tw:border tw:border-border tw:rounded tw:p-md"
+      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card tw:p-lg"
       aria-labelledby={id}
     >
       <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">
@@ -694,13 +694,17 @@ const THEME_CHOICE_TEXT: Readonly<
 /** Said beside the choice: where it is kept. */
 export const APPEARANCE_STAYS_HERE = 'Kept on this device only. The ride screen does not change.';
 
+/** Said under "More about": where a device that has never chosen starts (#992). */
+export const APPEARANCE_STARTS_DARK = 'A device that has not chosen yet starts dark.';
+
 /**
- * Light or dark — #672, the owner's ruling of 2026-09-27: the page follows
- * the device, with an override here.
+ * Light or dark — #672, the owner's ruling of 2026-09-27, and since #992 (the
+ * owner's ruling of 2026-10-02) a device that has never chosen is DARK.
  *
  * ⚠️ **Three choices, as a segmented control of native radios (#668, #667),
  * and not a switch**: a switch has two states, and "follow the device" is the
- * third — the default, and the one most riders never leave.
+ * third. Every choice's sentence is under "More about", so the one for a
+ * choice not made is still on the screen (#666: nothing is deleted).
  *
  * Applied at once, to this page, through the same rules the inline script
  * uses before the first paint (`design/theme-selection.ts`); a reload is then
@@ -764,6 +768,17 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
           {message.text}
         </StatusMessage>
       )}
+      <MoreAbout about="light and dark">
+        <p className="oyl-muted">{APPEARANCE_STARTS_DARK}</p>
+        <dl className="oyl-muted">
+          {THEME_CHOICES.map((option) => (
+            <div key={option}>
+              <dt>{THEME_CHOICE_TEXT[option].label}</dt>
+              <dd>{THEME_CHOICE_TEXT[option].detail}</dd>
+            </div>
+          ))}
+        </dl>
+      </MoreAbout>
     </section>
   );
 }

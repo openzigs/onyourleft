@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The three kinds of button and the segmented control, as the pinned Chromium
- * draws them — #668, and #688's hovered secondary.
+ * The kinds of button and the segmented control, as the pinned Chromium draws
+ * them — #668, #688's hovered secondary, and #992's filled kinds: the
+ * secondary TONAL (`surfaceOverlay`, no outline) and the tertiary TEXT.
  *
  * jsdom resolves no stylesheet and performs no layout (CLAUDE.md §4e), so
  * `contrast.a11y.test.ts` can only check the pairs `design/tokens.ts` DECLARES.
@@ -55,6 +56,7 @@ const TRANSITION_WAIT_MS = 400;
 const KINDS = [
   'primary',
   'secondary',
+  'tertiary',
   'toggle-off',
   'toggle-on',
   'primary-disabled',
@@ -203,8 +205,9 @@ for (const theme of THEMES) {
         await page.waitForTimeout(TRANSITION_WAIT_MS);
         expect(await secondary.evaluate((element) => element.matches(':hover'))).toBe(true);
         const read = await painted(secondary);
-        expectLabelPair(read, { fg: 'accentHover', bg: 'surface' }, 'a hovered secondary');
-        expectToken(read.border, 'accentHover', 'a hovered secondary, its border');
+        expectLabelPair(read, { fg: 'accentHover', bg: 'selected' }, 'a hovered secondary');
+        // #992: tonal, so its edge is its own fill — no outline under a pointer.
+        expectToken(read.border, 'selected', 'a hovered secondary, its border');
       });
 
       test('the control — without the rule it is #688’s pair again, under 4.5:1', async ({
@@ -236,11 +239,19 @@ for (const theme of THEMES) {
         const link = page.locator('[data-oyl-link-button]');
         const decoration = (): Promise<string> =>
           link.evaluate((element) => getComputedStyle(element).textDecorationLine);
-        expectLabelPair(await painted(link), { fg: 'accent', bg: 'canvas' }, 'a button-link');
+        expectLabelPair(
+          await painted(link),
+          { fg: 'accent', bg: 'surfaceOverlay' },
+          'a button-link',
+        );
         expect(await decoration()).toBe('none');
         await link.hover();
         await page.waitForTimeout(TRANSITION_WAIT_MS);
-        expectLabelPair(await painted(link), { fg: 'accentHover', bg: 'surface' }, 'a hovered one');
+        expectLabelPair(
+          await painted(link),
+          { fg: 'accentHover', bg: 'selected' },
+          'a hovered one',
+        );
         expect(await decoration()).toBe('none');
       });
     });
@@ -248,12 +259,13 @@ for (const theme of THEMES) {
     test.describe('#668 — every state of every kind is a declared pair', () => {
       test.use({ viewport: { width: 1280, height: 800 } });
 
+      /** The tertiary has no fill of its own, so it is read by its own case below. */
       const AT_REST: Readonly<
-        Record<(typeof KINDS)[number], { fg: ColourToken; bg: ColourToken }>
+        Record<Exclude<(typeof KINDS)[number], 'tertiary'>, { fg: ColourToken; bg: ColourToken }>
       > = {
         primary: { fg: 'accentInk', bg: 'accent' },
-        secondary: { fg: 'accent', bg: 'canvas' },
-        'toggle-off': { fg: 'accent', bg: 'canvas' },
+        secondary: { fg: 'accent', bg: 'surfaceOverlay' },
+        'toggle-off': { fg: 'accent', bg: 'surfaceOverlay' },
         'toggle-on': { fg: 'accentHover', bg: 'selected' },
         'primary-disabled': { fg: 'inkMuted', bg: 'surface' },
         'secondary-disabled': { fg: 'inkMuted', bg: 'surface' },
@@ -264,16 +276,67 @@ for (const theme of THEMES) {
         Record<(typeof KINDS)[number], { fg: ColourToken; bg: ColourToken }>
       > = {
         primary: { fg: 'accentInk', bg: 'accentHover' },
-        secondary: { fg: 'accentHover', bg: 'surface' },
-        'toggle-off': { fg: 'accentHover', bg: 'surface' },
+        secondary: { fg: 'accentHover', bg: 'selected' },
+        'toggle-off': { fg: 'accentHover', bg: 'selected' },
         'toggle-on': { fg: 'accentHover', bg: 'selected' },
       };
 
       test('at rest', async ({ page }) => {
         await open(page);
         for (const name of KINDS) {
+          if (name === 'tertiary') continue;
           expectLabelPair(await painted(kind(page, name)), AT_REST[name], `${name} at rest`);
         }
+      });
+
+      test('#992 — every kind but the tertiary is FILLED, and the secondary has no outline', async ({
+        page,
+      }) => {
+        await open(page);
+        const primary = await painted(kind(page, 'primary'));
+        const secondary = await painted(kind(page, 'secondary'));
+        const off = await painted(kind(page, 'toggle-off'));
+        // A tonal secondary's edge is its own fill: no outline in another colour.
+        expect(secondary.border).toBe(secondary.background);
+        expect(off.border).toBe(off.background);
+        expect(primary.border).toBe(primary.background);
+        // And the three kinds are three fills: none of them is the page.
+        const pageFill = rgbOf('canvas');
+        expect(new Set([primary.background, secondary.background, pageFill]).size).toBe(3);
+      });
+
+      test('#992 — the tertiary is text: no fill, no edge, an underlined accent label', async ({
+        page,
+      }) => {
+        await open(page);
+        const tertiary = kind(page, 'tertiary');
+        const read = async () => ({
+          ...(await painted(tertiary)),
+          ...(await tertiary.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              underline: style.textDecorationLine,
+              thickness: style.textDecorationThickness,
+              height: element.getBoundingClientRect().height,
+            };
+          })),
+        });
+        const atRest = await read();
+        expect(atRest.background, 'a tertiary has a fill').toBe('rgba(0, 0, 0, 0)');
+        expect(atRest.border, 'a tertiary has an edge').toBe('rgba(0, 0, 0, 0)');
+        expectToken(atRest.color, 'accent', 'a tertiary, its label');
+        expect(atRest.underline).toBe('underline');
+        expect(atRest.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        // Its label stands on the page behind it, and that is a declared pair.
+        expect(declared('accent', 'canvas', AA_TEXT)).toBe(true);
+        await tertiary.hover();
+        await page.waitForTimeout(TRANSITION_WAIT_MS);
+        const hovered = await read();
+        expect(hovered.background).toBe('rgba(0, 0, 0, 0)');
+        expectToken(hovered.color, 'accentHover', 'a hovered tertiary, its label');
+        expect(hovered.thickness).toBe('2px');
+        expect(declared('accentHover', 'canvas', AA_TEXT)).toBe(true);
+        expect(contrastRatio(colours.accentHover, colours.canvas)).toBeGreaterThanOrEqual(AA_TEXT);
       });
 
       test('under a pointer, and while pressed', async ({ page }) => {
