@@ -148,7 +148,8 @@ test(`on a ${String(PHONE.width)}×${String(PHONE.height)} phone the first pairi
 
   const measured = await page.evaluate(() => {
     const buttons = [...document.querySelectorAll<HTMLElement>('.oyl-pairing__row .oyl-button')];
-    const details = document.querySelector('main details');
+    // The screen's own disclosure, not the ⓘ beside its title (#993).
+    const details = document.querySelector('main details:not(.oyl-help)');
     const first = buttons[0]?.getBoundingClientRect();
     const last = buttons.at(-1)?.getBoundingClientRect();
     return {
