@@ -464,10 +464,14 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       detailWithoutSelection
       list={list}
       detail={
-        <>
-          {chosen ?? (
-            <>
-              {/*
+        // #1014: two groups — the route or the import with what was said about
+        // it, and the sharing warning — which sit side by side where the pane
+        // is wide enough (`theme.css` §"A screen of sections").
+        <div className="oyl-sections">
+          <div>
+            {chosen ?? (
+              <>
+                {/*
         #1013: the import keeps one line — what the file is, and that it stays on
         this device — and the rest is behind the section's ⓘ: what an import
         here becomes (#232's third criterion; the wording is a constant in
@@ -476,48 +480,48 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
         and what the loop switch asks of the file — which names the switch now,
         because it is read above the switch rather than under it.
       */}
-              <SectionHeading
-                level={2}
-                id={CREATE_HEADING_ID}
-                tabIndex={-1}
-                help={
-                  <>
-                    <p>
-                      {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is
-                      where those go.
-                    </p>
-                    {/*
+                <SectionHeading
+                  level={2}
+                  id={CREATE_HEADING_ID}
+                  tabIndex={-1}
+                  help={
+                    <>
+                      <p>
+                        {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is
+                        where those go.
+                      </p>
+                      {/*
           ⚠️ The threshold is shown in the rider's own units (#238) while the
           refusal quotes the importer's metres, because the refusal's numbers
           come from `packages/domain`, which has no unit preference and must not
           acquire one — a profile is arithmetic and a rider's choice of units is
           a client's. Both name the same distance.
         */}
-                    <p>
-                      Turn on &ldquo;{LOOP_CHECKBOX_LABEL}&rdquo; for a circuit that finishes where
-                      it starts, so riding past the finish begins another lap. The file has to
-                      close: if its two ends are more than{' '}
-                      {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart,
-                      nothing is saved and the import says how far apart they are.
-                    </p>
-                  </>
-                }
-              >
-                Import a route
-              </SectionHeading>
-              <p>
-                A GPX file from a route planner. The file is read on this device and never sent
-                anywhere.
-              </p>
-              {/* Named: #670's audit of a populated screen found two unnamed forms. */}
-              <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
+                      <p>
+                        Turn on &ldquo;{LOOP_CHECKBOX_LABEL}&rdquo; for a circuit that finishes
+                        where it starts, so riding past the finish begins another lap. The file has
+                        to close: if its two ends are more than{' '}
+                        {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart,
+                        nothing is saved and the import says how far apart they are.
+                      </p>
+                    </>
+                  }
+                >
+                  Import a route
+                </SectionHeading>
                 <p>
-                  <label htmlFor="route-file">GPX file</label>
-                  <FileDrop hint="Or drop a GPX file here">
-                    <input id="route-file" name={FILE_FIELD} type="file" />
-                  </FileDrop>
+                  A GPX file from a route planner. The file is read on this device and never sent
+                  anywhere.
                 </p>
-                {/*
+                {/* Named: #670's audit of a populated screen found two unnamed forms. */}
+                <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
+                  <p>
+                    <label htmlFor="route-file">GPX file</label>
+                    <FileDrop hint="Or drop a GPX file here">
+                      <input id="route-file" name={FILE_FIELD} type="file" />
+                    </FileDrop>
+                  </p>
+                  {/*
           #296. Until this box existed, nothing in this product could produce a
           route with `loop: true` — so the game's lap counting, its wrapped road
           markers and the plan view's "on lap 2" were all correct, all tested
@@ -529,37 +533,40 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
           same car park would start wrapping, a lap of a lake ending 30 m along
           the towpath would not, and neither screen would say which happened.
         */}
-                <p>
-                  <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
-                  <input id="route-loop" name={LOOP_FIELD} type="checkbox" role="switch" />
-                </p>
-                <Button type="submit">Import route</Button>
-              </form>
-            </>
-          )}
+                  <p>
+                    <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
+                    <input id="route-loop" name={LOOP_FIELD} type="checkbox" role="switch" />
+                  </p>
+                  <Button type="submit">Import route</Button>
+                </form>
+              </>
+            )}
 
-          {/*
+            {/*
             Once, whichever of the two is on screen: an edit's refusal and a
             save are said under the chosen route, an import's under the form,
             and a delete's under the form the list goes back to. #670's review
             found this block rendered twice, in two live regions.
           */}
-          {refusal !== undefined && (
-            <StatusMessage tone="warning" live>
-              {refusal.message}
-            </StatusMessage>
-          )}
-          {saved !== undefined && (
-            <StatusMessage tone="success" live>
-              {saved}
-            </StatusMessage>
-          )}
-          <h2>Before you share a route</h2>
-          {/* #1013: a privacy warning, so it is kept on the screen whole. */}
-          <KeptVisible>
-            <p>{PUBLIC_ROUTE_WARNING}</p>
-          </KeptVisible>
-        </>
+            {refusal !== undefined && (
+              <StatusMessage tone="warning" live>
+                {refusal.message}
+              </StatusMessage>
+            )}
+            {saved !== undefined && (
+              <StatusMessage tone="success" live>
+                {saved}
+              </StatusMessage>
+            )}
+          </div>
+          <div>
+            <h2>Before you share a route</h2>
+            {/* #1013: a privacy warning, so it is kept on the screen whole. */}
+            <KeptVisible>
+              <p>{PUBLIC_ROUTE_WARNING}</p>
+            </KeptVisible>
+          </div>
+        </div>
       }
     />
   );

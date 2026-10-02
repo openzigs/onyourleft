@@ -1089,6 +1089,108 @@ h3:first-child {
 }
 
 /*
+ * A screen of sections — #1014, epic #935 Phase 2.
+ *
+ * Devices, Settings, Files, Camera, Analysis, Segments and About were one
+ * column a reading measure wide, so a landscape tablet showed a narrow strip
+ * beside an empty page, and an upright one a column with an empty lower half
+ * at the end of a long scroll. `shell/routes.ts` §`RouteLayout` member
+ * `sections` drops the measure for them, and each view gathers its sections
+ * into one `.oyl-sections`, which flows them into columns.
+ *
+ * - **A container query, per pane.** `main` is the `oyl-pane` container here,
+ *   and so is a list–detail route's detail pane: what decides the columns is
+ *   the width the sections are GIVEN, which a window's width does not say
+ *   once a rail or a list pane has taken some of it. Two columns from 40rem
+ *   (an upright tablet's `main` is 42.5rem, a phone on its side 45rem), three
+ *   from 64rem (a landscape tablet's is 72.5rem). Under 40rem nothing changes:
+ *   one column, as before #1014.
+ * - **Columns, not a grid.** CSS columns flow the sections in DOM order down
+ *   the first column and on into the next, so the reading order, the tab
+ *   order and every "first control" the controls-first walk measures are what
+ *   they were; a grid's rows would each be as tall as their tallest section,
+ *   and Settings' cards differ by four times. Each section is
+ *   `break-inside: avoid`, so a card is never cut across two columns, and a
+ *   heading never ends a column (`break-after: avoid`).
+ * - **The prose keeps its measure.** The line under the title, a screen's
+ *   notes and the paragraphs left straight under `main` stay at
+ *   `--oyl-measure`; each column is narrower than it. Devices gathers nothing
+ *   into `.oyl-sections`: its garage of cards (#942) is already a grid of as
+ *   many columns as its width holds, and the width is what it was missing.
+ *
+ * `browser/sections.browser.spec.ts` measures the columns on the owner's
+ * tablet both ways up with the #439 insets, with `?layout=prose` — the same
+ * routes of the real table switched back — as the control that must fail.
+ */
+.oyl-main--sections {
+  max-width: none;
+  container: oyl-pane / inline-size;
+}
+
+/*
+ * Not a list: Devices' garage (`.oyl-pairing`, #942) is a list of cards that
+ * is ITS column grid, and given the width it holds three cards in a row.
+ */
+.oyl-main--sections > :is(p, details, .oyl-note) {
+  max-width: var(--oyl-measure);
+}
+
+.oyl-list-detail__detail {
+  container: oyl-pane / inline-size;
+}
+
+.oyl-sections > * {
+  break-inside: avoid;
+}
+
+.oyl-sections :is(h2, h3) {
+  break-after: avoid;
+}
+
+/*
+ * Across every column: a title that heads the sections (Camera's), and a
+ * section holding a table, which a column would make scroll sideways inside
+ * its region for no reason but the column (`design/ScrollTable.tsx`).
+ */
+.oyl-sections > .oyl-sections__title,
+.oyl-sections > :has(.oyl-scroll-region) {
+  column-span: all;
+}
+
+@container oyl-pane (min-width: 40rem) {
+  .oyl-sections:not(.oyl-sections--broad) {
+    columns: 2;
+    column-gap: var(--oyl-space-lg);
+  }
+
+  /* Panels that sat edge to edge in one column are apart in a column. */
+  .oyl-sections > .oyl-panel + .oyl-panel {
+    margin-block-start: var(--oyl-space-md);
+  }
+}
+
+@container oyl-pane (min-width: 64rem) {
+  .oyl-sections:not(.oyl-sections--broad) {
+    columns: 3;
+  }
+}
+
+/*
+ * Broad sections: Settings' cards, whose segmented controls (#668) are held
+ * to ONE row on any window from 600 px (`button-hierarchy.browser.spec.ts`
+ * §"Settings' appearance choice"). *Match this device*, *Light* and *Dark*
+ * need about 26rem of card, which a third of a landscape tablet (23rem) and
+ * half of an upright one (20.5rem) do not give, so these are two columns from
+ * two such cards' width and never three; an upright tablet keeps one.
+ */
+@container oyl-pane (min-width: 54rem) {
+  .oyl-sections--broad {
+    columns: 2;
+    column-gap: var(--oyl-space-lg);
+  }
+}
+
+/*
  * A list beside its detail (#670). The reading measure is dropped only while
  * there ARE two panes — one pane keeps it, like every other read route — and
  * `shell/ListDetail.tsx` decides the panes from `--oyl-list-detail-from`.

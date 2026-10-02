@@ -59,6 +59,10 @@
  *
  * `?shape=off` and `?shape=tall` are #941's: the cards without their drawn
  * shape, and with it three times as tall ({@link applyShapeControl}).
+ *
+ * `?sections=prose` and `?sections=uncontained` are #1014's: a screen of
+ * sections, and a detail pane, with nothing to decide their columns
+ * ({@link applySectionsControl}).
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -1166,6 +1170,32 @@ function applyPanesControl(): void {
 }
 
 /**
+ * `?sections=prose` and `?sections=uncontained` — #1014's two controls, one
+ * for each container its columns are decided by. `prose` switches the
+ * `sections` routes of the REAL table back to the reading measure before
+ * anything renders, so `main` is no container and their sections are one
+ * column again; `uncontained` takes the container off a list–detail route's
+ * detail pane, by a stylesheet of the harness's own after the shipping one,
+ * so the pane's sections are one column again. `sections.browser.spec.ts`'s
+ * column assertions must FAIL under each.
+ */
+function applySectionsControl(): void {
+  const sections = new URLSearchParams(window.location.search).get('sections');
+  if (sections === 'prose') {
+    for (const route of ALL_ROUTES) {
+      if (route.layout === 'sections') {
+        (route as { layout: RouteLayout }).layout = 'prose';
+      }
+    }
+  } else if (sections === 'uncontained') {
+    const style = document.createElement('style');
+    style.setAttribute('data-oyl-control', 'sections=uncontained');
+    style.textContent = '.oyl-list-detail__detail { container: none !important; }';
+    document.head.append(style);
+  }
+}
+
+/**
  * `?shape=off` and `?shape=tall` — #941. `off` takes the drawn shape off every
  * route and workout card and puts the card back as a plain block, which is the
  * page before #941: the margin `list-detail.browser.spec.ts` §"#941" holds the
@@ -1231,6 +1261,7 @@ async function main(): Promise<void> {
   }
   applyLayoutControl();
   applyPanesControl();
+  applySectionsControl();
   applyShapeControl();
   applyIllustrationControl();
   // A page opened with a hash keeps it (#670: a fresh load of a selection).

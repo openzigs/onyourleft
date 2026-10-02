@@ -684,6 +684,20 @@ underneath, so its role, its keyboard and its form value are the platform's:
 The riding position is a segmented control since #994 (a `<select>` before). `browser/controls.browser.spec.ts`
 measures every new target the #316 three ways, with a control for the tabs and the forced-colours rule.
 
+**A screen of sections** ([#1014](https://github.com/openzigs/onyourleft/issues/1014), epic #935
+Phase 2). Devices, Settings, Files, Camera, Analysis, Segments and About declare `layout: 'sections'`
+(`shell/routes.ts` §`RouteLayout`): `main` drops the reading measure and becomes an `oyl-pane`
+container, and each view gathers its sections into one `.oyl-sections`, which a container query
+flows into two columns from 40rem of pane and three from 64rem (`theme.css` §"A screen of
+sections"). CSS columns rather than a grid, so the DOM order — the reading order, the tab order, the
+first control — is unchanged and a tall card leaves no empty row beside it. Settings' cards are
+`--broad`: two columns from 54rem and never three, so its segmented choices keep one row, and an
+upright tablet keeps one column there. Devices gathers nothing: its garage (#942) is already a card
+grid, and the width is what it lacked. A list–detail route's detail pane is an `oyl-pane` container
+too, so Routes and Workouts lay their detail's groups side by side by the pane's width, not the
+window's. `browser/sections.browser.spec.ts` measures the columns on the owner's tablet both ways up,
+with `reflow.html?sections=prose` and `?sections=uncontained` as the controls that must fail.
+
 **A list beside its detail** ([#670](https://github.com/openzigs/onyourleft/issues/670)). Activities,
 Workouts and Routes declare `layout: 'list-detail'` on the route table (`shell/routes.ts`
 §`RouteLayout`), Material 3's list–detail canonical layout taken as a pattern (ADR 0009): at an
