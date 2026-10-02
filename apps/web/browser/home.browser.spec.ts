@@ -52,32 +52,24 @@ async function measure(page: Page): Promise<HomeMeasurement> {
   return measured;
 }
 
-/** How many cards share the first row. */
-const firstRow = (seen: HomeMeasurement): number =>
-  seen.cards.filter((card) => Math.abs(card.top - (seen.cards[0]?.top ?? -1)) < 2).length;
-
 test.describe('a landscape tablet — 1280×800', () => {
-  test('the cards use the width: main runs to the window, and more than one card shares a row', async ({
-    page,
-  }) => {
+  test('main runs to the window', async ({ page }) => {
     const seen = await open(page, 1280, 800);
     // The apparatus: a full history renders every card.
     expect(seen.cards.length).toBeGreaterThanOrEqual(4);
     expect(seen.mainClass).toBe('oyl-main oyl-main--dashboard');
     expect(seen.main?.right).toBeCloseTo(1280, 0);
-    expect(firstRow(seen)).toBeGreaterThanOrEqual(3);
   });
 
-  test('the control — under the reading measure the cards stop short of the window', async ({
+  test('the control — under the reading measure main stops short of the window', async ({
     page,
   }) => {
-    const seen = await open(page, 1280, 800);
+    await open(page, 1280, 800);
     await page.evaluate(() => {
       window.__oylHome?.constrain();
     });
     const constrained = await measure(page);
     expect(constrained.main?.right ?? Infinity).toBeLessThan(1280 - 200);
-    expect(firstRow(constrained)).toBeLessThan(firstRow(seen));
   });
 });
 
@@ -90,37 +82,37 @@ for (const [width, height] of [
     const seen = await open(page, width, height);
     expect(seen.cards.length).toBeGreaterThanOrEqual(4);
     expect(seen.horizontalOverflow).toBeLessThanOrEqual(0);
-    for (const card of seen.cards) {
+    for (const card of [...seen.cards, ...seen.rideCards.map((ride) => ride.card)]) {
       expect(card.right).toBeLessThanOrEqual(width + SUBPIXEL_TOLERANCE);
       expect(card.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
     }
+    expect(seen.nextUp?.card.right ?? Infinity).toBeLessThanOrEqual(width + SUBPIXEL_TOLERANCE);
   });
 }
 
 /**
- * #939 — the hero band and the three ride cards.
+ * #1010 — Next up, This week, and the ride cards as art.
  *
- * The first control is the Free ride card's link, which must START above the
- * fold: at a phone's 390×844, and on the owner's tablet in the shell both ways
- * up with the #439 insets and `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`'
- * 50 px floor. The hero's height and that margin are printed on every run.
- * `controls-first.browser.spec.ts` measures Home among every route as well;
- * this is where the band itself, and its control, are measured.
+ * Next up's Ride is the view's first control and its one primary, and must
+ * START above the fold: at a phone both ways up, and on the owner's tablet in
+ * the shell both ways up with the #439 insets and
+ * `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`' 50 px floor. Every margin
+ * is printed. `controls-first.browser.spec.ts` measures Home among every
+ * route as well; this is where the card itself, and its controls, are.
  */
 const FOLD_MARGIN_PIXELS = 50;
 /**
  * SC 2.5.5 (AAA) — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`. The card
- * links are ordinary `.oyl-button`s and declare exactly this: 48 is the
- * ride-time controls' alone (#669, `design/ride-time-controls.ts`).
+ * links and Next up's Ride are ordinary `.oyl-button`s and declare exactly
+ * this: 48 is the ride-time controls' alone (#669,
+ * `design/ride-time-controls.ts`).
  */
 const TOUCH_TARGET_PIXELS = 44;
 
 /**
- * The owner's ruling of 2026-10-01 on #935: drawings on cards and panels are
- * MEDIUM — about 48 px tall, and not thin strips. A picture is held to a
- * height in this band and to a shape no wider than `MAXIMUM_DRAWING_ASPECT`
- * times its height: the scene's own 320 × 120 is 2.67, a card's picture is 1.67,
- * and a 48 px band across a phone's card is 7.5.
+ * The owner's ruling of 2026-10-01 on #935 still governs the Trainer card's
+ * glyph and the days ring: about 48 px tall, and not thin strips. (#1010 made
+ * the ride cards' pictures their backgrounds; see below.)
  */
 const MEDIUM_DRAWING_PIXELS = { least: 44, most: 56 } as const;
 const MAXIMUM_DRAWING_ASPECT = 3;
@@ -137,13 +129,35 @@ function notMedium(box: Box | undefined): string | undefined {
   return undefined;
 }
 
-const size = (box: Box | undefined): string =>
-  box === undefined ? 'none' : `${box.width.toFixed(1)}×${box.height.toFixed(1)}`;
+const area = (box: Box | undefined): number => (box === undefined ? 0 : box.width * box.height);
+
+const overlaps = (line: Box, box: Box | undefined): boolean =>
+  box !== undefined &&
+  line.right > box.left + SUBPIXEL_TOLERANCE &&
+  line.left < box.right - SUBPIXEL_TOLERANCE &&
+  line.bottom > box.top + SUBPIXEL_TOLERANCE &&
+  line.top < box.bottom - SUBPIXEL_TOLERANCE;
+
+const inside = (line: Box, box: Box | undefined): boolean =>
+  box !== undefined &&
+  line.left >= box.left - SUBPIXEL_TOLERANCE &&
+  line.right <= box.right + SUBPIXEL_TOLERANCE &&
+  line.top >= box.top - SUBPIXEL_TOLERANCE &&
+  line.bottom <= box.bottom + SUBPIXEL_TOLERANCE;
+
+/** Whether a computed `background-color` is fully opaque. */
+function opaque(colour: string): boolean {
+  const channels = /rgba?\(([^)]*)\)/
+    .exec(colour)?.[1]
+    ?.split(/[,\s/]+/)
+    .filter(Boolean);
+  if (channels === undefined) return false;
+  return channels.length === 3 || Number.parseFloat(channels[3] ?? '0') === 1;
+}
 
 const FOLD_VIEWPORTS = [
   { name: 'phone 390×844', width: 390, height: 844, insets: undefined, margin: 0 },
-  // #939's review (B2): a phone on its side, a #660 reflow viewport, where
-  // the tablet's framed picture once put the first control 115 px under.
+  // #939's review (B2): a phone on its side, a #660 reflow viewport.
   { name: 'phone on its side 844×390', width: 844, height: 390, insets: undefined, margin: 0 },
   {
     name: 'small phone on its side 640×360',
@@ -168,149 +182,247 @@ const FOLD_VIEWPORTS = [
   },
 ] as const;
 
-test.describe('#939 — the hero is a band, and the first ride card starts above the fold', () => {
+async function openAt(
+  page: Page,
+  viewport: (typeof FOLD_VIEWPORTS)[number],
+  query?: string,
+): Promise<HomeMeasurement> {
+  const seen = await open(page, viewport.width, viewport.height, {
+    ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
+    ...(query === undefined ? {} : { query }),
+  });
+  if (viewport.insets !== undefined) {
+    // The override took effect, or this measured a page with no insets.
+    expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  }
+  return seen;
+}
+
+test.describe('#1010 — Next up is the first thing, and its Ride starts above the fold', () => {
   for (const viewport of FOLD_VIEWPORTS) {
     test(viewport.name, async ({ page }) => {
-      const seen = await open(page, viewport.width, viewport.height, {
-        ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
-      });
-      if (viewport.insets !== undefined) {
-        // The override took effect, or this measured a page with no insets.
-        expect(await resolvedInsets(page)).toEqual(viewport.insets);
-      }
-      const first = seen.rideCards[0];
-      expect(seen.hero, 'the hero band was not drawn').toBeDefined();
-      expect(first?.linkText).toBe('Start a ride');
-      const margin = seen.fold - (first?.link.top ?? Infinity);
+      const seen = await openAt(page, viewport);
+      const next = seen.nextUp;
+      expect(next, 'Next up was not drawn').toBeDefined();
+      // The apparatus: the fixture's newest ride was on a saved route, so this
+      // is the route kind, drawing that route's own shape.
+      expect(next?.name).toBe('Box Hill and back');
+      expect(next?.drawsProfile).toBe(true);
+      expect(next?.rideText).toBe('Ride');
+      expect(next?.rideHref).toBe('#/game?route=harness-route');
+      const margin = seen.fold - (next?.ride.top ?? Infinity);
       console.log(
-        `#939 ${viewport.name}: hero ${(seen.hero?.height ?? 0).toFixed(1)} px tall, ` +
-          `first card's link ${margin.toFixed(1)} px above the fold (${seen.fold.toFixed(1)}); ` +
-          `ride cards ${seen.rideCards.map((card) => card.card.height.toFixed(1)).join(' / ')} px tall`,
+        `#1010 ${viewport.name}: Next up ${(next?.card.width ?? 0).toFixed(1)}×` +
+          `${(next?.card.height ?? 0).toFixed(1)} px, its Ride ${margin.toFixed(1)} px above the ` +
+          `fold (${seen.fold.toFixed(1)}); ride cards ` +
+          seen.rideCards.map((card) => card.card.height.toFixed(1)).join(' / ') +
+          ' px tall',
       );
       expect(margin).toBeGreaterThan(viewport.margin);
-      // The words stand on the sky and never on the hills or the road: the
-      // only pairs declared for text over art are `ink` and `inkMuted` on
-      // `illoSky` (#936).
-      const ground = seen.ground;
-      expect(ground, 'the hero has no ground').toBeDefined();
-      expect(seen.titleText.length).toBeGreaterThanOrEqual(2);
-      const onTheGround = seen.titleText.filter(
-        (line) =>
-          ground !== undefined &&
-          line.right > ground.left &&
-          line.left < ground.right &&
-          line.bottom > ground.top &&
-          line.top < ground.bottom,
+      // The one primary on the screen, and the first control in it.
+      expect(seen.primaries).toEqual(['Ride']);
+      // The biggest thing on the screen: larger than every other card that
+      // starts on it. (On a phone on its side This week starts under the
+      // fold, and Next up's picture gives up height there to keep Ride on it.)
+      for (const other of [seen.week, seen.trainer, ...seen.rideCards.map((card) => card.card)]) {
+        if (other !== undefined && other.top < seen.fold) {
+          expect(area(next?.card)).toBeGreaterThan(area(other));
+        }
+      }
+      // Ride is a 44 px target at least, and big: wider than the ride cards' links.
+      expect(next?.ride.height ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(next?.ride.width ?? 0).toBeGreaterThan(
+        Math.max(...seen.rideCards.map((card) => card.link.width)),
       );
-      expect(onTheGround, 'a line of the title or summary stands on the hills').toEqual([]);
-      // A band, not a screen: under a third of the viewport.
-      expect(seen.hero?.height ?? Infinity).toBeLessThan(viewport.height / 3);
     });
   }
-  test('the control — the hero at 90 vh puts the first control under a phone’s fold', async ({
+
+  test('the control — Next up’s picture at 90 vh puts its Ride under a phone’s fold', async ({
     page,
   }) => {
     const shipped = await open(page, 390, 844);
     const seen = await open(page, 390, 844, { query: '?hero=tall' });
-    const first = seen.rideCards[0];
-    const grew = (seen.hero?.height ?? 0) - (shipped.hero?.height ?? 0);
-    const moved = (first?.link.top ?? 0) - (shipped.rideCards[0]?.link.top ?? 0);
+    const grew = (seen.nextUp?.card.height ?? 0) - (shipped.nextUp?.card.height ?? 0);
+    const moved = (seen.nextUp?.ride.top ?? 0) - (shipped.nextUp?.ride.top ?? 0);
     console.log(
-      `#939 control: hero ${(seen.hero?.height ?? 0).toFixed(1)} px (+${grew.toFixed(1)}), ` +
-        `first link top ${(first?.link.top ?? 0).toFixed(1)} (+${moved.toFixed(1)}) against ` +
-        `the fold ${seen.fold.toFixed(1)}`,
+      `#1010 control: Next up ${(seen.nextUp?.card.height ?? 0).toFixed(1)} px ` +
+        `(+${grew.toFixed(1)}), its Ride at ${(seen.nextUp?.ride.top ?? 0).toFixed(1)} ` +
+        `(+${moved.toFixed(1)}) against the fold ${seen.fold.toFixed(1)}`,
     );
-    expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(0.9 * 844 - SUBPIXEL_TOLERANCE);
-    expect(first?.link.top ?? 0).toBeGreaterThan(seen.fold);
-    // Whatever the fonts: the band is what moved the control, by as much as
-    // the band grew (#939's review, N2) — not a margin of a few pixels that a
-    // line of wrapping could close.
+    expect(seen.nextUp?.ride.top ?? 0).toBeGreaterThan(seen.fold);
+    // The picture is what moved the control, by as much as the card grew.
     expect(grew).toBeGreaterThan(100);
     expect(moved).toBeGreaterThanOrEqual(grew - 2 * SUBPIXEL_TOLERANCE);
   });
 
-  test('the control — without the short-viewport rule a phone on its side has its first control under the fold', async ({
+  test('the control — without the short-viewport rule a phone on its side has Ride lower', async ({
     page,
   }) => {
-    const seen = await open(page, 844, 390, { query: '?short=off' });
-    const margin = seen.fold - (seen.rideCards[0]?.link.top ?? -Infinity);
+    const shipped = await open(page, 640, 360);
+    const seen = await open(page, 640, 360, { query: '?short=off' });
+    const shippedMargin = shipped.fold - (shipped.nextUp?.ride.top ?? Infinity);
+    const margin = seen.fold - (seen.nextUp?.ride.top ?? -Infinity);
     console.log(
-      `#939 short-viewport control at 844×390: hero ${(seen.hero?.height ?? 0).toFixed(1)} px, ` +
-        `first link ${margin.toFixed(1)} px above the fold`,
+      `#1010 short-viewport control at 640×360: Ride ${margin.toFixed(1)} px above the fold ` +
+        `without the rule, ${shippedMargin.toFixed(1)} with it`,
     );
     expect(margin).toBeLessThan(0);
-    expect(seen.hero?.height ?? 0).toBeGreaterThanOrEqual(390 / 3);
   });
 });
 
-test.describe('#939 — medium drawings, about 48 px tall (the owner’s ruling of 2026-10-01)', () => {
+test.describe('#1010 — the pictures are the cards, and every word is on a solid band', () => {
   for (const viewport of FOLD_VIEWPORTS) {
     test(viewport.name, async ({ page }) => {
-      const seen = await open(page, viewport.width, viewport.height, {
-        ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
-      });
-      // The apparatus: three cards, and the panels that carry a drawing.
+      const seen = await openAt(page, viewport);
       expect(seen.rideCards).toHaveLength(3);
+      const tiles = [
+        {
+          name: 'Next up',
+          card: seen.nextUp?.card,
+          art: seen.nextUp?.art,
+          band: seen.nextUp?.band,
+          fill: seen.nextUp?.bandFill ?? '',
+          words: seen.nextUp?.words ?? [],
+        },
+        ...seen.rideCards.map((card) => ({
+          name: card.linkText,
+          card: card.card,
+          art: card.art,
+          band: card.band,
+          fill: card.bandFill,
+          words: card.words,
+        })),
+      ];
       console.log(
-        `#939 drawings at ${viewport.name}: cards ` +
-          seen.rideCards.map((card) => size(card.art)).join(', ') +
-          `; trainer glyph ${size(seen.trainerGlyph)}; days ring ${size(seen.daysRing)}` +
-          `; hero picture ${size(seen.ground)}`,
+        `#1010 art at ${viewport.name}: ` +
+          tiles
+            .map(
+              (tile) =>
+                `${tile.name} ${(tile.art?.width ?? 0).toFixed(0)}×${(tile.art?.height ?? 0).toFixed(0)}` +
+                ` over a ${(tile.band?.height ?? 0).toFixed(0)} px band`,
+            )
+            .join('; '),
       );
-      for (const card of seen.rideCards) {
-        expect(notMedium(card.art), `${card.linkText}'s picture`).toBeUndefined();
-        // Beside the heading, inside the card, and over none of its words.
-        const art = card.art;
-        const covered = card.words.filter(
-          (line) =>
-            art !== undefined &&
-            line.right > art.left + SUBPIXEL_TOLERANCE &&
-            line.left < art.right &&
-            line.bottom > art.top + SUBPIXEL_TOLERANCE &&
-            line.top < art.bottom - SUBPIXEL_TOLERANCE,
+      for (const tile of tiles) {
+        const { card, art, band } = tile;
+        expect(card, tile.name).toBeDefined();
+        // The picture is the card's whole width from its top, and every pixel
+        // of height the band does not take: the background, not a thumbnail.
+        expect(art, `${tile.name}: no picture`).toBeDefined();
+        expect(Math.abs((art?.width ?? 0) - (card?.width ?? 0))).toBeLessThanOrEqual(
+          2 * SUBPIXEL_TOLERANCE,
         );
-        expect(covered, `${card.linkText}: words under the picture`).toEqual([]);
-        expect(card.art?.top ?? -1).toBeGreaterThanOrEqual(card.card.top - SUBPIXEL_TOLERANCE);
-        expect(card.art?.right ?? Infinity).toBeLessThanOrEqual(
-          card.card.right + SUBPIXEL_TOLERANCE,
+        expect(Math.abs((art?.top ?? 0) - (card?.top ?? 0))).toBeLessThanOrEqual(
+          SUBPIXEL_TOLERANCE,
+        );
+        expect(Math.abs((art?.bottom ?? 0) - (band?.top ?? 0))).toBeLessThanOrEqual(
+          SUBPIXEL_TOLERANCE,
+        );
+        expect(Math.abs((band?.bottom ?? 0) - (card?.bottom ?? 0))).toBeLessThanOrEqual(
+          2 * SUBPIXEL_TOLERANCE,
+        );
+        expect(art?.height ?? 0).toBeGreaterThanOrEqual(MEDIUM_DRAWING_PIXELS.least);
+        // Every word on the band, the band a solid fill, and no word on the art.
+        expect(tile.words.length).toBeGreaterThanOrEqual(2);
+        expect(opaque(tile.fill), `${tile.name}: band fill ${tile.fill}`).toBe(true);
+        expect(
+          tile.words.filter((line) => !inside(line, band)),
+          `${tile.name}: words off the band`,
+        ).toEqual([]);
+        expect(
+          tile.words.filter((line) => overlaps(line, art)),
+          `${tile.name}: words on the picture`,
+        ).toEqual([]);
+      }
+      // The ride cards keep their pictures at the size a picture needs.
+      for (const card of seen.rideCards) {
+        expect(card.art?.height ?? 0, card.linkText).toBeGreaterThanOrEqual(
+          MEDIUM_DRAWING_PIXELS.least,
         );
       }
+      // The two drawings #1010 left medium.
       expect(notMedium(seen.trainerGlyph), 'the Trainer card’s glyph').toBeUndefined();
       expect(notMedium(seen.daysRing), 'the days ring').toBeUndefined();
-      // The hero's picture is at least medium (8rem on a tablet), and never a
-      // strip across the band.
-      const ground = seen.ground;
-      expect(ground?.height ?? 0).toBeGreaterThanOrEqual(MEDIUM_DRAWING_PIXELS.least);
-      expect(ground?.width ?? Infinity).toBeLessThanOrEqual(
-        MAXIMUM_DRAWING_ASPECT * (ground?.height ?? 0),
-      );
     });
   }
 
-  // The controls: each puts back a card picture the ruling superseded, and the
-  // same measurement must refuse it.
-  for (const control of [
-    { art: 'hidden', width: 640, height: 360, why: 'no card picture under 30rem tall' },
-    { art: 'band', width: 390, height: 844, why: 'the 8rem band #939 first shipped' },
-    { art: 'strip', width: 390, height: 844, why: 'a 48 px band across the card' },
-  ] as const) {
-    test(`the control — ?art=${control.art} (${control.why}) is not a medium drawing`, async ({
-      page,
-    }) => {
-      const seen = await open(page, control.width, control.height, {
-        query: `?art=${control.art}`,
-      });
-      expect(seen.rideCards).toHaveLength(3);
-      const reasons = seen.rideCards.map((card) => notMedium(card.art));
-      console.log(`#939 drawing control ?art=${control.art}: ${reasons.join(', ')}`);
-      for (const reason of reasons) {
-        expect(reason).toBeDefined();
-      }
+  test('the control — words laid over the picture on a clear band are refused', async ({
+    page,
+  }) => {
+    const seen = await open(page, 390, 844, { query: '?band=overlay' });
+    expect(seen.rideCards).toHaveLength(3);
+    for (const card of seen.rideCards) {
+      const onArt = card.words.filter((line) => overlaps(line, card.art));
+      console.log(
+        `#1010 band control: ${card.linkText} fill ${card.bandFill}, ${String(onArt.length)} lines on the picture`,
+      );
+      expect(onArt.length).toBeGreaterThan(0);
+      expect(opaque(card.bandFill)).toBe(false);
+    }
+  });
+});
+
+const LANDSCAPE_TABLET = FOLD_VIEWPORTS[3];
+
+test.describe('#1010 — a landscape tablet is a dashboard that uses the height', () => {
+  test('Next up beside This week and the Trainer card, down to the fold; the ride cards after', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET);
+    const { nextUp: next, week, trainer, start } = seen;
+    expect(next).toBeDefined();
+    expect(week).toBeDefined();
+    expect(trainer).toBeDefined();
+    // Beside: This week and Trainer right of Next up, sharing its two rows.
+    expect(week?.left ?? 0).toBeGreaterThanOrEqual((next?.card.right ?? Infinity) - 1);
+    expect(trainer?.left ?? 0).toBeGreaterThanOrEqual((next?.card.right ?? Infinity) - 1);
+    expect(Math.abs((week?.top ?? 0) - (next?.card.top ?? 0))).toBeLessThanOrEqual(1);
+    expect(trainer?.top ?? 0).toBeGreaterThanOrEqual((week?.bottom ?? Infinity) - 1);
+    expect(Math.abs((trainer?.bottom ?? 0) - (next?.card.bottom ?? 0))).toBeLessThanOrEqual(1);
+    // The whole height: the dashboard ends on the screen, close to the fold.
+    const spare = seen.fold - (next?.card.bottom ?? Infinity);
+    console.log(
+      `#1010 dashboard: Next up ${(next?.card.width ?? 0).toFixed(1)}×` +
+        `${(next?.card.height ?? 0).toFixed(1)} px, ending ${spare.toFixed(1)} px above the ` +
+        `fold (${seen.fold.toFixed(1)}); the ride cards start at ${(start?.top ?? 0).toFixed(1)}`,
+    );
+    expect(spare).toBeGreaterThanOrEqual(0);
+    expect(spare).toBeLessThan(0.1 * seen.fold);
+    expect(next?.card.height ?? 0).toBeGreaterThanOrEqual(0.5 * seen.fold);
+    // The ride cards after it, three across the whole width.
+    expect(start?.top ?? 0).toBeGreaterThanOrEqual((next?.card.bottom ?? Infinity) - 1);
+    expect(new Set(seen.rideCards.map((card) => Math.round(card.card.top))).size).toBe(1);
+  });
+
+  test('the control — without the dashboard rule This week is under Next up, not beside it', async ({
+    page,
+  }) => {
+    const seen = await openAt(page, LANDSCAPE_TABLET, '?dashboard=off');
+    console.log(
+      `#1010 dashboard control: This week at ${(seen.week?.top ?? 0).toFixed(1)}, Next up ends ` +
+        `at ${(seen.nextUp?.card.bottom ?? 0).toFixed(1)}`,
+    );
+    expect(seen.week?.top ?? 0).toBeGreaterThanOrEqual((seen.nextUp?.card.bottom ?? Infinity) - 1);
+    // And Next up no longer reaches the fold.
+    expect(seen.fold - (seen.nextUp?.card.bottom ?? Infinity)).toBeGreaterThan(0.1 * seen.fold);
+  });
+});
+
+test.describe('#1010 — a portrait tablet, and a phone on its side, are two columns', () => {
+  for (const viewport of [FOLD_VIEWPORTS[4], FOLD_VIEWPORTS[1]]) {
+    test(viewport.name, async ({ page }) => {
+      const seen = await openAt(page, viewport);
+      const { nextUp: next, week, trainer, start } = seen;
+      // Next up across both columns; This week and Trainer side by side under it.
+      expect(Math.abs((next?.card.width ?? 0) - (start?.width ?? -1))).toBeLessThanOrEqual(1);
+      expect(week?.top ?? 0).toBeGreaterThanOrEqual((next?.card.bottom ?? Infinity) - 1);
+      expect(Math.abs((week?.top ?? 0) - (trainer?.top ?? -1))).toBeLessThanOrEqual(1);
+      expect(trainer?.left ?? 0).toBeGreaterThanOrEqual((week?.right ?? Infinity) - 1);
     });
   }
 });
 
-test.describe('#939 — three equal cards, each one `.oyl-button` link at 44×44', () => {
+test.describe('the ride cards — each one `.oyl-button` link at 44×44', () => {
   for (const [width, height] of [
     [390, 844],
     [1280, 800],
@@ -334,22 +446,13 @@ test.describe('#939 — three equal cards, each one `.oyl-button` link at 44×44
         // 2. The declaration: `.oyl-button`'s own 44, and not #669's 48.
         expect(card.declaredMinHeight, card.linkText).toBe(TOUCH_TARGET_PIXELS);
         expect(card.declaredMinWidth, card.linkText).toBe(TOUCH_TARGET_PIXELS);
-        expect(card.link.height, card.linkText).toBeGreaterThanOrEqual(card.declaredMinHeight);
         // 3. With the floor stripped, the tokens still hold the target — the
         // measurement `shell.browser.spec.ts` §#316 makes for every
-        // `.oyl-button` (44.8 px: padding, line box and border). #939 asked
-        // that the stripped box fall SHORT; for an `.oyl-button` it cannot,
-        // and #316/#669 govern. The floor must really be off, or this is
-        // measurement 1 again.
+        // `.oyl-button`. The floor must really be off, or this is 1 again.
         expect(card.strippedMinHeight, `${card.linkText}: the floor was not stripped`).toBe('0px');
         expect(card.stripped.height, card.linkText).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
         // The stretched link: the card's middle is this card's link, and no other.
         expect(card.middleHitsOwnLink, `${card.linkText}: hit ${card.middleHit}`).toBe(true);
-      }
-      if (width >= 1280) {
-        // Three across on a landscape tablet.
-        const tops = new Set(seen.rideCards.map((card) => Math.round(card.card.top)));
-        expect(tops.size).toBe(1);
       }
     });
   }

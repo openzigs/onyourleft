@@ -146,6 +146,7 @@ import {
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
+import { gameRouteFromHash } from '../shell/routes';
 import {
   ghostDistanceAt,
   pacerGap,
@@ -465,7 +466,11 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
-  const [picked, setPicked] = useState<string | undefined>(undefined);
+  // #1010: Home's "next up" opens the game on the route it offered
+  // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
+  const [picked, setPicked] = useState<string | undefined>(() =>
+    gameRouteFromHash(globalThis.location.hash),
+  );
   const [withGhost, setWithGhost] = useState(false);
   const [withPacer, setWithPacer] = useState(false);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
