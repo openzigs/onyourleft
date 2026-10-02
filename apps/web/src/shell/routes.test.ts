@@ -6,7 +6,9 @@ import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
   CREDITS_ROUTE,
+  gameRouteFromHash,
   hrefFor,
+  hrefForGameRoute,
   hrefForActivity,
   hrefForSelection,
   matchHash,
@@ -177,6 +179,27 @@ describe('hrefFor with a parameter', () => {
 
   it('ignores a parameter given to a route that has no placeholder', () => {
     expect(hrefFor(routeById('about'), 'ignored')).toBe('#/about');
+  });
+});
+
+describe('the trainer game with a route chosen — #1010', () => {
+  it('is still the game route, and reads back the id it was given', () => {
+    for (const id of ['hill', 'a/b c#d?e&f=g', '%']) {
+      const href = hrefForGameRoute(id);
+      expect(routeForHash(href).id).toBe('game');
+      expect(gameRouteFromHash(href)).toBe(id);
+    }
+  });
+
+  it('is no choice with no query, an empty value, or another key', () => {
+    expect(gameRouteFromHash('#/game')).toBeUndefined();
+    expect(gameRouteFromHash('#/game?route=')).toBeUndefined();
+    expect(gameRouteFromHash('#/game?other=x')).toBeUndefined();
+    expect(gameRouteFromHash('')).toBeUndefined();
+  });
+
+  it('reads a lone % as itself rather than throwing', () => {
+    expect(gameRouteFromHash('#/game?route=%')).toBe('%');
   });
 });
 

@@ -436,7 +436,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         and no stream decode on every launch, the week and the
                         fitness line carried to today, and the empty state a
                         new rider sees first. ⚠️ `#/` is Home since #428 and
-                        the Ride screen is `#/ride`
+                        the Ride screen is `#/ride`. ⚠️ Since #1010 Home
+                        leads with ONE "Next up" card (the last route
+                        ridden, else a free ride, else the first ride) —
+                        at most ONE `getRoute` beyond #428's read
+                        (`home.ts` §`loadNextUp`), and it opens the game on
+                        that route through `#/game?route=…`, the one query
+                        this shell reads (`shell/routes.ts`
+                        §`gameRouteFromHash`). "The last workout used" is
+                        not offered: no ride records which workout it was
     src/instance/       connecting this app to an instance (#777) — which
                         addresses it will talk to (`https:`, and `http:` only
                         to this machine's loopback, refused before any

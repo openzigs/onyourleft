@@ -489,7 +489,13 @@ function viewFor(
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
-      return <HomeView analysis={props.analysis} controller={props.rideController} />;
+      return (
+        <HomeView
+          analysis={props.analysis}
+          controller={props.rideController}
+          routes={props.routes}
+        />
+      );
     case 'ride':
       return (
         <RideView

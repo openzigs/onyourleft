@@ -760,9 +760,10 @@ export function routeForHash(hash: string): RouteDefinition {
 /**
  * `'#/activities?x=1'` → `'/activities'`, `''` → `'/'`.
  *
- * The query and any nested fragment are dropped: this shell has no query
- * parameters, and silently matching `'/activities?x=1'` against nothing would
- * send a perfectly good deep link to the not-found page. A **path** parameter
+ * The query and any nested fragment are dropped: no route is chosen by its
+ * query, and silently matching `'/activities?x=1'` against nothing would
+ * send a perfectly good deep link to the not-found page. (One query is READ,
+ * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010.) A **path** parameter
  * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {
@@ -822,6 +823,34 @@ export function hrefForSelection(route: RouteDefinition, id: string): string {
 /** The link to one ride's detail view. */
 export function hrefForActivity(id: string): string {
   return hrefFor(ACTIVITY_DETAIL_ROUTE, id);
+}
+
+/**
+ * The trainer game with one saved route already chosen — #1010, Home's
+ * "next up" Ride.
+ *
+ * A QUERY rather than a path segment, on purpose: it chooses which card the
+ * picker opens on and nothing else, so `#/game?route=…` is still the game
+ * route ({@link normaliseHash} drops the query), a route id the picker does
+ * not hold falls back to its first card (`StageChooser.tsx` §`RoutePicker`),
+ * and nothing starts a ride from a link — the rider still presses Ride there.
+ */
+export function hrefForGameRoute(id: string): string {
+  return `${hrefFor(routeById('game'))}?route=${encodeURIComponent(id)}`;
+}
+
+/**
+ * The route {@link hrefForGameRoute} chose, or `undefined`. Total, for
+ * {@link matchHash}'s reason: `URLSearchParams` decodes a lone `%` as itself
+ * rather than throwing, and an empty value is no choice.
+ */
+export function gameRouteFromHash(hash: string): string | undefined {
+  const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
+  if (query === undefined) {
+    return undefined;
+  }
+  const chosen = new URLSearchParams(query).get('route');
+  return chosen === null || chosen === '' ? undefined : chosen;
 }
 
 /** The link to one segment's effort history (#67). */

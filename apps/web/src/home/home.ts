@@ -38,15 +38,17 @@ import {
   type FitnessPoint,
   type LoadEntry,
   type Metres,
+  type RouteProfile,
   type Seconds,
   type UnixSeconds,
 } from '@onyourleft/domain';
-import type { ActivitySummary } from '@onyourleft/store';
+import type { ActivitySummary, RouteId } from '@onyourleft/store';
 
 import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import type { AnalysisPort } from '../analysis/store-port';
 import { loadFromSummary } from '../analysis/summary';
 import { thresholdsFor } from '../analysis/thresholds';
+import type { RoutePort } from '../routes/store-port';
 
 /**
  * How far back "this week" reaches: today and the six CALENDAR days before
@@ -109,10 +111,32 @@ export interface HomeWeek {
   readonly daysRidden: number;
 }
 
+/** The seven calendar days before {@link HomeWeek}'s, counted the same way — #1010. */
+export interface HomePreviousWeek {
+  readonly rides: number;
+  readonly movingTime: number;
+  readonly load: number;
+  readonly ridesWithLoad: number;
+}
+
 export interface HomeData {
   /** `undefined` for a rider with no rides: the empty state. */
   readonly lastRide: HomeLastRide | undefined;
   readonly week: HomeWeek;
+  /**
+   * The seven calendar days before {@link week}'s — days seven to thirteen
+   * back, each ride on its own local day as {@link WEEK_DAYS} says — so the
+   * "this week" card can set each figure against the week before (#1010).
+   * The same rows, a different test on each: no read of its own.
+   */
+  readonly previousWeek: HomePreviousWeek;
+  /**
+   * The saved route the NEWEST ride ridden on one was ridden on, or
+   * `undefined` when no ride in the read carries a route — #1010's "next up".
+   * Read off the summaries' own `routeId`, so finding it costs nothing; the
+   * route itself is {@link loadNextUp}'s one record read.
+   */
+  readonly lastRouteId: RouteId | undefined;
   /** The fitness series carried to today; empty when no ride has a load. */
   readonly fitness: readonly FitnessPoint[];
   /** True when {@link HISTORY_ACTIVITY_LIMIT} cut the history short. */
@@ -140,8 +164,10 @@ export async function loadHome(
 
   const entries: LoadEntry[] = [];
   let week: Omit<HomeWeek, 'daysRidden'> = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
+  let previousWeek: HomePreviousWeek = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
   const daysBack = new Set<number>();
   let lastRide: HomeLastRide | undefined;
+  let lastRouteId: RouteId | undefined;
   for (const summary of considered) {
     const load = loadFromSummary(summary, thresholds)?.load;
     if (load !== undefined) {
@@ -161,7 +187,17 @@ export async function loadHome(
           ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
         };
         daysBack.add(back);
+      } else if (back >= WEEK_DAYS && back < 2 * WEEK_DAYS) {
+        previousWeek = {
+          rides: previousWeek.rides + 1,
+          movingTime: previousWeek.movingTime + summary.movingTime,
+          load: previousWeek.load + (load ?? 0),
+          ridesWithLoad: previousWeek.ridesWithLoad + (load === undefined ? 0 : 1),
+        };
       }
+    }
+    if (summary.routeId !== undefined) {
+      lastRouteId = summary.routeId;
     }
     // Ascending, so the last one seen is the newest.
     lastRide = {
@@ -185,7 +221,64 @@ export async function loadHome(
   return {
     lastRide,
     week: { ...week, daysRidden: daysBack.size },
+    previousWeek,
+    lastRouteId,
     fitness: fitnessSeries(dailyLoads(entries)),
     truncated: summaries.length > limit,
   };
+}
+
+/**
+ * The one ride Home offers first — #1010's "next up".
+ *
+ * | kind | when |
+ * |---|---|
+ * | `route` | a ride in the read was ridden on a saved route, and that route is still saved: the newest such |
+ * | `free` | there are rides, and none of them is on a route this device still holds |
+ * | `first` | there is no ride at all |
+ *
+ * ⚠️ **"The last workout used" is not offered, because the store cannot say
+ * which one it was.** A ride is NAMED after the workout it followed
+ * (`recording/finish.ts` §`rideName`), and a name is not a link: a rider can
+ * rename a ride, and two workouts can share a name. Matching on it would offer
+ * the wrong workout with confidence. Recording the link is a store change
+ * of its own, not a read Home can make: #1016.
+ *
+ * ⚠️ **The read budget.** {@link loadHome}'s summaries already carry each
+ * ride's `routeId`, so the route is found for nothing; drawing its shape needs
+ * its profile, which is ONE `getRoute` by id — one record, made only when
+ * there is a route to draw, and never a list. `HomeView.reads.test.tsx`
+ * counts it. A route the rider deleted since resolves to nothing and falls
+ * back to `free`, as a ghost lookup does (`records.ts` §`routeId`); so does a
+ * read that fails, because a picture is not worth an error on the screen
+ * every launch opens.
+ */
+export type HomeNextUp =
+  | { readonly kind: 'first' }
+  | { readonly kind: 'free' }
+  | {
+      readonly kind: 'route';
+      readonly id: RouteId;
+      readonly name: string;
+      readonly profile: RouteProfile;
+    };
+
+export async function loadNextUp(
+  data: Pick<HomeData, 'lastRide' | 'lastRouteId'>,
+  routes: RoutePort | undefined,
+): Promise<HomeNextUp> {
+  if (data.lastRide === undefined) {
+    return { kind: 'first' };
+  }
+  if (data.lastRouteId === undefined || routes === undefined) {
+    return { kind: 'free' };
+  }
+  try {
+    const route = await routes.store.getRoute(routes.athleteId, data.lastRouteId);
+    return route === undefined
+      ? { kind: 'free' }
+      : { kind: 'route', id: route.id, name: route.name, profile: route.profile };
+  } catch {
+    return { kind: 'free' };
+  }
 }

@@ -12,8 +12,25 @@
  * been audited.
  */
 
-import { metres, seconds, unixSeconds, watts, type UnixSeconds } from '@onyourleft/domain';
-import { activityId, athleteId as toAthleteId, recordingSessionId } from '@onyourleft/store';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  seconds,
+  unixSeconds,
+  watts,
+  type RoutePoint,
+  type UnixSeconds,
+} from '@onyourleft/domain';
+import {
+  activityId,
+  athleteId as toAthleteId,
+  recordingSessionId,
+  type RouteRecord,
+} from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
@@ -21,6 +38,8 @@ import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { AppShell } from '../shell/AppShell';
+import type { RoutePort } from '../routes/store-port';
+import { routeStub, stubRouteId } from '../routes/testing';
 import { hrefFor, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -36,7 +55,11 @@ afterEach(() => {
   mounted = undefined;
 });
 
-function ride(id: string, daysAgo: number): StubAnalysisRide {
+function ride(
+  id: string,
+  daysAgo: number,
+  extra: Partial<Parameters<typeof stubActivity>[0]> = {},
+): StubAnalysisRide {
   return {
     activity: stubActivity({
       id: activityId(id),
@@ -47,13 +70,38 @@ function ride(id: string, daysAgo: number): StubAnalysisRide {
       distance: metres(30_000),
       effortWeightedPower: watts(200),
       loadCoveredTime: seconds(3600),
+      ...extra,
     }),
+  };
+}
+
+/** A saved route over a hill, 4 km long, climbing 80 m — `shape-cards.test.tsx`'s. */
+function savedRoute(id: string, createdBy = OWNER): RouteRecord {
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 4000; along += 25) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + along / 111_195),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(30 + 80 * Math.sin((Math.PI * along) / 8000)),
+    });
+  }
+  return {
+    id: stubRouteId(id),
+    createdBy,
+    name: 'Up the hill',
+    profile: routeProfile(points),
+    visibility: 'private',
+    createdAt: unixSeconds(1_700_000_000),
+    updatedAt: unixSeconds(1_700_000_000),
   };
 }
 
 async function openHome(
   rides: readonly StubAnalysisRide[],
   snapshot = idleSnapshot(),
+  routes?: RoutePort,
 ): Promise<void> {
   globalThis.location.hash = '#/';
   // `Date.now()` is the home screen's clock; held so "this week" is stable.
@@ -65,6 +113,7 @@ async function openHome(
         capabilities={NO_BLUETOOTH}
         analysis={stubAnalysis(OWNER, rides)}
         rideController={stubRideController(snapshot).controller}
+        routes={routes}
       />,
     );
     await settle();
@@ -142,7 +191,7 @@ describe('the home screen — #428', () => {
     await openHome(
       Array.from({ length: 40 }, (_unused, index) => ride(`r${String(index)}`, 40 - index)),
     );
-    expect(text()).toContain('The last seven days');
+    expect(text()).toContain('This week');
     expect(text()).toMatch(/Fitness \d+/);
     expect(text()).toMatch(/Fatigue \d+/);
     expect(text()).toMatch(/Freshness -?\d+/);
@@ -236,8 +285,8 @@ describe('the illustrated home — #939', () => {
     const main = document.querySelector('main');
     expect(main?.querySelectorAll('img')).toHaveLength(0);
     const pictures = [...(main?.querySelectorAll('svg') ?? [])];
-    // The hero's three layers, the cards' eight, the trainer's glyph and the ring.
-    expect(pictures.length).toBeGreaterThanOrEqual(12);
+    // Next up's three layers, the cards' eight, the trainer's glyph and the ring.
+    expect(pictures.length).toBeGreaterThanOrEqual(13);
     for (const picture of pictures) {
       expect(
         picture.closest('[aria-hidden="true"]'),
@@ -246,7 +295,10 @@ describe('the illustrated home — #939', () => {
       expect(picture.querySelectorAll('text, title, desc')).toHaveLength(0);
       expect((picture.textContent ?? '').trim()).toBe('');
     }
-    expect(document.querySelector('.oyl-home-hero')?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelector('.oyl-next-up__art')?.getAttribute('aria-hidden')).toBe('true');
+    for (const art of document.querySelectorAll('.oyl-ride-card__art')) {
+      expect(art.getAttribute('aria-hidden')).toBe('true');
+    }
   });
 
   it('keeps the trainer’s sentence and its link to Devices (#659) when no trainer is paired', async () => {
@@ -284,5 +336,84 @@ describe('the illustrated home — #939', () => {
     ]);
     expect(text()).not.toMatch(/You rode on 0 of/);
     expect(text()).toContain('No rides in the last seven days.');
+  });
+});
+
+describe('next up — #1010', () => {
+  const nextUp = (): Element | null => document.querySelector('.oyl-next-up');
+  const rideLink = (): HTMLAnchorElement | null =>
+    document.querySelector<HTMLAnchorElement>('.oyl-next-up a.oyl-next-up__ride');
+
+  it('offers the route the newest route ride was on, drawn from its profile, in words beside it', async () => {
+    const routes = routeStub(OWNER, [savedRoute('hill')]);
+    await openHome(
+      [
+        ride('old', 5, { routeId: stubRouteId('hill') }),
+        // A later free ride does not hide the route.
+        ride('new', 1),
+      ],
+      idleSnapshot(),
+      routes,
+    );
+    expect(nextUp()?.querySelector('h2')?.textContent).toBe('Next up');
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('Up the hill');
+    expect(nextUp()?.textContent).toContain('The route you rode last: 4.0 km, climb 80 m.');
+    expect(rideLink()?.textContent).toBe('Ride');
+    expect(rideLink()?.getAttribute('href')).toBe('#/game?route=hill');
+    expect(rideLink()?.getAttribute('aria-describedby')).toBe('oyl-next-up-name');
+    expect(nextUp()?.querySelector('.oyl-next-up__profile')).not.toBeNull();
+    // Words carry the meaning: the picture says nothing to assistive technology.
+    expect(nextUp()?.querySelector('.oyl-next-up__art')?.getAttribute('aria-hidden')).toBe('true');
+    // The first control on the screen.
+    expect(document.querySelector('main a, main button')).toBe(rideLink());
+    expectClean('home, next up on a route');
+  });
+
+  it('offers a free ride when no ride was on a route', async () => {
+    await openHome([ride('only', 2)], idleSnapshot(), routeStub(OWNER));
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+    expect(rideLink()?.getAttribute('href')).toBe(hrefFor(routeById('ride')));
+    expect(nextUp()?.querySelector('.oyl-next-up__profile')).toBeNull();
+    expectClean('home, next up free');
+  });
+
+  it('offers the first ride to a rider with nothing ridden', async () => {
+    await openHome([], idleSnapshot(), routeStub(OWNER));
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('Your first ride');
+    expect(rideLink()?.getAttribute('href')).toBe(hrefFor(routeById('ride')));
+    expectClean('home, next up first');
+  });
+
+  it('falls back to a free ride when the route was deleted, or is another athlete’s', async () => {
+    const routes = routeStub(OWNER, [savedRoute('theirs', toAthleteId('athlete-b'))]);
+    await openHome([ride('gone', 3, { routeId: stubRouteId('deleted') })], idleSnapshot(), routes);
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+    mounted?.unmount();
+    await openHome([ride('theirs', 3, { routeId: stubRouteId('theirs') })], idleSnapshot(), routes);
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+  });
+
+  it('falls back to a free ride, with no error on the screen, when the route cannot be read', async () => {
+    const routes = routeStub(OWNER, [savedRoute('hill')]);
+    const failing: RoutePort = {
+      athleteId: OWNER,
+      store: { ...routes.store, getRoute: () => Promise.reject(new Error('no store')) },
+    };
+    await openHome([ride('r', 3, { routeId: stubRouteId('hill') })], idleSnapshot(), failing);
+    expect(nextUp()?.querySelector('.oyl-next-up__name')?.textContent).toBe('A free ride');
+    expect(text()).not.toContain('could not be read');
+  });
+});
+
+describe('this week, against the week before — #1010', () => {
+  it('sets each figure beside the seven days before', async () => {
+    await openHome([ride('before-a', 9), ride('before-b', 12), ride('this', 2)]);
+    const week = document.querySelector('.oyl-home__week');
+    expect(week?.querySelector('h2')?.textContent).toBe('This week');
+    const befores = [...(week?.querySelectorAll('.oyl-home__before') ?? [])].map(
+      (each) => each.textContent,
+    );
+    expect(befores).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
+    expectClean('home, this week');
   });
 });
