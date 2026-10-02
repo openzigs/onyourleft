@@ -640,19 +640,23 @@ secondary button, and a checkbox or radio row is a declared 44 px target.
 
 **Kinds of button, and one primary per view** ([#668](https://github.com/openzigs/onyourleft/issues/668), [#992](https://github.com/openzigs/onyourleft/issues/992)).
 A rider tells the action from the setting by weight, so `design/Button.tsx` §`ButtonVariant` has
-four kinds with one rule each — every one but the tertiary FILLED since #992:
+five kinds with one rule each — every one but the tertiary FILLED since #992:
 
 | Kind | Use | Drawn as |
 |---|---|---|
 | **Primary** | The one action a view exists for. **At most one per view** | `Button` (default) or `a.oyl-button` — filled with the accent |
 | **Secondary** | Every other action | `variant="secondary"` — TONAL: `surfaceOverlay`, no outline (an outline until #992) |
-| **Tertiary** | The lowest action beside a primary — a dialog's way out | `variant="tertiary"` — text: the accent underlined, no fill and no edge (#992) |
+| **Tertiary** | The lowest action beside a primary | `variant="tertiary"` — text: the accent underlined, no fill and no edge (#992) |
+| **Danger** | The destructive answer to a confirmation, **only inside a modal dialog** ([#1002](https://github.com/openzigs/onyourleft/issues/1002)) | `variant="danger"` — a `dangerSurface` fill with a `dangerAction` edge and label, LIGHTER than the filled safe answer beside it, which takes focus; a dashed edge under forced colours. Not counted as a primary |
 | **Toggle** | Changes how something is shown or heard, not what happens | A single on/off: `variant="toggle"`, which **requires** `pressed` and renders `aria-pressed` (a toggle without it does not compile). An exclusive choice of two or three: native radios in a `fieldset.oyl-segmented`. Four or more: a native `<select>` |
 
 "One primary per view" is a **gate**, not a guideline: `a11y/button-hierarchy.a11y.test.tsx` renders
 every route in `ALL_ROUTES` through the real `AppShell` over both of `testing/populated-shell.tsx`'s
 fixtures — the ones the reflow walk (#660) lays out — plus the ride screen in the states where its
 panels meet, and fails a `main` holding two `.oyl-button`s that are neither secondary nor a toggle.
+Since #1002 an open modal dialog is a view of its own (its one primary is the safe answer), and a
+danger button anywhere outside a modal is a finding (`button-hierarchy.ts`
+§`dangerOutsideModalViolations`).
 Where it is used: the Activities sort is #660's `<select>` of four orders; Settings' units choice is
 the one segmented control; *Mute sounds*, a waypoint's selection in the route builder and a ride's
 *Show power* / *Show heart rate* are the toggles. An empty state whose next step is an action draws it

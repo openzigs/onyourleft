@@ -20,8 +20,12 @@ import {
  *   and an empty fixture and fails a `main` that holds two.
  * - **`secondary`** — every other action, TONAL since #992: a filled surface
  *   step, not an outline.
- * - **`tertiary`** — text (#992): the lowest action beside a primary, such as
- *   a dialog's way out.
+ * - **`tertiary`** — text (#992): the lowest action beside a primary.
+ * - **`danger`** — the destructive answer to a confirmation (#1002): red-toned,
+ *   and LIGHTER than the filled safe answer beside it, which takes focus
+ *   (`ConfirmDialog.tsx`). **Only inside a modal dialog**, and that is a gate:
+ *   `a11y/button-hierarchy.ts` §`dangerOutsideModalViolations`. It does not
+ *   count toward the one primary, because it is not one.
  * - **`toggle`** — a single on/off that changes how something is shown or
  *   heard rather than what happens, such as *Mute sounds*. It carries
  *   `aria-pressed`, and it cannot be written without saying which way it
@@ -30,7 +34,7 @@ import {
  *   button at all but a native radio group styled `.oyl-segmented` (or, for
  *   four or more options, a native `<select>` — Activities' sort, #660).
  */
-export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'toggle';
+export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger' | 'toggle';
 
 /**
  * Which way a toggle stands, required exactly when the variant is `toggle`.
@@ -42,7 +46,10 @@ export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'toggle';
  * `@ts-expect-error`, which goes red (TS2578) the day it compiles.
  */
 export type ButtonKind =
-  | { readonly variant?: 'primary' | 'secondary' | 'tertiary'; readonly pressed?: never }
+  | {
+      readonly variant?: 'primary' | 'secondary' | 'tertiary' | 'danger';
+      readonly pressed?: never;
+    }
   | { readonly variant: 'toggle'; readonly pressed: boolean };
 
 interface ButtonCommonProps {
@@ -123,6 +130,7 @@ const VARIANT_CLASS: Readonly<Record<ButtonVariant, string>> = {
   primary: 'oyl-button',
   secondary: 'oyl-button oyl-button--secondary',
   tertiary: 'oyl-button oyl-button--tertiary',
+  danger: 'oyl-button oyl-button--danger',
   toggle: 'oyl-button oyl-button--toggle',
 };
 

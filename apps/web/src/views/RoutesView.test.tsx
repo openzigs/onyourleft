@@ -198,7 +198,7 @@ describe('deleting — #73 criterion 3', () => {
     expect(remove).toBeDefined();
     await activateWithKeyboard(remove as HTMLElement);
     await settle();
-    const text = view.container.textContent ?? '';
+    const text = document.body.textContent ?? '';
     expect(text).toContain('Delete this route?');
     expect(text).toContain('Box Hill loop');
     expect(text).toContain('cannot be undone');
@@ -206,12 +206,25 @@ describe('deleting — #73 criterion 3', () => {
     expect(stub.rows()).toHaveLength(1);
   });
 
+  it('puts the safe answer first, filled and focused, and the delete as danger (#1002)', async () => {
+    const stub = routeStub(ATHLETE, [route()]);
+    const view = await render(stub, 'route-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    const keep = buttonSaying(document.body, 'Keep it') as HTMLElement;
+    const remove = buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement;
+    expect(document.activeElement).toBe(keep);
+    expect(keep.className).toBe('oyl-button');
+    expect(remove.className).toContain('oyl-button--danger');
+  });
+
   it('keeps it when the rider backs out', async () => {
     const stub = routeStub(ATHLETE, [route()]);
     const view = await render(stub, 'route-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
-    await activateWithKeyboard(buttonSaying(view.container, 'Keep it') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document.body, 'Keep it') as HTMLElement);
     await settle();
     expect(stub.rows()).toHaveLength(1);
   });
@@ -222,7 +235,7 @@ describe('deleting — #73 criterion 3', () => {
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(
-      buttonSaying(view.container, 'Delete “Box Hill loop”') as HTMLElement,
+      buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement,
     );
     await settle();
     expect(stub.rows()).toHaveLength(0);
@@ -590,7 +603,7 @@ describe('each message is said once, in one live region', () => {
     await activateWithKeyboard(buttonSaying(view.container, 'Delete') as HTMLElement);
     await settle();
     await activateWithKeyboard(
-      buttonSaying(view.container, 'Delete “Box Hill loop”') as HTMLElement,
+      buttonSaying(document.body, 'Delete “Box Hill loop”') as HTMLElement,
     );
     await settle();
     // What the shell does when the delete moves the hash back to the list.

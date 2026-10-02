@@ -180,6 +180,19 @@ export const COLOUR_TOKENS = {
   dangerInk: '#7a1d1d',
   dangerBorder: '#a83232',
 
+  /**
+   * The destructive answer to a confirmation — #1002, the owner's ruling of
+   * 2026-10-02. `.oyl-button--danger` (`design/Button.tsx`) draws its EDGE and
+   * its label in this red on `dangerSurface`, and under a pointer fills with
+   * it. Red-toned and plainly destructive, and still LIGHTER than the filled
+   * accent of the safe answer beside it, so the dangerous answer is never the
+   * heaviest thing in the dialog. Never the only signal: the label names the
+   * action ("Delete the ride"), and under forced colours the edge is dashed.
+   */
+  dangerAction: '#9e2626',
+  /** Text drawn on `dangerAction` — the danger button's label under a pointer (#1002). */
+  dangerActionInk: '#ffffff',
+
   /*
    * THE ILLUSTRATION PALETTE — #936, the menus' house style (epic #935, the
    * owner's D-1: flat geometric art drawn from code and painted with tokens).
@@ -334,6 +347,8 @@ export const DARK_COLOUR_TOKENS = {
   dangerSurface: '#3a1818',
   dangerInk: '#f4b8b8',
   dangerBorder: '#d46a6a',
+  dangerAction: '#f08c8c',
+  dangerActionInk: '#2a0d0d',
   illoSky: '#152637',
   illoSun: '#9a7a30',
   illoHillFar: '#1d3a2b',
@@ -1327,6 +1342,33 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: { light: 6.63, dark: 5.2 },
     where: 'the edge of an error message',
+  },
+  /*
+   * The danger button — #1002. The destructive answer in a confirmation: a
+   * `dangerSurface` fill with a `dangerAction` edge and label at rest, filled
+   * with `dangerAction` under a pointer or a press. It sits on the dialog,
+   * which is `canvas`.
+   */
+  {
+    foreground: 'dangerAction',
+    background: 'dangerSurface',
+    minimum: AA_TEXT,
+    measured: { light: 6.46, dark: 6.67 },
+    where: 'the label of a danger button at rest (#1002)',
+  },
+  {
+    foreground: 'dangerAction',
+    background: 'canvas',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 7.61, dark: 7.56 },
+    where: 'the edge of a danger button, at rest and under a pointer, on the dialog (#1002)',
+  },
+  {
+    foreground: 'dangerActionInk',
+    background: 'dangerAction',
+    minimum: AA_TEXT,
+    measured: { light: 7.61, dark: 7.6 },
+    where: 'the label of a danger button under a pointer or a press (#1002)',
   },
 
   /*

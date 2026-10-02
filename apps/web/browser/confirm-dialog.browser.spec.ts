@@ -24,7 +24,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { THEMES, paletteColours } from '../src/design/tokens';
+import { THEMES, paletteColours, type Theme } from '../src/design/tokens';
 
 import type { ReflowMeasurement } from './reflow-harness';
 
@@ -200,4 +200,174 @@ test.describe('#950 — the delete confirmation is a real modal', () => {
       }
     });
   }
+
+  /*
+   * #1002, the owner's ruling of 2026-10-02: the SAFE answer is the filled
+   * primary and takes focus; the destructive one is `danger` — red-toned and
+   * lighter than it. Read back from the engine in both palettes, with a
+   * control that swaps the two kinds on the live elements and must fail.
+   */
+  for (const theme of THEMES) {
+    test(`#1002 — Keep is the filled primary with focus, Delete is danger, in the ${theme} palette`, async ({
+      browser,
+    }) => {
+      const context = await browser.newContext({ colorScheme: theme });
+      const page = await context.newPage();
+      try {
+        await openDialog(page);
+        await expect.poll(() => focused(page)).toBe('dialog: Keep the ride');
+        const drawn = await readAnswers(page);
+        expect(drawn.theme).toBe(theme);
+        expect(asTokens(drawn.keep), 'Keep the ride').toEqual(expectedKeep(theme));
+        expect(asTokens(drawn.remove), 'Delete the ride').toEqual(expectedDelete(theme));
+        expect(asRuled(drawn, theme)).toBe(true);
+        for (const answer of [drawn.keep, drawn.remove]) {
+          expect(answer.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+          expect(answer.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        }
+
+        // Under a pointer the danger fills with its red, and its label is the red's ink.
+        await page
+          .getByRole('alertdialog')
+          .getByRole('button', { name: 'Delete the ride' })
+          .hover();
+        await page.waitForTimeout(TRANSITION_WAIT_MS);
+        const colours = paletteColours(theme);
+        const hovered = (await readAnswers(page)).remove;
+        expect(hex(hovered.background)).toBe(colours.dangerAction);
+        expect(hex(hovered.color)).toBe(colours.dangerActionInk);
+      } finally {
+        await context.close();
+      }
+    });
+
+    test(`#1002 control — the kinds swapped back as #996 drew them fail, in the ${theme} palette`, async ({
+      browser,
+    }) => {
+      const context = await browser.newContext({ colorScheme: theme });
+      const page = await context.newPage();
+      try {
+        await openDialog(page);
+        await page.evaluate(() => {
+          const [keep, remove] = [...document.querySelectorAll('[role="alertdialog"] button')];
+          if (keep === undefined || remove === undefined) throw new Error('no answers');
+          keep.className = 'oyl-button oyl-button--tertiary';
+          remove.className = 'oyl-button';
+        });
+        await page.mouse.move(0, 0);
+        await page.waitForTimeout(TRANSITION_WAIT_MS);
+        expect(asRuled(await readAnswers(page), theme)).toBe(false);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+
+  test('#1002 — under forced colours the danger keeps a dashed edge, and Keep a solid one', async ({
+    browser,
+  }) => {
+    for (const forcedColors of ['active', 'none'] as const) {
+      const context = await browser.newContext({ forcedColors });
+      const page = await context.newPage();
+      try {
+        await openDialog(page);
+        const drawn = await readAnswers(page);
+        expect(drawn.keep.edge, `Keep, forced colours ${forcedColors}`).toBe('solid');
+        // The control: without a forced palette the edge is solid, so the
+        // dashed one is the forced-colours rule and nothing else.
+        expect(drawn.remove.edge, `Delete, forced colours ${forcedColors}`).toBe(
+          forcedColors === 'active' ? 'dashed' : 'solid',
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  });
 });
+
+/** SC 2.5.5 (AAA), `.oyl-button`'s floor. */
+const TOUCH_TARGET_PIXELS = 44;
+
+/** The buttons' own transition is 120 ms; a read waits past it. */
+const TRANSITION_WAIT_MS = 400;
+
+async function openDialog(page: Page): Promise<void> {
+  await openActivities(page, 1280, 800);
+  await firstDelete(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(TRANSITION_WAIT_MS);
+}
+
+interface Answer {
+  readonly background: string;
+  readonly color: string;
+  readonly border: string;
+  readonly edge: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface Answers {
+  readonly theme: string | undefined;
+  readonly keep: Answer;
+  readonly remove: Answer;
+}
+
+async function readAnswers(page: Page): Promise<Answers> {
+  return page.evaluate(() => {
+    const read = (name: string) => {
+      const button = [...document.querySelectorAll('[role="alertdialog"] button')].find(
+        (each) => (each.textContent ?? '').trim() === name,
+      );
+      if (button === undefined) throw new Error(`no “${name}” in the dialog`);
+      const style = getComputedStyle(button);
+      const box = button.getBoundingClientRect();
+      return {
+        background: style.backgroundColor,
+        color: style.color,
+        border: style.borderTopColor,
+        edge: style.borderTopStyle,
+        width: box.width,
+        height: box.height,
+      };
+    };
+    return {
+      theme: document.documentElement.dataset['theme'],
+      keep: read('Keep the ride'),
+      remove: read('Delete the ride'),
+    };
+  });
+}
+
+function asTokens(answer: Answer) {
+  return {
+    background: hex(answer.background),
+    color: hex(answer.color),
+    border: hex(answer.border),
+  };
+}
+
+function expectedKeep(theme: Theme) {
+  const colours = paletteColours(theme);
+  return { background: colours.accent, color: colours.accentInk, border: colours.accent };
+}
+
+function expectedDelete(theme: Theme) {
+  const colours = paletteColours(theme);
+  return {
+    background: colours.dangerSurface,
+    color: colours.dangerAction,
+    border: colours.dangerAction,
+  };
+}
+
+/** Whether the two answers are drawn as #1002 rules: Keep filled, Delete danger. */
+function asRuled(drawn: Answers, theme: Theme): boolean {
+  const same = (a: object, b: object): boolean => JSON.stringify(a) === JSON.stringify(b);
+  return (
+    same(asTokens(drawn.keep), expectedKeep(theme)) &&
+    same(asTokens(drawn.remove), expectedDelete(theme))
+  );
+}

@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useId, useState, type FormEvent, type JSX
 import { expandWorkout, type WorkoutBlock, type WorkoutTimeline } from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
@@ -534,33 +535,27 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             {exported}
           </StatusMessage>
         )}
-        {pendingDelete === undefined ? null : (
-          <div>
-            <h3>Delete “{pendingDelete.name}”?</h3>
-            <p>
-              This removes the workout from this device. It does not affect any ride you have
-              already recorded.
-            </p>
-            <Button
-              variant="secondary"
-              type="button"
-              onClick={() => {
-                void onDelete(pendingDelete);
-              }}
-            >
-              Delete “{pendingDelete.name}”
-            </Button>
-            <Button
-              variant="secondary"
-              type="button"
-              onClick={() => {
-                setPendingDelete(undefined);
-              }}
-            >
-              Keep it
-            </Button>
-          </div>
-        )}
+        <ConfirmDialog
+          open={pendingDelete !== undefined}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPendingDelete(undefined);
+            }
+          }}
+          title={`Delete “${pendingDelete?.name ?? ''}”?`}
+          confirmLabel={`Delete “${pendingDelete?.name ?? ''}”`}
+          cancelLabel="Keep it"
+          onConfirm={() => {
+            if (pendingDelete !== undefined) {
+              void onDelete(pendingDelete);
+            }
+          }}
+        >
+          <p>
+            This removes the workout from this device. It does not affect any ride you have already
+            recorded.
+          </p>
+        </ConfirmDialog>
       </div>
     ) : (
       <div className="oyl-selected">
