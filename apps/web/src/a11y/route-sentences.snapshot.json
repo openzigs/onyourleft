@@ -315,7 +315,7 @@
     "The camera is off",
     "It stays off until you turn it on, and it has never been on.",
     "Nothing has been captured and there is nothing on this device to remove.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at."
+    "Pictures and ride details stay on this device unless you turn on sending them below."
   ],
   "settings empty": [
     "Settings",
@@ -1433,7 +1433,7 @@
     "The camera is off",
     "It stays off until you turn it on, and it has never been on.",
     "Nothing has been captured and there is nothing on this device to remove.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at."
+    "Pictures and ride details stay on this device unless you turn on sending them below."
   ],
   "settings populated": [
     "Settings",
@@ -1876,6 +1876,8 @@
     "Decide accounts, reports and names on the instance you moderate.",
     "Help with Moderation",
     "Approve and refuse new accounts, decide reports, suspend accounts and hide names on the instance you moderate.",
+    "Everything you do here is written to the instance’s moderation log with your account, the reason you give and the time.",
+    "Nobody can change or delete the log, and it is kept when an account is erased.",
     "Waiting for approval",
     "Anna",
     "Account pending-anna, asked 2026-09-21 14:13 UTC.",
@@ -1907,8 +1909,6 @@
     "Suspend",
     "Lift the suspension",
     "Hide the display name",
-    "Everything you do here is written to the instance’s moderation log with your account, the reason you give and the time.",
-    "Nobody can change or delete the log, and it is kept when an account is erased.",
     "Moderation log",
     "Every moderator action on this instance, newest first.",
     "This page cannot change it.",
