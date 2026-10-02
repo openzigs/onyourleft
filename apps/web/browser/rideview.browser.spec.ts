@@ -430,6 +430,11 @@ for (const viewport of [
  * So the assertion is the finding: reverting the rule changes nothing. A later
  * change that made this page shorter than the screen would turn it red, and
  * that is the day #439 starts to apply here.
+ *
+ * ⚠️ **Upright, that day was #1012**: the readings went from one to a row to
+ * two, and the upright page became shorter than the screen. There the case
+ * now holds the rule doing its job — no scroll, and the old rule's 68 px back
+ * as the control. In landscape the page is still taller than the screen.
  */
 for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
   test.describe(`#439 — ${viewport.name}`, () => {
@@ -448,8 +453,18 @@ for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
       });
       const reverted = await measure(page);
 
-      expect(fixed.pageOverflow).toBeGreaterThan(0);
-      expect(reverted.pageOverflow).toBe(fixed.pageOverflow);
+      if (viewport === TABLET_UPRIGHT_IN_THE_SHELL) {
+        // ⚠️ #1012: the day this comment predicted. Two readings to a row
+        // rather than one made the upright page SHORTER than the screen, so
+        // #439's rule binds here now: the page fits, and the old rule puts
+        // the insets' 68 px back as scroll.
+        const insets = insetsOf(viewport);
+        expect(fixed.pageOverflow).toBeLessThanOrEqual(0);
+        expect(reverted.pageOverflow).toBeCloseTo(insets.top + insets.bottom, 0);
+      } else {
+        expect(fixed.pageOverflow).toBeGreaterThan(0);
+        expect(reverted.pageOverflow).toBe(fixed.pageOverflow);
+      }
     });
   });
 }
@@ -1019,8 +1034,13 @@ test(`#740 — the control — the Held line above the form puts End ERG under t
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
 
-/** Two rows of cards at the small step rather than the medium one, and the gap. */
-const CARDS_TIGHTEN_BY_PIXELS = 30;
+/**
+ * What the tightening takes off each ROW of cards: the padding at the small
+ * step rather than the medium one, top and bottom (2 × 8 px). Per row since
+ * #1012 — on the landscape tablet the four readings are one row now, where
+ * this was "two rows and the gap", 30 px.
+ */
+const CARDS_TIGHTEN_PER_ROW_PIXELS = 16;
 
 test.describe(`#692 — the metric cards — ${TABLET_IN_THE_SHELL.name}`, () => {
   /**
@@ -1034,9 +1054,12 @@ test.describe(`#692 — the metric cards — ${TABLET_IN_THE_SHELL.name}`, () =>
     page,
   }, testInfo) => {
     const viewport = TABLET_IN_THE_SHELL;
+    let rows = 0;
     const heightWith = async (query: string): Promise<number> => {
       await open(page, viewport, query);
-      return (await measure(page)).metrics?.height ?? 0;
+      const seen = await measure(page);
+      rows = Math.max(rows, seen.metricRows);
+      return seen.metrics?.height ?? 0;
     };
     const none = await heightWith('');
     const standing = await heightWith('?notification=refused');
@@ -1046,7 +1069,10 @@ test.describe(`#692 — the metric cards — ${TABLET_IN_THE_SHELL.name}`, () =>
     console.log(`#692 — the metric cards — ${note}`);
 
     expect(none, note).toBeGreaterThan(0);
-    expect(none - standing, note).toBeGreaterThanOrEqual(CARDS_TIGHTEN_BY_PIXELS);
+    expect(rows, note).toBeGreaterThan(0);
+    expect(none - standing, note).toBeGreaterThanOrEqual(
+      rows * CARDS_TIGHTEN_PER_ROW_PIXELS - SUBPIXEL_TOLERANCE,
+    );
     expect(beside, note).toBeCloseTo(none, 0);
   });
 });
@@ -1186,3 +1212,103 @@ test.describe(`#669 — the workout chooser — ${TABLET_UPRIGHT_IN_THE_SHELL.na
     expect(fixed - reverted, note).toBeGreaterThanOrEqual(CHOOSER_FIX_PIXELS);
   });
 });
+
+/**
+ * #1012 — the readings, and the one sensor banner (epic #935 Phase 2).
+ *
+ * The live numbers are `design/Reading.tsx` at the metric size: two to a row
+ * on a phone and all four in a row on the landscape tablet, where the Live
+ * group takes two of three columns. What can go wrong is #259's failure on a
+ * new screen — a number at 61 px in a card too narrow for it spilling onto
+ * the one beside it — so every card is read for spill at every phone and
+ * tablet, with every reading at the widest it can be (`?readings=widest`,
+ * 1888 W) and the readings forced four to a row as the control.
+ */
+const READING_VIEWPORTS: readonly Viewport[] = [
+  { name: 'the narrowest phone — 320×568', width: 320, height: 568 },
+  { name: 'a phone — 360×800', width: 360, height: 800 },
+  { name: 'a phone — 390×844', width: 390, height: 844 },
+  { name: 'a phone — 412×915', width: 412, height: 915 },
+  TABLET_UPRIGHT_IN_THE_SHELL,
+  SMALL_TABLET_IN_THE_SHELL,
+  TABLET_IN_THE_SHELL,
+];
+
+/** How many readings to a row each viewport is meant to show. */
+function readingsPerRow(viewport: Viewport): number {
+  if (viewport === TABLET_IN_THE_SHELL) return 4;
+  if (viewport.width <= 320) return 1;
+  return 2;
+}
+
+for (const viewport of READING_VIEWPORTS) {
+  test(`#1012 — every reading fits its card, ${String(readingsPerRow(viewport))} to a row — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?readings=widest');
+    const seen = await measure(page);
+    const note = seen.readings
+      .map(
+        (each) =>
+          `${each.label} ${each.reading.width.toFixed(0)} px in ${each.card.width.toFixed(0)} px`,
+      )
+      .join('; ');
+    testInfo.annotations.push({ type: '#1012 readings', description: note });
+    console.log(`#1012 — readings — ${viewport.name} — ${note}`);
+
+    expect(seen.readings, 'the fixture shows four readings').toHaveLength(4);
+    expect(seen.metricRows, note).toBe(4 / readingsPerRow(viewport));
+    for (const each of seen.readings) {
+      expect(each.spill, `${each.label} spills out of its card — ${note}`).toBeLessThanOrEqual(0);
+      // Inside the card's padding, not only its border: a number running
+      // into the padding is a number touching the next card's edge.
+      expect(each.reading.right, `${each.label} — ${note}`).toBeLessThanOrEqual(
+        each.contentRight + SUBPIXEL_TOLERANCE,
+      );
+    }
+  });
+}
+
+test('#1012 — the control — four readings to a row on a phone spill out of their cards', async ({
+  page,
+}) => {
+  await open(page, { name: 'a phone — 390×844', width: 390, height: 844 }, '?readings=widest');
+  const before = await measure(page);
+  await page.evaluate(() => {
+    window.__oylRideView?.crammedReadings();
+  });
+  const after = await measure(page);
+  expect(before.readings.filter((each) => each.spill > 0)).toEqual([]);
+  // The apparatus: the control did lay them out four to a row.
+  expect(after.metricRows).toBe(1);
+  expect(after.readings.filter((each) => each.spill > 0).length).toBeGreaterThan(0);
+});
+
+for (const viewport of [
+  { name: 'a phone — 390×844', width: 390, height: 844 },
+  TABLET_IN_THE_SHELL,
+  TABLET_UPRIGHT_IN_THE_SHELL,
+] as const) {
+  test(`#1012 — nothing paired: ONE banner and one Pair, on the screen — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?sensors=none');
+    const seen = await measure(page);
+    const banner = seen.sensorBanner;
+    expect(banner, 'no sensor banner').toBeDefined();
+    expect(seen.readings, 'the four tiles are still there').toEqual([]);
+    expect(banner?.links).toBe(1);
+    expect(banner?.link.name).toBe('Pair');
+    expect(banner?.link.onTop, 'Pair is covered').toBe(true);
+    expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
+    // After every ride control in its column (#692): it stands where the
+    // readings would.
+    const live = seen.controls.filter((each) => each.group === 'live');
+    expect(banner?.box.top ?? -Infinity).toBeGreaterThanOrEqual(lowestOf(live).box.bottom);
+    const margin = foldMargin(banner?.link.box.bottom ?? Infinity, viewport);
+    const note = `Pair ${margin.toFixed(1)} px above the fold`;
+    testInfo.annotations.push({ type: '#1012 banner', description: note });
+    console.log(`#1012 — banner — ${viewport.name} — ${note}`);
+    expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+}

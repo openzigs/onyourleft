@@ -2415,10 +2415,100 @@ a.oyl-button {
  * "unavailable". Colour is never the only carrier — the note beside it says the
  * same thing in words, which is what survives greyscale and a screen reader.
  */
-.oyl-metric--stale .oyl-metric__value,
-.oyl-metric--unpaired .oyl-metric__value,
-.oyl-metric--waiting .oyl-metric__value {
+.oyl-metric--stale .oyl-reading__value,
+.oyl-metric--unpaired .oyl-reading__value,
+.oyl-metric--waiting .oyl-reading__value {
   color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * THE RIDE'S READINGS — #1012 (epic #935 Phase 2). Each live number is a
+ * `design/Reading.tsx` at `size="metric"`: the reading's tabular numerals at
+ * #49's two-metre size, and its small unit on their baseline. The size is the
+ * metric token and nothing else, which `a11y/ride-legibility.a11y.test.ts`
+ * reads out of this rule.
+ */
+.oyl-reading--metric .oyl-reading__value {
+  font-family: var(--oyl-font-family-display);
+  font-size: var(--oyl-font-size-metric);
+  line-height: 1.1;
+}
+
+.oyl-metric__reading {
+  display: block;
+}
+
+/*
+ * How many readings to a row is a question about the Live GROUP's width, not
+ * the window's, so it is a container query: on a landscape tablet the group is
+ * wide and on a phone it is the screen, and a media query could not tell a
+ * phone from one column of a tablet. One column below the narrowest phone, two
+ * on a phone, all four in a row where four fit. The two widths are what four
+ * digits of the metric size and a card's padding need — 1888 W is 130 px in
+ * the display face — and `rideview.browser.spec.ts` §"#1012" reads every
+ * reading inside its card, at the widest each can be, at the phones and the
+ * tablets. The numerals are the bundled display face (#991) rather than the
+ * system one, so they are the same width on every machine that measures them.
+ */
+.oyl-ride__group--live {
+  container: oyl-live / inline-size;
+}
+
+.oyl-metric-grid--live {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container oyl-live (min-width: 20rem) {
+  .oyl-metric-grid--live {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The cards' sides at the small step: four tabular digits of the metric size
+   in the display face are 130 px, and a 360 px phone's two cards are 160 px
+   wide, so the medium step's 2 × 16 px would leave 126. */
+.oyl-metric-grid--live > .oyl-metric {
+  padding-inline: var(--oyl-space-sm);
+}
+
+@container oyl-live (min-width: 40rem) {
+  .oyl-metric-grid--live {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/*
+ * #1012: with nothing paired, ONE banner where the readings go
+ * (`RideView.tsx` §`NoSensorsBanner`) — a filled tile, the sensor drawing at
+ * the medium size (the owner's ruling of 2026-10-01), the sentence, and one
+ * *Pair* link drawn as a button. It wraps rather than overflowing on a phone.
+ */
+.oyl-sensor-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
+  margin: var(--oyl-space-lg) 0;
+  padding: var(--oyl-space-md);
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-surface-raised);
+}
+
+.oyl-sensor-banner__art {
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+}
+
+.oyl-sensor-banner__glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.oyl-sensor-banner__sentence {
+  flex: 1 1 14rem;
+  margin: 0;
 }
 
 .oyl-ride__clock {
@@ -2591,13 +2681,32 @@ a.oyl-button {
   }
 }
 
+/*
+ * #1012: on the widest layout — a landscape tablet — the Live group takes two
+ * of the three columns, so its four readings are one wide row, and the
+ * trainer keeps the third column for both rows, beside the live readings
+ * exactly as #422 put it. Sensors goes under Live. The document order is
+ * unchanged (live, trainer, sensors), so the tab order is too.
+ */
 @media (min-width: 76rem) {
   .oyl-ride {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      'live live trainer'
+      'sensors sensors trainer';
+    grid-template-rows: auto 1fr;
+  }
+
+  .oyl-ride__group--live {
+    grid-area: live;
+  }
+
+  .oyl-ride__group--trainer {
+    grid-area: trainer;
   }
 
   .oyl-ride__group--sensors {
-    grid-column: auto;
+    grid-area: sensors;
   }
 }
 

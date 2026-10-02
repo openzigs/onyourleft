@@ -37,4 +37,17 @@ describe('a reading — #992', () => {
     expect(reading?.querySelector('.oyl-reading__unit')).toBeNull();
     expect(reading?.textContent).toBe('1:23:45');
   });
+
+  it('is a menu fact by default, and a live ride number when asked — #1012', async () => {
+    mounted = await mount(
+      <>
+        <Reading value="42.2" unit="km" />
+        <Reading value="248" unit="W" size="metric" />
+      </>,
+    );
+    const [fact, metric] = mounted.container.querySelectorAll('.oyl-reading');
+    expect(fact?.classList.contains('oyl-reading--metric')).toBe(false);
+    expect(metric?.classList.contains('oyl-reading--metric')).toBe(true);
+    expect(metric?.textContent).toBe('248 W');
+  });
 });
