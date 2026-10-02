@@ -33,7 +33,13 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { FONT_SIZE_TOKENS, THEMES, paletteColours, type Theme } from '../src/design/tokens';
+import {
+  FONT_FAMILY_TOKENS,
+  FONT_SIZE_TOKENS,
+  THEMES,
+  paletteColours,
+  type Theme,
+} from '../src/design/tokens';
 import { ALL_ROUTES, hrefFor, type RouteDefinition } from '../src/shell/routes';
 
 /** Every element drawn as a filled tile. A panel inside a Settings card is the card's. */
@@ -48,8 +54,15 @@ const TILES = [
 /** `--oyl-radius-card`, 0.75rem at the root's 16 px. */
 const CARD_RADIUS = '12px';
 
-/** `theme.css` §`--oyl-font-family-display`, as Chromium reports a computed family. */
-const DISPLAY_FAMILY = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+/**
+ * `tokens.ts` §`FONT_FAMILY_TOKENS.display`, as Chromium reports a computed
+ * family: a quoted one-word name loses its quotes and a name with a space keeps
+ * double ones. Read from the token rather than typed out, so swapping the face
+ * (as #991 did, to Barlow) does not leave this spec asserting the old one.
+ */
+const DISPLAY_FAMILY = FONT_FAMILY_TOKENS.display.replace(/'([^']*)'/g, (_, name: string) =>
+  name.includes(' ') ? `"${name}"` : name,
+);
 
 interface Look {
   readonly routeId: string | null;
