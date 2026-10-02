@@ -669,6 +669,21 @@ Chromium. That read-back is what now holds [#688](https://github.com/openzigs/on
 hovered secondary, found at 1.40:1 on the shell harness's specimens while #667 was being built: a
 state nobody meant to draw is a pair nobody declared.
 
+**Game-style controls** ([#994](https://github.com/openzigs/onyourleft/issues/994)). The menus'
+form controls are drawn the way a game draws them, and every one of them is still the native control
+underneath, so its role, its keyboard and its form value are the platform's:
+
+| Control | What it is | Where |
+|---|---|---|
+| **Section tabs** | The group's own pages (Ride / Trainer game / Workouts …) as one row of joined segments. Still **links**, because a page is a URL; the current one is filled, bold AND underlined, so it is not told by colour alone | `theme.css` §`.oyl-subnav-link` |
+| **Switch** | An on/off **setting**: a native checkbox with `role="switch"`, drawn as a 44 × 24 track whose thumb's position is the state, handed back to the platform under forced colours. ⚠️ Not `@radix-ui/react-switch`: ADR 0042 D-6 admits Radix only where a hand-written control would re-implement behaviour, and this one re-implements none. ⚠️ A box that **agrees** to something (being raced, a picture or a ride leaving the device, the camera's acknowledgements) stays a checkbox, and so does a selection of several | `theme.css` §"A SWITCH" |
+| **Chips** | A single choice of more than three: native radios, each a separate rounded chip (the kit colour) | `theme.css` §`.oyl-chips` |
+| **Stepper** | − value + around a number box that still takes typing; a step is delivered as typing, so the screen cannot tell. ⚠️ Never on the trainer's ERG target form (#669, #567), and a test fails if it is | `design/Stepper.tsx` |
+| **Drop zone** | Around a file input, which stays the way in; on a window 48 rem or wider a dropped file is handed to the input itself | `design/FileDrop.tsx` |
+
+The riding position is a segmented control since #994 (a `<select>` before). `browser/controls.browser.spec.ts`
+measures every new target the #316 three ways, with a control for the tabs and the forced-colours rule.
+
 **A list beside its detail** ([#670](https://github.com/openzigs/onyourleft/issues/670)). Activities,
 Workouts and Routes declare `layout: 'list-detail'` on the route table (`shell/routes.ts`
 §`RouteLayout`), Material 3's list–detail canonical layout taken as a pattern (ADR 0009): at an

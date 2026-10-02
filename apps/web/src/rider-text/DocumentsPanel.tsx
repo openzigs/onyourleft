@@ -24,6 +24,7 @@ import {
 } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { FileDrop } from '../design/FileDrop';
 import { StatusMessage } from '../design/StatusMessage';
 import { RIDER_TEXT_NO_STORE } from './RiderTextBox';
 import { RiderTextDisclosure } from './RiderTextDisclosure';
@@ -194,16 +195,18 @@ export function DocumentsPanel({
         <>
           <p className="oyl-rider-text__form">
             <label htmlFor={inputId}>{DOCUMENT_ADD_LABEL}</label>
-            <input
-              id={inputId}
-              className="oyl-input oyl-input--file"
-              type="file"
-              accept={DOCUMENT_ACCEPT}
-              aria-describedby={`${inputId}-lead`}
-              onChange={(event) => {
-                void add(event);
-              }}
-            />
+            <FileDrop hint="Or drop a document here">
+              <input
+                id={inputId}
+                className="oyl-input oyl-input--file"
+                type="file"
+                accept={DOCUMENT_ACCEPT}
+                aria-describedby={`${inputId}-lead`}
+                onChange={(event) => {
+                  void add(event);
+                }}
+              />
+            </FileDrop>
           </p>
           <p id={`${inputId}-lead`} className="oyl-muted">
             {DOCUMENTS_LEAD}
