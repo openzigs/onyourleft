@@ -11,6 +11,7 @@ import {
   hrefForSelection,
   matchHash,
   matchHashAmong,
+  MAXIMUM_SUMMARY_CHARACTERS,
   normaliseHash,
   NOT_FOUND_ROUTE,
   routeById,
@@ -18,6 +19,7 @@ import {
   ROUTES,
 } from './routes';
 import { SELECTIONS } from '../testing/populated-shell';
+import { sentencesOf } from '../testing/route-sentences';
 
 describe('normaliseHash', () => {
   it.each([
@@ -193,6 +195,42 @@ describe('the table itself', () => {
   it('gives every route a summary, so no view is a bare heading', () => {
     for (const route of ALL_ROUTES) {
       expect(route.summary.length, `${route.id} has no summary`).toBeGreaterThan(20);
+    }
+  });
+
+  // #993: the owner's ruling of 2026-10-02 — "one line is the right amount".
+  // The browser gate holds the LINE (`controls-first.browser.spec.ts`); this
+  // holds the sentence, in the fast suite, with the words in front of you.
+  it('gives every route ONE sentence under its title, short enough for one line — #993', () => {
+    for (const route of ALL_ROUTES) {
+      expect(sentencesOf(route.summary), `${route.id}: ${route.summary}`).toHaveLength(1);
+      expect(
+        route.summary.length,
+        `${route.id}: “${route.summary}” is longer than one line`,
+      ).toBeLessThanOrEqual(MAXIMUM_SUMMARY_CHARACTERS);
+    }
+  });
+
+  it('gives a route’s help and notes something to say, and never the same sentence twice — #993', () => {
+    for (const route of ALL_ROUTES) {
+      for (const list of [route.help, route.notes]) {
+        if (list === undefined) continue;
+        expect(list.length, `${route.id} declares an empty list`).toBeGreaterThan(0);
+        for (const paragraph of list) {
+          expect(paragraph.trim(), `${route.id} has a blank paragraph`).not.toBe('');
+        }
+      }
+      const helpSentences = (route.help ?? []).flatMap(sentencesOf);
+      for (const note of route.notes ?? []) {
+        for (const sentence of sentencesOf(note)) {
+          // A note is kept on the screen; the same words in the help would be
+          // a second copy one press away, which says it is optional.
+          expect(helpSentences, `${route.id}: “${sentence}” is a note and help`).not.toContain(
+            sentence,
+          );
+          expect(route.summary).not.toContain(sentence);
+        }
+      }
     }
   });
 

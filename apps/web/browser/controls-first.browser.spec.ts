@@ -132,6 +132,14 @@ interface Viewport {
    * fold, and then the route passes without it. Held exactly, both ways.
    */
   readonly consentBelowFold: readonly RouteId[];
+  /**
+   * The most lines the route's summary under its `h1` may lay out on — #993.
+   * The owner's ruling is ONE line, and it is held at one on the tablet both
+   * ways up. A phone is held to two: a sentence a tablet sets on one line is
+   * two at 390 px, and a shorter limit would rule out half of what the
+   * summaries need to say.
+   */
+  readonly summaryLines: number;
 }
 
 const PHONE: Viewport = {
@@ -140,6 +148,7 @@ const PHONE: Viewport = {
   height: 844,
   margin: 0,
   consentBelowFold: ['side-camera'],
+  summaryLines: 2,
 };
 
 /** The owner's tablet in the shell, both ways up (#439). */
@@ -151,6 +160,7 @@ const TABLETS: readonly Viewport[] = [
     insets: PIXEL_TABLET_LANDSCAPE_INSETS,
     margin: FOLD_MARGIN_PIXELS,
     consentBelowFold: ['side-camera'],
+    summaryLines: 1,
   },
   {
     name: 'tablet in the shell 800×1280, insets 36/32 (assumed)',
@@ -160,6 +170,7 @@ const TABLETS: readonly Viewport[] = [
     margin: FOLD_MARGIN_PIXELS,
     // Measured: the side camera's first control clears this fold by 347 px.
     consentBelowFold: [],
+    summaryLines: 1,
   },
 ];
 
@@ -269,18 +280,68 @@ async function visit(page: Page, route: RouteDefinition): Promise<ReflowMeasurem
  */
 const SECTION_PROSE_BUDGET_PIXELS = 130;
 
+/**
+ * #993's three rules for the top of a screen, as faults:
+ *
+ * - **one line under the title** — the shell's summary lays out on at most
+ *   {@link Viewport.summaryLines};
+ * - **kept-visible text below the controls** — nothing marked
+ *   `data-oyl-kept-visible` before the first control, except on a consent
+ *   route ({@link CONSENT_BEFORE_CONTROL}), whose box says the text was read;
+ * - **a help control a thumb and a screen reader can use** — where the route
+ *   declares help, the ⓘ is a 44 × 44 target named "Help with …" whose panel
+ *   holds the route's words while it is closed (in the page, so offline).
+ */
+function lineFaults(route: RouteDefinition, seen: ReflowMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  if (seen.summary === null) {
+    faults.push(`${route.id}: no line under the title was laid out`);
+  } else if (seen.summary.lines > viewport.summaryLines) {
+    faults.push(
+      `${route.id}: the line under the title lays out on ${String(seen.summary.lines)} lines, ` +
+        `more than ${String(viewport.summaryLines)}: “${seen.summary.text}”`,
+    );
+  }
+  if (seen.keptBeforeFirstControl.length > 0 && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
+    faults.push(
+      `${route.id}: kept-visible text stands above the first control, where #993 puts it below: ` +
+        seen.keptBeforeFirstControl.map((text) => `“${text}”`).join(', '),
+    );
+  }
+  if (route.help === undefined) {
+    if (seen.help !== null) faults.push(`${route.id}: shows a help control and declares no help`);
+  } else if (seen.help === null) {
+    faults.push(`${route.id}: declares help and shows no help control`);
+  } else {
+    if (seen.help.width < TOUCH_TARGET_PIXELS || seen.help.height < TOUCH_TARGET_PIXELS) {
+      faults.push(
+        `${route.id}: the help control is ${seen.help.width.toFixed(0)} × ` +
+          `${seen.help.height.toFixed(0)} px, under ${String(TOUCH_TARGET_PIXELS)}`,
+      );
+    }
+    if (seen.help.name !== `Help with ${route.title}`) {
+      faults.push(`${route.id}: the help control is named “${seen.help.name}”`);
+    }
+    if (seen.help.contents !== route.help.join(' ')) {
+      faults.push(`${route.id}: the help panel holds “${seen.help.contents.slice(0, 80)}”`);
+    }
+  }
+  return faults;
+}
+
 /** A route's first control and the fold, as a line and as faults, which may be none. */
 function judge(
   route: RouteDefinition,
   seen: ReflowMeasurement,
-  margin: number,
+  viewport: Viewport,
 ): {
   readonly line: string;
   readonly faults: readonly string[];
   /** Whether the first control passed below the fold, behind kept-visible text only. */
   readonly exempted: boolean;
 } {
-  const faults: string[] = [];
+  const margin = viewport.margin;
+  const faults: string[] = [...lineFaults(route, seen, viewport)];
   const control = seen.firstControl;
   const sections = seen.sections
     .map(
@@ -317,6 +378,7 @@ function judge(
   const line =
     `${route.id}: first control at y = ${control.top.toFixed(0)} (${control.description} ` +
     `“${control.text}”), fold ${seen.fold.toFixed(0)}, margin ${clearance.toFixed(0)} px` +
+    `, line under the title on ${String(seen.summary?.lines ?? 0)}` +
     (clearance > margin ? '' : onlyKept ? ' — below it, behind kept-visible text only' : '') +
     sectionNote;
   if (clearance <= margin && !onlyKept) {
@@ -354,7 +416,7 @@ async function walk(
   const empty = await page.evaluate(() => window.__oylReflow?.data === 'empty');
   for (const route of ALL_ROUTES) {
     const seen = await visit(page, route);
-    const verdict = judge(route, seen, viewport.margin);
+    const verdict = judge(route, seen, viewport);
     lines.push(verdict.line);
     if (verdict.faults.length > 0) {
       faults.set(route.id, verdict.faults);
@@ -494,7 +556,7 @@ test.describe('#666 — the first control is above the fold on every route', () 
     test(`Devices where a browser can pair, on a ${viewport.name}`, async ({ page }) => {
       await open(page, viewport, 'data=empty&bluetooth=available');
       const seen = await visit(page, routeById('devices'));
-      const verdict = judge(routeById('devices'), seen, viewport.margin);
+      const verdict = judge(routeById('devices'), seen, viewport);
       console.log(`controls first, Bluetooth available, ${viewport.name}\n  ${verdict.line}`);
       // The state is the one with the pairing rows, or this measured the
       // no-Bluetooth page again.
@@ -522,6 +584,48 @@ test.describe('#666 — the first control is above the fold on every route', () 
       emptyFaults.get('activities'),
       'Activities’ empty-state action stayed above the fold with its drawing at 50vh',
     ).toBeDefined();
+  });
+
+  // #993's control. Every route with help or notes is opened with its old
+  // line put back under the title — summary, help and notes in one paragraph —
+  // and its notes copied above the view. On the tablet, the one-line rule must
+  // then fail for every route with HELP on at least one of the two
+  // orientations, and the notes rule for every route with notes on both.
+  // ⚠️ Not the one-line rule for a route with notes alone: Ride's old line, with
+  // its "Everything stays on this device.", was one line on the tablet both
+  // ways up, and moving that sentence is the notes rule's to hold.
+  test('#993’s control: with the line put back as it was, every route with help or notes fails', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    const tooLong = new Set<RouteId>();
+    for (const viewport of TABLETS) {
+      await open(page, viewport, 'data=empty&line=before993');
+      const { lines, faults } = await walk(page, viewport);
+      console.log(
+        `controls first, CONTROL (line put back), ${viewport.name}\n  ${lines.join('\n  ')}`,
+      );
+      for (const route of ALL_ROUTES) {
+        const found = faults.get(route.id) ?? [];
+        if (found.some((fault) => fault.includes('the line under the title lays out on'))) {
+          tooLong.add(route.id);
+        }
+        if (route.notes !== undefined && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
+          expect(
+            found.some((fault) => fault.includes('kept-visible text stands above')),
+            `${route.id}: notes passed above its first control, on a ${viewport.name}`,
+          ).toBe(true);
+        }
+      }
+    }
+    const withHelp = ALL_ROUTES.filter((route) => route.help !== undefined).map(
+      (route) => route.id,
+    );
+    expect(withHelp.length, 'no route has help to put back').toBeGreaterThan(5);
+    expect(
+      withHelp.filter((id) => !tooLong.has(id)),
+      'routes with help whose old line passed as one line on the tablet both ways up',
+    ).toEqual([]);
   });
 
   test('the control: with the explanation put back, Segments, Settings and Files fail', async ({
@@ -688,3 +792,68 @@ function hexToRgb(hex: string): string {
   const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
   return `rgb(${String(channel(1))}, ${String(channel(3))}, ${String(channel(5))})`;
 }
+
+test.describe('#993 — the help control beside a title', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('is a 44 px target three ways (#316), named, and opened and closed from the keyboard', async ({
+    page,
+  }) => {
+    await open(page, PHONE, 'data=empty');
+    const route = routeById('segments');
+    await visit(page, route);
+    const summary = page.locator('main > details.oyl-help > summary');
+    const read = await summary.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const shipped = element.getBoundingClientRect();
+      const declared = {
+        width: Number.parseFloat(style.minWidth),
+        height: Number.parseFloat(style.minHeight),
+      };
+      (element as HTMLElement).style.minWidth = '0';
+      (element as HTMLElement).style.minHeight = '0';
+      const stripped = element.getBoundingClientRect();
+      (element as HTMLElement).style.minWidth = '';
+      (element as HTMLElement).style.minHeight = '';
+      const title = document.querySelector('main > h1')?.getBoundingClientRect();
+      return {
+        shipped: { width: shipped.width, height: shipped.height },
+        declared,
+        stripped: { width: stripped.width, height: stripped.height },
+        // Beside the title: its middle within the title's first line, and the
+        // title's text stopping short of it.
+        middle: shipped.top + shipped.height / 2,
+        titleTop: title?.top ?? Number.NaN,
+        titleRight:
+          title === undefined
+            ? Number.NaN
+            : title.right -
+              Number.parseFloat(
+                getComputedStyle(document.querySelector('main > h1') as Element).paddingRight,
+              ),
+        left: shipped.left,
+      };
+    });
+    console.log(`#993 help control: ${JSON.stringify(read)}`);
+    expect(read.shipped.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.shipped.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.declared.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    expect(read.declared.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    // The control: without the declaration the glyph alone is far short.
+    expect(read.stripped.width).toBeLessThan(TOUCH_TARGET_PIXELS);
+    expect(read.stripped.height).toBeLessThan(TOUCH_TARGET_PIXELS);
+    expect(read.titleRight).toBeLessThanOrEqual(read.left);
+    expect(read.middle).toBeGreaterThan(read.titleTop);
+
+    // The platform's own name for it, as a screen reader would be given it.
+    await expect(summary).toHaveAccessibleName(`Help with ${route.title}`);
+    const details = page.locator('main > details.oyl-help');
+    await expect(details).not.toHaveAttribute('open');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(details).toHaveAttribute('open', '');
+    await expect(page.locator('main > details.oyl-help .oyl-help__panel')).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(details).not.toHaveAttribute('open');
+  });
+});

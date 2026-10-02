@@ -198,6 +198,18 @@ const KEPT: Record<RouteId, Kept> = {
   'not-found': { sentences: [], reason: NOTHING_TUCKED },
 };
 
+/**
+ * A route's list with its `notes` added — #993. The safety and privacy half of
+ * what used to be the line under its title is kept-visible text the shell
+ * renders below the view, read from the route table rather than copied here,
+ * so a note added to the table is checked with no edit to this file.
+ */
+function withNotes(route: RouteDefinition): Kept {
+  const kept = KEPT[route.id];
+  const notes = (route.notes ?? []).filter((note) => !kept.sentences.includes(note));
+  return { ...kept, sentences: [...kept.sentences, ...notes] };
+}
+
 /** Every sentence a route lists, in every state — what bounds its marks. */
 function everyListed(kept: Kept): readonly string[] {
   return [...kept.sentences, ...(kept.populated ?? []), ...(kept.elsewhere ?? [])];
@@ -358,7 +370,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
   for (const data of ['empty', 'populated'] as const) {
     for (const route of ALL_ROUTES) {
       it(`${route.id} (${route.path}), ${data}`, async () => {
-        const kept = KEPT[route.id];
+        const kept = withNotes(route);
         if (kept.sentences.length === 0) {
           expect(kept.reason, `${route.id} lists nothing and gives no reason`).toBeTruthy();
         }

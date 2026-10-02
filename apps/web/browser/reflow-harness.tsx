@@ -78,7 +78,13 @@ import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import type { MapPort } from '../src/map/port';
 import { LOCAL_ATHLETE, localAthleteRecord } from '../src/local-athlete';
 import { PRIMARY_BUTTON_SELECTOR } from '../src/a11y/button-hierarchy';
-import { ALL_ROUTES, matchHash, type RouteId, type RouteLayout } from '../src/shell/routes';
+import {
+  ALL_ROUTES,
+  matchHash,
+  type RouteDefinition,
+  type RouteId,
+  type RouteLayout,
+} from '../src/shell/routes';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
 import {
@@ -197,6 +203,22 @@ export interface ReflowMeasurement {
    * judged by this instead of by the fold.
    */
   readonly proseBeforeFirstControl: readonly string[];
+  /**
+   * The text marked `data-oyl-kept-visible` that is laid out between the
+   * route's summary and its first control — #993. The owner's ruling keeps
+   * safety and privacy sentences on the screen, as compact notes BELOW the
+   * controls; only a consent screen, whose box says the text was read, may put
+   * them first.
+   */
+  readonly keptBeforeFirstControl: readonly string[];
+  /**
+   * The route's one line under its title — #993: how many lines the shell's
+   * summary paragraph lays out on, from its height over its line height, and
+   * its words.
+   */
+  readonly summary: { readonly text: string; readonly lines: number } | null;
+  /** The screen's help control — #993 — or `null` where the route has none. */
+  readonly help: HelpControl | null;
   /** Every "More about" disclosure, and the prose above its section's first control. */
   readonly sections: readonly SectionProse[];
   /** Every `<details>` in `main`, and how many of them are open as measured. */
@@ -215,6 +237,16 @@ export interface ReflowMeasurement {
    * `top` is the first one's, like {@link FirstControl.top}.
    */
   readonly emptyStates: readonly EmptyStatePlace[];
+}
+
+/** The help control beside a screen's title — #993. */
+export interface HelpControl {
+  /** Its accessible name, as the platform computes it would be read: its text with `aria-hidden` parts left out. */
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  /** The panel's text, read while it is closed — it is in the page, so it is there offline. */
+  readonly contents: string;
 }
 
 /** One empty state's action — #943. */
@@ -723,6 +755,65 @@ function proseBetween(main: Element, after: Element | null, before: Element | nu
   );
 }
 
+/** Text marked kept-visible between the route's summary and its first control — #993. */
+function keptBeforeFirstControl(): string[] {
+  const main = document.querySelector('main');
+  if (main === null) {
+    return [];
+  }
+  const control = laidOutControls(main)[0] ?? null;
+  const summary = main.querySelector(':scope > h1 + p');
+  return [...main.querySelectorAll('[data-oyl-kept-visible]')]
+    .filter(
+      (element) =>
+        laidOut(element) &&
+        element.parentElement?.closest('[data-oyl-kept-visible]') == null &&
+        (summary === null || inOrder(summary, element)) &&
+        (control === null || (!element.contains(control) && inOrder(element, control))),
+    )
+    .map((element) => textOf(element).slice(0, 80));
+}
+
+/** The route's summary under its `h1`, and how many lines it lays out on — #993. */
+function summaryLines(): { readonly text: string; readonly lines: number } | null {
+  const summary = document.querySelector('main > h1 + p');
+  if (summary === null || !laidOut(summary)) {
+    return null;
+  }
+  // Counted from the TEXT's own line boxes rather than the paragraph's height:
+  // Home's line is a grid item beside #939's hero, stretched to its row and
+  // padded, so its box says nothing about how its words wrapped.
+  const range = document.createRange();
+  range.selectNodeContents(summary);
+  const tops = new Set(
+    [...range.getClientRects()]
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => Math.round(rect.top)),
+  );
+  return { text: textOf(summary), lines: tops.size };
+}
+
+/** The help control under a screen's title, and what it holds — #993. */
+function helpControl(): HelpControl | null {
+  const toggle = document.querySelector('main > .oyl-help > summary');
+  if (toggle === null) {
+    return null;
+  }
+  const box = toggle.getBoundingClientRect();
+  const visibleText = [...toggle.querySelectorAll('*:not([aria-hidden="true"])')]
+    .filter((element) => element.children.length === 0)
+    .map((element) => element.textContent ?? '')
+    .join(' ');
+  return {
+    name: (toggle.getAttribute('aria-label') ?? visibleText).replace(/\s+/g, ' ').trim(),
+    width: box.width,
+    height: box.height,
+    contents: [...(toggle.parentElement?.querySelectorAll('.oyl-help__panel > p') ?? [])]
+      .map(textOf)
+      .join(' '),
+  };
+}
+
 function proseBeforeFirstControl(): string[] {
   const main = document.querySelector('main');
   if (main === null) {
@@ -847,6 +938,39 @@ function inlineDisclosureCopies(): void {
   }
 }
 
+/**
+ * #993's control: the line under the title as it was before the ruling — the
+ * route's one line, its help and its notes in ONE paragraph straight under the
+ * `h1` — and the notes ALSO copied above the view, where kept-visible text
+ * stood before the first control. The one-line rule must then fail on every
+ * route with help or notes, and the "notes below the controls" rule on every
+ * route with notes; otherwise neither is measuring anything.
+ *
+ * ⚠️ Where a route's help repeats its old first sentence whole (Trainer game,
+ * Camera), the paragraph is LONGER than the one it replaced. It is a control
+ * that must fail, not a reconstruction of the old page.
+ *
+ * Copies, for {@link inlineDisclosureCopies}' reason: React owns the real ones.
+ */
+function putTheLineBack(route: RouteDefinition): void {
+  const main = document.querySelector('main');
+  const title = main?.querySelector(':scope > h1');
+  if (main === null || main === undefined || title === null || title === undefined) {
+    return;
+  }
+  const line = document.createElement('p');
+  line.className = 'oyl-muted';
+  line.setAttribute('data-oyl-inline-copy', '');
+  line.textContent = [route.summary, ...(route.help ?? []), ...(route.notes ?? [])].join(' ');
+  title.after(line);
+  const notes = main.querySelector(':scope > .oyl-note');
+  if (notes !== null) {
+    const copy = notes.cloneNode(true) as HTMLElement;
+    copy.setAttribute('data-oyl-inline-copy', '');
+    line.after(copy);
+  }
+}
+
 function removeInlineCopies(): void {
   for (const copy of document.querySelectorAll('[data-oyl-inline-copy]')) {
     copy.remove();
@@ -948,6 +1072,9 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   if (new URLSearchParams(window.location.search).get('disclosures') === 'inline') {
     inlineDisclosureCopies();
   }
+  if (new URLSearchParams(window.location.search).get('line') === 'before993') {
+    putTheLineBack(route);
+  }
   await nextFrame();
   visited.add(route.id);
   // Read through a `Partial` view on purpose: the spec's "no entry" fault has
@@ -978,6 +1105,9 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     firstControl: firstControl(),
     fold: foldLine(),
     proseBeforeFirstControl: proseBeforeFirstControl(),
+    keptBeforeFirstControl: keptBeforeFirstControl(),
+    summary: summaryLines(),
+    help: helpControl(),
     sections: sections(),
     disclosures: {
       total: document.querySelectorAll('main details').length,

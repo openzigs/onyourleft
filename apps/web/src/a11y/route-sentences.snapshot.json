@@ -1,7 +1,7 @@
 {
   "home empty": [
     "Home",
-    "Your rides on this device, and where to start.",
+    "Your rides, and where to start.",
     "Ride",
     "Free ride",
     "Record a ride from your paired sensors.",
@@ -25,7 +25,6 @@
   "ride empty": [
     "Ride",
     "Record a ride from the sensors paired on this device.",
-    "Everything stays on this device.",
     "Live",
     "Start recording",
     "iNo sensors: A ride with no sensors records elapsed time and nothing else.",
@@ -39,10 +38,13 @@
     "iNo trainer: Pair a smart trainer to control it from here — pairing is on Devices.",
     "Sensors",
     "Nothing is paired yet.",
-    "Pair a trainer or a sensor on Devices."
+    "Pair a trainer or a sensor on Devices.",
+    "Everything stays on this device."
   ],
   "game empty": [
     "Trainer game",
+    "Ride a saved route against a pacer or your own best.",
+    "Help with Trainer game",
     "Ride a saved route against a pacer that will not wait for you, or against your own previous attempt.",
     "Solo, offline, and no leaderboard of any kind.",
     "Choose a route",
@@ -59,6 +61,7 @@
   "workouts empty": [
     "Workouts",
     "Structured sessions built from blocks.",
+    "Help with Workouts",
     "Targets are a share of your own threshold, so the same workout works whatever shape you are in.",
     "Saved workouts",
     "Your first workout",
@@ -140,6 +143,7 @@
   "segments empty": [
     "Segments",
     "Stretches of road you have named, cut from your own rides.",
+    "Help with Segments",
     "A climb and its descent are two different segments.",
     "Your segments",
     "Your first segment",
@@ -165,7 +169,6 @@
   "routes empty": [
     "Routes",
     "Rides you plan to do, imported from a GPX file.",
-    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all.",
     "Saved routes",
     "Your first route",
     "You have no saved routes yet.",
@@ -186,7 +189,8 @@
     "Before you share a route",
     "Anyone will be able to see this route, including where it starts and where it ends.",
     "Most routes start at home.",
-    "A privacy zone hides the roads inside it, but a route that begins inside one cannot be shared at all — it would no longer be the route."
+    "A privacy zone hides the roads inside it, but a route that begins inside one cannot be shared at all — it would no longer be the route.",
+    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all."
   ],
   "devices empty": [
     "Devices",
@@ -274,8 +278,9 @@
   ],
   "camera empty": [
     "Camera",
+    "Still pictures of yourself while you ride.",
+    "Help with Camera",
     "Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at.",
     "Filming a ride: the side camera",
     "The way to use the camera with a ride is a spare phone on a tripod beside the bike, paired with the tablet you ride with.",
     "The phone films; the tablet starts and stops it.",
@@ -304,12 +309,12 @@
     "This device is holding no pictures.",
     "The camera is off",
     "It stays off until you turn it on, and it has never been on.",
-    "Nothing has been captured and there is nothing on this device to remove."
+    "Nothing has been captured and there is nothing on this device to remove.",
+    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at."
   ],
   "settings empty": [
     "Settings",
     "How this device shows your numbers.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded.",
     "You and your bike",
     "Units",
     "One choice covers distance, speed, climbing and weight.",
@@ -432,7 +437,8 @@
     "Connect to an instance, to ride with other people, and see this device’s connection and your devices there.",
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
-    "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one."
+    "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
+    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
   ],
   "about empty": [
     "About On Your Left",
@@ -692,8 +698,9 @@
   ],
   "instance empty": [
     "Connect to an instance",
+    "Sign in to an instance with this device, to ride with other people.",
+    "Help with Connect to an instance",
     "Sign in to an On Your Left instance with this device, to ride with other people.",
-    "Your rides stay on this device.",
     "Connect",
     "Instance address",
     "The name other riders will see (optional)",
@@ -710,10 +717,13 @@
     "Public rooms, where an instance offers them, are for adults only: you will be asked to confirm you are 18 or over before you join one.",
     "Voice chat in a room, where an instance offers it, happens on Discord, a separate service you choose to use: Discord receives your voice, and other riders in the voice channel see your Discord username and picture.",
     "If you link your Discord account, the instance keeps your Discord id with your account.",
-    "Nothing is sent until you press Connect."
+    "Nothing is sent until you press Connect.",
+    "Your rides stay on this device."
   ],
   "moderation empty": [
     "Moderation",
+    "Decide accounts, reports and names on the instance you moderate.",
+    "Help with Moderation",
     "Approve and refuse new accounts, decide reports, suspend accounts and hide names on the instance you moderate.",
     "iNot available: Your account is not a moderator of the instance this device is connected to.",
     "Only the account its operator names as moderator can use this page.",
@@ -721,8 +731,9 @@
   ],
   "side-camera empty": [
     "Side camera",
+    "This phone as the side camera your tablet starts and stops.",
+    "Help with Side camera",
     "Use this phone on a tripod beside the bike, side-on at hip height, as the camera your tablet starts and stops.",
-    "This phone keeps nothing about you afterwards.",
     "Before the camera is on",
     "This phone stands on a tripod beside the bike and takes pictures of you from the side while you ride, only while the “Camera on” sign is showing.",
     "While you set it up, it shows you its own picture so you can line the bike up.",
@@ -736,11 +747,13 @@
     "If somebody else might walk behind you, point the camera so they will not be in it, or leave the camera off.",
     "!If the tablet loses touch: If this phone loses touch with your tablet, it keeps filming for up to 30 seconds, then stops.",
     "I have read what happens to anyone else in the room, and what this phone does if it loses touch with my tablet.",
-    "Turn the camera on to set it up"
+    "Turn the camera on to set it up",
+    "This phone keeps nothing about you afterwards."
   ],
   "route-builder empty": [
     "Draw a route",
     "Place waypoints and have the roads between them worked out.",
+    "Help with Draw a route",
     "Every control works from the keyboard, and a half-drawn route survives closing the tab.",
     "!No routing service: Waypoints can be placed and moved, but nothing can work out the roads between them until a routing service is configured.",
     "Distance and climbing stay empty until then.",
@@ -778,30 +791,23 @@
     "That page does not exist",
     "The address in the bar does not match any page in this app.",
     "!No such page: Check the address, or pick a page below.",
-    "Home — Your rides on this device, and where to start.",
+    "Home — Your rides, and where to start.",
     "Ride — Record a ride from the sensors paired on this device.",
-    "Everything stays on this device.",
-    "Trainer game — Ride a saved route against a pacer that will not wait for you, or against your own previous attempt.",
-    "Solo, offline, and no leaderboard of any kind.",
+    "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
-    "Targets are a share of your own threshold, so the same workout works whatever shape you are in.",
     "Activities — Rides recorded on this device, newest first.",
     "Analysis — Time in zone for a ride, and the best average power you have held for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",
-    "A climb and its descent are two different segments.",
     "Routes — Rides you plan to do, imported from a GPX file.",
-    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all.",
     "Devices — Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
     "Import and export — Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
-    "Camera — Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at.",
+    "Camera — Still pictures of yourself while you ride.",
     "Settings — How this device shows your numbers.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded.",
     "About On Your Left — What this is, what it does not do, and where your data lives."
   ],
   "home populated": [
     "Home",
-    "Your rides on this device, and where to start.",
+    "Your rides, and where to start.",
     "Ride",
     "Free ride",
     "Record a ride from your paired sensors.",
@@ -836,7 +842,6 @@
   "ride populated": [
     "Ride",
     "Record a ride from the sensors paired on this device.",
-    "Everything stays on this device.",
     "Live",
     "Pause",
     "Stop",
@@ -858,10 +863,13 @@
     "A workout’s targets are a share of it, so there is no number to send without one.",
     "Sensors",
     "KICKR 1F2A: Connected",
-    "Pair or forget devices on Devices"
+    "Pair or forget devices on Devices",
+    "Everything stays on this device."
   ],
   "game populated": [
     "Trainer game",
+    "Ride a saved route against a pacer or your own best.",
+    "Help with Trainer game",
     "Ride a saved route against a pacer that will not wait for you, or against your own previous attempt.",
     "Solo, offline, and no leaderboard of any kind.",
     "Ride Box Hill, Leith Hill and every lane between them the long way round",
@@ -888,6 +896,7 @@
   "workouts populated": [
     "Workouts",
     "Structured sessions built from blocks.",
+    "Help with Workouts",
     "Targets are a share of your own threshold, so the same workout works whatever shape you are in.",
     "Saved workouts",
     "Build a workout",
@@ -1209,6 +1218,7 @@
   "segments populated": [
     "Segments",
     "Stretches of road you have named, cut from your own rides.",
+    "Help with Segments",
     "A climb and its descent are two different segments.",
     "Make a segment",
     "A segment is a stretch of road with a direction, cut from one of your own rides.",
@@ -1243,7 +1253,6 @@
   "routes populated": [
     "Routes",
     "Rides you plan to do, imported from a GPX file.",
-    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all.",
     "Saved routes",
     "Import a route",
     "Draw a route on this device — place waypoints and have the roads between them worked out.",
@@ -1266,6 +1275,7 @@
     "Anyone will be able to see this route, including where it starts and where it ends.",
     "Most routes start at home.",
     "A privacy zone hides the roads inside it, but a route that begins inside one cannot be shared at all — it would no longer be the route.",
+    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all.",
     "All routes",
     "Distance",
     "3.0 km",
@@ -1372,8 +1382,9 @@
   ],
   "camera populated": [
     "Camera",
+    "Still pictures of yourself while you ride.",
+    "Help with Camera",
     "Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at.",
     "Filming a ride: the side camera",
     "The way to use the camera with a ride is a spare phone on a tripod beside the bike, paired with the tablet you ride with.",
     "The phone films; the tablet starts and stops it.",
@@ -1402,12 +1413,12 @@
     "This device is holding no pictures.",
     "The camera is off",
     "It stays off until you turn it on, and it has never been on.",
-    "Nothing has been captured and there is nothing on this device to remove."
+    "Nothing has been captured and there is nothing on this device to remove.",
+    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at."
   ],
   "settings populated": [
     "Settings",
     "How this device shows your numbers.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded.",
     "You and your bike",
     "Units",
     "One choice covers distance, speed, climbing and weight.",
@@ -1540,7 +1551,8 @@
     "Connect to an instance, to ride with other people, and see this device’s connection and your devices there.",
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
-    "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one."
+    "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
+    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
   ],
   "about populated": [
     "About On Your Left",
@@ -1800,8 +1812,9 @@
   ],
   "instance populated": [
     "Connect to an instance",
+    "Sign in to an instance with this device, to ride with other people.",
+    "Help with Connect to an instance",
     "Sign in to an On Your Left instance with this device, to ride with other people.",
-    "Your rides stay on this device.",
     "Connected",
     "Instance",
     "Lanes of the Weald",
@@ -1809,11 +1822,11 @@
     "https://ride.example",
     "Your name there",
     "Rider",
+    "Disconnect",
     "Disconnecting removes the instance’s address and this device’s sign-in from this device, and ends the sign-in on the instance.",
     "Every ride stays on this device.",
     "What the instance already holds stays there: this app cannot remove it, so ask whoever runs the instance.",
     "For the project’s own instance, that is its maintainer, as the privacy policy’s Contact section says.",
-    "Disconnect",
     "Moderate this instance",
     "Get the source code of this instance (opens in a new tab).",
     "Your devices on this instance",
@@ -1833,13 +1846,14 @@
     "The project’s own instance runs on its maintainer’s computer at home, and its traffic passes through Cloudflare, which decrypts it on the way.",
     "Public rooms, where an instance offers them, are for adults only: you will be asked to confirm you are 18 or over before you join one.",
     "Voice chat in a room, where an instance offers it, happens on Discord, a separate service you choose to use: Discord receives your voice, and other riders in the voice channel see your Discord username and picture.",
-    "If you link your Discord account, the instance keeps your Discord id with your account."
+    "If you link your Discord account, the instance keeps your Discord id with your account.",
+    "Your rides stay on this device."
   ],
   "moderation populated": [
     "Moderation",
+    "Decide accounts, reports and names on the instance you moderate.",
+    "Help with Moderation",
     "Approve and refuse new accounts, decide reports, suspend accounts and hide names on the instance you moderate.",
-    "Everything you do here is written to the instance’s moderation log with your account, the reason you give and the time.",
-    "Nobody can change or delete the log, and it is kept when an account is erased.",
     "Waiting for approval",
     "Anna",
     "Account pending-anna, asked 2026-09-21 14:13 UTC.",
@@ -1871,6 +1885,8 @@
     "Suspend",
     "Lift the suspension",
     "Hide the display name",
+    "Everything you do here is written to the instance’s moderation log with your account, the reason you give and the time.",
+    "Nobody can change or delete the log, and it is kept when an account is erased.",
     "Moderation log",
     "Every moderator action on this instance, newest first.",
     "This page cannot change it.",
@@ -1879,8 +1895,9 @@
   ],
   "side-camera populated": [
     "Side camera",
+    "This phone as the side camera your tablet starts and stops.",
+    "Help with Side camera",
     "Use this phone on a tripod beside the bike, side-on at hip height, as the camera your tablet starts and stops.",
-    "This phone keeps nothing about you afterwards.",
     "Before the camera is on",
     "This phone stands on a tripod beside the bike and takes pictures of you from the side while you ride, only while the “Camera on” sign is showing.",
     "While you set it up, it shows you its own picture so you can line the bike up.",
@@ -1894,11 +1911,13 @@
     "If somebody else might walk behind you, point the camera so they will not be in it, or leave the camera off.",
     "!If the tablet loses touch: If this phone loses touch with your tablet, it keeps filming for up to 30 seconds, then stops.",
     "I have read what happens to anyone else in the room, and what this phone does if it loses touch with my tablet.",
-    "Turn the camera on to set it up"
+    "Turn the camera on to set it up",
+    "This phone keeps nothing about you afterwards."
   ],
   "route-builder populated": [
     "Draw a route",
     "Place waypoints and have the roads between them worked out.",
+    "Help with Draw a route",
     "Every control works from the keyboard, and a half-drawn route survives closing the tab.",
     "!No routing service: Waypoints can be placed and moved, but nothing can work out the roads between them until a routing service is configured.",
     "Distance and climbing stay empty until then.",
@@ -2127,25 +2146,18 @@
     "That page does not exist",
     "The address in the bar does not match any page in this app.",
     "!No such page: Check the address, or pick a page below.",
-    "Home — Your rides on this device, and where to start.",
+    "Home — Your rides, and where to start.",
     "Ride — Record a ride from the sensors paired on this device.",
-    "Everything stays on this device.",
-    "Trainer game — Ride a saved route against a pacer that will not wait for you, or against your own previous attempt.",
-    "Solo, offline, and no leaderboard of any kind.",
+    "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
-    "Targets are a share of your own threshold, so the same workout works whatever shape you are in.",
     "Activities — Rides recorded on this device, newest first.",
     "Analysis — Time in zone for a ride, and the best average power you have held for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",
-    "A climb and its descent are two different segments.",
     "Routes — Rides you plan to do, imported from a GPX file.",
-    "A route is private until you say otherwise, and one that starts inside a privacy zone cannot be shared at all.",
     "Devices — Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
     "Import and export — Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
-    "Camera — Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.",
-    "Nothing is sent anywhere, and a picture is thrown away once it has been looked at.",
+    "Camera — Still pictures of yourself while you ride.",
     "Settings — How this device shows your numbers.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded.",
     "About On Your Left — What this is, what it does not do, and where your data lives."
   ]
 }

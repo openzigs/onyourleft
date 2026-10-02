@@ -878,6 +878,80 @@ h3:first-child {
 }
 
 /*
+ * A screen's help, beside its title — #993 (`design/ScreenHelp.tsx`).
+ *
+ * The `<details>` stands AFTER the line under the title, so `main > h1 + p` is
+ * still that line and the panel opens in its place in the flow; its summary,
+ * the ⓘ, is drawn at the end of the title's first line. So `main` is its
+ * containing block, and the title stops short of the ⓘ rather than running
+ * under it.
+ *
+ * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason): the glyph
+ * alone is 20 px, and `controls-first.browser.spec.ts` strips the declaration
+ * as its control. Its glyph is `accent` on the page — the declared non-text
+ * pair the disclosure markers use (SC 1.4.11).
+ */
+.oyl-main:has(> .oyl-help) {
+  position: relative;
+}
+
+.oyl-main:has(> .oyl-help) > h1 {
+  padding-inline-end: calc(2.75rem + var(--oyl-space-sm));
+}
+
+.oyl-help > summary {
+  position: absolute;
+  inset-block-start: calc(var(--oyl-space-lg) + (var(--oyl-font-size-display) * 1.1 - 2.75rem) / 2);
+  inset-inline-end: var(--oyl-space-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  border-radius: 50%;
+  color: var(--oyl-color-accent);
+  cursor: pointer;
+  list-style: none;
+}
+
+.oyl-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.oyl-help > summary > svg {
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+}
+
+.oyl-help[open] > summary {
+  background: var(--oyl-color-surface);
+}
+
+.oyl-help__panel {
+  margin-block-end: var(--oyl-space-md);
+}
+
+.oyl-help__panel > p {
+  margin-block: 0 var(--oyl-space-sm);
+}
+
+/*
+ * A route's safety and privacy sentences, below its controls — #993
+ * (`ScreenHelp.tsx` §`ScreenNotes`). Compact, and still text on the page:
+ * `inkMuted` on `canvas` is a declared AA text pair.
+ */
+.oyl-note {
+  margin-block-start: var(--oyl-space-lg);
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-note > p {
+  margin-block: 0 var(--oyl-space-xs);
+}
+
+/*
  * The home screen (#428): cards, not a column. Every other reading route keeps
  * the measure; this one fills a landscape tablet, and on a phone the cards
  * stack. `min(100%, 18rem)` so a 320 px window gets one column that does not
