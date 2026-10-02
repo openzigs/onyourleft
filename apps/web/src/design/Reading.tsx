@@ -19,21 +19,34 @@ import type { JSX } from 'react';
  * is `'42.2 km'` exactly as before. A reading with no unit (a time, a count)
  * is its value alone.
  *
- * Not for a table cell, a sentence, or the ride's own live metrics: a table is
- * read across a row at one size, a sentence is prose, and the ride screen's
- * numbers are `ride/MetricGrid.tsx`'s, at the size #49 states.
+ * Not for a table cell or a sentence: a table is read across a row at one
+ * size, and a sentence is prose.
+ *
+ * ⚠️ **The ride screen's live numbers ARE readings since #1012**, and a
+ * reviewer who remembers this comment saying they were not is reading the old
+ * file. They are drawn `size="metric"`: the same tabular numerals and small
+ * unit, at #49's two-metre size (`--oyl-font-size-metric`, held to
+ * `ride/MetricGrid.tsx` §`MINIMUM_PRIMARY_METRIC_REM` by
+ * `a11y/ride-legibility.a11y.test.ts`) rather than a menu fact's `xxl`. Still
+ * one component, so still one scale: the two sizes are two declared steps.
  */
 export function Reading({
   value,
   unit,
+  size = 'fact',
 }: {
   /** The digits, formatted — `formatDuration`, `formatDistance(…).value`. */
   readonly value: string;
   /** The unit label beside them, if the reading has one. */
   readonly unit?: string | undefined;
+  /**
+   * `fact`, a menu's fact at `xxl`; or `metric`, a live ride number read from
+   * two metres (#49, #1012).
+   */
+  readonly size?: 'fact' | 'metric';
 }): JSX.Element {
   return (
-    <span className="oyl-reading">
+    <span className={size === 'metric' ? 'oyl-reading oyl-reading--metric' : 'oyl-reading'}>
       <span className="oyl-reading__value">{value}</span>
       {unit === undefined ? null : (
         <>

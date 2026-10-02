@@ -9,14 +9,28 @@
  * read it is asked for.
  */
 
-import { beatsPerMinute, metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
-import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
+import {
+  altitudeMetres,
+  beatsPerMinute,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  seconds,
+  unixSeconds,
+  watts,
+  type RoutePoint,
+} from '@onyourleft/domain';
+import { activityId, athleteId as toAthleteId, type RouteRecord } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
+import type { RoutePort } from '../routes/store-port';
+import { routeStub, stubRouteId } from '../routes/testing';
 
-import { loadHome, WEEK_DAYS } from './home';
+import { loadHome, loadNextUp, WEEK_DAYS, type HomeLastRide } from './home';
 
 const OWNER = toAthleteId('athlete-a');
 const DAY = 86_400;
@@ -45,6 +59,16 @@ function ride(
     heartRate: Array.from({ length: 60 }, () => beatsPerMinute(140)),
   };
 }
+
+/** Any last ride: `loadNextUp` reads only whether there is one. */
+const anyRide: HomeLastRide = {
+  name: 'Ride',
+  startedAt: NOW,
+  timeZone: 'UTC',
+  movingTime: seconds(60),
+  distance: metres(100),
+  load: undefined,
+};
 
 describe('the read budget — #428', () => {
   it('reads the list once and decodes no channel, over a thousand rides', async () => {
@@ -333,5 +357,136 @@ describe('one window for the ride count and the days ring — #939', () => {
         });
       }
     }
+  });
+});
+
+describe('the week before — #1010', () => {
+  it('counts days seven to thirteen back, and neither this week nor the fourteenth day', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('fourteen', 14),
+        ride('thirteen', 13),
+        ride('seven', 7),
+        ride('six', 6),
+        ride('today', 0, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+      ]),
+      NOW,
+    );
+    expect(home.week.rides).toBe(2);
+    expect(home.previousWeek.rides).toBe(2);
+    expect(home.previousWeek.movingTime).toBe(6000);
+    expect(home.previousWeek.ridesWithLoad).toBe(2);
+    expect(home.previousWeek.load).toBeGreaterThan(0);
+  });
+
+  it('says the week before carried fewer loads than rides when one had none', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('a', 8, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+        ride('b', 9),
+      ]),
+      NOW,
+    );
+    expect(home.previousWeek).toMatchObject({ rides: 2, ridesWithLoad: 1 });
+  });
+});
+
+describe('next up — #1010', () => {
+  const ROUTE_ID = stubRouteId('hill');
+
+  function savedRoute(createdBy = OWNER): RouteRecord {
+    const points: RoutePoint[] = [0, 500, 1000].map((along) => ({
+      position: geographicPosition(
+        degreesLatitude(51.5 + along / 111_195),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(10 + along / 50),
+    }));
+    return {
+      id: ROUTE_ID,
+      createdBy,
+      name: 'Hill',
+      profile: routeProfile(points),
+      visibility: 'private',
+      createdAt: unixSeconds(1_700_000_000),
+      updatedAt: unixSeconds(1_700_000_000),
+    };
+  }
+
+  /** A route port that counts its reads. */
+  function counting(routes: RoutePort): { port: RoutePort; reads: string[] } {
+    const reads: string[] = [];
+    return {
+      reads,
+      port: {
+        athleteId: routes.athleteId,
+        store: {
+          ...routes.store,
+          getRoute: (owner, id) => {
+            reads.push(`getRoute ${owner} ${id}`);
+            return routes.store.getRoute(owner, id);
+          },
+          listRoutes: (owner, limit) => {
+            reads.push('listRoutes');
+            return routes.store.listRoutes(owner, limit);
+          },
+        },
+      },
+    };
+  }
+
+  it('finds the NEWEST ride on a route from the summaries, with no read of its own', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('old', 5, { routeId: stubRouteId('older') }),
+        ride('mid', 3, { routeId: ROUTE_ID }),
+        ride('new', 1),
+      ]),
+      NOW,
+    );
+    expect(home.lastRouteId).toBe(ROUTE_ID);
+  });
+
+  it('offers that route, with ONE record read scoped to the athlete', async () => {
+    const { port, reads } = counting(routeStub(OWNER, [savedRoute()]));
+    const next = await loadNextUp({ lastRide: anyRide, lastRouteId: ROUTE_ID }, port);
+    expect(next).toMatchObject({ kind: 'route', id: ROUTE_ID, name: 'Hill' });
+    expect(reads).toEqual([`getRoute ${OWNER} ${ROUTE_ID}`]);
+  });
+
+  it('is the first ride with no ride, and a free ride with no route, reading nothing', async () => {
+    const { port, reads } = counting(routeStub(OWNER, [savedRoute()]));
+    expect(await loadNextUp({ lastRide: undefined, lastRouteId: ROUTE_ID }, port)).toEqual({
+      kind: 'first',
+    });
+    expect(await loadNextUp({ lastRide: anyRide, lastRouteId: undefined }, port)).toEqual({
+      kind: 'free',
+    });
+    expect(await loadNextUp({ lastRide: anyRide, lastRouteId: ROUTE_ID }, undefined)).toEqual({
+      kind: 'free',
+    });
+    expect(reads).toEqual([]);
+  });
+
+  it('is a free ride when the route is gone, another athlete’s, or cannot be read', async () => {
+    expect(
+      await loadNextUp({ lastRide: anyRide, lastRouteId: ROUTE_ID }, routeStub(OWNER)),
+    ).toEqual({ kind: 'free' });
+    expect(
+      await loadNextUp(
+        { lastRide: anyRide, lastRouteId: ROUTE_ID },
+        routeStub(OWNER, [savedRoute(toAthleteId('athlete-b'))]),
+      ),
+    ).toEqual({ kind: 'free' });
+    const broken = routeStub(OWNER, [savedRoute()]);
+    expect(
+      await loadNextUp(
+        { lastRide: anyRide, lastRouteId: ROUTE_ID },
+        {
+          athleteId: OWNER,
+          store: { ...broken.store, getRoute: () => Promise.reject(new Error('no store')) },
+        },
+      ),
+    ).toEqual({ kind: 'free' });
   });
 });

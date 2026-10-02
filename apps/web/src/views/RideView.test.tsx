@@ -246,7 +246,9 @@ describe('criterion 3 — an unavailable metric shows no number', () => {
     const heartRate = queryAll(document, '.oyl-metric--stale');
     expect(heartRate).toHaveLength(1);
     expect(heartRate[0]?.textContent).toContain('no reading for 12 s');
-    expect(heartRate[0]?.querySelector('.oyl-metric__value')?.textContent).toBe('—');
+    expect(heartRate[0]?.querySelector('.oyl-reading__value')?.textContent).toBe('—');
+    // #1012: no unit beside a dash — a unit says there is a number.
+    expect(heartRate[0]?.querySelector('.oyl-reading__unit')).toBeNull();
     // And the live ones do show their numbers, so the assertion above is not
     // passing because nothing renders at all.
     expect(document.body.textContent).toContain('248');
@@ -274,7 +276,7 @@ describe('criterion 3 — an unavailable metric shows no number', () => {
     // A reader must not hear "Heart rate: dash".
     expect(announced).toContain('Heart rate: unavailable — no reading for 12 s');
     // And nothing in the cell is announced twice.
-    expect(queryAll(document, '.oyl-metric__value[aria-hidden="true"]')).toHaveLength(
+    expect(queryAll(document, '.oyl-metric__reading[aria-hidden="true"]')).toHaveLength(
       announced.length,
     );
   });
@@ -412,10 +414,92 @@ describe('pairing is on Devices; this screen says what is connected (#659)', () 
     ]);
   });
 
-  it('sends a rider with nothing paired to Devices from the idle notice', async () => {
+  it('sends a rider with nothing paired to Devices from the banner', async () => {
     await show(stubRideController(idleSnapshot()));
     const notice = queryAll(document, '.oyl-ride__group--live a');
     expect(notice.map((link) => link.getAttribute('href'))).toContain('#/devices');
+  });
+});
+
+describe('#1012 — one sensor banner, and the readings as Readings', () => {
+  const banners = (): Element[] => queryAll(document, '[data-oyl-sensor-banner]');
+
+  for (const [name, snapshot] of [
+    ['before a ride', idleSnapshot()],
+    ['while recording', { ...idleSnapshot(), phase: 'recording' as const, elapsedSeconds: 30 }],
+  ] as const) {
+    it(`with nothing paired ${name}, says so ONCE, with one Pair link to Devices and no tiles`, async () => {
+      await show(stubRideController(snapshot));
+
+      expect(banners()).toHaveLength(1);
+      const banner = banners()[0];
+      expect(banner?.textContent).toContain(
+        'No sensors: A ride with no sensors records elapsed time and nothing else.',
+      );
+      const links = queryAll<HTMLAnchorElement>(banner ?? document, 'a');
+      expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+        ['Pair', '#/devices'],
+      ]);
+      // Drawn as a button, and a secondary one: the screen's primary is the
+      // ride's own next step (#668).
+      expect(links[0]?.className).toContain('oyl-button--secondary');
+      // The four tiles are gone, and with them "no sensor paired" four times.
+      expect(document.querySelector('.oyl-metric-grid')).toBeNull();
+      expect(document.body.textContent).not.toContain('no sensor paired');
+      // And the notice that stood under Start recording is not a second banner.
+      expect(
+        queryAll(document, '.oyl-status__label').map((label) => label.textContent),
+      ).not.toContain('No sensors: ');
+    });
+  }
+
+  it('stands after the ride controls, where the readings would be', async () => {
+    await show(stubRideController(idleSnapshot()));
+    const banner = banners()[0];
+    if (banner === undefined) {
+      throw new Error('no banner');
+    }
+    const position = buttonNamed('Start recording').compareDocumentPosition(banner);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('is not shown once anything is paired — even a device still connecting', async () => {
+    // A connecting device supplies no channel yet, so every reading is
+    // `unpaired`; the rider HAS paired something, and the banner would say not.
+    const stub = stubRideController(idleSnapshot());
+    stub.set({
+      sensors: [
+        {
+          id: deviceId('kickr'),
+          name: 'KICKR 1F2A',
+          role: 'trainer',
+          capabilities: ['power', 'cadence', 'speed'],
+          state: 'connecting',
+        },
+      ],
+    });
+    await show(stub);
+
+    expect(banners()).toEqual([]);
+    expect(queryAll(document, '.oyl-metric')).toHaveLength(4);
+  });
+
+  it('draws every live number as a Reading at the metric size, with its unit beside it', async () => {
+    await show(stubRideController(ridingSnapshot()));
+
+    const cards = queryAll(document, '.oyl-metric');
+    expect(cards).toHaveLength(4);
+    for (const card of cards) {
+      expect(card.querySelector('.oyl-reading.oyl-reading--metric')).not.toBeNull();
+    }
+    const power = document.querySelector('.oyl-metric--live .oyl-reading');
+    expect(power?.querySelector('.oyl-reading__value')?.textContent).toBe('248');
+    expect(power?.querySelector('.oyl-reading__unit')?.textContent).toBe('W');
+    // The unit is the reading's now, so it is not said again under it.
+    expect(document.querySelector('.oyl-metric--live .oyl-metric__note')).toBeNull();
+    expect(document.querySelector('.oyl-metric-grid')?.classList).toContain(
+      'oyl-metric-grid--live',
+    );
   });
 });
 

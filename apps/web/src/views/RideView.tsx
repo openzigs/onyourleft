@@ -48,7 +48,8 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
+import { SensorGlyph } from '../design/illustration';
 import { formatDuration } from '../format';
 import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
@@ -253,7 +254,11 @@ function LiveRide({
           </StatusMessage>
         ) : null}
         <StorageNotice snapshot={snapshot} />
-        <MetricGrid metrics={snapshot.metrics} />
+        {snapshot.sensors.length === 0 ? (
+          <NoSensorsBanner />
+        ) : (
+          <MetricGrid metrics={snapshot.metrics} />
+        )}
         <p className="oyl-ride__clock">
           {formatDuration(snapshot.elapsedSeconds)} elapsed ·{' '}
           {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
@@ -482,12 +487,9 @@ function RideControls({
         >
           Start recording
         </Button>
-        {snapshot.sensors.length === 0 ? (
-          <StatusMessage tone="info" label="No sensors">
-            A ride with no sensors records elapsed time and nothing else.{' '}
-            <a href={hrefFor(routeById('devices'))}>Pair something on Devices</a> first.
-          </StatusMessage>
-        ) : null}
+        {/* #1012: with nothing paired, the "No sensors" sentence that stood
+            here is the banner where the readings go — one banner rather than
+            this notice and four tiles each saying "no sensor paired". */}
       </>
     );
   }
@@ -720,6 +722,45 @@ function StorageNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.E
       The last checkpoint did not save. The ride is still being recorded and the next checkpoint
       will try again.
     </StatusMessage>
+  );
+}
+
+/**
+ * What the Live group shows where the readings go, while nothing is paired —
+ * #1012 (epic #935 Phase 2, the owner's review of 2026-10-02).
+ *
+ * ⚠️ **One banner, not four tiles.** Before it the screen said "no sensor
+ * paired" four times — once per reading — and, before a ride, a "No sensors"
+ * notice under *Start recording* as well. That notice's sentence is this
+ * banner's, word for word, and its link is the banner's one control: a
+ * `ButtonLink` to Devices, where pairing is (#659). Secondary, because
+ * *Start recording* (or *Resume*) is the screen's one primary (#668), and a
+ * 44 px target rather than 48: it is not pressed to move a ride on, so it is
+ * not in `design/ride-time-controls.ts`.
+ *
+ * It stands exactly where the readings would — after every ride control and
+ * every standing notice (#692) — and it is shown on `snapshot.sensors` being
+ * empty rather than on every metric reading `unpaired`: a device that is
+ * paired and still connecting leaves every channel `unpaired` too, and that
+ * rider has paired something. Once a sensor is paired the four readings
+ * come back, each saying in its own words what it has.
+ *
+ * The drawing is decoration (`aria-hidden`, epic #935 principle 1); the words
+ * say everything.
+ */
+function NoSensorsBanner(): JSX.Element {
+  return (
+    <div className="oyl-sensor-banner" data-oyl-sensor-banner="">
+      <span className="oyl-sensor-banner__art" aria-hidden="true">
+        <SensorGlyph className="oyl-sensor-banner__glyph" kind="power" />
+      </span>
+      <p className="oyl-sensor-banner__sentence">
+        <strong>No sensors:</strong> A ride with no sensors records elapsed time and nothing else.
+      </p>
+      <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
+        Pair
+      </ButtonLink>
+    </div>
   );
 }
 

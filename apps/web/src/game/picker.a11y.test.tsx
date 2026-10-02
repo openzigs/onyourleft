@@ -372,3 +372,28 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
     expect(violations, formatViolations(violations)).toEqual([]);
   });
 });
+
+describe('opened from Home’s next up — #1010', () => {
+  afterEach(() => {
+    globalThis.location.hash = '';
+  });
+
+  const rideLabel = (): string =>
+    (document.querySelector('.oyl-chooser__ride-label')?.textContent ?? '').trim();
+
+  it('opens on the route the link names', async () => {
+    globalThis.location.hash = '#/game?route=b';
+    mounted = await mountPicker();
+    expect(rideLabel()).toBe('Ride Ditchling');
+  });
+
+  it('opens on the first route with no route named, or one it does not hold', async () => {
+    globalThis.location.hash = '#/game';
+    mounted = await mountPicker();
+    expect(rideLabel()).toBe('Ride Box Hill');
+    mounted.unmount();
+    globalThis.location.hash = '#/game?route=gone';
+    mounted = await mountPicker();
+    expect(rideLabel()).toBe('Ride Box Hill');
+  });
+});

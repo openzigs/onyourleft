@@ -78,11 +78,13 @@ describe('a ride metric is legible from two metres', () => {
   });
 
   it('is the size the stylesheet actually gives the value element', () => {
-    // The join. Without it the token could be 4rem and `.oyl-metric__value`
+    // The join. Without it the token could be 4rem and the ride's reading
     // could carry `--oyl-font-size-md`, and both of the assertions above would
-    // still pass.
-    const rule = /\.oyl-metric__value\s*\{[^}]*\}/.exec(themeCss)?.[0] ?? '';
-    expect(rule, 'theme.css has no .oyl-metric__value rule').not.toBe('');
+    // still pass. Since #1012 the number is `design/Reading.tsx` at
+    // `size="metric"`, so the rule is that size's; `RideView.test.tsx` is the
+    // other half of the join — the ride's numbers ARE that element.
+    const rule = /\.oyl-reading--metric \.oyl-reading__value\s*\{[^}]*\}/.exec(themeCss)?.[0] ?? '';
+    expect(rule, 'theme.css has no .oyl-reading--metric .oyl-reading__value rule').not.toBe('');
     expect(rule).toContain('font-size: var(--oyl-font-size-metric)');
   });
 
@@ -90,7 +92,8 @@ describe('a ride metric is legible from two metres', () => {
     // Not cosmetic at 1 Hz: proportional digits make a power number jitter
     // sideways every second, which is unreadable from two metres and is the
     // kind of thing nobody diagnoses.
-    const rule = /\.oyl-metric__value\s*\{[^}]*\}/.exec(themeCss)?.[0] ?? '';
+    // A metric reading inherits the reading's own rule, so that is the one.
+    const rule = /\.oyl-reading__value\s*\{[^}]*\}/.exec(themeCss)?.[0] ?? '';
     expect(rule).toContain('font-variant-numeric: tabular-nums');
   });
 });
