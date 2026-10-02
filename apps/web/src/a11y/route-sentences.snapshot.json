@@ -112,6 +112,8 @@
   ],
   "analysis empty": [
     "Analysis",
+    "Time in zone, and your best power for each length of time.",
+    "Help with Analysis",
     "Time in zone for a ride, and the best average power you have held for each length of time.",
     "Time in zone",
     "Ride",
@@ -194,6 +196,8 @@
   ],
   "devices empty": [
     "Devices",
+    "Your sensors and smart trainers, over Bluetooth.",
+    "Help with Devices",
     "Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
     "This browser",
     "✕This browser has no Bluetooth support: Safari and Firefox have no Web Bluetooth implementation at all, on any platform, and both vendors have published positions against adding one.",
@@ -207,6 +211,8 @@
   ],
   "transfer empty": [
     "Import and export",
+    "Bring rides in from a file, and take your own rides out.",
+    "Help with Import and export",
     "Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
     "Import",
     "Import a FIT, GPX or TCX file — including the bulk export from your Strava account.",
@@ -479,6 +485,8 @@
   ],
   "credits empty": [
     "Credits",
+    "Who made the models and artwork, and on what terms.",
+    "Help with Credits",
     "Who made the models and artwork this app ships, and the terms they are used under.",
     "This page is generated from the record this app keeps of every file it ships that somebody else made — the artwork in the trainer game, the lettering on the map, the side camera’s pose model, and the templates the Android build is assembled from.",
     "Nothing here is typed by hand, so an asset cannot be added without appearing here.",
@@ -784,6 +792,8 @@
   ],
   "segment-detail empty": [
     "Segment",
+    "Every time you have ridden this stretch of road.",
+    "Help with Segment",
     "Every time you have ridden this stretch of road, and how two of those efforts compare.",
     "!Heads up: No segment on this device has that address."
   ],
@@ -796,11 +806,11 @@
     "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
     "Activities — Rides recorded on this device, newest first.",
-    "Analysis — Time in zone for a ride, and the best average power you have held for each length of time.",
+    "Analysis — Time in zone, and your best power for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",
     "Routes — Rides you plan to do, imported from a GPX file.",
-    "Devices — Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
-    "Import and export — Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
+    "Devices — Your sensors and smart trainers, over Bluetooth.",
+    "Import and export — Bring rides in from a file, and take your own rides out.",
     "Camera — Still pictures of yourself while you ride.",
     "Settings — How this device shows your numbers.",
     "About On Your Left — What this is, what it does not do, and where your data lives."
@@ -1090,6 +1100,8 @@
   ],
   "analysis populated": [
     "Analysis",
+    "Time in zone, and your best power for each length of time.",
+    "Help with Analysis",
     "Time in zone for a ride, and the best average power you have held for each length of time.",
     "Time in zone",
     "Ride",
@@ -1298,6 +1310,8 @@
   ],
   "devices populated": [
     "Devices",
+    "Your sensors and smart trainers, over Bluetooth.",
+    "Help with Devices",
     "Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
     "This browser",
     "✕This browser has no Bluetooth support: Safari and Firefox have no Web Bluetooth implementation at all, on any platform, and both vendors have published positions against adding one.",
@@ -1311,6 +1325,8 @@
   ],
   "transfer populated": [
     "Import and export",
+    "Bring rides in from a file, and take your own rides out.",
+    "Help with Import and export",
     "Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
     "Import",
     "Import a FIT, GPX or TCX file — including the bulk export from your Strava account.",
@@ -1593,6 +1609,8 @@
   ],
   "credits populated": [
     "Credits",
+    "Who made the models and artwork, and on what terms.",
+    "Help with Credits",
     "Who made the models and artwork this app ships, and the terms they are used under.",
     "This page is generated from the record this app keeps of every file it ships that somebody else made — the artwork in the trainer game, the lettering on the map, the side camera’s pose model, and the templates the Android build is assembled from.",
     "Nothing here is typed by hand, so an asset cannot be added without appearing here.",
@@ -2120,6 +2138,8 @@
   ],
   "segment-detail populated": [
     "Segment",
+    "Every time you have ridden this stretch of road.",
+    "Help with Segment",
     "Every time you have ridden this stretch of road, and how two of those efforts compare.",
     "The long drag up past the reservoir, the farm and the old quarry",
     "500 m · 3 efforts · Ranked by elapsed time.",
@@ -2151,11 +2171,11 @@
     "Trainer game — Ride a saved route against a pacer or your own best.",
     "Workouts — Structured sessions built from blocks.",
     "Activities — Rides recorded on this device, newest first.",
-    "Analysis — Time in zone for a ride, and the best average power you have held for each length of time.",
+    "Analysis — Time in zone, and your best power for each length of time.",
     "Segments — Stretches of road you have named, cut from your own rides.",
     "Routes — Rides you plan to do, imported from a GPX file.",
-    "Devices — Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.",
-    "Import and export — Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.",
+    "Devices — Your sensors and smart trainers, over Bluetooth.",
+    "Import and export — Bring rides in from a file, and take your own rides out.",
     "Camera — Still pictures of yourself while you ride.",
     "Settings — How this device shows your numbers.",
     "About On Your Left — What this is, what it does not do, and where your data lives."

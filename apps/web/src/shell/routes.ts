@@ -162,12 +162,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 
 /**
  * The longest a route's one line under its title may be, in characters —
- * #993. Measured, not chosen: the longest summary on the table when the rule
- * was written (Import and export's, 91 characters) lays out on one line on the
- * owner's tablet held upright, which is the narrowest viewport the rule is
- * measured at. `controls-first.browser.spec.ts` is what holds the line.
+ * #993. Measured, not chosen, and measured on the CI runner rather than a Mac:
+ * its fonts are wider, and five summaries of 82 to 91 characters that sat on
+ * one line locally took two on the runner's tablet in landscape (run
+ * 37032967970). The longest left, Instance's at 67, is one line there. A
+ * fast-suite check with the words in front of you; the LINE is
+ * `controls-first.browser.spec.ts`'s.
  */
-export const MAXIMUM_SUMMARY_CHARACTERS = 92;
+export const MAXIMUM_SUMMARY_CHARACTERS = 72;
 
 export interface RouteDefinition {
   readonly id: RouteId;
@@ -307,8 +309,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/analysis',
     navLabel: 'Analysis',
     title: 'Analysis',
-    summary:
+    summary: 'Time in zone, and your best power for each length of time.',
+    help: [
       'Time in zone for a ride, and the best average power you have held for each length of time.',
+    ],
   },
   {
     id: 'segments',
@@ -341,7 +345,8 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/devices',
     navLabel: 'Devices',
     title: 'Devices',
-    summary: 'Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.',
+    summary: 'Your sensors and smart trainers, over Bluetooth.',
+    help: ['Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.'],
   },
   {
     id: 'transfer',
@@ -353,8 +358,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     // mark — "Strava import" is not a label this product may carry.
     navLabel: 'Files',
     title: 'Import and export',
-    summary:
+    summary: 'Bring rides in from a file, and take your own rides out.',
+    help: [
       'Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.',
+    ],
   },
   {
     id: 'camera',
@@ -448,7 +455,8 @@ export const CREDITS_ROUTE: RouteDefinition = {
   path: '/about/credits',
   navLabel: 'Credits',
   title: 'Credits',
-  summary: 'Who made the models and artwork this app ships, and the terms they are used under.',
+  summary: 'Who made the models and artwork, and on what terms.',
+  help: ['Who made the models and artwork this app ships, and the terms they are used under.'],
 };
 
 /**
@@ -575,7 +583,8 @@ export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
   // h1 is the route title" assertion true of a route whose subject is only
   // known at run time.
   title: 'Segment',
-  summary: 'Every time you have ridden this stretch of road, and how two of those efforts compare.',
+  summary: 'Every time you have ridden this stretch of road.',
+  help: ['Every time you have ridden this stretch of road, and how two of those efforts compare.'],
 };
 
 /**
