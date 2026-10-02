@@ -380,7 +380,7 @@ export const ROUTES: readonly RouteDefinition[] = [
     help: [
       'Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.',
     ],
-    notes: ['Nothing is sent anywhere, and a picture is thrown away once it has been looked at.'],
+    notes: ['Pictures and ride details stay on this device unless you turn on sending them below.'],
   },
   {
     id: 'settings',
