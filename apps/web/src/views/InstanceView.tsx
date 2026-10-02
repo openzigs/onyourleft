@@ -274,11 +274,10 @@ export function InstanceView({
     );
   }
 
+  // #993: what disconnecting keeps stays on the screen, as a note BELOW the
+  // control it is about rather than above it.
   const disconnectControl = (
     <>
-      <KeptVisible>
-        <p>{DISCONNECT_KEEPS_RIDES}</p>
-      </KeptVisible>
       <Button
         variant="secondary"
         disabled={busy}
@@ -288,6 +287,9 @@ export function InstanceView({
       >
         Disconnect
       </Button>
+      <KeptVisible>
+        <p className="oyl-note">{DISCONNECT_KEEPS_RIDES}</p>
+      </KeptVisible>
     </>
   );
 

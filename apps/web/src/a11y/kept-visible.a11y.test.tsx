@@ -198,6 +198,32 @@ const KEPT: Record<RouteId, Kept> = {
   'not-found': { sentences: [], reason: NOTHING_TUCKED },
 };
 
+/**
+ * The six `notes` the shell renders below a view, written out LITERALLY — #993's
+ * review. They used to be read from the route table, which let the table
+ * classify its own sentences: moving one into `help` (a closed disclosure)
+ * went unnoticed. Now the table must still list exactly these as notes, and
+ * each is checked drawn and reachable on its route.
+ */
+const NOTES: Partial<Record<RouteId, readonly string[]>> = {
+  ride: ['Everything stays on this device.'],
+  routes: [
+    'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
+      'cannot be shared at all.',
+  ],
+  camera: ['Nothing is sent anywhere, and a picture is thrown away once it has been looked at.'],
+  settings: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
+  instance: ['Your rides stay on this device.'],
+  'side-camera': ['This phone keeps nothing about you afterwards.'],
+};
+
+/** A route's list with its literal `notes` added — #993. */
+function withNotes(route: RouteDefinition): Kept {
+  const kept = KEPT[route.id];
+  const notes = (NOTES[route.id] ?? []).filter((note) => !kept.sentences.includes(note));
+  return { ...kept, sentences: [...kept.sentences, ...notes] };
+}
+
 /** Every sentence a route lists, in every state — what bounds its marks. */
 function everyListed(kept: Kept): readonly string[] {
   return [...kept.sentences, ...(kept.populated ?? []), ...(kept.elsewhere ?? [])];
@@ -355,10 +381,16 @@ async function open(route: RouteDefinition, populated: boolean): Promise<Element
 }
 
 describe('#666 — safety and privacy sentences are never in a closed disclosure', () => {
+  it('the route table lists exactly the literal notes, and nothing else as one (#993)', () => {
+    for (const route of ALL_ROUTES) {
+      expect(route.notes ?? [], `${route.id} notes`).toEqual(NOTES[route.id] ?? []);
+    }
+  });
+
   for (const data of ['empty', 'populated'] as const) {
     for (const route of ALL_ROUTES) {
       it(`${route.id} (${route.path}), ${data}`, async () => {
-        const kept = KEPT[route.id];
+        const kept = withNotes(route);
         if (kept.sentences.length === 0) {
           expect(kept.reason, `${route.id} lists nothing and gives no reason`).toBeTruthy();
         }

@@ -160,6 +160,17 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   { id: 'more', label: 'More', icon: 'more' },
 ];
 
+/**
+ * The longest a route's one line under its title may be, in characters —
+ * #993. Measured, not chosen, and measured on the CI runner rather than a Mac:
+ * its fonts are wider, and five summaries of 82 to 91 characters that sat on
+ * one line locally took two on the runner's tablet in landscape (run
+ * 37032967970). The longest left, Instance's at 67, is one line there. A
+ * fast-suite check with the words in front of you; the LINE is
+ * `controls-first.browser.spec.ts`'s.
+ */
+export const MAXIMUM_SUMMARY_CHARACTERS = 72;
+
 export interface RouteDefinition {
   readonly id: RouteId;
   /**
@@ -174,8 +185,32 @@ export interface RouteDefinition {
   readonly navLabel: string;
   /** The `h1` and the document title. Sentence-shaped. */
   readonly title: string;
-  /** One line under the heading, so a view is never a bare title. */
+  /**
+   * One line under the heading, so a view is never a bare title.
+   *
+   * ⚠️ **ONE sentence, and one line on the owner's tablet — #993.** The owner's
+   * ruling of 2026-10-02: *"one line is the right amount. We can have help that
+   * gives further detail."* `routes.test.ts` holds it to one sentence of at most
+   * {@link MAXIMUM_SUMMARY_CHARACTERS} characters, and
+   * `controls-first.browser.spec.ts` to one laid-out line on the tablet both
+   * ways up and two at most on a phone. What else a screen has to say goes in
+   * {@link help} or, if it is about safety or privacy, in {@link notes}.
+   */
   readonly summary: string;
+  /**
+   * What the screen's ⓘ beside its title opens — #993: further explanation,
+   * paragraph by paragraph (`design/ScreenHelp.tsx`). Absent where the one
+   * line is all there is. Never a safety or privacy sentence: those are
+   * {@link notes}.
+   */
+  readonly help?: readonly string[];
+  /**
+   * Safety and privacy sentences that stay on the screen — #993 — as a compact
+   * note BELOW the view's controls rather than above them
+   * (`design/ScreenHelp.tsx` §`ScreenNotes`). They are kept-visible text, and
+   * `a11y/kept-visible.a11y.test.tsx` reads them from here.
+   */
+  readonly notes?: readonly string[];
   /** @see RouteLayout */
   readonly layout: RouteLayout;
   /**
@@ -215,7 +250,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/',
     navLabel: 'Home',
     title: 'Home',
-    summary: 'Your rides on this device, and where to start.',
+    // #993: was "Your rides on this device, and where to start." — two lines
+    // beside #939's hero on the tablet held upright. "On this device" is said
+    // under every screen by the footer.
+    summary: 'Your rides, and where to start.',
   },
   {
     id: 'ride',
@@ -224,8 +262,8 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/ride',
     navLabel: 'Ride',
     title: 'Ride',
-    summary:
-      'Record a ride from the sensors paired on this device. Everything stays on this device.',
+    summary: 'Record a ride from the sensors paired on this device.',
+    notes: ['Everything stays on this device.'],
   },
   {
     id: 'game',
@@ -234,9 +272,11 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/game',
     navLabel: 'Trainer game',
     title: 'Trainer game',
-    summary:
+    summary: 'Ride a saved route against a pacer or your own best.',
+    help: [
       'Ride a saved route against a pacer that will not wait for you, or against your own ' +
-      'previous attempt. Solo, offline, and no leaderboard of any kind.',
+        'previous attempt. Solo, offline, and no leaderboard of any kind.',
+    ],
   },
   {
     id: 'workouts',
@@ -246,9 +286,11 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/workouts',
     navLabel: 'Workouts',
     title: 'Workouts',
-    summary:
-      'Structured sessions built from blocks. Targets are a share of your own threshold, so the ' +
-      'same workout works whatever shape you are in.',
+    summary: 'Structured sessions built from blocks.',
+    help: [
+      'Targets are a share of your own threshold, so the same workout works whatever shape you ' +
+        'are in.',
+    ],
   },
   {
     id: 'activities',
@@ -267,8 +309,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/analysis',
     navLabel: 'Analysis',
     title: 'Analysis',
-    summary:
+    summary: 'Time in zone, and your best power for each length of time.',
+    help: [
       'Time in zone for a ride, and the best average power you have held for each length of time.',
+    ],
   },
   {
     id: 'segments',
@@ -277,9 +321,8 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/segments',
     navLabel: 'Segments',
     title: 'Segments',
-    summary:
-      'Stretches of road you have named, cut from your own rides. A climb and its descent are ' +
-      'two different segments.',
+    summary: 'Stretches of road you have named, cut from your own rides.',
+    help: ['A climb and its descent are two different segments.'],
   },
   {
     id: 'routes',
@@ -289,9 +332,11 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/routes',
     navLabel: 'Routes',
     title: 'Routes',
-    summary:
-      'Rides you plan to do, imported from a GPX file. A route is private until you say ' +
-      'otherwise, and one that starts inside a privacy zone cannot be shared at all.',
+    summary: 'Rides you plan to do, imported from a GPX file.',
+    notes: [
+      'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
+        'cannot be shared at all.',
+    ],
   },
   {
     id: 'devices',
@@ -300,7 +345,8 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/devices',
     navLabel: 'Devices',
     title: 'Devices',
-    summary: 'Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.',
+    summary: 'Your sensors and smart trainers, over Bluetooth.',
+    help: ['Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.'],
   },
   {
     id: 'transfer',
@@ -312,8 +358,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     // mark — "Strava import" is not a label this product may carry.
     navLabel: 'Files',
     title: 'Import and export',
-    summary:
+    summary: 'Bring rides in from a file, and take your own rides out.',
+    help: [
       'Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.',
+    ],
   },
   {
     id: 'camera',
@@ -328,9 +376,11 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/camera',
     navLabel: 'Camera',
     title: 'Camera',
-    summary:
-      'Take still pictures of yourself while you ride, from a phone on a tripod beside the bike. ' +
-      'Nothing is sent anywhere, and a picture is thrown away once it has been looked at.',
+    summary: 'Still pictures of yourself while you ride.',
+    help: [
+      'Take still pictures of yourself while you ride, from a phone on a tripod beside the bike.',
+    ],
+    notes: ['Nothing is sent anywhere, and a picture is thrown away once it has been looked at.'],
   },
   {
     id: 'settings',
@@ -339,9 +389,8 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/settings',
     navLabel: 'Settings',
     title: 'Settings',
-    summary:
-      'How this device shows your numbers. Nothing here is sent anywhere, and nothing here ' +
-      'changes what a ride recorded.',
+    summary: 'How this device shows your numbers.',
+    notes: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
   },
   {
     id: 'about',
@@ -378,9 +427,8 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   path: '/routes/new',
   navLabel: 'Draw a route',
   title: 'Draw a route',
-  summary:
-    'Place waypoints and have the roads between them worked out. Every control works from the ' +
-    'keyboard, and a half-drawn route survives closing the tab.',
+  summary: 'Place waypoints and have the roads between them worked out.',
+  help: ['Every control works from the keyboard, and a half-drawn route survives closing the tab.'],
 };
 
 /**
@@ -407,7 +455,8 @@ export const CREDITS_ROUTE: RouteDefinition = {
   path: '/about/credits',
   navLabel: 'Credits',
   title: 'Credits',
-  summary: 'Who made the models and artwork this app ships, and the terms they are used under.',
+  summary: 'Who made the models and artwork, and on what terms.',
+  help: ['Who made the models and artwork this app ships, and the terms they are used under.'],
 };
 
 /**
@@ -427,9 +476,9 @@ export const INSTANCE_ROUTE: RouteDefinition = {
   path: '/settings/instance',
   navLabel: 'Instance',
   title: 'Connect to an instance',
-  summary:
-    'Sign in to an On Your Left instance with this device, to ride with other people. Your rides ' +
-    'stay on this device.',
+  summary: 'Sign in to an instance with this device, to ride with other people.',
+  help: ['Sign in to an On Your Left instance with this device, to ride with other people.'],
+  notes: ['Your rides stay on this device.'],
 };
 
 /**
@@ -450,9 +499,11 @@ export const MODERATION_ROUTE: RouteDefinition = {
   path: '/settings/instance/moderation',
   navLabel: 'Moderation',
   title: 'Moderation',
-  summary:
+  summary: 'Decide accounts, reports and names on the instance you moderate.',
+  help: [
     'Approve and refuse new accounts, decide reports, suspend accounts and hide names on the ' +
-    'instance you moderate.',
+      'instance you moderate.',
+  ],
 };
 
 /**
@@ -470,9 +521,12 @@ export const SIDE_CAMERA_ROUTE: RouteDefinition = {
   path: '/camera/side',
   navLabel: 'Side camera',
   title: 'Side camera',
-  summary:
+  summary: 'This phone as the side camera your tablet starts and stops.',
+  help: [
     'Use this phone on a tripod beside the bike, side-on at hip height, as the camera your ' +
-    'tablet starts and stops. This phone keeps nothing about you afterwards.',
+      'tablet starts and stops.',
+  ],
+  notes: ['This phone keeps nothing about you afterwards.'],
 };
 
 /**
@@ -529,7 +583,8 @@ export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
   // h1 is the route title" assertion true of a route whose subject is only
   // known at run time.
   title: 'Segment',
-  summary: 'Every time you have ridden this stretch of road, and how two of those efforts compare.',
+  summary: 'Every time you have ridden this stretch of road.',
+  help: ['Every time you have ridden this stretch of road, and how two of those efforts compare.'],
 };
 
 /**

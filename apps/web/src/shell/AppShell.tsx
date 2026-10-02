@@ -42,6 +42,7 @@ import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourlef
 import type { Kilograms } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
+import { ScreenHelp, ScreenNotes } from '../design/ScreenHelp';
 import { HomeView } from '../views/HomeView';
 import { NotFoundView } from '../views/NotFoundView';
 import type { RoutingProvider } from '@onyourleft/domain';
@@ -817,6 +818,15 @@ export function AppShell(props: AppShellProps): JSX.Element {
           </h1>
           {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
           {/*
+            #993: one line under the title, and the rest one press away. AFTER
+            the summary rather than inside the heading, so the `h1` is the
+            title alone and `main > h1 + p` is still the line under it;
+            `theme.css` §`.oyl-help` draws the ⓘ beside the title.
+          */}
+          {immersive || route.help === undefined ? null : (
+            <ScreenHelp title={route.title} paragraphs={route.help} />
+          )}
+          {/*
             #674: a view in a lazy group is not in the entry chunk, so on its
             first visit it suspends and the fallback stands under the `h1` until
             it arrives. Keyed by route so a chunk that failed on one route does
@@ -832,6 +842,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
               })}
             </Suspense>
           </ViewBoundary>
+          {/*
+            #993: the safety and privacy sentences that were the second half of
+            the line under the title stay on the screen, below what a rider
+            came to do. A list–detail route's are `ListDetail`'s to place:
+            under the list at two panes, where below the view they took the
+            height of both panes (`ListDetail.tsx` §`notes`).
+          */}
+          {immersive || route.notes === undefined || route.layout === 'list-detail' ? null : (
+            <ScreenNotes notes={route.notes} />
+          )}
         </main>
 
         {immersive ? null : (

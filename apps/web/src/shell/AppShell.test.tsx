@@ -278,6 +278,62 @@ describe('the view heading', () => {
 });
 
 /**
+ * One line under the title, the rest behind the ⓘ, and the privacy sentences
+ * below the view — #993. What a browser does with them (the ⓘ's size, the
+ * line's lines, the notes' place against the first control) is
+ * `browser/controls-first.browser.spec.ts`'s; this is what the shell renders.
+ */
+describe('the line under the title, its help and its notes (#993)', () => {
+  it('renders the route’s one line straight after the h1, and its help in a closed disclosure after that', async () => {
+    const route = routeById('workouts');
+    await open(route.path);
+    const main = document.querySelector('main');
+    expect(main?.querySelector(':scope > h1 + p')?.textContent).toBe(route.summary);
+    const help = main?.querySelector(':scope > h1 + p + details.oyl-help');
+    expect(help, 'the help disclosure is not straight after the line').not.toBeNull();
+    expect(help?.hasAttribute('open')).toBe(false);
+    const summary = help?.querySelector('summary');
+    // Named in words a speech-control user says for an ⓘ, with the glyph
+    // itself hidden from assistive technology.
+    expect(summary?.textContent).toBe(`Help with ${route.title}`);
+    expect(summary?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    // Its words are in the page while it is closed: there offline, found by
+    // the route-sentences record.
+    expect(help?.querySelector('.oyl-help__panel')?.textContent).toBe(route.help?.join(''));
+  });
+
+  it('opens from the keyboard', async () => {
+    await open(routeById('segments').path);
+    const help = document.querySelector<HTMLDetailsElement>('main > details.oyl-help');
+    const summary = help?.querySelector('summary');
+    if (summary === null || summary === undefined) throw new Error('no help summary');
+    await activateWithKeyboard(summary);
+    expect(help?.open).toBe(true);
+  });
+
+  it('renders no help where a route has nothing more to say', async () => {
+    const route = routeById('activities');
+    expect(route.help).toBeUndefined();
+    await open(route.path);
+    expect(document.querySelector('main .oyl-help')).toBeNull();
+  });
+
+  it('keeps a route’s notes on the screen, marked kept-visible, AFTER the view', async () => {
+    const route = routeById('settings');
+    await open(route.path);
+    const main = document.querySelector('main');
+    const notes = main?.querySelector(':scope > .oyl-note');
+    expect(notes?.getAttribute('data-oyl-kept-visible')).toBe('');
+    expect(notes?.textContent).toBe(route.notes?.join(''));
+    // Below what a rider came to do: the last thing in `main`, after every control.
+    expect(main?.lastElementChild).toBe(notes);
+    expect(notes?.closest('details')).toBeNull();
+    // And not in the line under the title any more.
+    expect(main?.querySelector(':scope > h1 + p')?.textContent).not.toContain(route.notes?.[0]);
+  });
+});
+
+/**
  * The rider's weight, threaded from the athlete row to the two screens that
  * need it (#325).
  *

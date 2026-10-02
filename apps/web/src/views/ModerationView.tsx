@@ -461,9 +461,6 @@ export function ModerationView({
   }
   return (
     <div className="oyl-moderation">
-      <KeptVisible>
-        <p>{MODERATION_IS_LOGGED}</p>
-      </KeptVisible>
       {last?.kind === 'done' ? (
         <StatusMessage tone="success" live>
           {ACTION_DONE_TEXT}
@@ -472,6 +469,11 @@ export function ModerationView({
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
       <AnAccount port={port} onDone={onDone} />
+      {/* #993: that every action is logged stays on the screen, as a note
+          below the actions and above the log it names, not above them. */}
+      <KeptVisible>
+        <p className="oyl-note">{MODERATION_IS_LOGGED}</p>
+      </KeptVisible>
       <Log me={state.me} entries={state.log} />
     </div>
   );
