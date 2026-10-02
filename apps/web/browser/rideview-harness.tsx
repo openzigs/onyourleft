@@ -81,7 +81,7 @@ import { athleteId, workoutId, type AthleteRecord, type WorkoutRecord } from '@o
 import { stubAnalysis } from '../src/analysis/testing';
 import { scriptedSidePairing } from '../src/camera/testing';
 import { RIDE_NOTIFICATION_REFUSED, type RideSnapshot } from '../src/ride/controller';
-import { ridingSnapshot, stubRideController } from '../src/ride/testing';
+import { idleSnapshot, ridingSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -197,6 +197,22 @@ const SIDE_PAIRING =
  */
 const ERG_HELD = QUERY.get('erg') === 'held';
 
+/**
+ * `rideview.html?sensors=none` — #1012: a ride RECORDING with nothing paired,
+ * so the Live group shows the one sensor banner where the readings go. The
+ * trainer is unpaired too — a paired trainer IS a paired sensor — so the
+ * trainer group says so and offers no control.
+ */
+const NO_SENSORS = QUERY.get('sensors') === 'none';
+
+/**
+ * `rideview.html?readings=widest` — #1012: every reading live at the widest it
+ * can plausibly be — four digits of power, three of cadence and heart rate,
+ * and a speed just under 100 km/h — so "every reading fits its card" is about
+ * the numbers a sprint produces rather than the fixture's 248 W.
+ */
+const WIDEST_READINGS = QUERY.get('readings') === 'widest';
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -204,6 +220,22 @@ function snapshot(): RideSnapshot {
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
   };
+  if (WIDEST_READINGS) {
+    const at = unixSeconds(1_800_000_000);
+    return {
+      ...riding,
+      metrics: [
+        { id: 'power', state: { kind: 'live', value: 1888, at } },
+        { id: 'cadence', state: { kind: 'live', value: 188, at } },
+        { id: 'heartRate', state: { kind: 'live', value: 188, at } },
+        { id: 'speed', state: { kind: 'live', value: 27.7, at } },
+      ],
+    };
+  }
+  if (NO_SENSORS) {
+    const nothing = idleSnapshot();
+    return { ...riding, sensors: [], metrics: nothing.metrics, trainer: nothing.trainer };
+  }
   if (ERG_HELD) {
     return {
       ...riding,
@@ -321,6 +353,33 @@ export interface RideViewMeasurement {
    * screen while a notice stands, which the whole list cannot be.
    */
   readonly metricsTopRow: Box | undefined;
+  /** #1012: how many rows the readings are laid out in. */
+  readonly metricRows: number;
+  /**
+   * #1012: every reading's card, the reading inside it, and whether anything
+   * in the card is wider than the card — a reading spilling onto the one
+   * beside it is #259's failure on this screen.
+   */
+  readonly readings: readonly RideViewReading[];
+  /** #1012: the sensor banner, if one stands, and its one link. */
+  readonly sensorBanner:
+    | {
+        readonly box: Box;
+        readonly link: { readonly name: string; readonly box: Box; readonly onTop: boolean };
+        readonly links: number;
+      }
+    | undefined;
+}
+
+/** One reading on the Ride screen. @see RideViewMeasurement.readings */
+export interface RideViewReading {
+  readonly label: string;
+  readonly card: Box;
+  /** The card's right edge less its border and padding: where a reading must end. */
+  readonly contentRight: number;
+  readonly reading: Box;
+  /** `scrollWidth − clientWidth` of the card: above zero, something spilled. */
+  readonly spill: number;
 }
 
 /** One standing notice. @see RideViewMeasurement.notices */
@@ -349,6 +408,8 @@ declare global {
       readonly asBefore692: () => void;
       /** #740's control: the Held line back above the ERG form. @see heldAboveTheForm */
       readonly heldAboveTheForm: () => void;
+      /** #1012's control: four readings to a row at any width. @see crammedReadings */
+      readonly crammedReadings: () => void;
     };
   }
 }
@@ -436,7 +497,63 @@ function measure(): RideViewMeasurement {
     notices: standingNotices(),
     metrics: metricGrid === null ? undefined : boxOf(metricGrid),
     metricsTopRow: topRowOf(metricGrid),
+    metricRows:
+      metricGrid === null
+        ? 0
+        : new Set(
+            [...metricGrid.querySelectorAll(':scope > .oyl-metric')].map((card) =>
+              Math.round(card.getBoundingClientRect().top),
+            ),
+          ).size,
+    readings: readingsOf(metricGrid),
+    sensorBanner: sensorBannerOf(),
   };
+}
+
+/** @see RideViewMeasurement.readings */
+function readingsOf(grid: Element | null): RideViewReading[] {
+  if (grid === null) return [];
+  return [...grid.querySelectorAll(':scope > .oyl-metric')].map((card) => {
+    const reading = card.querySelector('.oyl-reading');
+    const style = window.getComputedStyle(card);
+    const box = boxOf(card);
+    return {
+      label: textOf(card.querySelector('.oyl-metric__label') ?? card),
+      card: box,
+      contentRight: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
+      reading: reading === null ? boxOf(card) : boxOf(reading),
+      spill: card.scrollWidth - card.clientWidth,
+    };
+  });
+}
+
+/** @see RideViewMeasurement.sensorBanner */
+function sensorBannerOf(): RideViewMeasurement['sensorBanner'] {
+  const banner = document.querySelector('[data-oyl-sensor-banner]');
+  const links = banner === null ? [] : [...banner.querySelectorAll('a[href]')];
+  const link = links[0];
+  if (banner === null || link === undefined) return undefined;
+  const box = boxOf(link);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return {
+    box: boxOf(banner),
+    link: { name: textOf(link), box, onTop: hit !== null && (hit === link || link.contains(hit)) },
+    links: links.length,
+  };
+}
+
+/**
+ * #1012's control: all four readings in one row however narrow the Live group
+ * is — what the grid would be with the container query's two-to-a-row step
+ * taken out. The spec requires a reading to spill out of its card then at a
+ * phone; without that, "nothing spills" is as true of a grid that never got
+ * narrow.
+ */
+function crammedReadings(): void {
+  const style = document.createElement('style');
+  style.textContent =
+    '.oyl-metric-grid--live { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }';
+  document.head.append(style);
 }
 
 /** The union of the cards whose top is the grid's first row. @see RideViewMeasurement */
@@ -541,6 +658,16 @@ function asBefore692(): void {
     '.oyl-ride__group--live > .oyl-metric-grid { gap: var(--oyl-space-md) !important;',
     '  margin-top: var(--oyl-space-lg) !important; }',
     '.oyl-ride__group--live .oyl-metric { padding: var(--oyl-space-md) !important; }',
+    // ⚠️ And the readings as they were before #1012, which is how they were
+    // before #692 too: the Live group one column of three on a landscape
+    // tablet, the cards `auto-fit` at 10rem (so ONE to a row upright), and
+    // the unit on a line of its own under the number. Without this the
+    // control measured #1012's one row of readings and stopped failing.
+    '@media (min-width: 76rem) { .oyl-ride { grid-template-areas: none !important;',
+    '  grid-template-rows: none !important; }',
+    '  .oyl-ride > .oyl-ride__group { grid-area: auto !important; } }',
+    '.oyl-metric-grid--live { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)) !important; }',
+    '.oyl-metric .oyl-reading__unit { display: block; }',
   ].join('\n');
   document.head.append(style);
 }
@@ -699,7 +826,9 @@ async function run(): Promise<void> {
   // #605: with a workout running there is no such control — `WorkoutPanel`
   // shows the running workout instead, so the wait is for *End workout* and,
   // when this page was asked for one, the Eased notice.
-  if (RIDE_STATE === 'idle' || RIDE_STATE === 'armed') {
+  if (NO_SENSORS) {
+    await until('the sensor banner', () => document.querySelector('[data-oyl-sensor-banner]'));
+  } else if (RIDE_STATE === 'idle' || RIDE_STATE === 'armed') {
     const awaited = RIDE_STATE === 'idle' ? 'Start recording' : 'Keep riding';
     await until(awaited, () =>
       [...document.querySelectorAll('.oyl-ride__group--live button')].find(
@@ -745,6 +874,7 @@ async function run(): Promise<void> {
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,
+    crammedReadings,
   };
 }
 
@@ -760,5 +890,6 @@ run().catch((error: unknown) => {
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,
+    crammedReadings,
   };
 });

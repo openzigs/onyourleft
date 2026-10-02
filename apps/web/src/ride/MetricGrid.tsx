@@ -19,6 +19,17 @@
  * **not** render the last value greyed out, and `metrics.ts` makes that
  * impossible rather than merely discouraged — the `stale` variant carries no
  * value to render. From two metres a greyed number is a number.
+ *
+ * ## Readings, two to a row on a phone and one row on a tablet (#1012)
+ *
+ * The number is `design/Reading.tsx` at `size="metric"` — large tabular
+ * numerals and a small unit beside them, the one component every number in
+ * the app is drawn with — and the unit is part of the reading rather than a
+ * note under it. A channel with no number keeps its em dash as the reading and
+ * says why on the line under it, as before. The grid is `theme.css`
+ * §`.oyl-metric-grid--live`: one column on the narrowest screens, two on a
+ * phone, all four in a row once the Live group is wide enough, which on a
+ * landscape tablet it is.
  */
 
 import type { JSX } from 'react';
@@ -26,6 +37,7 @@ import type { JSX } from 'react';
 import type { MetresPerSecond } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
+import { Reading } from '../design/Reading';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { useUnits } from '../units/context';
 import { formatSpeed, speedUnit } from '../units/format';
@@ -133,7 +145,7 @@ export interface MetricGridProps {
 export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
   const presentations = presentationFor(useUnits());
   return (
-    <ul className="oyl-metric-grid" aria-label="Live metrics">
+    <ul className="oyl-metric-grid oyl-metric-grid--live" aria-label="Live metrics">
       {metrics.map((metric) => {
         const presentation = presentations[metric.id];
         const text = metricText(metric.state, presentation);
@@ -145,7 +157,7 @@ export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
               definition list inside a grid of four is markup a screen reader
               reads as a glossary.
 
-              The three spans below are what the eye reads and are hidden from
+              The spans below are what the eye reads and are hidden from
               assistive technology; `VisuallyHidden` carries the same content as
               one sentence for the ear. Split that way because the em dash is
               read as "dash" or as nothing at all, and because a `span` may not
@@ -156,12 +168,18 @@ export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
             <span className="oyl-metric__label" aria-hidden="true">
               {presentation.label}
             </span>
-            <span className="oyl-metric__value" aria-hidden="true">
-              {text.value}
+            <span className="oyl-metric__reading" aria-hidden="true">
+              <Reading
+                value={text.value}
+                unit={metric.state.kind === 'live' ? presentation.unit : undefined}
+                size="metric"
+              />
             </span>
-            <span className="oyl-metric__note" aria-hidden="true">
-              {text.note}
-            </span>
+            {metric.state.kind === 'live' ? null : (
+              <span className="oyl-metric__note" aria-hidden="true">
+                {text.note}
+              </span>
+            )}
             <VisuallyHidden>{metricSentence(presentation.label, text)}</VisuallyHidden>
           </li>
         );
