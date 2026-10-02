@@ -64,7 +64,9 @@ export function ScreenHelp({
  * — #993. They used to be the second sentence of the line under the title; the
  * owner's ruling moves them under what a rider came to do, as a compact note,
  * and never into the help. Marked `data-oyl-kept-visible`, so the browser
- * gate's fold rule and the kept-visible test both know them.
+ * gate's fold rule and the kept-visible test both know them. On a list–detail
+ * route at two panes they are at the end of the list pane instead
+ * (`shell/ListDetail.tsx` §`notes`), so they take no height from the panes.
  */
 export function ScreenNotes({ notes }: { readonly notes: readonly string[] }): JSX.Element {
   return (

@@ -74,6 +74,7 @@ import {
 } from 'react';
 
 import { ButtonLink } from '../design/Button';
+import { ScreenNotes } from '../design/ScreenHelp';
 
 import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
 
@@ -288,45 +289,63 @@ export function ListDetail({
    * opens this same list and item.
    */
   const here = selection === undefined ? hrefFor(route) : hrefForSelection(route, selection);
+  /*
+   * The route's safety and privacy notes (#993), which the shell renders below
+   * every other view and leaves to this one. At one pane they are below the
+   * view as everywhere else. At two panes they go at the END of the list pane:
+   * below the view they were a row of the shell's column under both panes, and
+   * the 48 px they took came off the detail pane's height, putting Routes'
+   * *Import route* 42 px from its pane's bottom on the CI runner where the
+   * floor is 50 (`list-detail.browser.spec.ts` §"#670 — each primary action's
+   * place"). The list pane is in its place on arrival and with an item chosen,
+   * and the notes still follow the pane's first control.
+   */
+  const notes = route.notes === undefined ? null : <ScreenNotes notes={route.notes} />;
   return (
-    // The capture listener is not an interaction: it only NOTES that a create
-    // link was followed. Enter on a link fires `click`, so a keyboard counts.
-    <div
-      className={two ? 'oyl-list-detail oyl-list-detail--two' : 'oyl-list-detail'}
-      data-oyl-panes={two ? '2' : '1'}
-      onClickCapture={noteCreate}
-    >
-      <section
-        className="oyl-list-detail__list"
-        aria-labelledby={listHeadingId}
-        data-oyl-pane="list"
-        hidden={!showList}
-        ref={listRef}
+    <>
+      {/*
+        The capture listener is not an interaction: it only NOTES that a create
+        link was followed. Enter on a link fires `click`, so a keyboard counts.
+      */}
+      <div
+        className={two ? 'oyl-list-detail oyl-list-detail--two' : 'oyl-list-detail'}
+        data-oyl-panes={two ? '2' : '1'}
+        onClickCapture={noteCreate}
       >
-        {two ? (
-          <a className="oyl-pane-skip" href={here} onClick={skipToDetail}>
-            Skip to {detailLabel.toLowerCase()}
-          </a>
-        ) : null}
-        <h2 id={listHeadingId}>{listLabel}</h2>
-        {list}
-      </section>
-      <section
-        className="oyl-list-detail__detail"
-        aria-label={detailLabel}
-        data-oyl-pane="detail"
-        tabIndex={-1}
-        hidden={!showDetail}
-        ref={detailRef}
-      >
-        {!two && selection !== undefined ? (
-          <p>
-            <a href={hrefFor(route)}>{backLabel}</a>
-          </p>
-        ) : null}
-        {detail}
-      </section>
-    </div>
+        <section
+          className="oyl-list-detail__list"
+          aria-labelledby={listHeadingId}
+          data-oyl-pane="list"
+          hidden={!showList}
+          ref={listRef}
+        >
+          {two ? (
+            <a className="oyl-pane-skip" href={here} onClick={skipToDetail}>
+              Skip to {detailLabel.toLowerCase()}
+            </a>
+          ) : null}
+          <h2 id={listHeadingId}>{listLabel}</h2>
+          {list}
+          {two ? notes : null}
+        </section>
+        <section
+          className="oyl-list-detail__detail"
+          aria-label={detailLabel}
+          data-oyl-pane="detail"
+          tabIndex={-1}
+          hidden={!showDetail}
+          ref={detailRef}
+        >
+          {!two && selection !== undefined ? (
+            <p>
+              <a href={hrefFor(route)}>{backLabel}</a>
+            </p>
+          ) : null}
+          {detail}
+        </section>
+      </div>
+      {two ? null : notes}
+    </>
   );
 }
 

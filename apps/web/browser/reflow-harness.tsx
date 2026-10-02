@@ -963,7 +963,9 @@ function putTheLineBack(route: RouteDefinition): void {
   line.setAttribute('data-oyl-inline-copy', '');
   line.textContent = [route.summary, ...(route.help ?? []), ...(route.notes ?? [])].join(' ');
   title.after(line);
-  const notes = main.querySelector(':scope > .oyl-note');
+  // Anywhere in `main`: a list–detail route's notes are in its list pane at
+  // two panes (`ListDetail.tsx` §`notes`).
+  const notes = main.querySelector('.oyl-note');
   if (notes !== null) {
     const copy = notes.cloneNode(true) as HTMLElement;
     copy.setAttribute('data-oyl-inline-copy', '');

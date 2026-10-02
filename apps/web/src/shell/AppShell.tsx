@@ -845,9 +845,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
           {/*
             #993: the safety and privacy sentences that were the second half of
             the line under the title stay on the screen, below what a rider
-            came to do.
+            came to do. A list–detail route's are `ListDetail`'s to place:
+            under the list at two panes, where below the view they took the
+            height of both panes (`ListDetail.tsx` §`notes`).
           */}
-          {immersive || route.notes === undefined ? null : <ScreenNotes notes={route.notes} />}
+          {immersive || route.notes === undefined || route.layout === 'list-detail' ? null : (
+            <ScreenNotes notes={route.notes} />
+          )}
         </main>
 
         {immersive ? null : (
