@@ -444,9 +444,11 @@ function HierarchySpecimens(): JSX.Element {
  * the shapes and the words.
  *
  * The drawing is `aria-hidden` and carries no text, which is the house rule.
- * The heading's last word is long on purpose: at the display step it is wider
+ * The heading's long word is long on purpose: at the display step it is wider
  * than a 320 px viewport, so the reflow case measures the wrap rather than a
- * heading that happened to fit.
+ * heading that happened to fit. ⚠️ It was "transcontinental" until #991, and
+ * in the narrower display face that word FITS at 320 px, which turned the
+ * control red — the place name is wider in Barlow and in the system face.
  */
 const ILLUSTRATION_SPECIMENS = 'specimens';
 
@@ -530,7 +532,7 @@ function IllustrationSpecimens(): JSX.Element {
   return (
     <section data-oyl-illustration="true" aria-label="Illustration specimens">
       <h2 className="oyl-display" data-oyl-display="true">
-        Choose a transcontinental ride
+        Choose a Llanfairpwllgwyngyll ride
       </h2>
       <svg
         aria-hidden="true"

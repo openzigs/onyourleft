@@ -100,11 +100,12 @@
  *           entry supplies one
  *   NOT004  a reviewed entry is stale: its package is not in the closure, now
  *           ships its own licence file, or its excerpt marker is not there
- *   NOT005  the native list, the copied-file list or the vendored-into-bundle
- *           list names something this generator cannot render: a licence with
- *           no text here, a project whose package is not in the closure, a
- *           copied or bundled file not in its package, a vendored work with no
- *           licence text
+ *   NOT005  the native list, the copied-file list, the vendored-into-bundle
+ *           list or the committed-font list names something this generator
+ *           cannot render: a licence with no text here, a project whose package
+ *           is not in the closure, a copied or bundled file not in its package,
+ *           a vendored work with no licence text, a committed font file or its
+ *           licence file not in the repository (#991)
  *   NOT006  the committed document is not what the generator writes
  *   NOT007  the committed document is not there
  *   NOT008  a package whose code the bundler writes into the build (Vite's
@@ -803,6 +804,46 @@ export function renderNotices(root) {
     noticeVendored(`${source.name}/${file.file}`, source, file.vendored);
   }
 
+  // #991, ADR 0043 D-2: a font this repository COMMITS and the app serves.
+  // No closure lists it — it is a file, not a package — so the reviewed list
+  // names each one, and its notice is the licence file committed beside its
+  // upstream input, read verbatim. `apps/web/tools/fonts/fonts.test.ts` holds
+  // the list to the files the subsetting step writes.
+  const fontLines = [];
+  const fontEntries = [];
+  for (const font of web.committedFonts ?? []) {
+    const missing = [...(font.files ?? []), font.licenceFile].filter(
+      (file) => typeof file !== 'string' || !existsSync(join(root, file)),
+    );
+    if (missing.length > 0 || (font.files ?? []).length === 0) {
+      problems.push(
+        `NOT005 the committed font ${String(font.name)} ${String(font.version)} names ` +
+          (missing.length > 0
+            ? `files that are not in the repository: ${missing.map(String).join(', ')}`
+            : 'no file the app serves') +
+          '.',
+      );
+      continue;
+    }
+    fontLines.push(
+      `  ${font.name} ${font.version} — ${font.licence}: ${font.files.join(', ')} (${font.by})`,
+    );
+    fontEntries.push(
+      entry({
+        name: font.name,
+        version: font.version,
+        licence: font.licence,
+        part: 'font',
+        sections: [
+          {
+            heading: `${basename(font.licenceFile)} (committed with the font, at ${font.licenceFile})`,
+            text: normalised(readFileSync(join(root, font.licenceFile), 'utf8')),
+          },
+        ],
+      }),
+    );
+  }
+
   const nativeEntries = [];
   const nativeLibraries = [...(native.libraries ?? [])].sort((left, right) =>
     byCodePoint(left.coordinate, right.coordinate),
@@ -886,7 +927,8 @@ export function renderNotices(root) {
     'Android app contains. Part 3 names the files the build copies whole out of a',
     'package in part 1, and the files a package there vendors from somebody else',
     "that the build bundles into the app's own code. Part 4 is code the build",
-    'tools write into the app, which no package in part 1 accounts for.',
+    'tools write into the app, which no package in part 1 accounts for. Part 5',
+    "is the fonts this app's source repository commits and the app serves.",
     '',
     'Generated from the installed dependency tree by',
     'scripts/check-third-party-notices.mjs. Do not edit it by hand.',
@@ -913,6 +955,9 @@ export function renderNotices(root) {
     '',
     'Part 4 — code the build tools write into the app',
     ...(bundlerLines.length > 0 ? bundlerLines : ['  (none)']),
+    '',
+    'Part 5 — fonts committed in the source repository and served by the app',
+    ...(fontLines.length > 0 ? fontLines : ['  (none)']),
   ].join('\n');
   const document = [
     contents,
@@ -920,6 +965,7 @@ export function renderNotices(root) {
     ...entries,
     ...vendoredEntries.values(),
     ...bundlerEntries,
+    ...fontEntries,
     ...nativeEntries,
     ...appendixText,
   ].join('\n');

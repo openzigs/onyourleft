@@ -95,6 +95,9 @@
   --text-display: var(--oyl-font-size-display);
   --text-metric: var(--oyl-font-size-metric);
 
+  /* The font families (#991, ADR 0043) — `font-display` is the bundled face. */
+  --font-display: var(--oyl-font-family-display);
+
   /* The one radius — `rounded`. */
   --radius: var(--oyl-radius);
 

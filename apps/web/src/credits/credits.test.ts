@@ -32,6 +32,7 @@ import {
   NOTHING_ASKED_LICENCES,
   SHIPPED_LICENCE_TEXTS,
 } from './credits';
+import { LICENCE_BODY_STARTS } from '../../tools/fonts/font-recipe';
 import { parseAssetManifest } from './manifest';
 
 function credits(lines: readonly string[]): ReturnType<typeof creditsFrom> {
@@ -255,6 +256,25 @@ describe('the licence texts this app ships — #597', () => {
     }
   });
 
+  /**
+   * The canonical text each shipped copy is held to: `LICENSES/` for the
+   * repository's own licences, whose digests `LIC005` pins, and for OFL-1.1
+   * (#991) the licence's own text out of the committed upstream `OFL.txt`,
+   * whose digest `tools/fonts/fonts.test.ts` pins, from its first line down.
+   */
+  function canonicalText(licence: string): Buffer {
+    if (licence === 'OFL-1.1') {
+      const upstream = readFileSync(
+        fileURLToPath(new URL('../../tools/fonts/barlow/OFL.txt', import.meta.url)),
+        'utf8',
+      );
+      const at = upstream.indexOf(LICENCE_BODY_STARTS);
+      expect(at, 'the upstream OFL.txt does not hold the licence’s first line').toBeGreaterThan(0);
+      return Buffer.from(upstream.slice(at), 'utf8');
+    }
+    return readFileSync(fileURLToPath(new URL(`${licence}.txt`, canonical)));
+  }
+
   it('names files that are in `public/`, byte-identical to the canonical texts', () => {
     // Relative to the page, so what `public/` holds is what `dist` serves.
     // The bytes are the text `LIC005` pins by digest in ADR 0001, so a copy
@@ -265,7 +285,7 @@ describe('the licence texts this app ships — #597', () => {
     for (const [licence, link] of shipped) {
       expect(link.startsWith('./'), `${link} is not relative to the page`).toBe(true);
       const bytes = readFileSync(fileURLToPath(new URL(link.slice(2), publicDirectory)));
-      const expected = readFileSync(fileURLToPath(new URL(`${licence}.txt`, canonical)));
+      const expected = canonicalText(licence);
       expect(bytes.equals(expected), `${link} is not the canonical ${licence} text`).toBe(true);
     }
   });
@@ -284,6 +304,9 @@ describe('the licence texts this app ships — #597', () => {
       ).toHaveLength(1);
     }
     expect(licenceTerms('Apache-2.0')).toBe('licence-copy');
+    expect(licenceTerms('OFL-1.1')).toBe('licence-copy');
+    // Equality, never a prefix: a Reserved-Font-Name face is not this one.
+    expect(licenceTerms('OFL-1.1-RFN')).toBe('unclassified');
     expect(licenceTerms('CC0-1.0')).toBe('nothing');
     expect(licenceTerms('CC-BY-4.0')).toBe('attribution');
     expect(licenceTerms('MIT')).toBe('unclassified');

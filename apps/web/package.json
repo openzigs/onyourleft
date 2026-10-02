@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "wordmark:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/brand/game-wordmark.ts",
+    "fonts:subset": "node --import ./tools/ts-extensionless-resolve.mjs tools/fonts/subset-fonts.ts",
     "glyphs:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/glyphs/generate-glyphs.ts",
     "realistic:fetch": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/fetch-assets.ts",
     "realistic:process": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/process-assets.ts",
