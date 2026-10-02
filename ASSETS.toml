@@ -1553,3 +1553,61 @@ input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
 inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
 script = "apps/web/tools/brand/game-wordmark.ts"
 tool = "Node.js 24 (.nvmrc), then KTX-Software v4.4.2"
+
+# ---------------------------------------------------------------------------
+# The display face (#991, ADR 0043): Barlow 1.408 by Jeremy Tribby, under the
+# SIL Open Font License 1.1, which ADR 0043 D-1 admits for a FONT FILE under
+# apps/ only (ASSET004). The two upstream weights are committed as the
+# subsetter's INPUT and ship in nothing, so they carry no `creator` and are not
+# on the credits screen, which lists what ships (the Roboto rows' shape). The
+# WOFF2 subsets are what the app serves, and each carries the copyright notice
+# in its name table as well as here. The upstream OFL.txt is committed beside
+# the inputs; it declares no Reserved Font Name (ADR 0043 D-3), and its licence
+# text ships as apps/web/public/licences/OFL-1.1.txt. Made by
+# `pnpm --filter @onyourleft/web run fonts:subset` with fontTools 4.66.1 and
+# Brotli 1.2.0 (tools/fonts/font-recipe.ts); `--check` re-makes them byte for
+# byte, by hand, because CI has no fontTools; `tools/fonts/fonts.test.ts` holds
+# these rows, the inputs and what each subset holds, in CI.
+# ---------------------------------------------------------------------------
+
+[[asset]]
+path = "apps/web/tools/fonts/barlow/Barlow-Bold.ttf"
+source = "Barlow 1.408, Barlow-Bold.ttf from google/fonts at commit 9710da1eacb3be272583c3224dcb70f9da6eadbb (ofl/barlow); upstream bytes, unmodified — https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-Bold.ttf"
+licence = "OFL-1.1"
+read = "2026-10-02"
+sha256 = "84e6a4d61e7c3e21f3c50ea6a4f7e5303a3467864c038be6ea3759bab8d547f9"
+
+[[asset]]
+path = "apps/web/tools/fonts/barlow/Barlow-ExtraBold.ttf"
+source = "Barlow 1.408, Barlow-ExtraBold.ttf from google/fonts at commit 9710da1eacb3be272583c3224dcb70f9da6eadbb (ofl/barlow); upstream bytes, unmodified — https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-ExtraBold.ttf"
+licence = "OFL-1.1"
+read = "2026-10-02"
+sha256 = "5234d91030e1bb89525cbaccc4386892c3fe005a0582c705264ce3572d96a1a1"
+
+[[asset]]
+path = "apps/web/src/design/fonts/barlow-latin-700.woff2"
+source = "Barlow 1.408 Bold, subset to the Latin range and written as WOFF2 by this repository's subsetting step (#991) from apps/web/tools/fonts/barlow/Barlow-Bold.ttf"
+licence = "OFL-1.1"
+read = "2026-10-02"
+sha256 = "01c859a540c25bf1ce94d0a21f17134d6f0aebf38d94a7ccbcb66db54b5173d5"
+creator = "Jeremy Tribby and the Barlow Project Authors (Barlow 1.408, Copyright 2017 The Barlow Project Authors)"
+url = "https://github.com/jpt/barlow"
+modified = "subset to the Latin range the interface uses, its hinting removed, and written as WOFF2 by fontTools; the outlines, the metrics, the family name and the copyright and licence records are unchanged"
+input = "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-Bold.ttf"
+inputsha256 = "84e6a4d61e7c3e21f3c50ea6a4f7e5303a3467864c038be6ea3759bab8d547f9"
+script = "apps/web/tools/fonts/subset-fonts.ts"
+tool = "fontTools 4.66.1 with Brotli 1.2.0"
+
+[[asset]]
+path = "apps/web/src/design/fonts/barlow-latin-800.woff2"
+source = "Barlow 1.408 ExtraBold, subset to the Latin range and written as WOFF2 by this repository's subsetting step (#991) from apps/web/tools/fonts/barlow/Barlow-ExtraBold.ttf"
+licence = "OFL-1.1"
+read = "2026-10-02"
+sha256 = "e393aeb9ce300cd46ac1a8c25071dc83f48e994c3934451d7bf7149d31e2c0fa"
+creator = "Jeremy Tribby and the Barlow Project Authors (Barlow 1.408, Copyright 2017 The Barlow Project Authors)"
+url = "https://github.com/jpt/barlow"
+modified = "subset to the Latin range the interface uses, its hinting removed, and written as WOFF2 by fontTools; the outlines, the metrics, the family name and the copyright and licence records are unchanged"
+input = "https://raw.githubusercontent.com/google/fonts/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/barlow/Barlow-ExtraBold.ttf"
+inputsha256 = "5234d91030e1bb89525cbaccc4386892c3fe005a0582c705264ce3572d96a1a1"
+script = "apps/web/tools/fonts/subset-fonts.ts"
+tool = "fontTools 4.66.1 with Brotli 1.2.0"

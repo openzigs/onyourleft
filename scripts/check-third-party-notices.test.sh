@@ -674,6 +674,41 @@ generate
 assert_exit 'a server SERVERS names that is not in the workspace fails rather than noticing nothing' 1
 assert_says 'as NOT002' 'NOT002 no workspace package is at apps/instance'
 
+# --- A font the repository commits and the app serves (#991, ADR 0043) --------
+#
+# A file, not a package, so no closure lists it: the reviewed list names it,
+# and its notice is the licence file committed beside its upstream input.
+
+new_fixture
+mkdir -p "${tmp}/apps/web/src/design/fonts" "${tmp}/apps/web/tools/fonts/face"
+printf 'wOF2' > "${tmp}/apps/web/src/design/fonts/face-800.woff2"
+printf 'Copyright 2017 The Face Project Authors\n\nSIL OPEN FONT LICENSE fixture text\n' \
+  > "${tmp}/apps/web/tools/fonts/face/OFL.txt"
+FONT='{"name":"Face","version":"1.0","licence":"OFL-1.1","files":["apps/web/src/design/fonts/face-800.woff2"],"licenceFile":"apps/web/tools/fonts/face/OFL.txt","by":"a script"}'
+inputs "{\"noLicenceFile\":{},\"copiedIntoBuild\":[],\"committedFonts\":[${FONT}]}"
+generate
+assert_exit 'generates with a committed font' 0
+assert_document_has 'lists it in part 5, with the file the app serves' \
+  'Face 1.0 — OFL-1.1: apps/web/src/design/fonts/face-800.woff2 (a script)'
+assert_document_has 'gives it an entry of its own' 'Name: Face'
+assert_document_has 'reproducing its copyright notice, verbatim' 'Copyright 2017 The Face Project Authors'
+assert_document_has 'and its licence, verbatim' 'SIL OPEN FONT LICENSE fixture text'
+rm "${tmp}/apps/web/tools/fonts/face/OFL.txt"
+generate
+assert_exit 'a committed font whose licence file is gone fails' 1
+assert_says 'as NOT005, naming the file' 'NOT005 the committed font Face 1.0 names files that are not in the repository: apps/web/tools/fonts/face/OFL.txt'
+
+new_fixture
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[],"committedFonts":[{"name":"Face","version":"1.0","licence":"OFL-1.1","files":["apps/web/src/design/fonts/gone.woff2"],"licenceFile":"LICENSES/Apache-2.0.txt","by":"a script"}]}'
+generate
+assert_exit 'a committed font file that is not in the repository fails' 1
+assert_says 'as NOT005, naming it' 'apps/web/src/design/fonts/gone.woff2'
+
+new_fixture
+generate
+assert_document_has 'says so when no font is committed, rather than leaving part 5 out' \
+  'Part 5 — fonts committed in the source repository and served by the app'
+
 # --- Deterministic --------------------------------------------------------------------
 
 new_fixture

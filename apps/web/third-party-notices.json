@@ -9,7 +9,8 @@
     "named so the notice says which package each came from.",
     "writtenByTheBundler: packages whose OWN code the bundler writes into dist, which no closure lists because they are build tools -- see WRITTEN_BY_THE_BUNDLER in the generator. Keyed by the INSTALLED name@version, so a bump fails closed (NOT008). 'files' are read verbatim from the installed package; 'from'/'through' cut a file down to the part that covers the code that ships.",
     "A copiedIntoBuild entry may carry 'vendored' (#618): the copied file is somebody else's work that its package vendors -- Binomial's Apache-2.0 transcoder inside the MIT three -- so its notice is written here, once per work, because the package's own licence field cannot say it.",
-    "vendoredIntoBundle (#618's review): files a package vendors from somebody else that the bundler writes into the app's OWN chunks -- three's examples/jsm/libs/ copies of KTX-Parse and zstddec, which KTX2Loader imports into the renderer chunk. Same 'vendored' shape as copiedIntoBuild; 'file' is the path inside the package and 'in' says which chunk carries it. apps/web/tools/notices/copied-into-build.ts fails the build over a bundled file from a VENDORED_DIRECTORIES directory this list does not name, and over a name the build no longer bundles."
+    "vendoredIntoBundle (#618's review): files a package vendors from somebody else that the bundler writes into the app's OWN chunks -- three's examples/jsm/libs/ copies of KTX-Parse and zstddec, which KTX2Loader imports into the renderer chunk. Same 'vendored' shape as copiedIntoBuild; 'file' is the path inside the package and 'in' says which chunk carries it. apps/web/tools/notices/copied-into-build.ts fails the build over a bundled file from a VENDORED_DIRECTORIES directory this list does not name, and over a name the build no longer bundles.",
+    "committedFonts (#991, ADR 0043): fonts this repository COMMITS and the app serves, which are files rather than packages and so in no closure. Each names the files the app serves and the licence file committed beside the upstream input, whose text Part 5 reproduces verbatim; apps/web/tools/fonts/fonts.test.ts holds the list to the files the subsetting step writes."
   ],
   "noLicenceFile": {
     "@mediapipe/tasks-vision@1.0.1": {
@@ -167,5 +168,18 @@
         }
       ]
     }
-  }
+  },
+  "committedFonts": [
+    {
+      "name": "Barlow",
+      "version": "1.408",
+      "licence": "OFL-1.1",
+      "files": [
+        "apps/web/src/design/fonts/barlow-latin-700.woff2",
+        "apps/web/src/design/fonts/barlow-latin-800.woff2"
+      ],
+      "licenceFile": "apps/web/tools/fonts/barlow/OFL.txt",
+      "by": "apps/web/tools/fonts/subset-fonts.ts"
+    }
+  ]
 }

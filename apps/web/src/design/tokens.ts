@@ -550,9 +550,9 @@ export const FONT_SIZE_TOKENS = {
   xxl: '1.953125rem',
   /**
    * Step 4 (#936). A hero title on a menu — the one line on a screen that says
-   * what the screen is for, set above the view title on the same ladder. The
-   * owner's D-5 on #935: `system-ui` at a heavier weight, and no font file;
-   * `theme.css` §`.oyl-display` is the rule that sets both.
+   * what the screen is for, set above the view title on the same ladder, at a
+   * heavier weight and — since #991 — in {@link FONT_FAMILY_TOKENS}' display
+   * face; `theme.css` §`.oyl-display` is the rule that sets all three.
    */
   display: '2.44140625rem',
   /**
@@ -573,6 +573,21 @@ export const FONT_SIZE_TOKENS = {
    * criterion still holds with room.
    */
   metric: '3.814697265625rem',
+} as const satisfies Record<string, string>;
+
+/**
+ * The font families, by role — #991, ADR 0043.
+ *
+ * `display` is the bundled face, Barlow (SIL OFL 1.1, subset and committed
+ * under `design/fonts/` by `tools/fonts/subset-fonts.ts`), in front of the
+ * same system stack `body` uses, so a weight it does not carry or a character
+ * outside its Latin range falls back to the page's own face rather than to a
+ * missing glyph. Chosen against Barlow Condensed, Saira, Archivo, Exo 2 and
+ * Rajdhani on legibility, true tabular figures, weights and size; ADR 0043
+ * D-6 records the measurements.
+ */
+export const FONT_FAMILY_TOKENS = {
+  display: "'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif",
 } as const satisfies Record<string, string>;
 
 /**
