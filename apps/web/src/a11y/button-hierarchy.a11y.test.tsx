@@ -45,6 +45,7 @@ import { unixSeconds } from '@onyourleft/domain';
 import { recordingSessionId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import type { RideController, RideSnapshot } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { ALL_ROUTES, routeById, type RouteDefinition } from '../shell/routes';
@@ -53,7 +54,13 @@ import { answerTwoPanes } from '../testing/panes';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { ActivitiesView } from '../views/ActivitiesView';
 
-import { buttonsByView, onePrimaryViolations, primaryUnits } from './button-hierarchy';
+import {
+  buttonHierarchyViolations,
+  buttonsByView,
+  dangerOutsideModalViolations,
+  onePrimaryViolations,
+  primaryUnits,
+} from './button-hierarchy';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
 const THEME = readFileSync(
@@ -438,5 +445,84 @@ describe('the control — a view with two primaries is reported', () => {
       </main>,
     );
     expect(onePrimaryViolations(document)).toEqual([]);
+  });
+});
+
+/**
+ * #1002: the danger kind, and the modal dialog it lives in. The owner's
+ * ruling: danger does NOT count toward one primary per view, because it lives
+ * only inside a modal — so the rule is that it may appear nowhere else, and a
+ * modal is a view of its own whose one primary is the safe answer.
+ */
+describe('#1002 — the danger kind lives only in a modal dialog', () => {
+  it('the control — a danger button loose in a main is reported, by name', async () => {
+    mounted = await mount(
+      <main>
+        <Button>Start recording</Button>
+        <Button variant="danger">Delete the ride</Button>
+      </main>,
+    );
+    expect(dangerOutsideModalViolations(document)).toEqual([
+      'a danger button outside a modal dialog: “Delete the ride”',
+    ]);
+    // And through the one function the route walk calls.
+    expect(buttonHierarchyViolations(document)).toEqual([
+      'a danger button outside a modal dialog: “Delete the ride”',
+    ]);
+  });
+
+  it('is not a primary: one primary and a danger in a modal is one primary', async () => {
+    mounted = await mount(
+      <main>
+        <Button>Start recording</Button>
+        <div role="alertdialog" aria-modal="true" aria-label="Delete it?">
+          <Button>Keep the ride</Button>
+          <Button variant="danger">Delete the ride</Button>
+        </div>
+      </main>,
+    );
+    // The modal's primary is counted in the modal, not against the main.
+    expect(primaryUnits(document).map((unit) => [unit.where, unit.primaries.length])).toEqual([
+      ['main', 1],
+      ['a modal dialog', 1],
+    ]);
+    expect(buttonHierarchyViolations(document)).toEqual([]);
+  });
+
+  it('the control — two primaries in one modal dialog are reported', async () => {
+    mounted = await mount(
+      <div role="alertdialog" aria-modal="true" aria-label="Delete it?">
+        <Button>Keep the ride</Button>
+        <Button>Delete the ride</Button>
+      </div>,
+    );
+    expect(onePrimaryViolations(document)).toEqual([
+      '2 primary buttons in one view (a modal dialog): “Keep the ride”, “Delete the ride”',
+    ]);
+  });
+
+  it('the real confirmation: the safe answer is its one primary, and the danger is inside it', async () => {
+    mounted = await mount(
+      <main>
+        <Button>Start a ride</Button>
+        <ConfirmDialog
+          open
+          onOpenChange={() => undefined}
+          title="Delete “Tuesday hills”?"
+          confirmLabel="Delete the ride"
+          cancelLabel="Keep the ride"
+          onConfirm={() => undefined}
+        >
+          <p>Deleting a ride cannot be undone.</p>
+        </ConfirmDialog>
+      </main>,
+    );
+    await settle();
+    const modal = primaryUnits(document).find((unit) => unit.where === 'a modal dialog');
+    expect(modal?.primaries.map((element) => element.textContent)).toEqual(['Keep the ride']);
+    expect(
+      [...document.querySelectorAll('.oyl-button--danger')].map((element) => element.textContent),
+    ).toEqual(['Delete the ride']);
+    expect(buttonHierarchyViolations(document)).toEqual([]);
   });
 });

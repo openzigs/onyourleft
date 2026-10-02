@@ -289,7 +289,7 @@ async function readRoute(page: Page): Promise<RoutePaint> {
       ),
       primaries: [
         ...document.querySelectorAll<HTMLButtonElement>(
-          'button.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle):not(:disabled)',
+          'button.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle):not(.oyl-button--danger):not(:disabled)',
         ),
       ].map((button) => {
         const style = getComputedStyle(button);

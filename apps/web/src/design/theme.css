@@ -104,6 +104,8 @@
   --oyl-color-danger-surface: #fbe8e8;
   --oyl-color-danger-ink: #7a1d1d;
   --oyl-color-danger-border: #a83232;
+  --oyl-color-danger-action: #9e2626;
+  --oyl-color-danger-action-ink: #ffffff;
 
   /* The illustration palette (#936) — decoration, painted only by art. What
      may be drawn OVER each is a pair in `tokens.ts` §CONTRAST_REQUIREMENTS. */
@@ -262,6 +264,8 @@
   --oyl-color-danger-surface: #3a1818;
   --oyl-color-danger-ink: #f4b8b8;
   --oyl-color-danger-border: #d46a6a;
+  --oyl-color-danger-action: #f08c8c;
+  --oyl-color-danger-action-ink: #2a0d0d;
 
   /* Nearer is LIGHTER here, as the elevation ramp is (`tokens.ts`
      §ILLUSTRATION_DEPTH). */
@@ -1870,8 +1874,9 @@ a.oyl-button {
  *   and two above the page — with the accent's label and no outline. Its
  *   border is drawn in its own fill, so every kind keeps the same box.
  * - **Tertiary** is TEXT: the accent's label, underlined, on whatever it sits
- *   on, with no fill and no edge. For the lowest action beside a primary — a
- *   dialog's way out (`ConfirmDialog.tsx`).
+ *   on, with no fill and no edge. For the lowest action beside a primary.
+ * - **Danger** (#1002) is the destructive answer in a confirmation, drawn
+ *   below the tertiary's rules: lighter than the primary it stands beside.
  * - **Toggle** is drawn as a secondary when off. When on (`aria-pressed`) it
  *   takes the `selected` fill AND the accent's border with a second ring
  *   inside it — a border twice as heavy, where an off toggle has none —
@@ -1951,6 +1956,34 @@ a.oyl-button {
   border-color: transparent;
   color: var(--oyl-color-accent-hover);
   text-decoration-thickness: 2px;
+}
+
+/*
+ * The danger kind — #1002, the owner's ruling of 2026-10-02. The destructive
+ * answer in a confirmation (`design/ConfirmDialog.tsx`), and ONLY there:
+ * `a11y/button-hierarchy.ts` §`dangerOutsideModalViolations` fails one drawn
+ * anywhere but inside an open modal dialog.
+ *
+ * Red-toned and plainly destructive, and deliberately LIGHTER than the safe
+ * answer beside it, which is the filled primary: a pale `danger-surface` fill
+ * with a `danger-action` edge and label. Under a pointer or a press it fills
+ * with `danger-action`, the one moment it is the heaviest thing in the dialog,
+ * because the rider's hand is already on it. Every state is a pair in
+ * `tokens.ts` §`CONTRAST_REQUIREMENTS`, in both palettes. Colour is never the
+ * whole signal: the label names the action, and under forced colours the edge
+ * is DASHED (below), so it is told from the safe answer by its shape.
+ */
+.oyl-button--danger {
+  border: 2px solid var(--oyl-color-danger-action);
+  background: var(--oyl-color-danger-surface);
+  color: var(--oyl-color-danger-action);
+}
+
+.oyl-button--danger:hover:not(:disabled),
+.oyl-button--danger:active:not(:disabled) {
+  background: var(--oyl-color-danger-action);
+  border-color: var(--oyl-color-danger-action);
+  color: var(--oyl-color-danger-action-ink);
 }
 
 /* A toggle that is on: the `selected` fill and a doubled border (SC 1.4.1). */
@@ -3911,6 +3944,8 @@ p > label + input[type='file'] {
   --oyl-color-danger-surface: #fbe8e8;
   --oyl-color-danger-ink: #7a1d1d;
   --oyl-color-danger-border: #a83232;
+  --oyl-color-danger-action: #9e2626;
+  --oyl-color-danger-action-ink: #ffffff;
   --oyl-color-illo-sky: #cfe4ef;
   --oyl-color-illo-sun: #f4c65a;
   --oyl-color-illo-hill-far: #a7d3a3;
@@ -4944,6 +4979,13 @@ p > label + input[type='file'] {
     border-style: double;
     border-width: 4px;
     padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+  }
+
+  /* #1002: a forced palette paints every button's edge and fill in the same
+     system colours, so the destructive answer would be the safe one's twin.
+     Its edge is dashed instead — a shape, which the forced palette keeps. */
+  .oyl-button--danger {
+    border-style: dashed;
   }
 
   /* #992: a filled tile is a fill, which a forced palette flattens into the

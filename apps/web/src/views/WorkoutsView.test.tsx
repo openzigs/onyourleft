@@ -272,14 +272,25 @@ describe('deleting a workout asks first', () => {
   it('names the workout in the confirmation', async () => {
     const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    expect(view.container.textContent).toContain('Delete “Sweet spot”?');
+    expect(document.body.textContent).toContain('Delete “Sweet spot”?');
+  });
+
+  it('puts the safe answer first, filled and focused, and the delete as danger (#1002)', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
+    await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    const keep = buttonSaying(document.body, 'Keep it') as HTMLElement;
+    const remove = buttonSaying(document.body, 'Delete “Sweet spot”') as HTMLElement;
+    expect(document.activeElement).toBe(keep);
+    expect(keep.className).toBe('oyl-button');
+    expect(remove.className).toContain('oyl-button--danger');
   });
 
   it('keeps it when the rider says so', async () => {
     const stub = workoutStub(ATHLETE, [workout()]);
     const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    await activateWithKeyboard(buttonSaying(view.container, 'Keep it') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document.body, 'Keep it') as HTMLElement);
     await settle();
     expect(stub.rows()).toHaveLength(1);
   });
@@ -288,7 +299,7 @@ describe('deleting a workout asks first', () => {
     const stub = workoutStub(ATHLETE, [workout()]);
     const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document.body, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
     expect(stub.rows()).toEqual([]);
     // What the shell does when the delete moves the hash back to the list:
@@ -456,7 +467,7 @@ describe('#670 — a selected workout', () => {
     const view = await renderWithSave(stub, files);
     await activateWithKeyboard(buttonSaying(view.container, 'Export Sweet spot') as HTMLElement);
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    expect(view.container.textContent).toContain('Delete “Sweet spot”?');
+    expect(document.body.textContent).toContain('Delete “Sweet spot”?');
     expect(view.container.textContent).toContain('Sweet spot.oylworkout.json is ready');
 
     await view.rerender(
@@ -464,16 +475,16 @@ describe('#670 — a selected workout', () => {
     );
     await settle();
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe('Threshold');
-    expect(view.container.textContent).not.toContain('Delete “Sweet spot”?');
+    expect(document.body.textContent).not.toContain('Delete “Sweet spot”?');
     expect(view.container.textContent).not.toContain('is ready');
-    expect(buttonSaying(view.container, 'Delete “Sweet spot”')).toBeUndefined();
+    expect(buttonSaying(document.body, 'Delete “Sweet spot”')).toBeUndefined();
 
     // And coming back to the first does not bring them back either.
     await view.rerender(
       <WorkoutsView port={stub} now={() => 1_700_000_500} selected="workout-1" save={saveFile} />,
     );
     await settle();
-    expect(view.container.textContent).not.toContain('Delete “Sweet spot”?');
+    expect(document.body.textContent).not.toContain('Delete “Sweet spot”?');
     expect(view.container.textContent).not.toContain('is ready');
     expect(stub.rows()).toHaveLength(2);
   });
@@ -510,7 +521,7 @@ describe('#670 — a selected workout', () => {
     const stub = workoutStub(ATHLETE, [workout()]);
     const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document.body, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
     expect(globalThis.location.hash).toBe('#/workouts');
     globalThis.location.hash = '';
@@ -531,7 +542,7 @@ describe('each message is said once, in one live region', () => {
     const stub = workoutStub(ATHLETE, [workout()]);
     const view = await render(stub, undefined, 'workout-1');
     await activateWithKeyboard(buttonSaying(view.container, 'Delete Sweet spot') as HTMLElement);
-    await activateWithKeyboard(buttonSaying(view.container, 'Delete “Sweet spot”') as HTMLElement);
+    await activateWithKeyboard(buttonSaying(document.body, 'Delete “Sweet spot”') as HTMLElement);
     await settle();
     await view.rerender(<WorkoutsView port={stub} now={() => 1_700_000_500} />);
     await settle();

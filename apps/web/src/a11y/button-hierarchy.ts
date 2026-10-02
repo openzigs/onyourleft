@@ -39,11 +39,36 @@
  * again, and a pane the layout has `hidden` is left out of it, because it is
  * not on the page a rider scrolls: at one pane with an item chosen the list is
  * hidden and its *Build a workout* is not a second primary beside the item's.
+ *
+ * ## A modal dialog is a view of its own, and the danger kind lives only there — #1002
+ *
+ * An open modal (`[aria-modal="true"]`, `design/ConfirmDialog.tsx`) makes the
+ * page behind it inert, so while it is open it is the whole of what a rider
+ * can act on: it is counted as one more unit, and a primary inside it is
+ * never counted against the `main` it was opened from. Its safe answer is
+ * that one primary (the owner's ruling of 2026-10-02).
+ *
+ * The **danger** kind (`.oyl-button--danger`) is the destructive answer in
+ * such a dialog. It does NOT count toward the one primary — it is drawn
+ * lighter than one on purpose — and it may appear **only inside a modal**:
+ * {@link dangerOutsideModalViolations} reports one anywhere else, because a
+ * red button loose on a page is a destructive action with no question asked
+ * before it, and a second heavy colour competing with the view's primary.
  */
 
 /** Every element drawn as a primary button. */
 export const PRIMARY_BUTTON_SELECTOR =
-  '.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle)';
+  '.oyl-button:not(.oyl-button--secondary):not(.oyl-button--tertiary):not(.oyl-button--toggle):not(.oyl-button--danger)';
+
+/** Every element drawn as a danger button — #1002. */
+export const DANGER_BUTTON_SELECTOR = '.oyl-button--danger';
+
+/**
+ * An open modal dialog — what `a11y/audit.ts` §`openModal` reads too. ⚠️ It
+ * matches ANY `aria-modal="true"`, not only `design/ConfirmDialog.tsx`'s, so a
+ * future modal is held to one primary of its own and may hold a danger button.
+ */
+export const MODAL_SELECTOR = '[aria-modal="true"]';
 
 /** Every element drawn as a button of any kind. */
 export const ANY_BUTTON_SELECTOR = '.oyl-button';
@@ -85,8 +110,19 @@ export interface PrimaryUnit {
 
 /** The units the one-primary rule counts under `root`. @see LIST_DETAIL_MAIN_CLASS */
 export function primaryUnits(root: ParentNode): PrimaryUnit[] {
+  const inModal = (element: Element): boolean => element.closest(MODAL_SELECTOR) !== null;
+  const modals = [...root.querySelectorAll(MODAL_SELECTOR)].map((modal) => ({
+    where: 'a modal dialog',
+    primaries: [...modal.querySelectorAll(PRIMARY_BUTTON_SELECTOR)],
+  }));
+  return [...mainUnits(root, inModal), ...modals];
+}
+
+function mainUnits(root: ParentNode, inModal: (element: Element) => boolean): PrimaryUnit[] {
   return [...root.querySelectorAll('main')].flatMap((main) => {
-    const all = [...main.querySelectorAll(PRIMARY_BUTTON_SELECTOR)];
+    const all = [...main.querySelectorAll(PRIMARY_BUTTON_SELECTOR)].filter(
+      (element) => !inModal(element),
+    );
     if (!main.classList.contains(LIST_DETAIL_MAIN_CLASS)) {
       return [{ where: 'main', primaries: all }];
     }
@@ -129,4 +165,22 @@ export function onePrimaryViolations(root: ParentNode): string[] {
           .map((element) => `“${(element.textContent ?? '').replace(/\s+/g, ' ').trim()}”`)
           .join(', '),
     );
+}
+
+/**
+ * A sentence per danger button that is not inside an open modal dialog —
+ * #1002 — naming it by its text; empty when every one is.
+ */
+export function dangerOutsideModalViolations(root: ParentNode): string[] {
+  return [...root.querySelectorAll(DANGER_BUTTON_SELECTOR)]
+    .filter((element) => element.closest(MODAL_SELECTOR) === null)
+    .map(
+      (element) =>
+        `a danger button outside a modal dialog: “${(element.textContent ?? '').replace(/\s+/g, ' ').trim()}”`,
+    );
+}
+
+/** Every finding of this file's rules: {@link onePrimaryViolations} and {@link dangerOutsideModalViolations}. */
+export function buttonHierarchyViolations(root: ParentNode): string[] {
+  return [...onePrimaryViolations(root), ...dangerOutsideModalViolations(root)];
 }
