@@ -119,7 +119,9 @@ function DataTable({
   if (rows.length === 0) {
     return (
       <div className="oyl-panel">
-        <p className="oyl-muted">
+        {/* `oyl-table-empty`: the body of a table with no rows, which
+          `a11y/section-lines.ts` reads as the section's data, not prose (#1013). */}
+        <p className="oyl-muted oyl-table-empty">
           <strong>{caption}.</strong> {emptyMessage}
         </p>
       </div>

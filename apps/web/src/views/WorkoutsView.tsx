@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
+import { SectionHeading } from '../design/SectionHelp';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { WorkoutShape } from '../design/illustration/WorkoutShape';
 import { StatusMessage } from '../design/StatusMessage';
@@ -659,12 +660,20 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             three unnamed forms, which a landmark list cannot tell apart.
           */}
             <form aria-label="Add a block" onSubmit={onAddBlock}>
-              <h3>Add a block</h3>
-              <p>
-                Targets are a percentage of your own threshold power, so the same workout works
-                whatever shape you are in. A free-ride block releases the trainer instead of holding
-                a target.
-              </p>
+              {/* #1013: what a block does to the trainer is the section's one line;
+                why targets are a percentage is its help. */}
+              <SectionHeading
+                level={3}
+                help={
+                  <p>
+                    Targets are a percentage of your own threshold power, so the same workout works
+                    whatever shape you are in.
+                  </p>
+                }
+              >
+                Add a block
+              </SectionHeading>
+              <p>A free-ride block releases the trainer instead of holding a target.</p>
               <p>
                 <label htmlFor="block-kind">Kind</label>
                 <select
@@ -795,10 +804,15 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
               </Button>
             </form>
 
-            <h2>Import a workout</h2>
+            <SectionHeading
+              level={2}
+              help={<p>Files from other training apps are not read yet.</p>}
+            >
+              Import a workout
+            </SectionHeading>
             <p>
               A workout file written by On Your Left. The file is read on this device and never sent
-              anywhere. Files from other training apps are not read yet.
+              anywhere.
             </p>
             <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
               <p>

@@ -114,15 +114,23 @@ function Saved({
   return (
     <div className="oyl-write-up">
       {earlier === undefined ? undefined : <p className="oyl-write-up__state">{earlier}</p>}
-      <p>
+      {/* #1013: the framing (ADR 0035 D-9 A), what was sent and what the
+        write-up leaves out stay beside the text, never behind a help: a model's
+        words read without them read as this app's. Marked on each paragraph so
+        the layout does not move. */}
+      <p data-oyl-kept-visible="">
         <strong>{WRITE_UP_FRAMING_LEAD}</strong> {WRITE_UP_FRAMING_REST}
       </p>
       <blockquote className="oyl-write-up__text">{shown.text}</blockquote>
-      <p className="oyl-muted">
+      <p className="oyl-muted" data-oyl-kept-visible="">
         {WRITE_UP_SOURCE_TEXT[shown.source]}{' '}
         {WRITE_UP_POSE_TEXT[shown.includedPose ? 'included' : 'left-out']}
       </p>
-      {missing === undefined ? undefined : <p className="oyl-muted">{missing}</p>}
+      {missing === undefined ? undefined : (
+        <p className="oyl-muted" data-oyl-kept-visible="">
+          {missing}
+        </p>
+      )}
     </div>
   );
 }

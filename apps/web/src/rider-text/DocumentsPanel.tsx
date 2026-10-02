@@ -25,6 +25,7 @@ import {
 
 import { Button } from '../design/Button';
 import { FileDrop } from '../design/FileDrop';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { RIDER_TEXT_NO_STORE } from './RiderTextBox';
 import { RiderTextDisclosure } from './RiderTextDisclosure';
@@ -182,7 +183,19 @@ export function DocumentsPanel({
 
   return (
     <section className="oyl-panel oyl-rider-text" aria-labelledby="oyl-documents-heading">
-      <h3 id="oyl-documents-heading">{DOCUMENTS_HEADING}</h3>
+      {/* #1013: what a document may be is the section's help, behind its ⓘ; the
+        file input still names it as its description. */}
+      <SectionHeading
+        level={3}
+        id="oyl-documents-heading"
+        help={
+          <p id={`${inputId}-lead`} className="oyl-muted">
+            {DOCUMENTS_LEAD}
+          </p>
+        }
+      >
+        {DOCUMENTS_HEADING}
+      </SectionHeading>
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
           {RIDER_TEXT_NO_STORE}
@@ -207,9 +220,6 @@ export function DocumentsPanel({
                 }}
               />
             </FileDrop>
-          </p>
-          <p id={`${inputId}-lead`} className="oyl-muted">
-            {DOCUMENTS_LEAD}
           </p>
           {documents.length === 0 ? (
             <p className="oyl-muted">{DOCUMENTS_EMPTY}</p>

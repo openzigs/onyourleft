@@ -71,6 +71,7 @@ import {
   Sky,
   WorkoutShape,
 } from '../design/illustration';
+import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration, formatStartedAt } from '../format';
@@ -534,8 +535,14 @@ function ThisWeek({
 }): JSX.Element {
   return (
     <section className="oyl-panel oyl-home__week" aria-labelledby="oyl-home-week">
-      <h2 id="oyl-home-week">This week</h2>
-      <p className="oyl-muted">Today and the six days before it, against the seven before those.</p>
+      {/* #1013: which seven days these are is the section's help. */}
+      <SectionHeading
+        level={2}
+        id="oyl-home-week"
+        help={<p>Today and the six days before it, against the seven before those.</p>}
+      >
+        This week
+      </SectionHeading>
       {week.rides === 0 ? (
         <p>No rides in the last seven days.</p>
       ) : (

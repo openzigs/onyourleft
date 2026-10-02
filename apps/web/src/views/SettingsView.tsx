@@ -478,9 +478,6 @@ export function SettingsView({
                   </label>
                 ))}
               </div>
-              <p id="oyl-units-detail" className="oyl-muted">
-                {CHOICES[units].detail}
-              </p>
             </fieldset>
           )}
 
@@ -490,7 +487,12 @@ export function SettingsView({
             </StatusMessage>
           )}
 
+          {/* #1013: what the chosen units mean is the fieldset's description, and
+            here rather than a second line under the heading. */}
           <MoreAbout about="units">
+            <p id="oyl-units-detail" className="oyl-muted">
+              {CHOICES[units].detail}
+            </p>
             <p className="oyl-muted">
               A rider who wants miles for distance and metres for climbing cannot have that — the
               whole app follows one setting, and splitting it later is something we can add without
@@ -759,9 +761,6 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
             </label>
           ))}
         </div>
-        <p id="oyl-appearance-detail" className="oyl-muted">
-          {THEME_CHOICE_TEXT[choice].detail}
-        </p>
       </fieldset>
       <p className="oyl-muted">{APPEARANCE_STAYS_HERE}</p>
       {message === undefined ? null : (
@@ -769,7 +768,11 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
           {message.text}
         </StatusMessage>
       )}
+      {/* #1013: what the chosen palette means is the fieldset's description, here. */}
       <MoreAbout about="light and dark">
+        <p id="oyl-appearance-detail" className="oyl-muted">
+          {THEME_CHOICE_TEXT[choice].detail}
+        </p>
         <p className="oyl-muted">{APPEARANCE_STARTS_DARK}</p>
         <dl className="oyl-muted">
           {THEME_CHOICES.map((option) => (
@@ -1023,10 +1026,6 @@ function GameWorldPanel({
   return (
     <section className="oyl-panel oyl-announce oyl-world" aria-labelledby="oyl-world-heading">
       <h3 id="oyl-world-heading">Game world</h3>
-      <p className="oyl-muted">
-        The trainer game draws a standard world unless you choose the realistic one: photographic
-        road, ground and sky, photoscanned trees and a modelled rider.
-      </p>
       <p>
         <label className="oyl-announce__switch">
           <input
@@ -1051,7 +1050,12 @@ function GameWorldPanel({
           {message.text}
         </StatusMessage>
       )}
+      {/* #1013: the section keeps its switch, and what the two worlds are is here. */}
       <MoreAbout about="the realistic world">
+        <p className="oyl-muted">
+          The trainer game draws a standard world unless you choose the realistic one: photographic
+          road, ground and sky, photoscanned trees and a modelled rider.
+        </p>
         <p className="oyl-muted">
           It asks much more of the device. If the device gets too hot during a ride, the rest of
           that ride is in the standard world and the ride screen says so. It has been measured on
@@ -1307,15 +1311,25 @@ function WeightPanel({
         />
       )}
 
+      {/* #1013: the weight rides use is the section's one line; why an assumed
+        one is wrong, the bicycle and how to clear it are in the More about. */}
       <p className="oyl-muted">
         {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
-        {measurementText(formatMass(current.mass, units))}
-        {current.assumed
-          ? '. That is a stand-in and not a measurement, and it is wrong for almost everybody.'
-          : '.'}{' '}
-        A bicycle is added to it — the game rides a rider and a bike, not a rider.
+        {measurementText(formatMass(current.mass, units))}.
       </p>
       <MoreAbout about="your weight">
+        {current.assumed ? (
+          <p className="oyl-muted">
+            That is a stand-in and not a measurement, and it is wrong for almost everybody.
+          </p>
+        ) : null}
+        <p className="oyl-muted">
+          A bicycle is added to it — the game rides a rider and a bike, not a rider.
+        </p>
+        <p className="oyl-muted">
+          Leave it blank to go back to the assumed{' '}
+          {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
+        </p>
         <p className="oyl-muted">
           The trainer game works out how fast you are going from how hard you are pedalling, and
           what you weigh is most of the answer on a climb.
@@ -1563,10 +1577,6 @@ function WeightField({
             }}
           />
         </Stepper>
-      </p>
-      <p className="oyl-muted">
-        Leave it blank to go back to the assumed{' '}
-        {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
       </p>
       <Button
         onClick={() => {

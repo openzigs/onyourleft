@@ -38,7 +38,8 @@ import type { Kilograms } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { FileDrop } from '../design/FileDrop';
-import { MoreAbout } from '../design/MoreAbout';
+import { KeptVisible, MoreAbout } from '../design/MoreAbout';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
 import { formatDistance, measurementText } from '../units/format';
@@ -84,12 +85,24 @@ import {
 export const FILES_KEPT_VISIBLE: readonly string[] = [
   ...ERASE_REMOVES,
   ...ERASE_CANNOT_REACH,
+  'This removes everything this device holds about you.',
+  'There is no server and nothing has been uploaded, so there is nowhere else to ask',
+  'What goes:',
+  'What this cannot reach:',
   'Erasing the signing key cannot be undone, and it cannot be recreated.',
+  'Rides you have already exported go on verifying forever, but after this the device signs as a new identity.',
   'An exported file carries your real track — the ride as it was recorded, with nothing removed.',
   'Privacy zones exist for what gets published, and this is your own copy of your own data.',
+  // #1013: what the archive carries — what leaves the device in it.
+  'One file per ride plus',
+  'which carries your thresholds, privacy zones, routes, workouts and the public half of this device’s signing key.',
   'The archive holds your real tracks and the centres of your privacy zones.',
   'That is what makes it a complete copy, and it is why it deserves the same care as the rides themselves.',
   'Your private key is never written to any of it.',
+  // ADR 0009 R3, and #1013: whose names Strava and Zwift are is said where the
+  // names are used, so it is kept on the screen rather than in a section's help.
+  'Imports activity files exported from Strava.',
+  'On Your Left is not affiliated with, endorsed by, or derived from Strava or Zwift.',
 ];
 
 /** The ADR that explains why import is a file rather than a connection. */
@@ -241,17 +254,29 @@ export function TransferView({
         />
       )}
 
-      <h2>Why this is a file and not a connection</h2>
-      <p>
-        This project integrates with no other platform&rsquo;s API. Moving rides in and out is
-        something you do with files, which needs no account, no paid tier and nobody&rsquo;s
-        permission. The reasoning is recorded in{' '}
-        <a href={CLEAN_ROOM_ADR}>ADR 0009, the clean-room posture</a>.
-      </p>
-      <p>
-        Imports activity files exported from Strava. On Your Left is not affiliated with, endorsed
-        by, or derived from Strava or Zwift.
-      </p>
+      {/* #1013: the reasoning is the section's help. The statement that this app
+        is not Strava's or Zwift's stays on the screen (ADR 0009 R3): a name
+        another company owns is used here, and saying whose it is is the
+        condition of using it. */}
+      <SectionHeading
+        level={2}
+        help={
+          <p>
+            This project integrates with no other platform&rsquo;s API. Moving rides in and out is
+            something you do with files, which needs no account, no paid tier and nobody&rsquo;s
+            permission. The reasoning is recorded in{' '}
+            <a href={CLEAN_ROOM_ADR}>ADR 0009, the clean-room posture</a>.
+          </p>
+        }
+      >
+        Why this is a file and not a connection
+      </SectionHeading>
+      <KeptVisible>
+        <p>
+          Imports activity files exported from Strava. On Your Left is not affiliated with, endorsed
+          by, or derived from Strava or Zwift.
+        </p>
+      </KeptVisible>
     </>
   );
 }
@@ -804,7 +829,9 @@ function TakeEverythingPanel({
 
   return (
     <>
-      <p className="oyl-muted">
+      {/* #1013: what the archive carries is what leaves this device in it, so it
+        is kept on the screen beside what that means, not behind a help. */}
+      <p className="oyl-muted" data-oyl-kept-visible="">
         One file per ride plus <code>{MANIFEST_FILE_NAME}</code>, which carries your thresholds,
         privacy zones, routes, workouts and the public half of this device&rsquo;s signing key.
       </p>
@@ -1051,29 +1078,34 @@ function ErasePanel({
 
   return (
     <>
-      <p>
-        This removes everything this device holds about you. There is no server and nothing has been
-        uploaded, so there is nowhere else to ask &mdash; when this finishes, it is finished.
-      </p>
-      <p className="oyl-muted">What goes:</p>
-      <ul>
-        {ERASE_REMOVES.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-      <p className="oyl-muted">What this cannot reach:</p>
-      <ul>
-        {ERASE_CANNOT_REACH.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-      <p>
-        <strong>
-          Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
-          already exported go on verifying forever, but after this the device signs as a new
-          identity.
-        </strong>
-      </p>
+      {/* #1013: what an erase removes and cannot reach is kept on the screen
+        whole — it is the last thing read before something that cannot be
+        undone, and none of it is tucked behind the section's help. */}
+      <KeptVisible>
+        <p>
+          This removes everything this device holds about you. There is no server and nothing has
+          been uploaded, so there is nowhere else to ask &mdash; when this finishes, it is finished.
+        </p>
+        <p className="oyl-muted">What goes:</p>
+        <ul>
+          {ERASE_REMOVES.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <p className="oyl-muted">What this cannot reach:</p>
+        <ul>
+          {ERASE_CANNOT_REACH.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <p>
+          <strong>
+            Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
+            already exported go on verifying forever, but after this the device signs as a new
+            identity.
+          </strong>
+        </p>
+      </KeptVisible>
       <div className="oyl-transfer__form">
         <label htmlFor="oyl-erase-confirm">{`Type “${ERASE_CONFIRMATION}” to confirm`}</label>
         <input

@@ -130,16 +130,11 @@ export function BluetoothSupportNotice({
             Safari and Firefox have no Web Bluetooth implementation at all, on any platform, and
             both vendors have published positions against adding one. Nothing you have done is wrong
             and there is no setting that turns it on. Every browser on iPhone and iPad is Safari
-            underneath, so this is the same answer there whichever one you use.
+            underneath, so this is the same answer there whichever one you use. To record a ride,
+            open this app in {WORKING_BROWSERS}. Native apps for iPhone and Android are planned and
+            are the only path that will ever work on an iPhone. Everything else here works: rides
+            already on this device stay readable, and files can still be imported and exported.
           </StatusMessage>
-          <p>
-            To record a ride, open this app in {WORKING_BROWSERS}. Native apps for iPhone and
-            Android are planned and are the only path that will ever work on an iPhone.
-          </p>
-          <p className="oyl-muted">
-            Everything else here works: rides already on this device stay readable, and files can
-            still be imported and exported.
-          </p>
         </>
       );
 

@@ -66,6 +66,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from
 
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/MoreAbout';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   BYSTANDER_SENTENCE,
@@ -402,11 +403,20 @@ function Camera({
         y = 1,400 px under the consent text.
       */}
       <section aria-labelledby="oyl-camera-side-way">
-        <h3 id="oyl-camera-side-way">{SIDE_CAMERA_WAY_TITLE}</h3>
-        <p>
-          The way to use the camera with a ride is a spare phone on a tripod beside the bike, paired
-          with the tablet you ride with. The phone films; the tablet starts and stops it.
-        </p>
+        {/* #1013: the section keeps one line, and the rest is behind its ⓘ. */}
+        <SectionHeading
+          level={3}
+          id="oyl-camera-side-way"
+          help={
+            <p>
+              The way to use the camera with a ride is a spare phone on a tripod beside the bike,
+              paired with the tablet you ride with.
+            </p>
+          }
+        >
+          {SIDE_CAMERA_WAY_TITLE}
+        </SectionHeading>
+        <p>The phone films; the tablet starts and stops it.</p>
         {sidePairing === undefined ? (
           <p>{SIDE_CAMERA_UNAVAILABLE}</p>
         ) : (
@@ -693,8 +703,12 @@ function Camera({
             its only content." The words come from `camera/notice.ts`'s fixed
             table, which is where D-8 is enforced.
           */}
-          <p>{notice.explanation}</p>
-          {notice.instruction === null ? null : <p>{notice.instruction}</p>}
+          {/* #1013: what the camera is doing and has captured is the camera's
+            own privacy state (ADR 0029), so it is kept on the screen whole. */}
+          <KeptVisible>
+            <p>{notice.explanation}</p>
+            {notice.instruction === null ? null : <p>{notice.instruction}</p>}
+          </KeptVisible>
         </section>
       )}
     </section>

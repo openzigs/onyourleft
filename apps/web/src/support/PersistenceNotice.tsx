@@ -29,6 +29,7 @@
 
 import { useEffect, useState, type JSX } from 'react';
 
+import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage, type StatusTone } from '../design/StatusMessage';
 
 import {
@@ -112,7 +113,11 @@ export function PersistenceNotice({ storage }: PersistenceNoticeProps): JSX.Elem
       <StatusMessage tone={TONE[settled]} label={LABEL[settled]}>
         {TEXT[settled]}
       </StatusMessage>
-      <p className="oyl-muted">{CLEARING_STILL_REMOVES}</p>
+      {/* #1013: what clearing site data does is kept on the screen, not tucked:
+        it is what an erase of this browser's data cannot spare. */}
+      <KeptVisible>
+        <p className="oyl-muted">{CLEARING_STILL_REMOVES}</p>
+      </KeptVisible>
     </section>
   );
 }

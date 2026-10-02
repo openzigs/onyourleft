@@ -77,6 +77,16 @@
  * moved from below the actions to above them, which reorders that route's
  * populated walk and changes no word.
  *
+ * ⚠️ **Re-recorded by #1013**, when each section's explanation moved behind
+ * its ⓘ (`design/SectionHelp.tsx`). Nothing was lost: every route gained its
+ * sections' "Help with …" names, sentences moved order, and Analysis' empty
+ * walk says "A ride recorded without a power meter or a strap carries
+ * neither." in its Time in zone help, where it used to follow a ride with
+ * neither. One sentence is REWORDED, in the record in the same commit: the
+ * Routes import's "Turn it on for a circuit…" is read in the section's help
+ * now, above the switch rather than under it, so it names the switch — "Turn
+ * on “This route is a loop” for a circuit…".
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

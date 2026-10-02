@@ -994,6 +994,76 @@ h3:first-child {
 }
 
 /*
+ * A section's heading and its ⓘ — #1013 (`design/SectionHelp.tsx`).
+ *
+ * One row: the wrapper takes the heading's margins and is the ⓘ's containing
+ * block, the heading stops short of the ⓘ, and the ⓘ sits at the end of the
+ * heading's first line. The panel opens under the heading, in the flow, before
+ * the section's controls.
+ *
+ * The ⓘ is a 44 × 44 target DECLARED (SC 2.5.5, #316's reason), like
+ * `.oyl-help`'s: the glyph alone is 20 px, and `controls-first.browser.spec.ts`
+ * §"#1013" strips the declaration as its control. Its glyph is `accent`, the
+ * non-text pair the disclosure markers already use on both the page and a
+ * raised surface (SC 1.4.11), and the panel's words are `inkMuted`, the pair
+ * `.oyl-muted` already uses there — so no new contrast pair.
+ */
+.oyl-section-head {
+  position: relative;
+  margin: var(--oyl-space-lg) 0 var(--oyl-space-sm);
+}
+
+.oyl-section-head:has(> h2) {
+  margin-top: var(--oyl-space-xl);
+}
+
+.oyl-section-head:first-child {
+  margin-top: 0;
+}
+
+.oyl-section-head > :is(h2, h3, h4) {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin: 0;
+  padding-inline-end: calc(2.75rem + var(--oyl-space-xs));
+}
+
+.oyl-section-help > summary {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  border-radius: 50%;
+  color: var(--oyl-color-accent);
+  cursor: pointer;
+  list-style: none;
+}
+
+.oyl-section-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.oyl-section-help > summary > svg {
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+}
+
+.oyl-section-help__panel {
+  margin-block-start: var(--oyl-space-xs);
+  color: var(--oyl-color-ink-muted);
+}
+
+.oyl-section-help__panel > :is(p, ul, dl) {
+  margin-block: 0 var(--oyl-space-sm);
+}
+
+/*
  * A route's safety and privacy sentences, below its controls — #993
  * (`ScreenHelp.tsx` §`ScreenNotes`). Compact, and still text on the page:
  * `inkMuted` on `canvas` is a declared AA text pair.
@@ -1170,8 +1240,11 @@ h3:first-child {
  * the DOM, so the heading is not `:first-child` at two panes and kept the
  * 40 px `h2` gap — the list's heading sat 40 px below the detail's on every
  * list–detail route. `list-detail.browser.spec.ts` §"#730" holds them level.
+ * Since #1013 a list heading may carry an ⓘ (`design/SectionHelp.tsx`), whose
+ * wrapper takes the heading's margins, so it is held the same way.
  */
-.oyl-pane-skip + h2 {
+.oyl-pane-skip + h2,
+.oyl-pane-skip + .oyl-section-head {
   margin-top: 0;
 }
 

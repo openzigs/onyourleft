@@ -17,6 +17,7 @@ import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Reading } from '../design/Reading';
 import { EmptyState } from '../design/EmptyState';
+import { KeptVisible } from '../design/MoreAbout';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -249,6 +250,16 @@ type LoadState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly rows: readonly LibraryRow[]; readonly total: number }
   | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * What the Activities screen keeps on the screen whatever its length — #1013:
+ * that the rides are here and nowhere else, and that clearing this browser's
+ * site data deletes them.
+ */
+export const ACTIVITIES_KEPT_VISIBLE: readonly string[] = [
+  'Rides are stored on this device and nowhere else.',
+  'clearing this browser’s site data deletes them',
+];
 
 export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.Element {
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
@@ -612,10 +623,14 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         </p>
       </ConfirmDialog>
 
-      <p className="oyl-muted">
-        Rides are stored on this device and nowhere else. There is no account and no server, so
-        clearing this browser&rsquo;s site data deletes them — export anything you want to keep.
-      </p>
+      {/* #1013: where the rides are, and what clearing site data does to them,
+        is kept on the screen whole. */}
+      <KeptVisible>
+        <p className="oyl-muted">
+          Rides are stored on this device and nowhere else. There is no account and no server, so
+          clearing this browser&rsquo;s site data deletes them — export anything you want to keep.
+        </p>
+      </KeptVisible>
     </div>
   );
 

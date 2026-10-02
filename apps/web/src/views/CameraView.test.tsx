@@ -61,6 +61,17 @@ afterEach(() => {
   mounted = undefined;
 });
 
+/**
+ * The screen's markup, for the frame-locator scan — without the SVG namespace
+ * every inline icon declares (`xmlns="http://www.w3.org/2000/svg"`), which is
+ * a URL path to the scan and locates no picture. #1013 put an ⓘ (a Lucide
+ * icon) on the screen's sections; nothing else is taken out, so a real
+ * locator anywhere in the markup still fails.
+ */
+function screenHtml(): string {
+  return document.body.innerHTML.replaceAll('xmlns="http://www.w3.org/2000/svg"', '');
+}
+
 function controllerFor(camera: ReturnType<typeof scriptedCamera>): CameraController {
   return new CameraController({ port: camera.port, schedule: manualSchedule().schedule });
 }
@@ -267,7 +278,7 @@ describe('the camera itself', () => {
     expect(queryAll(document, 'img')).toHaveLength(0);
     expect(queryAll(document, 'video')).toHaveLength(0);
     expect(queryAll(document, 'canvas')).toHaveLength(0);
-    expect(frameLeaksIn(document.body.innerHTML)).toStrictEqual([]);
+    expect(frameLeaksIn(screenHtml())).toStrictEqual([]);
   });
 
   it('takes the consent back and stops the camera', async () => {
@@ -326,7 +337,7 @@ describe('the refusal screen', () => {
     }
     await activateWithKeyboard(on);
     await settle();
-    expect(frameLeaksIn(document.body.innerHTML)).toStrictEqual([]);
+    expect(frameLeaksIn(screenHtml())).toStrictEqual([]);
   });
 });
 
@@ -453,7 +464,7 @@ describe('keeping this ride’s pictures', () => {
     await settle();
     expect(document.body.textContent).toContain('holding 3 pictures');
     expect(queryAll(document, 'img')).toHaveLength(0);
-    expect(frameLeaksIn(document.body.innerHTML)).toStrictEqual([]);
+    expect(frameLeaksIn(screenHtml())).toStrictEqual([]);
   });
 
   it('offers no delete control when this device is holding nothing', async () => {
