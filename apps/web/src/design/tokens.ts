@@ -1243,6 +1243,13 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     where: 'secondary text on the app header',
   },
   {
+    foreground: 'ink',
+    background: 'surfaceOverlay',
+    minimum: AA_TEXT,
+    measured: { light: 13.15, dark: 10.57 },
+    where: "a route tile's facts band, on the game's chooser (#1011)",
+  },
+  {
     foreground: 'border',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,

@@ -194,7 +194,7 @@ describe('which world a ride draws — #475', () => {
     expect(mounted?.container.textContent).toContain(realisticWorldChosenText(false));
     expect(realisticWorldChosenText(false)).toContain('not kept on this device for use offline');
     const link = queryAll<HTMLAnchorElement>(mounted?.container ?? document, 'a').find(
-      (each) => each.textContent === 'Change this in Settings',
+      (each) => each.textContent === 'Change in Settings',
     );
     expect(link?.getAttribute('href')).toBe('#/settings');
   });
