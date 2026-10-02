@@ -36,6 +36,7 @@ import {
   DOCUMENTS_EMPTY,
   DOCUMENTS_FULL,
   DOCUMENTS_NOT_READ,
+  DOCUMENTS_READING,
   DocumentsPanel,
   documentAdded,
   documentRemoved,
@@ -82,11 +83,31 @@ async function open(port: RiderTextPort | undefined): Promise<void> {
       <DocumentsPanel port={port} />
     </main>,
   );
-  await settle();
-  await settle();
+  // The list is read from the store first, and until it is the panel offers
+  // no picker at all.
+  await until(() => !panelSays(DOCUMENTS_READING), 'the documents were read');
 }
 
-async function choose(file: File): Promise<void> {
+/**
+ * Settle until `done` holds (#952). The panel's add and remove are each a
+ * chain of tasks — a file read, an IndexedDB write, an IndexedDB read — and a
+ * fixed count of settles was not always enough on a loaded two-core runner.
+ * So every step here waits for what it is FOR, and fails naming it.
+ */
+async function until(done: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (done()) return;
+    await settle();
+  }
+  throw new Error(`never: ${what}`);
+}
+
+function panelSays(text: string): boolean {
+  return (document.body.textContent ?? '').includes(text);
+}
+
+/** Choose `file` in the picker, and wait until the panel says `outcome`. */
+async function choose(file: File, outcome: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>('input[type="file"]');
   if (input === null) throw new Error('no file input');
   const files = {
@@ -97,9 +118,7 @@ async function choose(file: File): Promise<void> {
   };
   Object.defineProperty(input, 'files', { value: files, configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle();
-  await settle();
-  await settle();
+  await until(() => status().includes(outcome), `the panel said “${outcome}”`);
 }
 
 /** Press the button whose accessible text is `name`, with the keyboard. */
@@ -127,8 +146,12 @@ describe('the documents panel (#836)', () => {
     await open(portOver(writer));
     expect(document.body.textContent).toContain(DOCUMENTS_EMPTY);
     expect(document.body.textContent).toContain(RIDER_TEXT_MODEL_WARNING);
-    await choose(new File(['# Base plan\r\n\r\nThree rides a week.'], 'Base plan.md'));
-    expect(status()).toContain(documentAdded('Base plan.md'));
+    await choose(
+      new File(['# Base plan\r\n\r\nThree rides a week.'], 'Base plan.md'),
+      documentAdded('Base plan.md'),
+    );
+    // The list is read again after the write, so it follows the status line.
+    await until(() => listed().length > 0, 'the document was listed');
     expect(listed()).toStrictEqual(['Base plan.md (32 characters)']);
     const onDisk = await kept();
     expect(onDisk.map((row) => [row.name, row.text])).toStrictEqual([
@@ -140,10 +163,11 @@ describe('the documents panel (#836)', () => {
 
   it('refuses a PDF and a file that is not UTF-8, and writes nothing for either', async () => {
     await open(portOver(writer));
-    await choose(new File(['%PDF-1.7'], 'plan.pdf'));
-    expect(status()).toContain(DOCUMENT_REFUSAL_TEXT['not-text']);
-    await choose(new File([new Uint8Array([0x63, 0x61, 0x66, 0xe9])], 'plan.txt'));
-    expect(status()).toContain(DOCUMENT_REFUSAL_TEXT['not-utf8']);
+    await choose(new File(['%PDF-1.7'], 'plan.pdf'), DOCUMENT_REFUSAL_TEXT['not-text']);
+    await choose(
+      new File([new Uint8Array([0x63, 0x61, 0x66, 0xe9])], 'plan.txt'),
+      DOCUMENT_REFUSAL_TEXT['not-utf8'],
+    );
     expect(await kept()).toStrictEqual([]);
   });
 
@@ -163,10 +187,8 @@ describe('the documents panel (#836)', () => {
     expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
     expect(await kept()).toHaveLength(1);
     await pressNamed(`${DOCUMENT_REMOVE_YES} Base plan.md`);
-    await settle();
-    await settle();
-    expect(status()).toContain(documentRemoved('Base plan.md'));
-    expect(listed()).toStrictEqual([]);
+    await until(() => status().includes(documentRemoved('Base plan.md')), 'the removal was said');
+    await until(() => listed().length === 0, 'the document left the list');
     expect(await kept()).toStrictEqual([]);
   });
 
@@ -183,8 +205,7 @@ describe('the documents panel (#836)', () => {
       ATHLETE_A,
     );
     await open(memory.port);
-    await choose(new File(['more'], 'more.md'));
-    expect(status()).toContain(DOCUMENTS_FULL);
+    await choose(new File(['more'], 'more.md'), DOCUMENTS_FULL);
     expect(memory.calls).not.toContain('putRiderText');
   });
 
@@ -192,8 +213,7 @@ describe('the documents panel (#836)', () => {
     const memory = memoryRiderText([], ATHLETE_A);
     await open(memory.port);
     memory.failNext = new Error('the disk is full');
-    await choose(new File(['text'], 'plan.txt'));
-    expect(status()).toContain(documentsFailure('the disk is full'));
+    await choose(new File(['text'], 'plan.txt'), documentsFailure('the disk is full'));
     expect(listed()).toStrictEqual([]);
   });
 
@@ -206,8 +226,7 @@ describe('the documents panel (#836)', () => {
     Object.defineProperty(file, 'arrayBuffer', {
       value: () => Promise.reject(new DOMException('gone', 'NotReadableError')),
     });
-    await choose(file);
-    expect(status()).toContain(DOCUMENT_FILE_NOT_READ);
+    await choose(file, DOCUMENT_FILE_NOT_READ);
     expect(listed()).toStrictEqual([]);
   });
 
@@ -229,9 +248,10 @@ describe('the documents panel (#836)', () => {
     memory.failNext = new Error('the disk is locked');
     await pressNamed('Remove Base plan.md');
     await pressNamed(`${DOCUMENT_REMOVE_YES} Base plan.md`);
-    await settle();
-    await settle();
-    expect(status()).toContain(documentsFailure('the disk is locked'));
+    await until(
+      () => status().includes(documentsFailure('the disk is locked')),
+      'the failed removal was said',
+    );
     expect(listed()).toStrictEqual(['Base plan.md (19 characters)']);
   });
 
