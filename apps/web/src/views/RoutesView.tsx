@@ -9,6 +9,7 @@ import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';
+import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { checkName, editRoute, LOOP_CHECKBOX_LABEL, type SaveRefusal } from '../routes/save';
 import { FILE_FIELD, LOOP_FIELD, routeFromImportForm } from '../routes/import-form';
@@ -573,11 +574,15 @@ function SelectedRoute({
       <dl className="oyl-activity-card__facts">
         <div>
           <dt>Distance</dt>
-          <dd>{routeLength(route.profile.totalDistance, units)}</dd>
+          <dd>
+            <Reading {...formatDistance(route.profile.totalDistance, units)} />
+          </dd>
         </div>
         <div>
           <dt>Climb</dt>
-          <dd>{routeClimb(route.profile.totalAscent, units)}</dd>
+          <dd>
+            <Reading {...formatSmallDistance(route.profile.totalAscent, units)} />
+          </dd>
         </div>
         <div>
           <dt>Shape</dt>

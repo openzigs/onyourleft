@@ -407,7 +407,7 @@ describe('the control — a view with two primaries is reported', () => {
     ]);
   });
 
-  it('counts a link drawn as a button, and not a secondary or a toggle', async () => {
+  it('counts a link drawn as a button, and not a secondary, a tertiary or a toggle', async () => {
     mounted = await mount(
       <main>
         <Button>Start recording</Button>
@@ -415,6 +415,7 @@ describe('the control — a view with two primaries is reported', () => {
           Import a GPX file
         </a>
         <Button variant="secondary">Pause</Button>
+        <Button variant="tertiary">Keep the ride</Button>
         <Button variant="toggle" pressed={false}>
           Mute sounds
         </Button>

@@ -11,14 +11,17 @@ import {
 } from 'react';
 
 /**
- * The three kinds of button — #668. A rider tells the action from the setting
- * by weight, so each kind has one job:
+ * The kinds of button — #668, and #992's tertiary. A rider tells the action
+ * from the setting by weight, so each kind has one job:
  *
- * - **`primary`** — the one action a view exists for. **At most one per
- *   view**, and that is a gate: `a11y/button-hierarchy.a11y.test.tsx` renders
- *   every route over a populated and an empty fixture and fails a `main` that
- *   holds two.
- * - **`secondary`** — every other action.
+ * - **`primary`** — the one action a view exists for, filled with the accent.
+ *   **At most one per view**, and that is a gate:
+ *   `a11y/button-hierarchy.a11y.test.tsx` renders every route over a populated
+ *   and an empty fixture and fails a `main` that holds two.
+ * - **`secondary`** — every other action, TONAL since #992: a filled surface
+ *   step, not an outline.
+ * - **`tertiary`** — text (#992): the lowest action beside a primary, such as
+ *   a dialog's way out.
  * - **`toggle`** — a single on/off that changes how something is shown or
  *   heard rather than what happens, such as *Mute sounds*. It carries
  *   `aria-pressed`, and it cannot be written without saying which way it
@@ -27,7 +30,7 @@ import {
  *   button at all but a native radio group styled `.oyl-segmented` (or, for
  *   four or more options, a native `<select>` — Activities' sort, #660).
  */
-export type ButtonVariant = 'primary' | 'secondary' | 'toggle';
+export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'toggle';
 
 /**
  * Which way a toggle stands, required exactly when the variant is `toggle`.
@@ -39,7 +42,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'toggle';
  * `@ts-expect-error`, which goes red (TS2578) the day it compiles.
  */
 export type ButtonKind =
-  | { readonly variant?: 'primary' | 'secondary'; readonly pressed?: never }
+  | { readonly variant?: 'primary' | 'secondary' | 'tertiary'; readonly pressed?: never }
   | { readonly variant: 'toggle'; readonly pressed: boolean };
 
 interface ButtonCommonProps {
@@ -119,6 +122,7 @@ export type ButtonProps = ButtonCommonProps & ButtonKind;
 const VARIANT_CLASS: Readonly<Record<ButtonVariant, string>> = {
   primary: 'oyl-button',
   secondary: 'oyl-button oyl-button--secondary',
+  tertiary: 'oyl-button oyl-button--tertiary',
   toggle: 'oyl-button oyl-button--toggle',
 };
 

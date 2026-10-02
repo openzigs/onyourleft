@@ -146,7 +146,17 @@
   --oyl-motion-medium: 200ms;
   --oyl-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
+  /*
+   * The body face — #992. Every word that is not a view's title or
+   * `.oyl-display`; the display face above is ADR 0043's (#991).
+   * `tokens.ts` §`FONT_FAMILY_TOKENS` holds the values.
+   */
+  --oyl-font-family-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   --oyl-radius: 0.375rem;
+  /* A card's or a panel's corner — #992: a filled tile is rounder than a
+     control on it, so the two read as an object and a thing you press. */
+  --oyl-radius-card: 0.75rem;
   --oyl-measure: 68ch;
 
   /*
@@ -281,11 +291,7 @@ body {
   padding: var(--oyl-safe-top) var(--oyl-safe-right) var(--oyl-safe-bottom) var(--oyl-safe-left);
   background: var(--oyl-color-canvas);
   color: var(--oyl-color-ink);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
+  font-family: var(--oyl-font-family-body);
   font-size: var(--oyl-font-size-md);
   line-height: 1.55;
 }
@@ -321,19 +327,28 @@ h3 {
   text-wrap: balance;
 }
 
+/*
+ * ⚠️ **A page title is the display step since #992** — the owner's ruling of
+ * 2026-10-02 on epic #935 ("a bold type scale"): every view's `h1` is
+ * `--oyl-font-size-display` at the heaviest weight, in the display face, and
+ * shares its declarations with `.oyl-display` below. A reviewer who remembers
+ * the `h1` at `xxl` is reading the old file. Section headings step down from
+ * it, `h2` at `xl` and `h3` at `lg`, both bold.
+ */
 h1 {
-  font-size: var(--oyl-font-size-xxl);
-  letter-spacing: -0.015em;
+  font-family: var(--oyl-font-family-display);
 }
 
 h2 {
   font-size: var(--oyl-font-size-xl);
+  font-weight: 700;
   letter-spacing: -0.01em;
   margin-top: var(--oyl-space-xl);
 }
 
 h3 {
   font-size: var(--oyl-font-size-lg);
+  font-weight: 700;
   margin-top: var(--oyl-space-lg);
 }
 
@@ -350,6 +365,7 @@ h3 {
  * 320 px viewport less its padding, and SC 1.4.10 forbids the sideways scroll
  * that would follow; `shell.browser.spec.ts` §"#936" measures it there.
  */
+h1,
 .oyl-display {
   font-family: var(--oyl-font-family-display);
   font-size: var(--oyl-font-size-display);
@@ -1039,15 +1055,20 @@ h3:first-child {
 
 .oyl-pane-list__item {
   padding: var(--oyl-space-sm) var(--oyl-space-md);
-  border: 1px solid var(--oyl-color-border);
-  border-radius: var(--oyl-radius);
+  border: 0;
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-surface-raised);
   overflow-wrap: anywhere;
 }
 
-/* The chosen item: a heavier edge, not a colour alone (SC 1.4.1), and `aria-current` says it. */
+/*
+ * The chosen item: an edge, not a colour alone (SC 1.4.1), and `aria-current`
+ * says it. An inset ring since #992, as an on toggle's is, so choosing an item
+ * moves no pixel of the list (the item has no border of its own to thicken).
+ * `accent` on `surfaceRaised` is a declared 3:1 pair in both palettes.
+ */
 .oyl-pane-list__item[aria-current='true'] {
-  border: 3px solid var(--oyl-color-accent);
-  padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+  box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
 }
 
 .oyl-pane-list__item a {
@@ -1096,10 +1117,10 @@ h3:first-child {
 .oyl-empty-state {
   --oyl-empty-state-art-height: 3rem;
   margin-block: var(--oyl-space-md);
-  padding: var(--oyl-space-md);
-  border: 1px solid var(--oyl-color-border);
-  border-radius: var(--oyl-radius);
-  background: var(--oyl-color-surface);
+  padding: var(--oyl-space-lg);
+  border: 0;
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-surface-raised);
 }
 
 .oyl-empty-state__art {
@@ -1425,9 +1446,34 @@ h3:first-child {
   height: 3rem;
 }
 
+/*
+ * A READING — #992 (`design/Reading.tsx`): large tabular numerals and a small
+ * unit label, the one size every menu's facts are set at. Tabular so a column
+ * of times does not jitter, and `xxl` because a reading is the thing a fact
+ * line exists to say. The unit sits on the numerals' baseline in `inkMuted`.
+ */
+.oyl-reading__value {
+  font-size: var(--oyl-font-size-xxl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.oyl-reading__unit {
+  font-size: var(--oyl-font-size-sm);
+  font-weight: 600;
+  color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * The facts' tracks are 9rem since #992: a time of `10:23:45` in the reading's
+ * tabular `xxl` is about 8.5rem, and a track narrower than its numerals spills
+ * onto the fact beside it, which is #259's failure in a new place.
+ */
 .oyl-home__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: var(--oyl-space-sm);
   margin: 0;
 }
@@ -1738,16 +1784,27 @@ a.oyl-button {
  * THE THREE KINDS OF BUTTON — #668. `design/Button.tsx` §`ButtonVariant` says
  * when each is used; this is how each is drawn, in every state.
  *
- * - **Primary** is the only FILLED one, so it is the heaviest control on any
- *   screen, and `a11y/button-hierarchy.a11y.test.tsx` holds every view to at
- *   most one of it.
- * - **Secondary** is an outline: the accent's border and label on the page.
+ * ⚠️ **Every kind is FILLED since #992** (the owner's ruling of 2026-10-02 on
+ * epic #935), and a reviewer who remembers the secondary as an outline is
+ * reading the old file.
+ *
+ * - **Primary** is filled with the accent, so it is the heaviest control on
+ *   any screen, and `a11y/button-hierarchy.a11y.test.tsx` holds every view to
+ *   at most one of it.
+ * - **Secondary** is TONAL: a filled surface step, `surfaceOverlay` — the top
+ *   of the elevation ramp, so it stands a step above a tile (`surfaceRaised`)
+ *   and two above the page — with the accent's label and no outline. Its
+ *   border is drawn in its own fill, so every kind keeps the same box.
+ * - **Tertiary** is TEXT: the accent's label, underlined, on whatever it sits
+ *   on, with no fill and no edge. For the lowest action beside a primary — a
+ *   dialog's way out (`ConfirmDialog.tsx`).
  * - **Toggle** is drawn as a secondary when off. When on (`aria-pressed`) it
- *   takes the `selected` fill AND a second ring inside its border — a border
- *   twice as heavy — because a state told by colour alone fails WCAG 2.2 SC
- *   1.4.1. The ring is an inset `box-shadow`, not a wider border, so a press
- *   does not move a pixel of the layout around it (the ride HUD's row is
- *   measured to the pixel).
+ *   takes the `selected` fill AND the accent's border with a second ring
+ *   inside it — a border twice as heavy, where an off toggle has none —
+ *   because a state told by colour alone fails WCAG 2.2 SC 1.4.1. The ring is
+ *   an inset `box-shadow`, not a wider border, so a press does not move a
+ *   pixel of the layout around it (the ride HUD's row is measured to the
+ *   pixel).
  *
  * Every state of every kind is a pair declared in `design/tokens.ts`
  * §`CONTRAST_REQUIREMENTS`, and every colour here is a token so #672's dark
@@ -1764,36 +1821,68 @@ a.oyl-button {
 }
 
 .oyl-button--secondary {
-  background: var(--oyl-color-canvas);
+  border: 2px solid var(--oyl-color-surface-overlay);
+  background: var(--oyl-color-surface-overlay);
   color: var(--oyl-color-accent);
 }
 
 .oyl-button--toggle {
-  background: var(--oyl-color-canvas);
+  border: 2px solid var(--oyl-color-surface-overlay);
+  background: var(--oyl-color-surface-overlay);
   color: var(--oyl-color-accent);
 }
 
 /*
- * #688: a lighter button under a pointer or a press. Until this rule the
- * primary's hover above won on specificity and drew the secondary's `accent`
- * label on the `accent-hover` fill — 1.40:1. It lightens instead: the `surface`
- * fill with the label darkened to `accent-hover`, the pair the file input's
- * button (#667) already used. The border keeps the hover's `accent-hover`.
+ * #688: a tonal button under a pointer or a press. Until #688 the primary's
+ * hover above won on specificity and drew the secondary's `accent` label on
+ * the `accent-hover` fill — 1.40:1. Since #992 it takes the `selected` fill
+ * with the label darkened to `accent-hover`, a declared pair in both palettes,
+ * and no edge: an ON toggle is the same fill WITH the doubled accent border,
+ * so a pointer over an off toggle never reads as on.
  * `browser/button-hierarchy.browser.spec.ts` §"#688 — a hovered secondary
- * button" reads the pair back after the
- * transition, with this rule taken away as its control.
+ * button" reads the pair back after the transition, with this rule taken away
+ * as its control.
  */
 .oyl-button--secondary:hover:not(:disabled),
 .oyl-button--secondary:active:not(:disabled),
 .oyl-button--toggle:hover:not(:disabled),
 .oyl-button--toggle:active:not(:disabled) {
-  background: var(--oyl-color-surface);
+  background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-selected);
   color: var(--oyl-color-accent-hover);
+}
+
+/*
+ * The tertiary kind — #992. Text: no fill and no edge (both `transparent`,
+ * so the box and its 44 px floor are the other kinds'), the accent's label
+ * underlined so it is told from a sentence by more than colour (SC 1.4.1), a
+ * thicker line and `accent-hover` under a pointer, as a link in running text
+ * (#661). Its label sits on whatever is behind it; `accent` and `accentHover`
+ * are declared text pairs on the canvas, and `accent` on `surfaceRaised` and
+ * `surfaceOverlay` is declared too. `accentHover` on a tile is NOT declared,
+ * so a tertiary placed inside a tile owes that pair first.
+ */
+.oyl-button--tertiary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--oyl-color-accent);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+.oyl-button--tertiary:hover:not(:disabled),
+.oyl-button--tertiary:active:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--oyl-color-accent-hover);
+  text-decoration-thickness: 2px;
 }
 
 /* A toggle that is on: the `selected` fill and a doubled border (SC 1.4.1). */
 .oyl-button--toggle[aria-pressed='true'] {
   background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-accent);
   color: var(--oyl-color-accent-hover);
   box-shadow: inset 0 0 0 2px var(--oyl-color-accent);
 }
@@ -1803,6 +1892,7 @@ a.oyl-button {
 .oyl-button--toggle[aria-pressed='true']:hover:not(:disabled),
 .oyl-button--toggle[aria-pressed='true']:active:not(:disabled) {
   background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-accent-hover);
   box-shadow: inset 0 0 0 2px var(--oyl-color-accent-hover);
 }
 
@@ -2005,11 +2095,48 @@ a.oyl-button {
   margin: 0;
 }
 
+/*
+ * A FILLED TILE — #992, the owner's ruling of 2026-10-02 on epic #935: a card
+ * or a panel is a surface at an elevation step, with no 1 px outline, a larger
+ * radius and more room inside. Depth is still a colour and never a shadow
+ * (`tokens.ts` §`ELEVATION_SURFACES`): elevation 2, `surfaceRaised`, because
+ * one step (`surface`, 1.10:1 against the light canvas) read as a faint tint
+ * once the outline was gone, which is the reason `.oyl-metric` gives for the
+ * same choice. Every pair drawn on it — ink, muted ink, the border of a control,
+ * the accent, the focus ring, a link in every state — is declared on
+ * `surfaceRaised` in both palettes. A tonal button on it is one step higher
+ * again (`.oyl-button--secondary`).
+ */
 .oyl-panel {
-  background: var(--oyl-color-surface);
-  border: 1px solid var(--oyl-color-border);
-  border-radius: var(--oyl-radius);
-  padding: var(--oyl-space-md);
+  background: var(--oyl-color-surface-raised);
+  border: 0;
+  border-radius: var(--oyl-radius-card);
+}
+
+/*
+ * A tile's inset, here rather than as a `tw:p-lg` on the tiles drawn with
+ * utilities: the menus' theme clears Tailwind's breakpoints (ADR 0042 D-2), and
+ * a PHONE keeps the old 16 px. At 24 px a side, Settings' card left the units
+ * choice too narrow for "Kilometres" and "Miles" on one row at 320 px on the
+ * CI runner's fonts (#992's first CI run), which is the row
+ * `button-hierarchy.browser.spec.ts` §"Settings' units choice" holds.
+ */
+.oyl-panel,
+.oyl-settings-card,
+.oyl-pairing__row,
+.oyl-chooser__loadout,
+.oyl-ride-card__body {
+  padding: var(--oyl-space-lg);
+}
+
+@media (max-width: 37.49rem) {
+  .oyl-panel,
+  .oyl-settings-card,
+  .oyl-pairing__row,
+  .oyl-chooser__loadout,
+  .oyl-ride-card__body {
+    padding: var(--oyl-space-md);
+  }
 }
 
 .oyl-muted {
@@ -2649,10 +2776,8 @@ label > input[type='radio'] {
 /*
  * The file input's button, drawn as `.oyl-button--secondary` — #667. Until then
  * it was the platform's own grey button butted against its label ("GPX
- * fileChoose File"). The same tokens as the secondary button, and the same
- * declared 44 px floor. Hover lightens to `surface` rather than copying
- * `.oyl-button:hover`, whose accent-hover fill is not a pair the secondary
- * button's accent text is declared against.
+ * fileChoose File"). The same tokens as the secondary button — tonal since
+ * #992 — and the same declared 44 px floor.
  */
 /* The input's own font first: a form control does not inherit one, and the
    button's `font: inherit` would otherwise take the platform's 13.33 px.
@@ -2675,14 +2800,16 @@ input[type='file']::file-selector-button {
   min-height: 2.75rem;
   margin-inline-end: var(--oyl-space-sm);
   padding: var(--oyl-space-sm) var(--oyl-space-md);
-  border: 2px solid var(--oyl-color-accent);
+  border: 2px solid var(--oyl-color-surface-overlay);
   border-radius: var(--oyl-radius);
-  background: var(--oyl-color-canvas);
+  background: var(--oyl-color-surface-overlay);
   color: var(--oyl-color-accent);
 }
 
 input[type='file']::file-selector-button:hover {
-  background: var(--oyl-color-surface);
+  background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
 }
 
 /* A token's gap between a file input and the label before it. */
@@ -2922,7 +3049,7 @@ p > label + input[type='file'] {
 .oyl-activity-card__facts {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   margin: 0 0 var(--oyl-space-sm);
 }
 
@@ -4723,9 +4850,9 @@ p > label + input[type='file'] {
  *
  * Everything else in this stylesheet already survives forced colours: the
  * elevation ramp flattens to a single `Canvas`, and every boundary that mattered
- * — the header's rule, a card's border, a table's row lines — is a `border`
- * rather than a colour change, so each is repainted as `CanvasText` instead of
- * disappearing. That is why this block is one rule and not twenty.
+ * — the header's rule, a table's row lines — is a `border` rather than a colour
+ * change, so each is repainted as `CanvasText` instead of disappearing. A
+ * filled tile (#992) has no border, so it is given one here.
  */
 @media (forced-colors: active) {
   select {
@@ -4742,6 +4869,24 @@ p > label + input[type='file'] {
   .oyl-button--toggle[aria-pressed='true'] {
     border-style: double;
     border-width: 4px;
+    padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
+  }
+
+  /* #992: a filled tile is a fill, which a forced palette flattens into the
+     page, so it is given the edge it no longer draws; and the chosen item of a
+     list, told by an inset ring a forced palette removes, by a heavier one. */
+  .oyl-panel,
+  .oyl-empty-state,
+  .oyl-pane-list__item,
+  .oyl-settings-card,
+  .oyl-ride-card,
+  .oyl-pairing__row,
+  .oyl-chooser__loadout {
+    border: 1px solid;
+  }
+
+  .oyl-pane-list__item[aria-current='true'] {
+    border-width: 3px;
     padding: calc(var(--oyl-space-sm) - 2px) calc(var(--oyl-space-md) - 2px);
   }
 

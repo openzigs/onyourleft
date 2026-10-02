@@ -137,6 +137,7 @@ function expectedTheme(): Map<string, string> {
     expected.set(`--font-${token}`, `var(--oyl-font-family-${token})`);
   }
   expected.set('--radius', 'var(--oyl-radius)');
+  expected.set('--radius-card', 'var(--oyl-radius-card)');
   expected.set('--ease-standard', 'var(--oyl-motion-ease-standard)');
   expected.set('--default-transition-duration', 'var(--oyl-motion-short)');
   expected.set('--default-transition-timing-function', 'var(--oyl-motion-ease-standard)');

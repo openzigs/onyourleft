@@ -219,6 +219,28 @@ describe('every token is painted by something', () => {
 });
 
 /**
+ * #992: a reading (`design/Reading.tsx`) is large tabular numerals and a small
+ * unit, both from tokens — one size for every menu's facts.
+ */
+describe('#992 — a reading', () => {
+  function body(selector: string): string {
+    const escaped = selector.replaceAll('.', '\\.');
+    const bodies = [...themeCss.matchAll(new RegExp(`\\n${escaped} \\{([^}]*)\\}`, 'g'))];
+    expect(bodies, `theme.css has ${String(bodies.length)} rules for ${selector}`).toHaveLength(1);
+    return bodies[0]?.[1] ?? '';
+  }
+
+  it('sets the numerals large and tabular, and the unit small and muted', () => {
+    const value = body('.oyl-reading__value');
+    expect(value).toContain('font-size: var(--oyl-font-size-xxl);');
+    expect(value).toContain('font-variant-numeric: tabular-nums;');
+    const unit = body('.oyl-reading__unit');
+    expect(unit).toContain('font-size: var(--oyl-font-size-sm);');
+    expect(unit).toContain('color: var(--oyl-color-ink-muted);');
+  });
+});
+
+/**
  * #661: a link in running text paints with a token in every state.
  *
  * `browser/links.browser.spec.ts` reads the computed colour back for rest,
