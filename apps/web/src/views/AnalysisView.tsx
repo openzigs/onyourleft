@@ -104,6 +104,9 @@ type LoadState =
     }
   | { readonly kind: 'failed'; readonly reason: string };
 
+/** The thresholds' hint, which both boxes are described by — #1023. */
+const THRESHOLD_HINT_ID = 'oyl-thresholds-hint';
+
 export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [selected, setSelected] = useState<ActivityId | undefined>(undefined);
@@ -259,7 +262,12 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         <SectionHeading
           level={2}
           id="oyl-zones-heading"
-          help={<p>A ride recorded without a power meter or a strap carries neither.</p>}
+          help={
+            <p>
+              Zones need power or heart rate, so a ride recorded without a power meter or a
+              heart-rate strap has none to show.
+            </p>
+          }
         >
           Time in zone
         </SectionHeading>
@@ -378,7 +386,6 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           help={
             <p>
               Every zone boundary and every load on this page is derived from these two numbers.
-              Leave one blank to go back to the assumed default.
             </p>
           }
         >
@@ -395,6 +402,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
               className="oyl-input"
               id="oyl-threshold-power"
               inputMode="numeric"
+              aria-describedby={THRESHOLD_HINT_ID}
               value={powerField}
               placeholder="not set"
               onChange={(event) => {
@@ -409,6 +417,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
               className="oyl-input"
               id="oyl-threshold-heart-rate"
               inputMode="numeric"
+              aria-describedby={THRESHOLD_HINT_ID}
               value={heartRateField}
               placeholder="not set"
               onChange={(event) => {
@@ -416,6 +425,11 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
                 setSaved(undefined);
               }}
             />
+          </p>
+          {/* #1023: the two fields' instruction is under them and is their
+            description (WCAG 2.2 SC 3.3.2), not behind the section's ⓘ. */}
+          <p id={THRESHOLD_HINT_ID} className="oyl-muted oyl-field-hint">
+            Leave one blank to go back to the assumed default.
           </p>
           <Button
             onClick={() => {

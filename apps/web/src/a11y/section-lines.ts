@@ -12,9 +12,9 @@
  *
  * ## What counts as an explanation
  *
- * A paragraph (`p`) that is drawn — not in a closed `<details>`, not `hidden`
- * — and is NOT one of the things the ruling keeps on the screen whatever their
- * length, each recognised by what it is rather than by its words:
+ * A paragraph (`p`, or a `div` with prose of its own) that is drawn — not in
+ * a closed `<details>`, not `hidden` — and is NOT one of the things the
+ * ruling keeps on the screen whatever their length, each recognised by what it is rather than by its words:
  *
  * - **kept-visible text** (`[data-oyl-kept-visible]`): safety, privacy and
  *   consent, which `kept-visible.a11y.test.tsx` holds out of any disclosure;
@@ -27,9 +27,34 @@
  * - text that belongs to a control or a datum: a label, a legend, a list item,
  *   a table cell, a definition, a button or a summary — and a paragraph that
  *   only lays out a control (it says nothing outside its links, buttons and
- *   labels), or that something is `aria-labelledby` (a list's caption);
+ *   labels, and the separators between them), or that something is
+ *   `aria-labelledby` (a list's caption);
+ * - a field's hint: a paragraph a form field is `aria-describedby` (#1023).
+ *   It is the field's instruction, one line under it — WCAG 2.2 SC 3.3.2 wants
+ *   it there rather than behind a disclosure — and it belongs to the field as
+ *   its label does. Only a FIELD's description counts: a paragraph a button or
+ *   a region is described by is still prose;
  * - a paragraph that does not end as a sentence does — a caption or a reading
- *   like "0:00 elapsed · 0:00 moving".
+ *   like "0:00 elapsed · 0:00 moving" — unless the last thing in it is a link
+ *   ("…on the <a>trainer game screen</a>"), which is a sentence whose last
+ *   words are pressable, and counts (#1023).
+ *
+ * ## Where explanation can be, and where it is not looked for
+ *
+ * #1023 widened the walk to the two places #1022's review found it blind:
+ *
+ * - **a `div` with prose of its own** — text written straight into it, not
+ *   inside a child, that ends as a sentence does — is read as a paragraph is.
+ *   A `div` whose text is all in its children is a wrapper, and the children
+ *   are read on their own;
+ * - **a paragraph ending in a link**, above.
+ *
+ * And it deliberately does not look in a **list item** (`li`): a list on these
+ * screens is a set of facts or limits read item by item — the four Web
+ * Bluetooth constraints, a route's steps — and #1013's ruling is about a
+ * section's running prose, not about how many items a list has. Prose in a
+ * `span`, a `section` or any other element directly is not read either: none
+ * of the views writes any, and the ruling's unit is a drawn paragraph.
  *
  * Everything else under a heading is explanation, and the rule is that a
  * section has at most one such paragraph, of at most
@@ -108,16 +133,62 @@ function isProse(paragraph: Element): boolean {
   // A paragraph another element is labelled by is that element's caption — a
   // list's "newest first", say — and belongs to the data it names.
   if (paragraph.id !== '' && labelsSomething(paragraph)) return false;
+  // A paragraph a form field is described by is that field's hint — its
+  // instruction, under it (WCAG 2.2 SC 3.3.2, #1023) — and belongs to the
+  // field, as its label does.
+  if (paragraph.id !== '' && describesAField(paragraph)) return false;
   const copy = paragraph.cloneNode(true) as Element;
   for (const control of copy.querySelectorAll(CONTROLS)) control.remove();
-  if (normalise(copy.textContent ?? '') === '') return false;
-  return /[.!?…:]$/u.test(normalise(paragraph.textContent ?? ''));
+  // Separators between links ("Your rides · Import or export files") are not
+  // words: a paragraph is prose only if a word of its own is left.
+  if (!/\p{L}/u.test(copy.textContent ?? '')) return false;
+  return /[.!?…:]$/u.test(normalise(paragraph.textContent ?? '')) || endsInLink(paragraph);
+}
+
+/**
+ * Whether the last thing drawn in `paragraph` is a link — #1023. "Read how
+ * it works on the <a>About screen</a>" ends in a word, not a full stop, and
+ * was not counted; a paragraph that says something of its own and ends in a
+ * link is a sentence whose last words are pressable.
+ */
+function endsInLink(paragraph: Element): boolean {
+  let last: Node | null = paragraph.lastChild;
+  while (last !== null && last.nodeType === 3 && normalise(last.textContent ?? '') === '') {
+    last = last.previousSibling;
+  }
+  return last !== null && last.nodeType === 1 && (last as Element).tagName === 'A';
+}
+
+/**
+ * The text a `div` holds of its own — its direct text nodes — #1023. Prose
+ * written straight into a `div` is drawn exactly as a paragraph is, and
+ * counted as one; a `div` whose text is all inside its children is a wrapper,
+ * and its children are read on their own.
+ */
+function ownText(element: Element): string {
+  return normalise(
+    [...element.childNodes]
+      .filter((node) => node.nodeType === 3)
+      .map((node) => node.textContent ?? '')
+      .join(' '),
+  );
 }
 
 /** Whether anything in the document is labelled by `element`'s id. */
 function labelsSomething(element: Element): boolean {
   return [...element.ownerDocument.querySelectorAll('[aria-labelledby]')].some((labelled) =>
     (labelled.getAttribute('aria-labelledby') ?? '').split(/\s+/).includes(element.id),
+  );
+}
+
+/** Whether a form field in the document is `aria-describedby` `element`. */
+function describesAField(element: Element): boolean {
+  return [
+    ...element.ownerDocument.querySelectorAll(
+      'input[aria-describedby], select[aria-describedby], textarea[aria-describedby]',
+    ),
+  ].some((field) =>
+    (field.getAttribute('aria-describedby') ?? '').split(/\s+/).includes(element.id),
   );
 }
 
@@ -152,7 +223,10 @@ export function sectionProse(root: Element): SectionProse[] {
       sections.push(current);
       continue;
     }
-    if (current === undefined || element.tagName !== 'P') continue;
+    if (current === undefined) continue;
+    const prose =
+      element.tagName === 'P' || (element.tagName === 'DIV' && /[.!?…:]$/u.test(ownText(element)));
+    if (!prose) continue;
     if (!drawn(element) || element.closest(NOT_EXPLANATION) !== null) continue;
     if (!isProse(element)) continue;
     current.paragraphs.push(normalise(element.textContent ?? ''));

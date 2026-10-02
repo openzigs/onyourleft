@@ -407,6 +407,21 @@ describe('AnalysisView — the threshold editor (#76 criterion 6, and #78\u2019s
     return input;
   }
 
+  it('describes both boxes with how to clear one, under them and never tucked — #1023', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    for (const label of ['Threshold power', 'Threshold heart rate']) {
+      const ids = (fieldNamed(label).getAttribute('aria-describedby') ?? '').split(' ');
+      const hints = ids.map((id) => document.getElementById(id));
+      expect(
+        hints.map((hint) => hint?.textContent?.trim()),
+        label,
+      ).toEqual(['Leave one blank to go back to the assumed default.']);
+      expect(hints[0]?.closest('details'), label).toBeNull();
+    }
+  });
+
   it('seeds the form from what is stored', async () => {
     const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
 

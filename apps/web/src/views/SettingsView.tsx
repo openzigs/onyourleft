@@ -1312,7 +1312,8 @@ function WeightPanel({
       )}
 
       {/* #1013: the weight rides use is the section's one line; why an assumed
-        one is wrong, the bicycle and how to clear it are in the More about. */}
+        one is wrong and the bicycle are in the More about. How to clear it is
+        the field's own hint (#1023). */}
       <p className="oyl-muted">
         {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
         {measurementText(formatMass(current.mass, units))}.
@@ -1325,10 +1326,6 @@ function WeightPanel({
         ) : null}
         <p className="oyl-muted">
           A bicycle is added to it — the game rides a rider and a bike, not a rider.
-        </p>
-        <p className="oyl-muted">
-          Leave it blank to go back to the assumed{' '}
-          {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
         </p>
         <p className="oyl-muted">
           The trainer game works out how fast you are going from how hard you are pedalling, and
@@ -1488,6 +1485,9 @@ function KitChoice({
  *
  * @see WeightPanel
  */
+/** The weight box's hint, which the box is described by — #1023. */
+const WEIGHT_HINT_ID = 'oyl-rider-mass-hint';
+
 function WeightField({
   port,
   units,
@@ -1571,12 +1571,19 @@ function WeightField({
             inputMode="decimal"
             value={typed}
             placeholder="not set"
+            aria-describedby={WEIGHT_HINT_ID}
             onChange={(event) => {
               setTyped(event.target.value);
               onMessage(undefined);
             }}
           />
         </Stepper>
+      </p>
+      {/* #1023: an instruction for this field is under it and is its
+        description (WCAG 2.2 SC 3.3.2), not in a disclosure away from it. */}
+      <p id={WEIGHT_HINT_ID} className="oyl-muted oyl-field-hint">
+        Leave it blank to go back to the assumed{' '}
+        {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
       </p>
       <Button
         onClick={() => {

@@ -2837,6 +2837,17 @@ a.oyl-button {
 }
 
 /*
+ * #1023: a field's hint — its one-line instruction, which the field is
+ * `aria-describedby` (WCAG 2.2 SC 3.3.2) — on a line of its own straight under
+ * the field it describes, inside the same row, so it is not pushed away from
+ * the box by a paragraph's margins.
+ */
+.oyl-trainer__form > .oyl-field-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/*
  * #669: the ERG form's own sentence — "This trainer accepts … W to … W in steps
  * of … W" — under its row, 8 px below the controls it describes (the row's own
  * gap) rather than a paragraph's 1rem either side. In a flex container margins

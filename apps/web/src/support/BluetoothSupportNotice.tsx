@@ -31,6 +31,7 @@
 import type { JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { KeptVisible } from '../design/MoreAbout';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import type { BluetoothSupport } from './bluetooth-support';
@@ -43,6 +44,25 @@ import type { BluetoothSupport } from './bluetooth-support';
  */
 const WORKING_BROWSERS =
   'Chrome, Edge, Opera or Samsung Internet, on Android, Chrome OS, macOS or Windows';
+
+/** The no-Bluetooth status's one line — #1023. */
+export const BLUETOOTH_ABSENT_LINE =
+  'Safari and Firefox have no Web Bluetooth implementation at all. Nothing you have done is wrong.';
+
+/** Why there is nothing to change: behind the status's "more". */
+const BLUETOOTH_ABSENT_WHY =
+  'Both vendors have published positions against adding one, on any platform, and there is ' +
+  'no setting that turns it on. Every browser on iPhone and iPad is Safari underneath, so ' +
+  'this is the same answer there whichever one you use.';
+
+/** Where pairing works instead — kept on the screen (ADR 0003 D-7). */
+export const BLUETOOTH_ABSENT_WHERE =
+  `To record a ride, open this app in ${WORKING_BROWSERS}. Native apps for iPhone and ` +
+  'Android are planned and are the only path that will ever work on an iPhone.';
+
+/** What a rider can still do in this browser — kept on the screen. */
+export const BLUETOOTH_ABSENT_STILL_WORKS =
+  'Rides already on this device stay readable, and files can still be imported and exported.';
 
 export interface BluetoothSupportNoticeProps {
   /** `undefined` while the probe is in flight. */
@@ -124,17 +144,31 @@ export function BluetoothSupportNotice({
       );
 
     case 'absent':
+      // #1023: the status is one short line — what is missing, and that it is
+      // not the reader's doing. Why there is no setting is behind its "more".
+      // Where pairing does work and what still works here are information,
+      // not danger, so they are their own boxes after it, kept on the screen
+      // (ADR 0003 D-7: name the browsers that work; never hide the limits).
       return (
         <>
-          <StatusMessage tone="danger" label="This browser has no Bluetooth support">
-            Safari and Firefox have no Web Bluetooth implementation at all, on any platform, and
-            both vendors have published positions against adding one. Nothing you have done is wrong
-            and there is no setting that turns it on. Every browser on iPhone and iPad is Safari
-            underneath, so this is the same answer there whichever one you use. To record a ride,
-            open this app in {WORKING_BROWSERS}. Native apps for iPhone and Android are planned and
-            are the only path that will ever work on an iPhone. Everything else here works: rides
-            already on this device stay readable, and files can still be imported and exported.
+          <StatusMessage
+            tone="danger"
+            label="This browser has no Bluetooth support"
+            more={{
+              summary: 'Why there is no setting for it',
+              detail: BLUETOOTH_ABSENT_WHY,
+            }}
+          >
+            {BLUETOOTH_ABSENT_LINE}
           </StatusMessage>
+          <KeptVisible>
+            <StatusMessage tone="info" label="Where pairing works">
+              {BLUETOOTH_ABSENT_WHERE}
+            </StatusMessage>
+            <StatusMessage tone="info" label="What still works here">
+              {BLUETOOTH_ABSENT_STILL_WORKS}
+            </StatusMessage>
+          </KeptVisible>
         </>
       );
 

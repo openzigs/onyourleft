@@ -5,7 +5,11 @@ import type { JSX } from 'react';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RideController } from '../ride/controller';
 import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
-import { BluetoothSupportNotice } from '../support/BluetoothSupportNotice';
+import {
+  BLUETOOTH_ABSENT_STILL_WORKS,
+  BLUETOOTH_ABSENT_WHERE,
+  BluetoothSupportNotice,
+} from '../support/BluetoothSupportNotice';
 import { ShellSupportNotice } from '../support/ShellSupportNotice';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
@@ -108,6 +112,16 @@ const BROWSER_LIMITS: readonly string[] = [
  * `a11y/kept-visible.a11y.test.tsx` holds them.
  */
 export const DEVICES_KEPT_VISIBLE: readonly string[] = [ONE_GESTURE_PER_DEVICE, ...BROWSER_LIMITS];
+
+/**
+ * What stays on the screen where a browser has no Bluetooth at all — #1023:
+ * where pairing does work, and what still works here. Kept-visible boxes
+ * toned as information, after the status's one line and its "more".
+ */
+export const DEVICES_NO_BLUETOOTH_KEPT_VISIBLE: readonly string[] = [
+  BLUETOOTH_ABSENT_WHERE,
+  BLUETOOTH_ABSENT_STILL_WORKS,
+];
 
 /**
  * The shell's equivalent. No background sentence: the Android shell keeps a

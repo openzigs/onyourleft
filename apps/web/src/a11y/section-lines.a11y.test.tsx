@@ -183,6 +183,40 @@ describe('the rule itself — its control', () => {
     expect(hidden?.paragraphs).toEqual(['One.']);
   });
 
+  it('reads prose written straight into a div, and not a div that only wraps — #1023', () => {
+    const [section] = sectionsFrom(
+      `<h3>Div</h3><div>Prose written straight into a div.</div>
+       <div><p>One paragraph inside a wrapper.</p></div>`,
+    );
+    expect(section?.paragraphs).toEqual([
+      'Prose written straight into a div.',
+      'One paragraph inside a wrapper.',
+    ]);
+  });
+
+  it('counts a paragraph ending in a link, and not a row of links — #1023', () => {
+    const [section] = sectionsFrom(
+      `<h3>Links</h3><p>Rides on this device, newest first</p>
+       <p>Read how it works on the <a href="#/about">About screen</a> </p>
+       <p><a href="#/a">Your rides</a> · <a href="#/b">Import or export files</a></p>`,
+    );
+    expect(section?.paragraphs).toEqual(['Read how it works on the About screen']);
+  });
+
+  it('leaves out a field’s hint, and nothing else a paragraph describes — #1023', () => {
+    const [section] = sectionsFrom(
+      `<h3>Field</h3><p>One short line.</p>
+       <p><label for="f">Weight</label> <input id="f" aria-describedby="f-hint"></p>
+       <p id="f-hint">Leave it blank to go back to the assumed weight.</p>
+       <button aria-describedby="b-hint">Save</button>
+       <p id="b-hint">A button’s description is still prose.</p>`,
+    );
+    expect(section?.paragraphs).toEqual([
+      'One short line.',
+      'A button’s description is still prose.',
+    ]);
+  });
+
   it('leaves the line under the screen’s title to #993, and starts a section at h2, h3 or h4', () => {
     const sections = sectionsFrom(
       `<h1>Screen</h1><p>${LONG}</p><h4>Four</h4><p>One.</p><h5>Five</h5><p>Two.</p>`,
