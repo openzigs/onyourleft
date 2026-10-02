@@ -122,18 +122,16 @@ describe('#668 — at most one primary button per view, on every route', () => {
 
 /**
  * #939: Home is where a ride starts, so its one primary is not optional —
- * EXACTLY one, *Start a ride* on the Free ride card, over both fixtures, and
- * the other two ride cards secondary.
+ * EXACTLY one over both fixtures. Since #1010 it is *Next up*'s Ride, and all
+ * three ride cards are secondary.
  */
-describe('#939 — Home has exactly one primary', () => {
+describe('#939, #1010 — Home has exactly one primary, Next up’s Ride', () => {
   for (const data of ['empty', 'populated'] as const) {
     it(data, async () => {
       await open(routeById('home'), data === 'populated');
       const primaries = buttonsByView(document)[0]?.primaries ?? [];
-      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual([
-        'Start a ride',
-      ]);
-      for (const label of ['Choose a route', 'Choose a workout']) {
+      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual(['Ride']);
+      for (const label of ['Start a ride', 'Choose a route', 'Choose a workout']) {
         const link = [...document.querySelectorAll('main a.oyl-button')].find(
           (element) => (element.textContent ?? '').trim() === label,
         );

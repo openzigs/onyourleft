@@ -25,12 +25,26 @@
  * remembers a "Ride" panel of two buttons in a sentence is reading the old
  * file.
  *
+ * ## Next up, this week, and the modes as art — #1010
+ *
+ * Since #1010 the band under the title is gone and Home leads with ONE large
+ * card, *Next up*: the ride this rider is most likely to want, its picture
+ * filling the card, and one big **Ride** — the view's one primary (#668), so
+ * the three ride cards below are all secondary now. Beside it on a landscape
+ * tablet, *This week* sets each figure against the week before, and the
+ * Trainer card says what the trainer is doing. The ride cards' pictures are
+ * the cards' backgrounds rather than 48 px drawings, with every word on a
+ * solid band (`theme.css` §"#1010"). `home/home.ts` §`HomeNextUp` says which
+ * ride is offered and why "the last workout used" is not one of them yet.
+ *
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
  * launch. The trainer's state and a ride left unfinished come from the ride
  * controller's snapshot, which is already in memory. #939 added no read:
- * `HomeView.reads.test.tsx` counts every store call the screen makes.
+ * `HomeView.reads.test.tsx` counts every store call the screen makes. #1010
+ * adds at most ONE record read, `getRoute`, and only when a ride was ridden
+ * on a route — `home/home.ts` §`loadNextUp`.
  *
  * ⚠️ **The load metrics' familiar names are registered trademarks** (CLAUDE.md
  * §6). This says "load", "fitness", "fatigue" and "freshness", the same words
@@ -50,6 +64,7 @@ import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
 import {
   Hills,
+  ProfileShape,
   RiderSilhouette,
   RoadRibbon,
   SensorGlyph,
@@ -59,16 +74,28 @@ import {
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration, formatStartedAt } from '../format';
-import { loadHome, type HomeData } from '../home/home';
+import {
+  loadHome,
+  loadNextUp,
+  type HomeData,
+  type HomeNextUp,
+  type HomePreviousWeek,
+} from '../home/home';
 import type { RideController } from '../ride/controller';
+import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
-import { hrefFor, routeById } from '../shell/routes';
+import { hrefFor, hrefForGameRoute, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
-import { formatDistance } from '../units/format';
+import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 
 export interface HomeViewProps {
   readonly analysis: AnalysisPort | undefined;
   readonly controller: RideController | undefined;
+  /**
+   * Saved routes, for the one record "next up" draws (#1010) — or `undefined`
+   * where this browser has no local store, when "next up" offers a free ride.
+   */
+  readonly routes?: RoutePort | undefined;
   /** The clock "this week" is measured from. A seam for tests. */
   readonly now?: (() => UnixSeconds) | undefined;
 }
@@ -78,7 +105,9 @@ const wallClock = (): UnixSeconds => unixSeconds(Math.floor(Date.now() / 1000));
 export function HomeView(props: HomeViewProps): JSX.Element {
   const { analysis } = props;
   const now = props.now ?? wallClock;
+  const { routes } = props;
   const [data, setData] = useState<HomeData | undefined>(undefined);
+  const [nextUp, setNextUp] = useState<HomeNextUp | undefined>(undefined);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -88,7 +117,12 @@ export function HomeView(props: HomeViewProps): JSX.Element {
     let live = true;
     loadHome(analysis, now()).then(
       (loaded) => {
-        if (live) setData(loaded);
+        if (!live) return;
+        setData(loaded);
+        // `loadNextUp` never rejects: a route it cannot read is a free ride.
+        void loadNextUp(loaded, routes).then((next) => {
+          if (live) setNextUp(next);
+        });
       },
       () => {
         if (live) setFailed(true);
@@ -97,18 +131,21 @@ export function HomeView(props: HomeViewProps): JSX.Element {
     return () => {
       live = false;
     };
-    // ⚠️ `analysis` only: `now` is a clock, read once per mount. A dependency
-    // on it would be a store read per render, which is the thing this screen
-    // exists to bound.
-  }, [analysis]);
+    // ⚠️ `analysis` and `routes` only: `now` is a clock, read once per mount.
+    // A dependency on it would be a store read per render, which is the thing
+    // this screen exists to bound.
+  }, [analysis, routes]);
 
   return (
-    <>
-      <HomeHero />
+    <div className="oyl-home-frame tw:@container">
       <div className="oyl-home">
         {props.controller === undefined ? null : <LeftUnfinished controller={props.controller} />}
-        <RideChoices />
+        <NextUp next={nextUp ?? { kind: 'free' }} />
+        {data?.lastRide === undefined ? null : (
+          <ThisWeek week={data.week} previous={data.previousWeek} />
+        )}
         {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
+        <RideChoices />
 
         {analysis === undefined ? (
           <StatusMessage tone="danger">
@@ -125,7 +162,7 @@ export function HomeView(props: HomeViewProps): JSX.Element {
           <Rides data={data} />
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -199,43 +236,6 @@ function Rides({ data }: { readonly data: HomeData }): JSX.Element {
         </section>
       )}
 
-      <section className="oyl-panel" aria-labelledby="oyl-home-week">
-        <h2 id="oyl-home-week">The last seven days</h2>
-        {data.week.rides === 0 ? (
-          <p>No rides in the last seven days.</p>
-        ) : (
-          <>
-            <div className="oyl-home__days">
-              <DaysRing days={data.week.daysRidden} />
-              <p>You rode on {String(data.week.daysRidden)} of the last seven days.</p>
-            </div>
-            <dl className="oyl-home__facts">
-              <div>
-                <dt>Rides</dt>
-                <dd>
-                  <Reading value={String(data.week.rides)} />
-                </dd>
-              </div>
-              <div>
-                <dt>Moving time</dt>
-                <dd>
-                  <Reading value={formatDuration(data.week.movingTime)} />
-                </dd>
-              </div>
-              <div>
-                <dt>Load</dt>
-                <dd>
-                  <Reading value={String(Math.round(data.week.load))} />
-                  {data.week.ridesWithLoad < data.week.rides
-                    ? ` (from ${String(data.week.ridesWithLoad)} of ${String(data.week.rides)} rides)`
-                    : ''}
-                </dd>
-              </div>
-            </dl>
-          </>
-        )}
-      </section>
-
       <section className="oyl-panel" aria-labelledby="oyl-home-form">
         <h2 id="oyl-home-form">Fitness and freshness</h2>
         {readings.length === 0 ? (
@@ -288,7 +288,7 @@ function LeftUnfinished({
 function TrainerCard({ controller }: { readonly controller: RideController }): JSX.Element {
   const trainer = useRideSnapshot(controller).trainer;
   return (
-    <section className="oyl-panel" aria-labelledby="oyl-home-trainer">
+    <section className="oyl-panel oyl-home__trainer" aria-labelledby="oyl-home-trainer">
       <h2 id="oyl-home-trainer" className="tw:flex tw:items-center tw:gap-sm">
         <SensorGlyph kind="trainer" className="oyl-home__glyph" />
         Trainer
@@ -310,35 +310,6 @@ function TrainerCard({ controller }: { readonly controller: RideController }): J
     </section>
   );
 }
-
-/**
- * The band under the title — #939. Decoration only: `aria-hidden`, drawn from
- * the illustration kit (#938) and holding no word, so the `h1` and the route's
- * summary the shell renders above it stay real text. `theme.css` §"Home"
- * lays the band BEHIND those two, over its sky, and frames its picture at the
- * band's top right with the words kept clear of it, so the only pairs it puts
- * text on are the declared ones: `ink` and `inkMuted` on `illoSky`. The
- * picture is a medium drawing — 48 px tall on a phone, never a strip across
- * the band (the owner's ruling of 2026-10-01 on #935).
- *
- * ⚠️ **It is short on purpose**: a band, not a screen. `home.browser.spec.ts`
- * publishes its height, and its control (`home.html?hero=tall`, the band at
- * 90 vh) must push the first ride card's control under a phone's fold.
- */
-function HomeHero(): JSX.Element {
-  return (
-    <div className="oyl-home-hero tw:bg-illo-sky" aria-hidden="true">
-      <div className="oyl-home-hero__ground">
-        <Sky className="oyl-home__layer" clouds={false} />
-        <Hills className="oyl-home__layer" seed={HERO_SEED} />
-        <RoadRibbon className="oyl-home__layer" />
-      </div>
-    </div>
-  );
-}
-
-/** Any whole number draws one set of hills; this one is the hero's. */
-const HERO_SEED = 11;
 
 /**
  * A workout's outline for the Workout card's picture: a warm-up, three hard
@@ -367,8 +338,6 @@ interface RideChoice {
   readonly line: string;
   readonly action: string;
   readonly to: 'ride' | 'game' | 'workouts';
-  /** #668: one primary per view, and it is Free ride. */
-  readonly primary: boolean;
   readonly art: JSX.Element;
 }
 
@@ -379,7 +348,6 @@ const RIDE_CHOICES: readonly RideChoice[] = [
     line: 'Record a ride from your paired sensors.',
     action: 'Start a ride',
     to: 'ride',
-    primary: true,
     art: (
       <>
         <Sky className="oyl-home__layer" clouds={false} />
@@ -394,7 +362,6 @@ const RIDE_CHOICES: readonly RideChoice[] = [
     line: 'Ride a saved route in the trainer game.',
     action: 'Choose a route',
     to: 'game',
-    primary: false,
     art: (
       <>
         <Sky className="oyl-home__layer" />
@@ -409,7 +376,6 @@ const RIDE_CHOICES: readonly RideChoice[] = [
     line: 'Follow a structured workout on a smart trainer.',
     action: 'Choose a workout',
     to: 'workouts',
-    primary: false,
     art: (
       <>
         <Sky className="oyl-home__layer" sun={false} />
@@ -420,12 +386,16 @@ const RIDE_CHOICES: readonly RideChoice[] = [
 ];
 
 /**
- * Where a ride starts — #939: three equal cards, the next thing to do the
- * largest thing on the screen. Each card is a list item with a picture (a
- * medium drawing, 48 px tall, framed beside the heading — the owner's ruling
- * of 2026-10-01 on #935), a real heading, one line and ONE link; the link's `::after` stretches over the card
- * (`theme.css` §`.oyl-ride-card__link`), so the whole card is the target and
- * still holds a single interactive element.
+ * Where a ride starts — #939: three equal cards. Each card is a list item with
+ * a real heading, one line and ONE link; the link's `::after` stretches over
+ * the card (`theme.css` §`.oyl-ride-card__link`), so the whole card is the
+ * target and still holds a single interactive element.
+ *
+ * Since #1010 the picture IS the card's background — it fills the card's
+ * width and every pixel the words do not take — and the words stand on a
+ * solid band of `surfaceRaised` below it, so every text pair on the card is a
+ * declared one and none is laid over a drawing. All three links are
+ * secondary: the view's one primary is *Next up*'s Ride.
  */
 function RideChoices(): JSX.Element {
   return (
@@ -437,14 +407,16 @@ function RideChoices(): JSX.Element {
             key={choice.id}
             className="oyl-ride-card tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
           >
-            <div className="oyl-ride-card__art">{choice.art}</div>
-            <div className="oyl-ride-card__body tw:flex tw:grow tw:flex-col tw:gap-sm">
+            <div className="oyl-ride-card__art" aria-hidden="true">
+              {choice.art}
+            </div>
+            <div className="oyl-ride-card__body tw:flex tw:flex-col tw:gap-sm tw:bg-surface-raised">
               <h3 id={`oyl-home-ride-${choice.id}`} className="tw:m-0">
                 {choice.title}
               </h3>
               <p className="oyl-muted tw:m-0">{choice.line}</p>
               <a
-                className={`oyl-button oyl-ride-card__link tw:mt-auto tw:self-start${choice.primary ? '' : ' oyl-button--secondary'}`}
+                className="oyl-button oyl-button--secondary oyl-ride-card__link tw:self-start"
                 href={hrefFor(routeById(choice.to))}
                 aria-describedby={`oyl-home-ride-${choice.id}`}
               >
@@ -454,6 +426,155 @@ function RideChoices(): JSX.Element {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** What "next up" says for each kind — `home/home.ts` §`HomeNextUp`. */
+function nextUpWords(
+  next: HomeNextUp,
+  units: ReturnType<typeof useUnits>,
+): { readonly name: string; readonly line: string; readonly href: string } {
+  switch (next.kind) {
+    case 'route':
+      return {
+        name: next.name,
+        // The climb in words beside the shape that draws it (#935 principle 1):
+        // `ProfileShape` scales the height, so the metres are only here.
+        line:
+          `The route you rode last: ${measurementText(formatDistance(next.profile.totalDistance, units))}, ` +
+          `climb ${measurementText(formatSmallDistance(next.profile.totalAscent, units))}.`,
+        href: hrefForGameRoute(next.id),
+      };
+    case 'free':
+      return {
+        name: 'A free ride',
+        line: 'Record a ride from your paired sensors.',
+        href: hrefFor(routeById('ride')),
+      };
+    case 'first':
+      return {
+        name: 'Your first ride',
+        line: 'Pair a sensor on Devices, then record a ride from it.',
+        href: hrefFor(routeById('ride')),
+      };
+  }
+}
+
+/**
+ * *Next up* — #1010. The largest thing on the screen and the first control in
+ * it: one card whose picture fills it (the route's own shape, or the kit's
+ * sky, hills and road), the ride's name and one line on a solid band, and one
+ * big **Ride**. The picture is `aria-hidden` and wordless; the band says
+ * everything it shows, the climb included.
+ */
+function NextUp({ next }: { readonly next: HomeNextUp }): JSX.Element {
+  const units = useUnits();
+  const words = nextUpWords(next, units);
+  return (
+    <section
+      className="oyl-next-up tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
+      aria-labelledby="oyl-next-up-heading"
+    >
+      <div className="oyl-next-up__art" aria-hidden="true">
+        {next.kind === 'route' ? (
+          <>
+            <Sky className="oyl-home__layer" clouds={false} />
+            <ProfileShape className="oyl-home__layer oyl-next-up__profile" profile={next.profile} />
+          </>
+        ) : (
+          <>
+            <Sky className="oyl-home__layer" />
+            <Hills className="oyl-home__layer" seed={NEXT_UP_SEED} />
+            <RoadRibbon className="oyl-home__layer" />
+          </>
+        )}
+      </div>
+      <div className="oyl-next-up__band tw:flex tw:flex-col tw:gap-sm tw:bg-surface-raised">
+        <h2 id="oyl-next-up-heading" className="tw:m-0">
+          Next up
+        </h2>
+        <p id="oyl-next-up-name" className="oyl-next-up__name tw:m-0">
+          {words.name}
+        </p>
+        <p className="oyl-muted tw:m-0">{words.line}</p>
+        <a
+          className="oyl-button oyl-next-up__ride"
+          href={words.href}
+          aria-describedby="oyl-next-up-name"
+        >
+          Ride
+        </a>
+      </div>
+    </section>
+  );
+}
+
+/** Any whole number draws one set of hills; this one is "next up"'s. */
+const NEXT_UP_SEED = 11;
+
+/** The week before's figure, as the words under a reading — its own `dd`. */
+function weekBefore(value: string): string {
+  return `Week before: ${value}`;
+}
+
+/**
+ * *This week* — #1010: rides, moving time and load in big tabular numerals
+ * (`Reading`), each set against the seven days before, and the days ridden as
+ * a ring beside the sentence that says the same. Numbers only — no streak
+ * and no target (#935 D-6). Every figure is `home/home.ts`'s arithmetic over
+ * the one read.
+ */
+function ThisWeek({
+  week,
+  previous,
+}: {
+  readonly week: HomeData['week'];
+  readonly previous: HomePreviousWeek;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel oyl-home__week" aria-labelledby="oyl-home-week">
+      <h2 id="oyl-home-week">This week</h2>
+      <p className="oyl-muted">Today and the six days before it, against the seven before those.</p>
+      {week.rides === 0 ? (
+        <p>No rides in the last seven days.</p>
+      ) : (
+        <div className="oyl-home__days">
+          <DaysRing days={week.daysRidden} />
+          <p>You rode on {String(week.daysRidden)} of the last seven days.</p>
+        </div>
+      )}
+      <dl className="oyl-home__facts">
+        <div>
+          <dt>Rides</dt>
+          <dd>
+            <Reading value={String(week.rides)} />
+          </dd>
+          <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
+        </div>
+        <div>
+          <dt>Moving time</dt>
+          <dd>
+            <Reading value={formatDuration(week.movingTime)} />
+          </dd>
+          <dd className="oyl-home__before">{weekBefore(formatDuration(previous.movingTime))}</dd>
+        </div>
+        <div>
+          <dt>Load</dt>
+          <dd>
+            <Reading value={String(Math.round(week.load))} />
+            {week.ridesWithLoad < week.rides
+              ? ` (from ${String(week.ridesWithLoad)} of ${String(week.rides)} rides)`
+              : ''}
+          </dd>
+          <dd className="oyl-home__before">
+            {weekBefore(String(Math.round(previous.load)))}
+            {previous.ridesWithLoad < previous.rides
+              ? ` (from ${String(previous.ridesWithLoad)} of ${String(previous.rides)} rides)`
+              : ''}
+          </dd>
+        </div>
+      </dl>
     </section>
   );
 }

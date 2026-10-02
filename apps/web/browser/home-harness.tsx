@@ -17,32 +17,50 @@
  * the cards to stop short of the window again. Without it, "fills the width"
  * is as true of a page whose main rendered nothing.
  *
- * ## #939: the hero band and the ride cards
+ * ## #1010: Next up, This week, and the ride cards as art
  *
- * `measure()` also publishes the hero band's box, the fold (the viewport less
- * its bottom inset, or the top of a bottom navigation bar —
- * `reflow-harness.tsx` §`foldLine`'s rule), and each ride card with its link:
- * the link's box, its declared `min-height`/`min-width`, the box it has with
- * that floor stripped, and what is hit at the card's middle.
+ * `measure()` also publishes the fold (the viewport less its bottom inset, or
+ * the top of a bottom navigation bar — `reflow-harness.tsx` §`foldLine`'s
+ * rule); *Next up*'s card, picture, band, words and Ride; *This week*'s and
+ * the Trainer card's boxes and the ride cards' section; and each ride card
+ * with its picture, its band, the band's computed fill, its words and its
+ * link — the link's box, its declared `min-height`/`min-width`, the box it
+ * has with that floor stripped, and what is hit at the card's middle.
  *
- * Since the owner's ruling of 2026-10-01 (medium drawings) it also publishes
- * each card's picture, the Trainer card's glyph and the days ring, and
- * `home.html?art=hidden|band|strip` puts back a superseded card picture —
- * `ART_CONTROLS` says which.
+ * The newest ride of the fixture was ridden on a saved route, so *Next up* is
+ * the route kind — the one that draws a profile and makes the one route read.
  *
- * `home.html?hero=tall` is #939's control: the band at 90 vh, which must push
- * the first ride card's control under a phone's fold — so a measurement that
- * finds it above the fold has measured the band and not a page that drew none.
+ * The controls, each the defect its assertion exists for:
+ *
+ * - `home.html?hero=tall` — Next up's picture at 90 vh, which must push its
+ *   Ride under a phone's fold;
+ * - `home.html?dashboard=off` — the landscape dashboard rule deleted, so Next
+ *   up no longer has This week beside it;
+ * - `home.html?band=overlay` — the words laid over the picture on a clear
+ *   band, which is what "text on art" would be;
+ * - `home.html?short=off` — the short-viewport rule deleted.
  */
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
-import { metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
-import { activityId, athleteId } from '@onyourleft/store';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  seconds,
+  unixSeconds,
+  watts,
+  type RoutePoint,
+} from '@onyourleft/domain';
+import { activityId, athleteId, type RouteRecord } from '@onyourleft/store';
 
 import { stubAnalysis } from '../src/analysis/testing';
+import { routeStub, stubRouteId } from '../src/routes/testing';
 import { stubActivity } from '../src/detail/testing';
 import { idleSnapshot, stubRideController } from '../src/ride/testing';
 import { AppShell } from '../src/shell/AppShell';
@@ -58,6 +76,29 @@ const ATHLETE = athleteId('harness');
 const DAY = 86_400;
 const PATIENCE_MS = 10_000;
 
+/** A route over a hill, so Next up has a shape to draw — `shape-cards.test.tsx`'s. */
+const ROUTE: RouteRecord = ((): RouteRecord => {
+  const points: RoutePoint[] = [];
+  for (let along = 0; along <= 24_000; along += 50) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + along / 111_195),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(40 + 220 * Math.sin((Math.PI * along) / 24_000) ** 2),
+    });
+  }
+  return {
+    id: stubRouteId('harness-route'),
+    createdBy: ATHLETE,
+    name: 'Box Hill and back',
+    profile: routeProfile(points),
+    visibility: 'private',
+    createdAt: unixSeconds(1_700_000_000),
+    updatedAt: unixSeconds(1_700_000_000),
+  };
+})();
+
 export interface Box {
   readonly left: number;
   readonly top: number;
@@ -71,37 +112,52 @@ export interface HomeMeasurement {
   readonly viewport: { readonly width: number; readonly height: number };
   readonly main: Box | undefined;
   readonly mainClass: string;
-  /** Every card, in document order. */
+  /** Every panel, in document order. */
   readonly cards: readonly Box[];
   /** `scrollWidth − innerWidth`: anything above zero is horizontal scrolling. */
   readonly horizontalOverflow: number;
-  /** #939: the hero band, or `undefined` when none was drawn. */
-  readonly hero: Box | undefined;
-  /** The hero's ground — its hills and road — or `undefined`. */
-  readonly ground: Box | undefined;
-  /**
-   * Every line of the `h1`'s and the summary's TEXT — their line boxes, not
-   * their padded boxes — so "the words stand on the sky" is a measurement.
-   */
-  readonly titleText: readonly Box[];
   /** The fold, in CSS px from the top of the viewport. */
   readonly fold: number;
+  /** #1010: Next up, or `undefined` when none was drawn. */
+  readonly nextUp: NextUpMeasurement | undefined;
+  readonly week: Box | undefined;
+  readonly trainer: Box | undefined;
+  /** The ride cards' section. */
+  readonly start: Box | undefined;
   /** The ride cards, in document order. */
   readonly rideCards: readonly RideCardMeasurement[];
   /** The Trainer card's glyph, or `undefined` when none was drawn. */
   readonly trainerGlyph: Box | undefined;
   /** The last-seven-days ring, or `undefined` when none was drawn. */
   readonly daysRing: Box | undefined;
+  /** Every `.oyl-button` in main that is a PRIMARY, by its text. */
+  readonly primaries: readonly string[];
+}
+
+export interface NextUpMeasurement {
+  readonly card: Box;
+  readonly art: Box | undefined;
+  readonly band: Box | undefined;
+  /** The band's computed `background-color`. */
+  readonly bandFill: string;
+  /** Every line of the band's words, as line boxes. */
+  readonly words: readonly Box[];
+  readonly name: string;
+  readonly ride: Box;
+  readonly rideText: string;
+  readonly rideHref: string;
+  /** Whether the route's own shape is drawn, rather than the kit's hills. */
+  readonly drawsProfile: boolean;
 }
 
 export interface RideCardMeasurement {
   readonly card: Box;
-  /**
-   * The card's picture — `.oyl-ride-card__art` — or `undefined` when it has no
-   * box at all (`display: none`). The owner's ruling of 2026-10-01: about
-   * 48 px tall.
-   */
+  /** The card's picture — `.oyl-ride-card__art` — or `undefined` when not rendered. */
   readonly art: Box | undefined;
+  /** The band the words stand on — `.oyl-ride-card__body`. */
+  readonly band: Box;
+  /** The band's computed `background-color`. */
+  readonly bandFill: string;
   /** The heading's TEXT and the line under it, as line boxes. */
   readonly words: readonly Box[];
   readonly linkText: string;
@@ -155,39 +211,71 @@ function boxOrNothing(element: Element | null): Box | undefined {
   return boxOf(element);
 }
 
-function measure(): HomeMeasurement {
-  const main = document.querySelector('main');
-  const hero = document.querySelector('.oyl-home-hero');
-  const ground = document.querySelector('.oyl-home-hero__ground');
+/** The line boxes of every element `selector` finds inside `root`. */
+function lineBoxes(root: Element, selector: string): Box[] {
+  return [...root.querySelectorAll(selector)].flatMap((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return [...range.getClientRects()].map((rect) => boxOf({ getBoundingClientRect: () => rect }));
+  });
+}
+
+function measureNextUp(): NextUpMeasurement | undefined {
+  const card = document.querySelector('.oyl-next-up');
+  const ride = card?.querySelector<HTMLAnchorElement>('a.oyl-next-up__ride');
+  if (card === null || card === undefined || ride === null || ride === undefined) {
+    return undefined;
+  }
+  const band = card.querySelector('.oyl-next-up__band');
   return {
+    card: boxOf(card),
+    art: boxOrNothing(card.querySelector('.oyl-next-up__art')),
+    band: boxOrNothing(band),
+    bandFill: band === null ? '' : getComputedStyle(band).backgroundColor,
+    words: lineBoxes(card, 'h2, p'),
+    name: (card.querySelector('.oyl-next-up__name')?.textContent ?? '').trim(),
+    ride: boxOf(ride),
+    rideText: (ride.textContent ?? '').trim(),
+    rideHref: ride.getAttribute('href') ?? '',
+    drawsProfile: card.querySelector('.oyl-next-up__profile') !== null,
+  };
+}
+
+function measure(): HomeMeasurement {
+  window.scrollTo(0, 0);
+  const main = document.querySelector('main');
+  const head = {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     main: main === null ? undefined : boxOf(main),
     mainClass: main?.className ?? '',
     cards: [...document.querySelectorAll('.oyl-home > .oyl-panel')].map(boxOf),
     horizontalOverflow: document.documentElement.scrollWidth - window.innerWidth,
-    hero: hero === null ? undefined : boxOf(hero),
-    ground: ground === null ? undefined : boxOf(ground),
-    titleText: [...document.querySelectorAll('main > h1, main > h1 + p')].flatMap((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      return [...range.getClientRects()].map((rect) =>
-        boxOf({ getBoundingClientRect: () => rect }),
-      );
-    }),
     fold: foldLine(),
+    nextUp: measureNextUp(),
+    week: boxOrNothing(document.querySelector('.oyl-home__week')),
+    trainer: boxOrNothing(document.querySelector('.oyl-home__trainer')),
+    start: boxOrNothing(document.querySelector('.oyl-home__start')),
     trainerGlyph: boxOrNothing(document.querySelector('.oyl-home__glyph')),
     daysRing: boxOrNothing(document.querySelector('.oyl-home__ring')),
-    rideCards: ((cards) => {
-      window.scrollTo(0, 0);
-      return cards;
-    })([...document.querySelectorAll('.oyl-home__rides > li')].map(measureCard)),
+    primaries: [...document.querySelectorAll('main .oyl-button')]
+      .filter(
+        (button) =>
+          !button.classList.contains('oyl-button--secondary') &&
+          !button.classList.contains('oyl-button--tertiary') &&
+          !button.classList.contains('oyl-button--danger'),
+      )
+      .map((button) => (button.textContent ?? '').trim()),
   };
+  const rideCards = [...document.querySelectorAll('.oyl-home__rides > li')].map(measureCard);
+  window.scrollTo(0, 0);
+  return { ...head, rideCards };
 }
 
 function measureCard(card: Element): RideCardMeasurement {
   const link = card.querySelector<HTMLAnchorElement>('a');
-  if (link === null) {
-    throw new Error('home harness: a ride card holds no link');
+  const band = card.querySelector('.oyl-ride-card__body');
+  if (link === null || band === null) {
+    throw new Error('home harness: a ride card holds no link or no band');
   }
   window.scrollTo(0, 0);
   const style = getComputedStyle(link);
@@ -200,11 +288,8 @@ function measureCard(card: Element): RideCardMeasurement {
   link.style.minWidth = '';
   const box = boxOf(card);
   const art = boxOrNothing(card.querySelector('.oyl-ride-card__art'));
-  const words = [...card.querySelectorAll('h3, p')].flatMap((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    return [...range.getClientRects()].map((rect) => boxOf({ getBoundingClientRect: () => rect }));
-  });
+  const bandBox = boxOf(band);
+  const words = lineBoxes(card, 'h3, p');
   // The middle is hit-tested where it is on screen: `elementFromPoint` finds
   // nothing outside the viewport, so a card below the fold is scrolled to
   // first, and the page put back at its top afterwards (`measure`).
@@ -215,6 +300,8 @@ function measureCard(card: Element): RideCardMeasurement {
   return {
     card: box,
     art,
+    band: bandBox,
+    bandFill: getComputedStyle(band).backgroundColor,
     words,
     linkText: (link.textContent ?? '').trim(),
     link: shipped,
@@ -254,42 +341,60 @@ function constrain(): void {
   main.classList.replace('oyl-main--dashboard', 'oyl-main--prose');
 }
 
-/** `?short=off`: delete Home's short-viewport rule, and fail if there is none. */
-function deleteShortViewportRule(): void {
+/**
+ * Delete every rule `matches` picks out of the shipped sheets, and fail unless
+ * exactly one went: a control that deleted nothing would measure the shipped
+ * page and call it the defect.
+ */
+function deleteOneRule(what: string, matches: (rule: CSSRule) => boolean): void {
   let deleted = 0;
   for (const sheet of document.styleSheets) {
     const rules = sheet.cssRules;
     for (let index = rules.length - 1; index >= 0; index -= 1) {
       const rule = rules[index];
-      if (
-        rule instanceof CSSMediaRule &&
-        // The build writes `(max-height: 30rem)` in range syntax.
-        ['(max-height: 30rem)', '(height <= 30rem)'].includes(rule.conditionText) &&
-        rule.cssText.includes('.oyl-home-hero')
-      ) {
+      if (rule !== undefined && matches(rule)) {
         sheet.deleteRule(index);
         deleted += 1;
       }
     }
   }
   if (deleted !== 1) {
-    throw new Error(
-      `home harness: expected one short-viewport Home rule, deleted ${String(deleted)}`,
-    );
+    throw new Error(`home harness: expected one ${what} rule, deleted ${String(deleted)}`);
   }
 }
 
-/**
- * `?art=…`: a card picture as it was before the ruling. `hidden` is the first
- * answer to #939's review (no card picture under 30rem tall); `band` is the
- * 8rem band across the card's top that #939 first shipped; `strip` is a band
- * of the ruling's height — 48 px tall and the card's full width, which is
- * what #973 drew and the ruling was made against.
- */
-const ART_CONTROLS: ReadonlyMap<string, string> = new Map([
-  ['hidden', '.oyl-ride-card__art { display: none; }'],
-  ['band', '.oyl-ride-card__art { position: relative; width: auto; height: 8rem; }'],
-  ['strip', '.oyl-ride-card__art { position: relative; width: auto; height: 3rem; }'],
+/** `?short=off`: Home's short-viewport rule. The build writes range syntax. */
+function deleteShortViewportRule(): void {
+  deleteOneRule(
+    'short-viewport Home',
+    (rule) =>
+      rule instanceof CSSMediaRule &&
+      ['(max-height: 30rem)', '(height <= 30rem)'].includes(rule.conditionText) &&
+      rule.cssText.includes('.oyl-next-up__art'),
+  );
+}
+
+/** `?dashboard=off`: the landscape dashboard's container rule. */
+function deleteDashboardRule(): void {
+  deleteOneRule(
+    'dashboard',
+    (rule) =>
+      rule instanceof CSSContainerRule &&
+      ['(min-width: 60rem)', '(width >= 60rem)'].includes(rule.conditionText) &&
+      rule.cssText.includes('.oyl-next-up'),
+  );
+}
+
+/** The controls that are a stylesheet of their own. */
+const STYLE_CONTROLS: ReadonlyMap<string, string> = new Map([
+  // #1010's fold control: Next up's picture a screen tall.
+  ['hero=tall', '.oyl-next-up__art { min-height: 90vh; }'],
+  // Words over the picture on a clear band: "text on art".
+  [
+    'band=overlay',
+    '.oyl-ride-card__art { position: absolute; inset: 0; } ' +
+      '.oyl-ride-card__body { position: relative; margin-top: 6rem; background: transparent !important; }',
+  ],
 ]);
 
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
@@ -316,26 +421,20 @@ async function run(): Promise<void> {
     throw new Error('home harness: #shell is missing from home.html');
   }
   window.location.hash = '#/';
-  if (new URLSearchParams(window.location.search).get('hero') === 'tall') {
-    // #939's control: the band at 90 vh, a screen rather than a band.
-    const tall = document.createElement('style');
-    tall.textContent = '.oyl-home-hero { min-height: 90vh; }';
-    document.head.append(tall);
-  }
-  if (new URLSearchParams(window.location.search).get('short') === 'off') {
-    deleteShortViewportRule();
-  }
-  const art = new URLSearchParams(window.location.search).get('art');
-  if (art !== null) {
-    // The controls for the owner's ruling of 2026-10-01 (medium drawings,
-    // about 48 px tall): each puts back a superseded picture.
-    const superseded = ART_CONTROLS.get(art);
-    if (superseded === undefined) {
-      throw new Error(`home harness: no ?art=${art} control`);
+  const query = new URLSearchParams(window.location.search);
+  for (const [key, value] of query) {
+    const css = STYLE_CONTROLS.get(`${key}=${value}`);
+    if (css !== undefined) {
+      const style = document.createElement('style');
+      style.textContent = css;
+      document.head.append(style);
+    } else if (key === 'short' && value === 'off') {
+      deleteShortViewportRule();
+    } else if (key === 'dashboard' && value === 'off') {
+      deleteDashboardRule();
+    } else {
+      throw new Error(`home harness: no ?${key}=${value} control`);
     }
-    const style = document.createElement('style');
-    style.textContent = superseded;
-    document.head.append(style);
   }
   const now = Math.floor(Date.now() / 1000);
   const rides = Array.from({ length: 60 }, (_unused, index) => ({
@@ -348,6 +447,8 @@ async function run(): Promise<void> {
       distance: metres(32_400),
       effortWeightedPower: watts(210),
       loadCoveredTime: seconds(3600),
+      // The newest ride was on the saved route, so Next up draws it.
+      ...(index === 59 ? { routeId: ROUTE.id } : {}),
     }),
   }));
   // #674: the view groups first, so every view renders on the render that asks.
@@ -358,6 +459,7 @@ async function run(): Promise<void> {
         <AppShell
           capabilities={NO_BLUETOOTH}
           analysis={stubAnalysis(ATHLETE, rides)}
+          routes={routeStub(ATHLETE, [ROUTE])}
           rideController={stubRideController(idleSnapshot()).controller}
         />
       </StrictMode>,
@@ -368,6 +470,9 @@ async function run(): Promise<void> {
     [...document.querySelectorAll('.oyl-home li')].find((each) =>
       (each.textContent ?? '').startsWith('Fitness'),
     ),
+  );
+  await until('Next up on the route', () =>
+    document.querySelector('.oyl-next-up__profile') === null ? undefined : true,
   );
   await document.fonts.ready;
   window.__oylHome = { ready: true, errors, measure, constrain };

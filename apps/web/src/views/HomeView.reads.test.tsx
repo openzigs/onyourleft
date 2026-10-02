@@ -12,16 +12,21 @@
  *
  * The count is the one Home made before #939 redrew it, taken on `main` with
  * this file: one `listActivitySummaries` and one `getAthlete`, nothing else.
+ * #1010's "next up" adds ONE `getRoute`, and only when a ride in the read was
+ * ridden on a route — counted on the route port the same way, which a
+ * `listRoutes` would show up on.
  */
 
 import { metres, seconds, unixSeconds } from '@onyourleft/domain';
-import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
+import { activityId, athleteId as toAthleteId, type RouteId } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { stubAnalysis } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
 import { idleSnapshot, stubRideController } from '../ride/testing';
+import type { RoutePort } from '../routes/store-port';
+import { routeStub, stubRouteId } from '../routes/testing';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -38,8 +43,10 @@ afterEach(() => {
 });
 
 /** A port whose every store method, whatever it is called, is counted. */
-function counted(port: AnalysisPort): { port: AnalysisPort; calls: Map<string, number> } {
-  const calls = new Map<string, number>();
+function counted<P extends AnalysisPort | RoutePort>(
+  port: P,
+  calls = new Map<string, number>(),
+): { port: P; calls: Map<string, number> } {
   const store = new Proxy(port.store, {
     get(target, name, receiver): unknown {
       const value: unknown = Reflect.get(target, name, receiver);
@@ -52,10 +59,10 @@ function counted(port: AnalysisPort): { port: AnalysisPort; calls: Map<string, n
       };
     },
   });
-  return { port: { athleteId: port.athleteId, store }, calls };
+  return { port: { ...port, athleteId: port.athleteId, store }, calls };
 }
 
-async function openHome(rides: number): Promise<Map<string, number>> {
+async function openHome(rides: number, routeId?: RouteId): Promise<Map<string, number>> {
   const { port, calls } = counted(
     stubAnalysis(
       OWNER,
@@ -67,16 +74,19 @@ async function openHome(rides: number): Promise<Map<string, number>> {
           startedAtTimeZone: 'UTC',
           movingTime: seconds(3000),
           distance: metres(30_000),
+          ...(routeId === undefined ? {} : { routeId }),
         }),
       })),
     ),
   );
+  const routes = counted(routeStub(OWNER), calls).port;
   globalThis.location.hash = '#/';
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
       analysis={port}
       rideController={stubRideController(idleSnapshot()).controller}
+      routes={routes}
     />,
   );
   await settle();
@@ -95,4 +105,15 @@ describe('the store calls Home makes — #939', () => {
       expect(Object.fromEntries(calls)).toEqual({ listActivitySummaries: 1, getAthlete: 1 });
     },
   );
+});
+
+describe('the store calls next up makes — #1010', () => {
+  it('a history ridden on a route: one getRoute more, and never a list of routes', async () => {
+    const calls = await openHome(40, stubRouteId('hill'));
+    expect(Object.fromEntries(calls)).toEqual({
+      listActivitySummaries: 1,
+      getAthlete: 1,
+      getRoute: 1,
+    });
+  });
 });
