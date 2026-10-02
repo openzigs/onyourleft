@@ -684,6 +684,23 @@ underneath, so its role, its keyboard and its form value are the platform's:
 The riding position is a segmented control since #994 (a `<select>` before). `browser/controls.browser.spec.ts`
 measures every new target the #316 three ways, with a control for the tabs and the forced-colours rule.
 
+**A screen of sections** ([#1014](https://github.com/openzigs/onyourleft/issues/1014), epic #935
+Phase 2). Devices, Settings, Files, Camera, Analysis, Segments and About declare `layout: 'sections'`
+(`shell/routes.ts` §`RouteLayout`): `main` drops the reading measure and becomes an `oyl-pane`
+container, and each view gathers its sections into one `.oyl-sections`, which a container query
+lays into a grid of two columns from 40rem of pane and three from 64rem (`theme.css` §"A screen of
+sections"). The grid is placed row by row with no `dense` packing, so the DOM order — the tab order,
+the first control — is unchanged and the eye reads across a row and on to the next; #1014's first
+cut used CSS columns, which made Files 2287 px tall at 1280×800 and sent a rider 1500 px down the
+first column before the second began. A section holding a table spans every column. Settings' cards are
+`--broad`: two columns from 54rem and never three, so its segmented choices keep one row, and an
+upright tablet keeps one column there. Devices gathers nothing: its garage (#942) is already a card
+grid, and the width is what it lacked. A list–detail route's detail pane is an `oyl-pane` container
+too, so Routes and Workouts lay their detail's groups side by side by the pane's width, not the
+window's. `browser/sections.browser.spec.ts` measures the columns and the rows on the owner's tablet both ways
+up, with `reflow.html?sections=prose`, `?sections=uncontained` and `?sections=columns` (the first
+cut's CSS columns put back) as the controls that must fail.
+
 **A list beside its detail** ([#670](https://github.com/openzigs/onyourleft/issues/670)). Activities,
 Workouts and Routes declare `layout: 'list-detail'` on the route table (`shell/routes.ts`
 §`RouteLayout`), Material 3's list–detail canonical layout taken as a pattern (ADR 0009): at an

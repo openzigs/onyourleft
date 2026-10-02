@@ -373,7 +373,7 @@ function Camera({
   }, [acknowledged, controller]);
 
   return (
-    <section className="oyl-camera" aria-labelledby={TITLE_ID}>
+    <section className="oyl-camera oyl-sections" aria-labelledby={TITLE_ID}>
       {/*
         ⚠️ **Named, because its children are.** A `<section>` with an accessible
         name is a `region` landmark; one without is nothing. This screen has
@@ -382,8 +382,15 @@ function Camera({
         `landmarks-are-distinguishable` — *"a landmark list with two identical
         entries is a list you cannot navigate by"*. The gate caught it on the
         way in, which is the gate working.
+
+        #1014: its subsections flow into columns where `main` is wide enough,
+        in this order, so each consent sentence is still read before the box
+        that agrees to it; the title spans them (`theme.css` §"A screen of
+        sections").
       */}
-      <h2 id={TITLE_ID}>Camera</h2>
+      <h2 id={TITLE_ID} className="oyl-sections__title">
+        Camera
+      </h2>
 
       {/*
         #528. The tripod phone's own screen, for the arrangement the owner

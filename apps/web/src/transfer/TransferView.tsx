@@ -199,85 +199,98 @@ export function TransferView({
   const [storeRevision, setStoreRevision] = useState(0);
 
   return (
-    <>
-      <h2>Import</h2>
-      {port === undefined ? (
-        <StatusMessage tone="danger">
-          Importing a file needs Web Crypto to fingerprint it, and this browser does not offer it
-          here — that is usually because the page was opened from a file rather than served over
-          <span> </span>
-          <code>https</code>. There is no import control on this page rather than one that cannot
-          work.
-        </StatusMessage>
-      ) : (
-        <ImportPanel
-          port={port}
-          onStoreChanged={() => {
-            setStoreRevision((previous) => previous + 1);
-          }}
-        />
-      )}
+    // #1014: each section is one group, and the groups flow into columns
+    // where `main` is wide enough (`theme.css` §"A screen of sections").
+    <div className="oyl-sections">
+      <div>
+        <h2>Import</h2>
+        {port === undefined ? (
+          <StatusMessage tone="danger">
+            Importing a file needs Web Crypto to fingerprint it, and this browser does not offer it
+            here — that is usually because the page was opened from a file rather than served over
+            <span> </span>
+            <code>https</code>. There is no import control on this page rather than one that cannot
+            work.
+          </StatusMessage>
+        ) : (
+          <ImportPanel
+            port={port}
+            onStoreChanged={() => {
+              setStoreRevision((previous) => previous + 1);
+            }}
+          />
+        )}
+      </div>
 
-      <h2>Export</h2>
-      {port === undefined ? (
-        <p className="oyl-muted">
-          Exporting needs the same local store the import above does, so it is unavailable here too.
-        </p>
-      ) : (
-        <ExportPanel port={port} storeRevision={storeRevision} />
-      )}
+      <div>
+        <h2>Export</h2>
+        {port === undefined ? (
+          <p className="oyl-muted">
+            Exporting needs the same local store the import above does, so it is unavailable here
+            too.
+          </p>
+        ) : (
+          <ExportPanel port={port} storeRevision={storeRevision} />
+        )}
+      </div>
 
-      <h2>Take everything with you</h2>
-      {port === undefined ? (
-        <p className="oyl-muted">
-          This needs the same local store the panels above do, so it is unavailable here too.
-        </p>
-      ) : (
-        <TakeEverythingPanel port={port} storeRevision={storeRevision} />
-      )}
+      <div>
+        <h2>Take everything with you</h2>
+        {port === undefined ? (
+          <p className="oyl-muted">
+            This needs the same local store the panels above do, so it is unavailable here too.
+          </p>
+        ) : (
+          <TakeEverythingPanel port={port} storeRevision={storeRevision} />
+        )}
+      </div>
 
-      <h2>Erase this device</h2>
-      {port === undefined ? (
-        <p className="oyl-muted">
-          This needs the same local store the panels above do, so it is unavailable here too.
-        </p>
-      ) : (
-        <ErasePanel
-          port={port}
-          {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
-          {...(onMassReset === undefined ? {} : { onMassReset })}
-          {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
-          storeRevision={storeRevision}
-          onStoreChanged={() => {
-            setStoreRevision((previous) => previous + 1);
-          }}
-        />
-      )}
+      <div>
+        <h2>Erase this device</h2>
+        {port === undefined ? (
+          <p className="oyl-muted">
+            This needs the same local store the panels above do, so it is unavailable here too.
+          </p>
+        ) : (
+          <ErasePanel
+            port={port}
+            {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
+            {...(onMassReset === undefined ? {} : { onMassReset })}
+            {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
+            storeRevision={storeRevision}
+            onStoreChanged={() => {
+              setStoreRevision((previous) => previous + 1);
+            }}
+          />
+        )}
+      </div>
 
-      {/* #1013: the reasoning is the section's help. The statement that this app
+      <div>
+        {/* #1013: the reasoning is the section's help. The statement that this app
         is not Strava's or Zwift's stays on the screen (ADR 0009 R3): a name
         another company owns is used here, and saying whose it is is the
         condition of using it. */}
-      <SectionHeading
-        level={2}
-        help={
+        <SectionHeading
+          level={2}
+          help={
+            <p>
+              This project integrates with no other platform&rsquo;s API. Moving rides in and out is
+              something you do with files, which needs no account, no paid tier and nobody&rsquo;s
+              permission. The reasoning is recorded in{' '}
+              <a href={CLEAN_ROOM_ADR}>ADR 0009, the clean-room posture</a>.
+            </p>
+          }
+        >
+          Why this is a file and not a connection
+        </SectionHeading>
+        <KeptVisible>
           <p>
-            This project integrates with no other platform&rsquo;s API. Moving rides in and out is
-            something you do with files, which needs no account, no paid tier and nobody&rsquo;s
-            permission. The reasoning is recorded in{' '}
-            <a href={CLEAN_ROOM_ADR}>ADR 0009, the clean-room posture</a>.
+            Imports activity files exported from Strava. On Your Left is not affiliated with,
+            endorsed by, or derived from Strava or Zwift.
           </p>
-        }
-      >
-        Why this is a file and not a connection
-      </SectionHeading>
-      <KeptVisible>
-        <p>
-          Imports activity files exported from Strava. On Your Left is not affiliated with, endorsed
-          by, or derived from Strava or Zwift.
-        </p>
-      </KeptVisible>
-    </>
+        </KeptVisible>
+      </div>
+    </div>
   );
 }
 

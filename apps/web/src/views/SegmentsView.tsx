@@ -367,7 +367,8 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
   );
 
   return (
-    <>
+    // #1014: the sections flow into columns where `main` is wide enough.
+    <div className="oyl-sections">
       {noSegments ? yours : null}
       <section aria-labelledby="segments-make">
         <h2 id="segments-make" tabIndex={-1}>
@@ -514,6 +515,6 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       )}
 
       {noSegments ? null : yours}
-    </>
+    </div>
   );
 }
