@@ -27,9 +27,10 @@ import { Button } from './Button';
  * `alertdialog`: its first focus is the choice that keeps things as they are
  * (Radix focuses `Cancel`), so a rider who presses Enter twice has lost
  * nothing. That choice is also the FILLED button, and the destructive one is
- * `danger` — red, and lighter than it (#1002). It is never opened by anything but a press, and it never carries a
- * safety or privacy sentence a screen must keep visible (#666): it is closed
- * until asked for, and a closed dialog renders nothing at all.
+ * `danger` — red, and lighter than it (#1002). It is never opened by anything
+ * but a press, and it never carries a safety or privacy sentence a screen must
+ * keep visible (#666): it is closed until asked for, and a closed dialog
+ * renders nothing at all.
  *
  * ⚠️ **Never on a ride-time screen.** While it is open the page behind it is
  * inert, and nothing may stand between a rider and *Pause* or *End*

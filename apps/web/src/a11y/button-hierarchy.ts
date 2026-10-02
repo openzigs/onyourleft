@@ -63,7 +63,11 @@ export const PRIMARY_BUTTON_SELECTOR =
 /** Every element drawn as a danger button — #1002. */
 export const DANGER_BUTTON_SELECTOR = '.oyl-button--danger';
 
-/** An open modal dialog — what `a11y/audit.ts` §`openModal` reads too. */
+/**
+ * An open modal dialog — what `a11y/audit.ts` §`openModal` reads too. ⚠️ It
+ * matches ANY `aria-modal="true"`, not only `design/ConfirmDialog.tsx`'s, so a
+ * future modal is held to one primary of its own and may hold a danger button.
+ */
 export const MODAL_SELECTOR = '[aria-modal="true"]';
 
 /** Every element drawn as a button of any kind. */
