@@ -109,6 +109,16 @@ describe('ConfirmDialog — #950', () => {
     expect(document.activeElement?.textContent).toBe('Keep the ride');
   });
 
+  it('draws the safe answer as the filled primary and the destructive one as danger — #1002', async () => {
+    await opened();
+    const keep = button('Keep the ride');
+    const remove = button('Delete the ride');
+    // Primary: `.oyl-button` with no lighter modifier.
+    expect(keep.className).toBe('oyl-button');
+    expect(remove.className).toBe('oyl-button oyl-button--danger');
+    expect(document.activeElement).toBe(keep);
+  });
+
   it('keeps Tab inside: past the last control it comes back to the first, and back again', async () => {
     await opened();
     const keep = button('Keep the ride');

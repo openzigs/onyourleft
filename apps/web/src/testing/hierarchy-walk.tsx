@@ -5,14 +5,19 @@
  * real route table and its control (a route whose view draws two primaries)
  * go through exactly the same path: the hash, the real `AppShell` over
  * `populated-shell.tsx`'s fixtures, the settle, the marker check and
- * `a11y/button-hierarchy.ts` §`onePrimaryViolations`.
+ * `a11y/button-hierarchy.ts` §`buttonHierarchyViolations` (one primary per
+ * view, and since #1002 no danger button outside a modal dialog).
  *
  * Test support: it calls `expect`, and is imported only by tests.
  */
 
 import { expect } from 'vitest';
 
-import { buttonsByView, onePrimaryViolations, type ViewButtons } from '../a11y/button-hierarchy';
+import {
+  buttonHierarchyViolations,
+  buttonsByView,
+  type ViewButtons,
+} from '../a11y/button-hierarchy';
 import type { RideController } from '../ride/controller';
 import { hrefFor, hrefForSelection, type RouteDefinition } from '../shell/routes';
 
@@ -121,5 +126,5 @@ export async function walkRoute(route: RouteDefinition, populated: boolean): Pro
 
   const views = buttonsByView(document);
   expect(views, 'the shell renders exactly one main').toHaveLength(1);
-  return { mounted, views, violations: onePrimaryViolations(document) };
+  return { mounted, views, violations: buttonHierarchyViolations(document) };
 }
