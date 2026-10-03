@@ -3257,6 +3257,12 @@ logs read for this):
   for its page by key and gets the one the previous case with that key loaded. Every control, and
   every case that changes the page, still loads its own. Locally the shared cases take 2–4 ms
   where each took a load: 93 cases in `ride` served by 13 loads, 34 in `rideview` by 9.
+  ⚠️ **It is module state, not a worker-scoped fixture, and that is the lesson of #1075's first
+  run** ([37155138130](https://github.com/openzigs/onyourleft/actions/runs/37155138130)):
+  Playwright gives a file that declares a worker fixture of its own a worker group of its own, so
+  the two specs were queued after every other `chromium` file, ran beside the `game` group that
+  `playwright.config.ts` §`projects` queues last, and its `?shadow-map` load ran out of its 70 s.
+  Anything added to a spec that changes its worker hash moves it in the queue.
 
 **What the measurement points at next, each OWED A RULING before it moves** (none moves in #1051;
 seconds are the 7763's, from 37131982824):

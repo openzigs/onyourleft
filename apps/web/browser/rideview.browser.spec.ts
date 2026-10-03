@@ -79,7 +79,7 @@
  * ⚠️ **Read `rideview-harness.tsx`'s header before reading a number here.**
  */
 
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import {
   applyInsets,
@@ -90,7 +90,7 @@ import {
   type Insets,
 } from './insets';
 import type { RideViewControl, RideViewMeasurement, RideViewNotice } from './rideview-harness';
-import { test, type SharedLoad } from './shared-load';
+import { releaseSharedPage, sharedPage } from './shared-load';
 
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 
@@ -202,15 +202,14 @@ async function open(page: Page, viewport: Viewport, query = ''): Promise<void> {
  * changes the page (a control putting a rule back, opening the Eased detail)
  * takes its own `page` and calls `open`.
  */
-async function sharedRideView(
-  sharedLoad: SharedLoad,
-  viewport: Viewport,
-  query = '',
-): Promise<Page> {
-  return sharedLoad.open(`rideview.html${query} at ${viewport.name}`, (page) =>
+async function sharedRideView(browser: Browser, viewport: Viewport, query = ''): Promise<Page> {
+  return sharedPage(browser, `rideview.html${query} at ${viewport.name}`, (page) =>
     open(page, viewport, query),
   );
 }
+
+// The page the cases below share goes when this file's cases do (`shared-load.ts`).
+test.afterAll(releaseSharedPage);
 
 async function measure(page: Page): Promise<RideViewMeasurement> {
   const measured = await page.evaluate(() => window.__oylRideView?.measure());
@@ -251,8 +250,8 @@ for (const viewport of TABLETS) {
      * first"* instead has no such control, and every case below would pass
      * over its absence.
      */
-    test('the harness rendered the screen at its fullest', async ({ sharedLoad }) => {
-      const page = await sharedRideView(sharedLoad, viewport);
+    test('the harness rendered the screen at its fullest', async ({ browser }) => {
+      const page = await sharedRideView(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.viewport).toEqual({ width: viewport.width, height: viewport.height });
@@ -268,8 +267,8 @@ for (const viewport of TABLETS) {
       ).toEqual([DEVICES_LINK]);
     });
 
-    test('is not held to the prose reading measure', async ({ sharedLoad }) => {
-      const page = await sharedRideView(sharedLoad, viewport);
+    test('is not held to the prose reading measure', async ({ browser }) => {
+      const page = await sharedRideView(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.mainClass).toBe('oyl-main oyl-main--instruments');
@@ -285,8 +284,8 @@ for (const viewport of TABLETS) {
      * a ride — the live group and the trainer group, which is `RideControls`,
      * `TrainerPanel` and `WorkoutPanel`.
      */
-    test('every ride control is on screen with no scrolling', async ({ sharedLoad }) => {
-      const page = await sharedRideView(sharedLoad, viewport);
+    test('every ride control is on screen with no scrolling', async ({ browser }) => {
+      const page = await sharedRideView(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.scrollY).toBe(0);
@@ -304,9 +303,9 @@ for (const viewport of TABLETS) {
      * the clock, and `theme.css` puts the title and its summary on one row.
      */
     test('the lowest ride control clears the fold by a margin, and says by how much', async ({
-      sharedLoad,
+      browser,
     }, testInfo) => {
-      const page = await sharedRideView(sharedLoad, viewport);
+      const page = await sharedRideView(browser, viewport);
       const seen = await measure(page);
 
       const during = seen.controls.filter((each) => each.group !== 'sensors');
@@ -327,12 +326,12 @@ for (const viewport of TABLETS) {
       expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     });
 
-    test('the title and its one-line summary share a row', async ({ sharedLoad }) => {
+    test('the title and its one-line summary share a row', async ({ browser }) => {
       // 40.8 px of the budget above. Stacked, they spend a line of the fold on
       // a sentence that fits beside the heading; the control below requires
       // them to be stacked again under the prose measure, so this is not true
       // of a page that simply has no summary.
-      const page = await sharedRideView(sharedLoad, viewport);
+      const page = await sharedRideView(browser, viewport);
       const { title, summary } = await measure(page);
 
       expect(title?.height ?? 0).toBeGreaterThan(0);
@@ -344,10 +343,10 @@ for (const viewport of TABLETS) {
       );
     });
 
-    test('the trainer is BESIDE the live metrics, not under them', async ({ sharedLoad }) => {
+    test('the trainer is BESIDE the live metrics, not under them', async ({ browser }) => {
       // "Landscape uses the width." The two groups share a top edge and do not
       // share a column.
-      const page = await sharedRideView(sharedLoad, viewport);
+      const page = await sharedRideView(browser, viewport);
       const { groups } = await measure(page);
 
       expect(groups.live).toBeDefined();
@@ -545,9 +544,9 @@ for (const viewport of EASED_VIEWPORTS) {
      * would be taken over controls that were never pushed down by one.
      */
     test('the harness rendered a running workout with its Eased notice, one sentence showing', async ({
-      sharedLoad,
+      browser,
     }) => {
-      const page = await sharedRideView(sharedLoad, viewport, EASED);
+      const page = await sharedRideView(browser, viewport, EASED);
       const seen = await measure(page);
 
       const names = seen.controls.map((each) => each.name);
@@ -583,9 +582,9 @@ for (const viewport of EASED_VIEWPORTS) {
     });
 
     test('the notice and every ride control are on screen, and clear the fold by a margin', async ({
-      sharedLoad,
+      browser,
     }, testInfo) => {
-      const page = await sharedRideView(sharedLoad, viewport, EASED);
+      const page = await sharedRideView(browser, viewport, EASED);
       const seen = await measure(page);
 
       expect(seen.scrollY).toBe(0);

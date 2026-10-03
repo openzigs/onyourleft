@@ -9,7 +9,7 @@
  * runner that load is most of a short case's time: `ride.browser.spec.ts`'s
  * nine overlay viewports each ran nine cases that loaded `ride.html` at the same
  * size and then only measured it, at about 0.45 s a case on an EPYC 7763 (run
- * 37131982824), where the measuring took a fraction of that. This is
+ * 37131982824), where the measuring took a few milliseconds. This is
  * `game.browser.spec.ts`' #456 move — load once, let every case read the
  * result — made small enough to use in any spec: a case asks for a page by a
  * KEY and a load, and gets the page the last case with that key left, or a new
@@ -22,20 +22,31 @@
  * takes Playwright's own `page` and loads its own, exactly as before — a
  * control above all, because a control that ran on a page an earlier case had
  * already broken would prove nothing. The key must name EVERYTHING the load
- * depends on (the viewport and the query at least): two cases that share a key
- * share a page.
+ * depends on (the page, the viewport and the query at least): two cases that
+ * share a key share a page.
  *
  * ## What it holds, and for how long
  *
- * One page, in one context, per worker. A different key closes the previous
- * context first, so a spec whose cases are grouped by key — every `describe`
- * here is — loads once per group and holds one page at a time. Playwright runs
- * one file's cases in order in one worker (this config is not `fullyParallel`),
- * which is what makes the grouping the ORDER the cases run in.
+ * One page, in one context, per worker process. A different key closes the
+ * previous context first, so a spec whose cases are grouped by key — every
+ * `describe` that uses this is — loads once per group and holds one page at a
+ * time. Playwright runs one file's cases in order in one worker (this config is
+ * not `fullyParallel`), which is what makes the grouping the ORDER the cases
+ * run in. A spec that uses this registers {@link releaseSharedPage} as its
+ * `afterAll`, so the page goes when the file's cases do.
  *
- * ⚠️ **A failure does not cascade.** Playwright replaces a worker after a
- * failing case, and the holder is worker-scoped, so the next case in the group
- * loads afresh in a new worker rather than reading a page a red case left
+ * ⚠️ **Module state, and deliberately not a worker-scoped fixture.** The first
+ * version was a worker fixture, and Playwright gives a file that uses a worker
+ * fixture of its own a worker of its own: `ride.browser.spec.ts` and
+ * `rideview.browser.spec.ts` were queued after every other `chromium` spec, ran
+ * beside the `game` group the config queues last, and the game's `?shadow-map`
+ * load ran out of its 70 s budget on PR #1075's first run (37155138130). A
+ * module-level holder changes no worker hash, so every spec keeps its place in
+ * the queue.
+ *
+ * ⚠️ **A failure does not cascade.** Playwright replaces a worker process after
+ * a failing case, and this module's state lives in that process, so the next
+ * case in the group loads afresh rather than reading a page a red case left
  * behind. A load that throws is not remembered either: the key is held only
  * once the load has resolved.
  *
@@ -46,16 +57,7 @@
  * option the load depends on must put it in the key.
  */
 
-import { test as base, type BrowserContext, type Page } from '@playwright/test';
-
-/** What a case is handed. */
-export interface SharedLoad {
-  /**
-   * The page `load` left for `key`, loading it first if the worker's current
-   * page is for a different key or there is none.
-   */
-  readonly open: (key: string, load: (page: Page) => Promise<void>) => Promise<Page>;
-}
+import type { Browser, BrowserContext, Page } from '@playwright/test';
 
 interface Held {
   readonly key: string;
@@ -63,52 +65,49 @@ interface Held {
   readonly page: Page;
 }
 
-interface Holder {
-  held: Held | undefined;
-  /** How many loads this worker made, and how many cases it served — printed once. */
-  loads: number;
-  served: number;
+let held: Held | undefined;
+let loads = 0;
+let served = 0;
+
+/**
+ * The page `load` left for `key`, loading it first in a new context of
+ * `browser` if the page held is for a different key, or there is none.
+ */
+export async function sharedPage(
+  browser: Browser,
+  key: string,
+  load: (page: Page) => Promise<void>,
+): Promise<Page> {
+  served += 1;
+  if (held?.key === key) {
+    return held.page;
+  }
+  const previous = held;
+  held = undefined;
+  await previous?.context.close();
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await load(page);
+    held = { key, context, page };
+    loads += 1;
+    return page;
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
 }
 
-export const test = base.extend<{ sharedLoad: SharedLoad }, { sharedLoadHolder: Holder }>({
-  sharedLoadHolder: [
-    // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring, and this fixture needs nothing.
-    async ({}, use) => {
-      const holder: Holder = { held: undefined, loads: 0, served: 0 };
-      await use(holder);
-      await holder.held?.context.close();
-      if (holder.served > 0) {
-        console.log(
-          `#1051 shared loads: ${String(holder.loads)} load(s) served ${String(holder.served)} case(s) in this worker`,
-        );
-      }
-    },
-    { scope: 'worker' },
-  ],
-  sharedLoad: async ({ browser, sharedLoadHolder: holder }, use) => {
-    await use({
-      open: async (key, load) => {
-        holder.served += 1;
-        if (holder.held?.key === key) {
-          return holder.held.page;
-        }
-        const previous = holder.held;
-        holder.held = undefined;
-        await previous?.context.close();
-        const context = await browser.newContext();
-        try {
-          const page = await context.newPage();
-          await load(page);
-          holder.held = { key, context, page };
-          holder.loads += 1;
-          return page;
-        } catch (error) {
-          await context.close();
-          throw error;
-        }
-      },
-    });
-  },
-});
-
-export { expect } from '@playwright/test';
+/** Close the page held, if any, and say how much loading it saved. For `test.afterAll`. */
+export async function releaseSharedPage(): Promise<void> {
+  const previous = held;
+  held = undefined;
+  await previous?.context.close();
+  if (served > 0) {
+    console.log(
+      `#1051 shared loads: ${String(loads)} load(s) served ${String(served)} case(s) in this worker`,
+    );
+  }
+  loads = 0;
+  served = 0;
+}
