@@ -133,3 +133,20 @@ it can, which the compositor draws without a layout.
   `check:licences` stops the build, and this ADR is re-opened.
 - **An animation becomes necessary** to understand a screen. D-6 would then be false, and a reader
   with reduced motion would be missing something.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-03** — [#945](https://github.com/openzigs/onyourleft/issues/945) did **not** install
+  Motion, so the header's *"The dependency is installed by #945"* and §Consequences' *"#945 installs
+  Motion under D-1 and D-2, wraps the app in `MotionConfig`"* are no longer true. #945 carried the
+  route cross-fade with React 19.3's `<ViewTransition>` and no dependency, which §Consequences
+  allowed, and its own acceptance criteria required `apps/web/package.json`'s `dependencies`
+  unchanged; a Motion install with no caller would have been a dependency nothing used. Installing
+  Motion, `MotionConfig reducedMotion="user"`, and the card carried into its detail move to
+  [#1072](https://github.com/openzigs/onyourleft/issues/1072). No decision here changes: D-3's rule
+  (no motion on `ride` or `game`, nor while immersive) binds #945's cross-fade, which
+  `apps/web/src/shell/route-motion.ts` enforces.

@@ -843,9 +843,25 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   them, and `theme.a11y.test.ts` refuses a duration literal above 200 ms. The
   `prefers-reduced-motion` and `update: slow` blocks collapse all of it, which
   `browser/shell.browser.spec.ts` §"#936" measures with `document.getAnimations()`. Script animation
-  is Motion ([ADR 0041](adr/0041-motion-for-menu-animation.md)): lazily loaded, menu routes only,
-  never during a ride or while the shell is immersive, and it reads the same values from
-  `tokens.ts` §`MOTION_FOR_SCRIPT`. Nothing loops.
+  is to be Motion ([ADR 0041](adr/0041-motion-for-menu-animation.md)): lazily loaded, menu routes
+  only, never during a ride or while the shell is immersive, and it reads the same values from
+  `tokens.ts` §`MOTION_FOR_SCRIPT`. ⚠️ **It is not installed yet** — #945 used none, and the
+  install moved to [#1072](https://github.com/openzigs/onyourleft/issues/1072). Nothing loops.
+- **A menu route cross-fades into the next, and a ride route never does**
+  ([#945](https://github.com/openzigs/onyourleft/issues/945)). `AppShell` wraps a route's view in
+  React 19.3's `<ViewTransition>`, keyed by route, and `theme.css` §"THE ROUTE CROSS-FADE" runs it
+  on `--oyl-motion-medium`, collapsed by both reduced-motion blocks. ⚠️ **The router had to
+  change for it to run at all**: React animates only an update inside `startTransition` (or a
+  Suspense reveal), and `useRoute` used to be a `useSyncExternalStore`, whose updates never are.
+  It mirrors the fragment into state now, and applies each change in `startTransition` or
+  synchronously as `shell/route-motion.ts` decides. ⚠️ **No transition runs to or from `ride` or
+  `game`, nor while the shell is immersive**: while one runs the page is the browser's snapshot,
+  and a press lands on the snapshot rather than on the control under it — a rider pressing *Start
+  recording* or the game's *Ride* must never press into a picture of the page they left. Those
+  navigations are applied synchronously, which React does not animate, and the `<ViewTransition>`
+  carries `update="none"` so a ride view's chunk arriving afterwards is not animated either.
+  `browser/motion.browser.spec.ts` counts the transitions the page starts, with the synchronous
+  router as its control.
 - **Utilities are tokens** ([ADR 0042](adr/0042-tailwind-and-radix-over-the-tokens.md), #950).
   A screen may lay itself out with Tailwind v4 utilities, prefixed `tw:`: `tw:bg-surface`,
   `tw:p-md`, `tw:text-xl`, `tw:duration-short`. `design/tailwind.css` clears Tailwind's own theme

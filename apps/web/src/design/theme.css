@@ -4832,6 +4832,34 @@ select.oyl-input {
 }
 
 /*
+ * THE ROUTE CROSS-FADE — #945.
+ *
+ * `AppShell.tsx` wraps a menu route's view in React 19.3's `<ViewTransition>`
+ * with the class `oyl-route`, and the browser's own View Transition API draws
+ * the old view fading out and the new one fading in. These rules set the one
+ * duration and the one curve every `::view-transition-*` animation runs on —
+ * the browser's default is 250 ms, past epic #935's 200 ms ceiling — and they
+ * are written for EVERY name, so React's snapshot of the root (when it takes
+ * one) is held to the same token as the route's.
+ *
+ * ⚠️ `*::before` does not match a `::view-transition-*` pseudo-element, so the
+ * two blocks below that collapse motion (`prefers-reduced-motion` and
+ * `update: slow`) name these selectors themselves. Without that a rider who
+ * asked for less motion would still get the cross-fade.
+ *
+ * ⚠️ No transition ever runs to or from a ride route: while one runs, a press
+ * lands on the snapshot rather than on the control under it. That rule is in
+ * `shell/route-motion.ts` and in the router, not here.
+ */
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--oyl-motion-medium);
+  animation-timing-function: var(--oyl-motion-ease-standard);
+}
+
+/*
  * Motion is opt-in. Every duration in this file is a `--oyl-motion-*` token
  * (#936), and this block collapses every one of them for a reader who asked
  * for less motion.
@@ -4839,7 +4867,11 @@ select.oyl-input {
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after {
+  *::after,
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -6184,7 +6216,11 @@ select.oyl-input {
 @media (update: slow) {
   *,
   *::before,
-  *::after {
+  *::after,
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
