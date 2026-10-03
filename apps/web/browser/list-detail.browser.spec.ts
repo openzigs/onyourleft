@@ -423,15 +423,12 @@ test.describe('#670 — one pane below 840 px', () => {
         // back to the Activities list at 800×1280 and was then lost: hidden,
         // the list measured a width of nothing, became cards, and was drawn
         // as a table again AFTER focus had returned to a card — so the link
-        // that had focus was removed. Whether the redraw came before or after
-        // the focus was timing, which is why the case was flaky rather than
-        // red; a list that was drawn again at all is what this asserts, and
-        // that is not timing (`ActivitiesView.tsx` §`useLibraryLayout`).
-        // ⚠️ But it reads the expando at ONE moment, so a redraw that lands
-        // after this `evaluate` still passes: before the fix it went red only
-        // 2 times in 20 (#758). The deterministic gate is
-        // `ActivitiesView.test.tsx` §"#738" and §"#758"; this is the
-        // corroboration in a real engine.
+        // that had focus was removed. Since #1041 the library is cards at
+        // every width and measures nothing, so there is no second layout to
+        // redraw it as; this is the corroboration in a real engine that
+        // nothing else redraws it either.
+        // ⚠️ It reads the expando at ONE moment, so a redraw that lands after
+        // this `evaluate` still passes (#758).
         expect(
           await item.evaluate(
             (link) => (link as HTMLElement & { oylLeftFrom?: true }).oylLeftFrom === true,
