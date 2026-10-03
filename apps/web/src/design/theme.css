@@ -3925,23 +3925,29 @@ select.oyl-input {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  overflow-wrap: anywhere;
 }
 
 .oyl-activity-card:has(a[aria-current='true']) {
   box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
 }
 
+/*
+ * A ride's name may be one unbreakable word (`reflow.browser.spec.ts`'s
+ * fixture has one), so it may break anywhere. Only the name: on the whole card
+ * it let a reading's numerals break mid-number (#1041's review).
+ */
 .oyl-activity-card__name {
   font-weight: 600;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
-/* The name is the card's link: a 44 px target however short the name. */
+/* The name is the card's link: a 44 × 44 px target however short the name. */
 .oyl-activity-card__name a {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
+  min-width: 2.75rem;
 }
 
 .oyl-activity-card__date {
@@ -3951,7 +3957,8 @@ select.oyl-input {
 .oyl-activity-card__facts {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
-  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  /* 9rem, as `.oyl-home__facts` sizes it (#992): `10:23:45` at `xxl` is about 8.5rem. */
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   align-self: stretch;
   margin: 0 0 var(--oyl-space-sm);
 }

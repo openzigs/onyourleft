@@ -283,6 +283,14 @@ test.describe('the activity library is cards at every width', () => {
         expect(library?.columns ?? 0).toBeGreaterThan(1);
       }
       expect(library?.shortestLink ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      // The fixture's ride of `10:23:45` named "Ride" (`SHORT_LONG_RIDE`): its
+      // link is 44 px wide by its own floor, and its duration fits its fact on
+      // one line — the facts' tracks are 9rem, as #992 sized them.
+      expect(library?.narrowestLink ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(library?.mostReadingLines, 'a reading wrapped').toBe(1);
+      expect(library?.readingSpill ?? 1, 'a reading spilled out of its fact').toBeLessThanOrEqual(
+        0.5,
+      );
       const frames = await page.evaluate(
         () => (window as unknown as { __oylTableFrames: boolean[] }).__oylTableFrames,
       );

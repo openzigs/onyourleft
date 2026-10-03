@@ -559,7 +559,10 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
  * view's.
  *
  * Average power is shown only where the ride has it. A ride with no power
- * meter is not drawn as "0 W" or "—": the reading is simply absent.
+ * meter is not drawn as "0 W" or "—": the reading is simply absent. So is
+ * distance where the ride stored none — a ride recorded with no speed channel
+ * stores 0 (`recording/finish.ts` §`distanceOf`), and "0.0 km" would be an
+ * invented reading (#1041's review).
  */
 function RideCard({
   row,
@@ -587,12 +590,14 @@ function RideCard({
             <Reading value={row.duration} />
           </dd>
         </div>
-        <div>
-          <dt>Distance</dt>
-          <dd>
-            <Reading value={row.distance} unit={distanceUnit(units)} />
-          </dd>
-        </div>
+        {row.distance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading value={row.distance} unit={distanceUnit(units)} />
+            </dd>
+          </div>
+        )}
         {row.averagePower === undefined ? null : (
           <div>
             <dt>Avg power</dt>
@@ -626,9 +631,7 @@ function RideSummary({ row }: { readonly row: LibraryRow }): JSX.Element {
         </div>
         <div>
           <dt>Distance</dt>
-          <dd>
-            {row.distance} {distanceUnit(units)}
-          </dd>
+          <dd>{row.distance === undefined ? '—' : `${row.distance} ${distanceUnit(units)}`}</dd>
         </div>
         <div>
           <dt>Avg power</dt>

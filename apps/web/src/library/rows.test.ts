@@ -79,6 +79,12 @@ describe('rowFor', () => {
     expect(row.distance).toBe('42.2');
   });
 
+  it('carries no distance for a ride that stored nought, rather than "0.0" (#1041)', () => {
+    // A ride recorded with no speed channel stores `metres(0)`.
+    expect(rowFor(summary('a', { distance: metres(0) }), 'metric').distance).toBeUndefined();
+    expect(rowFor(summary('b', { distance: metres(40) }), 'metric').distance).toBe('0.0');
+  });
+
   it('renders the same ride in miles for an imperial rider (#238)', () => {
     // 42 195 m is 42.2 km and 26.2 mi. The digits change, and nothing else
     // about the row does — the unit itself is the column heading, which

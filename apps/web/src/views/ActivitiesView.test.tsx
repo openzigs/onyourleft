@@ -522,6 +522,29 @@ describe('#1041 — every ride a card, at every width', () => {
     ).toHaveLength(0);
   });
 
+  it('invents no distance for a ride that stored none: no position, no power, no speed', async () => {
+    // A ride recorded with no speed channel stores `metres(0)`
+    // (`recording/finish.ts` §`distanceOf`) — no distance known, not 0.0 km.
+    const nothing = summary('no-speed', {
+      name: 'Trainer, power meter off',
+      hasPosition: false,
+      distance: metres(0),
+      elapsedTime: seconds(3_600),
+    });
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [nothing])} />);
+    await settle();
+
+    const card = queryAll(document.body, '.oyl-activity-cards > li')[0];
+    const text = card?.textContent ?? '';
+    expect(text).toContain('Trainer, power meter off');
+    expect(text).not.toContain('Distance');
+    expect(text).not.toContain('Avg power');
+    expect(text).not.toMatch(/\b0(\.0)? (km|mi)\b/);
+    expect(
+      queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
+    ).toStrictEqual(['1:00:00']);
+  });
+
   it('issues no read per card: one list read for fifty cards, and no ride read alone', async () => {
     const fifty = Array.from({ length: PAGE_SIZE }, (_, index) =>
       summary(`ride-${String(index)}`, { startedAt: unixSeconds(1_700_000_000 + index) }),

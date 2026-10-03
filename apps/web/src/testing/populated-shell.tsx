@@ -288,8 +288,19 @@ function north(metresNorth: number, metresEast = 0): GeographicPosition {
   );
 }
 
+/**
+ * The ride whose card is the hard case for its facts and its link (#1041's
+ * review): ten hours and more, so its duration is the widest reading a card
+ * draws (`10:23:45`, about 8.5rem at `xxl`), and a name of four letters, so its
+ * link is narrower than 44 px unless the link's own floor holds it.
+ */
+const SHORT_LONG_RIDE = 1;
+
 /** Long names, with spaces and without, because a name is where a row gets wide. */
 function rideName(index: number): string {
+  if (index === SHORT_LONG_RIDE) {
+    return 'Ride';
+  }
   if (index % 7 === 3) {
     return `Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch loop ${String(index)}`;
   }
@@ -344,7 +355,8 @@ function ride(index: number): ActivityRecord {
     name: rideName(index),
     startedAt: unixSeconds(NOW - index * DAY),
     startedAtTimeZone: 'Europe/London',
-    elapsedTime: seconds(3 * 3600 + 17 * 60),
+    elapsedTime:
+      index === SHORT_LONG_RIDE ? seconds(10 * 3600 + 23 * 60 + 45) : seconds(3 * 3600 + 17 * 60),
     movingTime: seconds(3 * 3600 + 2 * 60),
     distance: metres(123_456),
     averagePower: watts(234),
