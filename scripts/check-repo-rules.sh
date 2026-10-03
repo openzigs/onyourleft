@@ -210,19 +210,43 @@ exempt_paths() {
   sed -e 's/#.*//' -e 's/[[:space:]]*$//' "${EXEMPT_FILE}" | grep -v '^$'
 }
 
+# ⚠️ The list is read ONCE, and the comparison is still whole-line string
+# equality (#1051). `is_exempt` runs for every source file under `apps/` and
+# `packages/`, and it used to re-run `exempt_paths` -- a `sed` and a `grep` --
+# for each of them: two processes per file, about 2 000 files, on a CI step
+# whose commands share two cores. The `case` below matches the quoted path
+# between two newlines, so it is literal (a `*` in a path is a character, not
+# a glob) and a path that is a prefix or a suffix of an entry is not one.
+EXEMPT_LIST=''
+EXEMPT_LIST_READ=0
+
 is_exempt() {
-  local relative="$1" entry
-  while IFS= read -r entry; do
-    [ "${entry}" = "${relative}" ] && return 0
-  done < <(exempt_paths)
+  local relative="$1"
+  if [ "${EXEMPT_LIST_READ}" -eq 0 ]; then
+    EXEMPT_LIST="$(exempt_paths)"
+    EXEMPT_LIST_READ=1
+  fi
+  case $'\n'"${EXEMPT_LIST}"$'\n' in
+    *$'\n'"${relative}"$'\n'*) return 0 ;;
+  esac
   return 1
 }
 
 # The SPDX identifier must appear in the file's opening comment block. We allow
 # the first five lines rather than only the first, because a shebang and a
 # generated-file banner both legitimately precede it.
+#
+# One `sed` rather than `head | sed | head` (#1051): the first of the first five
+# lines that names an identifier is the one read, and `5q` stops the read there,
+# which is what the two `head`s did in three processes.
 spdx_of() {
-  head -n 5 "$1" | sed -n 's/.*SPDX-License-Identifier:[[:space:]]*\([A-Za-z0-9.+-]*\).*/\1/p' | head -n 1
+  sed -n \
+    -e '/SPDX-License-Identifier:/{' \
+    -e 's/.*SPDX-License-Identifier:[[:space:]]*\([A-Za-z0-9.+-]*\).*/\1/p' \
+    -e 'q' \
+    -e '}' \
+    -e '5q' \
+    "$1"
 }
 
 # --- LIC001 / LIC002: SPDX header matches the directory ----------------------
@@ -864,11 +888,15 @@ KEY_MATERIAL_NAMES='.*\.(jks|keystore|p12|pfx|key)$|^keystore\.properties$|^(rel
 # suite, so reporting it would be a red that only ever appears locally.
 check_no_key_material() {
   local candidates
+  # The name and the match are bash's own, not `basename` and `grep` (#1051):
+  # this loop visits every file the walk reaches, and two processes per file
+  # was most of this rule's time. `[[ =~ ]]` takes the same POSIX extended
+  # regular expression `grep -E` does, and a walked path never ends in `/`.
   while IFS= read -r file; do
     [ -n "${file}" ] || continue
-    base="$(basename "${file}")"
+    base="${file##*/}"
     relative="${file#"${ROOT}"/}"
-    if grep -qE "${KEY_MATERIAL_NAMES}" <<< "${base}"; then
+    if [[ "${base}" =~ ${KEY_MATERIAL_NAMES} ]]; then
       report REL001 "${relative}: looks like signing key material; keys belong in CI secrets and never in the repository (#95)"
     fi
   done < <(repo_files | sort)
@@ -1521,17 +1549,20 @@ fi
 # than by its name, so that the rule covers a format that does not exist yet.
 #
 # The read is bounded by `head` and the test is "did `tr` throw anything away",
-# which is three processes per file and about 2 s over this repository. A
-# command substitution cannot be used to hold the bytes themselves: bash drops
-# NUL from one, which is the byte being looked for.
+# which is three processes per file. A command substitution cannot be used to
+# hold the bytes themselves: bash drops NUL from one, which is the byte being
+# looked for. Since #1051 the count is read by bash arithmetic, which takes the
+# padding BSD `wc` puts before it, rather than by a fourth process (`tr`) that
+# removed it; an empty count (nothing read) is 0, which is "not binary", as it
+# was.
 #
 # `< "$1"` rather than `head -c N -- "$1"`, because a redirection cannot mistake
 # a filename beginning with a hyphen for an option bundle.
 asset_is_binary() {
   local nuls
   nuls="$(head -c "${ASSET_SNIFF_BYTES}" < "$1" 2>/dev/null \
-    | LC_ALL=C tr -dc '\000' | wc -c | tr -d '[:space:]')"
-  [ -n "${nuls}" ] && [ "${nuls}" != "0" ]
+    | LC_ALL=C tr -dc '\000' | wc -c)"
+  [ "$(( ${nuls:-0} ))" -ne 0 ]
 }
 
 # --- ASSET008: a vector or animation file is an asset, text or not ------------

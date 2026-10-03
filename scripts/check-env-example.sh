@@ -121,19 +121,45 @@ root_source_files() {
        -o -name '*.mjs' -o -name '*.cjs' \) -print
 }
 
+# Every file to scan, in the order they are reported.
+scanned="$(
+  root_source_files
+  source_files "${ROOT}/apps"
+  source_files "${ROOT}/packages"
+)"
+
+# ⚠️ The files that can read a variable at all, found by ONE grep over the whole
+# list rather than `used_names_in`'s eight processes per file (#1051). Each of
+# the three spellings above requires `process.env` or `meta.env` on the line it
+# matches (`import.meta.env` included, as its tail), so a file this pattern does
+# not match can yield no name, and skipping it changes no finding -- it is a
+# superset by construction, not a heuristic. The walk is ~2 000 files and a few
+# dozen read a variable.
+#
+# The same empty-input guard as `check-repo-rules.sh` §`check_no_key_material`:
+# GNU `xargs` runs `grep` once with no operands on an empty list, and `grep`
+# with no operands reads standard input.
+ENV_READ_PATTERN='(process|meta)[[:space:]]*\.[[:space:]]*env'
+mentions=''
+if [ -n "${scanned}" ]; then
+  mentions="$(printf '%s\n' "${scanned}" | tr '\n' '\000' \
+    | xargs -0 grep -lE -- "${ENV_READ_PATTERN}" 2>/dev/null)"
+fi
+newline=$'\n'
+
 while IFS= read -r file; do
   [ -n "${file}" ] || continue
+  case "${newline}${mentions}${newline}" in
+    *"${newline}${file}${newline}"*) ;;
+    *) continue ;;
+  esac
   while IFS= read -r name; do
     [ -n "${name}" ] || continue
     if ! is_documented "${name}"; then
       report "${file#"${ROOT}"/}: reads ${name}, which .env.example does not list"
     fi
   done < <(used_names_in "${file}")
-done < <(
-  root_source_files
-  source_files "${ROOT}/apps"
-  source_files "${ROOT}/packages"
-)
+done <<< "${scanned}"
 
 if [ "${findings}" -gt 0 ]; then
   printf '\n%s environment-template violation(s). Add each variable to .env.example with a placeholder value — never a real one.\n' \

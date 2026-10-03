@@ -1468,6 +1468,20 @@ printf 'apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
 assert_violation "an exemption covers only the path it names" LIC002 \
   "apps/mobile/icon2.xml: no SPDX-License-Identifier"
 
+# #1051 reads the list once and matches a path between two newlines. An entry
+# the scanned path is a PREFIX of, and one it is a SUFFIX of, both name real
+# files (so LIC006 is silent) and neither may exempt it: without the trailing
+# newline in that match the first would, and without the leading one the second.
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf 'notes\n' > "${fixture_root}/apps/mobile/icon.xml.orig"
+mkdir -p "${fixture_root}/nested/apps/mobile"
+printf 'notes\n' > "${fixture_root}/nested/apps/mobile/icon.xml"
+printf 'apps/mobile/icon.xml.orig\nnested/apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an exemption is the whole path, not a prefix or a suffix of one" LIC002 \
+  "apps/mobile/icon.xml: no SPDX-License-Identifier"
+
 new_fixture
 write_good_app mobile
 printf 'apps/mobile/gone.xml\n' > "${fixture_root}/.spdx-exempt"
