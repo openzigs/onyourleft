@@ -37,6 +37,12 @@
  *   columns did (Files 2287 px tall at 1280×800). Each route's height is
  *   published under the grid and under the columns it replaced.
  *
+ * - **No section dwarfs its row** (#1026). On Settings and Files in landscape,
+ *   in every row of two or more sections, the tallest is at most
+ *   {@link ROW_BALANCE_LIMIT} times the shortest. #1025 measured one card of
+ *   Settings at 1959 px beside one of 500 (3.9×) and Files' erase panel at
+ *   1822 px beside 421 (4.3×). Every route's rows are published both ways up.
+ *
  * What is NOT held here, because other gates already hold it unchanged by
  * #1014: the first control above the fold with the 50 px floor both ways up
  * (`controls-first.browser.spec.ts`), reflow at 320 px and on a phone on its
@@ -56,6 +62,9 @@
  * - `?sections=columns` deletes the grid through the CSSOM and puts back
  *   #1014's first cut, CSS columns. Every route the grid lays in two or more
  *   rows of two or more columns must then fail the rows check.
+ * - Files with its erase section's ⓘ opened puts the list of what an erase
+ *   removes back in the section, which is what #1026 took out of it, and its
+ *   row must then fail the balance check.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -160,6 +169,11 @@ async function layoutAt(page: Page, hash: string, root: string): Promise<Section
   const seen = await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
   expect(seen?.settledWithinPatience, `${hash} did not settle`).toBe(true);
   expect(seen?.errors, `${hash} raised an error`).toEqual([]);
+  return readLayout(page, root);
+}
+
+/** Reads the sections inside `root` (a selector) back from the engine, as the page stands. */
+async function readLayout(page: Page, root: string): Promise<SectionsLayout> {
   return page.evaluate((selector): SectionsLayout => {
     const main = document.querySelector('main');
     const scope = document.querySelector(selector);
@@ -456,5 +470,80 @@ test.describe('#1014 — a detail pane decides its own columns', () => {
       );
       expect(seen.columns, `${hash}: columns with no container`).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+/**
+ * The most the tallest section of a row may be, as a multiple of the shortest
+ * — #1026. Its goal was "about 1.5×"; the rows it leaves on Settings and Files
+ * in landscape measure 1.45 and 1.61, and the one above that is Files'
+ * *Confirm the erase* beside *Why this is a file and not a connection*, a
+ * 166 px note no section here is as short as (1.83). Before #1026 they were
+ * 3.9 and 4.3.
+ */
+const ROW_BALANCE_LIMIT = 2;
+
+/** The routes #1026 split sections on, and so holds to {@link ROW_BALANCE_LIMIT}. */
+const BALANCED_ROUTES: readonly string[] = ['settings', 'transfer'];
+
+/** Each row of two or more sections, as its tallest height over its shortest. */
+function rowBalances(seen: SectionsLayout): number[] {
+  return rowsOf(seen.boxes, seen.columns)
+    .filter((row) => row.length >= 2)
+    .map((row) => {
+      const heights = row.map((box) => box.bottom - box.top);
+      return Math.max(...heights) / Math.min(...heights);
+    });
+}
+
+test.describe('#1026 — no section dwarfs its row', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT]) {
+    test(`the rows at ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport);
+      const report: string[] = [];
+      for (const route of SECTIONS) {
+        const seen = await layoutAt(page, hashOf(route), 'main');
+        expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+        const balances = rowBalances(seen);
+        report.push(
+          `  ${route.id}: page ${String(Math.round(seen.pageHeight))} px, sections ` +
+            seen.boxes.map((box) => String(Math.round(box.bottom - box.top))).join(' / ') +
+            `, rows ${balances.map((each) => `${each.toFixed(2)}×`).join(', ') || 'none side by side'}`,
+        );
+        // Upright, Settings is one column and Files' last two rows hold a
+        // short note: the rows are published, and held in landscape, where
+        // #1025 measured the two giants.
+        if (viewport === TABLET_IN_THE_SHELL && BALANCED_ROUTES.includes(route.id)) {
+          expect(balances.length, `${route.id}: no row of sections side by side`).toBeGreaterThan(
+            0,
+          );
+          for (const balance of balances) {
+            expect(
+              balance,
+              `${route.id}: a section is ${balance.toFixed(2)}× the shortest in its row`,
+            ).toBeLessThanOrEqual(ROW_BALANCE_LIMIT);
+          }
+        }
+      }
+      console.log(`[#1026] row balance at ${viewport.name}\n${report.join('\n')}`);
+    });
+  }
+
+  test('the control — the erase list put back by its ⓘ, Files fails', async ({ page }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    const closed = await layoutAt(page, '#/transfer', 'main');
+    expect(Math.max(...rowBalances(closed))).toBeLessThanOrEqual(ROW_BALANCE_LIMIT);
+    const help = page.locator('details.oyl-section-help', {
+      hasText: 'Help with Erase this device',
+    });
+    await help.locator('summary').click();
+    await expect(help.getByText('What goes:')).toBeVisible();
+    const opened = await readLayout(page, 'main');
+    const worst = Math.max(...rowBalances(opened));
+    console.log(`[#1026] control: Files with the erase list shown, worst row ${worst.toFixed(2)}×`);
+    expect(
+      worst,
+      'the balance check passed with the erase list back in its section',
+    ).toBeGreaterThan(ROW_BALANCE_LIMIT);
   });
 });

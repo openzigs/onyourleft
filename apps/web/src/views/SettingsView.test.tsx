@@ -45,6 +45,7 @@ import {
   KIT_NO_STORE,
   KIT_SAVED,
   APPEARANCE_STAYS_HERE,
+  SETTINGS_CARD_TITLES,
 } from './SettingsView';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import { KIT_PALETTE } from '../game/bicycle';
@@ -1432,6 +1433,48 @@ describe('appearance — #672', () => {
     expect(more?.textContent).toContain(
       'Light or dark as this device is set, and it changes when the device does.',
     );
+    mounted.unmount();
+  });
+});
+
+describe('the cards — #1026', () => {
+  /** Each card's title, and the `h3` of every section inside it, in order. */
+  function cards(container: HTMLElement): { title: string; sections: string[] }[] {
+    return queryAll<HTMLElement>(container, '.oyl-settings-card').map((card) => ({
+      title: card.querySelector('h2')?.textContent ?? '',
+      sections: queryAll<HTMLElement>(card, 'h3').map((heading) => heading.textContent ?? ''),
+    }));
+  }
+
+  it('gives the words to mask, the goals and the documents a card each, in their order', async () => {
+    // ⚠️ #942 put the three in one card, 1959 px tall at half a landscape
+    // tablet; `browser/sections.browser.spec.ts` §"#1026" measures the rows
+    // this makes, and this is the structure it measures.
+    const { port } = recordingPort();
+    const mounted = await mount(
+      <SettingsView
+        port={port}
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+
+    const seen = cards(mounted.container);
+    expect(seen.map((card) => card.title)).toEqual([
+      SETTINGS_CARD_TITLES.you,
+      SETTINGS_CARD_TITLES.look,
+      SETTINGS_CARD_TITLES.ride,
+      SETTINGS_CARD_TITLES.words,
+      SETTINGS_CARD_TITLES.goals,
+      SETTINGS_CARD_TITLES.documents,
+      SETTINGS_CARD_TITLES.device,
+    ]);
+    const sectionsOf = (title: string): string[] | undefined =>
+      seen.find((card) => card.title === title)?.sections;
+    expect(sectionsOf(SETTINGS_CARD_TITLES.words)).toEqual(['Words to mask']);
+    expect(sectionsOf(SETTINGS_CARD_TITLES.goals)).toEqual(['Goals and notes']);
+    expect(sectionsOf(SETTINGS_CARD_TITLES.documents)).toEqual(['Documents for the analysis']);
     mounted.unmount();
   });
 });
