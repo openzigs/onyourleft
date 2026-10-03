@@ -64,6 +64,9 @@
  * sections, and a detail pane, with nothing to decide their columns; and
  * `?sections=columns` is its review's, the sections in #1014's first CSS
  * columns rather than in rows ({@link applySectionsControl}).
+ *
+ * `?chooser=as-shipped` is #1028's: Analysis' ride chooser 8rem wide with its
+ * name allowed to wrap, as it shipped ({@link applyChooserControl}).
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -1314,6 +1317,28 @@ function applyIllustrationControl(): void {
   document.head.append(style);
 }
 
+/**
+ * `?chooser=as-shipped` — #1028's control. Analysis' ride chooser as it
+ * shipped before #1028: `.oyl-input`'s 8rem, and a `base-select` whose
+ * closed control wraps its text, which on the owner's tablet put a ride's
+ * name over four lines. Laid over the shipping stylesheet by a stylesheet of
+ * the harness's own, so `ride-chooser.browser.spec.ts`' one-line and
+ * full-width checks must FAIL under it, or they measure nothing.
+ */
+function applyChooserControl(): void {
+  const chooser = new URLSearchParams(window.location.search).get('chooser');
+  if (chooser === null) {
+    return;
+  }
+  if (chooser !== 'as-shipped') {
+    throw new Error(`reflow harness: ?chooser must be "as-shipped", not ${chooser}`);
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', 'chooser=as-shipped');
+  style.textContent = '#oyl-zone-ride { width: 8rem !important; white-space: normal !important; }';
+  document.head.append(style);
+}
+
 async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -1328,6 +1353,7 @@ async function main(): Promise<void> {
   applySectionsControl();
   applyShapeControl();
   applyIllustrationControl();
+  applyChooserControl();
   // A page opened with a hash keeps it (#670: a fresh load of a selection).
   if (window.location.hash === '') {
     window.location.hash = '#/';
