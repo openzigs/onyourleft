@@ -40,8 +40,14 @@ export interface LibraryRow {
    * The ride's distance, one decimal, **no unit** — the unit is the column
    * heading, which `ActivitiesView` takes from `units/format.ts` so the
    * heading and these digits cannot be in different systems.
+   *
+   * `undefined` when the ride stored a distance of nought: a ride recorded
+   * with no speed channel stores `metres(0)` (`recording/finish.ts`
+   * §`distanceOf`), which is "no distance known", not a ride of 0.0 km — the
+   * same reason {@link averagePower} is `undefined` rather than 0 W (#1041's
+   * review).
    */
-  readonly distance: string;
+  readonly distance: string | undefined;
   /**
    * Whole watts, or `undefined` when the ride carried no power at all.
    *
@@ -68,7 +74,7 @@ export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow 
     name: summary.name,
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     duration: formatDuration(summary.elapsedTime),
-    distance: formatDistance(summary.distance, units).value,
+    distance: summary.distance > 0 ? formatDistance(summary.distance, units).value : undefined,
     averagePower:
       summary.averagePower === undefined ? undefined : formatPowerValue(summary.averagePower),
     hasPosition: summary.hasPosition,

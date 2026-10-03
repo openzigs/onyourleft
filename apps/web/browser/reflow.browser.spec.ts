@@ -231,41 +231,41 @@ for (const theme of THEMES) {
 }
 
 /**
- * #660's second criterion, measured: the library is a card list on a phone and
- * in #670's list pane, and stays a table where its columns fit — decided by `library/layout.ts` from the
- * width the library is given. And its sort control is a `select` with the
- * 44 px target every control here has (#316).
+ * #1041, measured: the activity library is a card per ride at EVERY width —
+ * one column on a phone and in #670's list pane beside a ride, and more than
+ * one where one pane is wide enough for two cards (the tablet upright) — and
+ * there is no table at any of them, in any frame. Until #1041 it was a table
+ * from 32 rem (#660's `library/layout.ts`), which the 800×1280 case here used
+ * to require. And its sort control is a `select` with the 44 px target every
+ * control here has (#316), as is each card's link.
  */
-test.describe('the activity library is cards on a phone and a table where it fits', () => {
+test.describe('the activity library is cards at every width', () => {
   const activities = ALL_ROUTES.find((each) => each.id === 'activities');
   if (activities === undefined) {
     throw new Error('the route table has no activities route');
   }
-  // ⚠️ 844×390 is CARDS since #670: at 840 px and wider the library is the
-  // list pane of a list–detail layout, 22.5rem wide, which is narrower than a
-  // table's columns. The table is where one pane is wide enough for it — the
-  // tablet upright.
+  // ⚠️ 844×390 is ONE column: at 840 px and wider the library is the list pane
+  // of a list–detail layout, 22.5rem wide, too narrow for two cards.
   const expected = [
-    [320, 256, 'cards'],
-    [390, 844, 'cards'],
-    [844, 390, 'cards'],
-    [800, 1280, 'table'],
+    [320, 256, 'one'],
+    [390, 844, 'one'],
+    [844, 390, 'one'],
+    [800, 1280, 'several'],
   ] as const;
-  for (const [width, height, layout] of expected) {
-    test(`a ${layout === 'cards' ? 'card list' : 'table'} at ${String(width)}×${String(height)}`, async ({
+  for (const [width, height, columns] of expected) {
+    test(`cards in ${columns === 'one' ? 'one column' : 'several columns'} at ${String(width)}×${String(height)}`, async ({
       page,
     }) => {
-      // The first frame: every animation frame from navigation on records the
-      // library's layout, so a table drawn for one frame and then swapped for
-      // cards is seen. `rAF` callbacks run just before the browser paints, so
-      // what one reads is what that frame drew (#683's review).
+      // Every animation frame from navigation on records whether the library
+      // drew a table, so one drawn for a single frame is seen (#683's review,
+      // when a table was drawn first and then swapped for cards).
       await page.addInitScript(() => {
-        const frames: string[] = [];
-        (window as unknown as { __oylLayoutFrames: string[] }).__oylLayoutFrames = frames;
+        const frames: boolean[] = [];
+        (window as unknown as { __oylTableFrames: boolean[] }).__oylTableFrames = frames;
         const sample = (): void => {
-          const drawn = document.querySelector('.oyl-library')?.getAttribute('data-layout');
-          if (drawn !== undefined && drawn !== null) {
-            frames.push(drawn);
+          const library = document.querySelector('.oyl-library');
+          if (library !== null) {
+            frames.push(library.querySelector('table') !== null);
           }
           requestAnimationFrame(sample);
         };
@@ -273,13 +273,29 @@ test.describe('the activity library is cards on a phone and a table where it fit
       });
       await open(page, width, height, 'data=populated');
       const seen = await visit(page, hrefFor(activities));
-      expect(seen.libraryLayout).toBe(layout);
+      const library = seen.library;
+      expect(library, 'the library was not drawn').not.toBeNull();
+      expect(library?.tables).toBe(0);
+      expect(library?.cards ?? 0).toBeGreaterThan(0);
+      if (columns === 'one') {
+        expect(library?.columns).toBe(1);
+      } else {
+        expect(library?.columns ?? 0).toBeGreaterThan(1);
+      }
+      expect(library?.shortestLink ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      // The fixture's ride of `10:23:45` named "Ride" (`SHORT_LONG_RIDE`): its
+      // link is 44 px wide by its own floor, and its duration fits its fact on
+      // one line — the facts' tracks are 9rem, as #992 sized them.
+      expect(library?.narrowestLink ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(library?.mostReadingLines, 'a reading wrapped').toBe(1);
+      expect(library?.readingSpill ?? 1, 'a reading spilled out of its fact').toBeLessThanOrEqual(
+        0.5,
+      );
       const frames = await page.evaluate(
-        () => (window as unknown as { __oylLayoutFrames: string[] }).__oylLayoutFrames,
+        () => (window as unknown as { __oylTableFrames: boolean[] }).__oylTableFrames,
       );
       expect(frames.length, 'no frame drew the library').toBeGreaterThan(0);
-      expect(frames[0], 'the first frame that drew the library').toBe(layout);
-      expect(new Set(frames), 'every frame that drew the library').toEqual(new Set([layout]));
+      expect(new Set(frames), 'a frame drew the library as a table').toEqual(new Set([false]));
       expect(seen.sortControlHeight ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
       expect(reflowFaults(activities, seen, true)).toEqual([]);
     });

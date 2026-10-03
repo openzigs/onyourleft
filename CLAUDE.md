@@ -506,9 +506,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         `RiderMarker` kind `remote`, instances of the rider's
                         own meshes, and the HUD shows a COUNT and ONE chosen
                         rider's gap — never a list (ADR 0021 D-6)
-    src/library/        the activity library's row model, its port and its stub (#62),
-                        and since #660 `layout.ts` — whether it is a table or a
-                        list of cards, from the width the library is GIVEN
+    src/library/        the activity library's row model, its port and its stub (#62).
+                        ⚠️ Since #1041 every ride is a CARD at every width
+                        (`views/ActivitiesView.tsx` §`RideCard`) and #660's
+                        `layout.ts` — table or cards by width — is gone: a
+                        reviewer who remembers a table on a tablet is reading
+                        the old file. A card draws NO shape, because no stored
+                        summary carries a track or a profile and a card may not
+                        read one
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the
                         once-per-application protocol registration, and the one
@@ -5500,7 +5505,7 @@ top of an issue **supersedes its body**.
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one, and why its picker is styled since #667 | `apps/web/src/design/theme.css` §`select`, §`@supports (appearance: base-select)`, `apps/web/src/a11y/theme.a11y.test.ts`, [#307](https://github.com/openzigs/onyourleft/issues/307) / PR [#311](https://github.com/openzigs/onyourleft/pull/311) (discussed in [#308](https://github.com/openzigs/onyourleft/issues/308)), reversed by the owner in [#654](https://github.com/openzigs/onyourleft/issues/654) and [#667](https://github.com/openzigs/onyourleft/issues/667) |
 | Why no route may scroll sideways on a phone, what a table does instead, and what walks every route to check | `apps/web/src/design/ScrollTable.tsx`, `apps/web/src/a11y/audit.ts` §`table-in-scroll-region`, `apps/web/browser/reflow.browser.spec.ts`, [#660](https://github.com/openzigs/onyourleft/issues/660) |
-| When the activity library is a card list and when it is a table, and why the width it is given decides rather than the window | `apps/web/src/library/layout.ts` §`TABLE_FROM_REM`, `apps/web/src/views/ActivitiesView.tsx` §`useLibraryLayout` |
+| Why every ride is a card at every width, what a card may read, and why it draws no shape | `apps/web/src/views/ActivitiesView.tsx` §`RideCard`, `apps/web/src/design/theme.css` §`.oyl-activity-cards`, `apps/web/browser/reflow.browser.spec.ts` §"the activity library is cards at every width", [#1041](https://github.com/openzigs/onyourleft/issues/1041) |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | Which controls get a 48 px target rather than 44, and what proves the floor does the work | `apps/web/src/design/ride-time-controls.ts`, `apps/web/src/design/theme.css` §`.oyl-button--ride`, `apps/web/browser/ride-targets.browser.spec.ts`, [#669](https://github.com/openzigs/onyourleft/issues/669) |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |

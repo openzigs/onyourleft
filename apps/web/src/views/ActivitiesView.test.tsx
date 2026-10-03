@@ -31,7 +31,6 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { TABLE_FROM_REM } from '../library/layout';
 import { PAGE_SIZE } from '../library/rows';
 import { stubLibrary } from '../library/testing';
 import {
@@ -77,8 +76,17 @@ function summary(id: string, overrides: Partial<ActivitySummary> = {}): Activity
   };
 }
 
+/** Each ride card's text, in the order the list draws them. */
 function rowText(): string[] {
-  return queryAll(document.body, 'tbody tr').map((row) => row.textContent ?? '');
+  return queryAll(document.body, '.oyl-activity-cards > li').map((card) => card.textContent ?? '');
+}
+
+/** The words the card list is labelled by: the order it is in. */
+function listCaption(): string | undefined {
+  const list = document.querySelector('.oyl-activity-cards');
+  return (
+    document.getElementById(list?.getAttribute('aria-labelledby') ?? '')?.textContent ?? undefined
+  );
 }
 
 function sortControl(): HTMLSelectElement {
@@ -411,9 +419,7 @@ describe('#62 — the local activity library', () => {
     expect(library.reads.at(-1)?.direction).toBe('ascending');
     expect(rowText()[0]).toContain('Short');
     // The caption says the order the list is in, in the control's own words.
-    expect(document.querySelector('caption')?.textContent).toBe(
-      'Rides on this device, shortest first',
-    );
+    expect(listCaption()).toBe('Rides on this device, shortest first');
   });
 
   it('sorts with a labelled select, not with filled buttons — #660', async () => {
@@ -437,36 +443,10 @@ describe('#62 — the local activity library', () => {
 });
 
 /**
- * A `ResizeObserver` that reports one width, once, when asked to observe —
- * which is what a browser does on the first frame. jsdom has none, and with
- * none the library stays a table (`library/layout.ts`).
+ * A `ResizeObserver` that reports each width in turn when asked to observe —
+ * a browser laying the list out. Since #1041 nothing should be listening.
  */
-function observerReporting(width: number): void {
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      readonly #callback: ResizeObserverCallback;
-      constructor(callback: ResizeObserverCallback) {
-        this.#callback = callback;
-      }
-      observe(): void {
-        this.#callback([{ contentRect: { width } } as unknown as ResizeObserverEntry], this);
-      }
-      disconnect(): void {
-        // Nothing to release.
-      }
-      unobserve(): void {
-        // Nothing to release.
-      }
-    },
-  );
-}
-
-/**
- * A `ResizeObserver` that reports each width in turn, once each, when asked to
- * observe — a list shown at one width and then hidden (#738).
- */
-function observerReportingInTurn(widths: readonly number[]): void {
+function observerReporting(widths: readonly number[]): void {
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -489,10 +469,7 @@ function observerReportingInTurn(widths: readonly number[]): void {
   );
 }
 
-/** jsdom's root font size, which is the browser default. */
-const REM = 16;
-
-describe('#660 — a card list on a phone, a table where it fits', () => {
+describe('#1041 — every ride a card, at every width', () => {
   const rides = [
     summary('outdoor', {
       name: 'Tuesday hills',
@@ -502,42 +479,98 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     summary('indoor', { name: 'Zwift hour', hasPosition: false }),
   ];
 
-  it('is a list of cards, one per ride, below the width the columns need', async () => {
-    observerReporting(TABLE_FROM_REM * REM - 1);
+  it('draws one card per ride, with its name, date and facts as readings, and no table', async () => {
     mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
     await settle();
 
     expect(document.querySelector('table')).toBeNull();
+    expect(document.querySelector('[role="region"]')).toBeNull();
     const cards = queryAll(document.body, '.oyl-activity-cards > li');
     expect(cards).toHaveLength(2);
-    const first = cards[0]?.textContent ?? '';
-    // Every fact the table's columns carry, with the unit a column heading
-    // would have given it.
-    expect(first).toContain('Tuesday hills');
-    expect(first).toContain('1:02:05');
-    expect(first).toContain('42.2 km');
-    expect(first).toContain('212 W');
-    expect(cards[1]?.textContent).toContain('indoor');
-    expect(cards[0]?.querySelector('a')?.getAttribute('href')).toBe(
-      '#/activities/selected/outdoor',
+    const first = cards[0];
+    const text = first?.textContent ?? '';
+    expect(text).toContain('Tuesday hills');
+    expect(first?.querySelector('.oyl-activity-card__date')?.textContent).toBe(
+      '14 Nov 2023, 22:15',
     );
-    // Named by the same words the table's caption would have said.
-    const list = document.querySelector('.oyl-activity-cards');
-    const label = document.getElementById(list?.getAttribute('aria-labelledby') ?? '');
-    expect(label?.textContent).toBe('Rides on this device, newest first');
+    // Each fact is a `Reading`: its digits and its unit, at the reading size.
+    expect(
+      queryAll(first as Element, '.oyl-reading').map((reading) => reading.textContent),
+    ).toStrictEqual(['1:02:05', '42.2 km', '212 W']);
+    expect(cards[1]?.textContent).toContain('indoor');
+    expect(first?.querySelector('a')?.getAttribute('href')).toBe('#/activities/selected/outdoor');
+    expect(listCaption()).toBe('Rides on this device, newest first');
   });
 
-  it('is a table from the width the columns need', async () => {
-    observerReporting(TABLE_FROM_REM * REM);
+  it('invents nothing for a ride with no position and no power: no power reading, no shape', async () => {
     mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
     await settle();
 
-    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
-    expect(rowText()).toHaveLength(2);
+    const indoor = queryAll(document.body, '.oyl-activity-cards > li')[1];
+    const text = indoor?.textContent ?? '';
+    expect(text).toContain('Zwift hour');
+    expect(text).not.toContain('Avg power');
+    expect(text).not.toContain('—');
+    expect(text).not.toMatch(/\b0 W\b/);
+    expect(
+      queryAll(indoor as Element, '.oyl-reading').map((reading) => reading.textContent),
+    ).toStrictEqual(['1:02:05', '42.2 km']);
+    // No card draws a shape: an `ActivitySummary` carries no track, no power
+    // and no altitude, and a stand-in would be a picture of another ride.
+    expect(
+      queryAll(document.body, '.oyl-activity-cards svg, .oyl-activity-cards img'),
+    ).toHaveLength(0);
   });
 
-  it('keeps delete confirmation working in the card list', async () => {
-    observerReporting(300);
+  it('invents no distance for a ride that stored none: no position, no power, no speed', async () => {
+    // A ride recorded with no speed channel stores `metres(0)`
+    // (`recording/finish.ts` §`distanceOf`) — no distance known, not 0.0 km.
+    const nothing = summary('no-speed', {
+      name: 'Trainer, power meter off',
+      hasPosition: false,
+      distance: metres(0),
+      elapsedTime: seconds(3_600),
+    });
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [nothing])} />);
+    await settle();
+
+    const card = queryAll(document.body, '.oyl-activity-cards > li')[0];
+    const text = card?.textContent ?? '';
+    expect(text).toContain('Trainer, power meter off');
+    expect(text).not.toContain('Distance');
+    expect(text).not.toContain('Avg power');
+    expect(text).not.toMatch(/\b0(\.0)? (km|mi)\b/);
+    expect(
+      queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
+    ).toStrictEqual(['1:00:00']);
+  });
+
+  it('issues no read per card: one list read for fifty cards, and no ride read alone', async () => {
+    const fifty = Array.from({ length: PAGE_SIZE }, (_, index) =>
+      summary(`ride-${String(index)}`, { startedAt: unixSeconds(1_700_000_000 + index) }),
+    );
+    const library = stubLibrary(OWNER, fifty);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(PAGE_SIZE);
+    expect(library.reads).toHaveLength(1);
+    expect(library.gets).toStrictEqual([]);
+  });
+
+  it('is cards whatever width it is laid out at — nothing measures it', async () => {
+    // The table #660 drew from 32 rem is gone: a wide list, a narrow one and a
+    // hidden one are all cards.
+    observerReporting([2_000, 300, 0]);
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
+    await settle();
+
+    expect(document.querySelector('table')).toBeNull();
+    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
+    expect(document.querySelector('.oyl-library')?.hasAttribute('data-layout')).toBe(false);
+  });
+
+  it('keeps delete confirmation working on a card', async () => {
     const library = stubLibrary(OWNER, rides);
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
@@ -550,8 +583,7 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(library.deleted).toStrictEqual(['outdoor']);
   });
 
-  it('says there is nothing yet, in the card layout too', async () => {
-    observerReporting(300);
+  it('says there is nothing yet, and draws no card', async () => {
     mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} />);
     await settle();
 
@@ -559,88 +591,15 @@ describe('#660 — a card list on a phone, a table where it fits', () => {
     expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
   });
 
-  // #738: on one pane the list is `hidden` while a ride is chosen, and a
-  // hidden box measures nothing. Read as a narrow list it became cards, and on
-  // the way back the table was drawn again after focus had returned to a card.
-  it('keeps its layout when the list is hidden and measures a width of nothing — #738', async () => {
-    observerReportingInTurn([TABLE_FROM_REM * REM, 0]);
-    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
-    await settle();
-
-    expect(queryAll(document.body, '.oyl-activity-cards')).toHaveLength(0);
-    expect(rowText()).toHaveLength(2);
-  });
-
-  it('measures the list again, before the paint, when it is shown after a choice — #758', async () => {
-    // A phone at a ride's own address: the list starts `hidden`, measures
-    // nothing, and stays the table it started as. On Back it used to be drawn
-    // as that table, and then as cards once the observer saw its width —
-    // re-creating the ride's link after `ListDetail` had returned focus to it.
-    // The observer here reports nothing, so only a synchronous measurement on
-    // the change of choice can make it cards by the time `rerender` returns.
-    observerReportingInTurn([]);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: HTMLElement,
-    ) {
-      return { width: this.closest('[hidden]') === null ? 300 : 0 } as DOMRect;
-    });
+  it('keeps the list a card list when a ride is chosen and put back — #670', async () => {
     const library = stubLibrary(OWNER, rides);
     mounted = await mount(<ActivitiesView library={library} selected="outdoor" />);
     await settle();
-    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).not.toBeNull();
-
     await mounted.rerender(<ActivitiesView library={library} />);
+    await settle();
 
-    expect(document.querySelector('.oyl-library')?.closest('[hidden]')).toBeNull();
     expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
-  });
-
-  it('keeps one ResizeObserver while the choice changes — #864', async () => {
-    // Re-measuring on a change of choice is its own layout effect: the
-    // observer is made when the library arrives and not again per choice.
-    let made = 0;
-    let released = 0;
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        constructor() {
-          made += 1;
-        }
-        observe(): void {
-          // Reports nothing: the layout here comes from the measurement.
-        }
-        disconnect(): void {
-          released += 1;
-        }
-        unobserve(): void {
-          // Nothing to release.
-        }
-      },
-    );
-    const library = stubLibrary(OWNER, rides);
-    mounted = await mount(<ActivitiesView library={library} />);
-    await settle();
-    const before = made;
-    const releasedBefore = released;
-    expect(before).toBeGreaterThan(0);
-
-    await mounted.rerender(<ActivitiesView library={library} selected="outdoor" />);
-    await mounted.rerender(<ActivitiesView library={library} />);
-    await mounted.rerender(<ActivitiesView library={library} selected="indoor" />);
-
-    expect(made).toBe(before);
-    expect(released).toBe(releasedBefore);
-  });
-
-  it('puts the table in a focusable region named by its caption', async () => {
-    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, rides)} />);
-    await settle();
-
-    const region = document.querySelector('table')?.parentElement;
-    expect(region?.getAttribute('role')).toBe('region');
-    expect(region?.getAttribute('tabindex')).toBe('0');
-    const caption = document.querySelector('caption');
-    expect(region?.getAttribute('aria-labelledby')).toBe(caption?.id);
+    expect(document.querySelector('table')).toBeNull();
   });
 });
 

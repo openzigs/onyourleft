@@ -93,32 +93,33 @@ async function open(path: string, props: Parameters<typeof AppShell>[0]): Promis
   await settle();
 }
 
-/** The library table's distance heading, which carries the unit. */
-function distanceHeading(): string {
-  return (
-    queryAll(document, 'th[scope="col"]').find((cell) =>
-      (cell.textContent ?? '').startsWith('Distance'),
-    )?.textContent ?? ''
+/**
+ * The one ride card's Distance reading — its unit and its digits (#1041: the
+ * unit was the table's column heading until the table went).
+ */
+function distanceReading(): { readonly unit: string; readonly value: string } {
+  const fact = queryAll(document, '.oyl-activity-card__facts > div').find(
+    (each) => each.querySelector('dt')?.textContent === 'Distance',
   );
+  return {
+    unit: fact?.querySelector('.oyl-reading__unit')?.textContent ?? '',
+    value: fact?.querySelector('.oyl-reading__value')?.textContent ?? '',
+  };
 }
 
-/**
- * The distance cell of the one row.
- *
- * Index 2 because the row is `th` (name), then started, duration, **distance**,
- * average power, actions — `ActivitiesView.tsx`'s column order. Named here so
- * a column inserted before it fails with a wrong number rather than silently
- * asserting a duration, which is what the first version of this helper did.
- */
+function distanceHeading(): string {
+  return distanceReading().unit;
+}
+
 function distanceCell(): string {
-  return queryAll(document, 'tbody td')[2]?.textContent ?? '';
+  return distanceReading().value;
 }
 
 describe('the stored preference reaches the first paint', () => {
   it('renders the library in kilometres for a rider who has never chosen', async () => {
     await open('/activities', { capabilities: NO_BLUETOOTH, library: library() });
 
-    expect(distanceHeading()).toBe('Distance (km)');
+    expect(distanceHeading()).toBe('km');
     expect(distanceCell()).toBe('42.2');
   });
 
@@ -132,7 +133,7 @@ describe('the stored preference reaches the first paint', () => {
       units: 'imperial',
     });
 
-    expect(distanceHeading()).toBe('Distance (mi)');
+    expect(distanceHeading()).toBe('mi');
     expect(distanceCell()).toBe('26.2');
   });
 });
@@ -156,7 +157,7 @@ describe('changing the setting changes another screen, with no reload', () => {
     globalThis.location.hash = '#/activities';
     await settle();
 
-    expect(distanceHeading()).toBe('Distance (mi)');
+    expect(distanceHeading()).toBe('mi');
     expect(distanceCell()).toBe('26.2');
   });
 
@@ -178,6 +179,6 @@ describe('changing the setting changes another screen, with no reload', () => {
     await settle();
 
     expect(written).toEqual(['metric']);
-    expect(distanceHeading()).toBe('Distance (km)');
+    expect(distanceHeading()).toBe('km');
   });
 });

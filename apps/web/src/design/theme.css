@@ -3917,28 +3917,73 @@ select.oyl-input {
 }
 
 /*
- * The library on a narrow width — #660. One card per ride, in the order the
- * table would list them; `library/layout.ts` says when. A `dl` of the four
- * facts, each name above its value, two to a row where they fit.
+ * The library — every ride a card, at every width (#1041; until then #660's
+ * cards were the narrow-width fallback for a table). A grid of cards: one
+ * column where the pane is narrower than two cards — a phone, and the list
+ * pane beside a ride at two panes — and as many as fit where it is wider. The
+ * `min()` keeps a card from forcing a column wider than a 320 px phone (SC
+ * 1.4.10), which `reflow.browser.spec.ts` walks.
+ *
+ * A card is its name, its date, and its facts as readings (`Reading`), two to
+ * a row where they fit. The chosen ride is told by an inset ring as a pane
+ * list's chosen item is (#992): `accent` on `surfaceRaised` is a declared 3:1
+ * pair in both palettes, and the link's `aria-current` says it in words.
  */
 .oyl-activity-cards {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: var(--oyl-space-sm);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
   list-style: none;
   margin: var(--oyl-space-md) 0;
   padding: 0;
 }
 
+.oyl-activity-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.oyl-activity-card:has(a[aria-current='true']) {
+  box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
+}
+
+/*
+ * A ride's name may be one unbreakable word (`reflow.browser.spec.ts`'s
+ * fixture has one), so it may break anywhere. Only the name: on the whole card
+ * it let a reading's numerals break mid-number (#1041's review).
+ */
 .oyl-activity-card__name {
   font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The name is the card's link: a 44 × 44 px target however short the name. */
+.oyl-activity-card__name a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.oyl-activity-card__date {
   margin: 0 0 var(--oyl-space-xs);
 }
 
 .oyl-activity-card__facts {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  /*
+   * 10rem, one wider than `.oyl-home__facts`' 9rem (#992), MEASURED: #992's
+   * "`10:23:45` at `xxl` is about 8.5rem" is a Mac's system font (137 px).
+   * On the CI runner's Linux font the same numerals are about 153 px (9.6rem),
+   * and a 9rem grid split the 22.5rem list pane into two 148 px tracks it
+   * spilled 5 px out of (run 37131279707). `reflow.browser.spec.ts` holds a
+   * `10:23:45` to one line inside its fact.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  align-self: stretch;
   margin: 0 0 var(--oyl-space-sm);
 }
 
@@ -6038,6 +6083,13 @@ select.oyl-input {
   .oyl-pairing__row,
   .oyl-chooser__loadout {
     border: 1px solid;
+  }
+
+  /* #1041: the chosen ride card's ring is a box shadow, which a forced
+     palette removes; an outline inside its edge stands in, moving nothing. */
+  .oyl-activity-card:has(a[aria-current='true']) {
+    outline: 3px solid;
+    outline-offset: -3px;
   }
 
   .oyl-pane-list__item[aria-current='true'] {

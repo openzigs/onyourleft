@@ -171,8 +171,28 @@ export interface ReflowMeasurement {
   /** CSS px between that element's right edge and the viewport's. Negative is an overflow. */
   readonly spare: number;
   readonly scrollBoxes: readonly ScrollBox[];
-  /** The activity library's `data-layout`, or `null` on any other route. */
-  readonly libraryLayout: string | null;
+  /**
+   * The activity library's cards (#1041): how many there are, how many grid
+   * columns they are laid out in, how many tables the library holds (none),
+   * and the shortest card link's height — or `null` on any other route.
+   * Since #1041's review also the narrowest link and its facts' readings.
+   */
+  readonly library: {
+    readonly cards: number;
+    readonly columns: number;
+    readonly tables: number;
+    readonly shortestLink: number | null;
+    /** The narrowest card link's width — a 44 px target both ways (#1041's review). */
+    readonly narrowestLink: number | null;
+    /**
+     * The most lines any card's facts reading's numerals are laid out on — 1
+     * unless one wraps — and how far the furthest spills past its own fact's
+     * box, in CSS px (positive is a spill). A `10:23:45` in a track narrower
+     * than its numerals does one or the other (#992, #1041's review).
+     */
+    readonly mostReadingLines: number;
+    readonly readingSpill: number;
+  } | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
   /**
@@ -506,6 +526,39 @@ function nameOf(element: Element): string {
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** The activity library's cards, as {@link ReflowMeasurement.library} says. */
+function libraryCards(): ReflowMeasurement['library'] {
+  const library = document.querySelector('.oyl-library');
+  if (library === null) return null;
+  const list = library.querySelector<HTMLElement>('.oyl-activity-cards');
+  const columns =
+    list === null
+      ? 0
+      : getComputedStyle(list)
+          .gridTemplateColumns.split(' ')
+          .filter((track) => track.trim() !== '').length;
+  const links = [...library.querySelectorAll('.oyl-activity-card__name a')].map((link) =>
+    link.getBoundingClientRect(),
+  );
+  const values = [...library.querySelectorAll('.oyl-activity-card__facts .oyl-reading__value')];
+  const lines = values.map((value) => value.getClientRects().length);
+  const spills = values.map((value) => {
+    const fact = value.closest('dd');
+    return fact === null
+      ? 0
+      : value.getBoundingClientRect().right - fact.getBoundingClientRect().right;
+  });
+  return {
+    cards: library.querySelectorAll('.oyl-activity-cards > li').length,
+    columns,
+    tables: library.querySelectorAll('table').length,
+    shortestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.height)),
+    narrowestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.width)),
+    mostReadingLines: lines.length === 0 ? 0 : Math.max(...lines),
+    readingSpill: spills.length === 0 ? 0 : Math.max(...spills),
+  };
 }
 
 /**
@@ -1110,7 +1163,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     widest: reach.description,
     spare: reach.spare,
     scrollBoxes: scrollBoxes(),
-    libraryLayout: document.querySelector('.oyl-library')?.getAttribute('data-layout') ?? null,
+    library: libraryCards(),
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
     expectation,
