@@ -1432,6 +1432,30 @@ function applyChooserControl(): void {
   document.head.append(style);
 }
 
+/**
+ * The route cross-fade (#945), made instant unless `?motion=on`.
+ *
+ * Every navigation on this page still goes through the real `startTransition`
+ * and `<ViewTransition>` — focus, the lazy-view retry and the layout are
+ * measured through the path a rider takes — but its animations last no time.
+ * The layout walks here make hundreds of navigations, and a 200 ms fade each
+ * (with React running the new view's effects only once the fade has finished)
+ * cost the browser gate about two minutes on the CI runner. What the fade
+ * itself does is `motion.browser.spec.ts`'s, which opens this page with
+ * `?motion=on`.
+ */
+function applyMotionSetting(): void {
+  if (new URLSearchParams(window.location.search).get('motion') === 'on') {
+    return;
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', 'motion=instant');
+  style.textContent =
+    '::view-transition-group(*), ::view-transition-image-pair(*), ' +
+    '::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; }';
+  document.head.append(style);
+}
+
 async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -1441,6 +1465,7 @@ async function main(): Promise<void> {
   if (data !== 'empty' && data !== 'populated') {
     throw new Error(`reflow harness: ?data must be "empty" or "populated", not ${String(data)}`);
   }
+  applyMotionSetting();
   applyLayoutControl();
   applyPanesControl();
   applySectionsControl();

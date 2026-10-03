@@ -27,6 +27,10 @@
  * the control under it (`shell/route-motion.ts`). Home → Ride, Ride → Home,
  * Home → game and game → Home must each start none.
  *
+ * ⚠️ **`&motion=on`, always.** Every other spec on `reflow.html` gets the
+ * fade at no duration (`reflow-harness.tsx` §`applyMotionSetting`), so the
+ * layout walks do not pay 200 ms a navigation.
+ *
  * ## What it does NOT prove
  *
  * That the fade looks right — there is no reference image (ADR 0009), and the
@@ -86,7 +90,7 @@ function recordViewTransitions(): void {
 async function open(page: Page, query: string): Promise<void> {
   await page.addInitScript(recordViewTransitions);
   await page.setViewportSize({ width: 1280, height: 800 });
-  const response = await page.goto(`/reflow.html?data=populated${query}#/`);
+  const response = await page.goto(`/reflow.html?data=populated&motion=on${query}#/`);
   expect(response?.status()).toBe(200);
   await page.waitForFunction(() => window.__oylReflow !== undefined);
   expect(await page.evaluate(() => window.__oylReflow?.errors)).toEqual([]);
