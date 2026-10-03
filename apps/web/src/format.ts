@@ -77,6 +77,17 @@ export function shownAveragePower(power: Watts | undefined): Watts | undefined {
 }
 
 /**
+ * What to say in place of an average power that `shownAveragePower` withheld.
+ * An absent figure means no power channel at all; a stored figure that shows
+ * as nought means a channel existed and read nought throughout (the Power
+ * trace is still drawn for it), so claiming "No power meter" would contradict
+ * the page and state something about hardware the store cannot know (#1054).
+ */
+export function noPowerText(stored: Watts | undefined): string {
+  return stored === undefined ? 'No power meter' : 'Power read zero throughout';
+}
+
+/**
  * A ride's start, rendered **in the zone it was ridden in**.
  *
  * Not the viewer's zone. `ActivityRecord` stores `startedAtTimeZone` beside the

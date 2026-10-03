@@ -53,7 +53,13 @@ import { useEffect, useId, useState, type JSX } from 'react';
 
 import { Button, ButtonLink } from '../design/Button';
 import { Reading } from '../design/Reading';
-import { formatDuration, formatPowerValue, POWER_UNIT, shownAveragePower } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  noPowerText,
+  POWER_UNIT,
+  shownAveragePower,
+} from '../format';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { distanceUnit, formatDistance, spokenDistanceUnit } from '../units/format';
@@ -133,7 +139,7 @@ export function RideResultCard({
           <dt>Average power</dt>
           <dd>
             {averagePower === undefined ? (
-              'No power meter'
+              noPowerText(result.averagePower)
             ) : (
               <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
             )}

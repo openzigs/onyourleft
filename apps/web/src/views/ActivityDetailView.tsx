@@ -71,6 +71,7 @@ import {
   formatPowerValue,
   formatStartedAt,
   POWER_UNIT,
+  noPowerText,
   shownAveragePower,
 } from '../format';
 import { useUnits } from '../units/context';
@@ -442,7 +443,7 @@ export function ActivityDetailView({
           <dt>Average power</dt>
           <dd>
             {averagePower === undefined ? (
-              'No power meter'
+              noPowerText(activity.averagePower)
             ) : (
               <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
             )}
