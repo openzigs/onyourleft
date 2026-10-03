@@ -62,7 +62,8 @@ import { useState, type FormEvent, type JSX } from 'react';
 
 import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 
-import { Button } from '../design/Button';
+import { Button, ButtonLink } from '../design/Button';
+import { SensorGlyph } from '../design/illustration';
 import { StatusMessage } from '../design/StatusMessage';
 
 import { hrefFor, routeById } from '../shell/routes';
@@ -192,13 +193,7 @@ export function TrainerPanel({
   const [problem, setProblem] = useState<string | undefined>(undefined);
 
   if (!trainer.paired) {
-    return (
-      <StatusMessage tone="info" label="No trainer">
-        Pair a smart trainer to control it from here — pairing is on{' '}
-        {/* #659: the Pair buttons moved to Devices; this sentence says where. */}
-        <a href={hrefFor(routeById('devices'))}>Devices</a>.
-      </StatusMessage>
-    );
+    return <NoTrainerCard />;
   }
 
   if (!trainer.controllable) {
@@ -542,4 +537,39 @@ export function rescueSentence(rescue: ManualErgRescue): string {
  */
 export function heldSentence(target: Watts): string {
   return `Your new target of ${String(target)} W will be set once ${STEADY}.`;
+}
+
+/**
+ * What the Trainer group is while no trainer is paired — #1029.
+ *
+ * ⚠️ **A filled card, not a one-line notice**, and a reviewer who remembers
+ * the "No trainer" status line here is reading the old file. On the owner's
+ * tablet in landscape that line sat alone at the top of the third column
+ * beside a Live group four times its height. The card is a tile like
+ * `RideView.tsx` §`NoSensorsBanner`'s — the trainer drawing, the same
+ * sentence, and ONE control, *Devices*, where pairing is (#659) — and
+ * `theme.css` §`.oyl-trainer-card` stretches it down the column on the
+ * layouts where the Trainer group stands beside the Live group, so the two
+ * columns are one height.
+ *
+ * Secondary, at the 44 px floor rather than the ride-time 48: it is pressed
+ * before a ride, not to move one on (#668, #669). The drawing is decoration
+ * (`aria-hidden`, epic #935 principle 1); the words say everything.
+ */
+function NoTrainerCard(): JSX.Element {
+  return (
+    <div className="oyl-trainer-card" data-oyl-trainer-card="">
+      <span className="oyl-trainer-card__art" aria-hidden="true">
+        <SensorGlyph className="oyl-trainer-card__glyph" kind="trainer" />
+      </span>
+      <p className="oyl-trainer-card__sentence">
+        <strong>No trainer:</strong> Pair a smart trainer to control it from here. Pairing is on
+        Devices.
+      </p>
+      {/* #659: the Pair buttons moved to Devices; this is the way there. */}
+      <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
+        Devices
+      </ButtonLink>
+    </div>
+  );
 }
