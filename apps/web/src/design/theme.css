@@ -3362,6 +3362,107 @@ p > label + input[type='file'] {
 }
 
 /*
+ * A FILE PICKER — #1030. `design/FileDrop.tsx` §`FilePicker`: the browser's
+ * own *"Choose File · No file chosen"* read as a web form on the tablet, so
+ * the input is laid OVER a button drawn as the secondary kind, absolutely
+ * positioned over its whole box, at `opacity: 0`. It stays the control: a press anywhere on the button
+ * lands on the input and the platform opens its picker, it keeps its place in
+ * the tab order and its label, and its focus is drawn on the button below.
+ * `opacity` rather than `.oyl-visually-hidden`, because a clipped 1 px input
+ * would take the press nowhere and its box would be no target to measure.
+ */
+.oyl-file {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+/* Out of the flow and stretched over the button, so the BUTTON is the box:
+   in the flow, the native input's own width (its button and "No file
+   chosen") made Files and Settings scroll sideways at 320 px, and its own
+   44 px button held the box up with the floor below stripped. */
+.oyl-file__input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.oyl-file__button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: var(--oyl-space-sm) var(--oyl-space-md);
+  border: 2px solid var(--oyl-color-surface-overlay);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface-overlay);
+  color: var(--oyl-color-accent);
+  /* A line short enough that the floor, not the padding, makes the 44 px:
+     at the body's 1.55 the box came to 44.8 px with the floor stripped, and
+     the floor held nothing (#316's arithmetic). */
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+/* Under a pointer and while pressed, as `.oyl-button--secondary` is (#688):
+   the press lands on the input, so `:active` is read there. */
+.oyl-file__input:hover + .oyl-file__button,
+.oyl-file__input:active + .oyl-file__button {
+  background: var(--oyl-color-selected);
+  border-color: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+}
+
+/* The input's keyboard focus, drawn where the rider sees the control. */
+.oyl-file__input:focus-visible + .oyl-file__button {
+  outline: 3px solid var(--oyl-color-focus);
+  outline-offset: 2px;
+}
+
+/* What was chosen, and the way to un-choose it. */
+.oyl-file__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  max-width: 100%;
+  padding-inline-start: var(--oyl-space-md);
+  border-radius: var(--oyl-radius);
+  background: var(--oyl-color-surface-overlay);
+  color: var(--oyl-color-ink);
+  vertical-align: middle;
+}
+
+.oyl-file__name {
+  overflow-wrap: anywhere;
+}
+
+.oyl-file__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--oyl-radius);
+  background: transparent;
+  color: var(--oyl-color-accent);
+  cursor: pointer;
+}
+
+.oyl-file__remove:hover {
+  background: var(--oyl-color-selected);
+  color: var(--oyl-color-accent-hover);
+}
+
+/*
  * A SWITCH — #994. An on/off setting is a native checkbox that says
  * `role="switch"`, drawn as a track with a thumb. It stays a checkbox in the
  * DOM — the platform's keyboard (Space), its form value and its `checked` —

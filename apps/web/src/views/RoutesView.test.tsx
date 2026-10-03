@@ -41,7 +41,7 @@ import { FILE_FIELD, LOOP_FIELD, loopChosen, routeFromImportForm } from '../rout
 import { LOOP_CHECKBOX_LABEL } from '../routes/save';
 import { loopGpx, routeStub, stubRouteId, type RouteStub } from '../routes/testing';
 import type { DownloadableFile } from '../transfer/store-port';
-import { PUBLIC_ROUTE_WARNING } from '../routes/share';
+import { PUBLIC_ROUTE_WARNING, PUBLIC_ROUTE_ZONE_NOTE } from '../routes/share';
 import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
 import {
   activateWithKeyboard,
@@ -296,6 +296,20 @@ describe('the warning before publishing — #73 criterion 5', () => {
     expect(text).toContain(PUBLIC_ROUTE_WARNING);
     // The half a generic notice would omit.
     expect(text).toContain('Most routes start at home');
+  });
+
+  it('keeps the warning on the screen and puts the privacy-zone note behind the ⓘ — #1030', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]));
+    const heading = [...view.container.querySelectorAll('h2')].find(
+      (element) => element.textContent === 'Before you share a route',
+    );
+    const help = heading?.parentElement?.querySelector('details.oyl-section-help');
+    expect(help?.textContent).toContain(PUBLIC_ROUTE_ZONE_NOTE);
+    expect(help?.textContent).not.toContain(PUBLIC_ROUTE_WARNING);
+    const warning = [...view.container.querySelectorAll('p')].find(
+      (element) => element.textContent === PUBLIC_ROUTE_WARNING,
+    );
+    expect(warning?.closest('details')).toBeNull();
   });
 });
 

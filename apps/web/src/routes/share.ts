@@ -79,8 +79,20 @@ export interface RouteShare {
  */
 export const PUBLIC_ROUTE_WARNING =
   'Anyone will be able to see this route, including where it starts and where it ends. ' +
-  'Most routes start at home. A privacy zone hides the roads inside it, but a route that ' +
-  'begins inside one cannot be shared at all — it would no longer be the route.';
+  'Most routes start at home.';
+
+/**
+ * What a privacy zone does to a shared route — the explanation behind the
+ * warning, not the warning (#1030). It used to be the warning's third
+ * sentence; the owner's ruling moved it behind the section's ⓘ (#1013's rule)
+ * and kept the two sentences above on the screen, which are what #73's fifth
+ * criterion names. A rider who tries to share a route that starts in a zone is
+ * still refused in words (`ROUTE_SHARE_FAULT_TEXT`), whether or not they opened
+ * the ⓘ.
+ */
+export const PUBLIC_ROUTE_ZONE_NOTE =
+  'A privacy zone hides the roads inside it, but a route that begins inside one cannot be ' +
+  'shared at all — it would no longer be the route.';
 
 /** What a shared copy of this route would contain, and whether it is still one. */
 export function routeShare(route: RouteRecord, zones: readonly PrivacyZoneRecord[]): RouteShare {

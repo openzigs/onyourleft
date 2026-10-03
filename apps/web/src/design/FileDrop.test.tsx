@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { mount, type Mounted } from '../testing/mount';
 
-import { FileDrop, handOver } from './FileDrop';
+import { chosenText, FileDrop, FilePicker, handOver } from './FileDrop';
 
 let mounted: Mounted | undefined;
 
@@ -141,6 +141,156 @@ describe('FileDrop', () => {
     const drop = await drag(zone(), 'drop', { types: ['Files'], files: fileList() });
     expect(drop.defaultPrevented).toBe(false);
     expect(seen).toEqual([]);
+  });
+});
+
+describe('FilePicker — #1030', () => {
+  /**
+   * Make `#file`'s `files` writable, and emptied by a write to `value` as a
+   * browser's is — jsdom's own setter refuses a list it did not build.
+   */
+  function choosable(): HTMLInputElement {
+    const input = document.querySelector<HTMLInputElement>('#file');
+    if (input === null) throw new Error('no file input');
+    let files: FileList | null = null;
+    Object.defineProperty(input, 'files', {
+      get: () => files,
+      set: (next: FileList | null) => {
+        files = next;
+      },
+    });
+    Object.defineProperty(input, 'value', {
+      get: () => (files === null || files.length === 0 ? '' : 'C:\\fakepath\\x'),
+      set: (next: string) => {
+        if (next === '') files = fileList();
+      },
+    });
+    return input;
+  }
+
+  async function choose(input: HTMLInputElement, ...names: string[]): Promise<void> {
+    await act(async () => {
+      handOver(input, fileList(...names));
+      await Promise.resolve();
+    });
+  }
+
+  function chip(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('.oyl-file__chip');
+  }
+
+  it('draws a button over which the input is laid, and keeps the input the way in', async () => {
+    mounted = await mount(<Screen onFiles={() => undefined} />);
+    const input = document.querySelector<HTMLInputElement>('#file');
+    const button = document.querySelector('.oyl-file__button');
+    expect(input?.classList.contains('oyl-file__input')).toBe(true);
+    expect(button?.textContent).toBe('Choose file');
+    expect(button?.getAttribute('aria-hidden')).toBe('true');
+    // The input precedes the button: theme.css draws its focus on the sibling.
+    expect(input?.nextElementSibling).toBe(button);
+    expect(input?.labels?.[0]?.textContent).toBe('GPX file');
+    expect(chip()).toBeNull();
+  });
+
+  it('shows the chosen file as a chip, and its remove button empties the input', async () => {
+    const seen: string[][] = [];
+    mounted = await mount(<Screen onFiles={(names) => seen.push(names)} />);
+    const input = choosable();
+    await choose(input, 'loop.gpx');
+    expect(chip()?.textContent).toBe('loop.gpx');
+    const remove = chip()?.querySelector('button');
+    expect(remove?.getAttribute('aria-label')).toBe('Remove loop.gpx');
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+    await act(async () => {
+      remove?.click();
+      await Promise.resolve();
+    });
+    expect(chip()).toBeNull();
+    expect(input.files?.length).toBe(0);
+    // The screen is told, through the input's own change, that nothing is chosen.
+    expect(seen).toEqual([['loop.gpx'], []]);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('shows no chip when the screen empties the input in its own handler', async () => {
+    function Consumes(): JSX.Element {
+      return (
+        <main>
+          <h1>Documents</h1>
+          <label htmlFor="file">Add a document</label>
+          <FilePicker>
+            <input
+              id="file"
+              type="file"
+              onChange={(event) => {
+                event.currentTarget.value = '';
+              }}
+            />
+          </FilePicker>
+        </main>
+      );
+    }
+    mounted = await mount(<Consumes />);
+    await choose(choosable(), 'notes.txt');
+    expect(chip()).toBeNull();
+  });
+
+  it('clears the chip when its form is reset', async () => {
+    mounted = await mount(
+      <main>
+        <h1>Import</h1>
+        <form aria-label="Import">
+          <label htmlFor="file">GPX file</label>
+          <FilePicker>
+            <input id="file" type="file" />
+          </FilePicker>
+          <button type="reset">Reset</button>
+        </form>
+      </main>,
+    );
+    await choose(choosable(), 'loop.gpx');
+    expect(chip()).not.toBeNull();
+    await act(async () => {
+      document.querySelector('form')?.dispatchEvent(new Event('reset', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(chip()).toBeNull();
+  });
+
+  it('says "Choose files" for a multiple input, and counts several in the chip', async () => {
+    mounted = await mount(
+      <main>
+        <h1>Files</h1>
+        <label htmlFor="file">Activity files</label>
+        <FilePicker>
+          <input id="file" type="file" multiple className="oyl-input" />
+        </FilePicker>
+      </main>,
+    );
+    expect(document.querySelector('.oyl-file__button')?.textContent).toBe('Choose files');
+    expect(document.querySelector('#file')?.className).toBe('oyl-file__input oyl-input');
+    await choose(choosable(), 'a.fit', 'b.fit', 'c.fit');
+    expect(chip()?.textContent).toBe('3 files');
+  });
+
+  it("takes the button's words from the caller", async () => {
+    mounted = await mount(
+      <main>
+        <h1>Files</h1>
+        <label htmlFor="file">A folder</label>
+        <FilePicker choose="Choose a folder">
+          <input id="file" type="file" multiple />
+        </FilePicker>
+      </main>,
+    );
+    expect(document.querySelector('.oyl-file__button')?.textContent).toBe('Choose a folder');
+  });
+
+  it('says nothing for an empty choice', () => {
+    expect(chosenText(null)).toBeUndefined();
+    expect(chosenText(fileList())).toBeUndefined();
+    expect(chosenText(fileList('one.gpx'))).toBe('one.gpx');
   });
 });
 

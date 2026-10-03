@@ -1,14 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useRef, useState, type DragEvent, type JSX, type ReactElement } from 'react';
+import { X } from 'lucide-react';
+import {
+  cloneElement,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type InputHTMLAttributes,
+  type JSX,
+  type ReactElement,
+} from 'react';
 
 /**
  * A drop zone around a file input — #994.
  *
  * The input is the caller's own `<input type="file">`, passed as the one
- * child, and it stays the way in: its button is drawn as a secondary button
- * (`theme.css` §"The file input's button"), and a keyboard, a screen reader
- * and a phone all use it exactly as before. On a window wide enough to drag a
+ * child, and it stays the way in: since #1030 it is drawn by `FilePicker`
+ * below — a styled button with the input laid invisibly over it — and a
+ * keyboard, a screen reader and a phone all use it exactly as before. On a window wide enough to drag a
  * file onto (`theme.css` §"A DROP ZONE"), the zone is drawn round it with one
  * line saying so.
  *
@@ -28,7 +38,9 @@ export interface FileDropProps {
   /** The line drawn in the zone on a tablet: "Or drop a GPX file here". */
   readonly hint: string;
   /** The `<input type="file">` itself. */
-  readonly children: ReactElement;
+  readonly children: ReactElement<InputHTMLAttributes<HTMLInputElement>>;
+  /** The styled button's words; `FilePicker`'s default when absent. */
+  readonly choose?: string;
 }
 
 export function FileDrop(props: FileDropProps): JSX.Element {
@@ -74,10 +86,119 @@ export function FileDrop(props: FileDropProps): JSX.Element {
         handOver(input, event.dataTransfer.files);
       }}
     >
-      {props.children}
+      <FilePicker choose={props.choose}>{props.children}</FilePicker>
       <span className="oyl-drop__hint">{props.hint}</span>
     </span>
   );
+}
+
+/**
+ * A file input drawn as a button, with what was chosen as a chip — #1030.
+ *
+ * On the tablet the browser's own *"Choose File · No file chosen"* read as a
+ * web form. The input is still the control — the caller's own element, named
+ * by the caller's own label, in the tab order, opened by Enter and Space and
+ * by a press — but it is laid OVER a styled button at `opacity: 0`
+ * (`theme.css` §"A FILE PICKER"), so a press on the button is a press on the
+ * input and the platform opens its picker, with no `click()` from script. Its
+ * keyboard focus is drawn on the button by a sibling selector.
+ *
+ * The button's words are hidden from a screen reader, which already hears the
+ * input's own name and role; that is how the platform's own button was too.
+ *
+ * Once something is chosen its name — or how many, for several — is shown as
+ * a chip with a remove button, which empties the input, tells the screen
+ * through the input's own `change`, and puts focus back on the input. The
+ * chip is read from the input at each `change` and cleared on its form's
+ * `reset`, so a screen that empties the input in its handler (Documents does,
+ * so the same file can be chosen twice) shows no chip at all.
+ *
+ * ⚠️ **The caller's contract.** The chip follows the input only through those
+ * two events. A screen that empties the input in script anywhere else — a
+ * `value = ''` outside its own `change` handler, or a second picker taking
+ * over the selection (Files' files and folder pickers, #1030's review) — must
+ * dispatch a bubbling `change` on it afterwards, or the chip goes on naming
+ * files that are no longer chosen. And a screen with two pickers keeps ONE
+ * selection: each picker draws only its own input's chip, so the screen
+ * empties the other input when one is chosen, and ignores an empty `change`
+ * from a picker that was not holding the selection.
+ */
+export interface FilePickerProps {
+  /** The `<input type="file">` itself. */
+  readonly children: ReactElement<InputHTMLAttributes<HTMLInputElement>>;
+  /** The button's words: "Choose file", or "Choose files" for a `multiple` input. */
+  readonly choose?: string | undefined;
+}
+
+export function FilePicker(props: FilePickerProps): JSX.Element {
+  const holder = useRef<HTMLSpanElement>(null);
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const input = (): HTMLInputElement | null =>
+    holder.current?.querySelector<HTMLInputElement>('input[type="file"]') ?? null;
+  const read = (): void => {
+    setChosen(chosenText(input()?.files ?? null));
+  };
+  useEffect(() => {
+    const form = input()?.form ?? null;
+    if (form === null) {
+      return undefined;
+    }
+    const reset = (): void => {
+      setChosen(undefined);
+    };
+    form.addEventListener('reset', reset);
+    return () => {
+      form.removeEventListener('reset', reset);
+    };
+  }, []);
+  const child = props.children;
+  const words = props.choose ?? (child.props.multiple === true ? 'Choose files' : 'Choose file');
+  // A space either side, so the button's words are never run into the
+  // label's or a drop zone's hint as text (`testing/route-sentences.ts`).
+  return (
+    <>
+      {' '}
+      <span className="oyl-file" ref={holder} onChange={read}>
+        {cloneElement(child, {
+          className: ['oyl-file__input', child.props.className].filter(Boolean).join(' '),
+        })}
+        <span className="oyl-file__button" aria-hidden="true">
+          {words}
+        </span>
+      </span>
+      {chosen !== undefined && (
+        <span className="oyl-file__chip">
+          <span className="oyl-file__name">{chosen}</span>
+          <button
+            type="button"
+            className="oyl-file__remove"
+            aria-label={`Remove ${chosen}`}
+            onClick={() => {
+              const element = input();
+              setChosen(undefined);
+              if (element === null) {
+                return;
+              }
+              element.value = '';
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+              element.focus();
+            }}
+          >
+            <X aria-hidden="true" focusable="false" />
+          </button>
+        </span>
+      )}{' '}
+    </>
+  );
+}
+
+/** What the chip says: the one file's name, or how many there are. */
+export function chosenText(files: FileList | null): string | undefined {
+  const count = files?.length ?? 0;
+  if (count === 0) {
+    return undefined;
+  }
+  return count === 1 ? (files?.[0]?.name ?? '1 file') : `${String(count)} files`;
 }
 
 /**

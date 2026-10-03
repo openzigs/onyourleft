@@ -17,7 +17,7 @@ import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import { checkName, editRoute, LOOP_CHECKBOX_LABEL, type SaveRefusal } from '../routes/save';
 import { FILE_FIELD, LOOP_FIELD, routeFromImportForm } from '../routes/import-form';
-import { PUBLIC_ROUTE_WARNING } from '../routes/share';
+import { PUBLIC_ROUTE_WARNING, PUBLIC_ROUTE_ZONE_NOTE } from '../routes/share';
 import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../routes/export';
 import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
@@ -560,8 +560,11 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
             )}
           </div>
           <div>
-            <h2>Before you share a route</h2>
-            {/* #1013: a privacy warning, so it is kept on the screen whole. */}
+            {/* #1030: the warning stays on the screen; what a privacy zone does
+                to a shared route is the explanation, behind the ⓘ. */}
+            <SectionHeading level={2} help={<p>{PUBLIC_ROUTE_ZONE_NOTE}</p>}>
+              Before you share a route
+            </SectionHeading>
             <KeptVisible>
               <p>{PUBLIC_ROUTE_WARNING}</p>
             </KeptVisible>
@@ -574,7 +577,8 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
 
 /**
  * What the Routes screen keeps on the screen whatever its length — #1013: who
- * can see a shared route, and what a privacy zone does and does not hide.
+ * can see a shared route, and that most routes start at home. Since #1030
+ * what a privacy zone does to one is behind the section's ⓘ.
  */
 export const ROUTES_KEPT_VISIBLE: readonly string[] = [PUBLIC_ROUTE_WARNING];
 
