@@ -897,6 +897,28 @@ describe('announcements — #397', () => {
     expect(readAnnouncementPreference(store).climbLeadMetres).toBe(500);
     mounted.unmount();
   });
+
+  it('gives every chip an id a selector can name, and its label points at it — #1031', async () => {
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={disk().store}
+      />,
+    );
+    const radios = [
+      ...mounted.container.querySelectorAll<HTMLInputElement>('.oyl-chips input[type="radio"]'),
+    ];
+    // The distance row's half-mile chip is the one whose value has a `.` in it.
+    expect(radios.some((radio) => radio.value === '0.5')).toBe(true);
+    for (const radio of radios) {
+      expect(radio.id).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(mounted.container.querySelector(`#${radio.id}`)).toBe(radio);
+      expect(radio.closest('label')?.htmlFor).toBe(radio.id);
+    }
+    mounted.unmount();
+  });
 });
 
 describe('sounds — #400', () => {

@@ -1269,7 +1269,8 @@ function EveryChoice(props: {
       <legend>{props.label}</legend>
       <div className="oyl-chips__options">
         {options.map((option) => {
-          const id = `${props.id}-${String(option.value)}`;
+          // `_` for `.`: an id like `…-distance-0.5` is not a CSS selector as written.
+          const id = `${props.id}-${String(option.value).replaceAll('.', '_')}`;
           return (
             <label key={String(option.value)} htmlFor={id}>
               <input

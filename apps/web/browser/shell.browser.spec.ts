@@ -1660,6 +1660,12 @@ test.describe('#397 — the announcement controls', () => {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
     }
+    // A chip is a radio ROW, which the owner's 44 px target holds (#667, SC
+    // 2.5.5): its label's `min-height` in `theme.css`, not its text, is what
+    // makes it 44 — with that floor stripped a chip measured 28.8 px.
+    for (const chip of seen.filter((each) => each.name === 'LABEL')) {
+      expect(chip.height, 'a chip label').toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    }
   });
 
   test('the control — without the declared size the switch is under 24', async ({ page }) => {
