@@ -51,26 +51,12 @@
  * the Analysis screen uses, and units go through `units/format.ts`.
  */
 
-import {
-  expandWorkout,
-  seconds,
-  thresholdShare,
-  unixSeconds,
-  type UnixSeconds,
-} from '@onyourleft/domain';
+import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
 import { useEffect, useState, type JSX } from 'react';
 
 import type { AnalysisPort } from '../analysis/store-port';
 import { trendReadings, trendSentence } from '../analysis/trend';
-import {
-  Hills,
-  ProfileShape,
-  RiderSilhouette,
-  RoadRibbon,
-  SensorGlyph,
-  Sky,
-  WorkoutShape,
-} from '../design/illustration';
+import { Hills, ProfileShape, RoadRibbon, SensorGlyph, Sky } from '../design/illustration';
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
@@ -82,6 +68,7 @@ import {
   type HomeNextUp,
   type HomePreviousWeek,
 } from '../home/home';
+import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import type { RideController } from '../ride/controller';
 import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
@@ -313,90 +300,8 @@ function TrainerCard({ controller }: { readonly controller: RideController }): J
 }
 
 /**
- * A workout's outline for the Workout card's picture: a warm-up, three hard
- * efforts and a cool-down. A drawing, not a workout anybody rides — no number
- * from it is shown, and the card's words say what the screen behind it is.
- */
-const CARD_WORKOUT = expandWorkout({
-  name: 'Home card',
-  blocks: [
-    { kind: 'ramp', seconds: seconds(300), from: thresholdShare(0.5), to: thresholdShare(0.75) },
-    {
-      kind: 'intervals',
-      repeats: 3,
-      hardSeconds: seconds(180),
-      hardTarget: thresholdShare(1.1),
-      easySeconds: seconds(120),
-      easyTarget: thresholdShare(0.55),
-    },
-    { kind: 'steady', seconds: seconds(240), target: thresholdShare(0.6) },
-  ],
-});
-
-interface RideChoice {
-  readonly id: string;
-  readonly title: string;
-  readonly line: string;
-  readonly action: string;
-  readonly to: 'ride' | 'game' | 'workouts';
-  readonly art: JSX.Element;
-}
-
-const RIDE_CHOICES: readonly RideChoice[] = [
-  {
-    id: 'free',
-    title: 'Free ride',
-    line: 'Record a ride from your paired sensors.',
-    action: 'Start a ride',
-    to: 'ride',
-    art: (
-      <>
-        <Sky className="oyl-home__layer" clouds={false} />
-        <Hills className="oyl-home__layer" seed={3} />
-        <RiderSilhouette className="oyl-home__layer oyl-ride-card__rider" />
-      </>
-    ),
-  },
-  {
-    id: 'route',
-    title: 'Ride a route',
-    line: 'Ride a saved route in the trainer game.',
-    action: 'Choose a route',
-    to: 'game',
-    art: (
-      <>
-        <Sky className="oyl-home__layer" />
-        <Hills className="oyl-home__layer" seed={5} />
-        <RoadRibbon className="oyl-home__layer" />
-      </>
-    ),
-  },
-  {
-    id: 'workout',
-    title: 'Workout',
-    line: 'Follow a structured workout on a smart trainer.',
-    action: 'Choose a workout',
-    to: 'workouts',
-    art: (
-      <>
-        <Sky className="oyl-home__layer" sun={false} />
-        <WorkoutShape className="oyl-home__layer oyl-ride-card__workout" workout={CARD_WORKOUT} />
-      </>
-    ),
-  },
-];
-
-/**
- * Where a ride starts — #939: three equal cards. Each card is a list item with
- * a real heading, one line and ONE link; the link's `::after` stretches over
- * the card (`theme.css` §`.oyl-ride-card__link`), so the whole card is the
- * target and still holds a single interactive element.
- *
- * Since #1010 the picture IS the card's background — it fills the card's
- * width and every pixel the words do not take — and the words stand on a
- * solid band of `surfaceRaised` below it, so every text pair on the card is a
- * declared one and none is laid over a drawing. All three links are
- * secondary: the view's one primary is *Next up*'s Ride.
+ * Where a ride starts — #939: three equal cards, `home/ride-choices.tsx`. All
+ * three links are secondary: the view's one primary is *Next up*'s Ride.
  */
 function RideChoices(): JSX.Element {
   return (
@@ -404,27 +309,7 @@ function RideChoices(): JSX.Element {
       <h2 id="oyl-home-start">Ride</h2>
       <ul className="oyl-home__rides">
         {RIDE_CHOICES.map((choice) => (
-          <li
-            key={choice.id}
-            className="oyl-ride-card tw:relative tw:flex tw:flex-col tw:overflow-hidden tw:rounded-card tw:bg-surface-raised"
-          >
-            <div className="oyl-ride-card__art" aria-hidden="true">
-              {choice.art}
-            </div>
-            <div className="oyl-ride-card__body tw:flex tw:flex-col tw:gap-sm tw:bg-surface-raised">
-              <h3 id={`oyl-home-ride-${choice.id}`} className="tw:m-0">
-                {choice.title}
-              </h3>
-              <p className="oyl-muted tw:m-0">{choice.line}</p>
-              <a
-                className="oyl-button oyl-button--secondary oyl-ride-card__link tw:self-start"
-                href={hrefFor(routeById(choice.to))}
-                aria-describedby={`oyl-home-ride-${choice.id}`}
-              >
-                {choice.action}
-              </a>
-            </div>
-          </li>
+          <RideChoiceCard key={choice.id} choice={choice} idPrefix="oyl-home-ride" />
         ))}
       </ul>
     </section>

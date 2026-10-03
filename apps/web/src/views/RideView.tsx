@@ -50,6 +50,7 @@ import type { Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
 import { SensorGlyph } from '../design/illustration';
+import { Reading } from '../design/Reading';
 import { formatDuration } from '../format';
 import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
@@ -73,6 +74,7 @@ import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
 import type { SidePairingPort } from '../camera/side-pairing-port';
+import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { hrefFor, routeById } from '../shell/routes';
 
 export interface RideViewProps {
@@ -259,10 +261,7 @@ function LiveRide({
         ) : (
           <MetricGrid metrics={snapshot.metrics} />
         )}
-        <p className="oyl-ride__clock">
-          {formatDuration(snapshot.elapsedSeconds)} elapsed ·{' '}
-          {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
-        </p>
+        <RideClock snapshot={snapshot} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
       </div>
 
@@ -321,6 +320,8 @@ function LiveRide({
         <h2>Sensors</h2>
         <ConnectedSensors snapshot={snapshot} />
       </div>
+
+      {snapshot.sensors.length === 0 && snapshot.phase === 'idle' ? <OtherRides /> : null}
     </div>
   );
 }
@@ -760,6 +761,72 @@ function NoSensorsBanner(): JSX.Element {
       <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
         Pair
       </ButtonLink>
+    </div>
+  );
+}
+
+/**
+ * The ride's clock — #1029. Elapsed and moving time as two big readings
+ * (`design/Reading.tsx`), and the seconds recorded beside them in small type.
+ *
+ * ⚠️ **It used to be one body-sized line**, "0:00 elapsed · 0:00 moving · 0
+ * seconds recorded", and a reviewer who remembers that sentence is reading
+ * the old file. With no sensor paired these two are the only numbers a ride
+ * records, so they are drawn as numbers. Each is a term and its reading in a
+ * `dl`, so a screen reader reads "Elapsed 0:00" rather than a run of digits.
+ *
+ * Still AFTER every ride control and every standing notice (#692): its height
+ * changes with the window, and nothing that does sits above a control. The
+ * size is `theme.css` §`.oyl-ride__clock`: a menu fact's `xxl` where the Live
+ * group is narrow, and the live readings' metric size where it is a landscape
+ * tablet's two columns, because `1:02:05` at the metric size does not fit
+ * half of a phone.
+ */
+function RideClock({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
+  return (
+    <dl className="oyl-ride__clock">
+      <div className="oyl-ride__time">
+        <dt>Elapsed</dt>
+        <dd>
+          <Reading value={formatDuration(snapshot.elapsedSeconds)} />
+        </dd>
+      </div>
+      <div className="oyl-ride__time">
+        <dt>Moving</dt>
+        <dd>
+          <Reading value={formatDuration(snapshot.movingSeconds)} />
+        </dd>
+      </div>
+      <div className="oyl-ride__time oyl-ride__time--recorded">
+        <dt>Recorded</dt>
+        <dd>{snapshot.sampleCount} seconds</dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
+ * The other ways to ride, while nothing is paired and no ride has started —
+ * #1029. On the owner's tablet in landscape the screen with no sensors used
+ * the top third of the display and left the rest empty; this puts Home's
+ * *Ride a route* and *Workout* cards there (`home/ride-choices.tsx`, the same
+ * words and pictures), under the Live and Sensors groups. *Free ride* is not
+ * offered: it is this screen.
+ *
+ * ⚠️ **Last in the document**, so the tab order is live, trainer, sensors,
+ * then these, and nothing in it is above a ride control in any layout. Gone
+ * the moment a sensor is paired or a ride starts: a rider recording a ride is
+ * not offered a way to leave it.
+ */
+function OtherRides(): JSX.Element {
+  return (
+    <div className="oyl-ride__group oyl-ride__group--other">
+      <h2>Other ways to ride</h2>
+      <ul className="oyl-home__rides">
+        {RIDE_CHOICES.filter((choice) => choice.to !== 'ride').map((choice) => (
+          <RideChoiceCard key={choice.id} choice={choice} idPrefix="oyl-ride-other" />
+        ))}
+      </ul>
     </div>
   );
 }

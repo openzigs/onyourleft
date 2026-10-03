@@ -201,7 +201,8 @@ const ERG_HELD = QUERY.get('erg') === 'held';
  * `rideview.html?sensors=none` — #1012: a ride RECORDING with nothing paired,
  * so the Live group shows the one sensor banner where the readings go. The
  * trainer is unpaired too — a paired trainer IS a paired sensor — so the
- * trainer group says so and offers no control.
+ * trainer group says so and offers no control. With `&ride=idle` it is the
+ * same screen before a ride (#1029).
  */
 const NO_SENSORS = QUERY.get('sensors') === 'none';
 
@@ -234,7 +235,11 @@ function snapshot(): RideSnapshot {
   }
   if (NO_SENSORS) {
     const nothing = idleSnapshot();
-    return { ...riding, sensors: [], metrics: nothing.metrics, trainer: nothing.trainer };
+    // #1029: `&ride=idle` is the same screen before a ride — the one where the
+    // other ways to ride are offered under the Live and Sensors groups.
+    return RIDE_STATE === 'idle'
+      ? nothing
+      : { ...riding, sensors: [], metrics: nothing.metrics, trainer: nothing.trainer };
   }
   if (ERG_HELD) {
     return {

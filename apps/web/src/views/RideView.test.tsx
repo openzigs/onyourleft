@@ -808,12 +808,78 @@ describe('the ride clock', () => {
     expect(formatDuration(-1)).toBe('0:00');
   });
 
-  it('is on the screen alongside moving time', async () => {
+  it('is on the screen alongside moving time, each as a reading under its term (#1029)', async () => {
     const stub = stubRideController(ridingSnapshot());
     await show(stub);
 
-    expect(document.body.textContent).toContain('1:02:05 elapsed');
-    expect(document.body.textContent).toContain('1:00:00 moving');
+    // #1029: two big readings rather than one body-sized line. A term and its
+    // reading, so the pair is read "Elapsed 1:02:05", and the digits are a
+    // `design/Reading.tsx` — the one place a number's size is decided.
+    const times = queryAll(document, '.oyl-ride__group--live dl.oyl-ride__clock > div').map(
+      (pair) => ({
+        term: pair.querySelector('dt')?.textContent,
+        reading: pair.querySelector('dd .oyl-reading .oyl-reading__value')?.textContent,
+      }),
+    );
+    expect(times).toEqual([
+      { term: 'Elapsed', reading: '1:02:05' },
+      { term: 'Moving', reading: '1:00:00' },
+      { term: 'Recorded', reading: undefined },
+    ]);
+    expect(document.querySelector('.oyl-ride__time--recorded dd')?.textContent).toBe(
+      '3725 seconds',
+    );
+  });
+});
+
+describe('#1029 — the screen with nothing paired fills its width', () => {
+  it('draws the Trainer group as one card with a Devices button, not a status line', async () => {
+    await show(stubRideController(idleSnapshot()));
+
+    const trainer = document.querySelector('.oyl-ride__group--trainer');
+    const card = trainer?.querySelector(':scope > .oyl-trainer-card');
+    if (card === null || card === undefined) {
+      throw new Error('the Trainer group renders no card with no trainer paired');
+    }
+    expect(card.textContent).toContain('No trainer:');
+    expect(card.querySelector('[aria-hidden="true"] svg')).not.toBeNull();
+    const links = queryAll<HTMLAnchorElement>(card, 'a');
+    expect(
+      links.map((link) => ({
+        name: link.textContent,
+        href: link.getAttribute('href'),
+        button: link.classList.contains('oyl-button--secondary'),
+      })),
+    ).toEqual([{ name: 'Devices', href: '#/devices', button: true }]);
+    expect(trainer?.querySelector('.oyl-status')).toBeNull();
+  });
+
+  it('offers the other ways to ride, after every group, while nothing is paired before a ride', async () => {
+    await show(stubRideController(idleSnapshot()));
+
+    const groups = queryAll(document, '.oyl-ride > .oyl-ride__group').map(
+      (group) => group.querySelector('h2')?.textContent,
+    );
+    expect(groups).toEqual(['Live', 'Trainer', 'Sensors', 'Other ways to ride']);
+    const other = document.querySelector('.oyl-ride__group--other');
+    const links = queryAll<HTMLAnchorElement>(other ?? document, '.oyl-ride-card a');
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['Choose a route', '#/game'],
+      ['Choose a workout', '#/workouts'],
+    ]);
+    // Free ride is this screen, so it is not offered here.
+    expect(other?.textContent).not.toContain('Free ride');
+  });
+
+  it('offers them neither once a sensor is paired nor once a ride has started', async () => {
+    const stub = stubRideController({ ...idleSnapshot(), sensors: ridingSnapshot().sensors });
+    await show(stub);
+    expect(document.querySelector('.oyl-ride__group--other')).toBeNull();
+
+    stub.set({ sensors: [], phase: 'recording' });
+    await settle();
+    expect(document.querySelector('.oyl-ride__group--live .oyl-ride__actions')).not.toBeNull();
+    expect(document.querySelector('.oyl-ride__group--other')).toBeNull();
   });
 });
 
