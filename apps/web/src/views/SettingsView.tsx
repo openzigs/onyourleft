@@ -579,7 +579,13 @@ export function SettingsView({
         />
       </SettingsCard>
 
-      {/* #839, #836: what is masked, and the goals and documents it is masked in. */}
+      {/*
+        #839, #836: what is masked, and the goals and documents it is masked in.
+        ⚠️ Three cards since #1026, where #942 made them one: the one card was
+        1959 px tall at half a landscape tablet, so the row it shared with The
+        ride was four times as tall as that card. The sections are in the order
+        they were, so the tab order and each one's first control are unchanged.
+      */}
       <SettingsCard
         id="oyl-settings-words"
         title={SETTINGS_CARD_TITLES.words}
@@ -591,6 +597,19 @@ export function SettingsView({
         }
       >
         <MaskedWordsPanel port={maskedWords} />
+      </SettingsCard>
+
+      <SettingsCard
+        id="oyl-settings-goals"
+        title={SETTINGS_CARD_TITLES.goals}
+        picture={
+          <>
+            <Sky clouds={false} />
+            <Hills seed={3} />
+            <RoadRibbon />
+          </>
+        }
+      >
         <RiderTextBox
           port={riderText}
           kind="goal"
@@ -599,6 +618,18 @@ export function SettingsView({
           words={GOALS_WORDS}
           headingLevel={3}
         />
+      </SettingsCard>
+
+      <SettingsCard
+        id="oyl-settings-documents"
+        title={SETTINGS_CARD_TITLES.documents}
+        picture={
+          <>
+            <Sky sun={false} clouds={false} />
+            <Hills seed={4} />
+          </>
+        }
+      >
         <DocumentsPanel port={riderText} />
       </SettingsCard>
 
@@ -643,6 +674,8 @@ export const SETTINGS_CARD_TITLES = {
   look: 'Look and sound',
   ride: 'The ride',
   words: 'Your words',
+  goals: 'Your goals',
+  documents: 'Your documents',
   device: 'Connect and keep',
 } as const;
 
@@ -1185,7 +1218,7 @@ function EverySelect(props: {
     <p>
       <label htmlFor={props.id}>{props.label}</label>{' '}
       <select
-        className="oyl-input"
+        className="oyl-input oyl-input--wide"
         id={props.id}
         value={String(props.value)}
         onChange={(event) => {

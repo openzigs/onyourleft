@@ -50,7 +50,8 @@ import type {
 import { syntheticCourseGpx, syntheticGpx } from './testing';
 import { FILES_IMPORT_MEANS } from '../routes/two-importers';
 import type { AccountExportReport } from './export-everything';
-import { everythingSentence, TransferView } from './TransferView';
+import { ERASE_CONFIRM_HEADING, everythingSentence, TransferView } from './TransferView';
+import { ERASE_CANNOT_REACH, ERASE_REMOVES } from './erase-device';
 import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 
 let mounted: Mounted | undefined;
@@ -1379,5 +1380,52 @@ describe('TransferView — did you mean a route?', () => {
     await waitForBody('could not save it');
 
     expect(await storedRoutes()).toHaveLength(0);
+  });
+});
+
+describe('TransferView — the erase, in two sections (#1026)', () => {
+  /** The child of `.oyl-sections` whose `h2` reads `heading`. */
+  function sectionHeaded(heading: string): HTMLElement {
+    const found = [...document.querySelectorAll<HTMLElement>('.oyl-sections > *')].find(
+      (section) => section.querySelector('h2')?.textContent === heading,
+    );
+    if (found === undefined) {
+      throw new Error(`no section headed “${heading}”`);
+    }
+    return found;
+  }
+
+  it('tucks what goes behind the section’s ⓘ, and keeps what it cannot reach and the key beside the button', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-erase-confirm') !== null,
+      'the erase panel to render',
+    );
+
+    const erase = sectionHeaded('Erase this device');
+    const help = erase.querySelector('details.oyl-section-help');
+    expect(help, 'the erase section has no ⓘ').not.toBeNull();
+    expect(help?.hasAttribute('open')).toBe(false);
+    const tucked = [...(help?.querySelectorAll('li') ?? [])].map((item) => item.textContent);
+    expect(tucked).toEqual([...ERASE_REMOVES]);
+
+    // What it cannot reach is in the section, and in no disclosure.
+    const reach = [...erase.querySelectorAll('li')].filter(
+      (item) => item.closest('details') === null,
+    );
+    expect(reach.map((item) => item.textContent)).toEqual([...ERASE_CANNOT_REACH]);
+    expect(reach.every((item) => item.closest('[data-oyl-kept-visible]') !== null)).toBe(true);
+
+    // The button is in the next section, under the signing key's sentence.
+    const confirm = sectionHeaded(ERASE_CONFIRM_HEADING);
+    expect(erase.nextElementSibling).toBe(confirm);
+    expect(confirm.querySelector('#oyl-erase-confirm')).not.toBeNull();
+    expect(erase.querySelector('#oyl-erase-confirm')).toBeNull();
+    const key = confirm.querySelector('[data-oyl-kept-visible]');
+    expect(key?.textContent).toContain('Erasing the signing key cannot be undone');
+    expect([...confirm.querySelectorAll('button')].map((button) => button.textContent)).toContain(
+      'Erase everything',
+    );
   });
 });
