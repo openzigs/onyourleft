@@ -99,6 +99,7 @@ const CONTROLLER = {
   }),
   simulationControl: () => undefined,
   requestTrainerControl: () => Promise.resolve(),
+  noteGameRideEnded: () => undefined,
 };
 
 let pending: FrameRequestCallback[] = [];

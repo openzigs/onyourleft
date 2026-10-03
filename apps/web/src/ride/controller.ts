@@ -100,6 +100,8 @@ import {
 } from '../recording/recorder';
 import { recoverableRides, type RecoverableRide } from '../recording/recovery';
 import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
+import type { GhostOutcome } from '../game/ghost-outcome-kind';
+import { statedAverageHeartRate, type SavedRide } from './ride-result';
 
 import {
   metricStateFor,
@@ -348,6 +350,25 @@ export interface RideSnapshot {
   readonly saveError: string | undefined;
   /** The activity a finished ride became, so a screen can link to it. */
   readonly savedActivityId: ActivityId | undefined;
+  /**
+   * The facts of the ride {@link savedActivityId} names, for the result card —
+   * #1042. Set exactly when that is, from the activity the save WROTE, so the
+   * card can state nothing the library does not hold. `ride/ride-result.ts`
+   * §`rideResultOf` is the one rule for when a card is shown.
+   *
+   * ⚠️ **Cleared by {@link RideController.dismissResult}** — the card's *Done*
+   * (#1049's review). The screen is under the router and this controller is
+   * above it, so a dismissal held in the screen's own state came back with the
+   * screen: Ride → Activities → Ride showed the card again.
+   */
+  readonly savedRide: SavedRide | undefined;
+  /**
+   * The result card for {@link savedRide} has spoken its one polite sentence
+   * (#1049's review). A card mounted again — the rider went to another screen
+   * and came back — is shown but says nothing, so the save is announced once
+   * per ride rather than once per visit. `false` again for every new save.
+   */
+  readonly resultAnnounced: boolean;
   /**
    * The ride saved, and its checkpoint could **not** be removed afterwards.
    *
@@ -816,6 +837,30 @@ export interface RideController {
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;
   /**
+   * A trainer-game ride ended while this recording was running, and this is
+   * how its race against the rider's own best ended — #1042.
+   *
+   * ⚠️ **The LATCHED answer, from `game/ghost-outcome.ts`, never a reading of
+   * the live gap**, and `undefined` for a game ride with no ghost or one not
+   * settled. The last SETTLED answer is kept for the recording in progress
+   * — an `undefined` never clears one (#1049's review) — and stated on the
+   * result card when it is saved. Ignored unless a
+   * ride is recording or paused: a game ride with no recording under it is
+   * saved nowhere, so there is nothing to attach it to. Decides no write.
+   */
+  noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * *Done* on the result card — #1042. The card is put away for good: the
+   * snapshot's `savedRide` is cleared, so no screen mounted later shows it
+   * again. Nothing else changes; the ride is saved and stays stopped.
+   */
+  dismissResult(): void;
+  /**
+   * The result card has announced the saved ride — #1042. Recorded here, above
+   * the router, so a card mounted again does not announce it again.
+   */
+  noteResultAnnounced(): void;
+  /**
    * Put a stopped ride away and return to `idle`, ready to record another —
    * #548. Refused (`false`) unless {@link canStartNewRide} holds.
    *
@@ -1008,6 +1053,12 @@ export function createRideController(options: RideControllerOptions): RideContro
   let saveState: RideSaveState = 'unavailable';
   let saveError: string | undefined;
   let savedActivityId: ActivityId | undefined;
+  /** @see RideSnapshot.savedRide */
+  let savedRide: SavedRide | undefined;
+  /** @see RideSnapshot.resultAnnounced */
+  let resultAnnounced = false;
+  /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
+  let gameOutcome: GhostOutcome | undefined;
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
   let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
@@ -1789,6 +1840,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       stopping: finishing,
       saveError,
       savedActivityId,
+      savedRide,
+      resultAnnounced,
       leftover,
       recoverable,
       pairingError,
@@ -2147,6 +2200,7 @@ export function createRideController(options: RideControllerOptions): RideContro
   const saveTheRide = async (
     current: Recorder | undefined,
     workoutName: string | undefined,
+    outcomeInGame: GhostOutcome | undefined,
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2156,23 +2210,37 @@ export function createRideController(options: RideControllerOptions): RideContro
     saveError = undefined;
     changed();
 
-    const outcome = await saveFinishedRide(
-      port.store,
-      rideToSave({
-        id: port.newActivityId(),
-        athleteId: options.athleteId,
-        series: current.session.series(),
-        elapsedTime: current.session.elapsedTime,
-        movingTime: current.session.movingTime,
-        timeZone: port.timeZone,
-        now: now(),
-        ...(workoutName === undefined ? {} : { workoutName }),
-      }),
-    );
+    const series = current.session.series();
+    const finished = rideToSave({
+      id: port.newActivityId(),
+      athleteId: options.athleteId,
+      series,
+      elapsedTime: current.session.elapsedTime,
+      movingTime: current.session.movingTime,
+      timeZone: port.timeZone,
+      now: now(),
+      ...(workoutName === undefined ? {} : { workoutName }),
+    });
+    const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
     saveError = outcome.status === 'failed' ? outcome.error.message : undefined;
     savedActivityId = outcome.status === 'saved' ? outcome.id : undefined;
+    // #1042: the card's facts are the activity the save WROTE, read off the
+    // record rather than recomputed — so the card and the library agree.
+    savedRide =
+      outcome.status === 'saved' && finished !== undefined
+        ? {
+            activityId: outcome.id,
+            elapsedTime: finished.activity.elapsedTime,
+            distance: finished.activity.distance,
+            averagePower: finished.activity.averagePower,
+            // The figure the ride's page states, from the channel the save
+            // wrote (#1049's review: `ride-result.ts` §`statedAverageHeartRate`).
+            averageHeartRate: statedAverageHeartRate(finished.streams.channels.heartRate),
+            gameOutcome: outcomeInGame,
+          }
+        : undefined;
     if (outcome.status === 'saved' || outcome.status === 'empty') {
       // ⚠️ **Stamp the link BEFORE the checkpoint goes, and read what the
       // discard answered.** Found by review: `discard()` returns `false` when
@@ -2562,6 +2630,34 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
     },
 
+    noteGameRideEnded(outcome: GhostOutcome | undefined): void {
+      if (phase !== 'recording' && phase !== 'paused') {
+        return;
+      }
+      // #1049's review: the last SETTLED answer is kept. A later game ride
+      // with no ghost, or one that ended before its race settled, has nothing
+      // to say — and must not erase what an earlier one did say.
+      if (outcome !== undefined) {
+        gameOutcome = outcome;
+      }
+    },
+
+    dismissResult(): void {
+      if (savedRide === undefined) {
+        return;
+      }
+      savedRide = undefined;
+      changed();
+    },
+
+    noteResultAnnounced(): void {
+      if (savedRide === undefined || resultAnnounced) {
+        return;
+      }
+      resultAnnounced = true;
+      changed();
+    },
+
     armStop(): void {
       if (phase !== 'recording' && phase !== 'paused') {
         return;
@@ -2615,7 +2711,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         await stopTrainer();
         await recording().stop(at);
         changed();
-        await saveTheRide(recorder, ridden);
+        await saveTheRide(recorder, ridden, gameOutcome);
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -2650,6 +2746,16 @@ export function createRideController(options: RideControllerOptions): RideContro
       saveState = 'unavailable';
       saveError = undefined;
       savedActivityId = undefined;
+      savedRide = undefined;
+      // #1049's review: forgotten here and only here, for `gameOutcome`'s
+      // reason below — a card can only speak for a STOPPED ride, and the next
+      // stopped ride is reached only through this.
+      resultAnnounced = false;
+      // #1042: the ONE place a recording's game outcome is forgotten. A
+      // recording only starts from `idle`, and `idle` is reached only through
+      // here (or a fresh controller), so `start` needs no second reset — two
+      // would each be invisible to the suite.
+      gameOutcome = undefined;
       leftover = false;
       clock = now();
       changed();
@@ -2687,6 +2793,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       saveState = 'unavailable';
       saveError = undefined;
       savedActivityId = undefined;
+      savedRide = undefined;
       recoverable = [];
       changed();
       return true;
@@ -2718,7 +2825,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         await refreshRecoverable();
         return 'failed';
       }
-      await saveTheRide(found, undefined);
+      await saveTheRide(found, undefined, undefined);
       await refreshRecoverable();
       return saveState;
     },

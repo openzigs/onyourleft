@@ -364,6 +364,7 @@ function trainerPort(hasControl: boolean): GameTrainerPort {
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
   };
 }
 

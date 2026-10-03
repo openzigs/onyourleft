@@ -886,6 +886,15 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #1042: a ride that was on the stage has ended, by *End ride* or by
+    // leaving, and the recording under it (if any) keeps how its race against
+    // the rider's best ended — the LATCHED answer, never the live gap — for the
+    // result card the Ride screen shows when that recording is saved. Only a
+    // ride that was on: this also runs when the picker unmounts, and that must
+    // not wipe what the last ride settled.
+    if (simulationRef.current !== undefined) {
+      trainerPortRef.current?.gameRideEnded(outcomeRef.current);
+    }
     // #782: leave the room — its socket, its reconnects and its hold on the
     // screen-off service go with the ride.
     roomRef.current?.leave();

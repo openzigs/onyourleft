@@ -306,6 +306,7 @@ describe('a notice is laid out by the HUD — #423', () => {
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
     readTrainer: () => ({ kind: 'no-control', control: undefined }),
   };
 

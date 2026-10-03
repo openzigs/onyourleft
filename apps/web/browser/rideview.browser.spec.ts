@@ -1436,3 +1436,88 @@ for (const [viewport, size] of [
     }
   });
 }
+
+/**
+ * #1042 — the result card after a ride is saved, at its fullest
+ * (`rideview.html?ride=saved`: hours of elapsed time, four-digit power, a
+ * heart rate and the longest game outcome sentence).
+ *
+ * It stands only on a STOPPED ride, so there is no ride control for it to
+ * cover; what is held is that the rider can reach *Done*, the ride's page and
+ * *Start a new ride* with no scrolling, each {@link FOLD_MARGIN_PIXELS} clear
+ * of the fold, and that no fact spills out of its track. The margins are
+ * published at every tablet.
+ */
+const SAVED_CARD_VIEWPORTS: readonly Viewport[] = [...TABLETS, TABLET_UPRIGHT_IN_THE_SHELL];
+
+for (const viewport of SAVED_CARD_VIEWPORTS) {
+  test.describe(`#1042 — the result card — ${viewport.name}`, () => {
+    test('Done, the ride’s page and Start a new ride clear the fold, and no fact spills', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, '?ride=saved');
+      const seen = await measure(page);
+      const card = seen.resultCard;
+      expect(card, 'the result card did not render').toBeDefined();
+      // No ride control on a stopped ride: there is nothing for it to cover.
+      const rideControls = seen.controls.filter(
+        (each) => each.group === 'live' && ['Pause', 'Stop', 'Resume'].includes(each.name),
+      );
+      expect(rideControls).toEqual([]);
+      const named = (name: string): RideViewControl => {
+        const found = seen.controls.find((each) => each.group === 'live' && each.name === name);
+        expect(found, `no ${name} in the live group`).toBeDefined();
+        return found!;
+      };
+      const done = named('Done');
+      const another = named('Start a new ride');
+      const margins = {
+        done: foldMargin(done.box.bottom, viewport),
+        link: foldMargin(card!.link.box.bottom, viewport),
+        another: foldMargin(another.box.bottom, viewport),
+        card: foldMargin(card!.box.bottom, viewport),
+      };
+      const note =
+        `Done ${margins.done.toFixed(1)} px, ${card!.link.name} ${margins.link.toFixed(1)} px, ` +
+        `Start a new ride ${margins.another.toFixed(1)} px, the card ${margins.card.toFixed(1)} px ` +
+        `above the fold; spill ${String(card!.spill)} px`;
+      testInfo.annotations.push({ type: '#1042', description: note });
+      console.log(`#1042 — ${viewport.name} — ${note}`);
+      expect(seen.scrollY).toBe(0);
+      for (const control of [done, another]) {
+        expect(onScreen(control, viewport), describeControl(control)).toBe(true);
+      }
+      expect(card!.link.onTop, note).toBe(true);
+      expect(margins.done, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(margins.link, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(margins.another, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(card!.spill, note).toBe(0);
+      // 44 px targets, the button's own and the link drawn as one.
+      expect(done.box.height).toBeGreaterThanOrEqual(44);
+      expect(card!.link.box.height).toBeGreaterThanOrEqual(44);
+    });
+  });
+}
+
+test(`#1042 — the control — the card after the readings puts Done under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, '?ride=saved');
+  const doneMargin = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'live' && each.name === 'Done')?.box.bottom ??
+        -Infinity,
+      viewport,
+    );
+  const fixed = doneMargin(await measure(page));
+  await page.evaluate(() => {
+    window.__oylRideView?.cardAfterTheReadings();
+  });
+  const reverted = doneMargin(await measure(page));
+  const note = `Done ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px with the card after the readings`;
+  testInfo.annotations.push({ type: '#1042 control', description: note });
+  console.log(`#1042 — the control — ${note}`);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});

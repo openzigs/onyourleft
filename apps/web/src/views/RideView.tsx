@@ -70,6 +70,8 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { RideResultCard } from '../ride/RideResultCard';
+import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
@@ -459,6 +461,10 @@ function RideControls({
   // answer lands first.
   const startRecording = useRef<HTMLButtonElement>(null);
   const focusStartWhenIdle = useRef(false);
+  // #1042: the control the result card's *Done* hands focus to. Whether the
+  // card is put away, and whether it has spoken, are the CONTROLLER's — it is
+  // above the router and this screen is not (#1049's review).
+  const startNewRide = useRef<HTMLButtonElement>(null);
   // A press the controller refused. Unreachable from the button while the rule
   // it renders under is the controller's own, and said anyway: a control that
   // does nothing when pressed reads as a broken one.
@@ -496,6 +502,13 @@ function RideControls({
   }
 
   if (snapshot.phase === 'stopped') {
+    // #1042: the result card, for a ride that is stopped and SAVED and only
+    // then (`ride-result.ts` §`rideResultOf`), until the rider presses *Done*.
+    // There is no ride control on this branch for it to cover, and its height
+    // changes nothing during a ride (#692): it exists only once one is over.
+    // *Done* clears the controller's `savedRide`, so a screen mounted later
+    // does not bring the card back.
+    const result = rideResultOf(snapshot);
     // #548: until this existed a stopped ride was a dead end. `RideSession` is
     // mounted above the router for the app's lifetime, so neither navigating
     // away nor anything else reset the controller, and in the Android shell a
@@ -505,9 +518,33 @@ function RideControls({
     // are never followed by a control that would discard what they protect.
     return (
       <>
-        <StoppedNotice snapshot={snapshot} />
+        <StoppedNotice snapshot={snapshot} cardShown={result !== undefined} />
+        {result === undefined ? null : (
+          <RideResultCard
+            key={result.activityId}
+            result={result}
+            // One voice for the save: with a working copy left behind, the
+            // warning above carries it (`StoppedNotice`), and a card mounted
+            // again for a ride already announced stays quiet.
+            announce={!snapshot.resultAnnounced && !snapshot.leftover}
+            onAnnounced={() => {
+              controller.noteResultAnnounced();
+            }}
+            onDone={() => {
+              controller.dismissResult();
+              // The card goes; focus goes to the control it stood above,
+              // rather than falling to `<body>` (WCAG 2.2 SC 2.4.3, #548's
+              // reason). Always rendered while a card is: `rideResultOf`
+              // requires what `canStartNewRide` requires.
+              startNewRide.current?.focus();
+            }}
+          />
+        )}
         {canStartNewRide(snapshot) ? (
           <Button
+            ref={startNewRide}
+            // #668: one primary per view — *Done* while the card is up.
+            variant={result === undefined ? 'primary' : 'secondary'}
             onClick={() => {
               setNewRideRefused(false);
               focusStartWhenIdle.current = true;
@@ -613,7 +650,20 @@ function RideControls({
 }
 
 /** What a stopped ride ends on — where it got to, and whether the tab is safe to close. */
-function StoppedNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
+function StoppedNotice({
+  snapshot,
+  cardShown,
+}: {
+  readonly snapshot: RideSnapshot;
+  /**
+   * #1042: the result card is up, and its region is the one voice for the
+   * save — so the success sentence below is shown and not ALSO announced.
+   * The sentence itself is unchanged. ⚠️ Not the leftover warning: with a
+   * working copy left behind, the WARNING is the voice (it says the save and
+   * the one thing a rider would misread) and the card stays quiet.
+   */
+  readonly cardShown: boolean;
+}): JSX.Element {
   // ⚠️ Only when the last checkpoint landed. The final flush happens inside
   // `confirmStop`, and it can be refused — a full device, an aborted
   // transaction — which leaves the last seconds of the ride in this tab and
@@ -689,7 +739,9 @@ function StoppedNotice({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.E
         saved ride.
       </StatusMessage>
     ) : (
-      <StatusMessage tone="success" label="Saved" live>
+      // Nor once the card has spoken for this ride (#1049's review): put away
+      // with *Done*, or the screen mounted again, the save is not said twice.
+      <StatusMessage tone="success" label="Saved" live={!cardShown && !snapshot.resultAnnounced}>
         The ride is stopped and saved to your activities. Closing the tab is safe now.
       </StatusMessage>
     );

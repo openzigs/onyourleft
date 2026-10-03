@@ -47,6 +47,11 @@ export interface RecordedCalls {
   armStop: number;
   cancelStop: number;
   confirmStop: number;
+  /** #1042 — the latched outcomes the game handed over, in order. */
+  readonly noteGameRideEnded: (string | undefined)[];
+  /** #1042 — the result card's *Done*, and its one announcement. */
+  dismissResult: number;
+  noteResultAnnounced: number;
   /** #548 — the stopped screen's way back to a ride. */
   startNewRide: number;
   requestControl: number;
@@ -94,6 +99,8 @@ export function idleSnapshot(): RideSnapshot {
     saveState: 'unavailable',
     saveError: undefined,
     savedActivityId: undefined,
+    savedRide: undefined,
+    resultAnnounced: false,
     leftover: false,
     recoverable: [],
     connectionsRemaining: 3,
@@ -168,6 +175,9 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     armStop: 0,
     cancelStop: 0,
     confirmStop: 0,
+    noteGameRideEnded: [],
+    dismissResult: 0,
+    noteResultAnnounced: 0,
     startNewRide: 0,
     requestControl: 0,
     clearTarget: 0,
@@ -230,6 +240,24 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     },
     cancelStop: () => {
       calls.cancelStop += 1;
+    },
+    noteGameRideEnded: (outcome) => {
+      calls.noteGameRideEnded.push(outcome);
+    },
+    // #1042: these two DO move the stub's snapshot, because what a test reads
+    // is whether a screen mounted again sees what the first one recorded —
+    // which is the whole of #1049's review finding. The rules around them
+    // (cleared on a new ride, refused with no saved ride) are the real
+    // controller's, and `controller.test.ts` §"#1042" drives those.
+    dismissResult: () => {
+      calls.dismissResult += 1;
+      snapshot = { ...snapshot, savedRide: undefined };
+      notify();
+    },
+    noteResultAnnounced: () => {
+      calls.noteResultAnnounced += 1;
+      snapshot = { ...snapshot, resultAnnounced: true };
+      notify();
     },
     confirmStop: async () => {
       calls.confirmStop += 1;

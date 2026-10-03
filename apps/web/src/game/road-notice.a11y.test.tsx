@@ -86,6 +86,7 @@ const WORKOUT_OWNS_IT: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => undefined,
   recordingMayStop: () => false,
+  gameRideEnded: () => undefined,
   readTrainer: () =>
     gameTrainerFrom(
       { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -162,6 +163,7 @@ describe('the picker says what the Ride press will do, before it — #503', () =
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
   };
 
   it('states that the trainer will follow the route’s hills, above the Ride button, with no violation', async () => {

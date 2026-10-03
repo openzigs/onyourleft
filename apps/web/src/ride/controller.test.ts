@@ -85,6 +85,7 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
+import type { NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
@@ -6984,6 +6985,173 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
     await pedalAt(rig, PART_S);
     expect(rig.targetOnTheTrainer()).toBe(133);
     expect(rig.controller.getSnapshot().trainer.ergRescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+describe('#1042 — the saved ride the result card states, and the game’s outcome it carries', () => {
+  it('states the activity the save WROTE, and nothing for a save that failed', async () => {
+    const written: NewActivity[] = [];
+    const { port } = savePort({
+      putActivity: (record) => {
+        written.push(record);
+        return Promise.resolve(record.id);
+      },
+    });
+    const rig = benchWith({ rideSave: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const saved = rig.controller.getSnapshot().savedRide;
+    const record = written[0]!;
+    expect(saved).toEqual({
+      activityId: 'saved-ride',
+      elapsedTime: record.elapsedTime,
+      distance: record.distance,
+      averagePower: record.averagePower,
+      // The bench's trainer reports no heart rate, so there is none to state.
+      averageHeartRate: undefined,
+      gameOutcome: undefined,
+    });
+    rig.controller.dispose();
+
+    const { port: refusing } = savePort({
+      putStreamSet: () => Promise.reject(new Error('the device is full')),
+    });
+    const failing = benchWith({ rideSave: refusing });
+    await failing.controller.pair('trainer');
+    await failing.controller.start();
+    await ride(failing, 3);
+    failing.controller.armStop();
+    await failing.controller.confirmStop();
+    expect(failing.controller.getSnapshot().saveState).toBe('failed');
+    expect(failing.controller.getSnapshot().savedRide).toBeUndefined();
+    failing.controller.dispose();
+  });
+
+  it('states the mean of the heart rate the ride actually recorded', async () => {
+    const streams: NewStreamSet[] = [];
+    const { port } = savePort({
+      putStreamSet: (set) => {
+        streams.push(set);
+        return Promise.resolve(set.activityId);
+      },
+    });
+    const rig = benchWith({ rideSave: port, devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    // Computed here by hand from the samples the save wrote, holes left out.
+    const readings = (streams[0]?.channels.heartRate ?? []).filter(
+      (sample): sample is NonNullable<typeof sample> => sample !== undefined,
+    );
+    expect(readings.length).toBeGreaterThan(0);
+    const mean = Math.round(readings.reduce((sum, each) => sum + each, 0) / readings.length);
+    expect(rig.controller.getSnapshot().savedRide?.averageHeartRate).toBe(mean);
+    rig.controller.dispose();
+  });
+
+  it('drops a game outcome handed over while nothing is recording', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // A game ride with no recording under it is saved nowhere: a recording
+    // started afterwards rode no game, and must not claim one.
+    rig.controller.noteGameRideEnded('beaten');
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('keeps the last game ride’s latched outcome for the recording it was ridden in', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // Before a recording: there is nothing to attach it to, so it is dropped.
+    rig.controller.noteGameRideEnded('beaten');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('not-beaten');
+    await rig.controller.pause();
+    // Paused is still a recording in progress; the LAST game ride's answer wins.
+    rig.controller.noteGameRideEnded('level');
+    await rig.controller.resume();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('level');
+
+    // Stopped: a game ride ended now belongs to no recording.
+    rig.controller.noteGameRideEnded('beaten');
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('level');
+
+    // A new ride starts with no game ridden in it.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().savedRide).toBeUndefined();
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-2');
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('keeps an earlier SETTLED outcome when a later game ride has none (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('beaten');
+    // A short later game ride with no ghost, or one that ended before its race
+    // settled, hands over nothing — and must not erase what was settled.
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('beaten');
+    rig.controller.dispose();
+  });
+
+  it('puts the card away for good on Done, until the next ride is saved (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-1');
+
+    rig.controller.dismissResult();
+    // Held HERE, above the router, so a Ride screen mounted later reads it.
+    expect(rig.controller.getSnapshot().savedRide).toBeUndefined();
+    // Nothing else moves: the ride is still saved and stopped.
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.controller.getSnapshot().savedActivityId).toBe('ride-1');
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-2');
+    rig.controller.dispose();
+  });
+
+  it('remembers that the card has spoken, once per saved ride (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // Nothing saved: nothing to have announced.
+    rig.controller.noteResultAnnounced();
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    rig.controller.noteResultAnnounced();
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(true);
+
+    // The next ride is announced afresh.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
     rig.controller.dispose();
   });
 });

@@ -310,6 +310,7 @@ describe('the side camera on the ride HUD — #551', () => {
       askForControlOnRide: () => Promise.resolve(),
       workoutRescue: () => undefined,
       recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
     };
     const pairing = scriptedSidePairing({ phone: 'filming' });
     await ride(pairing, trainer);

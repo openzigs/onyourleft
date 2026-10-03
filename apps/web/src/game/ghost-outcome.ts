@@ -70,20 +70,17 @@
  * and nothing here takes an athlete id.
  */
 
+import type { GhostOutcome } from './ghost-outcome-kind';
 import { ghostFinished } from './scene';
 import type { GameState } from './simulation';
 import type { GhostTrack } from '@onyourleft/domain';
 
 /**
- * What became of the rider's previous best, once it has finished.
- *
- * Three values rather than two, and `level` is not padding: `pacer/gap.ts`
- * §`botIsAhead` already takes the position that exactly level is neither ahead
- * nor behind, and telling a rider who dead-heated with themselves that their
- * best finished *ahead of them* would be false. It is vanishingly rare and it
- * costs one branch.
+ * What became of the rider's previous best — `ghost-outcome-kind.ts`, a leaf
+ * of its own since #1042 so the ride controller can name it without importing
+ * the scene and the simulation this module needs.
  */
-export type GhostOutcome = 'beaten' | 'level' | 'not-beaten';
+export type { GhostOutcome } from './ghost-outcome-kind';
 
 /**
  * The outcome so far: `settled` once it is known, `undefined` while the attempt

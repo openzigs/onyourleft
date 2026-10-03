@@ -462,6 +462,7 @@ const TRAINER: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
+  gameRideEnded: () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
       ? {

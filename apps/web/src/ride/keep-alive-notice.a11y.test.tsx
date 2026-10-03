@@ -513,6 +513,7 @@ describe('the game’s HUD — #647', () => {
       askForControlOnRide: () => Promise.resolve(),
       workoutRescue: () => rescue.current,
       recordingMayStop: () => true,
+      gameRideEnded: () => undefined,
       readTrainer: () =>
         gameTrainerFrom(
           { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -631,6 +632,7 @@ describe('the game’s HUD — #647', () => {
     const port: GameTrainerPort = {
       ...refusedForGood({ current: undefined }),
       recordingMayStop: () => refused.current,
+      gameRideEnded: () => undefined,
     };
     mounted = await mount(
       <GameView port={PORT} trainer={port} renderer={() => Promise.resolve(RENDERER)} />,
