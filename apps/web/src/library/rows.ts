@@ -11,7 +11,7 @@
 
 import type { ActivityOrder, ActivitySummary, SortDirection, UnitSystem } from '@onyourleft/store';
 
-import { formatDuration, formatPowerValue, formatStartedAt } from '../format';
+import { formatDuration, formatPowerValue, formatStartedAt, shownAveragePower } from '../format';
 import { formatDistance } from '../units/format';
 
 /**
@@ -49,11 +49,14 @@ export interface LibraryRow {
    */
   readonly distance: string | undefined;
   /**
-   * Whole watts, or `undefined` when the ride carried no power at all.
+   * Whole watts, or `undefined` when the ride carried no power at all — or
+   * stored an average that shows as 0 W, which says nothing was measured
+   * (`format.ts` §`shownAveragePower`, #1054).
    *
-   * `undefined` is rendered as an em dash rather than a zero. A ride with no
-   * power meter and a ride that averaged 0 W are different facts, and 0 is a
-   * plausible-looking number for the first one.
+   * `undefined` is no reading on a card and an em dash in the selected ride's
+   * summary, never a zero: 0 is a plausible-looking number for a ride whose
+   * power nobody measured, and until #1054 an all-zero channel drew exactly
+   * that.
    */
   readonly averagePower: string | undefined;
   /**
@@ -69,14 +72,14 @@ export interface LibraryRow {
 }
 
 export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow {
+  const averagePower = shownAveragePower(summary.averagePower);
   return {
     id: summary.id,
     name: summary.name,
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     duration: formatDuration(summary.elapsedTime),
     distance: summary.distance > 0 ? formatDistance(summary.distance, units).value : undefined,
-    averagePower:
-      summary.averagePower === undefined ? undefined : formatPowerValue(summary.averagePower),
+    averagePower: averagePower === undefined ? undefined : formatPowerValue(averagePower),
     hasPosition: summary.hasPosition,
   };
 }

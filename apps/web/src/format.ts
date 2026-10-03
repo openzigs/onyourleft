@@ -2,7 +2,8 @@
 
 /**
  * The formatting decisions that do **not** depend on which units a rider reads
- * in: a duration, a power, and the instant a ride started.
+ * in: a duration, a power (and whether a stored average is one to show at all),
+ * and the instant a ride started.
  *
  * ⚠️ **Speed and distance are not here any more, and this file used to be
  * where they were.** A reviewer who remembers `SPEED_UNIT`, `DISTANCE_UNIT`,
@@ -48,6 +49,42 @@ export function formatDuration(totalSeconds: number): string {
 /** An average power as whole watts. A fractional watt is not a thing a rider reads. */
 export function formatPowerValue(power: Watts): string {
   return String(Math.round(power));
+}
+
+/**
+ * A ride's stored average power, as a figure worth showing — or `undefined`
+ * when it says nothing was measured (#1054).
+ *
+ * The store holds no `averagePower` for a ride with no power channel
+ * (`recording/finish.ts` §`averagePowerOf`, `transfer/read-activity-file.ts`).
+ * But a ride whose power readings were ALL 0 stores `0`, and so does one whose
+ * mean rounds to under a watt: the mean of readings that exist, and every one
+ * of them was nought. That ride and a trainer that sent 0 W for every reading
+ * without measuring anything cannot be told apart from the stored figure, and
+ * "0 W" drawn large reads as a measurement either way — #1041's invented zero,
+ * for power. So a figure that shows as `0` is shown as no figure at all: no
+ * reading on a card, the surface's own words for "no power" elsewhere.
+ *
+ * ⚠️ **This decides what is SHOWN, not what is stored.** The stored 0 stays as
+ * it was written — it is what the readings averaged, it travels in an export
+ * and a signed record as such, and a row already on a rider's device is read
+ * correctly with no migration. A lap's average is not passed through this: a
+ * lap ridden at 0 W inside a ride with power (a descent) is a real fact, and
+ * the lap table states it small, in a column of other laps' figures.
+ */
+export function shownAveragePower(power: Watts | undefined): Watts | undefined {
+  return power === undefined || formatPowerValue(power) === '0' ? undefined : power;
+}
+
+/**
+ * What to say in place of an average power that `shownAveragePower` withheld.
+ * An absent figure means no power channel at all; a stored figure that shows
+ * as nought means a channel existed and read nought throughout (the Power
+ * trace is still drawn for it), so claiming "No power meter" would contradict
+ * the page and state something about hardware the store cannot know (#1054).
+ */
+export function noPowerText(stored: Watts | undefined): string {
+  return stored === undefined ? 'No power meter' : 'Power read zero throughout';
 }
 
 /**

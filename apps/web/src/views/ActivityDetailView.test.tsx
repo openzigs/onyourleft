@@ -197,6 +197,30 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     expect(document.body.textContent).toContain('42.2 km');
   });
 
+  it('says power read zero, not "No power meter" nor "0 W", for a ride whose power readings were all 0 — #1054', async () => {
+    const zeros = Array.from({ length: 600 }, () => watts(0)) as Samples<'power'>;
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false, averagePower: watts(0) }),
+        channels: { power: zeros },
+        laps: [],
+      }),
+    );
+    const summary = document.querySelector('.oyl-ride-summary');
+    const power = queryAll(summary as Element, ':scope > div').find(
+      (fact) => fact.querySelector('dt')?.textContent === 'Average power',
+    );
+    expect(power?.querySelector('dd')?.textContent).toBe('Power read zero throughout');
+    expect(summary?.textContent).not.toMatch(/\b0 W\b/);
+    // The Power trace is still drawn for that channel: the summary must not
+    // contradict it by claiming there is no meter.
+    const traceLabels = queryAll(document.body, '[aria-label]').map((n) =>
+      n.getAttribute('aria-label'),
+    );
+    expect(traceLabels.some((l) => l?.startsWith('Power over'))).toBe(true);
+    expect(summary?.textContent).not.toContain('No power meter');
+  });
+
   it('offers no shared view at all, because there is no track to share', async () => {
     mounted = await open(indoorRide());
     expect(document.body.textContent).not.toContain('What a shared copy would contain');

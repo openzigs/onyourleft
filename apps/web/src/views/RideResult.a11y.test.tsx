@@ -114,6 +114,19 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
     expect(shown.textContent).not.toContain('bpm');
   });
 
+  it('says power read zero, never "0 W", for a ride whose power readings were all 0 — #1054', async () => {
+    // `finish.ts` §`averagePowerOf` saves 0 for a ride whose every power
+    // reading was 0, and the controller hands that to the card as it was saved.
+    await show(savedSnapshot({ ...SAVED, averagePower: watts(0) }));
+    const shown = card()!;
+    expect(shown.textContent).toContain('Power read zero throughout');
+    expect(shown.textContent).not.toContain('No power meter');
+    expect(shown.textContent).not.toMatch(/\b0 W\b/);
+    expect(queryAll<HTMLElement>(shown, '.oyl-reading').map((r) => r.textContent)).not.toContain(
+      '0 W',
+    );
+  });
+
   it('states distance in the rider’s units, through the units module', async () => {
     const stub = stubRideController(ridingSnapshot());
     stub.set(savedSnapshot());
