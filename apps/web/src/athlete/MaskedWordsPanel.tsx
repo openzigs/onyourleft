@@ -33,6 +33,14 @@ export const MASKED_WORDS_HEADING = 'Words to mask';
 export const MASKED_WORDS_LEAD =
   'Anything on this list is masked in everything the ride analysis sends to a hosted model. The list is kept with your rides on this device.';
 
+/**
+ * What masking cannot promise, and who is sent the text unmasked. Kept visible
+ * (#1040, the owner's ruling of 2026-10-03): it is about what leaves, so it is
+ * never behind the section's ⓘ, where #839 and #1031 had put it.
+ */
+export const MASKED_WORDS_CAVEAT =
+  'Masking reduces what is sent; it does not guarantee that nothing personal gets through. Your own computer is sent the text in full.';
+
 export const MASKED_WORDS_NO_STORE =
   'This browser has no local store, so a list made here would be forgotten as soon as the page reloaded.';
 
@@ -135,9 +143,10 @@ export function MaskedWordsPanel({
 
   return (
     <section className="oyl-panel oyl-masked-words" aria-labelledby="oyl-masked-words-heading">
-      {/* #1031: what masking does and cannot do is the section's help, behind
-        its ⓘ, where a "More about words to mask" used to close the section.
-        What is kept stays above the form. */}
+      {/* #1031: what masking does is the section's help, behind its ⓘ, where a
+        "More about words to mask" used to close the section. What it cannot
+        promise, and what leaves unmasked, is kept above the form with the
+        lead (#1040): never behind the ⓘ. */}
       <SectionHeading
         level={3}
         id="oyl-masked-words-heading"
@@ -151,8 +160,7 @@ export function MaskedWordsPanel({
             </p>
             <p className="oyl-muted">
               A name is masked only if it is on this list: nothing can tell a person’s or a place’s
-              name from any other word. Masking reduces what is sent; it does not guarantee that
-              nothing personal gets through. Your own computer is sent the text in full.
+              name from any other word.
             </p>
           </>
         }
@@ -161,6 +169,7 @@ export function MaskedWordsPanel({
       </SectionHeading>
       <KeptVisible>
         <p className="oyl-muted">{MASKED_WORDS_LEAD}</p>
+        <p className="oyl-muted">{MASKED_WORDS_CAVEAT}</p>
       </KeptVisible>
 
       {port === undefined ? (
