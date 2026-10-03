@@ -3153,7 +3153,21 @@ select {
   /* #660: an option as long as a ride's name must not widen the page. */
   max-width: 100%;
   min-height: 2.75rem;
+  /* #1028: the closed control shows ONE line. A platform-drawn select never
+     wraps; under `base-select` (below) the closed control is a box like any
+     other and its text did — a ride's name over four lines of an 8rem box on
+     the owner's tablet. Too long for its box, the name is cut. ⚠️ The
+     ellipsis is drawn by the `appearance: none` skin only: under
+     `base-select` the text is in an engine-internal box no author style
+     reaches, so there it is clipped (`ride-chooser.browser.spec.ts`). The picker's options wrap again
+     below, where a long name has the picker's width to wrap in. The clip is
+     at the CONTENT box, so a cut name stops short of the chevron drawn in
+     the right padding rather than running under it. */
+  overflow: clip;
+  overflow-clip-margin: content-box;
   padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: border-color var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 
@@ -3234,6 +3248,8 @@ select option {
     align-items: center;
     min-height: 2.75rem;
     padding: var(--oyl-space-xs) var(--oyl-space-sm);
+    /* #1028: `select`'s `nowrap` is for the closed control only. */
+    white-space: normal;
   }
 
   select option:hover,
@@ -3554,13 +3570,21 @@ input[type='checkbox'][role='switch']:disabled {
 }
 
 .oyl-input {
-  background: var(--oyl-color-canvas);
+  /* `background-color`, not the `background` shorthand: on a `<select>` the
+     shorthand reset `select`'s chevron to no image at all (#1028). */
+  background-color: var(--oyl-color-canvas);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   color: var(--oyl-color-ink);
   font-size: var(--oyl-font-size-lg);
   padding: var(--oyl-space-sm);
   width: 8rem;
+}
+
+/* #1028: `.oyl-input`'s padding overrode `select`'s room for its chevron, so
+   a long name ran to the border. */
+select.oyl-input {
+  padding-right: 2rem;
 }
 
 /*
@@ -3572,6 +3596,17 @@ input[type='checkbox'][role='switch']:disabled {
 .oyl-input--file {
   width: auto;
   max-width: 100%;
+}
+
+/*
+ * #1028: a chooser whose options are rides takes the whole width of its
+ * section, so a ride's name gets every pixel the column has before `select`
+ * cuts it (`ride-chooser.browser.spec.ts`). Analysis' *Ride* chooser wore
+ * `.oyl-input`'s 8rem, which is a number box's width.
+ */
+.oyl-input--block {
+  display: block;
+  width: 100%;
 }
 
 .oyl-input--file {

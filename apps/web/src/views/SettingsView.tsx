@@ -1185,7 +1185,7 @@ function EverySelect(props: {
     <p>
       <label htmlFor={props.id}>{props.label}</label>{' '}
       <select
-        className="oyl-input"
+        className="oyl-input oyl-input--wide"
         id={props.id}
         value={String(props.value)}
         onChange={(event) => {
