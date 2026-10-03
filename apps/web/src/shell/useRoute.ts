@@ -32,7 +32,9 @@
  *   ride, or while a ride has the screen (`AppShell.tsx` §`mayAnimate`). A
  *   synchronous update is not in a lane React will animate, which is what makes
  *   "no snapshot over a ride control" a property of the update rather than of a
- *   class name.
+ *   class name. ⚠️ And a fade still running from the navigation before is
+ *   SKIPPED first ({@link endRunningFade}): a synchronous update starts no
+ *   transition, but it does not stop one either.
  *
  * ## The "wrong time" read, kept
  *
@@ -69,6 +71,26 @@ export type RouteUpdates = 'transition' | 'synchronous';
 export type MayAnimate = (from: RouteMatch, to: RouteMatch) => boolean;
 
 /**
+ * Ends a view transition that is still running — preparing or animating — so that a navigation which
+ * must not animate is never drawn under one — #945's review.
+ *
+ * A synchronous update starts no transition, and does not end one either:
+ * `react-dom` 19.3 skips a running one only for `flushSync`. Measured in
+ * Chromium 153 (`motion.browser.spec.ts` §"a ride route asked for while a
+ * menu fade is preparing"): without this, Ride asked for while a menu fade was
+ * still preparing was committed only after the fade — hundreds of
+ * milliseconds in which the rider still saw the menu, frozen or as its
+ * snapshot, and no Ride control was there to press. React does not hand out the transition it
+ * started, so the document's own handle is the one to skip. Skipping finishes
+ * the transition at once, with the page as it now is. Where the engine has no
+ * `activeViewTransition` (jsdom) there is nothing animating to end.
+ */
+function endRunningFade(): void {
+  // Undefined where the engine has no such property (jsdom), null when idle.
+  globalThis.document.activeViewTransition?.skipTransition();
+}
+
+/**
  * The route the address bar currently selects, and what its parameter captured.
  * Re-renders when either changes.
  *
@@ -101,6 +123,9 @@ export function useRoute(
         setHash(next);
       });
     } else {
+      if (next !== hash) {
+        endRunningFade();
+      }
       setHash(next);
     }
   });

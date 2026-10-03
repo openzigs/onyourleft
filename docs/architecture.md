@@ -859,8 +859,11 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   and a press lands on the snapshot rather than on the control under it — a rider pressing *Start
   recording* or the game's *Ride* must never press into a picture of the page they left. Those
   navigations are applied synchronously, which React does not animate, and the `<ViewTransition>`
-  carries `update="none"` so a ride view's chunk arriving afterwards is not animated either.
-  `browser/motion.browser.spec.ts` counts the transitions the page starts, with the synchronous
+  carries `update="none"` so a ride view's chunk arriving afterwards is not animated either. A
+  menu fade still running when a ride route is asked for is skipped first (`useRoute.ts`
+  §`endRunningFade`): React does not skip it for a synchronous update, and Ride waited behind it.
+  The focus move to `main` and the document title are layout effects, because React runs passive
+  effects only once a fade has finished. `browser/motion.browser.spec.ts` counts the transitions the page starts, with the synchronous
   router as its control.
 - **Utilities are tokens** ([ADR 0042](adr/0042-tailwind-and-radix-over-the-tokens.md), #950).
   A screen may lay itself out with Tailwind v4 utilities, prefixed `tw:`: `tw:bg-surface`,

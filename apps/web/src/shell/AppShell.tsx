@@ -38,7 +38,7 @@
 
 import {
   Suspense,
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   ViewTransition,
@@ -726,14 +726,24 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
-  useEffect(() => {
+  /*
+   * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
+   * review. Under a view transition React runs passive effects only once the
+   * fade has FINISHED, so as `useEffect`s these left keyboard focus on the old
+   * route's control, and the old title for a screen reader to announce, for
+   * the whole 200 ms. A layout effect runs in the commit itself — inside the
+   * transition's update, as soon as the new DOM is in place.
+   * `motion.browser.spec.ts` §"focus and the title move in the commit that
+   * changes the route" goes red with either one passive again.
+   */
+  useLayoutEffect(() => {
     if (previousRouteId.current !== null && previousRouteId.current !== route.id) {
       mainRef.current?.focus();
     }
     previousRouteId.current = route.id;
   }, [route.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // The document title is the first thing a screen reader announces after a
     // page change and the only thing a tab strip shows, so it moves with the
     // route rather than staying on whatever index.html said.
