@@ -139,11 +139,16 @@ scanned="$(
 # The same empty-input guard as `check-repo-rules.sh` §`check_no_key_material`:
 # GNU `xargs` runs `grep` once with no operands on an empty list, and `grep`
 # with no operands reads standard input.
+#
+# `|| true` because a batch in which no file matches makes `grep` exit 1 and
+# `xargs` then exit 123: harmless today, but under `set -e` (or `pipefail`
+# with `-e`) that status would end the walk silently with no finding reported
+# (#1075's review, #1076). No match is not an error here.
 ENV_READ_PATTERN='(process|meta)[[:space:]]*\.[[:space:]]*env'
 mentions=''
 if [ -n "${scanned}" ]; then
   mentions="$(printf '%s\n' "${scanned}" | tr '\n' '\000' \
-    | xargs -0 grep -lE -- "${ENV_READ_PATTERN}" 2>/dev/null)"
+    | xargs -0 grep -lE -- "${ENV_READ_PATTERN}" 2>/dev/null || true)"
 fi
 newline=$'\n'
 

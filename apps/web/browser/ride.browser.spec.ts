@@ -59,7 +59,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
-import { releaseSharedPage, sharedPage } from './shared-load';
+import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
 
@@ -209,11 +209,16 @@ async function sharedRide(browser: Browser, viewport: Viewport, query = ''): Pro
     browser,
     `ride.html${query} at ${String(viewport.width)}×${String(viewport.height)}`,
     (page) => openRide(page, viewport, query),
+    test.info(),
   );
 }
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
+// What a red shared case read, since the `page` fixture's screenshot is not it (#1076).
+test.afterEach(async () => {
+  await attachSharedPageOnFailure(test.info());
+});
 
 async function measure(page: Page): Promise<StageMeasurement> {
   const measured = await page.evaluate(() => window.__oylRide?.measure());

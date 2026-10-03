@@ -267,6 +267,28 @@ write_source 'apps/web/node_modules/some-dep/index.js' \
   'const k=process.env.SOME_DEP_KEY;'
 assert_clean "build output and node_modules are not scanned"
 
+# --- No match is not an error (#1076) ------------------------------------------
+#
+# The prefilter's `xargs grep -l` exits 123 when no file in a batch reads a
+# variable. The checker does not run under `set -e` today; run it under one
+# anyway, so that adding `-e` can never turn "nothing here reads a variable"
+# into an exit the caller reads as a failure -- or, with several batches, a
+# walk that stops early with nothing reported.
+new_fixture
+write_source 'apps/web/src/plain.ts' 'export const answer = 42;'
+write_source 'packages/domain/src/plain.ts' 'export const other = 1;'
+out="$(bash -e "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -eq 0 ] && grep -qF 'check-env-example: clean' <<< "${out}"; then
+  pass=$((pass + 1))
+  printf 'ok   %s\n' 'a tree that reads no variable is clean under set -e'
+else
+  fail=$((fail + 1))
+  printf 'FAIL %s\n     expected exit 0 and "clean"; got exit %s\n%s\n' \
+    'a tree that reads no variable is clean under set -e' "${status}" "${out}"
+fi
+cleanup_fixture
+
 # --- Result -------------------------------------------------------------------
 
 printf '\n%s passed, %s failed\n' "${pass}" "${fail}"

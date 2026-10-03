@@ -74,6 +74,16 @@ export interface InstanceOptions {
   readonly resolve?: Resolver;
   /** The timers the rate-limit sweep runs on (#892) — Node's own unless a test's. */
   readonly sweepTimers?: SweepTimers;
+  /**
+   * The countdown a room gets when its own course names none — a race a rider
+   * made over HTTP (`rooms.ts` stores `null` for one). Unset, the room core's
+   * `DEFAULT_COUNTDOWN_MS` (10 s), which is what a running instance always
+   * uses: `serve.ts` never sets this. A test sets it so a race made over HTTP
+   * does not wait out ten real seconds before its first tick (#1076); every
+   * other part of the countdown — the message, its riders, the start — is the
+   * same code at either length.
+   */
+  readonly defaultCountdownMs?: number;
 }
 
 export interface StartedInstance {
@@ -152,8 +162,12 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     );
     const started = course?.raceStartedAt !== null && course?.raceStartedAt !== undefined;
     if (plan === undefined) return started ? { kind: 'ended' } : { kind: 'unknown' };
+    const timed =
+      plan.countdownMs === null && options.defaultCountdownMs !== undefined
+        ? { ...plan, countdownMs: options.defaultCountdownMs }
+        : plan;
     // Live on a worker, it is rejoined there; on none, the router refuses it.
-    return started ? { kind: 'started', plan } : { kind: 'open', plan };
+    return started ? { kind: 'started', plan: timed } : { kind: 'open', plan: timed };
   };
 
   const router: RoomRouter = new RoomRouter({

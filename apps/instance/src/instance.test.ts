@@ -70,7 +70,7 @@ async function start(
   extra: {
     config?: Partial<Config>;
     resolve?: Resolver;
-    timing?: Pick<InstanceOptions, 'now' | 'sweepTimers'>;
+    timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
   } = {},
 ) {
   const lines: string[] = [];
@@ -772,7 +772,10 @@ describe('a rider’s race on the running instance — #784, #785', () => {
   it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
     await migrateForDeploy(path);
-    const { instance, lines } = await start(path);
+    // A one-second countdown rather than the room core's ten (#1076): the
+    // same countdown, its message and its start, without ten seconds of
+    // waiting. The message's length below is what shows it took effect.
+    const { instance, lines } = await start(path, {}, { timing: { defaultCountdownMs: 1_000 } });
     const url = instance.url;
     const call = async (method: string, route: string, token: string, body?: unknown) => {
       const response = await fetch(`${url}${route}`, {
@@ -840,6 +843,10 @@ describe('a rider’s race on the running instance — #784, #785', () => {
       'the countdown said to both',
       5_000,
     );
+    for (const socket of [annSocket, bobSocket]) {
+      const told = socket.messages.find((m) => m.type === 'countdown');
+      expect(told?.type === 'countdown' ? told.startsInMs : undefined).toBeLessThanOrEqual(1_000);
+    }
     let sequence = 0;
     const pedal = setInterval(() => {
       sequence += 1;
