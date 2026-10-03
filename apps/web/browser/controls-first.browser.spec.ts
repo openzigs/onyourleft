@@ -35,7 +35,7 @@
  * A consent screen cannot put its control above its consent text: the box
  * says the text was read. So a first control below the fold passes when
  * everything in its way is a heading or is marked `data-oyl-kept-visible`
- * (`design/MoreAbout.tsx` §`KeptVisible`) — and fails the moment one ordinary
+ * (`design/KeptVisible.tsx`) — and fails the moment one ordinary
  * paragraph is added there — ON THE ROUTES {@link CONSENT_BEFORE_CONTROL}
  * NAMES, and nowhere else. #699's review found the exemption unbounded: with
  * Camera's reorder reverted and the mark added to one intro paragraph, Camera
@@ -63,16 +63,19 @@
  *
  * ## The controls
  *
- * - `?disclosures=inline` copies every "More about" disclosure, OPEN, to
- *   straight under its section's heading — the explanation put back where it
- *   was before it was tucked. Segments, Settings and Files must then FAIL:
+ * - `?disclosures=inline` copies every section's ⓘ panel, drawn, to straight
+ *   under its section's heading — the explanation put back where it was
+ *   before it was tucked. ⚠️ Until #1031 it copied each "More about"
+ *   disclosure, which is gone: every one is a section's ⓘ now. Segments, Settings and Files must then FAIL:
  *   without it, a page that rendered nothing, or a reader that found no
  *   control, would pass. ⚠️ **Camera is not in that list, though #666 names
  *   it**: it tucks nothing. Its first control came above the fold by order —
  *   see {@link MUST_FAIL_INLINE}.
  * - The summary's 44 px row target is measured #316's three ways: the shipped
  *   box, the declaration, and the box with the floor stripped, which must be
- *   shorter than 44 — so the declaration is what holds the target.
+ *   shorter than 44 — so the declaration is what holds the target. Since
+ *   #1031 that is the Devices screen's disclosure, the one `.oyl-details` row
+ *   left; the section ⓘ is measured the same three ways under §"#1013".
  *
  * ## The tab order (#665's deferred cross-check)
  *
@@ -217,19 +220,30 @@ const READ_BEFORE_ACTING: Partial<Record<RouteId, string>> = {
 
 /**
  * The sections that tuck their explanation, by heading, route by route —
- * #699's review, B2. The harness measures a section only where it finds a
- * "More about" disclosure, so a section put back the way it was before #666 —
- * its paragraph above its control and its disclosure deleted — is simply not
- * measured. Pinning the list turns that into a fault. A route not named here
+ * #699's review, B2. The harness measures a section only where it finds the
+ * ⓘ beside its heading (a "More about" disclosure until #1031), so a section
+ * put back the way it was before #666 — its paragraph above its control and
+ * its ⓘ deleted — is simply not measured. Pinning the list turns that into a fault. A route not named here
  * tucks nothing, and a disclosure found on one is a fault too, so a new one
  * is pinned deliberately.
  */
 const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
+  // ⚠️ Since #1031 every section's ⓘ is measured, not only the seven Settings,
+  // two Segments and one Files sections that closed with a "More about": the
+  // ⓘ is the one pattern, so the sections #1013 gave one (Analysis, Camera,
+  // the game, the route builder, Routes, Workouts, Files' erase and its
+  // file-not-a-connection) are held to the same prose budget and pinned here
+  // too, in page order.
+  analysis: ['Time in zone', 'Fitness and fatigue', 'Your thresholds', 'Duration personal bests'],
+  camera: ['Filming a ride: the side camera', 'A side camera on a tripod'],
+  game: ['Ride with others'],
+  'route-builder': ['Waypoints'],
+  routes: ['Saved routes', 'Import a route'],
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
-  // with it the "More about your kit" that explained the choice.
+  // with it the ⓘ that explained the choice.
   // #839: 'Words to mask' tucks what is masked and what masking cannot do
-  // under its "More about"; where it is kept stays above the form.
+  // behind its ⓘ; where it is kept stays above the form.
   // #992: 'Appearance' tucks what each choice means, and that a device that
   // has not chosen starts dark.
   settings: [
@@ -240,9 +254,20 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Sounds',
     'Game world',
     'Words to mask',
+    'Documents for the analysis',
   ],
   segments: ['Make a segment', 'Find your efforts'],
-  transfer: ['Import'],
+  transfer: ['Import', 'Erase this device', 'Why this is a file and not a connection'],
+  workouts: ['Add a block', 'Import a workout'],
+};
+
+/**
+ * Sections that are drawn only over the POPULATED fixture, so their ⓘ is
+ * pinned for that walk alone — #1031. Home's week is an empty state until
+ * there is a ride in it, and its ⓘ comes with the week.
+ */
+const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
+  home: ['This week'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
@@ -365,6 +390,7 @@ function judge(
   route: RouteDefinition,
   seen: ReflowMeasurement,
   viewport: Viewport,
+  populated = false,
 ): {
   readonly line: string;
   readonly faults: readonly string[];
@@ -383,12 +409,15 @@ function judge(
     .join(', ');
   const sectionNote = sections === '' ? '' : `; prose above a section’s control: ${sections}`;
   const measured = seen.sections.map((section) => section.heading);
-  const pinned = TUCKING_SECTIONS[route.id] ?? [];
+  const pinned = [
+    ...(TUCKING_SECTIONS[route.id] ?? []),
+    ...(populated ? (TUCKING_WHEN_POPULATED[route.id] ?? []) : []),
+  ];
   if (measured.join('|') !== pinned.join('|')) {
     faults.push(
       `${route.id}: the sections measured as tucking are [${measured.join(', ')}], ` +
         `and TUCKING_SECTIONS pins [${pinned.join(', ')}] — a pinned section with no ` +
-        `“More about” disclosure is one whose explanation was put back above its control`,
+        `ⓘ beside its heading is one whose explanation was put back above its control`,
     );
   }
   for (const section of seen.sections) {
@@ -447,7 +476,7 @@ async function walk(
   const empty = await page.evaluate(() => window.__oylReflow?.data === 'empty');
   for (const route of ALL_ROUTES) {
     const seen = await visit(page, route);
-    const verdict = judge(route, seen, viewport);
+    const verdict = judge(route, seen, viewport, !empty);
     lines.push(verdict.line);
     if (verdict.faults.length > 0) {
       faults.set(route.id, verdict.faults);
@@ -773,11 +802,15 @@ test.describe('#666 — a summary is a 44 px row, measured three ways (#316)', (
   test('the shipped box, the declaration, and the box with the floor stripped', async ({
     page,
   }) => {
-    await open(page, PHONE, 'data=empty');
-    await visit(page, routeById('settings'));
-    const summaries = page.locator('main details.oyl-more > summary');
+    // #1031: the "More about" disclosures Settings carried are each a
+    // section's ⓘ now (measured under §"#1013"), and the one `.oyl-details`
+    // row left is the Devices screen's "What this browser can and cannot do",
+    // which renders where a browser can pair.
+    await open(page, PHONE, 'data=empty&bluetooth=available');
+    await visit(page, routeById('devices'));
+    const summaries = page.locator('main details.oyl-details > summary');
     const count = await summaries.count();
-    expect(count, 'Settings has no “More about” disclosure to measure').toBeGreaterThan(0);
+    expect(count, 'Devices has no `.oyl-details` disclosure to measure').toBeGreaterThan(0);
     for (let index = 0; index < count; index += 1) {
       const summary = summaries.nth(index);
       const read = await summary.evaluate((element) => {

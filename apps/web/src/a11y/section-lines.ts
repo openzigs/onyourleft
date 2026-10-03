@@ -8,7 +8,8 @@
  * a section of a screen — everything from one `h2`, `h3` or `h4` to the next —
  * keeps **at most one short line** of explanation where a rider reads it, and
  * the rest is one press away, behind the section's ⓘ
- * (`design/SectionHelp.tsx`) or in its "More about" (`design/MoreAbout.tsx`).
+ * (`design/SectionHelp.tsx`) — since #1031 the one place; the "More about"
+ * disclosure that was the other (`design/MoreAbout.tsx`) is gone.
  *
  * ## What counts as an explanation
  *

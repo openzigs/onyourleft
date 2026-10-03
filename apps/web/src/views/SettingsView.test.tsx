@@ -825,23 +825,76 @@ describe('announcements — #397', () => {
         announcements={disk().store}
       />,
     );
-    const selects = [
-      ...mounted.container.querySelectorAll<HTMLSelectElement>('.oyl-announce select'),
+    // #1031: chips — a fieldset of native radios each — where they were selects.
+    const groups = [
+      ...mounted.container.querySelectorAll<HTMLFieldSetElement>('.oyl-announce fieldset'),
     ];
     // Four since #399: power, distance to go, the next block, a climb ahead.
-    expect(selects).toHaveLength(4);
-    for (const select of selects) {
-      expect([...select.options].map((option) => option.value)).toContain('never');
+    expect(groups).toHaveLength(4);
+    expect(mounted.container.querySelectorAll('.oyl-announce select')).toHaveLength(0);
+    for (const group of groups) {
+      expect(group.classList.contains('oyl-chips')).toBe(true);
+      const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+      expect(radios.map((radio) => radio.value)).toContain('never');
+      // One group, one name: the platform's one tab stop and arrow keys.
+      expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
     }
     // The distance row is in the rider's own unit.
     expect(mounted.container.textContent).toContain('every 1 mi');
     // #399: the climb row is STORED in metres and LABELLED in the rider's
     // unit — 250 m is 820 ft, and the value submitted is still the metres.
-    const climb = mounted.container.querySelector<HTMLSelectElement>('#oyl-announce-climb');
-    expect([...(climb?.options ?? [])].map((option) => option.textContent)).toContain(
-      '820 ft before it starts',
+    const climb = mounted.container.querySelector<HTMLFieldSetElement>('#oyl-announce-climb');
+    const chosen = climb?.querySelector<HTMLInputElement>('input:checked');
+    expect(chosen?.value).toBe('250');
+    expect(chosen?.closest('label')?.textContent).toContain('820 ft before it starts');
+    mounted.unmount();
+  });
+
+  it('writes the value a chip names, which is the one the select wrote — #1031', async () => {
+    const { store } = disk();
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
     );
-    expect(climb?.value).toBe('250');
+    function chip(group: string, text: string): HTMLInputElement {
+      const label = [
+        ...mounted.container.querySelectorAll<HTMLLabelElement>(`#${group} label`),
+      ].find((each) => each.textContent?.trim() === text);
+      const input = label?.querySelector<HTMLInputElement>('input[type="radio"]');
+      if (input === null || input === undefined) throw new Error(`no chip “${text}” in ${group}`);
+      return input;
+    }
+    async function press(input: HTMLInputElement): Promise<void> {
+      await act(async () => {
+        input.click();
+        await Promise.resolve();
+      });
+    }
+    // Each group is named by its legend, the question the select's label asked.
+    expect(mounted.container.querySelector('#oyl-announce-power > legend')?.textContent).toBe(
+      'Say your power',
+    );
+
+    await press(chip('oyl-announce-power', 'every 2 min'));
+    expect(readAnnouncementPreference(store).powerEverySeconds).toBe(120);
+    expect(chip('oyl-announce-power', 'every 2 min').checked).toBe(true);
+
+    await press(chip('oyl-announce-power', 'never'));
+    expect(readAnnouncementPreference(store).powerEverySeconds).toBe('never');
+
+    await press(chip('oyl-announce-distance', 'every 0.5 mi'));
+    expect(readAnnouncementPreference(store).distanceEvery).toBe(0.5);
+
+    await press(chip('oyl-announce-interval', '30 seconds before it starts'));
+    expect(readAnnouncementPreference(store).intervalLeadSeconds).toBe(30);
+
+    // Labelled in feet, stored in metres (#399).
+    await press(chip('oyl-announce-climb', '1640 ft before it starts'));
+    expect(readAnnouncementPreference(store).climbLeadMetres).toBe(500);
     mounted.unmount();
   });
 });
@@ -1426,8 +1479,9 @@ describe('appearance — #672', () => {
 
   it('says a device that has not chosen starts dark, and keeps every choice’s sentence (#992)', async () => {
     const mounted = await mountWith(themeDisk().store);
-    const more = [...mounted.container.querySelectorAll('details')].find(
-      (details) => details.querySelector('summary')?.textContent === 'More about light and dark',
+    // #1031: in the Appearance section's ⓘ, where "More about light and dark" was.
+    const more = [...mounted.container.querySelectorAll('details.oyl-section-help')].find(
+      (details) => details.querySelector('summary')?.textContent === 'Help with Appearance',
     );
     expect(more?.textContent).toContain(APPEARANCE_STARTS_DARK);
     expect(more?.textContent).toContain(

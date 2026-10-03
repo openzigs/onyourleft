@@ -506,7 +506,7 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
   for (const route of ALL_ROUTES) {
     it(`every control on ${route.id} is in the tab order and is named`, async () => {
       await open(route.path);
-      // #666: a control tucked in a closed "More about" disclosure is reached
+      // #666: a control tucked in a closed disclosure (a section's ⓘ since #1031) is reached
       // by opening it first, which is one press on its summary — so every
       // summary must be in the tab order as the page is drawn, and every
       // control must be in it once the disclosures are open. `tabbableElements`
@@ -537,11 +537,12 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
     });
   }
 
-  it('leaves a link tucked in a closed “More about” out of the tab order until it is opened — #666', async () => {
+  it('leaves a link tucked in a closed section ⓘ out of the tab order until it is opened — #666', async () => {
     // The jsdom half of #666's fourth criterion; `controls-first.browser.spec.ts`
-    // presses Tab through the same route in a real Chromium.
+    // presses Tab through the same route in a real Chromium. Since #1031 the
+    // disclosure is a section's ⓘ, which is where Settings' links are tucked.
     await open('/settings');
-    const tucked = queryAll(document, 'details.oyl-more').find(
+    const tucked = queryAll(document, 'details.oyl-section-help').find(
       (details) => details.querySelector('a[href]') !== null,
     );
     const link = tucked?.querySelector('a[href]');

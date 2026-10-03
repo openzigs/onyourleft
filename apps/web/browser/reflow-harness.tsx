@@ -227,7 +227,7 @@ export interface ReflowMeasurement {
   readonly summary: { readonly text: string; readonly lines: number } | null;
   /** The screen's help control — #993 — or `null` where the route has none. */
   readonly help: HelpControl | null;
-  /** Every "More about" disclosure, and the prose above its section's first control. */
+  /** Every section's ⓘ (#1013, the one pattern since #1031), and the prose above its section's first control. */
   readonly sections: readonly SectionProse[];
   /** Every `<details>` in `main`, and how many of them are open as measured. */
   readonly disclosures: { readonly total: number; readonly open: number };
@@ -837,25 +837,29 @@ function proseBeforeFirstControl(): string[] {
 }
 
 /**
- * Every "More about" disclosure, its section's heading, and the height of the
- * prose between that heading and the section's first control — #666 applied
- * section by section: a long page whose first control is near the top can
- * still bury every later one under a paragraph, which is Settings on `main`.
+ * Every section that tucks its explanation behind its heading's ⓘ, that
+ * heading, and the height of the prose between it and the section's first
+ * control — #666 applied section by section: a long page whose first control
+ * is near the top can still bury every later one under a paragraph, which is
+ * Settings on `main`.
+ *
+ * ⚠️ **Since #1031 a tucking section is one with a `SectionHeading`'s ⓘ**
+ * (`design/SectionHelp.tsx`), and a reviewer who remembers this reading
+ * `details.oyl-more` is reading the old file: the "More about" disclosure that
+ * closed a section beneath its controls is gone, and the ⓘ is the one pattern.
+ * Its heading is the one in its own row, not the last one before it.
  */
 function sections(): SectionProse[] {
   const main = document.querySelector('main');
   if (main === null) {
     return [];
   }
-  const headings = [...main.querySelectorAll('h2, h3')].filter(laidOut);
+  const headings = [...main.querySelectorAll('h2, h3, h4')].filter(laidOut);
   const controls = laidOutControls(main);
   const found: SectionProse[] = [];
-  for (const details of main.querySelectorAll('details.oyl-more')) {
-    if (details.hasAttribute('data-oyl-inline-copy')) {
-      continue;
-    }
-    const heading = headings.filter((each) => inOrder(each, details)).at(-1);
-    if (heading === undefined) {
+  for (const details of main.querySelectorAll('.oyl-section-head > details.oyl-section-help')) {
+    const heading = details.parentElement?.querySelector(':scope > :is(h2, h3, h4)');
+    if (heading === null || heading === undefined || !laidOut(heading)) {
       continue;
     }
     // The section ends at the next heading of its own level or higher.
@@ -918,10 +922,15 @@ function foldLine(): number {
 
 /**
  * The control #666 names: a copy of the page with its explanation put back —
- * each "More about" disclosure copied, OPEN, to straight under its section's
- * heading, where the explanation stood before it was tucked. The fold and the
- * section rules must then FAIL on the routes that tuck anything, or they are
- * not measuring it.
+ * each section's ⓘ panel copied, drawn, to straight under its section's
+ * heading row, where the explanation stood before it was tucked. The fold and
+ * the section rules must then FAIL on the routes that tuck anything, or they
+ * are not measuring it.
+ *
+ * ⚠️ Since #1031 it copies the ⓘ's PANEL (`.oyl-section-help__panel`), not a
+ * "More about" disclosure: those are gone. The panel alone, so the copy is
+ * prose under the heading and not a second ⓘ, and it lands where an open ⓘ
+ * draws it — in the flow, before the section's controls.
  *
  * A copy rather than a move: the disclosure is React's, and moving a node
  * React owns makes the next render fail to remove it. The copies are the
@@ -932,17 +941,13 @@ function inlineDisclosureCopies(): void {
   if (main === null) {
     return;
   }
-  const headings = [...main.querySelectorAll('h2, h3')];
-  for (const details of main.querySelectorAll('details.oyl-more')) {
-    const heading = headings.filter((each) => inOrder(each, details)).at(-1);
-    const copy = details.cloneNode(true) as HTMLElement;
-    copy.setAttribute('open', '');
+  for (const panel of main.querySelectorAll(
+    '.oyl-section-head > details.oyl-section-help > .oyl-section-help__panel',
+  )) {
+    const head = panel.closest('.oyl-section-head');
+    const copy = panel.cloneNode(true) as HTMLElement;
     copy.setAttribute('data-oyl-inline-copy', '');
-    if (heading === undefined) {
-      main.querySelector(':scope > h1 + p')?.after(copy);
-    } else {
-      heading.after(copy);
-    }
+    head?.after(copy);
   }
 }
 

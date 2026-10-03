@@ -246,7 +246,9 @@ function LinkSpecimens(): JSX.Element {
  * route here draws a file input, a radio or a `<select>` with options to open.
  * The markup is copied from the views that ship it — Routes' file input and its
  * loop box with the label BESIDE the control, Settings' radios and the trainer
- * game's boxes with the label WRAPPING it, Settings' "Say your power" select —
+ * game's boxes with the label WRAPPING it, Settings' "Say your power" select
+ * (a chip group since #1031; the specimen keeps it, because Activities' sort
+ * and the segment form are still `<select>`s and the styling is theirs) —
  * and the stylesheet and the layout box are the shipping ones.
  * `data-oyl-native-control` is what the spec counts, so a missing specimen is a
  * red build rather than an empty loop.

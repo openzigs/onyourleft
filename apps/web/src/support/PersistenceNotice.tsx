@@ -29,7 +29,7 @@
 
 import { useEffect, useState, type JSX } from 'react';
 
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage, type StatusTone } from '../design/StatusMessage';
 
 import {

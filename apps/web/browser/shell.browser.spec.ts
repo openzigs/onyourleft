@@ -1629,7 +1629,13 @@ test.describe('#397 — the announcement controls', () => {
 
   async function controls(page: Page) {
     return page.evaluate(() =>
-      [...document.querySelectorAll('.oyl-announce input, .oyl-announce select')].map((each) => {
+      // #1031: the interval rows are chips, and a chip's target is its LABEL
+      // (#667's radio row), so the label is measured rather than its radio's dot.
+      [
+        ...document.querySelectorAll(
+          '.oyl-announce input:not([type="radio"]), .oyl-announce select, .oyl-announce label:has(> input[type="radio"])',
+        ),
+      ].map((each) => {
         const box = each.getBoundingClientRect();
         return { name: each.tagName, width: box.width, height: box.height };
       }),
@@ -1640,12 +1646,16 @@ test.describe('#397 — the announcement controls', () => {
     await page.goto('/shell.html#/settings');
     await page.waitForSelector('html[data-oyl-shell-ready]');
     const seen = await controls(page);
-    // Eight since #475, and every one is measured below: the announcements'
-    // switch and four rows (power, distance, next block, and #399's climb
-    // ahead), #400's Sounds panel — which carries the same class so its switch
-    // and its volume slider are held to the same floor — and #475's Game world
-    // switch, which carries it for the same reason and shipped without it.
-    expect(seen.length).toBe(8);
+    // Twenty-six since #1031, and every one is measured below: the
+    // announcements' switch and four rows (power, distance, next block, and
+    // #399's climb ahead) — chips since #1031, six, six, five and five of them,
+    // each "never" and an interval, where they were four selects — #400's
+    // Sounds panel, which carries the same class so its switch and its volume
+    // slider are held to the same floor, and #475's Game world switch, which
+    // carries it for the same reason and shipped without it.
+    expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
+    expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
+    expect(seen.length).toBe(26);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);

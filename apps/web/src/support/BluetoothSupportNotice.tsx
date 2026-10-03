@@ -31,7 +31,7 @@
 import type { JSX } from 'react';
 
 import { Button, ButtonLink } from '../design/Button';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { hrefFor, routeById } from '../shell/routes';

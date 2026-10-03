@@ -42,7 +42,7 @@ import { useEffect, useId, useState, type JSX } from 'react';
 
 import type { ActivityRecord } from '@onyourleft/store';
 
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 
 import { offeredAsGhost } from './race-consent';

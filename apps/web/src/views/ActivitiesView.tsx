@@ -17,7 +17,7 @@ import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Reading } from '../design/Reading';
 import { EmptyState } from '../design/EmptyState';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';

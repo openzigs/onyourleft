@@ -9,7 +9,7 @@ import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
 import { FileDrop } from '../design/FileDrop';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 // The part's own module, not the kit's index: this list reaches only what it draws (#941).
 import { ProfileShape } from '../design/illustration/ProfileShape';

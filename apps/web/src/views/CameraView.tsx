@@ -65,7 +65,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {

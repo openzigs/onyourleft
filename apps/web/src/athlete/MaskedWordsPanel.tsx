@@ -21,7 +21,8 @@ import { useEffect, useId, useState, type JSX } from 'react';
 import { parseMaskedWords } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
-import { KeptVisible, MoreAbout } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { addedMaskedWord, MASKED_WORD_REFUSAL_TEXT } from './masked-words';
 import type { MaskedWordsPort } from './masked-words-port';
@@ -134,7 +135,30 @@ export function MaskedWordsPanel({
 
   return (
     <section className="oyl-panel oyl-masked-words" aria-labelledby="oyl-masked-words-heading">
-      <h3 id="oyl-masked-words-heading">{MASKED_WORDS_HEADING}</h3>
+      {/* #1031: what masking does and cannot do is the section's help, behind
+        its ⓘ, where a "More about words to mask" used to close the section.
+        What is kept stays above the form. */}
+      <SectionHeading
+        level={3}
+        id="oyl-masked-words-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              Before anything is sent to a hosted model, e-mail addresses, phone numbers, links,
+              street addresses, postcodes, coordinates and the names you gave your privacy zones are
+              replaced with a placeholder such as [email] or [place], and so is everything on this
+              list.
+            </p>
+            <p className="oyl-muted">
+              A name is masked only if it is on this list: nothing can tell a person’s or a place’s
+              name from any other word. Masking reduces what is sent; it does not guarantee that
+              nothing personal gets through. Your own computer is sent the text in full.
+            </p>
+          </>
+        }
+      >
+        {MASKED_WORDS_HEADING}
+      </SectionHeading>
       <KeptVisible>
         <p className="oyl-muted">{MASKED_WORDS_LEAD}</p>
       </KeptVisible>
@@ -204,19 +228,6 @@ export function MaskedWordsPanel({
           {message.text}
         </StatusMessage>
       )}
-
-      <MoreAbout about="words to mask">
-        <p className="oyl-muted">
-          Before anything is sent to a hosted model, e-mail addresses, phone numbers, links, street
-          addresses, postcodes, coordinates and the names you gave your privacy zones are replaced
-          with a placeholder such as [email] or [place], and so is everything on this list.
-        </p>
-        <p className="oyl-muted">
-          A name is masked only if it is on this list: nothing can tell a person’s or a place’s name
-          from any other word. Masking reduces what is sent; it does not guarantee that nothing
-          personal gets through. Your own computer is sent the text in full.
-        </p>
-      </MoreAbout>
     </section>
   );
 }
