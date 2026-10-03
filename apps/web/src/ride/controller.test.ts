@@ -85,7 +85,7 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
-import type { NewActivity } from '@onyourleft/store';
+import type { NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
@@ -7030,6 +7030,43 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(failing.controller.getSnapshot().saveState).toBe('failed');
     expect(failing.controller.getSnapshot().savedRide).toBeUndefined();
     failing.controller.dispose();
+  });
+
+  it('states the mean of the heart rate the ride actually recorded', async () => {
+    const streams: NewStreamSet[] = [];
+    const { port } = savePort({
+      putStreamSet: (set) => {
+        streams.push(set);
+        return Promise.resolve(set.activityId);
+      },
+    });
+    const rig = benchWith({ rideSave: port, devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    // Computed here by hand from the samples the save wrote, holes left out.
+    const readings = (streams[0]?.channels.heartRate ?? []).filter(
+      (sample): sample is NonNullable<typeof sample> => sample !== undefined,
+    );
+    expect(readings.length).toBeGreaterThan(0);
+    const mean = Math.round(readings.reduce((sum, each) => sum + each, 0) / readings.length);
+    expect(rig.controller.getSnapshot().savedRide?.averageHeartRate).toBe(mean);
+    rig.controller.dispose();
+  });
+
+  it('drops a game outcome handed over while nothing is recording', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // A game ride with no recording under it is saved nowhere: a recording
+    // started afterwards rode no game, and must not claim one.
+    rig.controller.noteGameRideEnded('beaten');
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBeUndefined();
+    rig.controller.dispose();
   });
 
   it('keeps the last game ride’s latched outcome for the recording it was ridden in', async () => {

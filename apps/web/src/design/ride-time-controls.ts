@@ -30,6 +30,9 @@
  *   controls, and the HUD's *Trainer notice* and *Stop side camera*. None is
  *   pressed at the bars mid-ride, and the ruling names four actions, not a
  *   screen.
+ * - ***Done*** and *Open this ride* on the result card after a saved ride
+ *   (#1042). The card exists only once a ride is over, so neither is pressed
+ *   to move a ride on; both are the ordinary 44 px.
  *
  * Test-facing: nothing in production reads this module. Every control on it
  * is sized at its own call site — `Button`'s `size="ride"`, or

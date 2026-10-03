@@ -2654,18 +2654,20 @@ a.oyl-button {
  * shares a column with a ride control and its height changes nothing during
  * a ride (#692). Every colour is a declared pair on `surfaceRaised` — `ink`,
  * `inkMuted` for the labels and units, `accent` for the edge (SC 1.4.11) and
- * the buttons' own — in both palettes.
+ * the buttons' own — in both palettes. Its spacing is the tighter steps on
+ * purpose: on a 4:3 tablet in the shell (1024×720) the roomier ones left
+ * *Start a new ride*, below it, 15.7 px above the fold (#1042's browser gate).
  */
 .oyl-result {
-  margin: var(--oyl-space-lg) 0;
-  padding: var(--oyl-space-md);
+  margin: var(--oyl-space-md) 0;
+  padding: var(--oyl-space-sm) var(--oyl-space-md);
   border-top: 0.375rem solid var(--oyl-color-accent);
   border-radius: var(--oyl-radius-card);
   background: var(--oyl-color-surface-raised);
 }
 
 .oyl-result__heading {
-  margin: 0 0 var(--oyl-space-sm);
+  margin: 0 0 var(--oyl-space-xs);
 }
 
 /* 9rem tracks: `.oyl-home__facts`' reason — a reading at `xxl` is ~8.5rem. */
@@ -2694,7 +2696,7 @@ a.oyl-button {
   display: flex;
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
-  margin-top: var(--oyl-space-md);
+  margin-top: var(--oyl-space-sm);
 }
 
 .oyl-sensor-banner__art {
