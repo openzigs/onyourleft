@@ -3200,6 +3200,76 @@ it is open, from a second job whose token holds `issues: write` and nothing else
 nothing out. Close the issue once a nightly run is green. The job that runs the checks is
 read-only, pins its actions to the same SHAs as `rules.yml`, and runs on `ubuntu-latest`.
 
+#### 23m39s of 25 — #1051
+
+⚠️ **Four days after #866's 887 s the job was back at 1 400 s on the 7763**, and PR #1047's run
+([37131982824](https://github.com/openzigs/onyourleft/actions/runs/37131982824)) took 1 419 s of its
+1 500 s stop. Thirteen green `main` runs from 2026-10-02 22:09 to 2026-10-03 17:31 UTC, with the CPU
+`Record the runner's CPU` printed for each (step seconds; the job is `started_at` to
+`completed_at`):
+
+| Run | CPU | Job | `Checks, concurrently` | Accessibility | Vitest with coverage | Browser gate |
+|---|---|--:|--:|--:|--:|--:|
+| [37070950955](https://github.com/openzigs/onyourleft/actions/runs/37070950955) | EPYC 7763 | 1424 | 220 | 49 | 458 | 656 |
+| [37077843274](https://github.com/openzigs/onyourleft/actions/runs/37077843274) | EPYC 7763 | 1414 | 214 | 49 | 446 | 664 |
+| [37079780914](https://github.com/openzigs/onyourleft/actions/runs/37079780914) | Xeon 6973P-C | 1015 | 141 | 31 | 308 | 501 |
+| [37084931010](https://github.com/openzigs/onyourleft/actions/runs/37084931010) | EPYC 9V74 | 1140 | 171 | 36 | 346 | 551 |
+| [37087015700](https://github.com/openzigs/onyourleft/actions/runs/37087015700) | EPYC 7763 | 1409 | 213 | 48 | 443 | 666 |
+| [37120739683](https://github.com/openzigs/onyourleft/actions/runs/37120739683) | EPYC 7763 | 1411 | 212 | 49 | 442 | 669 |
+| [37122320624](https://github.com/openzigs/onyourleft/actions/runs/37122320624) | EPYC 7763 | 1435 | 210 | 50 | 457 | 672 |
+| [37126496645](https://github.com/openzigs/onyourleft/actions/runs/37126496645) | EPYC 9V45 | 928 | 138 | 28 | 260 | 467 |
+| [37130959007](https://github.com/openzigs/onyourleft/actions/runs/37130959007) | EPYC 7763 | 1446 | 218 | 50 | 456 | 675 |
+| [37131982824](https://github.com/openzigs/onyourleft/actions/runs/37131982824) (#1047's PR) | EPYC 7763 | 1419 | 216 | 49 | 445 | 669 |
+| [37133519300](https://github.com/openzigs/onyourleft/actions/runs/37133519300) | EPYC 9V74 | 1415 | 218 | 48 | 436 | 670 |
+| [37136194554](https://github.com/openzigs/onyourleft/actions/runs/37136194554) | EPYC 9V45 | 958 | 139 | 29 | 275 | 482 |
+| [37140800605](https://github.com/openzigs/onyourleft/actions/runs/37140800605) | EPYC 9V74 | 1135 | 169 | 38 | 343 | 549 |
+
+**Seven of the thirteen are at 1 409–1 446 s, 59 to 91 s from the stop** — every 7763 and one 9V74
+(which is #841's "9V74 is not one speed" again). The 9V45 and the Xeon land at 928–1 015 s.
+
+**What grew since #866's 887 s, on the same CPU** (the 7763; 36637978753 against 37131982824, both
+logs read for this):
+
+| Step | #866 | #1047 | Growth | Where it went |
+|---|--:|--:|--:|---|
+| Browser gate | 338 s | 669 s | +331 s | 902 → 1 213 tests. 311 new tests added 386 s of case time (`ride` +180: #940's chooser, #1011's tiles; new `sections`, `look`, `controls`, `confirm-dialog`, `room`). And the **887 tests both runs share got 1.49× slower** (513 → 767 s of case time): a harness load is about 0.45 s now where it was 0.27 s (`ride.browser.spec.ts`' overlay cases, 270 → 460 ms), the page now loading ~1.46 MB in ~73 requests. Two workers, so wall time is about half the case time |
+| Vitest with coverage | 296 s | 445 s | +149 s | 546 → 656 files; summed test time 499 → 846 s. `instance` alone 15 → 167 s (subprocess and real-tick files: `instance.test.ts` 38.7 s, `operator/commands.test.ts` 19.6 s, `room/node/router.test.ts` 12.3 s, `tools/tunnel-soak.test.ts` 10.4 s), `web` 408 → 585 s (`realistic-textures` 32 → 59 s, new `billboards` 20 s, `instance/sync` 12.7 s, `analysis-safety` 2 → 11 s) |
+| `Checks, concurrently` | 178 s | 216 s | +38 s | CPU-bound; `lint` is the long pole (178 → 216 s), `check-repo-rules` 128 → 154 s, its suite 161 → 190 s, `check-env-example` 76 → 95 s |
+| Accessibility | 38 s | 49 s | +11 s | 46 → 50 files |
+
+**What #1051 cut, keeping every check in the required job** (the owner's instruction of
+2026-10-03: measure first; deduplicate and share, move nothing to nightly):
+
+- **`check-repo-rules.sh` and `check-env-example.sh` fork far fewer processes.** Both are bash
+  walks of ~2 000 files and spent their time starting `sed`, `grep`, `head` and `basename` per
+  file, on a step whose 26 commands share two cores. `is_exempt` reads `.spdx-exempt` once (it
+  re-read it for every source file), `spdx_of` is one `sed` (was three processes), REL001's
+  name match is bash's own `[[ =~ ]]` (was `basename` and `grep`), the binary sniff lost its
+  fourth process, and `check-env-example.sh` finds the files that mention `process.env` or
+  `meta.env` with ONE `grep -l` over the whole list before running its per-file matchers — a
+  superset of all three spellings by construction. Every finding is unchanged: both scripts were
+  run old and new over this tree and over planted violations with identical output, and the
+  fixture suites pass (`check-repo-rules.test.sh` gains a case that an exemption is the whole
+  path, not a prefix or a suffix — the read-once match's two newlines, each mutation-tested).
+  Locally: `check-repo-rules.sh` 38 → 22 s, `check-env-example.sh` 24 → 1.4 s.
+- **The read-only cases of `ride.browser.spec.ts` and `rideview.browser.spec.ts` share one load**
+  (`apps/web/browser/shared-load.ts`, #456's move made reusable): a case that only measures asks
+  for its page by key and gets the one the previous case with that key loaded. Every control, and
+  every case that changes the page, still loads its own. Locally the shared cases take 2–4 ms
+  where each took a load: 93 cases in `ride` served by 13 loads, 34 in `rideview` by 9.
+
+**What the measurement points at next, each OWED A RULING before it moves** (none moves in #1051;
+seconds are the 7763's, from 37131982824):
+
+| Candidate | Saves | Why it is not a safety gate — or why it stays |
+|---|--:|---|
+| Run the 50 `.a11y.test.` files ONCE: `test:coverage` stops running them and `test:a11y` stays the named gate (a dedup, not a move; needs `check:test-split` to know a third run, and the coverage report loses what only they execute, as #852 did) | ~43 s (86 s of case time under coverage, two workers) | accessibility stays required and blocking |
+| `ride.browser.spec.ts` §"#940 — the notices are never hidden…" to nightly | ~42 s (84 s of case time) | a layout sweep of the pre-ride chooser; #940's own "Ride is on the screen" cases stay. ⚠️ It is the notices-never-obscured check, so it may count as a safety sentence — the owner's call |
+| `realistic-textures.test.ts` to nightly (#866's realistic rule) | ~30 s (59 s summed) | the opt-in realistic world's KTX2 pipeline, the same class #866 moved for the browser |
+| `reflow.browser.spec.ts`' dark-palette walks to nightly | ~22 s (45 s of its 89 s) | #672 put them back on purpose; the light walk stays |
+| The `instance` subprocess files (`instance.test.ts`, `operator/commands.test.ts`, `tunnel-soak.test.ts`) to nightly, or a faster spawn | ~35 s (69 s summed) | `/source`, migrate-refusal and SIGTERM are AGPL §13 and data-safety claims — probably stays; a faster fixture is the better cut |
+| `check-repo-rules.test.sh`' last case, "this repository passes its own rules" | one whole `check-repo-rules` run of CPU in the concurrent step (49 s of wall time there in 37131982824, under contention) | it re-runs exactly the `check-repo-rules` command beside it in the same step |
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
@@ -5225,6 +5295,7 @@ top of an issue **supersedes its body**.
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
 | What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
+| When a browser-gate case may read a page another case loaded, and when it must load its own | `apps/web/browser/shared-load.ts`, §4c §"23m39s of 25 — #1051" |
 | What a map costs a rider on a cold cache, and why CI does not measure it | §4f, [`docs/spikes/0004-cold-load-first-painted-tile.md`](docs/spikes/0004-cold-load-first-painted-tile.md), `apps/web/browser/hosted-archive.ts` |
 | Why a zero byte count means two opposite things, depending on the origin | `apps/web/browser/harness.ts` §`ArchiveRequestTiming.timingOpaque` |
 | Why a built map fetches every tile and draws none of them without one extra line | `apps/web/src/map/maplibre.ts` §`setWorkerUrl`, [`docs/architecture.md`](docs/architecture.md) §"The map dependencies" |
