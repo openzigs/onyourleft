@@ -376,3 +376,152 @@ test.describe('#994 — drop zones', () => {
     expect(chosen).toEqual({ multiple: false, names: ['first.gpx'] });
   });
 });
+
+test.describe('#1030 — a file input drawn as a button, with what was chosen as a chip', () => {
+  /** The Routes import's picker, as drawn: what the eye sees and what a press lands on. */
+  async function picker(page: Page) {
+    return page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('main #route-file');
+      const button = input?.parentElement?.querySelector<HTMLElement>('.oyl-file__button');
+      if (input === null || input === undefined || button === null || button === undefined) {
+        return undefined;
+      }
+      const inputBox = input.getBoundingClientRect();
+      const buttonBox = button.getBoundingClientRect();
+      const centreX = buttonBox.left + buttonBox.width / 2;
+      const centreY = buttonBox.top + buttonBox.height / 2;
+      return {
+        inputOpacity: getComputedStyle(input).opacity,
+        buttonShown: button.checkVisibility(),
+        buttonWords: button.textContent,
+        buttonBackground: getComputedStyle(button).backgroundColor,
+        pressLandsOnInput: document.elementFromPoint(centreX, centreY) === input,
+        inputCoversButton:
+          Math.abs(inputBox.left - buttonBox.left) <= 1 &&
+          Math.abs(inputBox.top - buttonBox.top) <= 1 &&
+          inputBox.width + 1 >= buttonBox.width &&
+          inputBox.height + 1 >= buttonBox.height,
+        height: buttonBox.height,
+      };
+    });
+  }
+
+  for (const viewport of [PHONE, TABLET]) {
+    test(`hides the browser's own picker and draws a button the input covers at ${String(viewport.width)}×${String(viewport.height)}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await visit(page, 'routes');
+      const drawn = await picker(page);
+      expect(drawn, 'no file picker on Routes').toBeDefined();
+      expect(drawn?.inputOpacity).toBe('0');
+      expect(drawn?.buttonShown).toBe(true);
+      expect(drawn?.buttonWords).toBe('Choose file');
+      expect(drawn?.buttonBackground).not.toBe('rgba(0, 0, 0, 0)');
+      expect(drawn?.pressLandsOnInput).toBe(true);
+      expect(drawn?.inputCoversButton).toBe(true);
+      expect(drawn?.height).toBeGreaterThanOrEqual(TARGET);
+    });
+  }
+
+  test('is a 44 px target that the floor holds up, the #316 three ways', async ({ page }) => {
+    await open(page, PHONE);
+    await visit(page, 'routes');
+    // The input is out of the flow, so the button is the box a press lands in:
+    // its floor stripped, the input must shrink with it.
+    const measured = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('main .oyl-file__button');
+      const input = document.querySelector<HTMLElement>('main .oyl-file__input');
+      const shipped = input?.getBoundingClientRect().height ?? 0;
+      const declared = button === null ? '' : getComputedStyle(button).minHeight;
+      button?.style.setProperty('min-height', '0');
+      const stripped = input?.getBoundingClientRect().height ?? 0;
+      button?.style.removeProperty('min-height');
+      return { shipped, declared, stripped };
+    });
+    expect(measured.shipped).toBeGreaterThanOrEqual(TARGET);
+    expect(measured.declared).toBe(`${String(TARGET)}px`);
+    expect(measured.stripped).toBeLessThan(TARGET);
+  });
+
+  test('a press on the button opens the platform picker', async ({ page }) => {
+    await open(page, PHONE);
+    await visit(page, 'routes');
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('main .oyl-file__button').first().click({ force: true });
+    expect((await chooser).isMultiple()).toBe(false);
+  });
+
+  test('draws the input’s keyboard focus on the button, and not without its rule', async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await visit(page, 'routes');
+    const ring = async (): Promise<string> => {
+      await page.keyboard.press('Shift');
+      await page.locator('main #route-file').focus();
+      return page.evaluate(() => {
+        const button = document.querySelector<HTMLElement>('main #route-file + .oyl-file__button');
+        return button === null ? '' : getComputedStyle(button).outlineStyle;
+      });
+    };
+    expect(await ring()).toBe('solid');
+    const deleted = await page.evaluate(() => {
+      let count = 0;
+      for (const sheet of document.styleSheets) {
+        for (let index = sheet.cssRules.length - 1; index >= 0; index -= 1) {
+          const rule = sheet.cssRules[index];
+          if (
+            rule instanceof CSSStyleRule &&
+            rule.selectorText === '.oyl-file__input:focus-visible + .oyl-file__button'
+          ) {
+            sheet.deleteRule(index);
+            count += 1;
+          }
+        }
+      }
+      return count;
+    });
+    expect(deleted, 'the focus rule was not found to delete').toBe(1);
+    await page.locator('main h1').focus();
+    expect(await ring()).toBe('none');
+  });
+
+  test('shows the chosen file as a chip, whose remove empties the input and returns focus', async ({
+    page,
+  }) => {
+    await open(page, TABLET);
+    await visit(page, 'routes');
+    await page.locator('main #route-file').setInputFiles({
+      name: 'circuit.gpx',
+      mimeType: 'application/gpx+xml',
+      buffer: Buffer.from('<gpx/>'),
+    });
+    const chip = page.locator('main .oyl-file__chip');
+    await expect(chip).toHaveText('circuit.gpx');
+    const remove = chip.getByRole('button', { name: 'Remove circuit.gpx' });
+    const box = await remove.boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(TARGET);
+    expect(box?.height).toBeGreaterThanOrEqual(TARGET);
+    // The drop zone stays round it.
+    expect(await zone(page)).toEqual({ border: 'dashed', hintShown: true });
+    await remove.click();
+    await expect(chip).toHaveCount(0);
+    const after = await page.evaluate(() => ({
+      files: document.querySelector<HTMLInputElement>('main #route-file')?.files?.length,
+      focused: document.activeElement?.id,
+    }));
+    expect(after).toEqual({ files: 0, focused: 'route-file' });
+  });
+
+  async function zone(page: Page) {
+    return page.evaluate(() => {
+      const found = document.querySelector<HTMLElement>('main .oyl-drop');
+      const hint = found?.querySelector<HTMLElement>('.oyl-drop__hint');
+      return {
+        border: found === null || found === undefined ? '' : getComputedStyle(found).borderTopStyle,
+        hintShown: hint?.checkVisibility() ?? false,
+      };
+    });
+  }
+});

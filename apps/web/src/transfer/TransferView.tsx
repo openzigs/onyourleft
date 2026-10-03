@@ -37,7 +37,7 @@ import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
-import { FileDrop } from '../design/FileDrop';
+import { FileDrop, FilePicker } from '../design/FileDrop';
 import { KeptVisible, MoreAbout } from '../design/MoreAbout';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
@@ -402,14 +402,16 @@ function ImportPanel({
           19 does not declare it; React passes an unknown lowercase attribute
           through to the DOM unchanged.
         */}
-        <input
-          {...DIRECTORY_PICKER}
-          id="oyl-import-folder"
-          className="oyl-input oyl-input--file"
-          type="file"
-          multiple
-          onChange={choose}
-        />
+        <FilePicker choose="Choose a folder">
+          <input
+            {...DIRECTORY_PICKER}
+            id="oyl-import-folder"
+            className="oyl-input oyl-input--file"
+            type="file"
+            multiple
+            onChange={choose}
+          />
+        </FilePicker>
       </div>
       <div className="oyl-transfer__form">
         {running ? (

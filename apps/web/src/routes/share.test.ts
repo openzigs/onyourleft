@@ -29,7 +29,12 @@ import {
 } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
-import { PUBLIC_ROUTE_WARNING, ROUTE_SHARE_FAULT_TEXT, routeShare } from './share';
+import {
+  PUBLIC_ROUTE_WARNING,
+  PUBLIC_ROUTE_ZONE_NOTE,
+  ROUTE_SHARE_FAULT_TEXT,
+  routeShare,
+} from './share';
 
 const ATHLETE = athleteId('athlete-a');
 const METRES_PER_DEGREE_LATITUDE = 111_194.93;
@@ -202,6 +207,8 @@ describe('the warning a rider sees before publishing', () => {
   it('says a route that begins in a zone cannot be shared at all', () => {
     // The half a rider would otherwise assume away: a privacy zone protects a
     // ride by trimming it, and cannot protect a route the same way.
-    expect(PUBLIC_ROUTE_WARNING).toContain('cannot be shared at all');
+    // Since #1030 it is the note behind the section's ⓘ, not the warning.
+    expect(PUBLIC_ROUTE_ZONE_NOTE).toContain('cannot be shared at all');
+    expect(PUBLIC_ROUTE_WARNING).not.toContain('privacy zone');
   });
 });
