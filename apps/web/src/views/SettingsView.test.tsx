@@ -923,7 +923,7 @@ describe('sounds — #400', () => {
     // #400's review: the distance note is played only on the frame its sentence
     // is said (a sound is never the only carrier), so the copy must not promise
     // it to a rider who has Sounds on and announcements off.
-    // #666: the explanation is under "More about sounds" now, still in the panel.
+    // #666: the explanation is in the panel's ⓘ (#1031; "More about sounds" until then).
     const copy = mounted.container.querySelector('.oyl-sounds')?.textContent ?? '';
     expect(copy.replace(/\s+/g, ' ')).toContain(
       'That note plays only with its spoken sentence, so it needs announcements turned on above, with ' +
@@ -1313,8 +1313,9 @@ describe('the kit colour — #623', () => {
     );
     expect(warning).toBeDefined();
     const text = mounted.container.textContent ?? '';
-    // No "More about" explaining a choice that is not on offer, and never "kept".
-    expect(text).not.toContain('More about your kit');
+    // No ⓘ explaining a choice that is not on offer (#1031; a "More about your
+    // kit" until then), and never "kept".
+    expect(text).not.toContain('Help with Your kit');
     expect(text).not.toContain(KIT_KEPT);
     mounted.unmount();
   });

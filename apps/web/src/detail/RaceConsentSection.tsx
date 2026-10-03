@@ -17,7 +17,7 @@
  * off, and that sharing does not turn it on. It is privacy text in #666's
  * sense, so it is marked {@link KeptVisible} and listed in
  * `a11y/kept-visible.a11y.test.tsx` for this route: it can never be tucked
- * into a "More about" disclosure.
+ * behind an ⓘ.
  *
  * ## What it reads back
  *

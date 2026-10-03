@@ -350,6 +350,154 @@ describe('TransferView — importing', () => {
 });
 
 /**
+ * The two pickers hold ONE selection — #1030's review. Each draws a chip for
+ * its own input, so a choice in one must empty the other (and its chip), and
+ * the × on a chip must clear only what that picker chose.
+ */
+describe('TransferView — the files picker and the folder picker are one selection (#1030)', () => {
+  /**
+   * Both inputs given writable `files` that a write to `value` empties, as a
+   * browser's are — jsdom's own setter refuses a list it did not build.
+   */
+  function choosable(): void {
+    for (const selector of ['#oyl-import-files', '#oyl-import-folder']) {
+      const input = document.querySelector<HTMLInputElement>(selector);
+      if (input === null) throw new Error(`the import input ${selector} is not on the page`);
+      let files: FileList = fileListOf([]);
+      Object.defineProperty(input, 'files', {
+        configurable: true,
+        get: () => files,
+        set: (next: FileList) => {
+          files = next;
+        },
+      });
+      Object.defineProperty(input, 'value', {
+        configurable: true,
+        get: () => (files.length === 0 ? '' : 'C:\\fakepath\\x'),
+        set: (next: string) => {
+          if (next === '') files = fileListOf([]);
+        },
+      });
+    }
+  }
+
+  async function pick(selector: string, files: readonly File[]): Promise<void> {
+    const input = document.querySelector<HTMLInputElement>(selector);
+    if (input === null) throw new Error(`the import input ${selector} is not on the page`);
+    input.files = fileListOf(files);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  }
+
+  /** The chip drawn beside one input, or `null`. */
+  function chipOf(selector: string): HTMLElement | null {
+    const holder = document.querySelector(selector)?.closest('.oyl-file');
+    const next = holder?.nextElementSibling ?? null;
+    return next?.classList.contains('oyl-file__chip') === true ? (next as HTMLElement) : null;
+  }
+
+  async function remove(selector: string): Promise<void> {
+    const button = chipOf(selector)?.querySelector('button');
+    if (button === null || button === undefined) throw new Error(`no chip beside ${selector}`);
+    await activateWithKeyboard(button);
+    await settle();
+  }
+
+  const FILES = '#oyl-import-files';
+  const FOLDER = '#oyl-import-folder';
+
+  it('choosing a folder after files empties the files picker and its chip, and imports the folder only', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    choosable();
+
+    await pick(FILES, [fileOf('loose.gpx', syntheticGpx(20))]);
+    expect(chipOf(FILES)?.textContent).toContain('loose.gpx');
+
+    await pick(FOLDER, [
+      fileOf('archive/a.gpx', syntheticGpx(21)),
+      fileOf('archive/b.gpx', syntheticGpx(22)),
+    ]);
+    expect(chipOf(FILES)).toBeNull();
+    expect(chipOf(FOLDER)?.textContent).toContain('2 files');
+    expect(statusText()).toContain('2 files ready');
+
+    await activateWithKeyboard(buttonNamed('Import 2 files'));
+    await runToCompletion(finished, 'the batch to finish');
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('archive/a.gpx');
+    expect(text).toContain('archive/b.gpx');
+    expect(text).not.toContain('loose.gpx');
+    const stored = await (harness ?? never()).read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A),
+    );
+    expect(stored).toHaveLength(2);
+  });
+
+  it('choosing files after a folder empties the folder picker and its chip', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    choosable();
+
+    await pick(FOLDER, [fileOf('archive/a.gpx', syntheticGpx(23))]);
+    await pick(FILES, [
+      fileOf('one.gpx', syntheticGpx(24)),
+      fileOf('two.gpx', syntheticGpx(25)),
+      fileOf('three.gpx', syntheticGpx(26)),
+    ]);
+    expect(chipOf(FOLDER)).toBeNull();
+    expect(chipOf(FILES)?.textContent).toContain('3 files');
+    expect(() => buttonNamed('Import 3 files')).not.toThrow();
+  });
+
+  it('× on the folder chip clears the folder selection and leaves nothing stale', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    choosable();
+
+    await pick(FILES, [fileOf('loose.gpx', syntheticGpx(27))]);
+    await pick(FOLDER, [fileOf('archive/a.gpx', syntheticGpx(28))]);
+    await remove(FOLDER);
+    expect(chipOf(FOLDER)).toBeNull();
+    expect(chipOf(FILES)).toBeNull();
+    expect(statusText()).toContain('No files chosen');
+    expect(buttonNamed('Import').disabled).toBe(true);
+  });
+
+  it('an empty change from the picker that holds nothing leaves the other picker’s selection', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    choosable();
+
+    // What a remove on a stale chip used to send: an empty `change` from the
+    // picker the selection did not come from. It must not wipe the folder.
+    await pick(FOLDER, [fileOf('archive/a.gpx', syntheticGpx(32))]);
+    await pick(FILES, []);
+    expect(chipOf(FOLDER)?.textContent).toContain('a.gpx');
+    expect(statusText()).toContain('1 file ready');
+    expect(() => buttonNamed('Import 1 file')).not.toThrow();
+  });
+
+  it('× on the files chip clears the files selection, and choosing again still imports', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    choosable();
+
+    await pick(FOLDER, [fileOf('archive/a.gpx', syntheticGpx(29))]);
+    await pick(FILES, [fileOf('loose.gpx', syntheticGpx(30))]);
+    await remove(FILES);
+    expect(chipOf(FILES)).toBeNull();
+    expect(chipOf(FOLDER)).toBeNull();
+    expect(statusText()).toContain('No files chosen');
+
+    await pick(FOLDER, [fileOf('archive/b.gpx', syntheticGpx(31))]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+    expect(document.body.textContent).toContain('archive/b.gpx');
+  });
+});
+
+/**
  * The sibling-refresh case: one screen that both writes and reads the same
  * store.
  *
