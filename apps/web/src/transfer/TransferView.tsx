@@ -76,18 +76,20 @@ import {
 
 /**
  * The sentences on the Files screen that are never tucked into a "More about"
- * disclosure — #666: what an erase takes and what it cannot reach (#35,
+ * disclosure — #666: that an erase takes everything and what it cannot reach (#35,
  * ADR 0014 D-7), that the signing key cannot come back, and that an export
  * and the whole-account archive carry the REAL track and the privacy zones
  * (ADR 0004). `a11y/kept-visible.a11y.test.tsx` holds them, over a store
  * holding one ride — the export's own sentence renders only beside a ride.
  */
 export const FILES_KEPT_VISIBLE: readonly string[] = [
-  ...ERASE_REMOVES,
+  // ⚠️ Not `ERASE_REMOVES` since #1026: the itemised list of what goes is
+  // behind the erase section's ⓘ, where its nineteen lines made the panel
+  // 1822 px tall in a third of a landscape tablet. That an erase removes
+  // EVERYTHING, and what it cannot reach, stay here.
   ...ERASE_CANNOT_REACH,
   'This removes everything this device holds about you.',
   'There is no server and nothing has been uploaded, so there is nowhere else to ask',
-  'What goes:',
   'What this cannot reach:',
   'Erasing the signing key cannot be undone, and it cannot be recreated.',
   'Rides you have already exported go on verifying forever, but after this the device signs as a new identity.',
@@ -104,6 +106,12 @@ export const FILES_KEPT_VISIBLE: readonly string[] = [
   'Imports activity files exported from Strava.',
   'On Your Left is not affiliated with, endorsed by, or derived from Strava or Zwift.',
 ];
+
+/**
+ * The heading of the section the erase button is in — #1026, which split the
+ * erase panel in two: what it removes and cannot reach, then this.
+ */
+export const ERASE_CONFIRM_HEADING = 'Confirm the erase';
 
 /** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
@@ -245,25 +253,26 @@ export function TransferView({
         )}
       </div>
 
-      <div>
-        <h2>Erase this device</h2>
-        {port === undefined ? (
+      {port === undefined ? (
+        <div>
+          <h2>Erase this device</h2>
           <p className="oyl-muted">
             This needs the same local store the panels above do, so it is unavailable here too.
           </p>
-        ) : (
-          <ErasePanel
-            port={port}
-            {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
-            {...(onMassReset === undefined ? {} : { onMassReset })}
-            {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
-            storeRevision={storeRevision}
-            onStoreChanged={() => {
-              setStoreRevision((previous) => previous + 1);
-            }}
-          />
-        )}
-      </div>
+        </div>
+      ) : (
+        // Two sections of the grid, not one (#1026): see `ErasePanel`.
+        <ErasePanel
+          port={port}
+          {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
+          {...(onMassReset === undefined ? {} : { onMassReset })}
+          {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
+          storeRevision={storeRevision}
+          onStoreChanged={() => {
+            setStoreRevision((previous) => previous + 1);
+          }}
+        />
+      )}
 
       <div>
         {/* #1013: the reasoning is the section's help. The statement that this app
@@ -1091,64 +1100,90 @@ function ErasePanel({
 
   return (
     <>
-      {/* #1013: what an erase removes and cannot reach is kept on the screen
-        whole — it is the last thing read before something that cannot be
-        undone, and none of it is tucked behind the section's help. */}
-      <KeptVisible>
-        <p>
-          This removes everything this device holds about you. There is no server and nothing has
-          been uploaded, so there is nowhere else to ask &mdash; when this finishes, it is finished.
-        </p>
-        <p className="oyl-muted">What goes:</p>
-        <ul>
-          {ERASE_REMOVES.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-        <p className="oyl-muted">What this cannot reach:</p>
-        <ul>
-          {ERASE_CANNOT_REACH.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-        <p>
-          <strong>
-            Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
-            already exported go on verifying forever, but after this the device signs as a new
-            identity.
-          </strong>
-        </p>
-      </KeptVisible>
-      <div className="oyl-transfer__form">
-        <label htmlFor="oyl-erase-confirm">{`Type “${ERASE_CONFIRMATION}” to confirm`}</label>
-        <input
-          id="oyl-erase-confirm"
-          className="oyl-input oyl-input--wide"
-          type="text"
-          value={typed}
-          onChange={(event) => {
-            setTyped(event.target.value);
-          }}
-        />
-        <Button
-          variant="secondary"
-          onClick={() => {
-            void run();
-          }}
+      {/*
+        #1013: that an erase removes everything and what it cannot reach is kept
+        on the screen — it is the last thing read before something that cannot
+        be undone.
+
+        ⚠️ Two sections of the grid since #1026, where it was one 1822 px tall
+        in a third of a landscape tablet, and the itemised list of what goes is
+        behind this section's ⓘ: "everything this device holds" above it
+        already says what the list itemises, and the nineteen lines are one
+        press away. What it CANNOT reach stays here, and the signing key stays
+        beside the button. Nothing moved: the order is the order it was in.
+      */}
+      <div>
+        <SectionHeading
+          level={2}
+          help={
+            <>
+              <p className="oyl-muted">What goes:</p>
+              <ul>
+                {ERASE_REMOVES.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </>
+          }
         >
-          Erase everything
-        </Button>
+          Erase this device
+        </SectionHeading>
+        <KeptVisible>
+          <p>
+            This removes everything this device holds about you. There is no server and nothing has
+            been uploaded, so there is nowhere else to ask &mdash; when this finishes, it is
+            finished.
+          </p>
+          <p className="oyl-muted">What this cannot reach:</p>
+          <ul>
+            {ERASE_CANNOT_REACH.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </KeptVisible>
       </div>
-      {refused === undefined ? null : (
-        <StatusMessage tone="warning" live>
-          {ERASE_REFUSAL_TEXT[refused]}
-        </StatusMessage>
-      )}
-      {done === undefined ? null : (
-        <StatusMessage tone="success" live>
-          {done}
-        </StatusMessage>
-      )}
+      <div>
+        <h2>{ERASE_CONFIRM_HEADING}</h2>
+        <KeptVisible>
+          <p>
+            <strong>
+              Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
+              already exported go on verifying forever, but after this the device signs as a new
+              identity.
+            </strong>
+          </p>
+        </KeptVisible>
+        <div className="oyl-transfer__form">
+          <label htmlFor="oyl-erase-confirm">{`Type “${ERASE_CONFIRMATION}” to confirm`}</label>
+          <input
+            id="oyl-erase-confirm"
+            className="oyl-input oyl-input--wide"
+            type="text"
+            value={typed}
+            onChange={(event) => {
+              setTyped(event.target.value);
+            }}
+          />
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void run();
+            }}
+          >
+            Erase everything
+          </Button>
+        </div>
+        {refused === undefined ? null : (
+          <StatusMessage tone="warning" live>
+            {ERASE_REFUSAL_TEXT[refused]}
+          </StatusMessage>
+        )}
+        {done === undefined ? null : (
+          <StatusMessage tone="success" live>
+            {done}
+          </StatusMessage>
+        )}
+      </div>
     </>
   );
 }
