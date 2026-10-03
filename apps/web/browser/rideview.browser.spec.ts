@@ -1312,3 +1312,127 @@ for (const viewport of [
     expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 }
+
+/**
+ * #1029 — the screen with nothing paired, on the owner's tablet in landscape
+ * (seen on 2026-10-03): the readings and the status fill the width, and the
+ * lower half is used.
+ *
+ * Three claims, each read off the engine's layout:
+ *
+ *   - the Trainer group's card runs at least to the bottom of the Live group,
+ *     where it was one status line alone at the top of its column — and its
+ *     control, the card's stretch taken off through a style tag, must leave
+ *     it a long way short;
+ *   - elapsed and moving time are readings at the live readings' metric size
+ *     on the landscape tablet, and `xxl` on a phone, inside their own boxes;
+ *   - before a ride, the other ways to ride START on the first screen, under
+ *     the Live group, so the empty lower half is no longer empty.
+ */
+interface NothingPaired {
+  readonly live: Box1029;
+  readonly trainerCard: Box1029 | undefined;
+  readonly other: Box1029 | undefined;
+  readonly clock: readonly {
+    readonly fontSize: number;
+    readonly right: number;
+    readonly within: number;
+  }[];
+  readonly metricFontSize: number;
+  readonly xxlFontSize: number;
+}
+
+interface Box1029 {
+  readonly top: number;
+  readonly bottom: number;
+}
+
+async function nothingPaired(page: Page): Promise<NothingPaired> {
+  return page.evaluate(() => {
+    const box = (element: Element | null): { top: number; bottom: number } | undefined => {
+      if (element === null) return undefined;
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    };
+    const live = box(document.querySelector('.oyl-ride__group--live'));
+    if (live === undefined) throw new Error('the Ride screen rendered no Live group');
+    const root = getComputedStyle(document.documentElement);
+    const rem = Number.parseFloat(root.fontSize);
+    const token = (name: string): number => Number.parseFloat(root.getPropertyValue(name)) * rem;
+    return {
+      live,
+      trainerCard: box(document.querySelector('.oyl-ride__group--trainer > .oyl-trainer-card')),
+      other: box(document.querySelector('.oyl-ride__group--other')),
+      clock: [
+        ...document.querySelectorAll(
+          '.oyl-ride__clock .oyl-ride__time:not(.oyl-ride__time--recorded)',
+        ),
+      ].map((pair) => {
+        const value = pair.querySelector('.oyl-reading__value');
+        if (value === null) throw new Error('a clock term has no reading');
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(value).fontSize),
+          right: value.getBoundingClientRect().right,
+          within: pair.getBoundingClientRect().right,
+        };
+      }),
+      metricFontSize: token('--oyl-font-size-metric'),
+      xxlFontSize: token('--oyl-font-size-xxl'),
+    };
+  });
+}
+
+for (const viewport of [TABLET_IN_THE_SHELL, SMALL_TABLET_IN_THE_SHELL] as const) {
+  test(`#1029 — nothing paired: the trainer card is the Live group's height, and other rides start on the first screen — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?sensors=none&ride=idle');
+    const seen = await nothingPaired(page);
+    const card = seen.trainerCard;
+    const other = seen.other;
+    expect(card, 'no trainer card').toBeDefined();
+    expect(other, 'no other ways to ride').toBeDefined();
+    const short = seen.live.bottom - (card?.bottom ?? -Infinity);
+    const otherMargin = foldMargin(other?.top ?? Infinity, viewport);
+    const note = `card ends ${(-short).toFixed(1)} px past the Live group; other rides start ${otherMargin.toFixed(1)} px above the fold`;
+    testInfo.annotations.push({ type: '#1029 nothing paired', description: note });
+    console.log(`#1029 — nothing paired — ${viewport.name} — ${note}`);
+
+    expect(short, note).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    expect(other?.top ?? -Infinity, note).toBeGreaterThanOrEqual(seen.live.bottom);
+    expect(otherMargin, note).toBeGreaterThan(0);
+
+    // The control: the card without its stretch is one tile at the top of
+    // its column, a long way short of the Live group — the defect.
+    await page.addStyleTag({
+      content: '.oyl-ride__group--trainer > .oyl-trainer-card { flex: none !important; }',
+    });
+    const unstretched = await nothingPaired(page);
+    const shortUnstretched = seen.live.bottom - (unstretched.trainerCard?.bottom ?? Infinity);
+    console.log(
+      `#1029 — control — ${viewport.name} — unstretched, the card ends ${shortUnstretched.toFixed(1)} px short of the Live group`,
+    );
+    // Fails the assertion above, by more than layout rounding.
+    expect(shortUnstretched).toBeGreaterThan(10 * SUBPIXEL_TOLERANCE);
+  });
+}
+
+for (const [viewport, size] of [
+  [TABLET_IN_THE_SHELL, 'metric'],
+  [SMALL_TABLET_IN_THE_SHELL, 'xxl'],
+  [{ name: 'a phone — 360×800', width: 360, height: 800 }, 'xxl'],
+] as const) {
+  test(`#1029 — elapsed and moving time are readings at the ${size} size, inside their boxes — ${viewport.name}`, async ({
+    page,
+  }) => {
+    // A ride an hour in, so the widest time a ride usually shows is measured.
+    await open(page, viewport);
+    const seen = await nothingPaired(page);
+    expect(seen.clock).toHaveLength(2);
+    const expected = size === 'metric' ? seen.metricFontSize : seen.xxlFontSize;
+    for (const each of seen.clock) {
+      expect(each.fontSize).toBeCloseTo(expected, 1);
+      expect(each.right).toBeLessThanOrEqual(each.within + SUBPIXEL_TOLERANCE);
+    }
+  });
+}
