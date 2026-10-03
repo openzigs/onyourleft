@@ -239,7 +239,7 @@ declare global {
 
 /**
  * Runs in the page: starts recording what every animation frame shows of a
- * list–detail route's focus for 600 ms, so the navigation can be made by real
+ * list–detail route's focus for 1.5 s, so the navigation can be made by real
  * input after it returns. {@link focusFrames} reads the result.
  */
 function watchFocus(): void {
@@ -257,7 +257,7 @@ function watchFocus(): void {
         focusedItem: document.activeElement?.getAttribute('data-oyl-select') ?? null,
         fading: document.activeViewTransition !== null,
       });
-      if (performance.now() - started > 600) {
+      if (performance.now() - started > 1500) {
         resolve(frames);
       } else {
         requestAnimationFrame(sample);
@@ -265,6 +265,27 @@ function watchFocus(): void {
     };
     requestAnimationFrame(sample);
   });
+}
+
+/**
+ * Focus reached what #670 puts it on, and within the fade's own duration of
+ * the frame the change first showed: not held back behind a fade. ⚠️ Not in
+ * that same frame — `ListDetail`'s focus moves are passive effects, as they
+ * were before #945, and on the CI runner a frame can fall between the commit
+ * and them (run 37161938329).
+ */
+function expectFocusSoonAfter(
+  frames: FocusFrame[],
+  shown: FocusFrame | undefined,
+  focused: (frame: FocusFrame) => boolean,
+  what: string,
+): void {
+  const landed = frames.find((frame) => frame.ms >= (shown?.ms ?? Infinity) && focused(frame));
+  expect(landed, `focus never reached ${what}`).toBeDefined();
+  expect(
+    (landed?.ms ?? Infinity) - (shown?.ms ?? 0),
+    `focus reached ${what} only after a fade's length`,
+  ).toBeLessThan(MOTION_DURATION_MS.medium);
 }
 
 async function focusFrames(page: Page): Promise<FocusFrame[]> {
@@ -535,7 +556,7 @@ test.describe('the route cross-fade — #945', () => {
     });
   }
 
-  test('#670 with motion on: Enter on a card focuses its heading, and Back the card, in the frame each lands, with no fade', async ({
+  test('#670 with motion on: Enter on a card focuses its heading, and Back the card, with no fade', async ({
     page,
   }) => {
     // The list–detail focus cases in `list-detail.browser.spec.ts` run with
@@ -545,8 +566,8 @@ test.describe('the route cross-fade — #945', () => {
     // `<ViewTransition>` is keyed by route with `update="none"`: so neither
     // fades, and `ListDetail`'s focus moves (passive effects) are not held
     // back behind one. Measured, not assumed — the count below is zero, and
-    // focus is where #670 puts it in the frame each lands. A change that made
-    // a selection cross-fade would fail both.
+    // focus is where #670 puts it within a fade's length of each change
+    // showing. A change that made a selection cross-fade fails the count.
     await page.addInitScript(recordViewTransitions);
     await page.setViewportSize({ width: 390, height: 844 });
     const activities = routeById('activities');
@@ -567,7 +588,7 @@ test.describe('the route cross-fade — #945', () => {
     const opened = chosen.find((frame) => frame.selectedHeading);
     expect(opened, 'the chosen item never showed its heading').toBeDefined();
     console.log(`#945/#670: the detail showed ${String(opened?.ms)} ms after Enter`, opened);
-    expect(opened?.focusedHeading, 'focus was not on the heading when it appeared').toBe(true);
+    expectFocusSoonAfter(chosen, opened, (frame) => frame.focusedHeading, 'the heading');
 
     // Back to the list.
     await page.evaluate(watchFocus);
@@ -576,7 +597,7 @@ test.describe('the route cross-fade — #945', () => {
     const listed = back.find((frame) => !frame.selectedHeading && frame.listShown);
     expect(listed, 'the list never came back').toBeDefined();
     console.log(`#945/#670: the list showed ${String(listed?.ms)} ms after Back`, listed);
-    expect(listed?.focusedItem, 'focus was not on the card when the list came back').toBe(id);
+    expectFocusSoonAfter(back, listed, (frame) => frame.focusedItem === id, 'the card');
 
     // Neither is a cross-fade: a selection is an update inside the route's
     // `<ViewTransition>`, which animates no update.
