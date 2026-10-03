@@ -127,9 +127,12 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
   });
 
   it.each([
-    ['beaten', 'your best on that route was beaten by you'],
-    ['level', 'your best on that route was matched by you'],
-    ['not-beaten', 'your best on that route finished ahead of you'],
+    ['beaten', 'In your last trainer game ride, you beat your best on that route.'],
+    ['level', 'In your last trainer game ride, you matched your best on that route.'],
+    [
+      'not-beaten',
+      'In your last trainer game ride, your best on that route finished ahead of you.',
+    ],
   ] as const)('states a game ride’s latched outcome %s in words', async (outcome, words) => {
     await show(savedSnapshot({ ...SAVED, gameOutcome: outcome }));
     expect(card()!.textContent).toContain(words);
@@ -191,7 +194,14 @@ describe('#1042 — announced politely, once', () => {
   it('renders its region EMPTY first, so the sentence arriving is a change a reader hears', () => {
     // The first render, before any effect: a region mounted with its words
     // already in it is read twice or not at all (`StatusMessage` §`live`).
-    const markup = renderToStaticMarkup(<RideResultCard result={SAVED} onDone={() => undefined} />);
+    const markup = renderToStaticMarkup(
+      <RideResultCard
+        result={SAVED}
+        announce
+        onAnnounced={() => undefined}
+        onDone={() => undefined}
+      />,
+    );
     expect(markup).toContain('<p class="oyl-visually-hidden" role="status"></p>');
   });
 
@@ -214,8 +224,8 @@ describe('#1042 — announced politely, once', () => {
   it('says the game’s outcome after the facts, once', async () => {
     await show(savedSnapshot({ ...SAVED, gameOutcome: 'beaten' }));
     expect(region()!.textContent).toBe(
-      'Ride saved: 1:02:05 elapsed, 32.4 kilometres. In the trainer game, your best on that ' +
-        'route was beaten by you.',
+      'Ride saved: 1:02:05 elapsed, 32.4 kilometres. In your last trainer game ride, you beat ' +
+        'your best on that route.',
     );
   });
 });
@@ -278,5 +288,83 @@ describe('#1042 — Done, focus and the button hierarchy', () => {
     expect(card()).toBeDefined();
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
+  });
+});
+
+/** Leave the Ride screen and come back to it — the router unmounts it, the controller stays. */
+async function remount(stub: ReturnType<typeof stubRideController>): Promise<void> {
+  mounted?.unmount();
+  mounted = await mount(<RideView controller={stub.controller} />);
+  await settle();
+}
+
+describe('#1042 — the card outlives the screen, not the ride (#1049’s review)', () => {
+  it('stays put away after Done when the screen is mounted again', async () => {
+    const stub = await show(savedSnapshot());
+    await activateWithKeyboard(buttonNamed('Done'));
+    await settle();
+    expect(stub.calls.dismissResult).toBe(1);
+
+    // Ride → Activities → Ride.
+    await remount(stub);
+    expect(card()).toBeUndefined();
+    expect(buttonNamed('Start a new ride').matches(PRIMARY_BUTTON_SELECTOR)).toBe(true);
+    expect(onePrimaryViolations(document)).toEqual([]);
+    // And the save is not said again by the sentence the card used to silence.
+    const saved = queryAll<HTMLElement>(document, '.oyl-status').find((node) =>
+      node.textContent?.includes('saved to your activities'),
+    );
+    expect(saved).toBeDefined();
+    expect(saved!.getAttribute('role')).toBeNull();
+  });
+
+  it('is shown again without Done, and does NOT announce the ride a second time', async () => {
+    const stub = await show(savedSnapshot());
+    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+    expect(stub.calls.noteResultAnnounced).toBe(1);
+
+    await remount(stub);
+    expect(card()).toBeDefined();
+    expect(region()!.textContent).toBe('');
+    expect(stub.calls.noteResultAnnounced).toBe(1);
+    // Still the one primary: the card is up, so Done is.
+    expect(buttonNamed('Done').matches(PRIMARY_BUTTON_SELECTOR)).toBe(true);
+    // And nothing else on the screen says it either.
+    const regions = queryAll<HTMLElement>(document, '[role="status"], [role="alert"]');
+    expect(regions.filter((node) => node.textContent?.toLowerCase().includes('saved'))).toEqual([]);
+  });
+
+  it('keeps the region it filled when the controller records that it spoke', async () => {
+    // The controller turning `resultAnnounced` on re-renders the card at once;
+    // that must not empty what was just announced.
+    const stub = await show(savedSnapshot());
+    expect(stub.calls.noteResultAnnounced).toBe(1);
+    stub.set({ elapsedSeconds: 3_728 });
+    await settle();
+    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+  });
+});
+
+describe('#1042 — one voice when a working copy is left behind (#1049’s review)', () => {
+  it('lets the leftover warning carry the save, with every word of it still rendered', async () => {
+    const stub = await show({ ...savedSnapshot(), leftover: true });
+    expect(card()).toBeDefined();
+    // The card is shown and silent…
+    expect(region()!.textContent).toBe('');
+    expect(stub.calls.noteResultAnnounced).toBe(0);
+    // …and the warning, word for word, is the one polite region about the save.
+    const warning = queryAll<HTMLElement>(document, '.oyl-status').find((node) =>
+      node.textContent?.includes('working copy'),
+    );
+    expect(warning?.textContent).toBe(
+      '!Saved, with a working copy left behind: The ride is stopped and saved to your ' +
+        'activities. The working copy on this device could not be removed, so it will be ' +
+        'offered back next time — discarding it changes nothing about the saved ride.',
+    );
+    expect(warning?.getAttribute('role')).toBe('status');
+    const speaking = queryAll<HTMLElement>(document, '[role="status"], [role="alert"]').filter(
+      (node) => (node.textContent ?? '').toLowerCase().includes('saved'),
+    );
+    expect(speaking).toEqual([warning]);
   });
 });

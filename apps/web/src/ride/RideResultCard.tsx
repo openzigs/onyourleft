@@ -24,11 +24,23 @@
  * One `role="status"` region, rendered EMPTY with the card and filled once in
  * an effect, so a screen reader hears the change (a region mounted with its
  * words already in it is read twice or not at all, `StatusMessage` §`live`).
- * It is filled once per saved ride: a re-render — the 1 Hz tick, a sensor
- * notification — writes the same words into a region already holding them,
- * which says nothing. While the card is up, the saved ride's own sentence
- * above it is not `live` (`RideView.tsx` §`StoppedNotice`), so this is the
- * one voice for the save.
+ * While the card is up, the saved ride's own sentence above it is not `live`
+ * (`RideView.tsx` §`StoppedNotice`), so this is the one voice for the save.
+ *
+ * ⚠️ **Once per saved RIDE, not once per mount** (#1049's review). The Ride
+ * screen is under the router and the ride controller above it, so a rider who
+ * goes to Activities and back mounts a second card for the same ride. Whether
+ * it may speak is therefore the controller's (`RideSnapshot.resultAnnounced`),
+ * read ONCE as the card mounts, and the card tells the controller when it has
+ * spoken. A re-render — the 1 Hz tick, a sensor notification, the controller
+ * recording that it spoke — changes nothing in the region.
+ *
+ * ⚠️ **A change of units while the card is up re-announces nothing**, and that
+ * is decided, not overlooked: the effect runs once per mount and reads the
+ * sentence of that moment. The readings on the card follow the new unit at
+ * once; the region keeps the words it already spoke, because writing the
+ * sentence again in the new unit would be a second announcement of the same
+ * save, which is what this section forbids.
  *
  * ⚠️ ***Done* is not a ride-time control** (`design/ride-time-controls.ts`):
  * it is pressed after the ride has ended, not to move one on, so it is 44 px
@@ -52,22 +64,49 @@ const HEART_RATE_UNIT = 'bpm';
 
 export interface RideResultCardProps {
   readonly result: SavedRide;
+  /**
+   * Whether this card may speak its sentence. `false` when it already has for
+   * this ride (a card mounted again), and when another voice on the screen is
+   * carrying the save (`RideView.tsx` §`StoppedNotice`'s leftover warning).
+   * Read once, as the card mounts.
+   */
+  readonly announce: boolean;
+  /** The card has filled its region — the controller records it. */
+  readonly onAnnounced: () => void;
   /** *Done*: the card goes away. */
   readonly onDone: () => void;
 }
 
-export function RideResultCard({ result, onDone }: RideResultCardProps): JSX.Element {
+/**
+ * ⚠️ Mount it with `key={result.activityId}`: everything here that happens
+ * once happens once per MOUNT, so a card for a different ride must be a
+ * different mount.
+ */
+export function RideResultCard({
+  result,
+  announce,
+  onAnnounced,
+  onDone,
+}: RideResultCardProps): JSX.Element {
   const units = useUnits();
   const headingId = useId();
   const distance = formatDistance(result.distance, units);
   const spoken = resultSentence(result, distance.value, spokenDistanceUnit(units));
+  // Decided as the card mounts. The controller hearing `onAnnounced` turns the
+  // prop to `false` on the very next render, and that must not empty the
+  // region this card has just filled.
+  const [speaks] = useState(announce);
   // Empty on the card's first render, then the sentence — the change is what a
-  // screen reader announces. Keyed on the activity, so a re-render of the same
-  // card writes nothing new.
+  // screen reader announces.
   const [announced, setAnnounced] = useState('');
   useEffect(() => {
+    if (!speaks) {
+      return;
+    }
     setAnnounced(spoken);
-  }, [result.activityId]);
+    onAnnounced();
+    // Once per mount, deliberately — see "A change of units" above.
+  }, []);
 
   return (
     <div className="oyl-result" role="group" aria-labelledby={headingId} data-oyl-result-card="">

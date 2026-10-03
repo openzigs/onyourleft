@@ -461,9 +461,9 @@ function RideControls({
   // answer lands first.
   const startRecording = useRef<HTMLButtonElement>(null);
   const focusStartWhenIdle = useRef(false);
-  // #1042: the saved ride whose result card the rider put away with *Done*,
-  // and the control *Done* hands focus to.
-  const [doneWith, setDoneWith] = useState<string | undefined>(undefined);
+  // #1042: the control the result card's *Done* hands focus to. Whether the
+  // card is put away, and whether it has spoken, are the CONTROLLER's — it is
+  // above the router and this screen is not (#1049's review).
   const startNewRide = useRef<HTMLButtonElement>(null);
   // A press the controller refused. Unreachable from the button while the rule
   // it renders under is the controller's own, and said anyway: a control that
@@ -506,8 +506,9 @@ function RideControls({
     // then (`ride-result.ts` §`rideResultOf`), until the rider presses *Done*.
     // There is no ride control on this branch for it to cover, and its height
     // changes nothing during a ride (#692): it exists only once one is over.
-    const saved = rideResultOf(snapshot);
-    const result = saved !== undefined && saved.activityId !== doneWith ? saved : undefined;
+    // *Done* clears the controller's `savedRide`, so a screen mounted later
+    // does not bring the card back.
+    const result = rideResultOf(snapshot);
     // #548: until this existed a stopped ride was a dead end. `RideSession` is
     // mounted above the router for the app's lifetime, so neither navigating
     // away nor anything else reset the controller, and in the Android shell a
@@ -520,9 +521,17 @@ function RideControls({
         <StoppedNotice snapshot={snapshot} cardShown={result !== undefined} />
         {result === undefined ? null : (
           <RideResultCard
+            key={result.activityId}
             result={result}
+            // One voice for the save: with a working copy left behind, the
+            // warning above carries it (`StoppedNotice`), and a card mounted
+            // again for a ride already announced stays quiet.
+            announce={!snapshot.resultAnnounced && !snapshot.leftover}
+            onAnnounced={() => {
+              controller.noteResultAnnounced();
+            }}
             onDone={() => {
-              setDoneWith(result.activityId);
+              controller.dismissResult();
               // The card goes; focus goes to the control it stood above,
               // rather than falling to `<body>` (WCAG 2.2 SC 2.4.3, #548's
               // reason). Always rendered while a card is: `rideResultOf`
@@ -649,7 +658,9 @@ function StoppedNotice({
   /**
    * #1042: the result card is up, and its region is the one voice for the
    * save — so the success sentence below is shown and not ALSO announced.
-   * The sentence itself is unchanged.
+   * The sentence itself is unchanged. ⚠️ Not the leftover warning: with a
+   * working copy left behind, the WARNING is the voice (it says the save and
+   * the one thing a rider would misread) and the card stays quiet.
    */
   readonly cardShown: boolean;
 }): JSX.Element {
@@ -728,7 +739,9 @@ function StoppedNotice({
         saved ride.
       </StatusMessage>
     ) : (
-      <StatusMessage tone="success" label="Saved" live={!cardShown}>
+      // Nor once the card has spoken for this ride (#1049's review): put away
+      // with *Done*, or the screen mounted again, the save is not said twice.
+      <StatusMessage tone="success" label="Saved" live={!cardShown && !snapshot.resultAnnounced}>
         The ride is stopped and saved to your activities. Closing the tab is safe now.
       </StatusMessage>
     );

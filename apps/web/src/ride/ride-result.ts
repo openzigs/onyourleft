@@ -12,7 +12,7 @@
  * | the ride's elapsed time | the recording engine, written to the activity (`recording/finish.ts`) |
  * | its distance | `finish.ts` §`distanceOf`, written to the activity |
  * | its average power | `finish.ts` §`averagePowerOf`, written to the activity |
- * | its average heart rate, where there is one | `finish.ts` §`averageHeartRateOf` — the SAME rule as power (the mean of the readings that exist), over the same samples, and the figure the ride's page already states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`) |
+ * | its average heart rate, where there is one | {@link statedAverageHeartRate} — the figure the ride's page states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`), computed by the page's OWN two steps over the samples the save wrote |
  * | how the race against the rider's own best ended, in the trainer game | `game/ghost-outcome.ts`, LATCHED — carried here, never re-derived |
  *
  * ⚠️ **No score, no grade, no load, and no trademarked name** (CLAUDE.md §6):
@@ -37,9 +37,16 @@
  * no card: the card never appears for an unsaved ride.
  */
 
-import type { BeatsPerMinute, Metres, Seconds, Watts } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  type BeatsPerMinute,
+  type Metres,
+  type Seconds,
+  type Watts,
+} from '@onyourleft/domain';
 import type { ActivityId } from '@onyourleft/store';
 
+import { CHART_POINTS, downsample, traceMean } from '../detail/series';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
 
 /** A saved ride's facts, as the result card states them. */
@@ -63,14 +70,41 @@ export interface SavedRide {
 /**
  * The game's latched outcome, in a sentence about the rider's best.
  *
- * ⚠️ **The subject is the attempt**, `hud/fields.ts` §`SETTLED`'s rule: there
- * is no reading of any of these in which the wrong one won.
+ * ⚠️ **Who did what is said outright**, `hud/fields.ts` §`SETTLED`'s rule:
+ * there is no reading of any of these in which the wrong one won. And it is
+ * the LAST trainer-game ride's (#1049's review): a recording can hold several
+ * game rides, on different routes, and "that route" is the route of the one
+ * whose settled answer the controller kept (`controller.ts`
+ * §`noteGameRideEnded`).
  */
 export const GAME_OUTCOME_TEXT: Readonly<Record<GhostOutcome, string>> = {
-  beaten: 'In the trainer game, your best on that route was beaten by you.',
-  level: 'In the trainer game, your best on that route was matched by you.',
-  'not-beaten': 'In the trainer game, your best on that route finished ahead of you.',
+  beaten: 'In your last trainer game ride, you beat your best on that route.',
+  level: 'In your last trainer game ride, you matched your best on that route.',
+  'not-beaten': 'In your last trainer game ride, your best on that route finished ahead of you.',
 };
+
+/**
+ * The average heart rate the ride's page states, or `undefined` for a ride
+ * with no reading at all — the card's figure.
+ *
+ * ⚠️ **Not the plain mean of the readings, and that is the point** (#1049's
+ * review). The ride's page reads the stored heart rate channel, reduces it to
+ * {@link CHART_POINTS} buckets (`detail/series.ts` §`downsample`, each the mean
+ * of the readings it has) and states the mean of THOSE (§`traceMean`, rounded
+ * to a whole beat by the series' `format`). For a ride over 600 samples with a
+ * gap, that is a mean of bucket means and is not the plain mean, so a card
+ * computing the plain mean would state a different number for the same ride.
+ * This is the page's two steps, called, not restated.
+ */
+export function statedAverageHeartRate(
+  heartRate: readonly (BeatsPerMinute | undefined)[] | undefined,
+): BeatsPerMinute | undefined {
+  if (heartRate === undefined) {
+    return undefined;
+  }
+  const mean = traceMean(downsample(heartRate, CHART_POINTS));
+  return mean === undefined ? undefined : beatsPerMinute(Math.round(mean));
+}
 
 /**
  * The saved ride the card is for, or `undefined` when there must be no card.

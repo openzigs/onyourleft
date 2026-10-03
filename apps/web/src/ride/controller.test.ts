@@ -7098,4 +7098,60 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBeUndefined();
     rig.controller.dispose();
   });
+
+  it('keeps an earlier SETTLED outcome when a later game ride has none (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('beaten');
+    // A short later game ride with no ghost, or one that ended before its race
+    // settled, hands over nothing — and must not erase what was settled.
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('beaten');
+    rig.controller.dispose();
+  });
+
+  it('puts the card away for good on Done, until the next ride is saved (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-1');
+
+    rig.controller.dismissResult();
+    // Held HERE, above the router, so a Ride screen mounted later reads it.
+    expect(rig.controller.getSnapshot().savedRide).toBeUndefined();
+    // Nothing else moves: the ride is still saved and stopped.
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.controller.getSnapshot().savedActivityId).toBe('ride-1');
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-2');
+    rig.controller.dispose();
+  });
+
+  it('remembers that the card has spoken, once per saved ride (#1049’s review)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // Nothing saved: nothing to have announced.
+    rig.controller.noteResultAnnounced();
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    rig.controller.noteResultAnnounced();
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(true);
+
+    // The next ride is announced afresh.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    await recordAndStop(rig, 2);
+    expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    rig.controller.dispose();
+  });
 });
