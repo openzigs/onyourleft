@@ -40,7 +40,7 @@
 import type { BeatsPerMinute, Metres, Seconds, Watts } from '@onyourleft/domain';
 import type { ActivityId } from '@onyourleft/store';
 
-import type { GhostOutcome } from '../game/ghost-outcome';
+import type { GhostOutcome } from '../game/ghost-outcome-kind';
 
 /** A saved ride's facts, as the result card states them. */
 export interface SavedRide {

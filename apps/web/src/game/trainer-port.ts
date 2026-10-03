@@ -81,7 +81,7 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
-import type { GhostOutcome } from './ghost-outcome';
+import type { GhostOutcome } from './ghost-outcome-kind';
 
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.

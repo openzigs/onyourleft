@@ -105,7 +105,7 @@ import {
   saveFinishedRide,
   type RideSaveStore,
 } from '../recording/finish';
-import type { GhostOutcome } from '../game/ghost-outcome';
+import type { GhostOutcome } from '../game/ghost-outcome-kind';
 import type { SavedRide } from './ride-result';
 
 import {
