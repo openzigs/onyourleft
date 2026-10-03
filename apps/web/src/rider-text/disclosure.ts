@@ -12,7 +12,7 @@
  * LLM01:2025): a document from somewhere else can carry instructions aimed at
  * a model, the app treats this text as information, and no safeguard is
  * perfect. Kept visible (#666): it is about what leaves the device and who
- * reads it, so no "More about" may hide it.
+ * reads it, so no ⓘ may hide it.
  */
 
 /** The bold lead: where the text is kept, and where it goes. */

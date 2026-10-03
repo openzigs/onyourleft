@@ -31,7 +31,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import type { ActivityId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { HOSTED_MASKING_NOTICE } from '../camera/hosted-model';
 import { COMPUTER_SENDS, COMPUTER_SENDS_LEAD, HOSTED_SENDS } from '../detail/write-up';
 import type {

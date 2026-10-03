@@ -229,3 +229,15 @@ migration. The two dumps are identical.
   reason changes. The audit still reads `aria-modal`, and the browser gate still presses Tab.
 - **Tailwind removes `prefix()` or `@theme inline`.** D-2 and D-3 rest on both. The gate would fail
   first, because the compiled CSS would name Tailwind's own variables.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-03** — **D-8's `MoreAbout` row describes a primitive that no longer exists.**
+  `design/MoreAbout.tsx` was removed by [#1031](https://github.com/openzigs/onyourleft/issues/1031):
+  every section's longer explanation is now behind its `SectionHeading` ⓘ
+  (`design/SectionHelp.tsx`), which is also a native `<details>`. The row's reasoning carries over
+  unchanged: it has no `theme.css` rule that Radix would replace, and Radix Collapsible would
+  unmount its closed content, which `route-sentences.a11y.test.tsx`, the kept-visible gate and the
+  audit's tab model all read as present and tucked.

@@ -12,7 +12,7 @@ import {
 
 import { Button, ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
-import { MoreAbout } from '../design/MoreAbout';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   createSegmentFromRide,
@@ -371,9 +371,27 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
     <div className="oyl-sections">
       {noSegments ? yours : null}
       <section aria-labelledby="segments-make">
-        <h2 id="segments-make" tabIndex={-1}>
+        {/* #1031: why a climb and its descent are two segments, and why the
+          stretch is chosen by seconds, are the section's help, behind its ⓘ. */}
+        <SectionHeading
+          level={2}
+          id="segments-make"
+          tabIndex={-1}
+          help={
+            <>
+              <p className="oyl-muted">
+                The climb and its descent are two different segments, because they are two different
+                efforts.
+              </p>
+              <p className="oyl-muted">
+                There is no map on this screen yet, so the stretch is chosen by the first and last
+                recorded second of the ride rather than by dragging on a line.
+              </p>
+            </>
+          }
+        >
           Make a segment
-        </h2>
+        </SectionHeading>
         <p className="oyl-muted">
           A segment is a stretch of road with a direction, cut from one of your own rides.
         </p>
@@ -451,17 +469,6 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
             )}
           </>
         )}
-
-        <MoreAbout about="making a segment">
-          <p className="oyl-muted">
-            The climb and its descent are two different segments, because they are two different
-            efforts.
-          </p>
-          <p className="oyl-muted">
-            There is no map on this screen yet, so the stretch is chosen by the first and last
-            recorded second of the ride rather than by dragging on a line.
-          </p>
-        </MoreAbout>
       </section>
 
       {/*
@@ -472,7 +479,30 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
       */}
       {match === undefined ? null : (
         <section aria-labelledby="segments-match">
-          <h2 id="segments-match">Find your efforts</h2>
+          {/* #1031: when matching runs and how far one press goes is the
+            section's help, behind its ⓘ. */}
+          <SectionHeading
+            level={2}
+            id="segments-match"
+            help={
+              <>
+                <p className="oyl-muted">
+                  It is <strong>not</strong> done while you ride, and not when a ride is saved: it
+                  decodes a ride&rsquo;s whole track, and that does not belong on the end of
+                  pressing Stop. So a ride you have just recorded shows no effort until you run
+                  this.
+                </p>
+                <p className="oyl-muted">
+                  One press covers up to {String(SWEEP_ACTIVITY_BUDGET)} rides and remembers where
+                  it got to, so pressing it again carries on rather than starting over. Running it
+                  after making a segment is what finds that segment in rides you have already
+                  stored.
+                </p>
+              </>
+            }
+          >
+            Find your efforts
+          </SectionHeading>
           <p className="oyl-muted">
             Matching reads the positions of each ride once and stores every time you have set on
             these segments.
@@ -499,18 +529,6 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
               )}
             </>
           )}
-          <MoreAbout about="matching">
-            <p className="oyl-muted">
-              It is <strong>not</strong> done while you ride, and not when a ride is saved: it
-              decodes a ride&rsquo;s whole track, and that does not belong on the end of pressing
-              Stop. So a ride you have just recorded shows no effort until you run this.
-            </p>
-            <p className="oyl-muted">
-              One press covers up to {String(SWEEP_ACTIVITY_BUDGET)} rides and remembers where it
-              got to, so pressing it again carries on rather than starting over. Running it after
-              making a segment is what finds that segment in rides you have already stored.
-            </p>
-          </MoreAbout>
         </section>
       )}
 

@@ -4,7 +4,7 @@
 
 import type { JSX } from 'react';
 
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import {
   RIDER_TEXT_DISCLOSURE_DETAIL,
   RIDER_TEXT_DISCLOSURE_LEAD,

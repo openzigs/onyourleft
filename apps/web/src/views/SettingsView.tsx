@@ -86,7 +86,8 @@ import { Button } from '../design/Button';
 import { Hills } from '../design/illustration/Hills';
 import { RoadRibbon } from '../design/illustration/RoadRibbon';
 import { Sky } from '../design/illustration/Sky';
-import { KeptVisible, MoreAbout } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
+import { SectionHeading } from '../design/SectionHelp';
 import {
   THEME_CHOICES,
   chooseTheme,
@@ -195,7 +196,7 @@ export const WEIGHT_STAYS_HERE =
 export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
 
 /**
- * The sentences on this screen that are never tucked into a "More about"
+ * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
  * weight is kept, and that clearing site data takes the rides with it.
@@ -261,7 +262,7 @@ export const KIT_NO_STORE =
   'page reloaded. You ride in the house kit.';
 
 /**
- * Where the choice is kept, said under "More about your kit". Rendered only
+ * Where the choice is kept, said in Your kit's help. Rendered only
  * where there is a store to keep it in: with none there is no choice to
  * explain, and {@link KIT_NO_STORE} says why.
  */
@@ -434,7 +435,34 @@ export function SettingsView({
         }
       >
         <section className="oyl-panel" aria-labelledby="oyl-units-heading">
-          <h3 id="oyl-units-heading">Units</h3>
+          {/* #1013: what the chosen units mean is the fieldset's description, and
+            in the section's help rather than a second line under the heading —
+            behind its ⓘ since #1031, where a "More about units" used to close
+            the section. */}
+          <SectionHeading
+            level={3}
+            id="oyl-units-heading"
+            help={
+              <>
+                <p id="oyl-units-detail" className="oyl-muted">
+                  {CHOICES[units].detail}
+                </p>
+                <p className="oyl-muted">
+                  A rider who wants miles for distance and metres for climbing cannot have that —
+                  the whole app follows one setting, and splitting it later is something we can add
+                  without taking anything away.
+                </p>
+                <p className="oyl-muted">
+                  This changes how numbers are <strong>shown</strong> and nothing else. Every ride
+                  stays recorded exactly as it was, and a FIT, GPX or TCX file you export is
+                  unaffected — those formats have their own unit rules and another program reads
+                  them.
+                </p>
+              </>
+            }
+          >
+            Units
+          </SectionHeading>
           <p className="oyl-muted">One choice covers distance, speed, climbing and weight.</p>
 
           {/*
@@ -489,24 +517,6 @@ export function SettingsView({
               {message.text}
             </StatusMessage>
           )}
-
-          {/* #1013: what the chosen units mean is the fieldset's description, and
-            here rather than a second line under the heading. */}
-          <MoreAbout about="units">
-            <p id="oyl-units-detail" className="oyl-muted">
-              {CHOICES[units].detail}
-            </p>
-            <p className="oyl-muted">
-              A rider who wants miles for distance and metres for climbing cannot have that — the
-              whole app follows one setting, and splitting it later is something we can add without
-              taking anything away.
-            </p>
-            <p className="oyl-muted">
-              This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
-              recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected —
-              those formats have their own unit rules and another program reads them.
-            </p>
-          </MoreAbout>
         </section>
 
         {/*
@@ -733,7 +743,7 @@ const THEME_CHOICE_TEXT: Readonly<
 /** Said beside the choice: where it is kept. */
 export const APPEARANCE_STAYS_HERE = 'Kept on this device only. The ride screen does not change.';
 
-/** Said under "More about": where a device that has never chosen starts (#992). */
+/** Said in Appearance's help: where a device that has never chosen starts (#992). */
 export const APPEARANCE_STARTS_DARK = 'A device that has not chosen yet starts dark.';
 
 /**
@@ -742,7 +752,7 @@ export const APPEARANCE_STARTS_DARK = 'A device that has not chosen yet starts d
  *
  * ⚠️ **Three choices, as a segmented control of native radios (#668, #667),
  * and not a switch**: a switch has two states, and "follow the device" is the
- * third. Every choice's sentence is under "More about", so the one for a
+ * third. Every choice's sentence is in the help, so the one for a
  * choice not made is still on the screen (#666: nothing is deleted).
  *
  * Applied at once, to this page, through the same rules the inline script
@@ -777,7 +787,30 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-appearance-heading">
-      <h3 id="oyl-appearance-heading">Appearance</h3>
+      {/* #1013: what the chosen palette means is the fieldset's description, in
+        the section's help — behind its ⓘ since #1031. */}
+      <SectionHeading
+        level={3}
+        id="oyl-appearance-heading"
+        help={
+          <>
+            <p id="oyl-appearance-detail" className="oyl-muted">
+              {THEME_CHOICE_TEXT[choice].detail}
+            </p>
+            <p className="oyl-muted">{APPEARANCE_STARTS_DARK}</p>
+            <dl className="oyl-muted">
+              {THEME_CHOICES.map((option) => (
+                <div key={option}>
+                  <dt>{THEME_CHOICE_TEXT[option].label}</dt>
+                  <dd>{THEME_CHOICE_TEXT[option].detail}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        }
+      >
+        Appearance
+      </SectionHeading>
       <fieldset className="oyl-segmented" aria-describedby="oyl-appearance-detail">
         <legend>Light or dark?</legend>
         <div className="oyl-segmented__options">
@@ -804,21 +837,6 @@ function AppearancePanel({ storage }: { readonly storage: ThemeStorage | undefin
           {message.text}
         </StatusMessage>
       )}
-      {/* #1013: what the chosen palette means is the fieldset's description, here. */}
-      <MoreAbout about="light and dark">
-        <p id="oyl-appearance-detail" className="oyl-muted">
-          {THEME_CHOICE_TEXT[choice].detail}
-        </p>
-        <p className="oyl-muted">{APPEARANCE_STARTS_DARK}</p>
-        <dl className="oyl-muted">
-          {THEME_CHOICES.map((option) => (
-            <div key={option}>
-              <dt>{THEME_CHOICE_TEXT[option].label}</dt>
-              <dd>{THEME_CHOICE_TEXT[option].detail}</dd>
-            </div>
-          ))}
-        </dl>
-      </MoreAbout>
     </section>
   );
 }
@@ -865,7 +883,18 @@ function AnnouncementsPanel({
   const unit = distanceUnit(units);
   return (
     <section className="oyl-panel oyl-announce" aria-labelledby="oyl-announce-heading">
-      <h3 id="oyl-announce-heading">Announcements</h3>
+      <SectionHeading
+        level={3}
+        id="oyl-announce-heading"
+        help={
+          <p className="oyl-muted">
+            During a ride in the trainer game, your screen reader is given a short sentence now and
+            then — never more than one every few seconds, and nothing you have not chosen below.
+          </p>
+        }
+      >
+        Announcements
+      </SectionHeading>
       <p className="oyl-muted">For riding with a screen reader.</p>
       <p>
         <label className="oyl-announce__switch">
@@ -880,7 +909,7 @@ function AnnouncementsPanel({
           Announce the ride to a screen reader
         </label>
       </p>
-      <EverySelect
+      <EveryChoice
         id="oyl-announce-power"
         label="Say your power"
         value={preference.powerEverySeconds}
@@ -892,7 +921,7 @@ function AnnouncementsPanel({
           save({ ...preference, powerEverySeconds });
         }}
       />
-      <EverySelect
+      <EveryChoice
         id="oyl-announce-distance"
         label="Say the distance to go"
         value={preference.distanceEvery}
@@ -902,7 +931,7 @@ function AnnouncementsPanel({
           save({ ...preference, distanceEvery });
         }}
       />
-      <EverySelect
+      <EveryChoice
         id="oyl-announce-interval"
         label="Say a workout's next block"
         value={preference.intervalLeadSeconds}
@@ -912,7 +941,7 @@ function AnnouncementsPanel({
           save({ ...preference, intervalLeadSeconds });
         }}
       />
-      <EverySelect
+      <EveryChoice
         id="oyl-announce-climb"
         label="Say a climb ahead"
         value={preference.climbLeadMetres}
@@ -938,12 +967,6 @@ function AnnouncementsPanel({
       <KeptVisible>
         <p className="oyl-muted">{ANNOUNCEMENTS_STAY_HERE}</p>
       </KeptVisible>
-      <MoreAbout about="announcements">
-        <p className="oyl-muted">
-          During a ride in the trainer game, your screen reader is given a short sentence now and
-          then — never more than one every few seconds, and nothing you have not chosen above.
-        </p>
-      </MoreAbout>
     </section>
   );
 }
@@ -979,7 +1002,22 @@ function SoundsPanel({
 
   return (
     <section className="oyl-panel oyl-announce oyl-sounds" aria-labelledby="oyl-sounds-heading">
-      <h3 id="oyl-sounds-heading">Sounds</h3>
+      <SectionHeading
+        level={3}
+        id="oyl-sounds-heading"
+        help={
+          <p className="oyl-muted">
+            Short sounds during a ride, as well as anything your screen reader says: a steady tone
+            during a workout that rises when your power is over the target and falls when it is
+            under, two rising notes when a workout block changes, and one low note as each
+            distance-to-go mark passes in the game. That note plays only with its spoken sentence,
+            so it needs announcements turned on above, with &ldquo;Say the distance to go&rdquo; set
+            to a distance. The tone is silent whenever there is no power reading.
+          </p>
+        }
+      >
+        Sounds
+      </SectionHeading>
       <p className="oyl-muted">
         Off unless you turn it on; while riding, a Mute sounds button and a volume slider are on the
         ride screen.
@@ -1017,16 +1055,6 @@ function SoundsPanel({
           {message.text}
         </StatusMessage>
       )}
-      <MoreAbout about="sounds">
-        <p className="oyl-muted">
-          Short sounds during a ride, as well as anything your screen reader says: a steady tone
-          during a workout that rises when your power is over the target and falls when it is under,
-          two rising notes when a workout block changes, and one low note as each distance-to-go
-          mark passes in the game. That note plays only with its spoken sentence, so it needs
-          announcements turned on above, with &ldquo;Say the distance to go&rdquo; set to a
-          distance. The tone is silent whenever there is no power reading.
-        </p>
-      </MoreAbout>
     </section>
   );
 }
@@ -1061,7 +1089,33 @@ function GameWorldPanel({
   // 2.5.8 — #475's review. `oyl-world` is the hook the tests find it by.
   return (
     <section className="oyl-panel oyl-announce oyl-world" aria-labelledby="oyl-world-heading">
-      <h3 id="oyl-world-heading">Game world</h3>
+      {/* #1013: the section keeps its switch, and what the two worlds are is its
+        help — behind its ⓘ since #1031. */}
+      <SectionHeading
+        level={3}
+        id="oyl-world-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              The trainer game draws a standard world unless you choose the realistic one:
+              photographic road, ground and sky, photoscanned trees and a modelled rider.
+            </p>
+            <p className="oyl-muted">
+              It asks much more of the device. If the device gets too hot during a ride, the rest of
+              that ride is in the standard world and the ride screen says so. It has been measured
+              on one tablet, not on phones.
+            </p>
+            <p className="oyl-muted">
+              In a browser the realistic world is downloaded when a ride starts — about 33 MB — and
+              is not kept on this device for use offline. With no network, or if it cannot be
+              loaded, the ride is in the standard world instead and the ride screen says so. In the
+              Android app it is already on the device.
+            </p>
+          </>
+        }
+      >
+        Game world
+      </SectionHeading>
       <p>
         <label className="oyl-announce__switch">
           <input
@@ -1086,24 +1140,6 @@ function GameWorldPanel({
           {message.text}
         </StatusMessage>
       )}
-      {/* #1013: the section keeps its switch, and what the two worlds are is here. */}
-      <MoreAbout about="the realistic world">
-        <p className="oyl-muted">
-          The trainer game draws a standard world unless you choose the realistic one: photographic
-          road, ground and sky, photoscanned trees and a modelled rider.
-        </p>
-        <p className="oyl-muted">
-          It asks much more of the device. If the device gets too hot during a ride, the rest of
-          that ride is in the standard world and the ride screen says so. It has been measured on
-          one tablet, not on phones.
-        </p>
-        <p className="oyl-muted">
-          In a browser the realistic world is downloaded when a ride starts — about 33 MB — and is
-          not kept on this device for use offline. With no network, or if it cannot be loaded, the
-          ride is in the standard world instead and the ride screen says so. In the Android app it
-          is already on the device.
-        </p>
-      </MoreAbout>
     </section>
   );
 }
@@ -1205,8 +1241,18 @@ function MapTilesPanel({
   );
 }
 
-/** One row: a choice of how often, or never. */
-function EverySelect(props: {
+/**
+ * One row: a choice of how often, or never — #1031.
+ *
+ * Chips rather than the `<select>` it was: every row is "never" and four or
+ * five intervals, and #994's rule draws a single choice of more than three as
+ * chips (`theme.css` §"CHIPS"), the kit colour's control. Still NATIVE radios
+ * in a `fieldset` whose `legend` is the row's question, so the group has a
+ * name, one tab stop and the platform's arrow keys, and the value written is
+ * the one the select wrote: `'never'` or the stored number — the CLIMB row's
+ * metres, though its label is in the rider's own unit (#399).
+ */
+function EveryChoice(props: {
   readonly id: string;
   readonly label: string;
   readonly value: Every;
@@ -1214,26 +1260,35 @@ function EverySelect(props: {
   readonly describe: (value: number) => string;
   readonly onChange: (value: Every) => void;
 }): JSX.Element {
+  const options: readonly { readonly value: Every; readonly text: string }[] = [
+    { value: 'never', text: 'never' },
+    ...props.choices.map((choice) => ({ value: choice, text: props.describe(choice) })),
+  ];
   return (
-    <p>
-      <label htmlFor={props.id}>{props.label}</label>{' '}
-      <select
-        className="oyl-input oyl-input--wide"
-        id={props.id}
-        value={String(props.value)}
-        onChange={(event) => {
-          const raw = event.currentTarget.value;
-          props.onChange(raw === 'never' ? 'never' : Number(raw));
-        }}
-      >
-        <option value="never">never</option>
-        {props.choices.map((choice) => (
-          <option key={choice} value={String(choice)}>
-            {props.describe(choice)}
-          </option>
-        ))}
-      </select>
-    </p>
+    <fieldset id={props.id} className="oyl-chips">
+      <legend>{props.label}</legend>
+      <div className="oyl-chips__options">
+        {options.map((option) => {
+          // `_` for `.`: an id like `…-distance-0.5` is not a CSS selector as written.
+          const id = `${props.id}-${String(option.value).replaceAll('.', '_')}`;
+          return (
+            <label key={String(option.value)} htmlFor={id}>
+              <input
+                type="radio"
+                id={id}
+                name={props.id}
+                value={String(option.value)}
+                checked={props.value === option.value}
+                onChange={() => {
+                  props.onChange(option.value);
+                }}
+              />{' '}
+              {option.text}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }
 
@@ -1323,7 +1378,48 @@ function WeightPanel({
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-weight-heading">
-      <h3 id="oyl-weight-heading">Your weight</h3>
+      {/* #1013: the weight rides use is the section's one line; why an assumed
+        one is wrong and the bicycle are its help, behind its ⓘ since #1031 —
+        which stands ABOVE that line, so neither of its sentences says "that"
+        or "it" of a weight it has not yet named. How to clear it is the
+        field's own hint (#1023). */}
+      <SectionHeading
+        level={3}
+        id="oyl-weight-heading"
+        help={
+          <>
+            {current.assumed ? (
+              <p className="oyl-muted">
+                An assumed weight is a stand-in and not a measurement, and it is wrong for almost
+                everybody.
+              </p>
+            ) : null}
+            <p className="oyl-muted">
+              A bicycle is added to your weight — the game rides a rider and a bike, not a rider.
+            </p>
+            <p className="oyl-muted">
+              The trainer game works out how fast you are going from how hard you are pedalling, and
+              what you weigh is most of the answer on a climb.
+            </p>
+            {/*
+              ⚠️ #365's fifth criterion, and the half a weight box cannot carry
+              on its own: weight is most of the answer on a climb and almost
+              none of it on the flat, where what decides a rider's speed is how
+              much air they are pushing. That is chosen per ride on the game
+              screen — `game/rider.ts` §`RIDING_POSITIONS` — and a rider told
+              only about their weight would go looking for the flat-road
+              setting here and not find one.
+            */}
+            <p className="oyl-muted">
+              On the flat it is mostly air rather than weight. How you are riding — sitting up, on
+              the hoods, in the drops — is chosen for each ride on the{' '}
+              <a href={hrefFor(routeById('game'))}>trainer game screen</a>.
+            </p>
+          </>
+        }
+      >
+        Your weight
+      </SectionHeading>
       <KeptVisible>
         <p className="oyl-muted">{WEIGHT_STAYS_HERE}</p>
       </KeptVisible>
@@ -1347,41 +1443,10 @@ function WeightPanel({
         />
       )}
 
-      {/* #1013: the weight rides use is the section's one line; why an assumed
-        one is wrong and the bicycle are in the More about. How to clear it is
-        the field's own hint (#1023). */}
       <p className="oyl-muted">
         {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
         {measurementText(formatMass(current.mass, units))}.
       </p>
-      <MoreAbout about="your weight">
-        {current.assumed ? (
-          <p className="oyl-muted">
-            That is a stand-in and not a measurement, and it is wrong for almost everybody.
-          </p>
-        ) : null}
-        <p className="oyl-muted">
-          A bicycle is added to it — the game rides a rider and a bike, not a rider.
-        </p>
-        <p className="oyl-muted">
-          The trainer game works out how fast you are going from how hard you are pedalling, and
-          what you weigh is most of the answer on a climb.
-        </p>
-        {/*
-          ⚠️ #365's fifth criterion, and the half a weight box cannot carry on
-          its own: weight is most of the answer on a climb and almost none of it
-          on the flat, where what decides a rider's speed is how much air they
-          are pushing. That is chosen per ride on the game screen —
-          `game/rider.ts` §`RIDING_POSITIONS` — and a rider told only about
-          their weight would go looking for the flat-road setting here and not
-          find one.
-        */}
-        <p className="oyl-muted">
-          On the flat it is mostly air rather than weight. How you are riding — sitting up, on the
-          hoods, in the drops — is chosen for each ride on the{' '}
-          <a href={hrefFor(routeById('game'))}>trainer game screen</a>.
-        </p>
-      </MoreAbout>
     </section>
   );
 }
@@ -1439,12 +1504,35 @@ function KitPanel({
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-kit-heading">
-      <h3 id="oyl-kit-heading">Your kit</h3>
+      {/*
+        #1031: the help is offered only where the choice is: with no store
+        there is no kit control, and an ⓘ explaining it would explain a choice
+        not on offer.
+      */}
+      {port === undefined ? (
+        <h3 id="oyl-kit-heading">Your kit</h3>
+      ) : (
+        <SectionHeading
+          level={3}
+          id="oyl-kit-heading"
+          help={
+            <>
+              <p className="oyl-muted">
+                The pacer rides in orange and your own best in grey-blue, so there is no red, orange
+                or blue here: a rider in either could be taken for one of them at a glance.
+              </p>
+              <p className="oyl-muted">{KIT_KEPT}</p>
+            </>
+          }
+        >
+          Your kit
+        </SectionHeading>
+      )}
       {/*
         ⚠️ **Absent rather than disabled where there is nothing to write to** —
         the units' and the weight's rule, and the owner's ruling of 2026-09-28.
         There is no "for this visit" choice: the explanation takes its place,
-        and so does the "More about", which explains a choice not on offer.
+        and so does the ⓘ, which explains a choice not on offer.
       */}
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
@@ -1458,16 +1546,6 @@ function KitPanel({
         <StatusMessage tone={message.tone} live>
           {message.text}
         </StatusMessage>
-      )}
-
-      {port === undefined ? null : (
-        <MoreAbout about="your kit">
-          <p className="oyl-muted">
-            The pacer rides in orange and your own best in grey-blue, so there is no red, orange or
-            blue here: a rider in either could be taken for one of them at a glance.
-          </p>
-          <p className="oyl-muted">{KIT_KEPT}</p>
-        </MoreAbout>
       )}
     </section>
   );

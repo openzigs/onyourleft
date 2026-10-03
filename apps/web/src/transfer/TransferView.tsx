@@ -38,7 +38,7 @@ import type { Kilograms } from '@onyourleft/domain';
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { FileDrop, FilePicker } from '../design/FileDrop';
-import { KeptVisible, MoreAbout } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
@@ -75,8 +75,8 @@ import {
 } from './erase-device';
 
 /**
- * The sentences on the Files screen that are never tucked into a "More about"
- * disclosure — #666: that an erase takes everything and what it cannot reach (#35,
+ * The sentences on the Files screen that are never tucked behind a section's
+ * ⓘ — #666: that an erase takes everything and what it cannot reach (#35,
  * ADR 0014 D-7), that the signing key cannot come back, and that an export
  * and the whole-account archive carry the REAL track and the privacy zones
  * (ADR 0004). `a11y/kept-visible.a11y.test.tsx` holds them, over a store
@@ -211,7 +211,16 @@ export function TransferView({
     // where `main` is wide enough (`theme.css` §"A screen of sections").
     <div className="oyl-sections">
       <div>
-        <h2>Import</h2>
+        {/* #1031: how a batch is read, and where a route goes instead, are the
+          section's help, behind its ⓘ — offered only where there is an import
+          control for it to explain. */}
+        {port === undefined ? (
+          <h2>Import</h2>
+        ) : (
+          <SectionHeading level={2} help={<ImportHelp />}>
+            Import
+          </SectionHeading>
+        )}
         {port === undefined ? (
           <StatusMessage tone="danger">
             Importing a file needs Web Crypto to fingerprint it, and this browser does not offer it
@@ -491,25 +500,30 @@ function ImportPanel({
       />
 
       <CoursePanel port={port} offers={courseOffers(chosen, outcomes)} />
+    </>
+  );
+}
 
-      <MoreAbout about="importing">
-        <p className="oyl-muted">
-          Choose as many as you like; each one is reported on its own, and one file that cannot be
-          read does not stop the rest.
-        </p>
-        {/*
-          #232's third criterion: the two importers' distinct purposes are
-          stated where a rider chooses, not only in the code. The wording is a
-          constant in `routes/two-importers.ts` so that this screen, the routes
-          screen and the trainer game's empty picker cannot drift into three
-          paraphrases of one distinction. ⚠️ Tucked since #666 — it is an
-          explanation of where a route lives, not a safety sentence — and still
-          on this screen, beneath the picker, where #232 asked for it.
-        */}
-        <p className="oyl-muted">
-          {FILES_IMPORT_MEANS} <a href={hrefFor(routeById('routes'))}>Routes</a> is where they live.
-        </p>
-      </MoreAbout>
+/** What the Import section's ⓘ holds — #1031, a "More about importing" until then. */
+function ImportHelp(): JSX.Element {
+  return (
+    <>
+      <p className="oyl-muted">
+        Choose as many as you like; each one is reported on its own, and one file that cannot be
+        read does not stop the rest.
+      </p>
+      {/*
+        #232's third criterion: the two importers' distinct purposes are
+        stated where a rider chooses, not only in the code. The wording is a
+        constant in `routes/two-importers.ts` so that this screen, the routes
+        screen and the trainer game's empty picker cannot drift into three
+        paraphrases of one distinction. ⚠️ Tucked since #666 — it is an
+        explanation of where a route lives, not a safety sentence — and still
+        on this screen, in the Import section's help, where #232 asked for it.
+      */}
+      <p className="oyl-muted">
+        {FILES_IMPORT_MEANS} <a href={hrefFor(routeById('routes'))}>Routes</a> is where they live.
+      </p>
     </>
   );
 }

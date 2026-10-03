@@ -31,8 +31,15 @@ import type { JSX, ReactNode } from 'react';
  * ## What it is not for
  *
  * **No safety, privacy or consent sentence goes in here**, the same rule as
- * `MoreAbout` and `ScreenHelp`: those are a view's `*_KEPT_VISIBLE` list, and
- * `a11y/kept-visible.a11y.test.tsx` fails one that is tucked.
+ * `ScreenHelp`: those are a view's `*_KEPT_VISIBLE` list, marked with
+ * `KeptVisible.tsx`, and `a11y/kept-visible.a11y.test.tsx` fails one that is
+ * tucked.
+ *
+ * ⚠️ **Since #1031 this is the ONE way a section tucks its explanation.** A
+ * "More about …" disclosure that closed a section beneath its controls
+ * (`MoreAbout.tsx`, #666) was the other, and every one became this; a reviewer
+ * who remembers two patterns is reading the old file. The ⓘ costs the section
+ * no height, so its first control comes up rather than down.
  */
 export function SectionHeading({
   level,

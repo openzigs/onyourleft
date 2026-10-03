@@ -34,7 +34,8 @@
  * a substring of any block, which the reader used to accept — and the record
  * must EQUAL what the recorder would write here. The re-record reordered the
  * sentences #666 and #670 moved and added what the screens had gained since
- * (the "More about" summaries, the Appearance section, the Activities
+ * (the "More about" summaries — ⓘ help since #1031, whose hidden names
+ * "Help with …" are recorded instead — the Appearance section, the Activities
  * list–detail prompt, the Basis transcoder's credit). It dropped two lines,
  * each still said in other words it records: "Draw a route", the `<h2>` #670
  * removed when the drawing link moved to the head of the list ("Draw a route on

@@ -65,7 +65,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
-import { KeptVisible } from '../design/MoreAbout';
+import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
@@ -198,8 +198,8 @@ export const ANALYSIS_WHAT_IS_SENT =
   'network, and is not encrypted on the way unless your computer’s address starts with https://.';
 
 /**
- * The sentences on this screen that are never tucked into a "More about"
- * disclosure — #666: what the camera captures, where a picture goes and what
+ * The sentences on this screen that are never tucked behind a section's ⓘ
+ * — #666: what the camera captures, where a picture goes and what
  * is kept (ADR 0029, #382's consent statement), anyone else in the room (ADR
  * 0029 D-5), and what is sent to the rider's own computer, unencrypted
  * (ADR 0029's amendment, Q1). `a11y/kept-visible.a11y.test.tsx` holds them.

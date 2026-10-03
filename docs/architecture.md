@@ -803,7 +803,10 @@ against the scripted Web Bluetooth stack, with today's dead end as its control.
 
 **Controls first, detail tucked** (#666, the owner's ruling on #654). Settings, Segments, Files and
 the Devices screen keep a route's heading and one short sentence, then its controls, then a native
-`<details>` — `design/MoreAbout.tsx`, *"More about …"* — holding the longer explanation. Nothing was
+`<details>` — `design/MoreAbout.tsx`, *"More about …"* — holding the longer explanation. ⚠️ **Since
+#1031 that disclosure is gone**: every section's explanation is behind its heading's ⓘ
+(`design/SectionHelp.tsx`, #1013) and a screen's behind its title's (`design/ScreenHelp.tsx`, #993),
+one pattern everywhere, and the mark for text that stays is `design/KeptVisible.tsx`. Nothing was
 deleted: `a11y/route-sentences.a11y.test.tsx` holds every route to the sentences it rendered on
 `main`. What may **never** be tucked — trainer control, what leaves the device and to whom, what an
 erase cannot reach, the camera and anyone else in the room, Web Bluetooth's limits — is listed per

@@ -9,8 +9,8 @@
  * the fixture's item selected), with a store behind the Files screen, and every
  * section on it is held to `a11y/section-lines.ts`: at most one drawn
  * paragraph of explanation, of at most `SECTION_LINE_CHARACTERS` characters.
- * The rest is behind the section's ⓘ (`design/SectionHelp.tsx`) or in its
- * "More about".
+ * The rest is behind the section's ⓘ (`design/SectionHelp.tsx`), which since
+ * #1031 is the one place: the "More about" disclosure is gone.
  *
  * ## The two lists, and why each fails when it goes stale
  *
@@ -162,8 +162,8 @@ describe('the rule itself — its control', () => {
   it('does not count what the ruling keeps on the screen, or what is behind a closed ⓘ', () => {
     const [section] = sectionsFrom(
       `<h3>Kept</h3><p>One short line.</p>
-       <details class="oyl-section-help"><summary>Help</summary><p>${LONG}</p></details>
-       <details class="oyl-more"><summary>More about it</summary><p>${LONG}</p></details>
+       <details class="oyl-section-help"><summary><span class="oyl-visually-hidden">Help with Kept</span></summary><div class="oyl-section-help__panel"><p>${LONG}</p></div></details>
+       <details><summary>Any closed disclosure</summary><p>${LONG}</p></details>
        <div data-oyl-kept-visible=""><p>${LONG}</p></div>
        <p class="oyl-status">${LONG}</p>
        <div role="alert"><p>${LONG}</p></div>

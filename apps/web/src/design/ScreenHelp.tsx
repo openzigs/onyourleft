@@ -23,7 +23,7 @@ import type { JSX } from 'react';
  *
  * ## What it is not for
  *
- * The same thing `MoreAbout` is not for: **no safety or privacy sentence goes
+ * The same thing `SectionHelp` is not for: **no safety or privacy sentence goes
  * in here.** Those are a route's `notes`, which the shell keeps on the screen
  * below the view (`RouteDefinition.notes`), and `a11y/kept-visible.a11y.test.tsx`
  * fails one that is tucked.

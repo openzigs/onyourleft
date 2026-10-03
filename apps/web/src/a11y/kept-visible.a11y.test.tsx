@@ -5,9 +5,10 @@
  * Safety and privacy text is never inside a closed `<details>` — #666's second
  * criterion.
  *
- * #666 tucks each screen's longer explanation into a "More about" disclosure
- * (`design/MoreAbout.tsx`), and the owner's ruling keeps some sentences out of
- * it whatever their length: trainer control, what leaves the device and to
+ * #666 tucked each screen's longer explanation into a "More about" disclosure,
+ * and since #1031 it is behind the section's ⓘ (`design/SectionHelp.tsx`) or
+ * the screen's (`design/ScreenHelp.tsx`) — and the owner's ruling keeps some
+ * sentences out of every one whatever their length: trainer control, what leaves the device and to
  * whom, what an erase cannot reach, the camera and anyone else in the room,
  * and Web Bluetooth's limits. A closed `<details>` is one press from hidden.
  *
@@ -389,10 +390,11 @@ function unlistedMarkedSentences(root: Element, listed: readonly string[]): stri
 
 /**
  * A heading inside a `<summary>` anywhere on the page — #699's review, N5.
- * `MoreAbout` has no slot for one, and a `StatusMessage`'s `more.summary` and
+ * `SectionHelp`'s and `ScreenHelp`'s summaries hold a glyph and a hidden name
+ * and no slot for one, and a `StatusMessage`'s `more.summary` and
  * `SensorPairing`'s summary are two other places one could arrive: a heading
  * inside a summary is exposed differently by different browser and
- * screen-reader pairings (`design/MoreAbout.tsx`).
+ * screen-reader pairings (#654's re-review §5, scottohara.me 2022).
  */
 const HEADING_IN_SUMMARY = 'summary :is(h1, h2, h3, h4, h5, h6, [role="heading"])';
 
