@@ -2664,9 +2664,97 @@ a.oyl-button {
   margin: 0;
 }
 
+/*
+ * #1029: the Trainer group with no trainer paired — a filled tile like the
+ * sensor banner above, the trainer drawing at the same medium size, the
+ * sentence, and one *Devices* link drawn as a button. Its height on the wide
+ * layouts is `.oyl-ride`'s to set (below).
+ */
+.oyl-trainer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-md);
+  margin: 0;
+  padding: var(--oyl-space-lg);
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-surface-raised);
+}
+
+.oyl-trainer-card__art {
+  flex: none;
+  width: 3rem;
+  height: 3rem;
+}
+
+.oyl-trainer-card__glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.oyl-trainer-card__sentence {
+  margin: 0;
+}
+
+/*
+ * #1029: the ride's clock — elapsed and moving time as two READINGS
+ * (`RideView.tsx` §`RideClock`), side by side, and the seconds recorded in
+ * small type. It was one body-sized line, and with no sensor paired these are
+ * the only numbers a ride has.
+ *
+ * Two columns, the seconds recorded on a row of their own under them: a menu
+ * fact's `xxl` tabular `10:23:45` is about 8.5rem (`.oyl-home__facts`), inside
+ * half of a 360 px phone's Live group. On a landscape tablet — the Live group
+ * four readings wide, #1012's container step — the two take the live
+ * readings' metric size and display face, because there they stand under
+ * those readings and are read from as far away, and the seconds recorded go
+ * BESIDE them as a third column: the Live group's height is what puts the
+ * Sensors group's link on the screen or under the fold
+ * (`rideview.browser.spec.ts` §"has room for the sensors too").
+ */
 .oyl-ride__clock {
-  font-size: var(--oyl-font-size-lg);
-  font-variant-numeric: tabular-nums;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
+  margin: var(--oyl-space-md) 0 0;
+}
+
+.oyl-ride__time > dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  text-transform: uppercase;
+}
+
+.oyl-ride__time > dd {
+  margin: 0;
+}
+
+.oyl-ride__time--recorded {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--oyl-space-sm);
+  align-items: baseline;
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+@container oyl-live (min-width: 40rem) {
+  .oyl-ride__clock {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+
+  .oyl-ride__clock .oyl-reading__value {
+    font-family: var(--oyl-font-family-display);
+    font-size: var(--oyl-font-size-metric);
+    line-height: 1.1;
+  }
+
+  .oyl-ride__time--recorded {
+    grid-column: auto;
+    display: block;
+    align-self: end;
+  }
 }
 
 /*
@@ -2829,8 +2917,28 @@ a.oyl-button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .oyl-ride__group--sensors {
+  .oyl-ride__group--sensors,
+  .oyl-ride__group--other {
     grid-column: 1 / -1;
+  }
+
+  /*
+   * #1029: with no trainer paired, the Trainer group is one filled card
+   * (`TrainerPanel.tsx` §`NoTrainerCard`), and where that group stands beside
+   * the Live group the card runs down the whole of its cell — the Live
+   * group's height on two columns, the Live and Sensors groups' on three —
+   * rather than a status line alone at the top of an empty column. ONLY while
+   * the card is there: a flex column stops its children's margins
+   * collapsing, which would move every control of a paired trainer's group
+   * and every fold margin `rideview.browser.spec.ts` holds.
+   */
+  .oyl-ride__group--trainer:has(> .oyl-trainer-card) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .oyl-ride__group--trainer > .oyl-trainer-card {
+    flex: 1 1 auto;
   }
 }
 
@@ -2846,8 +2954,13 @@ a.oyl-button {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-areas:
       'live live trainer'
-      'sensors sensors trainer';
-    grid-template-rows: auto 1fr;
+      'sensors sensors trainer'
+      'other other other';
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .oyl-ride__group--other {
+    grid-area: other;
   }
 
   .oyl-ride__group--live {
@@ -3040,7 +3153,21 @@ select {
   /* #660: an option as long as a ride's name must not widen the page. */
   max-width: 100%;
   min-height: 2.75rem;
+  /* #1028: the closed control shows ONE line. A platform-drawn select never
+     wraps; under `base-select` (below) the closed control is a box like any
+     other and its text did — a ride's name over four lines of an 8rem box on
+     the owner's tablet. Too long for its box, the name is cut. ⚠️ The
+     ellipsis is drawn by the `appearance: none` skin only: under
+     `base-select` the text is in an engine-internal box no author style
+     reaches, so there it is clipped (`ride-chooser.browser.spec.ts`). The picker's options wrap again
+     below, where a long name has the picker's width to wrap in. The clip is
+     at the CONTENT box, so a cut name stops short of the chevron drawn in
+     the right padding rather than running under it. */
+  overflow: clip;
+  overflow-clip-margin: content-box;
   padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: border-color var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 
@@ -3121,6 +3248,8 @@ select option {
     align-items: center;
     min-height: 2.75rem;
     padding: var(--oyl-space-xs) var(--oyl-space-sm);
+    /* #1028: `select`'s `nowrap` is for the closed control only. */
+    white-space: normal;
   }
 
   select option:hover,
@@ -3441,13 +3570,21 @@ input[type='checkbox'][role='switch']:disabled {
 }
 
 .oyl-input {
-  background: var(--oyl-color-canvas);
+  /* `background-color`, not the `background` shorthand: on a `<select>` the
+     shorthand reset `select`'s chevron to no image at all (#1028). */
+  background-color: var(--oyl-color-canvas);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   color: var(--oyl-color-ink);
   font-size: var(--oyl-font-size-lg);
   padding: var(--oyl-space-sm);
   width: 8rem;
+}
+
+/* #1028: `.oyl-input`'s padding overrode `select`'s room for its chevron, so
+   a long name ran to the border. */
+select.oyl-input {
+  padding-right: 2rem;
 }
 
 /*
@@ -3459,6 +3596,17 @@ input[type='checkbox'][role='switch']:disabled {
 .oyl-input--file {
   width: auto;
   max-width: 100%;
+}
+
+/*
+ * #1028: a chooser whose options are rides takes the whole width of its
+ * section, so a ride's name gets every pixel the column has before `select`
+ * cuts it (`ride-chooser.browser.spec.ts`). Analysis' *Ride* chooser wore
+ * `.oyl-input`'s 8rem, which is a number box's width.
+ */
+.oyl-input--block {
+  display: block;
+  width: 100%;
 }
 
 .oyl-input--file {
@@ -5693,6 +5841,7 @@ input[type='checkbox'][role='switch']:disabled {
      list, told by an inset ring a forced palette removes, by a heavier one. */
   .oyl-panel,
   .oyl-empty-state,
+  .oyl-trainer-card,
   .oyl-pane-list__item,
   .oyl-settings-card,
   .oyl-ride-card,

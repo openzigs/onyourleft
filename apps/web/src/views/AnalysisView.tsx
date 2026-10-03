@@ -277,7 +277,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           <p>
             <label htmlFor="oyl-zone-ride">Ride</label>{' '}
             <select
-              className="oyl-input"
+              className="oyl-input oyl-input--block"
               id="oyl-zone-ride"
               value={selected ?? ''}
               onChange={(event) => {
