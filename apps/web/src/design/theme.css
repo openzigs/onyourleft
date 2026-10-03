@@ -115,6 +115,16 @@
   --oyl-color-illo-hill-near: #7db678;
   --oyl-color-illo-road: #6f726c;
 
+  /* The workout block chart's intensity bands (#1043), easiest first. Each
+     is a pair against `surface` in `tokens.ts` §CONTRAST_REQUIREMENTS. */
+  --oyl-color-band-recovery: #5e8f88;
+  --oyl-color-band-endurance: #467f75;
+  --oyl-color-band-tempo: #336d61;
+  --oyl-color-band-threshold: #2e5878;
+  --oyl-color-band-vo2: #7a3622;
+  --oyl-color-band-anaerobic: #5e2537;
+  --oyl-color-band-sprint: #3d1d3a;
+
   --oyl-space-xs: 0.25rem;
   --oyl-space-sm: 0.5rem;
   --oyl-space-md: 1rem;
@@ -274,6 +284,13 @@
   --oyl-color-illo-hill-far: #1d3a2b;
   --oyl-color-illo-hill-near: #2f5d3b;
   --oyl-color-illo-road: #5f6a63;
+  --oyl-color-band-recovery: #467a73;
+  --oyl-color-band-endurance: #529085;
+  --oyl-color-band-tempo: #62a596;
+  --oyl-color-band-threshold: #7fb0d6;
+  --oyl-color-band-vo2: #f2b391;
+  --oyl-color-band-anaerobic: #f5c9d3;
+  --oyl-color-band-sprint: #f8e7f3;
 }
 
 *,
@@ -4842,6 +4859,70 @@ select.oyl-input {
 }
 
 /*
+ * THE WORKOUT BLOCK CHART (#1043).
+ *
+ * Time across, share of threshold up (`workouts/block-chart.ts`). A block is
+ * filled by its intensity band, each a pair against this well, `surface`, in
+ * `tokens.ts` §CONTRAST_REQUIREMENTS; a free ride is an outline with hatching
+ * and no fill, and the dashed rule is threshold — so no band is told by colour
+ * alone (SC 1.4.1). `workouts/BlockChart.tsx` §BLOCK_CHART_PAINTS is the same
+ * table, held to these rules by its test. `vector-effect` keeps the strokes
+ * even under the horizontal stretch, for `.oyl-trace__line`'s reason.
+ */
+.oyl-block-chart {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  height: 6rem;
+  margin-top: var(--oyl-space-sm);
+  width: 100%;
+}
+
+.oyl-block-chart__band-recovery {
+  fill: var(--oyl-color-band-recovery);
+}
+
+.oyl-block-chart__band-endurance {
+  fill: var(--oyl-color-band-endurance);
+}
+
+.oyl-block-chart__band-tempo {
+  fill: var(--oyl-color-band-tempo);
+}
+
+.oyl-block-chart__band-threshold {
+  fill: var(--oyl-color-band-threshold);
+}
+
+.oyl-block-chart__band-vo2 {
+  fill: var(--oyl-color-band-vo2);
+}
+
+.oyl-block-chart__band-anaerobic {
+  fill: var(--oyl-color-band-anaerobic);
+}
+
+.oyl-block-chart__band-sprint {
+  fill: var(--oyl-color-band-sprint);
+}
+
+.oyl-block-chart__free-ride {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-block-chart__rule {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-dasharray: 6 4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
  * The ride HUD (#94).
  *
  * Sized for a phone clamped to a handlebar and read at about 60 cm, by a rider
@@ -4915,6 +4996,13 @@ select.oyl-input {
   --oyl-color-illo-hill-far: #a7d3a3;
   --oyl-color-illo-hill-near: #7db678;
   --oyl-color-illo-road: #6f726c;
+  --oyl-color-band-recovery: #5e8f88;
+  --oyl-color-band-endurance: #467f75;
+  --oyl-color-band-tempo: #336d61;
+  --oyl-color-band-threshold: #2e5878;
+  --oyl-color-band-vo2: #7a3622;
+  --oyl-color-band-anaerobic: #5e2537;
+  --oyl-color-band-sprint: #3d1d3a;
 
   color: var(--oyl-color-hud-ink);
   display: flex;

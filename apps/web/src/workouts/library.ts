@@ -46,7 +46,8 @@ export interface WorkoutRow {
    * Words rather than a chart, and that is #48's rule rather than a placeholder:
    * a workout's structure has to be readable without seeing it, and a screen
    * that only draws it is one where the structure is unavailable to a screen
-   * reader. A chart may sit beside this later; it may not replace it.
+   * reader. A chart may sit beside this; it may not replace it — and since
+   * #1043 one does (`BlockChart.tsx`), `aria-hidden` beside these words.
    */
   readonly shape: string;
   /**

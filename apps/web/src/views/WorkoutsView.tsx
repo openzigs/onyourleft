@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { memo, useCallback, useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type FormEvent,
+  type JSX,
+} from 'react';
 
-import { expandWorkout, type WorkoutBlock, type WorkoutTimeline } from '@onyourleft/domain';
+import {
+  expandWorkout,
+  type Workout,
+  type WorkoutBlock,
+  type WorkoutTimeline,
+} from '@onyourleft/domain';
 import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -22,6 +36,7 @@ import {
   type BlockDraft,
   type BuildRefusal,
 } from '../workouts/build';
+import { BlockChart } from '../workouts/BlockChart';
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
@@ -55,9 +70,10 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  * and #202 is the issue that settles it.
  *
  * **Colour carries nothing.** A block's kind is a word in its own cell, for
- * `AnalysisView.tsx`'s reason, and the workout's shape is a sentence rather
- * than a chart — see `library.ts` for why the words are the primary form and
- * not a fallback.
+ * `AnalysisView.tsx`'s reason, and the workout's shape is a sentence — see
+ * `library.ts` for why the words are the primary form and not a fallback.
+ * Since #1043 a block chart sits beside those words, on a saved workout and in
+ * the builder, `aria-hidden` and repeating them (`workouts/BlockChart.tsx`).
  *
  * **A list beside its detail — #670.** The saved workouts are the list;
  * choosing one (`#/workouts/selected/<id>`) puts it, with its export and its
@@ -149,6 +165,33 @@ const WorkoutCardArt = memo(function WorkoutCardArt({
       <WorkoutShape workout={timeline} className="tw:block tw:size-full" />
     </div>
   );
+});
+
+/**
+ * A workout's block chart — #1043 — or nothing, for one that cannot be expanded.
+ *
+ * The builder hands it blocks that are each valid but may not yet make a
+ * rideable workout (none at all, or more than `MAXIMUM_SEGMENTS` between them):
+ * `expandWorkout` refuses those, and the builder's own refusal is what says so
+ * when the rider presses *Save workout*. Drawn from the blocks as they stand,
+ * so it follows every add and remove.
+ */
+const WorkoutBlockChart = memo(function WorkoutBlockChart({
+  blocks,
+}: {
+  readonly blocks: Workout['blocks'];
+}): JSX.Element | null {
+  const timeline = useMemo((): WorkoutTimeline | undefined => {
+    // An empty builder is not expanded at all: there is nothing to draw, and
+    // `expandWorkout` would only throw (#941's count of expansions per load).
+    if (blocks.length === 0) return undefined;
+    try {
+      return expandWorkout({ name: '', blocks });
+    } catch {
+      return undefined;
+    }
+  }, [blocks]);
+  return timeline === undefined ? null : <BlockChart segments={timeline.segments} />;
 });
 
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
@@ -531,6 +574,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             Delete {shown.entry.row.name}
           </Button>
         </p>
+        {/* #1043: below the workout's own controls, so it pushes none of them down. */}
+        <WorkoutBlockChart blocks={shown.entry.record.workout.blocks} />
         {exported === undefined ? null : (
           <StatusMessage tone="success" live>
             {exported}
@@ -614,6 +659,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   ))}
                 </ol>
               )}
+              <WorkoutBlockChart blocks={blocks} />
 
               <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
                 <p>
