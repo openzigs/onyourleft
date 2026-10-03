@@ -53,7 +53,13 @@ import { useEffect, useId, useState, type JSX } from 'react';
 
 import { Button, ButtonLink } from '../design/Button';
 import { Reading } from '../design/Reading';
-import { formatDuration, formatPowerValue, POWER_UNIT } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  noPowerText,
+  POWER_UNIT,
+  shownAveragePower,
+} from '../format';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { distanceUnit, formatDistance, spokenDistanceUnit } from '../units/format';
@@ -91,6 +97,9 @@ export function RideResultCard({
   const units = useUnits();
   const headingId = useId();
   const distance = formatDistance(result.distance, units);
+  // #1054: a ride whose power readings were all 0 saves an average of 0 W, and
+  // that says nothing was measured — the card says what it says for no power.
+  const averagePower = shownAveragePower(result.averagePower);
   const spoken = resultSentence(result, distance.value, spokenDistanceUnit(units));
   // Decided as the card mounts. The controller hearing `onAnnounced` turns the
   // prop to `false` on the very next render, and that must not empty the
@@ -129,10 +138,10 @@ export function RideResultCard({
         <div>
           <dt>Average power</dt>
           <dd>
-            {result.averagePower === undefined ? (
-              'No power meter'
+            {averagePower === undefined ? (
+              noPowerText(result.averagePower)
             ) : (
-              <Reading value={formatPowerValue(result.averagePower)} unit={POWER_UNIT} />
+              <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
             )}
           </dd>
         </div>

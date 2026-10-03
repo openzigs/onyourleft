@@ -66,7 +66,14 @@ import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
-import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
+import {
+  formatDuration,
+  formatPowerValue,
+  formatStartedAt,
+  POWER_UNIT,
+  noPowerText,
+  shownAveragePower,
+} from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit, formatDistance } from '../units/format';
 import {
@@ -399,6 +406,8 @@ export function ActivityDetailView({
   const { activity, streams, laps, sideCamera, writeUp: savedWriteUp } = state.overview;
   const available = streams?.channels ?? [];
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
+  // #1054: a stored average that shows as 0 W says nothing was measured.
+  const averagePower = shownAveragePower(activity.averagePower);
 
   return (
     <>
@@ -433,10 +442,10 @@ export function ActivityDetailView({
         <div>
           <dt>Average power</dt>
           <dd>
-            {activity.averagePower === undefined ? (
-              'No power meter'
+            {averagePower === undefined ? (
+              noPowerText(activity.averagePower)
             ) : (
-              <Reading value={formatPowerValue(activity.averagePower)} unit={POWER_UNIT} />
+              <Reading value={formatPowerValue(averagePower)} unit={POWER_UNIT} />
             )}
           </dd>
         </div>

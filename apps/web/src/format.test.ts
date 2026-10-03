@@ -15,7 +15,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { formatDuration, POWER_UNIT } from './format';
+import { watts } from '@onyourleft/domain';
+
+import { formatDuration, POWER_UNIT, shownAveragePower } from './format';
 
 describe('what is left here is not a unit a rider chooses', () => {
   it('renders a duration the same way whichever units the rider reads in', () => {
@@ -25,5 +27,19 @@ describe('what is left here is not a unit a rider chooses', () => {
 
   it('names power in watts, which is the same word in both systems', () => {
     expect(POWER_UNIT).toBe('W');
+  });
+});
+
+describe('which stored average power is shown at all — #1054', () => {
+  it('shows none for a ride with no power, or one whose average shows as 0 W', () => {
+    expect(shownAveragePower(undefined)).toBeUndefined();
+    expect(shownAveragePower(watts(0))).toBeUndefined();
+    expect(shownAveragePower(watts(0.49))).toBeUndefined();
+  });
+
+  it('shows every average that reads as a watt or more, unchanged', () => {
+    expect(shownAveragePower(watts(0.5))).toBe(0.5);
+    expect(shownAveragePower(watts(1))).toBe(1);
+    expect(shownAveragePower(watts(212))).toBe(212);
   });
 });

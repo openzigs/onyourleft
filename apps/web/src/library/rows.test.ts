@@ -65,11 +65,21 @@ describe('rowFor', () => {
   });
 
   it('renders an absent average power as undefined rather than zero', () => {
-    // A ride with no power meter and a ride that averaged 0 W are different
-    // facts, and 0 is a plausible-looking number for the first one.
+    // 0 is a plausible-looking number for a ride whose power nobody measured.
     expect(rowFor(summary('a'), 'metric').averagePower).toBeUndefined();
-    expect(rowFor(summary('b', { averagePower: watts(0) }), 'metric').averagePower).toBe('0');
     expect(rowFor(summary('c', { averagePower: watts(212.6) }), 'metric').averagePower).toBe('213');
+    expect(rowFor(summary('d', { averagePower: watts(1) }), 'metric').averagePower).toBe('1');
+  });
+
+  it('renders a stored average of 0 W as undefined too — #1054', () => {
+    // A ride whose power readings were all 0 stores an average of 0
+    // (`recording/finish.ts` §`averagePowerOf`). Until #1054 the row carried
+    // '0' and the card drew "0 W" large; that says nothing was measured.
+    expect(rowFor(summary('b', { averagePower: watts(0) }), 'metric').averagePower).toBeUndefined();
+    // A mean under half a watt shows as 0 too, and is the same non-fact.
+    expect(
+      rowFor(summary('e', { averagePower: watts(0.4) }), 'metric').averagePower,
+    ).toBeUndefined();
   });
 
   it('formats duration and distance the way the rest of the shell does', () => {

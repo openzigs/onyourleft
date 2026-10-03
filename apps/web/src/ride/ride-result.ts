@@ -11,7 +11,7 @@
  * |---|---|
  * | the ride's elapsed time | the recording engine, written to the activity (`recording/finish.ts`) |
  * | its distance | `finish.ts` §`distanceOf`, written to the activity |
- * | its average power | `finish.ts` §`averagePowerOf`, written to the activity |
+ * | its average power | `finish.ts` §`averagePowerOf`, written to the activity — and not shown when it is 0 W (`format.ts` §`shownAveragePower`, #1054) |
  * | its average heart rate, where there is one | {@link statedAverageHeartRate} — the figure the ride's page states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`), computed by the page's OWN two steps over the samples the save wrote |
  * | how the race against the rider's own best ended, in the trainer game | `game/ghost-outcome.ts`, LATCHED — carried here, never re-derived |
  *
