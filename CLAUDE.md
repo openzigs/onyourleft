@@ -5198,6 +5198,7 @@ top of an issue **supersedes its body**.
 | Why the offer says "up to" a length rather than a length | `apps/web/src/recording/recovery.ts` §"What this deliberately does not read" |
 | Why a recorded ride's distance is integrated from speed, and what a dropout does to it | `apps/web/src/recording/finish.ts` §`distanceOf` |
 | What a rider is told when a finished ride cannot be added to their activities | `apps/web/src/views/RideView.tsx`, and the four cases in `RideView.test.tsx` |
+| Why a ride whose power readings were all 0 shows no average power rather than "0 W", and why the stored 0 is kept | `apps/web/src/format.ts` §`shownAveragePower`, `apps/web/src/recording/finish.test.ts` §"#1054", [#1054](https://github.com/openzigs/onyourleft/issues/1054) |
 | What proves an ERG workout's targets survive all the way into a FIT file | `apps/web/src/workout/erg-to-file.test.ts` |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |

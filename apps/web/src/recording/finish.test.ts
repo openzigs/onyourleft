@@ -172,6 +172,32 @@ describe('what the activity says about the ride', () => {
     expect('averagePower' in activity).toBe(false);
   });
 
+  it('stores no average for no power channel, and 0 W for readings that were all 0 — #1054', async () => {
+    // #1054's first criterion, read back through the store as the library's
+    // card reads it. The 0 is what the readings averaged, and it stays stored;
+    // it is `format.ts` §`shownAveragePower` that keeps it off the screen.
+    await seedAthletes(harness);
+    const zeros = series({
+      channels: {
+        power: Array.from({ length: 10 }, () => watts(0)),
+        speed: Array.from({ length: 10 }, () => metresPerSecond(5)),
+      },
+    });
+    const noPower = series({ channels: { speed: [metresPerSecond(5)] }, sampleCount: 1 });
+    const second = toActivityId('no-power-channel');
+    await harness.write(async (store) => {
+      await saveFinishedRide(store, rideToSave(input({ series: zeros })));
+      await saveFinishedRide(store, rideToSave(input({ id: second, series: noPower })));
+    });
+    const read = await harness.read(async (store) => [
+      await store.getActivity(ATHLETE_A, ACTIVITY),
+      await store.getActivity(ATHLETE_A, second),
+    ]);
+    expect(read[0]?.averagePower).toBe(0);
+    expect(read[1] !== undefined && 'averagePower' in read[1]).toBe(false);
+    expect(read[1]).toBeDefined();
+  });
+
   it('sets no visibility, so the store applies ADR 0004’s private default', async () => {
     await seedAthletes(harness);
     const finished = rideToSave(input());
