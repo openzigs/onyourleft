@@ -171,8 +171,17 @@ export interface ReflowMeasurement {
   /** CSS px between that element's right edge and the viewport's. Negative is an overflow. */
   readonly spare: number;
   readonly scrollBoxes: readonly ScrollBox[];
-  /** The activity library's `data-layout`, or `null` on any other route. */
-  readonly libraryLayout: string | null;
+  /**
+   * The activity library's cards (#1041): how many there are, how many grid
+   * columns they are laid out in, how many tables the library holds (none),
+   * and the shortest card link's height — or `null` on any other route.
+   */
+  readonly library: {
+    readonly cards: number;
+    readonly columns: number;
+    readonly tables: number;
+    readonly shortestLink: number | null;
+  } | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
   /**
@@ -506,6 +515,28 @@ function nameOf(element: Element): string {
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** The activity library's cards, as {@link ReflowMeasurement.library} says. */
+function libraryCards(): ReflowMeasurement['library'] {
+  const library = document.querySelector('.oyl-library');
+  if (library === null) return null;
+  const list = library.querySelector<HTMLElement>('.oyl-activity-cards');
+  const columns =
+    list === null
+      ? 0
+      : getComputedStyle(list)
+          .gridTemplateColumns.split(' ')
+          .filter((track) => track.trim() !== '').length;
+  const links = [...library.querySelectorAll('.oyl-activity-card__name a')].map(
+    (link) => link.getBoundingClientRect().height,
+  );
+  return {
+    cards: library.querySelectorAll('.oyl-activity-cards > li').length,
+    columns,
+    tables: library.querySelectorAll('table').length,
+    shortestLink: links.length === 0 ? null : Math.min(...links),
+  };
 }
 
 /**
@@ -1110,7 +1141,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     widest: reach.description,
     spare: reach.spare,
     scrollBoxes: scrollBoxes(),
-    libraryLayout: document.querySelector('.oyl-library')?.getAttribute('data-layout') ?? null,
+    library: libraryCards(),
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
     expectation,

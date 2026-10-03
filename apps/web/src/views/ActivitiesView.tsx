@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type JSX,
-  type RefObject,
-} from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
@@ -18,13 +9,11 @@ import { ConfirmDialog } from '../design/ConfirmDialog';
 import { Reading } from '../design/Reading';
 import { EmptyState } from '../design/EmptyState';
 import { KeptVisible } from '../design/KeptVisible';
-import { ScrollTable } from '../design/ScrollTable';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
-import { libraryLayout, type LibraryLayout } from '../library/layout';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
@@ -81,6 +70,19 @@ import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/
  *
  * *Start a ride* comes FIRST since #670, above the sort control: #668 measured
  * it 5,560 px down a populated library, below forty rides.
+ *
+ * ## Every ride a card, at every width — #1041
+ *
+ * Until #1041 the library was a table wherever its six columns fitted and a
+ * list of cards below that (#660, measured by a `ResizeObserver` from the
+ * width the list was given). It is cards everywhere now, laid out in a grid
+ * that is one column on a phone and more where the pane is wider
+ * (`theme.css` §`.oyl-activity-cards`) — so there is nothing left to measure,
+ * and no frame in which one layout is drawn and then swapped for the other.
+ *
+ * **The read budget is unchanged: one `listActivitySummaries` per page of
+ * {@link PAGE_SIZE}, and no read per card.** A card is drawn from its summary
+ * alone, which is why it draws no shape — {@link RideCard} says why.
  */
 export interface ActivitiesViewProps {
   /**
@@ -150,95 +152,6 @@ function sortOptionFor(orderBy: ActivityOrder, direction: SortDirection): SortOp
   );
 }
 
-/**
- * Table or cards, from the width the library is given — `library/layout.ts`.
- *
- * ⚠️ **Measured once, synchronously, before the first paint, and then watched.**
- * A `ResizeObserver` alone is not enough: its first notification does arrive
- * before the first paint, but a state update from inside it is not flushed by
- * React until after that paint, so a phone drew one frame of the table and
- * then swapped it — sampled per animation frame in #683's review, three runs
- * of three. An update made in a LAYOUT effect is flushed before the browser
- * paints, so the width is read here first and the observer only follows later
- * changes. `reflow.browser.spec.ts` §"the first frame" samples every frame
- * from navigation and fails on a table before cards — which guards the
- * synchronous first read above, and not the choice of a layout effect over an
- * ordinary one: nothing has shown that it tells the two apart (#690).
- *
- * Where there is no `ResizeObserver` — jsdom — nothing is measured and it
- * stays a table. A width of nought is read as "not laid out" rather than as a
- * phone, because jsdom reports nought for every box and a real container of
- * nought width has nothing to lay out.
- */
-function useLibraryLayout(
-  present: boolean,
-  selected: string | undefined,
-): [RefObject<HTMLDivElement | null>, LibraryLayout] {
-  const container = useRef<HTMLDivElement | null>(null);
-  const [layout, setLayout] = useState<LibraryLayout>('table');
-  /** The container's content width now, as a layout, or nothing while it is hidden. */
-  const measure = useCallback((): void => {
-    const element = container.current;
-    if (element === null || typeof ResizeObserver !== 'function') return;
-    const width = contentWidth(element);
-    if (width > 0) setLayout(libraryLayout(width, rootRem()));
-  }, []);
-  useLayoutEffect(() => {
-    const element = container.current;
-    if (element === null || typeof ResizeObserver !== 'function') {
-      return undefined;
-    }
-    measure();
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[entries.length - 1]?.contentRect.width;
-      // ⚠️ #738: a width of NOTHING is a hidden list, not a narrow one, and is
-      // ignored as the first measurement above ignores it. On one pane the
-      // list is `hidden` while an item is chosen; the observer reported 0,
-      // the list became cards, and on the way back it was drawn as cards and
-      // then as a table once the observer saw its width again — re-creating
-      // the item's link after `ListDetail` had already focused it, so focus
-      // fell to the page (list-detail.browser.spec.ts, 800×1280, CI run
-      // 36412215912). Keeping the last layout means the link focus returns
-      // to is the one that stays.
-      if (width === undefined || !(width > 0)) return;
-      setLayout(libraryLayout(width, rootRem()));
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-    // Re-attached when a library arrives: with none, there is no container.
-  }, [present, measure]);
-  // ⚠️ And measured again whenever the choice changes (#758). On one pane the
-  // list is `hidden` while a ride is chosen, so it can come back at a width it
-  // never had while shown: a phone opened at a ride's own address, or turned
-  // with the ride open. The observer would see the new width only after
-  // `ListDetail`'s passive effect had returned focus to the old layout's link,
-  // and the redraw dropped it. This layout effect runs in the commit that
-  // removes `hidden`, and its update is flushed before any passive effect, so
-  // focus returns to the link that stays. Its own effect since #864: the
-  // observer above is not torn down and made again on every choice.
-  useLayoutEffect(() => {
-    measure();
-  }, [selected, measure]);
-  return [container, layout];
-}
-
-/** The root font size in pixels: what a `rem` is. */
-function rootRem(): number {
-  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
-}
-
-/** The content-box width a `ResizeObserver` would report as `contentRect.width`. */
-function contentWidth(element: HTMLElement): number {
-  const style = getComputedStyle(element);
-  const edges = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] as const;
-  return edges.reduce(
-    (width, edge) => width - (Number.parseFloat(style[edge]) || 0),
-    element.getBoundingClientRect().width,
-  );
-}
-
 /** The selected ride, when it is not in the page the list read. */
 type Fetched =
   | { readonly id: string; readonly kind: 'found'; readonly summary: ActivitySummary }
@@ -275,7 +188,6 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
   const deletedOne = useRef(false);
   const [reloads, setReloads] = useState(0);
   const units = useUnits();
-  const [container, layout] = useLibraryLayout(library !== undefined, selected);
   const listCaptionId = useId();
 
   const load = useCallback(async (): Promise<void> => {
@@ -440,7 +352,7 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
   );
 
   const list = (
-    <div className="oyl-library" data-layout={layout} ref={container}>
+    <div className="oyl-library">
       {/*
         #668: the next steps are actions, so they are drawn as buttons rather
         than links in a sentence — on an empty library they are the only
@@ -498,7 +410,7 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
           <p className="oyl-muted">{caption}</p>
           {emptyState}
         </>
-      ) : layout === 'cards' ? (
+      ) : (
         <>
           <p className="oyl-muted" id={listCaptionId}>
             {caption}
@@ -508,79 +420,17 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
           ) : (
             <ul className="oyl-activity-cards" aria-labelledby={listCaptionId}>
               {rows.map((row) => (
-                <li key={row.id} className="oyl-panel oyl-activity-card">
-                  <p className="oyl-activity-card__name oyl-library__name">
-                    {selectLink(row)}
-                    {indoor(row)}
-                  </p>
-                  <dl className="oyl-activity-card__facts">
-                    <div>
-                      <dt>Started</dt>
-                      <dd>{row.startedAt}</dd>
-                    </div>
-                    <div>
-                      <dt>Duration</dt>
-                      <dd>
-                        <Reading value={row.duration} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Distance</dt>
-                      <dd>
-                        <Reading value={row.distance} unit={distanceUnit(units)} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Avg power</dt>
-                      <dd>
-                        {row.averagePower === undefined ? (
-                          '—'
-                        ) : (
-                          <Reading value={row.averagePower} unit={POWER_UNIT} />
-                        )}
-                      </dd>
-                    </div>
-                  </dl>
-                  {deleteButton(row)}
-                </li>
+                <RideCard
+                  key={row.id}
+                  row={row}
+                  link={selectLink(row)}
+                  indoor={indoor(row)}
+                  remove={deleteButton(row)}
+                />
               ))}
             </ul>
           )}
         </>
-      ) : (
-        <ScrollTable className="oyl-table" caption={caption}>
-          <thead>
-            <tr>
-              <th scope="col">Ride</th>
-              <th scope="col">Started</th>
-              <th scope="col">Duration</th>
-              <th scope="col">Distance ({distanceUnit(units)})</th>
-              <th scope="col">Avg power ({POWER_UNIT})</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length > 0 ? (
-              rows.map((row) => (
-                <tr key={row.id}>
-                  <th scope="row" className="oyl-library__name">
-                    {selectLink(row)}
-                    {indoor(row)}
-                  </th>
-                  <td>{row.startedAt}</td>
-                  <td>{row.duration}</td>
-                  <td>{row.distance}</td>
-                  <td>{row.averagePower ?? '—'}</td>
-                  <td>{deleteButton(row)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={6}>{nothingYet}</td>
-              </tr>
-            )}
-          </tbody>
-        </ScrollTable>
       )}
 
       {/*
@@ -685,6 +535,75 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         )
       }
     />
+  );
+}
+
+/**
+ * One ride in the list — #1041: a card at every width, its name and date, and
+ * its facts as large readings.
+ *
+ * ⚠️ **Drawn from the ride's {@link LibraryRow} and nothing else**, which is
+ * the page's one `listActivitySummaries` read: a card issues no read of its
+ * own (`ActivitiesView.test.tsx` §"#1041" counts them over fifty cards).
+ *
+ * ⚠️ **No drawn shape, on purpose.** #1041 asks for the ride's trace, or else
+ * its power or elevation profile, from the illustration kit — but only from
+ * data the library already reads or a summary already stored, and otherwise
+ * none. An `ActivitySummary` carries no position, no power sample and no
+ * altitude (`packages/store` §`summaryOf`), and no stored summary of a ride's
+ * shape exists, so every card would need a stream read of its own to draw
+ * one. So no card draws a shape, and none draws a stand-in: a road or a hill
+ * that is not this ride's would be a picture of nothing. Because nothing here
+ * draws a track, there is no privacy-zone trim to apply either — the day a
+ * stored shape lands, it is trimmed as `detail/privacy.ts` trims the detail
+ * view's.
+ *
+ * Average power is shown only where the ride has it. A ride with no power
+ * meter is not drawn as "0 W" or "—": the reading is simply absent.
+ */
+function RideCard({
+  row,
+  link,
+  indoor,
+  remove,
+}: {
+  readonly row: LibraryRow;
+  readonly link: JSX.Element;
+  readonly indoor: JSX.Element | undefined;
+  readonly remove: JSX.Element;
+}): JSX.Element {
+  const units = useUnits();
+  return (
+    <li className="oyl-panel oyl-activity-card">
+      <p className="oyl-activity-card__name oyl-library__name">
+        {link}
+        {indoor}
+      </p>
+      <p className="oyl-muted oyl-activity-card__date">{row.startedAt}</p>
+      <dl className="oyl-activity-card__facts">
+        <div>
+          <dt>Duration</dt>
+          <dd>
+            <Reading value={row.duration} />
+          </dd>
+        </div>
+        <div>
+          <dt>Distance</dt>
+          <dd>
+            <Reading value={row.distance} unit={distanceUnit(units)} />
+          </dd>
+        </div>
+        {row.averagePower === undefined ? null : (
+          <div>
+            <dt>Avg power</dt>
+            <dd>
+              <Reading value={row.averagePower} unit={POWER_UNIT} />
+            </dd>
+          </div>
+        )}
+      </dl>
+      {remove}
+    </li>
   );
 }
 

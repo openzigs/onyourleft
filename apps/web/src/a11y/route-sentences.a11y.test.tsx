@@ -88,6 +88,16 @@
  * now, above the switch rather than under it, so it names the switch — "Turn
  * on “This route is a loop” for a circuit…".
  *
+ * ⚠️ **Re-recorded by #1041**, when Activities became a card per ride at every
+ * width and its table went. Nothing was added, and six lines of the populated
+ * walk went with the table, none of them a lost word: its column headings
+ * "Ride", "Distance (km)", "Avg power (W)" and "Actions" — as #670's Workouts
+ * "Actions" and #943's empty-table headings went — whose facts each card
+ * names as "Distance" and "Avg power" beside a reading that carries its unit;
+ * and the bare cells "123.5" and "234", which are said as the readings
+ * "123.5 km" and "234 W" on the card and in the selected ride's summary, both
+ * recorded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -902,6 +902,17 @@ rather than a form to fill in, and the style is set as tokens before any art is 
   `reflow.html?shape=off`, with `?shape=tall` as the control; §"#982" publishes how many cards
   fit before scrolling). Activities draws no trace on its cards: a ride's line is location data under
   [ADR 0004](adr/0004-privacy-and-location.md), and drawing one on a list is its own question.
+- **Every ride is a card, at every width** ([#1041](https://github.com/openzigs/onyourleft/issues/1041)).
+  The Activities table (#660's `library/layout.ts`, a table from 32 rem) is gone: each ride is a
+  card in a grid, one column on a phone and more where the pane is wider (`theme.css`
+  §`.oyl-activity-cards`), with its name, its date and its facts as `Reading`s — duration, distance
+  in the rider's units, and average power only where the ride has it. ⚠️ **A ride card draws no
+  shape**, and that is the issue's own rule rather than an omission: a shape could come only from
+  what the library already reads or a summary already stored, an `ActivitySummary` carries no track,
+  power sample or altitude, and no stored summary of a ride's shape exists. So the read budget is
+  #62's, unchanged — one `listActivitySummaries` per page and no read per card
+  (`ActivitiesView.test.tsx` §"#1041") — and with no trace drawn there is no privacy-zone trim to
+  apply on a card. A stored shape summary is a store change of its own.
 - **A screen with nothing on it yet is one component** ([#943](https://github.com/openzigs/onyourleft/issues/943)).
   `design/EmptyState.tsx` is a drawing from the kit (about 48 px tall, the owner's ruling of
   2026-10-01, one custom property `--oyl-empty-state-art-height`), a heading, the screen's own

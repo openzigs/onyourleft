@@ -3900,28 +3900,59 @@ select.oyl-input {
 }
 
 /*
- * The library on a narrow width — #660. One card per ride, in the order the
- * table would list them; `library/layout.ts` says when. A `dl` of the four
- * facts, each name above its value, two to a row where they fit.
+ * The library — every ride a card, at every width (#1041; until then #660's
+ * cards were the narrow-width fallback for a table). A grid of cards: one
+ * column where the pane is narrower than two cards — a phone, and the list
+ * pane beside a ride at two panes — and as many as fit where it is wider. The
+ * `min()` keeps a card from forcing a column wider than a 320 px phone (SC
+ * 1.4.10), which `reflow.browser.spec.ts` walks.
+ *
+ * A card is its name, its date, and its facts as readings (`Reading`), two to
+ * a row where they fit. The chosen ride is told by an inset ring as a pane
+ * list's chosen item is (#992): `accent` on `surfaceRaised` is a declared 3:1
+ * pair in both palettes, and the link's `aria-current` says it in words.
  */
 .oyl-activity-cards {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: var(--oyl-space-sm);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
   list-style: none;
   margin: var(--oyl-space-md) 0;
   padding: 0;
 }
 
+.oyl-activity-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+
+.oyl-activity-card:has(a[aria-current='true']) {
+  box-shadow: inset 0 0 0 3px var(--oyl-color-accent);
+}
+
 .oyl-activity-card__name {
   font-weight: 600;
+  margin: 0;
+}
+
+/* The name is the card's link: a 44 px target however short the name. */
+.oyl-activity-card__name a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+.oyl-activity-card__date {
   margin: 0 0 var(--oyl-space-xs);
 }
 
 .oyl-activity-card__facts {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  align-self: stretch;
   margin: 0 0 var(--oyl-space-sm);
 }
 
@@ -5950,6 +5981,13 @@ select.oyl-input {
   .oyl-pairing__row,
   .oyl-chooser__loadout {
     border: 1px solid;
+  }
+
+  /* #1041: the chosen ride card's ring is a box shadow, which a forced
+     palette removes; an outline inside its edge stands in, moving nothing. */
+  .oyl-activity-card:has(a[aria-current='true']) {
+    outline: 3px solid;
+    outline-offset: -3px;
   }
 
   .oyl-pane-list__item[aria-current='true'] {

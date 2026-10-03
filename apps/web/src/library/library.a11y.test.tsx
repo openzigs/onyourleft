@@ -6,12 +6,13 @@
  *
  * `routes.a11y.test.tsx` audits every route, and it renders `AppShell` with no
  * ports — so on the activities route it audits the *no local store* screen.
- * That state is worth auditing and it is not the interesting one: the table,
- * its per-row controls and its sort buttons only exist once there is a store,
+ * That state is worth auditing and it is not the interesting one: the cards,
+ * their per-ride controls and the sort control only exist once there is a store,
  * and an audit that never sees them would report a clean route while the thing
  * riders use went unchecked.
  *
- * So this file audits the populated table directly. It carries the
+ * So this file audits the populated library directly — a card per ride at
+ * every width since #1041, so there is no second layout to audit. It carries the
  * `*.a11y.test.*` name, which is what `test:a11y` selects on and what
  * `check-a11y-suite` enforces — a file in this shape is in the gate without
  * anyone editing CI.
@@ -19,7 +20,7 @@
 
 import { metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, athleteId, type ActivitySummary } from '@onyourleft/store';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -34,7 +35,6 @@ let mounted: Mounted | undefined;
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
-  vi.unstubAllGlobals();
 });
 
 function ride(id: string, name: string, hasPosition: boolean): ActivitySummary {
@@ -76,35 +76,31 @@ describe('the activity library, populated', () => {
     expect(violations, formatViolations(violations)).toStrictEqual([]);
   });
 
-  it('puts every control in the tab order, including one per row', async () => {
+  it('puts every control in the tab order, including one per card', async () => {
     // A delete button reachable only by pointer is #48's first criterion
     // failing quietly: the control is there, it is just not operable.
     await mountLibrary();
 
     const tabbable = tabbableElements(document.body);
-    // The sort control (a select since #660), one delete per row, and the
-    // table's own scroll region, which a keyboard has to reach to scroll it.
-    const controls = queryAll<HTMLElement>(
-      document.body,
-      'button, select, [role="region"][tabindex="0"]',
-    );
-    expect(controls.length).toBe(4);
+    // The sort control (a select since #660), each card's link, and one
+    // delete per card. No scroll region since #1041: the table it held is gone.
+    const controls = queryAll<HTMLElement>(document.body, 'button, select, .oyl-activity-cards a');
+    expect(controls.length).toBe(5);
     for (const control of controls) {
       expect(tabbable).toContain(control);
     }
   });
 
-  it('names each row control by its ride, not just “Delete”', async () => {
+  it('names each card control by its ride, not just “Delete”', async () => {
     // Six identical "Delete" buttons is a list a screen reader cannot navigate:
     // the name has to say which ride. `VisuallyHidden` carries the name so the
     // visible column stays narrow.
     await mountLibrary();
 
-    const names = queryAll<HTMLButtonElement>(document.body, 'tbody button').map(
+    const names = queryAll<HTMLButtonElement>(document.body, '.oyl-activity-cards button').map(
       (button) => button.textContent ?? '',
     );
-    expect(names.some((name) => name.includes('Tuesday hills'))).toBe(true);
-    expect(names.some((name) => name.includes('Zwift hour'))).toBe(true);
+    expect([...names].sort()).toStrictEqual(['Delete Tuesday hills', 'Delete Zwift hour']);
   });
 
   it('states the indoor case in words rather than by an absent element', async () => {
@@ -112,68 +108,20 @@ describe('the activity library, populated', () => {
     // or by a gap alone. An indoor ride is the common case here.
     await mountLibrary();
 
-    const indoorRow = queryAll(document.body, 'tbody tr').find((row) =>
-      (row.textContent ?? '').includes('Zwift hour'),
+    const indoor = queryAll(document.body, '.oyl-activity-cards > li').find((card) =>
+      (card.textContent ?? '').includes('Zwift hour'),
     );
-    expect(indoorRow?.textContent).toContain('indoor');
+    expect(indoor?.textContent).toContain('indoor');
   });
 
   it('keeps the confirmation reachable and announced when a delete is armed', async () => {
     await mountLibrary();
-    const remove = queryAll<HTMLButtonElement>(document.body, 'tbody button')[0];
+    const remove = queryAll<HTMLButtonElement>(document.body, '.oyl-activity-cards button')[0];
     await activateWithKeyboard(remove as HTMLElement);
     await settle();
 
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toStrictEqual([]);
     expect(document.body.textContent).toContain('cannot be undone');
-  });
-});
-
-/**
- * #660: on a phone the library is a list of cards, and the audit has to see
- * that layout too — jsdom has no `ResizeObserver`, so without one reporting a
- * narrow width every case above audits the table only.
- */
-describe('the activity library, as a card list on a narrow width', () => {
-  async function mountCards(): Promise<void> {
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        readonly #callback: ResizeObserverCallback;
-        constructor(callback: ResizeObserverCallback) {
-          this.#callback = callback;
-        }
-        observe(): void {
-          this.#callback([{ contentRect: { width: 300 } } as unknown as ResizeObserverEntry], this);
-        }
-        disconnect(): void {
-          // Nothing to release.
-        }
-        unobserve(): void {
-          // Nothing to release.
-        }
-      },
-    );
-    await mountLibrary();
-    expect(queryAll(document.body, '.oyl-activity-cards > li')).toHaveLength(2);
-  }
-
-  it('has no accessibility violations', async () => {
-    await mountCards();
-    const violations = auditAccessibility(document);
-    expect(violations, formatViolations(violations)).toStrictEqual([]);
-  });
-
-  it('names each card’s delete by its ride, and says indoor in words', async () => {
-    await mountCards();
-    const names = queryAll<HTMLButtonElement>(document.body, '.oyl-activity-cards button').map(
-      (button) => button.textContent ?? '',
-    );
-    expect([...names].sort()).toStrictEqual(['Delete Tuesday hills', 'Delete Zwift hour']);
-    const indoor = queryAll(document.body, '.oyl-activity-cards > li').find((card) =>
-      (card.textContent ?? '').includes('Zwift hour'),
-    );
-    expect(indoor?.textContent).toContain('indoor');
   });
 });
