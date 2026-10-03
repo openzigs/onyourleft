@@ -71,7 +71,11 @@ import {
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
-import { MASKED_WORDS_LEAD, MaskedWordsPanel } from '../athlete/MaskedWordsPanel';
+import {
+  MASKED_WORDS_CAVEAT,
+  MASKED_WORDS_LEAD,
+  MaskedWordsPanel,
+} from '../athlete/MaskedWordsPanel';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
@@ -214,6 +218,9 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   'the app asks',
   CLEARING_STILL_REMOVES,
   MASKED_WORDS_LEAD,
+  // #1040: what masking cannot promise, and that your own computer is sent
+  // the text in full.
+  MASKED_WORDS_CAVEAT,
   // #836, ADR 0040 D-11: what the goals and documents are kept as, where they
   // go, and that a model reads them.
   ...RIDER_TEXT_KEPT_VISIBLE,
