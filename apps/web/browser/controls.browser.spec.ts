@@ -386,6 +386,9 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
       if (input === null || input === undefined || button === null || button === undefined) {
         return undefined;
       }
+      // In the middle of the viewport, clear of a phone's bottom navigation:
+      // a point outside the viewport hit-tests nothing.
+      button.scrollIntoView({ block: 'center' });
       const inputBox = input.getBoundingClientRect();
       const buttonBox = button.getBoundingClientRect();
       const centreX = buttonBox.left + buttonBox.width / 2;
@@ -447,8 +450,16 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
   test('a press on the button opens the platform picker', async ({ page }) => {
     await open(page, PHONE);
     await visit(page, 'routes');
-    const chooser = page.waitForEvent('filechooser');
-    await page.locator('main .oyl-file__button').first().click({ force: true });
+    // A real pointer press at the BUTTON's centre, not a click on an element:
+    // what is under that point is what takes it.
+    const button = page.locator('main .oyl-file__button').first();
+    await button.evaluate((element) => {
+      element.scrollIntoView({ block: 'center' });
+    });
+    const box = await button.boundingBox();
+    if (box === null) throw new Error('the button has no box');
+    const chooser = page.waitForEvent('filechooser', { timeout: 10_000 });
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     expect((await chooser).isMultiple()).toBe(false);
   });
 
