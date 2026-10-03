@@ -3957,8 +3957,15 @@ select.oyl-input {
 .oyl-activity-card__facts {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
-  /* 9rem, as `.oyl-home__facts` sizes it (#992): `10:23:45` at `xxl` is about 8.5rem. */
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  /*
+   * 10rem, one wider than `.oyl-home__facts`' 9rem (#992), MEASURED: #992's
+   * "`10:23:45` at `xxl` is about 8.5rem" is a Mac's system font (137 px).
+   * On the CI runner's Linux font the same numerals are about 153 px (9.6rem),
+   * and a 9rem grid split the 22.5rem list pane into two 148 px tracks it
+   * spilled 5 px out of (run 37131279707). `reflow.browser.spec.ts` holds a
+   * `10:23:45` to one line inside its fact.
+   */
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   align-self: stretch;
   margin: 0 0 var(--oyl-space-sm);
 }
