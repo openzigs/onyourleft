@@ -72,6 +72,13 @@
   --color-illo-hill-far: var(--oyl-color-illo-hill-far);
   --color-illo-hill-near: var(--oyl-color-illo-hill-near);
   --color-illo-road: var(--oyl-color-illo-road);
+  --color-band-recovery: var(--oyl-color-band-recovery);
+  --color-band-endurance: var(--oyl-color-band-endurance);
+  --color-band-tempo: var(--oyl-color-band-tempo);
+  --color-band-threshold: var(--oyl-color-band-threshold);
+  --color-band-vo2: var(--oyl-color-band-vo2);
+  --color-band-anaerobic: var(--oyl-color-band-anaerobic);
+  --color-band-sprint: var(--oyl-color-band-sprint);
   --color-hud-surface: var(--oyl-color-hud-surface);
   --color-hud-ink: var(--oyl-color-hud-ink);
   --color-hud-ink-muted: var(--oyl-color-hud-ink-muted);

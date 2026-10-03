@@ -310,6 +310,58 @@ describe('deleting a workout asks first', () => {
   });
 });
 
+describe('#1043 — the block chart', () => {
+  const chart = (root: ParentNode): Element | null => root.querySelector('[data-oyl-block-chart]');
+  const bandsDrawn = (root: ParentNode): string[] =>
+    queryAll<SVGPathElement>(root, '[data-oyl-block-chart] path')
+      .map((path) => path.getAttribute('class') ?? '')
+      .filter((name) => name.includes('__band-'))
+      .sort();
+
+  async function addSteady(view: Mounted, minutes: string, percent: string): Promise<void> {
+    await typeInto(field(view.container, 'block-minutes'), minutes);
+    await typeInto(field(view.container, 'block-percent'), percent);
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+  }
+
+  it('follows the builder as blocks are added and removed', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    expect(chart(view.container)).toBeNull();
+
+    await addSteady(view, '10', '65');
+    expect(bandsDrawn(view.container)).toEqual(['oyl-block-chart__band-endurance']);
+
+    await addSteady(view, '3', '110');
+    expect(bandsDrawn(view.container)).toEqual([
+      'oyl-block-chart__band-endurance',
+      'oyl-block-chart__band-vo2',
+    ]);
+
+    await activateWithKeyboard(buttonSaying(view.container, 'Remove block 1') as HTMLElement);
+    expect(bandsDrawn(view.container)).toEqual(['oyl-block-chart__band-vo2']);
+
+    await activateWithKeyboard(buttonSaying(view.container, 'Remove block 1') as HTMLElement);
+    expect(chart(view.container)).toBeNull();
+  });
+
+  it('draws a saved workout below its own controls, hidden from assistive technology', async () => {
+    const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
+    const drawn = chart(view.container);
+    expect(drawn).not.toBeNull();
+    expect(drawn?.getAttribute('aria-hidden')).toBe('true');
+    expect(drawn?.textContent).toBe('');
+    expect(bandsDrawn(view.container)).toEqual(['oyl-block-chart__band-endurance']);
+    // The words it repeats are on the page beside it.
+    expect(view.container.textContent).toContain('10 min at 60%');
+    const remove = buttonSaying(view.container, 'Delete Sweet spot');
+    expect(remove).toBeDefined();
+    expect(
+      (remove as HTMLElement).compareDocumentPosition(drawn as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe('what this screen does not claim', () => {
   it('quotes no watts and no load anywhere', async () => {
     // ⚠️ Every such number is a function of the rider's threshold, and this

@@ -225,6 +225,30 @@ export const COLOUR_TOKENS = {
   illoRoad: '#6f726c',
 
   /*
+   * The workout block chart's seven intensity bands (#1043) — one per power
+   * zone (`@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`), easiest first.
+   *
+   * ⚠️ **A band is never told by its colour alone** (SC 1.4.1): a block's
+   * band follows from its height, drawn against the dashed threshold rule,
+   * and the shares are in the words beside the chart. What the colours DO
+   * owe is SC 1.4.11's 3:1 against the chart's well (`surface`), as a
+   * graphical object, which is the pair each declares in
+   * {@link CONTRAST_REQUIREMENTS} — and a lightness that moves one way along
+   * the ramp, darker in the light palette and lighter in the dark one, so the
+   * ramp reads in greyscale ({@link BAND_TOKENS}, held by `tokens.test.ts`).
+   *
+   * Our own ramp (ADR 0009 L1): the house teal deepening to threshold, a slate
+   * at threshold, then brick and plum above it.
+   */
+  bandRecovery: '#5e8f88',
+  bandEndurance: '#467f75',
+  bandTempo: '#336d61',
+  bandThreshold: '#2e5878',
+  bandVo2: '#7a3622',
+  bandAnaerobic: '#5e2537',
+  bandSprint: '#3d1d3a',
+
+  /*
    * The ride HUD (#94), which is the one surface in this app that is drawn over
    * something we do not control.
    *
@@ -354,6 +378,13 @@ export const DARK_COLOUR_TOKENS = {
   illoHillFar: '#1d3a2b',
   illoHillNear: '#2f5d3b',
   illoRoad: '#5f6a63',
+  bandRecovery: '#467a73',
+  bandEndurance: '#529085',
+  bandTempo: '#62a596',
+  bandThreshold: '#7fb0d6',
+  bandVo2: '#f2b391',
+  bandAnaerobic: '#f5c9d3',
+  bandSprint: '#f8e7f3',
 } as const satisfies Record<ThemedColourToken, string>;
 
 /**
@@ -901,6 +932,54 @@ const ILLUSTRATION_FOCUS_MEASURED: Readonly<
   illoHillFar: { light: 10.4, dark: 10.26 },
   illoHillNear: { light: 7.35, dark: 6.31 },
   illoRoad: { light: 3.58, dark: 4.66 },
+};
+
+/**
+ * The workout block chart's intensity bands (#1043), easiest first — one per
+ * power zone, in `@onyourleft/domain` §`POWER_ZONE_LOWER_FRACTIONS`' order.
+ * `workouts/BlockChart.tsx` paints band `n` with the `n`th of these, and
+ * `tokens.test.ts` holds the ramp's lightness to one direction per palette.
+ */
+export const BAND_TOKENS = [
+  'bandRecovery',
+  'bandEndurance',
+  'bandTempo',
+  'bandThreshold',
+  'bandVo2',
+  'bandAnaerobic',
+  'bandSprint',
+] as const satisfies readonly ThemedColourToken[];
+
+/** One of {@link BAND_TOKENS}. */
+export type BandToken = (typeof BAND_TOKENS)[number];
+
+/**
+ * Which way a band's luminance moves as intensity rises, per palette: the
+ * ramp darkens on the light page and lightens on the dark one, as a raised
+ * surface does ({@link ELEVATION_DIRECTION}).
+ */
+export const BAND_DIRECTION: Readonly<Record<Theme, 'darker' | 'lighter'>> = ELEVATION_DIRECTION;
+
+/**
+ * The smallest contrast ratio two neighbouring bands may have, so the ramp is
+ * still a ramp in greyscale (SC 1.4.1's spirit; WCAG states no number for
+ * it). A legibility floor of this design system's own.
+ */
+export const MINIMUM_BAND_STEP = 1.15;
+
+/**
+ * What each band measures against the chart's well, `surface`, per palette —
+ * SC 1.4.11's 3:1 for a graphical object, held both ways by
+ * `contrast.a11y.test.ts` (#307's erosion rule).
+ */
+const BAND_ON_SURFACE_MEASURED: Readonly<Record<BandToken, Readonly<Record<Theme, number>>>> = {
+  bandRecovery: { light: 3.32, dark: 3.39 },
+  bandEndurance: { light: 4.2, dark: 4.49 },
+  bandTempo: { light: 5.47, dark: 5.79 },
+  bandThreshold: { light: 6.88, dark: 7.17 },
+  bandVo2: { light: 8.05, dark: 9.18 },
+  bandAnaerobic: { light: 10.66, dark: 11.18 },
+  bandSprint: { light: 13.34, dark: 13.97 },
 };
 
 /**
@@ -1456,5 +1535,19 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: ILLUSTRATION_FOCUS_MEASURED[token],
     where: `the focus ring of a control over art, where it lands on ${token} (WCAG 2.2 SC 2.4.13)`,
+  })),
+
+  /*
+   * #1043: each band of the workout block chart against the chart's well. A
+   * block is a graphical object (SC 1.4.11); the chart is `aria-hidden` beside
+   * the workout's words, and its free rides and threshold rule are drawn in
+   * `inkMuted` and `ink`, whose pairs on `surface` are above.
+   */
+  ...BAND_TOKENS.map((token): ContrastRequirement => ({
+    foreground: token,
+    background: 'surface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: BAND_ON_SURFACE_MEASURED[token],
+    where: `a ${token} block of the workout block chart, on its well (WCAG 2.2 SC 1.4.11)`,
   })),
 ];
