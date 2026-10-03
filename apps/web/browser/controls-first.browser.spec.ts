@@ -238,7 +238,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   camera: ['Filming a ride: the side camera', 'A side camera on a tripod'],
   game: ['Ride with others'],
   'route-builder': ['Waypoints'],
-  routes: ['Saved routes', 'Import a route'],
+  // #1030 (PR #1032): the share note went behind its own ⓘ.
+  routes: ['Saved routes', 'Import a route', 'Before you share a route'],
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
   // with it the ⓘ that explained the choice.
