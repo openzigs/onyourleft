@@ -390,6 +390,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
         facts.hasControl = true;
         return Promise.resolve();
       },
+      noteGameRideEnded: () => undefined,
     };
     return { controller, requests };
   }
@@ -432,6 +433,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
         facts.refusal = 'the machine did not answer op code 0x0 within 5 s';
         return Promise.resolve();
       },
+      noteGameRideEnded: () => undefined,
     };
     const port = gameTrainerPortOver(controller);
     expect(port.readTrainer().refusal).toBeUndefined();
@@ -471,11 +473,30 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
       }),
       simulationControl: () => undefined,
       requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
     });
     expect(port.workoutRescue()).toBeUndefined();
     rescue = { kind: 'floor', reason: 'Pedalling has stopped.' };
     expect(port.workoutRescue()).toEqual(rescue);
     expect(gameTrainerPortOver(undefined).workoutRescue()).toBeUndefined();
+  });
+
+  it('hands a game ride’s outcome to the ride controller, and to nothing without one — #1042', () => {
+    const noted: (string | undefined)[] = [];
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: (outcome) => {
+        noted.push(outcome);
+      },
+    });
+    port.gameRideEnded('beaten');
+    port.gameRideEnded(undefined);
+    expect(noted).toEqual(['beaten', undefined]);
+    expect(() => {
+      gameTrainerPortOver(undefined).gameRideEnded('level');
+    }).not.toThrow();
   });
 
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {

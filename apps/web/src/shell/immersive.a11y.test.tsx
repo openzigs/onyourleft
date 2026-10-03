@@ -81,6 +81,7 @@ const NO_CONTROL: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => undefined,
   recordingMayStop: () => false,
+  gameRideEnded: () => undefined,
   readTrainer: () => ({ kind: 'no-control', control: undefined }),
 };
 

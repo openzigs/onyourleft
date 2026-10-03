@@ -69,14 +69,22 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
 import {
+  beatsPerMinute,
   expandWorkout,
+  metres,
   seconds,
   thresholdShare,
   unixSeconds,
   watts,
   type WorkoutRescue,
 } from '@onyourleft/domain';
-import { athleteId, workoutId, type AthleteRecord, type WorkoutRecord } from '@onyourleft/store';
+import {
+  activityId,
+  athleteId,
+  workoutId,
+  type AthleteRecord,
+  type WorkoutRecord,
+} from '@onyourleft/store';
 
 import { stubAnalysis } from '../src/analysis/testing';
 import { scriptedSidePairing } from '../src/camera/testing';
@@ -214,6 +222,21 @@ const NO_SENSORS = QUERY.get('sensors') === 'none';
  */
 const WIDEST_READINGS = QUERY.get('readings') === 'widest';
 
+/**
+ * `rideview.html?ride=saved` — #1042: a ride stopped and SAVED, with its
+ * result card at its fullest — a heart rate as well as power, hours of
+ * elapsed time, and the longest of the game's outcome sentences — so "the
+ * card fits above the fold" is about the tallest card there is.
+ */
+const SAVED_RIDE = {
+  activityId: activityId('harness-ride'),
+  elapsedTime: seconds(12_345),
+  distance: metres(123_456),
+  averagePower: watts(1_234),
+  averageHeartRate: beatsPerMinute(188),
+  gameOutcome: 'not-beaten' as const,
+};
+
 function snapshot(): RideSnapshot {
   const riding = {
     ...ridingSnapshot(),
@@ -264,6 +287,15 @@ function snapshot(): RideSnapshot {
       movingSeconds: 0,
       sampleCount: 0,
       trainer: { ...riding.trainer, hasControl: false, target: { kind: 'none' } },
+    };
+  }
+  if (RIDE_STATE === 'saved') {
+    return {
+      ...riding,
+      phase: 'stopped',
+      saveState: 'saved',
+      savedActivityId: SAVED_RIDE.activityId,
+      savedRide: SAVED_RIDE,
     };
   }
   if (RIDE_STATE === 'armed') {
@@ -366,6 +398,18 @@ export interface RideViewMeasurement {
    * beside it is #259's failure on this screen.
    */
   readonly readings: readonly RideViewReading[];
+  /**
+   * #1042: the result card, if one stands — its box, its one link (a link is
+   * not in {@link controls}' live group, whose fold assertions predate it),
+   * and whether anything inside a fact spills out of it.
+   */
+  readonly resultCard:
+    | {
+        readonly box: Box;
+        readonly link: { readonly name: string; readonly box: Box; readonly onTop: boolean };
+        readonly spill: number;
+      }
+    | undefined;
   /** #1012: the sensor banner, if one stands, and its one link. */
   readonly sensorBanner:
     | {
@@ -415,6 +459,8 @@ declare global {
       readonly heldAboveTheForm: () => void;
       /** #1012's control: four readings to a row at any width. @see crammedReadings */
       readonly crammedReadings: () => void;
+      /** #1042's control: the card after the clock. @see cardAfterTheReadings */
+      readonly cardAfterTheReadings: () => void;
     };
   }
 }
@@ -512,7 +558,44 @@ function measure(): RideViewMeasurement {
           ).size,
     readings: readingsOf(metricGrid),
     sensorBanner: sensorBannerOf(),
+    resultCard: resultCardOf(),
   };
+}
+
+function resultCardOf(): RideViewMeasurement['resultCard'] {
+  const card = document.querySelector('[data-oyl-result-card]');
+  const link = card?.querySelector('a[href]');
+  if (card === null || card === undefined || link === null || link === undefined) return undefined;
+  const box = boxOf(link);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  const spill = Math.max(
+    0,
+    ...[...card.querySelectorAll('.oyl-result__facts > div')].map(
+      (fact) => fact.scrollWidth - fact.clientWidth,
+    ),
+  );
+  return {
+    box: boxOf(card),
+    link: { name: textOf(link), box, onTop: hit !== null && (hit === link || link.contains(hit)) },
+    spill,
+  };
+}
+
+/**
+ * #1042's control: the result card where a naive placement would put it —
+ * after the readings and the clock, at the END of the Live group — which the
+ * spec requires to put *Done* under the floor at the owner's tablet in the
+ * shell. Without it, "the card clears the fold" is as true of a card that
+ * could go anywhere.
+ */
+function cardAfterTheReadings(): void {
+  const live = document.querySelector('.oyl-ride__group--live');
+  const card = live?.querySelector('[data-oyl-result-card]');
+  const clock = live?.querySelector('.oyl-ride__clock');
+  if (!live || !card || !clock) {
+    throw new Error('rideview harness: ?ride=saved did not render its result card and clock');
+  }
+  clock.after(card);
 }
 
 /** @see RideViewMeasurement.readings */
@@ -833,6 +916,8 @@ async function run(): Promise<void> {
   // when this page was asked for one, the Eased notice.
   if (NO_SENSORS) {
     await until('the sensor banner', () => document.querySelector('[data-oyl-sensor-banner]'));
+  } else if (RIDE_STATE === 'saved') {
+    await until('the result card', () => document.querySelector('[data-oyl-result-card]'));
   } else if (RIDE_STATE === 'idle' || RIDE_STATE === 'armed') {
     const awaited = RIDE_STATE === 'idle' ? 'Start recording' : 'Keep riding';
     await until(awaited, () =>
@@ -880,6 +965,7 @@ async function run(): Promise<void> {
     asBefore692,
     heldAboveTheForm,
     crammedReadings,
+    cardAfterTheReadings,
   };
 }
 
@@ -896,5 +982,6 @@ run().catch((error: unknown) => {
     asBefore692,
     heldAboveTheForm,
     crammedReadings,
+    cardAfterTheReadings,
   };
 });

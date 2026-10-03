@@ -2647,6 +2647,56 @@ a.oyl-button {
   background: var(--oyl-color-surface-raised);
 }
 
+/*
+ * THE RESULT CARD — #1042 (`ride/RideResultCard.tsx`). What a rider sees once
+ * a ride is saved: the ride's readings large, on a raised card with the
+ * accent along its top edge, and *Done*. Only on a STOPPED ride, so it never
+ * shares a column with a ride control and its height changes nothing during
+ * a ride (#692). Every colour is a declared pair on `surfaceRaised` — `ink`,
+ * `inkMuted` for the labels and units, `accent` for the edge (SC 1.4.11) and
+ * the buttons' own — in both palettes.
+ */
+.oyl-result {
+  margin: var(--oyl-space-lg) 0;
+  padding: var(--oyl-space-md);
+  border-top: 0.375rem solid var(--oyl-color-accent);
+  border-radius: var(--oyl-radius-card);
+  background: var(--oyl-color-surface-raised);
+}
+
+.oyl-result__heading {
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+/* 9rem tracks: `.oyl-home__facts`' reason — a reading at `xxl` is ~8.5rem. */
+.oyl-result__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--oyl-space-sm) var(--oyl-space-md);
+  margin: 0;
+}
+
+.oyl-result__facts dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-result__facts dd {
+  margin: 0;
+}
+
+.oyl-result__outcome {
+  margin: var(--oyl-space-sm) 0 0;
+  font-weight: 600;
+}
+
+.oyl-result__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin-top: var(--oyl-space-md);
+}
+
 .oyl-sensor-banner__art {
   flex: none;
   width: 3rem;

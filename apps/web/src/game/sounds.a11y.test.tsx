@@ -327,6 +327,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
       askForControlOnRide: () => Promise.resolve(),
       workoutRescue: () => undefined,
       recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
       readTrainer: () =>
         gameTrainerFrom(
           { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -351,6 +352,7 @@ describe('the audio may stop once nothing is riding — #447', () => {
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
     readTrainer: () =>
       gameTrainerFrom(
         { paired: true, controllable: true, canSimulate: true, hasControl: true },

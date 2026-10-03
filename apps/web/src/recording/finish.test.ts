@@ -12,6 +12,7 @@
  */
 
 import {
+  beatsPerMinute,
   metresPerSecond,
   seconds,
   unixSeconds,
@@ -32,7 +33,13 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { rideName, rideToSave, saveFinishedRide, type RideSaveStore } from './finish';
+import {
+  averageHeartRateOf,
+  rideName,
+  rideToSave,
+  saveFinishedRide,
+  type RideSaveStore,
+} from './finish';
 
 const ACTIVITY = toActivityId('ride-1');
 const ZONE = 'Europe/London';
@@ -252,3 +259,16 @@ function storeOf(): RideSaveStore {
     deleteActivity: () => Promise.resolve(true),
   };
 }
+
+describe('averageHeartRateOf — the result card’s heart rate (#1042)', () => {
+  it('is the mean of the readings that exist, rounded, with a dropout left out', () => {
+    // 140 and 151 average to 145.5; a hole is missing data, not a nought — read
+    // as one it would be 97.
+    expect(averageHeartRateOf([beatsPerMinute(140), undefined, beatsPerMinute(151)])).toBe(146);
+  });
+
+  it('is nothing for a ride with no strap, or a strap that never reported', () => {
+    expect(averageHeartRateOf(undefined)).toBeUndefined();
+    expect(averageHeartRateOf([undefined, undefined])).toBeUndefined();
+  });
+});

@@ -27,6 +27,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
 import {
   FRAME_MS_REDUCE_ABOVE,
@@ -625,6 +626,63 @@ describe('your own best crossing the line (#259)', () => {
     // nothing settled. Left over, the field would still read `Beaten by you`.
     expect(hudField('Your best')).not.toContain('Beaten');
     expect(hudField('Your best')).toContain('behind you');
+  });
+
+  /**
+   * #1042: the game saves no ride, so the LATCHED outcome travels to the
+   * recording under it — the result card states it when that is saved. Once
+   * per ride that was on the stage, and the latched answer rather than the
+   * live gap: the outpaced rider below has passed the attempt's distance by
+   * the time they press End ride, and is still handed `not-beaten`.
+   */
+  it('hands the recording each ended ride’s latched outcome, and nothing for the picker (#1042)', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const tracks: (GhostTrack | undefined)[] = [BEATEN_GHOST, OUTPACED_GHOST];
+    let loaded = 0;
+    const port: GamePort = {
+      ...pedallingPort(route),
+      loadGhost: () => {
+        const track = tracks[loaded];
+        loaded += 1;
+        return Promise.resolve(track);
+      },
+    };
+    const handed: (string | undefined)[] = [];
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: (outcome) => {
+        handed.push(outcome);
+      },
+    };
+    mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
+    await settle();
+    // The picker alone hands over nothing.
+    expect(handed).toEqual([]);
+
+    await clickThrough(ghostCheckbox());
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Your best')).toBe('Beaten by you');
+    await clickThrough(endRideButton());
+    pending = [];
+    expect(handed).toEqual(['beaten']);
+
+    await clickThrough(rideButton());
+    await pump(20);
+    await pump(40);
+    expect(hudField('Your best')).toBe('Finished ahead of you');
+    await clickThrough(endRideButton());
+    pending = [];
+    expect(handed).toEqual(['beaten', 'not-beaten']);
+
+    // Leaving from the picker is not a third ride ending, so it must not wipe
+    // what the last one settled.
+    mounted?.unmount();
+    mounted = undefined;
+    expect(handed).toEqual(['beaten', 'not-beaten']);
   });
 });
 

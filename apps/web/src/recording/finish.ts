@@ -57,9 +57,11 @@
  */
 
 import {
+  beatsPerMinute,
   localDay,
   metres,
   watts,
+  type BeatsPerMinute,
   type Metres,
   type RecordedSeries,
   type Seconds,
@@ -219,6 +221,32 @@ function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watt
   // is missing data, not a stretch at zero watts, and averaging over the whole
   // series would make a ride with a flaky meter look easier than it was.
   return count === 0 ? undefined : watts(Math.round(total / count));
+}
+
+/**
+ * The mean heart rate of the readings that exist, rounded to a whole beat, or
+ * `undefined` for a ride with none — #1042's result card.
+ *
+ * ⚠️ **{@link averagePowerOf}'s rule exactly**, and for its reason: a dropout
+ * is missing data, not a stretch at nought. Not stored on the activity (no
+ * record field holds it); the card states it once, as the ride's page states
+ * the same mean in its heart rate trace's description.
+ */
+export function averageHeartRateOf(
+  heartRate: readonly (BeatsPerMinute | undefined)[] | undefined,
+): BeatsPerMinute | undefined {
+  if (heartRate === undefined) {
+    return undefined;
+  }
+  let total = 0;
+  let count = 0;
+  for (const sample of heartRate) {
+    if (sample !== undefined) {
+      total += sample;
+      count += 1;
+    }
+  }
+  return count === 0 ? undefined : beatsPerMinute(Math.round(total / count));
 }
 
 /** What this module needs from the store, and nothing more. */

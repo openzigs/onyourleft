@@ -81,6 +81,8 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
+import type { GhostOutcome } from './ghost-outcome';
+
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.
  *
@@ -267,6 +269,21 @@ export interface GameTrainerPort {
    * it; named so that nothing else in production calls a method of that name.
    */
   recordingMayStop(): boolean;
+  /**
+   * A game ride has ended, and this is how its race against the rider's own
+   * best ended — #1042. `GameView` §`teardown` calls it once per ride that was
+   * on the stage, by *End ride* or by leaving, with `ghost-outcome.ts`'s
+   * LATCHED answer (or `undefined`: no ghost, or not settled).
+   *
+   * ⚠️ Not about the trainer, and on this port for {@link recordingMayStop}'s
+   * reason: it is the game's one view of the ride controller, which keeps it
+   * for the recording in progress so the result card can say it when that
+   * recording is saved on the Ride screen (`ride/ride-result.ts`). Decides no
+   * write. Named so nothing else in production calls a method of that name —
+   * the controller's is `noteGameRideEnded` — so `WIRE003` goes red if
+   * `GameView` stops calling it.
+   */
+  gameRideEnded(outcome: GhostOutcome | undefined): void;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -294,6 +311,8 @@ interface GameTrainerSource {
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
+  /** #1042. @see GameTrainerPort.gameRideEnded */
+  noteGameRideEnded(outcome: GhostOutcome | undefined): void;
 }
 
 /**
@@ -333,6 +352,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
+    gameRideEnded: (outcome) => {
+      controller?.noteGameRideEnded(outcome);
+    },
   };
 }
 
