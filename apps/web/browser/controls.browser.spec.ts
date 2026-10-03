@@ -475,6 +475,41 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
     expect(await page.evaluate(() => document.body.dataset['oylFileClick'])).toBe('trusted');
   });
 
+  test('draws a press on the input as the secondary button’s pressed state, apart from hover', async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await visit(page, 'routes');
+    // `:active` forced on the INPUT through the protocol, with no pointer over
+    // it, so what is read is the pressed rule alone — a mouse press also
+    // hovers, and the hover rule would paint the same fill on its own.
+    const session = await page.context().newCDPSession(page);
+    await session.send('DOM.enable');
+    await session.send('CSS.enable');
+    const { root } = await session.send('DOM.getDocument');
+    const { nodeId } = await session.send('DOM.querySelector', {
+      nodeId: root.nodeId,
+      selector: 'main #route-file',
+    });
+    const fill = async (): Promise<string> =>
+      page.evaluate(() => {
+        const button = document.querySelector<HTMLElement>('main #route-file + .oyl-file__button');
+        return button === null ? '' : getComputedStyle(button).backgroundColor;
+      });
+    const force = async (state: readonly string[]): Promise<void> => {
+      await session.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [...state] });
+    };
+    const resting = await fill();
+    await force(['hover']);
+    const hovered = await fill();
+    await force(['active']);
+    const pressed = await fill();
+    await force([]);
+    expect(hovered).not.toBe(resting);
+    // The secondary kind's pressed fill is its hover fill (`theme.css` §#688).
+    expect(pressed).toBe(hovered);
+  });
+
   test('draws the input’s keyboard focus on the button, and not without its rule', async ({
     page,
   }) => {

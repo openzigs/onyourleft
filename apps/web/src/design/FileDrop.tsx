@@ -112,6 +112,16 @@ export function FileDrop(props: FileDropProps): JSX.Element {
  * chip is read from the input at each `change` and cleared on its form's
  * `reset`, so a screen that empties the input in its handler (Documents does,
  * so the same file can be chosen twice) shows no chip at all.
+ *
+ * ⚠️ **The caller's contract.** The chip follows the input only through those
+ * two events. A screen that empties the input in script anywhere else — a
+ * `value = ''` outside its own `change` handler, or a second picker taking
+ * over the selection (Files' files and folder pickers, #1030's review) — must
+ * dispatch a bubbling `change` on it afterwards, or the chip goes on naming
+ * files that are no longer chosen. And a screen with two pickers keeps ONE
+ * selection: each picker draws only its own input's chip, so the screen
+ * empties the other input when one is chosen, and ignores an empty `change`
+ * from a picker that was not holding the selection.
  */
 export interface FilePickerProps {
   /** The `<input type="file">` itself. */

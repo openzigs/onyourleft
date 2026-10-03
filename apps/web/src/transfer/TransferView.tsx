@@ -315,8 +315,34 @@ function ImportPanel({
   // contract the Cancel button has.
   useEffect(() => () => cancellation.current?.abort(), []);
 
+  // Two pickers, one selection (#1030's review). Each picker draws a chip for
+  // its own input, so the screen keeps exactly one of them holding anything:
+  // a choice in one empties the other, through that input's own `change`, which
+  // clears its chip; and an empty `change` — a chip's ×, or the emptying just
+  // described — clears the selection only when it came from the picker that
+  // went empty. Without this a files chip stayed up naming files a folder had
+  // replaced, and its × wiped the folder's selection under the folder's chip.
+  const filesInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const chosenFrom = useRef<HTMLInputElement | null>(null);
+
   function choose(event: ChangeEvent<HTMLInputElement>): void {
-    setChosen(sourcesOf(event.target.files));
+    const input = event.currentTarget;
+    const sources = sourcesOf(input.files);
+    if (sources.length === 0) {
+      if (chosenFrom.current !== input) {
+        return;
+      }
+      chosenFrom.current = null;
+    } else {
+      chosenFrom.current = input;
+      const other = input === filesInput.current ? folderInput.current : filesInput.current;
+      if (other !== null && (other.files?.length ?? 0) > 0) {
+        other.value = '';
+        other.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+    setChosen(sources);
     setOutcomes([]);
     setProgress(undefined);
   }
@@ -378,6 +404,7 @@ function ImportPanel({
         */}
         <FileDrop hint="Or drop activity files here">
           <input
+            ref={filesInput}
             id="oyl-import-files"
             className="oyl-input oyl-input--file"
             type="file"
@@ -405,6 +432,7 @@ function ImportPanel({
         <FilePicker choose="Choose a folder">
           <input
             {...DIRECTORY_PICKER}
+            ref={folderInput}
             id="oyl-import-folder"
             className="oyl-input oyl-input--file"
             type="file"
