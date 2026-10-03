@@ -3264,6 +3264,18 @@ logs read for this):
   `playwright.config.ts` §`projects` queues last, and its `?shadow-map` load ran out of its 70 s.
   Anything added to a spec that changes its worker hash moves it in the queue.
 
+**What it bought on the runner — n = 1 per CPU, so read it as a sample, not a figure.** On #1075's
+first run, on an EPYC 7763
+([37155138130](https://github.com/openzigs/onyourleft/actions/runs/37155138130), red in the browser
+gate for the reason above), `Checks, concurrently` took **200 s against 210–220 s** on the seven
+7763 runs above: `check-repo-rules` 154 → 104 s, its suite 190 → 154 s, `check-env-example` 95 →
+6 s, `lint` (the long pole) 216 → 200 s. The green run
+([37157396306](https://github.com/openzigs/onyourleft/actions/runs/37157396306)) landed on an
+Intel Xeon Platinum 8573C, a CPU none of the thirteen used, at 1 277 s (165 s concurrent, 383 s
+Vitest, 608 s browser gate, `ride` 198 s of case time against 253 s and `rideview` 65 s against
+80 s on the 7763). **#1051 does not take the job back under 20 minutes on the 7763 by itself**:
+the cuts that would are the table below, and every one of them is the owner's.
+
 **What the measurement points at next, each OWED A RULING before it moves** (none moves in #1051;
 seconds are the 7763's, from 37131982824):
 
