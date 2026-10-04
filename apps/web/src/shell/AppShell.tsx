@@ -47,7 +47,7 @@ import {
 } from 'react';
 
 import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
-import type { Kilograms } from '@onyourleft/domain';
+import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
 import { ScreenHelp, ScreenNotes } from '../design/ScreenHelp';
@@ -168,6 +168,13 @@ export interface AppShellProps {
    * #945, under which the route cross-fade must start nothing.
    */
   readonly routeUpdates?: RouteUpdates | undefined;
+  /**
+   * The clock Home's *This week* is measured from — #1052. `main.tsx` passes
+   * none, and Home reads the wall clock. The reflow fixture passes its own
+   * fixed instant, because its rides are dated from one and *This week* would
+   * otherwise always be empty there, and a 10-hour week never measured.
+   */
+  readonly homeNow?: (() => UnixSeconds) | undefined;
   /**
    * The browser capabilities, probed once at start-up.
    *
@@ -510,6 +517,7 @@ function viewFor(
           analysis={props.analysis}
           controller={props.rideController}
           routes={props.routes}
+          now={props.homeNow}
         />
       );
     case 'ride':

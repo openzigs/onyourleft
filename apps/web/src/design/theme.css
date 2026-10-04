@@ -1771,13 +1771,18 @@ h3:first-child {
 }
 
 /*
- * The facts' tracks are 9rem since #992: a time of `10:23:45` in the reading's
- * tabular `xxl` is about 8.5rem, and a track narrower than its numerals spills
- * onto the fact beside it, which is #259's failure in a new place.
+ * The facts' tracks are 10rem since #1052 (9rem from #992): a track narrower
+ * than its numerals spills onto the fact beside it, which is #259's failure in
+ * a new place. #992 sized them from "`10:23:45` in the reading's tabular `xxl`
+ * is about 8.5rem", and that is a Mac's system font (137 px). On the CI
+ * runner's Linux font the same numerals are about 153 px (9.6rem) — #1046's
+ * measurement, which spilled the Activities cards' 9rem tracks by 5 px (run
+ * 37131279707). `reflow.browser.spec.ts` §"Home's facts" holds a `10:23:45`
+ * and a `28:35:45` to one line inside their facts; at 7rem they spill.
  */
 .oyl-home__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--oyl-space-sm);
   margin: 0;
 }
@@ -2690,7 +2695,11 @@ a.oyl-button {
   margin: 0 0 var(--oyl-space-xs);
 }
 
-/* 9rem tracks: `.oyl-home__facts`' reason — a reading at `xxl` is ~8.5rem. */
+/*
+ * 9rem tracks, sized as `.oyl-home__facts`' were before #1052 — from a Mac's
+ * `10:23:45` at `xxl` (137 px). Linux draws it about 153 px; nothing measures
+ * this card's facts at a ten-hour ride yet.
+ */
 .oyl-result__facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
@@ -2776,8 +2785,8 @@ a.oyl-button {
  * the only numbers a ride has.
  *
  * Two columns, the seconds recorded on a row of their own under them: a menu
- * fact's `xxl` tabular `10:23:45` is about 8.5rem (`.oyl-home__facts`), inside
- * half of a 360 px phone's Live group. On a landscape tablet — the Live group
+ * fact's `xxl` tabular `10:23:45` is about 8.5rem on a Mac and 9.6rem on
+ * Linux (`.oyl-home__facts`), inside half of a 360 px phone's Live group. On a landscape tablet — the Live group
  * four readings wide, #1012's container step — the two take the live
  * readings' metric size and display face, because there they stand under
  * those readings and are read from as far away, and the seconds recorded go
@@ -4030,7 +4039,7 @@ select.oyl-input {
   display: grid;
   gap: var(--oyl-space-xs) var(--oyl-space-md);
   /*
-   * 10rem, one wider than `.oyl-home__facts`' 9rem (#992), MEASURED: #992's
+   * 10rem, as `.oyl-home__facts`' are since #1052 (9rem from #992), MEASURED: #992's
    * "`10:23:45` at `xxl` is about 8.5rem" is a Mac's system font (137 px).
    * On the CI runner's Linux font the same numerals are about 153 px (9.6rem),
    * and a 9rem grid split the 22.5rem list pane into two 148 px tracks it
