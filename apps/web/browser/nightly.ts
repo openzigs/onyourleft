@@ -19,7 +19,9 @@
  *
  * What may NOT be listed, whatever it costs (#866): anything that gates
  * trainer control; privacy (no network, no picture, masking, scoping,
- * erasure); licences and notices; accessibility and layout; the wiring gate.
+ * erasure); licences and notices; accessibility and layout; the wiring gate —
+ * with ONE exception, the owner's of 2026-10-03 (#1076), named below. Any
+ * further exception is the owner's ruling, recorded here and in CLAUDE.md §4c.
  * Every describe below but one draws the REALISTIC world, which is a rung a
  * rider chooses in Settings and is off by default (ADR 0026 D-3), or measures
  * the owner's instruments for it. The one is #1076's: the reflow walk's DARK

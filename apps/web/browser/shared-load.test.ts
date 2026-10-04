@@ -18,6 +18,10 @@ interface FakePage {
   shots: number;
   closed: boolean;
   drawable: boolean;
+  /** A page whose screenshot never settles unless it is given a timeout. */
+  hung: boolean;
+  /** The timeout each screenshot was asked for. */
+  timeouts: (number | undefined)[];
 }
 
 function fakeBrowser(pages: FakePage[]): Browser {
@@ -25,11 +29,25 @@ function fakeBrowser(pages: FakePage[]): Browser {
     newContext: () =>
       Promise.resolve({
         newPage: () => {
-          const page: FakePage = { shots: 0, closed: false, drawable: true };
+          const page: FakePage = {
+            shots: 0,
+            closed: false,
+            drawable: true,
+            hung: false,
+            timeouts: [],
+          };
           pages.push(page);
           return Promise.resolve({
             isClosed: () => page.closed,
-            screenshot: () => {
+            screenshot: (options?: { timeout?: number }) => {
+              page.timeouts.push(options?.timeout);
+              if (page.hung) {
+                // Playwright rejects once a bounded screenshot runs out of
+                // time, and waits on an unbounded one for as long as it hangs.
+                return options?.timeout === undefined || options.timeout === 0
+                  ? new Promise<Buffer>(() => undefined)
+                  : Promise.reject(new Error(`Timeout ${String(options.timeout)}ms exceeded`));
+              }
               if (!page.drawable) return Promise.reject(new Error('the target closed'));
               page.shots += 1;
               return Promise.resolve(Buffer.from(`shot ${String(page.shots)}`));
@@ -118,4 +136,17 @@ describe('a shared page is screenshot when the case that read it fails — #1076
     await attachSharedPageOnFailure(reader);
     expect(reader.attached).toEqual([]);
   });
+
+  it('bounds the screenshot, so a hung page cannot hold the hook — #1078', async () => {
+    const pages: FakePage[] = [];
+    const reader = fakeCase('case-1', RED);
+    await sharedPage(fakeBrowser(pages), 'key', () => Promise.resolve(), reader);
+    for (const page of pages) page.hung = true;
+    await attachSharedPageOnFailure(reader);
+    expect(reader.attached).toEqual([]);
+    const asked = pages[0]?.timeouts ?? [];
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toBeGreaterThan(0);
+    expect(asked[0]).toBeLessThanOrEqual(5_000);
+  }, 2_000);
 });

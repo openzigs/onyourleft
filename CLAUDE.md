@@ -2112,7 +2112,8 @@ bash scripts/check-licence-hashes.test.sh
 # a template that is not there documents nothing.
 bash scripts/check-env-example.sh
 
-# Test that checker. Fixture-driven; 22 cases.
+# Test that checker. Fixture-driven; 23 cases on 2026-10-03 (22 until #1075's
+# review added the `bash -e` case) — the count is what the run prints.
 bash scripts/check-env-example.test.sh
 
 # Every relative link in the documentation points at something. RELATIVE ONLY —
@@ -2328,7 +2329,8 @@ pnpm run test:browser
 
 # ⚠️ Since #866 `test:browser` runs the `chromium` and `game` projects ONLY.
 # The describes tagged `@nightly` — a reviewed list in
-# `apps/web/browser/nightly.ts`, every one of them the opt-in realistic world —
+# `apps/web/browser/nightly.ts`, every one of them the opt-in realistic world
+# but one, the reflow walk's DARK palette (#1076; its light twin stays here) —
 # run in the `nightly` project, one worker, from `.github/workflows/nightly.yml`,
 # which is NOT a required check. This is that run. About 1.3 minutes on a Mac;
 # `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
@@ -3184,7 +3186,14 @@ twice — and `nightly-split.test.ts` fails if it is.
 
 **What stays required, whatever it costs**: anything that gates trainer control; privacy (no
 network, no picture, masking, scoping, erasure); licences and notices; accessibility and layout;
-and the wiring gate. The browser half of the split is a Playwright **tag**: a describe carrying
+and the wiring gate. ⚠️ **One exception, the owner's of 2026-10-03
+([#1076](https://github.com/openzigs/onyourleft/issues/1076#issuecomment-5974417148))**:
+`reflow.browser.spec.ts`' walk in the DARK palette is nightly. Layout stays required — the same
+walk in the light palette, the one every rider starts in, is in `test:browser` — and the dark
+palette's colours stay required in `theme`, `links`, `button-hierarchy` and `controls-first`; what
+moved is the repeat of the layout walk in the second palette. A reviewer who reads "accessibility
+and layout" here as admitting no exception is reading it before that ruling, and any further one is
+the owner's to make, not a tag added in passing. The browser half of the split is a Playwright **tag**: a describe carrying
 `@nightly` runs in the `nightly` project and in neither `chromium` nor `game`, so every test is in
 exactly one run by construction, and the tagged describes must equal the reviewed list in
 `apps/web/browser/nightly.ts`, each with its seconds and its reason — adding a tag anywhere else is
@@ -3328,6 +3337,15 @@ browser gate **645 s** (656–675 s). One sample: the runner's speed varies by m
 one CPU model (§4c above), so read it as one green job clear of the stop, not as a figure. The
 nightly run on the same pull request, with the dark walk and `realistic-textures.test.ts` in it,
 took 6m50s ([37162466198](https://github.com/openzigs/onyourleft/actions/runs/37162466198)).
+
+**#1077's second sample on the 7763** ([#1078](https://github.com/openzigs/onyourleft/issues/1078)):
+[37163632225](https://github.com/openzigs/onyourleft/actions/runs/37163632225), the same pull
+request a commit later, printed `AMD EPYC 7763` and took **1 317 s, 183 s clear of the stop**
+(`Checks, concurrently` 203 s, Accessibility 51 s, Vitest with coverage 373 s, browser gate 647 s).
+So the 7763 after #1076 is **n = 2: 1 296 s and 1 317 s**, both green. ⚠️ **Read strictly, #1076's
+criterion — "a green job at least 180 s clear of the stop" — is met by both, and the second by 3 s**:
+the margin #1076 bought is about 180–200 s, not more, and a spec or step added to the job spends it
+from there.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run

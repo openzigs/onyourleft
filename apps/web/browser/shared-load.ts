@@ -137,7 +137,10 @@ async function attachScreenshot(
   if (page.isClosed()) return;
   let body: Buffer;
   try {
-    body = await page.screenshot();
+    // Bounded (#1078): `playwright.config.ts` sets no `actionTimeout`, so an
+    // unbounded screenshot waits out the whole hook's budget, and a page hung
+    // enough to fail a case is the likeliest to hang here as well.
+    body = await page.screenshot({ timeout: 5_000 });
   } catch {
     // A page that cannot be drawn any more says nothing a screenshot could;
     // the case's own failure is the report.
