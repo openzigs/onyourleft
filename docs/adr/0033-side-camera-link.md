@@ -759,3 +759,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `side-link.test.ts` reproduces the lost secret with `testing.ts`
   §`losesAnsweringEndsFirstControlMessage`: on the code before this entry the tablet ended that
   pairing as `not-our-phone`.
+- **2026-10-04** — **D-6 is superseded in part by [ADR 0044](0044-side-camera-live-view-and-snapshot.md),
+  on the owner's rulings of 2026-10-03, and so is the #527 ruling *"Preview on the tablet: None"*
+  quoted in §Context.** This entry records where the decisions went; it does not make them, because
+  an amendment cannot reverse one ([ADR 0013](0013-adr-amendments.md)). What changes:
+  - **D-6's *"No picture is ever displayed on the tablet"*** is superseded: the side camera's picture
+    is shown with the pose outline on it, during setup and, if the rider turns it on, during a ride
+    (ADR 0044 D-1, D-5, D-7). D-6's *"Pose numbers never reach the HUD, the ride screen…"* is
+    superseded for that outline only.
+  - **D-6's *"No picture is ever written to storage on the tablet"*** stands, except for **one still
+    per press** that the rider saves (ADR 0044 D-3).
+  - **D-3's join rule** stands for every pose number, and is departed from **for a snapshot only**,
+    which carries the id of the ride it was taken in and nothing finer (ADR 0044 D-4).
+  - **D-3's transport** is unchanged until spike 0021
+    ([#1057](https://github.com/openzigs/onyourleft/issues/1057)) reports. If it chooses a video
+    track for the live view, reason 3 and the *"single frames, not a clip"* row are superseded for
+    that view only, and the one strip point stays on the phone (ADR 0044 D-2). A higher picture rate
+    for a fit check is recorded by a further amendment here.
+  - **What stands of D-6**: analysed as each picture arrives and discarded at once; at most one
+    waiting; no queue of photographs; no object URL anywhere on this path; pose numbers only until
+    the report. The body above is not edited.

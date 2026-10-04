@@ -5087,7 +5087,13 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0044.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0046.**
+  ⚠️ **0044 is [ADR 0044](docs/adr/0044-side-camera-live-view-and-snapshot.md)**, taken by
+  [#1058](https://github.com/openzigs/onyourleft/issues/1058) on 2026-10-04 for the side camera's
+  live view and pressed snapshot, and **0045 is RESERVED for
+  [#1059](https://github.com/openzigs/onyourleft/issues/1059)** (fit from one side camera) and not
+  yet written: both were reserved by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055)
+  on 2026-10-03. A reviewer who remembers this sentence offering 0044 is reading the old file.
   ⚠️ **0043 is [ADR 0043](docs/adr/0043-ofl-display-typeface.md)**, taken by
   [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02 for the OFL display face. A
   reviewer who remembers this sentence offering 0043 is reading the old file.
@@ -5964,5 +5970,6 @@ top of an issue **supersedes its body**.
 | How a suspended rider still takes their data out and deletes their account, and what stops that session reaching anything else | `apps/instance/src/auth/identity.ts` §"A suspended rider's way out", `apps/instance/src/route-kit.ts` §`admitsSuspended`, `apps/instance/src/moderation/choke-point.test.ts` |
 | What happens when two devices change the same goals, note or document before syncing | `apps/web/src/instance/sync.ts` rule 8 and §`conflictCopyName`, [#924](https://github.com/openzigs/onyourleft/issues/924) |
 | Why the display face is Barlow, why OFL is admitted for a font file and nothing else, how its copyright and licence travel, and how the WOFF2s are made again | [ADR 0043](docs/adr/0043-ofl-display-typeface.md), `apps/web/tools/fonts/font-recipe.ts`, `apps/web/tools/fonts/fonts.test.ts`, `apps/web/src/privacy/stylesheet-origins.test.ts`, [#991](https://github.com/openzigs/onyourleft/issues/991) |
+| Whether the tablet may show the side camera's picture, when during a ride, what a pressed snapshot stores and which ride it belongs to, and where the picture may never appear | [ADR 0044](docs/adr/0044-side-camera-live-view-and-snapshot.md), [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-10-04, [#1058](https://github.com/openzigs/onyourleft/issues/1058) |
 
-<!-- Last updated: 2026-10-02 by delivery:code-issue resolving #991 (ADR 0043: OFL-1.1 for a bundled display face, Barlow) -->
+<!-- Last updated: 2026-10-04 by delivery:code-issue resolving #1058 (ADR 0044: a live view and a pressed snapshot on the side-camera path) -->
