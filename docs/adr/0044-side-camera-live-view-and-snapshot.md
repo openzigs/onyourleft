@@ -1,9 +1,11 @@
 # ADR 0044: A live view and a pressed snapshot on the side-camera path, superseding ADR 0033 D-6
 
-- **Status**: Proposed. ⚠️ **The owner must approve this ADR before it merges.** It records the
-  owner's rulings of 2026-10-03, and it also makes choices those rulings do not settle. Each such
-  choice is marked *the author's choice* where it is made, takes the narrower option, and is listed
-  in §"What the owner has not decided". ⚠️ **D-2 is conditional on spike 0021
+- **Status**: Proposed. It records the owner's rulings of 2026-10-03 and the owner's answers of
+  2026-10-04 to the seven questions the first draft left open (§"What the owner answered on
+  2026-10-04"). **The owner approved the wording on 2026-10-04**: *"go ahead and do 1058 now I
+  approve the wording"*. Where an answer left a detail open, the narrower reading is marked *the
+  author's choice* at the place, and §"What the owner has not decided" says none remain. ⚠️ **D-2
+  is conditional on spike 0021
   ([#1057](https://github.com/openzigs/onyourleft/issues/1057))**, which has not been run. D-2
   decides what follows from each of its outcomes, so the spike needs only an appended amendment
   here saying which one happened ([ADR 0013](0013-adr-amendments.md))
