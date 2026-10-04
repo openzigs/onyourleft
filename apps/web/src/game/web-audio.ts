@@ -24,11 +24,13 @@
  * `docs/validation/0003-screen-reader-and-assistive-technology.md` Part I,
  * step I7, and its table is empty.
  *
- * ## The two short sounds, which are this project's own
+ * ## The short sounds, which are this project's own
  *
  * - **interval**: two short rising notes, a fifth apart — a change is coming
  *   and it is a change, not a warning;
  * - **distance**: one short low note — a mark passed.
+ * - **select**, **confirm** and **back** (#946): the menus' sounds — one
+ *   short high note; two rising; two falling. Each is over in 130 ms.
  *
  * Designed here, from nothing; ADR 0009 forbids deriving them from a product
  * and none was consulted. Each note has a 10 ms attack and a short release so
@@ -63,7 +65,26 @@ const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
     { hz: 880, at: 0.15, seconds: 0.16 },
   ],
   distance: [{ hz: 330, at: 0, seconds: 0.2 }],
+  // #946: the menus' sounds. Each is over within MENU_CUE_SECONDS, from its
+  // first note's start to its last note's end, so a press is never followed
+  // by a sound longer than the press — UI-sound guidance puts these at about
+  // 50 to 150 ms (#935's sources).
+  select: [{ hz: 659.25, at: 0, seconds: 0.06 }],
+  confirm: [
+    { hz: 523.25, at: 0, seconds: 0.05 },
+    { hz: 783.99, at: 0.06, seconds: 0.07 },
+  ],
+  back: [
+    { hz: 587.33, at: 0, seconds: 0.05 },
+    { hz: 440, at: 0.06, seconds: 0.06 },
+  ],
 };
+
+/**
+ * How long a note takes to reach its level, in seconds. A note that starts at
+ * full level clicks; 10 ms is soft without blurring a 50 ms note.
+ */
+const NOTE_ATTACK_SECONDS = 0.01;
 
 /** How quickly a tone follows a new pitch or level, in seconds (a time constant). */
 const GLIDE_SECONDS = 0.04;
@@ -175,7 +196,7 @@ export function webAudioOutput(create: (() => AudioContextLike) | undefined): Cu
         oscillator.type = 'sine';
         oscillator.frequency.value = note.hz;
         gain.gain.setValueAtTime(0, from);
-        gain.gain.linearRampToValueAtTime(level, from + 0.01);
+        gain.gain.linearRampToValueAtTime(level, from + NOTE_ATTACK_SECONDS);
         gain.gain.linearRampToValueAtTime(0, until);
         oscillator.connect(gain);
         gain.connect(context.destination);

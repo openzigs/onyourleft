@@ -43,6 +43,10 @@ import {
   type UpdateWatcher,
 } from './offline/update';
 import { AppShell, VIEW_GROUPS } from './shell/AppShell';
+import { createMenuSounds } from './shell/menu-sounds';
+import { readMenuSoundPreference } from './shell/menu-sound-preference';
+import { sharedCueOutput } from './game/web-audio';
+import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
@@ -1070,6 +1074,12 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
   const rooms = buildRoomsPort();
+  // #946: the menus' sounds, over the ONE audio output the ride's sounds use
+  // (one context for the app). The rider's choice is read at each press, so
+  // Settings' switch is heard on the very next one.
+  const menuSounds = createMenuSounds(sharedCueOutput(), () =>
+    readMenuSoundPreference(deviceStorage()),
+  );
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -1104,6 +1114,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // "no row at all" read the same, which is what they mean.
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
+          menuSounds={menuSounds}
           transfer={buildTransferPort()}
           library={buildLibraryPort()}
           detail={buildDetailPort()}

@@ -230,6 +230,19 @@ describe('importActivityFiles — a bulk archive', () => {
   });
 });
 
+describe('importActivityFiles — the facts badges are earned from (#947)', () => {
+  it('works out a climb from the file’s altitude, and claims no workout and no ghost', async () => {
+    const open = await openSeeded();
+    const source = corpusSource('nominal-ride.gpx', 'activities/2024-06-15.gpx');
+    await run(open, [source]);
+    const [summary] = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(summary?.rideFacts).toBeDefined();
+    expect(summary?.rideFacts?.ascent).toBeGreaterThan(0);
+    expect(summary?.rideFacts?.workoutFinished).toBeUndefined();
+    expect(summary?.rideFacts?.ghostRaced).toBeUndefined();
+  });
+});
+
 describe('importActivityFiles — deduplication against the local store', () => {
   it('does not create a second activity for the same file imported twice', async () => {
     const open = await openSeeded();

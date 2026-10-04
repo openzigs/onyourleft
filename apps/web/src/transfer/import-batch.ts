@@ -52,6 +52,7 @@ import {
   type ImportedRide,
 } from './read-activity-file';
 import { loadSummaryOf } from '../analysis/summary';
+import { rideFactsOf } from '../progress/ride-facts';
 import type { TransferStore } from './store-port';
 
 /**
@@ -349,6 +350,13 @@ async function storeRide(
     // store yet — so re-exporting produces a file this client wrote rather than
     // the one the rider imported.
     originalFile: { key: source.fileName, sha256 },
+    // #947: the badges' facts, from the samples already in hand. A file cannot
+    // say whether a workout was finished or a ghost raced, so it says neither.
+    rideFacts: rideFactsOf({
+      power: ride.channels.power,
+      altitude: ride.channels.altitude,
+      sampleInterval: ride.sampleInterval,
+    }),
     createdAt: options.now(),
   };
   // `visibility` is left unset deliberately: `putActivity` applies ADR 0004's

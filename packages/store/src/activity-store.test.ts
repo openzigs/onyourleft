@@ -462,6 +462,58 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('setActivityRideFacts replaces the facts and leaves the ride otherwise alone (#947)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide({
+        name: 'Hill reps',
+        rideFacts: { ascent: metres(10), workoutFinished: true },
+      });
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+
+      const read = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setActivityRideFacts(ATHLETE_A, ride.id, {
+            ascent: metres(321),
+            bestPower: [{ duration: seconds(60), power: watts(402) }],
+          }),
+        async (fresh) =>
+          (await fresh.listActivitySummaries(ATHLETE_A)).find((summary) => summary.id === ride.id),
+      );
+
+      // Replaced, not merged: the backfill's reading is the whole of it.
+      expect(read?.rideFacts).toEqual({
+        ascent: 321,
+        bestPower: [{ duration: 60, power: 402 }],
+      });
+      expect(read?.name).toBe('Hill reps');
+      expect(read?.movingTime).toBe(ride.movingTime);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('keeps facts worked out to nothing as `{}`, not as absent (#947)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide();
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+      const read = await harness.roundTrip(
+        async (fresh) => fresh.setActivityRideFacts(ATHLETE_A, ride.id, {}),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
+      expect(read?.rideFacts).toEqual({});
+      const gone = await harness.write(async (fresh) =>
+        fresh.setActivityRideFacts(ATHLETE_A, activityId('gone'), {}),
+      );
+      expect(gone).toBe(false);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('moving time and elapsed time survive the round trip as distinct values', async () => {
     await store.putAthlete(athlete());
     const ride = indoorRide({ elapsedTime: seconds(7_384), movingTime: seconds(6_011) });

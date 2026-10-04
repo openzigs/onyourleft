@@ -131,6 +131,12 @@ import {
   writeCuePreference,
   type CuePreference,
 } from '../game/cue-preference';
+import {
+  menuVolumeFromSlider,
+  readMenuSoundPreference,
+  writeMenuSoundPreference,
+  type MenuSoundPreference,
+} from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
 import { KIT_PALETTE } from '../game/bicycle';
@@ -556,6 +562,15 @@ export function SettingsView({
           {...(kitColour === undefined ? {} : { kitColour })}
           {...(onKitColourChange === undefined ? {} : { onKitColourChange })}
         />
+
+        {/*
+          #946: the menus' own switch and volume — how the app answers the
+          rider's own presses, apart from the ride's sounds in *Look and sound*.
+          Here rather than beside those because there it made that card 2.07×
+          this one on the CI runner, over #1026's balance rule
+          (`sections.browser.spec.ts` §`ROW_BALANCE_LIMIT`).
+        */}
+        <MenuSoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
       </SettingsCard>
 
       <SettingsCard id="oyl-settings-look" title={SETTINGS_CARD_TITLES.look} picture={<Sky />}>
@@ -1057,6 +1072,96 @@ function SoundsPanel({
           }}
         />
       </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Sounds in the menus — #946. Off by default, kept on this device under its
+ * own key (`shell/menu-sound-preference.ts`), with its own volume: turning
+ * these on turns on nothing during a ride, and the ride's sounds above turn on
+ * nothing here. They never play during a ride (`shell/menu-sounds.ts`).
+ */
+function MenuSoundsPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [preference, setPreference] = useState<MenuSoundPreference>(() =>
+    readMenuSoundPreference(storage),
+  );
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function save(next: MenuSoundPreference): void {
+    setPreference(next);
+    setMessage(
+      writeMenuSoundPreference(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  return (
+    <section className="oyl-panel oyl-menu-sounds" aria-labelledby="oyl-menu-sounds-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-menu-sounds-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              A short soft note when you press a link or a button in the menus, two rising notes
+              when you confirm something and two falling notes when you go back. They play only when
+              you press, never during a ride, and every press still shows its result on the screen.
+            </p>
+            <p className="oyl-muted">
+              Off unless you turn it on, and separate from the sounds during a ride. Their volume is
+              offered once they are on.
+            </p>
+          </>
+        }
+      >
+        Menu sounds
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={preference.enabled}
+            onChange={(event) => {
+              save({ ...preference, enabled: event.currentTarget.checked });
+            }}
+          />{' '}
+          Play sounds in the menus
+        </label>
+      </p>
+      {/*
+        The volume once the sounds are on, straight after the switch that
+        brought it — a slider for sounds that cannot play is one more stop in
+        the tab order that does nothing. Kept, not reset, while they are off.
+      */}
+      {preference.enabled ? (
+        <p>
+          <label htmlFor="oyl-menu-sounds-volume">Menu sound volume</label>{' '}
+          <input
+            id="oyl-menu-sounds-volume"
+            type="range"
+            min={0}
+            max={100}
+            step={10}
+            value={Math.round(preference.volume * 100)}
+            onChange={(event) => {
+              const volume = menuVolumeFromSlider(Number(event.currentTarget.value));
+              if (volume !== undefined) save({ ...preference, volume });
+            }}
+          />
+        </p>
+      ) : null}
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

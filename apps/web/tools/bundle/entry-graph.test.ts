@@ -159,6 +159,28 @@ describe('a Radix primitive is never in the entry — ADR 0034 D-5, #950', () =>
   });
 });
 
+describe('Motion is never in the entry — ADR 0041 D-2, #1072', () => {
+  const MOTION = [
+    '/repo/node_modules/.pnpm/motion@13.5.1_react@19.3.0/node_modules/motion/dist/es/react.mjs',
+    '/repo/node_modules/.pnpm/framer-motion@13.5.1/node_modules/framer-motion/dist/es/index.mjs',
+    '/repo/node_modules/.pnpm/motion-dom@13.5.1/node_modules/motion-dom/dist/es/index.mjs',
+    '/repo/node_modules/.pnpm/motion-utils@13.5.0/node_modules/motion-utils/dist/es/index.mjs',
+  ];
+
+  it('fails each of its four packages in the entry, and passes them in a group chunk', () => {
+    for (const id of MOTION) {
+      const inEntry = goodBuild().map((each) =>
+        each.isEntry ? { ...each, moduleIds: [...each.moduleIds, id] } : each,
+      );
+      expect(eagerLazyOnlyPackages(inEntry), id).toHaveLength(1);
+      const inGroup = goodBuild().map((each) =>
+        each.fileName === 'assets/more.js' ? { ...each, moduleIds: [...each.moduleIds, id] } : each,
+      );
+      expect(eagerLazyOnlyPackages(inGroup), id).toEqual([]);
+    }
+  });
+});
+
 describe('the lazy groups are read from the source', () => {
   it('reads every re-export specifier, in order', () => {
     expect(

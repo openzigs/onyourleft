@@ -990,7 +990,7 @@ describe('the game world — #475', () => {
 
   it('draws every on/off setting on the screen as a switch, still a checkbox (#994)', async () => {
     const mounted = await settings(disk());
-    for (const panel of ['.oyl-announce', '.oyl-sounds', '.oyl-world']) {
+    for (const panel of ['.oyl-announce', '.oyl-sounds', '.oyl-menu-sounds', '.oyl-world']) {
       const box = mounted.container.querySelector<HTMLInputElement>(
         `${panel} input[role="switch"]`,
       );

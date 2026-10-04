@@ -31,6 +31,7 @@ import type {
   AthleteId,
   AthleteRecord,
   ListActivitiesOptions,
+  RideFacts,
   Samples,
   StreamChannel,
   StreamSetSummary,
@@ -69,6 +70,12 @@ export interface AnalysisStore {
       readonly loadCoveredTime: Seconds;
     },
   ): Promise<boolean>;
+  /**
+   * Write one ride's badge facts (#947) — Home's *Look at older rides*, the
+   * backfill for a ride saved before #947. Narrow and athlete-scoped, for the
+   * load summary's reasons above.
+   */
+  setActivityRideFacts(owner: AthleteId, id: ActivityId, facts: RideFacts): Promise<boolean>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   listActivitySummaries(
     owner: AthleteId,

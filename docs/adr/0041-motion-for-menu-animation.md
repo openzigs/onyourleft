@@ -150,3 +150,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [#1072](https://github.com/openzigs/onyourleft/issues/1072). No decision here changes: D-3's rule
   (no motion on `ride` or `game`, nor while immersive) binds #945's cross-fade, which
   `apps/web/src/shell/route-motion.ts` enforces.
+- **2026-10-04** — [#1072](https://github.com/openzigs/onyourleft/issues/1072) installed Motion,
+  and three facts above have moved. **The version is `motion` 13.5.1**, not the 13.4.6 §Context
+  measured (with `framer-motion` and `motion-dom` 13.5.1, `motion-utils` 13.5.0 and `tslib`, all MIT;
+  `check:licences` passes and `check:notices` lists the four new packages). **The features are
+  `domAnimation`, not `domMax`**: a card is carried into its detail by transforms animated from
+  keyframes (`apps/web/src/shell/ListDetail.tsx` §"Carrying a card into its detail"), because a
+  shared `layoutId` crossfades two mounted elements and at two panes the card stays on screen.
+  **The weight, measured on the built tree** (gzip -9): the entry chunk holds no Motion module —
+  `tools/bundle/entry-graph.ts` now fails the build if `motion`, `framer-motion`, `motion-dom` or
+  `motion-utils` reaches it (the entry went from 168.2 kB to 170.8 kB with #946 and #947's code,
+  none of it Motion's) — and Motion arrives in two lazily loaded chunks: `ListDetail`, shared by the
+  history and routes groups, which grew from 14.4 kB to 28.4 kB with `LazyMotion`, `m` and
+  `MotionConfig`, and `motion-features` (14.5 kB, `import()`ed once a list–detail route mounts) —
+  28.5 kB of Motion in all, where §Context estimated 28.0. `MotionConfig
+  reducedMotion="user"` wraps the one place Motion animates, the list–detail layout, rather than the
+  app: wrapping the app would put Motion in the entry, which D-2 forbids. ⚠️ Motion reads the
+  reader's preference when an element MOUNTS, so a preference changed while a list is on screen
+  takes effect the next time a list is opened; the browser gate's reduced-motion case says so.
+  Any new Motion surface must therefore carry its own `MotionConfig reducedMotion="user"`, because
+  the app root cannot hold one without putting Motion in the entry chunk.

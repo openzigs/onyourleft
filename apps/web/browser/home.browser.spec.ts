@@ -91,6 +91,45 @@ for (const [width, height] of [
 }
 
 /**
+ * #947 — the badges reflow at 320 px (WCAG 2.2 SC 1.4.10).
+ *
+ * The harness's sixty rides earn the first ride and three distance badges, so
+ * the list is there to measure. ⚠️ The control is on the SAME page, after the
+ * shipped layout is measured: the list's columns are given a floor the phone
+ * cannot hold — the `min(100%, …)` cap taken off and the floor widened — and
+ * the same measurement must then find a badge past the viewport's edge.
+ * Without it, "nothing overflows" is as true of a list that rendered nothing.
+ */
+test.describe('#947 — the badges reflow at 320 px', () => {
+  test('every badge inside the viewport, and the control spills', async ({ page }) => {
+    await open(page, 320, 568);
+    const badges = () =>
+      page.evaluate(() => {
+        const items = [...document.querySelectorAll('.oyl-progress__badges > li')];
+        return {
+          count: items.length,
+          words: items.map((each) => each.textContent),
+          right: Math.max(...items.map((each) => each.getBoundingClientRect().right)),
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+    const shipped = await badges();
+    expect(shipped.count).toBeGreaterThanOrEqual(3);
+    expect(shipped.words.join(' ')).toContain('ridden in all');
+    expect(shipped.right).toBeLessThanOrEqual(320 + SUBPIXEL_TOLERANCE);
+    expect(shipped.overflow).toBeLessThanOrEqual(0);
+
+    await page.addStyleTag({
+      content:
+        '.oyl-progress__badges { grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); }',
+    });
+    const control = await badges();
+    expect(control.count).toBe(shipped.count);
+    expect(control.right).toBeGreaterThan(320 + SUBPIXEL_TOLERANCE);
+  });
+});
+
+/**
  * #1010 — Next up, This week, and the ride cards as art.
  *
  * Next up's Ride is the view's first control and its one primary, and must

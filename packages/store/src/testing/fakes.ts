@@ -133,6 +133,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
+    setActivityRideFacts: async (owner, activity, facts) =>
+      real.setActivityRideFacts(owner, activity, facts),
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
@@ -254,6 +256,12 @@ export function memoryWriteStoreFactory(): StoreFactory {
         // which is what makes the read-back the only thing that notices.
         setActivityLoadSummary: (_owner, activity, summary) => {
           memory.set(`load:${activity}`, summary);
+          return Promise.resolve(true);
+        },
+        // #947: diverted like the load summary, and answering `true` for the
+        // same reason — a badge backfill reports every ride worked out.
+        setActivityRideFacts: (_owner, activity, facts) => {
+          memory.set(`facts:${activity}`, facts);
           return Promise.resolve(true);
         },
         putActivity: (record) => {

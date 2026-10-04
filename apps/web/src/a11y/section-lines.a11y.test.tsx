@@ -63,6 +63,8 @@ const READINGS: Record<string, string> = {
     'the side camera’s saved report: its summary sentence is the report’s own, stored with it (#388) and worded by ADR 0030’s rules, not an explanation of a control',
   'segment-detail The long drag up past the reservoir, the farm and the old quarry':
     'a segment’s own facts (its length, its efforts, what it is ranked by) and the one line that says what to do with them',
+  'home Streaks and badges':
+    'the rider’s own streak, read back from their rides, and how many of their older rides are still to be looked at — their data and this device’s state, not an explanation of a control (#947)',
   'route-builder Distance, climbing and surface':
     'the route being drawn, read back: its distance, its surfaces and its profile, each a reading of the draft',
 };

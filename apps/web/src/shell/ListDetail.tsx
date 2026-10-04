@@ -60,12 +60,45 @@
  * button means the same thing either way. `replace` at two panes would need
  * every list link to intercept its own click, and back would then leave the
  * screen from a tablet but return to the list from a phone.
+ *
+ * ## Carrying a card into its detail — #1072, ADR 0041
+ *
+ * A pointer's press on an item's link notes where its card is on the screen
+ * and where the detail will be drawn — the detail pane at two panes, the
+ * column the list fills at one. When the selection it
+ * asked for arrives, the detail's content is drawn first over the card and
+ * moves into place, on `design/tokens.ts` §`MOTION_FOR_SCRIPT`'s `medium`.
+ *
+ * - **Transforms from keyframes, not `layoutId`.** A shared `layoutId`
+ *   crossfades two mounted elements, and at two panes the card stays on
+ *   screen: it would fade out of the list. So nothing is shared — the detail
+ *   is translated and scaled from the card's box to its own, with its origin
+ *   at the top left, and Motion animates that to nothing.
+ * - **Only on a pointer's press.** Enter on the link moves focus to the
+ *   chosen item's heading at once, and a focus ring must be where its element
+ *   is from the moment it is drawn, so a keyboard selection is not carried.
+ *   Nor is a selection by address — a reload, a shared link, back and
+ *   forward: nothing was pressed, and there is no card to come from.
+ *   `initial={false}` keeps the first render still.
+ * - **Nothing moves the focus or the tree.** The wrapper is always there, so
+ *   carrying a card mounts nothing, and the focus rules above run unchanged.
+ * - **The reader's preference wins**: `MotionConfig reducedMotion="user"`
+ *   turns transforms off under `prefers-reduced-motion: reduce` (ADR 0041
+ *   D-4); only the short fade of the detail's opacity is left.
+ * - **Never on a ride route, nor while a ride has the screen**
+ *   (`route-motion.ts` §`mayCarryOn`, ADR 0041 D-3).
+ * - Motion is in this module's chunk (a menu route's, never the entry), and
+ *   its features arrive later still (`motion-features.ts`); before they do, a
+ *   press is simply not animated.
  */
 
+import { LazyMotion, m, MotionConfig } from 'motion/react';
 import {
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -74,10 +107,53 @@ import {
 } from 'react';
 
 import { ButtonLink } from '../design/Button';
+import { MOTION_FOR_SCRIPT } from '../design/tokens';
 import { ScreenNotes } from '../design/ScreenHelp';
 import { SectionHeading } from '../design/SectionHelp';
 
+import { mayCarryOn, RideHasTheScreen } from './route-motion';
 import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
+
+/** Where a pressed card was, and where its detail will be drawn. */
+interface Carry {
+  readonly id: string;
+  readonly from: DOMRectReadOnly;
+  readonly to: DOMRectReadOnly;
+}
+
+/** Motion's features, fetched once a list–detail route has mounted. */
+const loadMotionFeatures = () => import('./motion-features').then((features) => features.default);
+
+/** The detail at rest. */
+const AT_REST = { x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1 } as const;
+
+/**
+ * The keyframes that draw the detail over the card and carry it into place,
+ * or `undefined` where either box has no size to scale by.
+ */
+export function carriedFrom(
+  from: Pick<DOMRectReadOnly, 'left' | 'top' | 'width' | 'height'>,
+  to: Pick<DOMRectReadOnly, 'left' | 'top' | 'width' | 'height'>,
+):
+  | {
+      readonly x: [number, number];
+      readonly y: [number, number];
+      readonly scaleX: [number, number];
+      readonly scaleY: [number, number];
+      readonly opacity: [number, number];
+    }
+  | undefined {
+  if (!(from.width > 0 && from.height > 0 && to.width > 0 && to.height > 0)) {
+    return undefined;
+  }
+  return {
+    x: [from.left - to.left, 0],
+    y: [from.top - to.top, 0],
+    scaleX: [from.width / to.width, 1],
+    scaleY: [from.height / to.height, 1],
+    opacity: [0.4, 1],
+  };
+}
 
 /** The custom property `theme.css` declares the two-pane width in. */
 export const LIST_DETAIL_FROM_PROPERTY = '--oyl-list-detail-from';
@@ -191,6 +267,9 @@ export function ListDetail({
   const createPressed = useRef(false);
   const focusCreate = useRef(false);
   const wasTwo = useRef(two);
+  const carry = useRef<Carry | undefined>(undefined);
+  // #1072's review (N5): the shell's own state, not a literal `false`.
+  const rideHasTheScreen = useContext(RideHasTheScreen);
 
   useEffect(() => {
     if (!started.current) {
@@ -285,7 +364,46 @@ export function ListDetail({
     if (event.target instanceof Element && event.target.closest(`[${CREATE_ATTRIBUTE}]`) !== null) {
       createPressed.current = true;
     }
+    noteCarry(event);
   }
+
+  /** A press on an item's link: where its card is, and where its detail will be. */
+  function noteCarry(event: MouseEvent<HTMLDivElement>): void {
+    carry.current = undefined;
+    // A pointer's press only. Enter on a link fires a click with `detail` 0,
+    // and moves focus to the chosen item's heading at once: its focus ring
+    // must be where the heading is from that moment (#723's measurement),
+    // not travelling in from a card the keyboard never pointed at.
+    if (event.detail === 0) return;
+    // Asked of the route on screen and of the shell's own state: never while
+    // a ride has the screen. @see mayCarryOn
+    if (!mayCarryOn(route.id, rideHasTheScreen)) return;
+    const link =
+      event.target instanceof Element ? event.target.closest(`[${SELECT_ATTRIBUTE}]`) : null;
+    const id = link?.getAttribute(SELECT_ATTRIBUTE);
+    if (link === null || link === undefined || id === null || id === undefined) return;
+    const card = link.closest('li, tr') ?? link;
+    const into = (two ? detailRef : listRef).current;
+    if (into === null) return;
+    carry.current = {
+      id,
+      from: card.getBoundingClientRect(),
+      to: into.getBoundingClientRect(),
+    };
+  }
+
+  // The keyframes for the selection that has just arrived, when a press asked
+  // for it; at rest otherwise. Read, not cleared, here — a render may run
+  // twice — and let go of once the selection has been drawn.
+  const carried = useMemo(() => {
+    const pending = carry.current;
+    return pending !== undefined && pending.id === selection
+      ? carriedFrom(pending.from, pending.to)
+      : undefined;
+  }, [selection]);
+  useEffect(() => {
+    carry.current = undefined;
+  }, [selection]);
 
   /*
    * The skip link's href is this page's OWN address, not a fragment naming the
@@ -309,56 +427,77 @@ export function ListDetail({
    */
   const notes = route.notes === undefined ? null : <ScreenNotes notes={route.notes} />;
   return (
-    <>
-      {/*
+    <MotionConfig reducedMotion="user">
+      <LazyMotion features={loadMotionFeatures} strict>
+        {/*
         The capture listener is not an interaction: it only NOTES that a create
-        link was followed. Enter on a link fires `click`, so a keyboard counts.
+        link was followed, and where a pressed card was (#1072). Enter on a
+        link fires `click`, so a keyboard counts.
       */}
-      <div
-        className={two ? 'oyl-list-detail oyl-list-detail--two' : 'oyl-list-detail'}
-        data-oyl-panes={two ? '2' : '1'}
-        onClickCapture={noteCreate}
-      >
-        <section
-          className="oyl-list-detail__list"
-          aria-labelledby={listHeadingId}
-          data-oyl-pane="list"
-          hidden={!showList}
-          ref={listRef}
+        <div
+          className={two ? 'oyl-list-detail oyl-list-detail--two' : 'oyl-list-detail'}
+          data-oyl-panes={two ? '2' : '1'}
+          onClickCapture={noteCreate}
         >
-          {two ? (
-            <a className="oyl-pane-skip" href={here} onClick={skipToDetail}>
-              Skip to {detailLabel.toLowerCase()}
-            </a>
-          ) : null}
-          {listHelp === undefined ? (
-            <h2 id={listHeadingId}>{listLabel}</h2>
-          ) : (
-            <SectionHeading level={2} id={listHeadingId} help={listHelp}>
-              {listLabel}
-            </SectionHeading>
-          )}
-          {list}
-          {two ? notes : null}
-        </section>
-        <section
-          className="oyl-list-detail__detail"
-          aria-label={detailLabel}
-          data-oyl-pane="detail"
-          tabIndex={-1}
-          hidden={!showDetail}
-          ref={detailRef}
-        >
-          {!two && selection !== undefined ? (
-            <p>
-              <a href={hrefFor(route)}>{backLabel}</a>
-            </p>
-          ) : null}
-          {detail}
-        </section>
-      </div>
-      {two ? null : notes}
-    </>
+          <section
+            className="oyl-list-detail__list"
+            aria-labelledby={listHeadingId}
+            data-oyl-pane="list"
+            hidden={!showList}
+            ref={listRef}
+          >
+            {two ? (
+              <a className="oyl-pane-skip" href={here} onClick={skipToDetail}>
+                Skip to {detailLabel.toLowerCase()}
+              </a>
+            ) : null}
+            {listHelp === undefined ? (
+              <h2 id={listHeadingId}>{listLabel}</h2>
+            ) : (
+              <SectionHeading level={2} id={listHeadingId} help={listHelp}>
+                {listLabel}
+              </SectionHeading>
+            )}
+            {list}
+            {two ? notes : null}
+          </section>
+          <section
+            className="oyl-list-detail__detail"
+            aria-label={detailLabel}
+            data-oyl-pane="detail"
+            tabIndex={-1}
+            hidden={!showDetail}
+            ref={detailRef}
+          >
+            {/*
+            #1072: the detail, carried from the card a press chose. Always
+            this one element, so carrying mounts and focuses nothing.
+          */}
+            <m.div
+              className="oyl-list-detail__carried"
+              style={{ transformOrigin: '0 0' }}
+              initial={false}
+              animate={carried ?? AT_REST}
+              transition={{
+                duration: MOTION_FOR_SCRIPT.medium.duration,
+                ease: [...MOTION_FOR_SCRIPT.medium.ease],
+              }}
+            >
+              {!two && selection !== undefined ? (
+                <p>
+                  {/* #946: a press here is the menus' "back" sound. */}
+                  <a href={hrefFor(route)} data-oyl-sound="back">
+                    {backLabel}
+                  </a>
+                </p>
+              ) : null}
+              {detail}
+            </m.div>
+          </section>
+        </div>
+        {two ? null : notes}
+      </LazyMotion>
+    </MotionConfig>
   );
 }
 

@@ -75,6 +75,7 @@ import type {
 } from '@onyourleft/store';
 
 import { loadSummaryOf } from '../analysis/summary';
+import { rideFactsOf } from '../progress/ride-facts';
 
 /** The activity and the samples behind it, ready to write. */
 export interface FinishedRide {
@@ -99,6 +100,10 @@ export interface RideToSaveInput {
    * and the alternative is every indoor session sharing one name.
    */
   readonly workoutName?: string | undefined;
+  /** A structured workout was ridden to its end on this ride — #947's first-workout badge. */
+  readonly workoutFinished?: boolean | undefined;
+  /** This ride raced the rider's own ghost and the race settled — #947's ghost badge. */
+  readonly ghostRaced?: boolean | undefined;
 }
 
 /**
@@ -151,6 +156,16 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     // time or never. `analysis/summary.ts` records why the load itself is not.
     ...(loadSummaryOf({ power, heartRate: series.channels.heartRate }, series.sampleInterval) ??
       {}),
+    // #947: what the badges need, worked out while the samples are in hand —
+    // and the two things only the ride itself knew, which nothing can find out
+    // later. `progress/ride-facts.ts` says why at save rather than on Home.
+    rideFacts: rideFactsOf({
+      power,
+      altitude: series.channels.altitude,
+      sampleInterval: series.sampleInterval,
+      workoutFinished: input.workoutFinished,
+      ghostRaced: input.ghostRaced,
+    }),
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind
     // it, and inventing a name would put a ride in the deduplication index

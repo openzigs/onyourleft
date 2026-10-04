@@ -69,6 +69,7 @@ import {
   type HomePreviousWeek,
 } from '../home/home';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
+import { ProgressPanel } from '../progress/ProgressPanel';
 import type { RideController } from '../ride/controller';
 import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
@@ -102,6 +103,8 @@ export function HomeView(props: HomeViewProps): JSX.Element {
   const [data, setData] = useState<HomeData | undefined>(undefined);
   const [nextUp, setNextUp] = useState<HomeNextUp | undefined>(undefined);
   const [failed, setFailed] = useState(false);
+  // #947: bumped once *Look at older rides* has written, so Home reads again.
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     if (analysis === undefined) {
@@ -126,8 +129,8 @@ export function HomeView(props: HomeViewProps): JSX.Element {
     };
     // ⚠️ `analysis` and `routes` only: `now` is a clock, read once per mount.
     // A dependency on it would be a store read per render, which is the thing
-    // this screen exists to bound.
-  }, [analysis, routes]);
+    // this screen exists to bound. `reads` is a rider's press (#947), not a render.
+  }, [analysis, routes, reads]);
 
   return (
     <div className="oyl-home-frame tw:@container">
@@ -152,7 +155,13 @@ export function HomeView(props: HomeViewProps): JSX.Element {
         ) : data.lastRide === undefined ? (
           <GettingStarted />
         ) : (
-          <Rides data={data} />
+          <Rides
+            data={data}
+            analysis={analysis}
+            onRead={() => {
+              setReads((count) => count + 1);
+            }}
+          />
         )}
       </div>
     </div>
@@ -183,7 +192,15 @@ function GettingStarted(): JSX.Element {
   );
 }
 
-function Rides({ data }: { readonly data: HomeData }): JSX.Element {
+function Rides({
+  data,
+  analysis,
+  onRead,
+}: {
+  readonly data: HomeData;
+  readonly analysis: AnalysisPort;
+  readonly onRead: () => void;
+}): JSX.Element {
   const units = useUnits();
   const last = data.lastRide;
   const lastDistance = last === undefined ? undefined : shownDistance(last.distance);
@@ -259,6 +276,14 @@ function Rides({ data }: { readonly data: HomeData }): JSX.Element {
           </>
         )}
       </section>
+
+      {/* #947: from the same rows, with no read of its own. */}
+      <ProgressPanel
+        progress={data.progress}
+        summaries={data.summaries}
+        analysis={analysis}
+        onRead={onRead}
+      />
     </>
   );
 }

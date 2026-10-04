@@ -79,8 +79,12 @@ export const TONE_DEAD_BAND = 0.03;
 export const TONE_FULL_SCALE = 0.25;
 /** The tone's level at full volume — quiet under the short sounds, on purpose. */
 const TONE_LEVEL = 0.12;
-/** The short sounds' level at full volume. */
-const CUE_LEVEL = 0.3;
+/**
+ * The short sounds' level at full volume. Exported because the menus' sounds
+ * (#946, `shell/menu-sounds.ts`) are set BELOW it: a sound answering a press
+ * is never louder than one a rider needs mid-ride.
+ */
+export const RIDE_CUE_LEVEL = 0.3;
 
 /**
  * The tone's pitch for a power against a target, in whole semitones from
@@ -193,7 +197,7 @@ export class RideCues {
   /** One short sound — only alongside its sentence. @see the module note */
   cue(name: CueName): void {
     if (!this.#audible()) return;
-    this.#output.playCue(name, CUE_LEVEL * this.#preference.volume);
+    this.#output.playCue(name, RIDE_CUE_LEVEL * this.#preference.volume);
   }
 
   /** The ride ended, or the screen went away: nothing is left sounding. */

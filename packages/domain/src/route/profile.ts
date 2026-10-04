@@ -386,6 +386,28 @@ function accumulated(
 }
 
 /**
+ * The total ascent of a RECORDED ride, from its altitude readings in order —
+ * #947's climbing badges.
+ *
+ * The same run rule a route's ascent uses ({@link ASCENT_THRESHOLD_METRES}),
+ * so a ride and the route it was ridden on are counted alike; a gap in the
+ * readings is skipped rather than read as a step to or from sea level.
+ *
+ * `undefined` — never `0` — when the ride has fewer than two readings: an
+ * indoor ride did not climb nought metres, it climbed nothing anybody
+ * measured, and a badge counting it as nought would say otherwise.
+ */
+export function recordedAscent(altitudes: readonly (number | undefined)[]): Metres | undefined {
+  const values = altitudes.filter(
+    (value): value is number => value !== undefined && Number.isFinite(value),
+  );
+  if (values.length < 2) {
+    return undefined;
+  }
+  return metres(accumulated(values, ASCENT_THRESHOLD_METRES).ascent);
+}
+
+/**
  * Build a route profile from a route's points.
  *
  * @throws {RouteError} for every way a route can fail to be one — see

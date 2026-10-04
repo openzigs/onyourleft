@@ -127,6 +127,7 @@ import {
 import type {
   ActivityRecord,
   ActivitySummary,
+  RideFacts,
   AthleteRecord,
   CameraFrameRecord,
   FramingReferenceRecord,
@@ -877,6 +878,34 @@ export class ActivityStore {
           loadCoveredTime: summary.loadCoveredTime,
         }),
       );
+      return true;
+    });
+  }
+
+  /**
+   * Writes the facts a ride's badges are earned from (#947), leaving every
+   * other field alone — the backfill's write, for a ride saved before #947.
+   *
+   * Narrow for {@link setActivityLoadSummary}'s reason, in one transaction for
+   * its reason, and athlete-scoped like every other write. The facts are
+   * REPLACED, not merged: they are worked out together from one read of the
+   * ride's samples, and a merge would keep a fact the new reading does not
+   * support.
+   *
+   * @returns `false` when this athlete has no such ride, rather than throwing.
+   */
+  async setActivityRideFacts(
+    owner: AthleteId,
+    activity: ActivityId,
+    facts: RideFacts,
+  ): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#activities], async () => {
+      const row = await this.#activities.get(activity);
+      if (row === undefined || row.athleteId !== owner) {
+        return false;
+      }
+      const existing = fromPersistedActivity(row);
+      await this.#activities.put(toPersistedActivity({ ...existing, rideFacts: facts }));
       return true;
     });
   }
@@ -3318,6 +3347,7 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     effortWeightedPower,
     effortWeightedHeartRate,
     loadCoveredTime,
+    rideFacts,
     createdAt,
   } = record;
   return {
@@ -3340,6 +3370,9 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     ...(effortWeightedPower === undefined ? {} : { effortWeightedPower }),
     ...(effortWeightedHeartRate === undefined ? {} : { effortWeightedHeartRate }),
     ...(loadCoveredTime === undefined ? {} : { loadCoveredTime }),
+    // #947: what the badges on Home are earned from, read off the list row so
+    // Home stays one store read and no stream decode.
+    ...(rideFacts === undefined ? {} : { rideFacts }),
   };
 }
 

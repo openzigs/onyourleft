@@ -402,6 +402,7 @@ export {
   LOOP_CLOSURE_METRES,
   positionAt,
   PROFILE_RESOLUTION_METRES,
+  recordedAscent,
   routeProfile,
 } from './route/profile';
 
