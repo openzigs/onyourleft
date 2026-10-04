@@ -13,14 +13,13 @@
 - **Issue**: [#1093](https://github.com/openzigs/onyourleft/issues/1093). Parent epic
   [#1092](https://github.com/openzigs/onyourleft/issues/1092), the successor to
   [#795](https://github.com/openzigs/onyourleft/issues/795)
-- **Number**: **0046**, reserved by #1093's title. [`docs/architecture.md`](../architecture.md)'s
-  ownership table said on 2026-10-04 that the next free number was 0044, and listed no reservation
-  for 0044 or 0045. ⚠️ **Both are claimed by open issues by title**, the practice
-  [ADR 0035](0035-model-written-ride-write-ups.md) followed for 0034:
-  [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) and
-  [#1059](https://github.com/openzigs/onyourleft/issues/1059) (ADR 0045). Neither has merged. This
-  pull request records both as live reservations in that table rather than skipping them silently,
-  and records 0046 as this ADR
+- **Number**: **0046**, reserved by #1093's title. 0044 and 0045 were already claimed when this
+  number was taken, by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055):
+  [ADR 0044](0044-side-camera-live-view-and-snapshot.md) is written and on `main`
+  ([#1058](https://github.com/openzigs/onyourleft/issues/1058), 2026-10-04, Proposed), and 0045 is
+  reserved for [#1059](https://github.com/openzigs/onyourleft/issues/1059) and not yet merged.
+  [`docs/architecture.md`](../architecture.md)'s ownership table records both; this pull request
+  adds 0046 to it as this ADR, and moves the next free number to 0047
 - **Supersedes**, when the owner approves it, and **for AI analysis only**:
   - [ADR 0036](0036-a-self-hostable-instance-server-now.md) **D-3(a)**, as far as asking for a
     ride analysis is concerned. (a) stays in force for every other feature it lists.
@@ -135,7 +134,7 @@ And the owner's note on #1093 the same day, verbatim:
 | Earlier statement | Replaced by | Effect |
 |---|---|---|
 | #1093 ruling 3, *"on a **single-rider** instance only … refused on an instance with more than one athlete"* | #1092 comment ruling 5, *"This REPLACES ruling 3's 'single-rider only'"* | Two key modes on any instance (D-9). The encryption, logging and backup rules of ruling 3 survive and ruling 5 restates them |
-| #1093 ruling 1, *"pictures do not leave the room"*, and the epic body's *"The live side-camera pose model … stays on the device"* | #1092 comment ruling 1, *"Pose on your computer (ADR 0033 D-11): move it to the instance"* | ⚠️ **Only the D-11 path moves.** The live pose model on the tablet stays (D-3). Pictures to the instance wait on their own privacy ruling ([#1106](https://github.com/openzigs/onyourleft/issues/1106)) and **this ADR does not make it** |
+| #1093 ruling 1, *"pictures do not leave the room"*, and the epic body's *"The live side-camera pose model … **stays on the device**"* | #1092 comment ruling 1, *"Pose on your computer (ADR 0033 D-11): move it to the instance"* | ⚠️ **Only the D-11 path moves.** The live pose model on the tablet stays (D-3). Pictures to the instance wait on their own privacy ruling ([#1106](https://github.com/openzigs/onyourleft/issues/1106)) and **this ADR does not make it** |
 | The epic body's open question 4, *"Recommended: the operator CLI only"* | #1092 comment ruling 6 | The operator command **and** the app |
 | The epic body's open question 6, *"held in memory only"* | #1092 comment ruling 7 | Synced and stored per athlete (D-10) |
 | The epic body's open question 9, *"the candidate is deleted when the device acknowledges the save"* | #1092 comment ruling 8 | Results are kept on the instance (D-12) |
@@ -168,7 +167,8 @@ And the owner's note on #1093 the same day, verbatim:
 > the tablet, epic #1055) stays on the device: it is not an analysis job, and pictures do not leave
 > the room."*
 
-- **The device-held hosted key is removed too. *The author's reading*, not a ruling's words.**
+- **The device-held hosted key is removed too. *The author's reading*, not a ruling's words**, and
+  §"Owner questions left open" Q12 asks the owner to confirm it.
   Ruling 1 removes the on-device runner, and #1092 comment rulings 5 and 6 put every key the
   analysis uses on the instance, set by the operator or pasted by the rider and stored there (D-9).
   With no runner on the device to use it, the author reads the device-held key of
@@ -253,8 +253,9 @@ The result: **28 commits**, 26 by `mcronin <mgcronin@gmail.com>` and 2 by
 `mgcronin <mgcronin@gmail.com>` — one person, the owner. 25 of the 28 carry a
 `Co-Authored-By: Claude Opus 5.5` trailer and no other co-author trailer appears. (The five files
 this list gained in review — `read-input.ts`, `hosted-mask-reachable.test.ts`,
-`personal-details-testing.ts`, `ride-summary.test.ts` and `history.test.ts` — add four distinct
-commits, seven file-and-commit pairs, all by `mcronin`.) An AI assistant is a tool and holds no
+`personal-details-testing.ts`, `ride-summary.test.ts` and `history.test.ts` — take the total from
+27 commits to 28: four commits touch them, all by `mcronin`, and three of those four were already
+counted for the files listed before review, so only one commit is new.) An AI assistant is a tool and holds no
 copyright, so it is not a holder whose consent is needed. (#1093's body counted 39 commits and 33
 trailers over a wider file set; the conclusion is the same.) ⚠️ **#1094 re-runs the command over
 exactly the files it moves**, on the day it merges, and records the result in its pull request. A
@@ -380,7 +381,7 @@ template still decides: the sections asked for, the instructions, the budgets an
 - **[ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-4 holds**: no vendor is named,
   defaulted or suggested, and there is one code path that takes a URL and a key. The gateway is in
   the closure because `ai` depends on it, and it is never called. Whether an unused vendor default
-  in a dependency counts as *"a vendor endpoint hard-coded"* is recorded in §"Amendments owed" for
+  in a dependency counts as *"No vendor endpoint is hard-coded, and no vendor is named in source."* is recorded in §"Amendments owed" for
   ADR 0031.
 - **Rejected, and why.** **Mastra**: `@mastra/core` ships an `ee/` directory under the non-OSI
   Mastra Enterprise License inside a package whose manifest says `Apache-2.0`, which `DEP001` reads
@@ -469,7 +470,9 @@ every athlete on the instance but the operator's own; the switch is one instance
 the database, changed by the operator command or by the operator in the app; while it is off a
 job request from another athlete is refused with an app sentence, before a model is called and
 before a key is read. **Neither key mode turns it on**: a rider who brings their own key still
-needs the operator's switch.
+needs the operator's switch. ⚠️ That last sentence is *the author's proposal*, not a ruling's words:
+ruling 5 does not say whether a rider's own key needs the switch, and §"Owner questions left open"
+Q13 asks the owner.
 
 ⚠️ **That reading needs an identity that does not exist yet.** There is no "operator's athlete" in
 `apps/instance/src` on `a9c7f3ff`. The nearest thing is the two moderator keys,
@@ -636,7 +639,7 @@ before it merges, and nothing else changes:
 2. **D-4's consent**: the owner's first-person consent on #1093 (Q8), quoted verbatim with its
    link and date, below the ruling's third-person sentence.
 3. **This file's answered owner questions**, each recorded as answered with the owner's words, and
-   any decision an answer changes (Q1 to Q10). An answer that reverses a decision here is a change
+   any decision an answer changes (Q1 to Q13). An answer that reverses a decision here is a change
    to this ADR before it is accepted, not an amendment after.
 4. **`CLAUDE.md` §1**'s sentence beside the invariants block, which says ADR 0046 *"is PROPOSED …
    Until the owner approves it on #1093, (a) holds unchanged"*. It goes stale the day this merges,
@@ -747,7 +750,7 @@ own three. Each names the statement in that ADR that becomes false.
 | [0035](0035-model-written-ride-write-ups.md) | D-7's *"The app decides every step; the model never chooses a tool"*; D-7's *"The rider's own computer is offered first when both it and a hosted model are set up"* (line 321 of that file); D-8's *"Nothing is sent in the background"*; D-9 B (own computer) and C (hosted, device key); D-10's *"Where each piece lands"* | D-7 superseded on the instance, and its source order gone with the rider's computer; D-8's bullet narrowed (D-7 above); B withdrawn; C replaced by #1104; D-10 redirected to #1092. **D-4 and D-5's never-sent list are unchanged** |
 | [0036](0036-a-self-hostable-instance-server-now.md) | D-3(a) for AI analysis; D-3(d)'s *"the rider's own analysis endpoint (ADR 0035) is the rider's computer, not this instance"*; and its own 2026-09-29 amendment's *"a rider with no instance gets the write-up without history and loses nothing, which keeps (a)"* and *"The analysis endpoint that **writes** a write-up is still the rider's computer or a hosted service they chose"* | Superseded by D-1, for analysis only; (b) and (c) reconciled by D-14; the 2026-09-29 entry's two sentences are recorded as no longer true, since a rider with no instance has no write-up and the endpoint is the instance's |
 | [0037](0037-instance-runtime-hosting-and-transport.md) | D-9's table as the instance's whole runtime closure | Adds D-8's rows. D-2: the agent's engine is written against ports, and only one Node-adapter module imports `ai` |
-| [0040](0040-a-history-index-on-the-riders-instance.md) | D-2's *"Where the screen and the summary builder run: on the device, and nowhere else"*; D-8's *"A separate 'history' step … is the only step that sees a passage"*; D-9's masking on the device; §Consequences' *"(a) a rider with no instance loses nothing — the write-up works exactly as ADR 0035 built it"* (line 141 of that file) and *"one who does not gets the write-up without history and loses nothing"* (line 479); and D-9's *"the history step runs on the rider's own computer only"* | The screen runs on both, from `@onyourleft/analysis`; the history step becomes the `history_search` tool (#1099), with the same 6 × 900-character bounds and the same fence; masking moves to the instance (D-10); the three sentences about a rider with no instance, and about the rider's own computer, are recorded as no longer true |
+| [0040](0040-a-history-index-on-the-riders-instance.md) | D-2's *"Where the screen and the summary builder run: on the device, and nowhere else"*; D-8's *"**A separate "history" step** … is the **only** step that sees a passage"*; D-9's masking on the device; §Consequences' *"(a) a rider with no instance loses nothing — the write-up works exactly as ADR 0035 built it"* (line 141 of that file) and *"one who does not gets the write-up without history and loses nothing"* (line 479); and D-9's *"the history step runs on the rider's own computer only"* | The screen runs on both, from `@onyourleft/analysis`; the history step becomes the `history_search` tool (#1099), with the same 6 × 900-character bounds and the same fence; masking moves to the instance (D-10); the three sentences about a rider with no instance, and about the rider's own computer, are recorded as no longer true |
 
 **Outside `docs/adr/`**, also owed and not made here:
 
@@ -810,6 +813,15 @@ None of these is decided by this ADR. Each is the owner's.
     and every job's input and result are plaintext there whenever the rider is away from home. Is
     that acceptable for these payloads — with #1104's disclosures saying so — or must they take
     ADR 0029 D-6's other transports (a LAN, or a WireGuard-class overlay), as a photograph must?
+12. **Is the device-held hosted key removed with the on-device runner?** (D-1.) Ruling 1 removes
+    the runner and #1092 comment rulings 5 and 6 put every key on the instance; *the author's
+    reading* is that the key ADR 0029's 2026-09-28 entry keeps on the device goes with the runner.
+    No ruling says so in words.
+13. **Does a rider who brings their own key still need the operator's switch?** (D-9.) Ruling 5
+    turns other riders' access off by default and lets the operator turn it on, and also lets a
+    rider bring their own key. *The author's proposal* is that the switch gates both key modes, so a
+    bring-your-own rider is refused while it is off; the alternative is that a rider's own key is
+    enough on its own, and the switch gates only Share mode.
 
 ---
 
