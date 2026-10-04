@@ -88,6 +88,7 @@ const WORKOUT_OWNS_IT: GameTrainerPort = {
   recordingMayStop: () => false,
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => undefined,
+  watchRide: () => () => undefined,
   readTrainer: () =>
     gameTrainerFrom(
       { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -166,6 +167,7 @@ describe('the picker says what the Ride press will do, before it — #503', () =
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
     rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
   };
 
   it('states that the trainer will follow the route’s hills, above the Ride button, with no violation', async () => {

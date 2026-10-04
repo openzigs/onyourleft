@@ -461,9 +461,66 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         const row = [...document.querySelectorAll('.oyl-hud__field')].find(
           (each) => each.querySelector('dt')?.textContent === 'Moving',
         );
-        return row?.querySelector('dd')?.textContent ?? '';
+        const text = row?.querySelector('dd')?.firstChild;
+        const range = document.createRange();
+        if (text !== null && text !== undefined) range.selectNodeContents(text);
+        return {
+          text: row?.querySelector('dd')?.textContent ?? '',
+          width: text === null || text === undefined ? 0 : range.getBoundingClientRect().width,
+          field: row?.getBoundingClientRect().width ?? 0,
+          lines: row === undefined ? 0 : range.getClientRects().length,
+        };
       });
-      expect(shown).toBe('9:59:59');
+      expect(shown.text).toBe('9:59:59');
+      // One line, and inside its own box: a time broken at a colon reads as
+      // two numbers, and on the CI runner's fonts it did break (run
+      // 37229623180). `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
+      // SIDE" says why the track is 19 rem's and not 19.5's.
+      expect(shown.lines).toBe(1);
+      expect(shown.width).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
+
+      // #1111's review: the time FITS its field, read off this engine's fonts
+      // — on the CI runner `9:59:59` was wider than an 89 px track and broke
+      // at a colon. `theme.css` never breaks it now, so a time too wide would
+      // spill rather than wrap; this is what catches that. And `10:00:00` at
+      // the word size (`fields.ts` §`movingTimeReading`), set on the live
+      // element for one synchronous read and put back: no fixture rides for
+      // ten hours.
+      const fit = await page.evaluate(() => {
+        const row = [...document.querySelectorAll<HTMLElement>('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Moving',
+        );
+        const value = row?.querySelector<HTMLElement>('dd');
+        const text = value?.firstChild;
+        if (row === undefined || value === undefined || value === null || !(text instanceof Text)) {
+          return undefined;
+        }
+        const width = (): number => {
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          return range.getBoundingClientRect().width;
+        };
+        const field = row.getBoundingClientRect().width;
+        const atNine = width();
+        const before = text.data;
+        text.data = '10:00:00';
+        value.classList.add('oyl-hud__value--word');
+        const atTen = width();
+        const fieldAtTen = row.getBoundingClientRect().width;
+        text.data = before;
+        value.classList.remove('oyl-hud__value--word');
+        return { field, atNine, atTen, fieldAtTen };
+      });
+      expect(fit).toBeDefined();
+      const room = fit ?? { field: 0, atNine: Infinity, atTen: Infinity, fieldAtTen: 0 };
+      const fits =
+        `9:59:59 ${room.atNine.toFixed(1)} px in a ${room.field.toFixed(1)} px field ` +
+        `(${(room.field - room.atNine).toFixed(1)} px to spare); 10:00:00 at the word size ` +
+        `${room.atTen.toFixed(1)} px in ${room.fieldAtTen.toFixed(1)} px ` +
+        `(${(room.fieldAtTen - room.atTen).toFixed(1)} px to spare)`;
+      console.log(`#1111 fit — ${viewport.name} — ${fits}`);
+      expect(room.atNine, fits).toBeLessThanOrEqual(room.field);
+      expect(room.atTen, fits).toBeLessThanOrEqual(room.fieldAtTen);
 
       const field = named(seen.items, 'reading: Moving');
       expect(inside(field.box, viewport)).toBe(true);
@@ -484,7 +541,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const measured =
         `moving time ${describeItem(field)}; ${toRider.toFixed(1)} px clear of the leaning ` +
         `rider, ${toControl.toFixed(1)} px of the nearest control, ` +
-        `${toBottom.toFixed(1)} px above the bottom of the stage`;
+        `${toBottom.toFixed(1)} px above the bottom of the stage; the time is ` +
+        `${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field`;
       testInfo.annotations.push({ type: '#1111', description: measured });
       console.log(`#1111 — ${viewport.name} — ${measured}`);
       expect(toRider).toBeGreaterThan(0);
@@ -672,6 +730,24 @@ test.describe('a ride with a standing notice', () => {
       expect(controls.filter((each) => overlap(each.box, moving.box)).map(describeItem)).toEqual(
         [],
       );
+      // #1111's review: and over no other laid-out panel. The secondary
+      // panel is excused only where the field is drawn INSIDE it (a phone on
+      // its side, a tablet), which is where it is in the document.
+      const within = (inner: Box, outer: Box): boolean =>
+        inner.left >= outer.left &&
+        inner.right <= outer.right &&
+        inner.top >= outer.top &&
+        inner.bottom <= outer.bottom;
+      expect(
+        laidOut
+          .filter(
+            (each) =>
+              !(each.name.includes('oyl-hud__fields--secondary') && within(moving.box, each.box)),
+          )
+          .filter((each) => overlap(each.box, moving.box))
+          .map(describeItem),
+        describeItem(moving),
+      ).toEqual([]);
       const clearOfRider = Math.max(
         moving.box.left - leaning.right,
         leaning.left - moving.box.right,

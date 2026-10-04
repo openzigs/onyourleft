@@ -6134,7 +6134,21 @@ select.oyl-input {
  * phone narrower than 24 rem (above). 802 px is where four secondary tracks
  * fit beside a 24 rem primary panel (4 × 88 + 3 × 8 + 18 = 394 px of panel),
  * so a wider phone keeps the primary tier exactly as it was.
- * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport.
+ *
+ * ⚠️ **And the moving time takes TWO of those four tracks, because of the CI
+ * runner's fonts.** A track here is 89 px, and `9:59:59` at 1.5 rem is 85 px
+ * in this repository's Chromium on a Mac and wider than the track on the
+ * runner, whose system face has wider digits: it broke at a colon, the first
+ * row grew from 45 to 70 px, and the bottom row went off a 736×360 stage
+ * (run 37229623180). Two tracks are about 186 px, which holds `10:00:00` and
+ * more at either size. It costs no row on the widest ride: seven readings and
+ * one extra cell are two rows of four, as seven were — `dense` back-fills the
+ * fourth cell of the first row with the reading after it, so the moving time
+ * is drawn at the start of the second row. An ordinary ride's four readings
+ * become two rows rather than one, no taller than the widest ride's panel,
+ * which is the one measured.
+ * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport,
+ * and how much room the time has in its field.
  */
 @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
   .oyl-game--riding .oyl-hud {
@@ -6144,6 +6158,24 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
     display: block;
   }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-auto-flow: row dense;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+    grid-column: span 2;
+  }
+}
+
+/* #1111. A time is one token: `9:59:59` broken at a colon reads as two
+   numbers, and the second line makes its row taller on a HUD with no height to
+   spare. So it is never broken, and what holds it inside its field instead is
+   a measurement: `ride.browser.spec.ts` §"#1111" and `hud.browser.spec.ts`'s
+   no-overflow check, on the CI runner's fonts. Past ten hours it is set at the
+   word size (`fields.ts` §`movingTimeReading`), for #259's reason. */
+.oyl-hud__field--moving .oyl-hud__value {
+  white-space: nowrap;
 }
 
 /*
@@ -6172,9 +6204,14 @@ select.oyl-input {
  * that control has no trainer line, and its actions panel began 121 px under
  * the rider at 360×752.
  *
- * ⚠️ Where the engine has no anchor positioning (a WebView older than
- * Chrome 125) none of this applies and the reading stays a third row in the
- * grid, as #576's rule says of its own fallback.
+ * ⚠️ **This layout ASSUMES anchor positioning: Android System WebView /
+ * Chrome 125 or later.** Where the engine has none, none of this applies and
+ * the reading stays a third row in the grid — and that fallback does NOT hold
+ * the upright layout's floors. Measured for #1111's review with this block
+ * deleted: 13 cases of `ride.browser.spec.ts` fail at 360×752 and 360×800 (a
+ * panel over the leaning rider, #585's and #647's 50 px floors, the sounds and
+ * the side camera). #576's own fallback takes the same stance; making either
+ * hold without anchors is #1120.
  */
 @supports (anchor-name: --oyl-probe) {
   @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {

@@ -1026,6 +1026,18 @@ describe('the ride’s moving time — #1111', () => {
     }
   });
 
+  it('is set at the word size past ten hours, and at the number size up to then', () => {
+    // 9:59:59 is the widest figure the layout is measured at (`theme.css`
+    // never breaks a time), so it is a number; one second later it is a digit
+    // wider and takes #259's smaller size.
+    expect(movingTime({ ...baseInput(), movingSeconds: 35_999 })?.word).toBeUndefined();
+    const ten = movingTime({ ...baseInput(), movingSeconds: 36_000 });
+    expect(ten?.value).toBe('10:00:00');
+    expect(ten?.word).toBe(true);
+    expect(movingTime({ ...baseInput(), movingSeconds: 360_000 })?.word).toBe(true);
+    expect(movingTime({ ...baseInput(), movingSeconds: undefined })?.word).toBeUndefined();
+  });
+
   it('is always present, beside the distance to go, in the secondary tier', () => {
     const keys = hudReadings(baseInput()).map((reading) => reading.key);
     expect(keys.indexOf(MOVING_TIME_KEY)).toBe(keys.indexOf('remaining') + 1);

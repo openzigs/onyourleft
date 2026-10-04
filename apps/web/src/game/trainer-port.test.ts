@@ -391,6 +391,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
         return Promise.resolve();
       },
       noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
     };
     return { controller, requests };
   }
@@ -434,6 +435,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
         return Promise.resolve();
       },
       noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
     };
     const port = gameTrainerPortOver(controller);
     expect(port.readTrainer().refusal).toBeUndefined();
@@ -474,6 +476,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
       simulationControl: () => undefined,
       requestTrainerControl: () => Promise.resolve(),
       noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
     });
     expect(port.workoutRescue()).toBeUndefined();
     rescue = { kind: 'floor', reason: 'Pedalling has stopped.' };
@@ -490,6 +493,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
       noteGameRideEnded: (outcome) => {
         noted.push(outcome);
       },
+      subscribe: () => () => undefined,
     });
     port.gameRideEnded('beaten');
     port.gameRideEnded(undefined);
@@ -509,6 +513,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
       simulationControl: () => undefined,
       requestTrainerControl: () => Promise.resolve(),
       noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
     });
     // Nothing started on the Ride screen: there is no moving time to quote.
     expect(port.rideMovingSeconds()).toBeUndefined();
@@ -521,6 +526,36 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     snapshot = { phase: 'stopped', movingSeconds: 70 };
     expect(port.rideMovingSeconds()).toBeUndefined();
     expect(gameTrainerPortOver(undefined).rideMovingSeconds()).toBeUndefined();
+  });
+
+  it('tells the HUD whenever the controller changes, and stops when asked — #1111', () => {
+    // What keeps the moving time current while the GAME is paused and its
+    // render loop is not running. @see GameTrainerPort.watchRide
+    const listeners = new Set<() => void>();
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    });
+    let told = 0;
+    const stop = port.watchRide(() => {
+      told += 1;
+    });
+    for (const listener of listeners) listener();
+    expect(told).toBe(1);
+    stop();
+    expect(listeners.size).toBe(0);
+    // No controller: nothing to watch, and stopping is harmless.
+    expect(() => {
+      gameTrainerPortOver(undefined).watchRide(() => undefined)();
+    }).not.toThrow();
   });
 
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {

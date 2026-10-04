@@ -301,14 +301,33 @@ export interface GameTrainerPort {
    * ⚠️ The game's own *Pause* pauses the SIMULATION; the recording is the
    * Ride screen's (`RideSession`, above the router), and its auto-pause is
    * what stops this figure when the rider stops. So this is the time the
-   * saved ride will say, which is the point of reading it.
+   * saved ride will say, which is the point of reading it — and why the HUD
+   * does not read it on the frame alone: see {@link watchRide}.
    *
-   * Read on every frame, like {@link workoutRescue}, and for its reason: it
-   * decides no write, and a snapshot read is a property access. On the port
-   * for {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView`
-   * stops reading it — and named so nothing else in production calls it.
+   * A snapshot read, a property access. On the port for
+   * {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView` stops
+   * reading it — and named so nothing else in production calls it.
    */
   rideMovingSeconds(): number | undefined;
+  /**
+   * Be told whenever the ride controller's state changes — #1111's review.
+   * Returns the call that stops telling.
+   *
+   * ⚠️ **What keeps the moving time current while the GAME is paused.** The
+   * render loop does not run while the game is paused, so a figure read only
+   * during the tick's render froze at the press — while the recording, which
+   * the game's Pause does not pause, went on counting until its own
+   * auto-pause, or for as long as the rider kept pedalling. `GameView` reads
+   * {@link rideMovingSeconds} through `useSyncExternalStore` over this, so the
+   * HUD re-renders on the controller's own tick (once a second, on the ride's
+   * clock) whatever the game is doing. A notification, not a clock: the
+   * figure is still the recorder's.
+   *
+   * On the port for {@link recordingMayStop}'s reason, and named so nothing
+   * else in production calls a method of that name — the controller's is
+   * `subscribe` — so `WIRE003` goes red if `GameView` stops calling it.
+   */
+  watchRide(listener: () => void): () => void;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -343,9 +362,14 @@ interface GameTrainerSource {
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
+  /** #1111. @see GameTrainerPort.watchRide */
+  subscribe(listener: () => void): () => void;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
 }
+
+/** What {@link GameTrainerPort.watchRide} returns with no ride controller: nothing to stop. */
+const NOT_WATCHING = (): void => undefined;
 
 /**
  * The game's trainer port over a ride controller, or over none — #362, #503.
@@ -387,6 +411,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
     },
+    watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
     rideMovingSeconds: () => {
       // One snapshot read for both, so the phase and the time are one moment.
       const snapshot = controller?.getSnapshot();

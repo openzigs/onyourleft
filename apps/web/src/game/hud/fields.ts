@@ -424,14 +424,30 @@ export const MOVING_TIME_KEY = 'movingTime';
  * ⚠️ **Never stale.** A dash here means "nothing is being recorded", which is
  * not a sensor that dropped: no *Sensor lost* is said, because nothing was
  * lost.
+ *
+ * ⚠️ **Past ten hours it is set at the word size** ({@link HudReading.word}),
+ * for #259's reason exactly: `10:00:00` is one token with no break
+ * opportunity (`theme.css` never breaks it) and a digit wider than
+ * `9:59:59`, which is the widest figure the layout was measured at. At
+ * 1.5 rem on the CI runner's fonts it would be wider than a 93 px track.
  */
 function movingTimeReading(movingSeconds: number | undefined): HudReading {
   const value =
     movingSeconds === undefined || !Number.isFinite(movingSeconds)
       ? NO_READING
       : formatDuration(movingSeconds, 'always');
-  return { key: MOVING_TIME_KEY, label: 'Moving', value, unit: '', stale: false };
+  return {
+    key: MOVING_TIME_KEY,
+    label: 'Moving',
+    value,
+    unit: '',
+    stale: false,
+    ...(value.length > WIDEST_MEASURED_MOVING_TIME.length ? { word: true } : {}),
+  };
 }
+
+/** The widest moving time the HUD's layout is measured at — #1111. @see movingTimeReading */
+const WIDEST_MEASURED_MOVING_TIME = '9:59:59';
 
 /**
  * The room's two fields — #783: the one chosen rider's gap, and how many are

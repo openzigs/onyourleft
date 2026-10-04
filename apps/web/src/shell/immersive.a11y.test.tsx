@@ -83,6 +83,7 @@ const NO_CONTROL: GameTrainerPort = {
   recordingMayStop: () => false,
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => undefined,
+  watchRide: () => () => undefined,
   readTrainer: () => ({ kind: 'no-control', control: undefined }),
 };
 

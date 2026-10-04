@@ -475,6 +475,7 @@ const TRAINER: GameTrainerPort = {
   recordingMayStop: () => MAY_STOP,
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => MOVING_SECONDS,
+  watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
       ? {

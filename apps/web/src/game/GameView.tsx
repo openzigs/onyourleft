@@ -27,7 +27,7 @@
  * its own could not be rendered there at all.
  */
 
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 
 import type { KitColour } from '@onyourleft/store';
 
@@ -415,6 +415,33 @@ function oneNoticeOnly(): boolean {
   );
 }
 
+/** What there is to watch with no trainer port: nothing, and nothing to stop. */
+function watchNothing(): () => void {
+  return () => undefined;
+}
+
+/**
+ * The recorder's moving time, kept current — #1111's review.
+ *
+ * ⚠️ **Subscribed, not only read during render**, for {@link useOneNoticeOnly}'s
+ * reason. A running game re-renders on every frame, but a PAUSED one does not
+ * — and the game's *Pause* does not pause the RECORDING (`trainer-port.ts`
+ * §`GameTrainerPort.rideMovingSeconds`), so a figure read only on the tick's
+ * render froze at the press while the recorder went on counting. The
+ * controller tells its subscribers on every tick of the ride's clock
+ * (`ride/controller.ts` §`tick`), and `useSyncExternalStore` re-renders only
+ * when the figure has changed. It is still read on every other render, so a
+ * frame never shows an older figure than the recorder holds.
+ */
+function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideMovingSeconds(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
 /**
  * {@link oneNoticeOnly}, kept current — #693's re-review.
  *
@@ -684,6 +711,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * link is said once, when it goes — `side-camera.ts` §`sideCameraLostEvent`.
    */
   const sideCamera = useSideCamera(props.sidePairing);
+  /** @see useRideMovingSeconds */
+  const movingSeconds = useRideMovingSeconds(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -1890,11 +1919,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
-        // #1111: the RECORDER's moving time, read during render like `rescue`
-        // — the tick's `setState` schedules this render, so it is as fresh as
-        // the frame. Never the simulation's `elapsed`: that is a second clock,
-        // and it does not know about the recorder's auto-pause.
-        movingSeconds={props.trainer?.rideMovingSeconds()}
+        // #1111: the RECORDER's moving time — never the simulation's
+        // `elapsed`, which is a second clock that does not know about the
+        // recorder's auto-pause. @see useRideMovingSeconds
+        movingSeconds={movingSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         // #783: a count and ONE chosen gap on a room ride, never a list.
         {...(roomRef.current === undefined

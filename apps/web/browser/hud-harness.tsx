@@ -415,6 +415,13 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * consequence for what the gate can claim.
  */
 /**
+ * A moving time of 9:59:59 on every panel — #1111. The widest figure a ride
+ * under ten hours shows (`h:mm:ss` from the first second, tabular digits), so
+ * "no value overflows its track" is measured with the new field at its widest.
+ */
+const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
+/**
  * The one piece of geometry here that is this file's — see the header.
  *
  * `position: relative` puts the stage in the flow, so six of them stack; the
@@ -422,13 +429,6 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * HUD inside is `position: absolute; inset: 0` against this box exactly as it
  * is against the product's.
  */
-/**
- * A moving time of 9:59:59 on every panel — #1111. The widest figure a ride
- * under ten hours shows (`h:mm:ss` from the first second, tabular digits), so
- * "no value overflows its track" is measured with the new field at its widest.
- */
-const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
-
 const STAGE_IN_FLOW = { position: 'relative', inset: 'auto', height: '100vh' } as const;
 
 function Harness(): JSX.Element {
