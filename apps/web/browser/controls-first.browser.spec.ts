@@ -988,3 +988,112 @@ test.describe('#1013 — the help control beside a section heading', () => {
     await expect(details).not.toHaveAttribute('open');
   });
 });
+
+/**
+ * #1050 — *Save workout* with blocks in the builder.
+ *
+ * Every other walk here renders the workout builder with NO blocks, so the
+ * block list and the block chart (#1043) — drawn only once a block exists —
+ * were never laid out, and nothing measured where they put the builder's one
+ * primary. `reflow.html?builder=blocks` adds one block of each kind through the
+ * builder's own *Add block* form (`reflow-harness.tsx` §`buildOnWorkouts`),
+ * and this publishes *Save workout*'s margin to the fold — to its pane's
+ * bottom where that pane scrolls on its own (#723) — with and without them.
+ *
+ * - **Held** to §4f's 50 px floor on the owner's tablet both ways up. With
+ *   the chart where #1043 drew it, between the list and the Save form, it
+ *   could not be: in landscape the four blocks and the chart put *Save
+ *   workout* about 46 px UNDER the fold on a Mac. The chart moved below the
+ *   form (`WorkoutsView.tsx`, #1050), which is the issue's own remedy.
+ * - **Published, not held, on a phone** (390×844), and the floor there is
+ *   not one the layout can meet by moving the chart: one pane puts the list
+ *   of saved workouts first, the builder after it, and the block list alone
+ *   — each block a line and a 44 px *Remove* button — puts *Save workout*
+ *   about 120 px under the fold with four blocks on a Mac. With none it is
+ *   above the fold (`list-detail.browser.spec.ts` §`PRIMARY_ON_ARRIVAL`
+ *   says by how little). A builder that grows with every block cannot keep a
+ *   button below it on one screen; the phone's way to it is scrolling.
+ * - **The control**: `&chart=above` puts the chart back between the list and
+ *   the form on the live page, and on the landscape tablet *Save workout* must
+ *   then fall under the floor — so the hold above is the chart's place doing
+ *   the work, not a fixture too small to matter.
+ */
+const SAVE_WORKOUT = 'Save workout';
+
+/** How many blocks `?builder=blocks` adds: `reflow-harness.tsx` §`BUILDER_BLOCKS`. */
+const BUILDER_BLOCK_COUNT = 4;
+
+async function saveWorkoutMargin(
+  page: Page,
+): Promise<{ margin: number; blocks: number; chart: number }> {
+  const seen = await visit(page, routeById('workouts'));
+  const save = seen.primaries.find((primary) => primary.text === SAVE_WORKOUT);
+  if (save === undefined) {
+    throw new Error(
+      `workouts: no laid-out “${SAVE_WORKOUT}” among ${JSON.stringify(seen.primaries)}`,
+    );
+  }
+  // `primaries` is in document coordinates and the fold in the viewport's;
+  // `visit` measures at the top of the page, so the two agree.
+  const line = Math.min(seen.fold, save.clipBottom ?? Number.POSITIVE_INFINITY);
+  const builder = page.locator('.oyl-main .oyl-sections').first();
+  return {
+    margin: line - save.bottom,
+    blocks: await builder.locator('ol > li').count(),
+    chart: await builder.locator('svg.oyl-block-chart').count(),
+  };
+}
+
+test.describe('#1050 — Save workout, with blocks in the builder', () => {
+  for (const viewport of [...TABLETS, PHONE]) {
+    const held = viewport !== PHONE;
+    test(`its margin to the fold on a ${viewport.name}${held ? `, held to ${String(FOLD_MARGIN_PIXELS)} px` : ''}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, 'data=populated');
+      const without = await saveWorkoutMargin(page);
+      await open(page, viewport, 'data=populated&builder=blocks');
+      const withBlocks = await saveWorkoutMargin(page);
+      console.log(
+        `[#1050] “${SAVE_WORKOUT}” @ ${viewport.name}: ${withBlocks.margin.toFixed(1)} px with ` +
+          `${String(withBlocks.blocks)} blocks and the chart, ${without.margin.toFixed(1)} px with none`,
+      );
+      // The fixture is what it says, or this measured the empty builder twice.
+      expect(without.blocks).toBe(0);
+      expect(without.chart).toBe(0);
+      expect(withBlocks.blocks).toBe(BUILDER_BLOCK_COUNT);
+      expect(withBlocks.chart).toBe(1);
+      if (held) {
+        expect(withBlocks.margin).toBeGreaterThan(FOLD_MARGIN_PIXELS);
+      }
+    });
+  }
+
+  test('the control — with the chart above the form, Save workout falls under the floor on the landscape tablet', async ({
+    page,
+  }) => {
+    const [landscape] = TABLETS;
+    if (landscape === undefined) throw new Error('no tablet viewport');
+    await open(page, landscape, 'data=populated&builder=blocks&chart=above');
+    const above = await saveWorkoutMargin(page);
+    console.log(
+      `[#1050] control: “${SAVE_WORKOUT}” @ ${landscape.name}, chart above the form: ` +
+        `${above.margin.toFixed(1)} px`,
+    );
+    expect(above.blocks).toBe(BUILDER_BLOCK_COUNT);
+    expect(above.chart).toBe(1);
+    // The chart really is above the form, or this measured the shipped page.
+    expect(
+      await page.evaluate(() => {
+        const chart = document.querySelector('.oyl-main svg.oyl-block-chart');
+        const form = document.querySelector('form[aria-label="Save this workout"]');
+        return (
+          chart !== null &&
+          form !== null &&
+          (chart.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        );
+      }),
+    ).toBe(true);
+    expect(above.margin).toBeLessThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+});

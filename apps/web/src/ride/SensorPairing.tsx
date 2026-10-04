@@ -66,6 +66,7 @@ import type { ConnectionState } from '@onyourleft/sensors';
 
 import { Button } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
+import { KeptVisible } from '../design/KeptVisible';
 // The part's own file, not the kit's index, which names every part.
 import { SensorGlyph, type SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { StatusMessage } from '../design/StatusMessage';
@@ -208,10 +209,12 @@ export function PairingPanel({
           />
         ))}
       </ul>
-      <p>{ONE_GESTURE_PER_DEVICE}</p>
-      {limits.map((limit) => (
-        <p key={limit}>{limit}</p>
-      ))}
+      <KeptVisible>
+        <p>{ONE_GESTURE_PER_DEVICE}</p>
+        {limits.map((limit) => (
+          <p key={limit}>{limit}</p>
+        ))}
+      </KeptVisible>
       <details className="oyl-details">
         <summary>{summary}</summary>
         {children}
