@@ -677,7 +677,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   - **D-3's first sentence** is superseded for exactly **four sagittal angles** (knee at bottom dead
     centre, hip at top dead centre, elbow and trunk at bottom dead centre), rendered as numbers only
     on **one surface**, the Fit check section of a saved ride's page, each rounded and with R8's
-    caveat in the same sentence (ADR 0045 D-3, D-7, D-8). Everywhere else D-3 stands as written, and
+    caveat in the same sentence (ADR 0045 D-3, D-7, D-8). Everywhere else D-3 stands as amended on 2026-09-28, and
     a limb angle, a segment length and a body dimension are still never rendered anywhere. **R1** is
     relaxed for those four values on that surface only.
   - **D-3's second reason, condition 6**, is not argued away: the owner accepts the risk, framed
@@ -686,7 +686,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     **The equipment half of D-5 is untouched** (no size, no component, no component position, no
     direction to move one), and so is its verdict clause (no position or fit is called correct,
     optimal, good or bad; ADR 0045 adopts no verdict, signed or unsigned).
-  - **What stands exactly as written**: D-1, D-2 (R2 to R10; **R4 to R7 untouched**), **D-4**
-    (nothing in the frontal plane, as a number, a word or a picture), D-6 (kept explicitly by
-    ADR 0045 D-9), D-7 and D-8, whose first bullet ADR 0045 D-7 narrows to one file rather than
-    deletes. The body above is not edited.
+  - **D-8 stands**, as amended on 2026-09-28, with its **first bullet narrowed, not deleted**:
+    ADR 0045 D-7 lifts its three degree rules in one file, named by exact path, and nowhere else.
+    The frontal-plane rule is not narrowed anywhere.
+  - **What stands exactly as written**: D-1, **D-4** (nothing in the frontal plane, as a number, a
+    word or a picture), D-6 (kept explicitly by ADR 0045 D-9) and D-7. **D-2 stands as amended on
+    2026-09-28** (R2 to R10; **R4 to R7 untouched**, and R1 relaxed only as above). The body above
+    is not edited.

@@ -15,22 +15,29 @@
 - **Number**: **0045**, reserved by epic #1055 on 2026-10-03, which read *"The next free number is
   0044"* from [`docs/architecture.md`](../architecture.md) and reserved **0044** for
   [#1058](https://github.com/openzigs/onyourleft/issues/1058) (a live view and a snapshot) and
-  **0045** for this issue. ADR 0044 is **not written** on `main` at this date. This pull request
-  adds both rows to the reservation table, as the epic asks of whichever lands first
+  **0045** for this issue. ADR 0044 was written by #1058 and merged on 2026-10-04
+  ([#1113](https://github.com/openzigs/onyourleft/pull/1113)), with its Status *Proposed* and its
+  wording approved by the owner; this pull request records 0045 as written beside it
+- **Numbering in this ADR**: a bare *D-n* is **this ADR's** decision. Another ADR's decision is
+  always written with its number, *ADR 0030 D-5*, because ADR 0030 and this ADR both have a D-3 to
+  a D-8 and they are about different things (ADR 0030 D-5 is *no fit verdict*; this ADR's D-5 is
+  the capture)
 - **Supersedes**, each **to the extent named in D-1 and no further**:
   - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-3**, *"No absolute joint angle is ever
     reported as a number"*, for **the four angles D-3 below defines, on the one surface D-7 names**.
   - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-5**, for its **product boundary
-    only**: the program now offers a check it calls a *fit check*. **Both clauses of D-5's rule
-    stand unchanged**, the equipment clause and the verdict clause (D-1, D-8).
+    only**: the program now offers a check it calls a *fit check*. **Both clauses of ADR 0030
+    D-5's rule stand unchanged**, the equipment clause and the verdict clause (D-1, D-8).
   - ADR 0030's body is not edited. It carries an appended `## Amendments` entry dated **2026-10-04**
     pointing here, under [ADR 0013](0013-adr-amendments.md), as ADR 0033 and ADR 0035 each did.
-- **Does NOT supersede**, named so none of it is read as touched: ADR 0030 **D-1**, **D-2** (R1 to
-  R10, with R1 relaxed only as D-3 above), **D-4** (nothing frontal-plane), **D-6** (decided
-  explicitly in D-9 below: **kept**), **D-7** (the live silence rule) and **D-8**; ADR 0030's
-  2026-09-23 amendment and its six conditions; [ADR 0029](0029-camera-imagery-as-a-data-class.md)
+- **Narrows, without superseding**: ADR 0030 **D-8**, what a machine checks. It **stands**, with its
+  first bullet **narrowed, not deleted**, for one file named by exact path (D-1, D-7).
+- **Does NOT supersede**, named so none of it is read as touched: ADR 0030 **D-1**, **D-2** as
+  amended on 2026-09-28 (R1 to R10, with R1 relaxed only as D-3 above), **D-4** (nothing
+  frontal-plane), **D-6** (decided explicitly in D-9 below: **kept**) and **D-7** (the live silence
+  rule); ADR 0030's 2026-09-23 amendment and its six conditions; [ADR 0029](0029-camera-imagery-as-a-data-class.md)
   **D-8** and **D-9**; [ADR 0033](0033-side-camera-link.md) **D-3**, including its rule that nothing
-  joins pose numbers to a ride reading or a wall-clock time (D-5 and D-12 below keep it);
+  joins pose numbers to a ride reading or a wall-clock time (this ADR's D-5 and D-12 keep it);
   [ADR 0035](0035-model-written-ride-write-ups.md) **D-4**'s degree screen, which D-10 keeps whole;
   and [ADR 0007](0007-patent-posture.md)
 - **Relates to**: [ADR 0007](0007-patent-posture.md),
@@ -107,8 +114,8 @@ a comment on #1059 on 2026-10-03, asks this ADR to carry four things. Each is ca
 independent claims 1, 10 and 17 on 2026-10-03 against the fit design #1055 proposes:
 
 - **The fit design is still outside on (d), (e), (f) and (g)**, and in the US on (h). What the
-  ruling cost is **margin**: D-5's verdict clause was one of the reasons for (g), and the standing
-  half of D-5 (no size, component or direction) is what holds it now.
+  ruling cost is **margin**: ADR 0030 D-5's verdict clause was one of the reasons for (g), and the
+  standing half of ADR 0030 D-5 (no size, component or direction) is what holds it now.
 - ⚠️ **The pending Canadian family member CA 3,183,442 A1 has no Markush group (h) in its claim
   1.** Spike 0006 did not record it. In Canada (d) must hold by itself.
 - **Element (c) is uncertain.** An angle taken from two directions needs no length, which is the
@@ -139,8 +146,8 @@ Condition 6 is the one fit breaks on its face:
 - **§4.2**: the worked class IIa example (MDCG 2019-11, sub-rule 11a) is software *"intended to
   prevent the risk of illnesses or pathologies by analysing physiological parameters (e.g.
   placement of the dorsal vertebrae …)"*. A trunk angle is posture measured from anatomy.
-- **§7**: D-3 gained **no** third reason from the EU or UK read. D-5 gained one: the
-  musculoskeletal example turns on *recommending* something to do. And on D-6: *"Placing a rider
+- **§7**: ADR 0030 D-3 gained **no** third reason from the EU or UK read. ADR 0030 D-5 gained one:
+  the musculoskeletal example turns on *recommending* something to do. And on ADR 0030 D-6: *"Placing a rider
   against a published range is the closest this product could come to 'potential detection of
   pathologies' without naming one."*
 - **§9, Question A** was asked about *"a differences-only sagittal measurement … where no absolute
@@ -195,14 +202,16 @@ item 5 → D-10; item 6 → D-11; item 7 → D-12; item 8 → D-13.
 >    or in a validation procedure's result table. Today's figure is #1112's 0.3 a second.
 > 2. **The rate is sufficient, shown on fixtures.** #1064's synthetic pedalling fixtures,
 >    **resampled at the measured delivery times** (not at an ideal uniform rate), prove BDC
->    sampled within D-5's tolerance on D-5's number of revolutions, within **60 s** of steady
+>    sampled within the tolerance this ADR's D-5 (capture) sets, on its number of revolutions, within **60 s** of steady
 >    pedalling, at each of 60, 75, 90 and 105 rpm. 0.3 a second fails this by the arithmetic in
 >    Context.
 > 3. **The capture refuses at run time too.** Each fit check counts what it receives, and a check
->    that does not reach D-5's evidence in its time says so in words and shows no knee number (D-5,
->    D-6). Item 1 is about the owner's devices; this is about the rider's.
-> 4. **ADR 0044 has landed** ([#1058](https://github.com/openzigs/onyourleft/issues/1058)), because
->    the capture's transport and any picture buffer are its decisions, and the privacy policy and
+>    that does not reach the evidence of this ADR's D-5 (capture) in its time says so in words and
+>    shows no knee number (this ADR's D-5 and D-6). Item 1 is about the owner's devices; this is about the rider's.
+> 4. **ADR 0044 is accepted** ([#1058](https://github.com/openzigs/onyourleft/issues/1058)). It merged
+>    on 2026-10-04 with its Status *Proposed* and the owner's approval of its wording, and its D-2 is
+>    conditional on spike 0021, so this item holds once its Status reads *Accepted*. It is a
+>    precondition because the capture's transport and any picture buffer are its decisions, and the privacy policy and
 >    Play Data Safety wording ([#1060](https://github.com/openzigs/onyourleft/issues/1060)) are
 >    approved by the owner, under [ADR 0033](0033-side-camera-link.md) D-10's rule that the
 >    published statements are true at every merge.
@@ -213,11 +222,14 @@ sweep. It is written down so that changing it is a decision.
 
 > **The trunk angle has a fifth precondition.** It is **blocked** until an **accepted ADR widens
 > [ADR 0033](0033-side-camera-link.md) D-3's phone-to-tablet list**, which says *"and nothing
-> else"*, to admit the phone's tilt message (D-4). **This ADR does not widen it**, and no open pull
-> request does yet: neither ADR 0044 draft ([#1113](https://github.com/openzigs/onyourleft/pull/1113),
-> [#1116](https://github.com/openzigs/onyourleft/pull/1116)) adds the message, read 2026-10-04.
-> #1113 names [#1064](https://github.com/openzigs/onyourleft/issues/1064) as where it is added,
-> and #1064 is an implementation issue: it cannot widen an ADR's list.
+> else"*, to admit the phone's tilt message (D-4). **This ADR does not widen it, and neither does
+> ADR 0044.** ADR 0044 merged on 2026-10-04 ([#1113](https://github.com/openzigs/onyourleft/pull/1113))
+> and says so in its own words: *"The phone's tilt message is a new D-3 message that the capture
+> work after spike 0021 adds, and this ADR does not add it."* Its table of what each issue owns
+> gives [#1064](https://github.com/openzigs/onyourleft/issues/1064) *"the phone's tilt message (the
+> owner's trunk-angle ruling), both added there and not here"*. #1064 is an implementation issue,
+> and an implementation issue cannot widen an ADR's list, so **ADR 0044 does not discharge this
+> precondition**, and the trunk stays *"not measured"* until an accepted ADR widens the list.
 > Until such an ADR is accepted, **every fit check reports the trunk as *"not measured"*** with its
 > reason in words (D-6), and BDC and TDC are found by D-4's fallback. The other three angles do
 > not wait for it. Who writes that ADR is an open question for the owner.
@@ -237,12 +249,12 @@ the preconditions hold. The rule is about what a rider can start and see.
 | ADR 0030 **R4 to R9** | **Stand.** R4: no component, size or direction. R5: no condition or injury, in any tense. R6: no clinical, professional or *"accurate to"* framing (D-8 records the one fixed negative phrase the owner's ruling uses). R7: no prompt or alert. R8: **load-bearing**, every fit number carries its uncertainty in the same sentence. R9: no score or ranking |
 | ADR 0030 **R10** and **D-6**, literature ranges | **Kept**, decided explicitly in D-9 |
 | ADR 0030 **D-7**, live silence | **Stands.** No fit angle is shown, spoken or sent while a ride is recording or paused (D-7) |
-| ADR 0030 **D-8**, what a machine checks | **Stands**, and its first bullet is **narrowed, not deleted** (D-7) |
+| ADR 0030 **D-8**, what a machine checks | **Stands**, and its first bullet is **narrowed, not deleted**, for one file named by exact path (D-7). It is not superseded |
 | ADR 0035 **D-4**, the degree screen on model text | **Stands whole** (D-10), and gains one screen for write-ups that carry fit |
-| ADR 0033 **D-3**, the join rule | **Stands** (D-5, D-12) |
+| ADR 0033 **D-3**, the join rule | **Stands** (this ADR's D-5 and D-12) |
 
-⚠️ **The epic allowed more than this ADR takes.** Ruling 3 supersedes D-3 and D-5 *"to the extent
-needed"*. The author reads "needed" as what fit requires to exist, and a verdict or a range
+⚠️ **The epic allowed more than this ADR takes.** Ruling 3 supersedes ADR 0030 D-3 and D-5 *"to the
+extent needed"*. The author reads "needed" as what fit requires to exist, and a verdict or a range
 comparison is not required for a rider to read four angles. Adopting either later is a superseding
 ADR, and spike 0020 §6 Question D or A′.2 is what to buy first.
 
@@ -306,7 +318,7 @@ no angle is measured. **Sagittal only**, by D-4 of ADR 0030.
   gravity direction.
 
 Both are defined by the ankle so that **no reported joint is reported at its own extreme** (P5).
-How each phase is estimated, and the tolerance it must meet, is D-5 and #1064's.
+How each phase is estimated, and the tolerance it must meet, is this ADR's D-5 (capture) and #1064's.
 
 | Angle | Landmarks (near side) | Event | Definition |
 |---|---|---|---|
@@ -315,8 +327,8 @@ How each phase is estimated, and the tolerance it must meet, is D-5 and #1064's.
 | **Elbow** | shoulder, elbow, wrist | BDC | The interior angle at the elbow between the elbow→shoulder and elbow→wrist directions |
 | **Trunk** | hip, shoulder, and the gravity reference | BDC | The angle between the hip→shoulder direction and **horizontal**, horizontal being perpendicular to the phone's reported gravity direction in the picture (D-4). 0° is a flat back, 90° is upright |
 
-**Each value** is the median of the per-revolution values at that event, over the revolutions D-5
-accepts. **Each rendered value is rounded to the nearest 5°** and introduced with *"about"*.
+**Each value** is the median of the per-revolution values at that event, over the revolutions this
+ADR's D-5 (capture) accepts. **Each rendered value is rounded to the nearest 5°** and introduced with *"about"*.
 ⚠️ **The rounding is the author's choice**: published markerless error for this measurement is 6
 to 10 degrees (R8), and a value given to the degree would be the spurious precision R8 names as its
 own violation. The stored value keeps the median unrounded (D-12).
@@ -395,7 +407,7 @@ An angle is shown only when **all** of these hold:
 
 | | Condition |
 |---|---|
-| 1 | D-5's evidence: at least 10 accepted revolutions with the event sampled within ±10° |
+| 1 | The evidence of this ADR's D-5 (capture): at least 10 accepted revolutions with the event sampled within ±10° |
 | 2 | Its three landmarks (two, and the gravity reference, for the trunk) have visibility of at least 0.5 on at least 80 % of the pictures used |
 | 3 | The interquartile range of its per-revolution values is at most 10° |
 | 4 | For the trunk, D-4's stillness test passed |
@@ -465,7 +477,11 @@ drafted here, and the owner approves it with this ADR. ⚠️ **Drafted, not yet
 > professional bike fit; studies of camera measurements like this one found them off by about 6 to
 > 10 degrees (Kakavand et al., 2025)."*
 
-Each of the four angles has a sentence of that shape. The citation is named inline, in the same
+Each of the four angles has a sentence of that shape. ⚠️ **The trunk's sentence names no
+direction**: it reads *"Trunk angle to horizontal: about 40°, …"*, never *"above horizontal"*,
+because *"above"* is on P7's direction list below and the list has **no exception**, for the trunk
+or any other sentence. ⚠️ **The author's choice**, the narrower of drafting round the word and
+admitting it. The citation is named inline, in the same
 sentence; the 2026 scoping review ADR 0030 D-3 cites may be named beside it. #1066's test asserts
 the caveat is in each angle's sentence.
 
@@ -488,23 +504,23 @@ matches as a phrase.
 |---|---|
 | Components and sizes (R4, P6, P7) | saddle, seat, seatpost, stem, handlebar, bars, crank, cleat, frame, size, reach, stack, setback, spacer, shim, mm, millimetre, cm, centimetre, inch |
 | Directions (R4, P7) | raise, lower, higher, move, adjust, forward, backward, up, down, above, below, too, high, low, extend, shorten, lengthen, open up, close down |
-| Verdicts (D-5, R3, R9) | good, bad, correct, incorrect, wrong, optimal, ideal, normal, abnormal, should, recommend, within, outside, score, better, worse |
+| Verdicts (ADR 0030 D-5, R3, R9) | good, bad, correct, incorrect, wrong, optimal, ideal, normal, abnormal, should, recommend, within, outside, score, better, worse |
 | Bodies (R5) | pain, injury, injure, strain, risk, prevent, healthy, unhealthy |
 
 **No verdict, signed or unsigned.** Spike 0020 §2.1's Option V (*"within the range fitters often
 use"*) is **not adopted**. An unsigned verdict leaks less direction than a range comparison, but it
-is still a pass or a fail, it moves element (g) toward selection, and D-5's verdict clause stands
+is still a pass or a fail, it moves element (g) toward selection, and ADR 0030 D-5's verdict clause stands
 (D-1). ADR 0030 R3's description-not-judgement rule binds every fit sentence.
 
 ### D-9 — Literature ranges: ADR 0030 D-6 is kept, explicitly
 
-> **The decision.** D-6 stands. A published range may appear on the Fit check section **only as
+> **The decision.** ADR 0030 D-6 stands. A published range may appear on the Fit check section **only as
 > prose with its citation in the same sentence**, and **never in, against or beside the rider's own
 > number**. Spike 0020's Option R is **not adopted**.
 
-**Why keep it**, answering D-6 and spike 0008 in their own terms:
+**Why keep it**, answering ADR 0030 D-6 and spike 0008 in their own terms:
 
-- D-6's reason was that *"a range the rider is placed against is not a citation, it is a target"*.
+- ADR 0030 D-6's reason was that *"a range the rider is placed against is not a citation, it is a target"*.
   Fit makes that **more** true, not less: the rider's number now exists on the same screen, and a
   target beside it is a pass or a fail without the word.
 - Spike 0008 §7: placing a rider against a published range is *"the closest this product could come
@@ -514,7 +530,7 @@ is still a pass or a fail, it moves element (g) toward selection, and D-5's verd
   tells the rider which way the saddle would go*), with no sentence saying so. That is R4's refusal
   arrived at through layout.
 
-**What "beside" means here**, so it can be checked. ⚠️ **The author's reading of D-6**, confirmed
+**What "beside" means here**, so it can be checked. ⚠️ **The author's reading of ADR 0030 D-6**, confirmed
 by the owner with this ADR: a range sentence is *beside* a rider's number if it is in the same
 sentence, list item, table row, card or chart. A range sentence in **its own sub-section, after
 all four readings, headed as what published sources say**, is not. Every range sentence:
@@ -568,7 +584,7 @@ D-3 defines is 145 to 155 degrees.
     matching them would withhold nearly every write-up. ⚠️ **The author's choice**. #1067 may add to
     the list, never remove, and records each word it adds with the false withholds it measured on
     `model-answers-testing.ts`.
-  - **What this does to ADR 0035.** It **tightens** ADR 0035 D-1, which left D-5 unscreened on model
+  - **What this does to ADR 0035.** It **tightens** ADR 0035 D-1, which left ADR 0030 D-5 unscreened on model
     output and recorded that as an accepted risk (*"What is accepted and not narrowed"*). Narrowing
     an accepted risk is not a reversal, so ADR 0035 is **not** superseded, but a write-up ADR 0035
     would have shown is now withheld if it names a component. This is an owner question with this
@@ -589,7 +605,7 @@ ADR 0030 quotes it.
 | 2 | *"do not involve an intervention or technology that may pose a risk to the safety of users or other persons if specific regulatory controls are not applied"* | **Holds.** Nothing on the fit path reaches a trainer control point, the HUD, the announcer or a ride-time screen. Nothing is shown during a ride (D-7) |
 | 3 | *"are not intended for the diagnosis, cure, mitigation, prevention, or treatment of a disease or condition"* | **Holds while R5 holds**, and D-8's body words make it a test on the fit sentences |
 | 4 | *"are not intended to substitute for an FDA-authorized, cleared, or approved device"* | **Holds while R6 holds**: the caveat says in words that it is *"not a professional bike fit"* |
-| 5 | *"do not include claims, functionality, or outputs that prompt or guide specific clinical action or medical management"* | **Holds while R7 and D-5's equipment clause hold.** Read only after the rider opens the ride's page; no alert; no verdict, no range comparison and no direction (D-8, D-9), which is what stops a number becoming guidance |
+| 5 | *"do not include claims, functionality, or outputs that prompt or guide specific clinical action or medical management"* | **Holds while R7 and ADR 0030 D-5's equipment clause hold.** Read only after the rider opens the ride's page; no alert; no verdict, no range comparison and no direction (D-8, D-9), which is what stops a number becoming guidance |
 | 6 | *"do not include values that mimic those used clinically unless validated (e.g. manufacturer testing, peer-reviewed clinical literature) to reflect those values"* | ⚠️ **Breached on its face, and accepted.** A knee angle at bottom dead centre is a value used clinically, and nothing in this program validates one from a single uncalibrated phone. The peer-reviewed literature that exists puts markerless error at 6 to 10 degrees with **four** cameras |
 
 > **The decision, the owner's.** Fit angles are shown although they may breach condition 6, and so
@@ -606,11 +622,11 @@ runs and publishes, and nothing in this project's reach would be one.
 every number's sentence says *"a rough estimate from one camera and not a professional bike fit"*
 and gives the published error (D-8); and no number is placed against a target (D-9).
 
-**The EU and UK, re-read in spike 0008.** Nothing there made D-3 stricter or looser (§7), and the
+**The EU and UK, re-read in spike 0008.** Nothing there made ADR 0030 D-3 stricter or looser (§7), and the
 wellness exclusion of MDCG 2019-11 still holds while the intended purpose is fitness (§4.1). What
 fit changes is that spike 0008's Question A was asked about a product where *"no absolute value is
-rendered"*, and that is no longer true. R5 remains the rule carrying the EU margin (§4.3), D-5's
-equipment clause the second (§7), and D-6 is kept for spike 0008's reason (D-9). ⚠️ **And Article
+rendered"*, and that is no longer true. R5 remains the rule carrying the EU margin (§4.3), ADR 0030
+D-5's equipment clause the second (§7), and ADR 0030 D-6 is kept for spike 0008's reason (D-9). ⚠️ **And Article
 2(12)'s *intended purpose* includes promotional material**: the word *"fit"* in a store listing,
 a release note or `README.md` is the manufacturer describing the product, and spike 0008 §8's gap,
 that nothing scans those, is wider now that the product has a feature called a fit check.
@@ -680,7 +696,7 @@ that nothing scans those, is wider now that the product has a feature called a f
   D-7 names exactly what the gate is narrowed to, and D-8 gives #1066 its word lists.
 - **The rider gets the thing ADR 0030 said riders come for, partly.** Four of their own angles, with
   the honest error beside each. Not *"your saddle is 8 mm too low"*: that sentence is still
-  refused, by D-5's equipment clause, R4 and element (g).
+  refused, by ADR 0030 D-5's equipment clause, R4 and element (g).
 
 ### What this costs, stated plainly
 
@@ -692,7 +708,7 @@ that nothing scans those, is wider now that the product has a feature called a f
   own** numbers, framed. Every other condition now rests on wording rules holding: one alert, one
   *"reduces the risk of"*, or one range placed beside a number would argue the product out of the
   carve-out it relies on.
-- **The patent margin is thinner too.** D-5's verdict clause still stands, which keeps (g) where
+- **The patent margin is thinner too.** ADR 0030 D-5's verdict clause still stands, which keeps (g) where
   spike 0020 put it. But the product now computes absolute body angles, closer to a conventional
   bike-fit tool than #377's difference report, and spike 0006 §5's ten documents are still unread.
 - **No verdict and no range comparison**, which is what a rider might expect a fit check to give.
@@ -707,9 +723,9 @@ that nothing scans those, is wider now that the product has a feature called a f
 
 | Issue | What it inherits |
 |---|---|
-| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The capture transport whose rate D-0 measures. If ADR 0044 is where ADR 0033 D-3's list gains the tilt message, it discharges D-0's trunk precondition; neither draft does today |
+| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The capture transport whose rate D-0 measures, and D-0 item 4 (its Status reading *Accepted*). ADR 0044, merged on 2026-10-04, does **not** add the tilt message to ADR 0033 D-3's list and says so, so it does not discharge D-0's trunk precondition; which accepted ADR does is an owner question |
 | [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-8's caveat and D-9's range sentence in the published wording; whether the policy names the tilt (D-4) |
-| [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-0's measurement and fixtures, D-3's event definitions, D-5's tolerance, N and steadiness tests, no sensor join |
+| [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-0's measurement and fixtures, D-3's event definitions, this ADR's D-5 tolerance, N and steadiness tests, no sensor join. ADR 0044 gives it the tilt message too, and it cannot add that to ADR 0033 D-3's list without an accepted ADR (D-0) |
 | [#1065](https://github.com/openzigs/onyourleft/issues/1065) | P1 to P6, D-3's definitions and rounding, D-6's conditions, D-12's record (no taken-at time, one per ride) |
 | [#1066](https://github.com/openzigs/onyourleft/issues/1066) | D-7 entire: a section, not a route; one wording module; `ANGLE_SURFACES` and the import-graph test; D-8 and D-9 |
 | [#1067](https://github.com/openzigs/onyourleft/issues/1067) | D-10: the screen's degree matchers unchanged, P8 added for every write-up, with or without a fit section |

@@ -5090,10 +5090,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   **and which are claimed by open issues** before you pick one. **The next free number is 0046.**
   ⚠️ **0045 is [ADR 0045](docs/adr/0045-fit-from-one-side-camera.md)**, taken by
   [#1059](https://github.com/openzigs/onyourleft/issues/1059) on 2026-10-04 for fit from one side
-  camera, and **0044 is reserved for [#1058](https://github.com/openzigs/onyourleft/issues/1058)**
-  (a live view and a snapshot) and not written. Epic
-  [#1055](https://github.com/openzigs/onyourleft/issues/1055) reserved both on 2026-10-03. A reviewer
-  who remembers this sentence offering 0044 is reading the old file.
+  camera, and **0044 is [ADR 0044](docs/adr/0044-side-camera-live-view-and-snapshot.md)**, taken by
+  [#1058](https://github.com/openzigs/onyourleft/issues/1058) the same day for the side camera's live
+  view and snapshot. Epic [#1055](https://github.com/openzigs/onyourleft/issues/1055) reserved both on
+  2026-10-03. A reviewer who remembers this sentence offering 0044 or 0045 is reading the old file.
   ⚠️ **0043 is [ADR 0043](docs/adr/0043-ofl-display-typeface.md)**, taken by
   [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02 for the OFL display face. A
   reviewer who remembers this sentence offering 0043 is reading the old file.

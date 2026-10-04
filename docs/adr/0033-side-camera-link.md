@@ -759,3 +759,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `side-link.test.ts` reproduces the lost secret with `testing.ts`
   §`losesAnsweringEndsFirstControlMessage`: on the code before this entry the tablet ended that
   pairing as `not-our-phone`.
+- **2026-10-04** — **D-6's *"No picture is ever displayed on the tablet"* and *"never stored"*, and
+  #527's *"Preview on the tablet: None"* in §Context, no longer describe this path once
+  [ADR 0044](0044-side-camera-live-view-and-snapshot.md) is accepted.** The owner ruled on
+  [#1055](https://github.com/openzigs/onyourleft/issues/1055) on 2026-10-03 for a live view of the
+  picture with the pose outline, during setup and during the ride, and for a snapshot the rider
+  presses to save, tied to the ride it was taken in. Those rulings reverse decisions, so the
+  reversal is ADR 0044, not this entry ([ADR 0013](0013-adr-amendments.md)). ADR 0044 D-1 lists
+  what of D-6 stands. D-3's join rule is departed from for a snapshot only (ADR 0044 D-3), and
+  reason 3's display clause loses its premise (ADR 0044 D-2). Whether D-3's picture row and the rest
+  of reason 3 change waits on spike 0021
+  ([#1057](https://github.com/openzigs/onyourleft/issues/1057)). D-8 and D-10 stand. ⚠️ ADR 0044 is
+  **Proposed** on this date: until the owner accepts it, this entry is a pointer and D-6 governs.
