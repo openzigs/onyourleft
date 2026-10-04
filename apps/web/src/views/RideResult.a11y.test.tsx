@@ -127,6 +127,19 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
     );
   });
 
+  it('draws and says no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
+    // `finish.ts` §`distanceOf` saves 0 m for a ride with no speed channel.
+    await show(savedSnapshot({ ...SAVED, distance: metres(0) }));
+    const shown = card()!;
+    expect(queryAll<HTMLElement>(shown, 'dt').map((node) => node.textContent)).toEqual([
+      'Elapsed',
+      'Average power',
+      'Average heart rate',
+    ]);
+    expect(shown.textContent).not.toMatch(/0\.0/);
+    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed.');
+  });
+
   it('states distance in the rider’s units, through the units module', async () => {
     const stub = stubRideController(ridingSnapshot());
     stub.set(savedSnapshot());

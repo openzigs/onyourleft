@@ -13,7 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { kilograms, unixSeconds } from '@onyourleft/domain';
+import { kilograms, metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
   routeId,
@@ -548,6 +548,32 @@ describe('TransferView — the two panels over one store', () => {
 });
 
 describe('TransferView — exporting', () => {
+  it('leaves the distance out of a ride stored at 0 m in the chooser, rather than "0.0 km" — #1070', async () => {
+    const port = await openPort();
+    const measured = rideFor(ATHLETE_A, { name: 'Measured', distance: metres(42_200) });
+    const unknown = rideFor(ATHLETE_A, { name: 'No speed sensor', distance: metres(0) });
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(measured);
+      await store.putActivity(unknown);
+    });
+
+    mounted = await mount(<TransferView port={port} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-export-ride') !== null,
+      'the ride list to load',
+    );
+
+    const labels = queryAll<HTMLOptionElement>(
+      document.querySelector('#oyl-export-ride') ?? document.body,
+      'option',
+    ).map((option) => option.textContent);
+    const minutes = String(Math.round(unknown.movingTime / 60));
+    expect(labels).toContain(`No speed sensor — ${minutes} min`);
+    // A ride with a distance still states it.
+    expect(labels.find((label) => label?.startsWith('Measured — '))).toMatch(/42\.2 km/);
+    expect(labels.join(' ')).not.toMatch(/\b0\.0\b/);
+  });
+
   it('hands the browser a file for the ride the rider chose', async () => {
     const port = await openPort();
     const ride = rideFor(ATHLETE_A, { name: 'Sunday loop', hasPosition: true });

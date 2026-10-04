@@ -3285,6 +3285,17 @@ function requireCount(what: string, value: number): void {
  * fails to compile until someone decides which side of the projection it is on
  * — which is the decision #62's "never loads stream data for a list row"
  * criterion actually needs made.
+ *
+ * ⚠️ **That compile error only fires for a REQUIRED field.** An optional one is
+ * left out of the list row with no error at all, and the load summary was: #77
+ * built the fitness chart, Home's load and the Analysis backfill on "one list
+ * read, then arithmetic" (`apps/web/src/analysis/history.ts`), and until #1070
+ * this function dropped `effortWeightedPower`, `effortWeightedHeartRate` and
+ * `loadCoveredTime`, so on the real store every ride read as unsummarised and
+ * the backfill re-summarised every ride on every pass. Their stubs carried the
+ * fields, so every test above the store was green. A new OPTIONAL field on
+ * `ActivityRecord` needs the same decision made by hand, and a test here that
+ * reads it back through `listActivitySummaries`.
  */
 function summaryOf(record: ActivityRecord): ActivitySummary {
   const {
@@ -3299,6 +3310,9 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     visibility,
     hasPosition,
     averagePower,
+    effortWeightedPower,
+    effortWeightedHeartRate,
+    loadCoveredTime,
     createdAt,
   } = record;
   return {
@@ -3314,6 +3328,10 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     hasPosition,
     createdAt,
     ...(averagePower === undefined ? {} : { averagePower }),
+    // The load summary #77's list readers are built on — see the ⚠️ above.
+    ...(effortWeightedPower === undefined ? {} : { effortWeightedPower }),
+    ...(effortWeightedHeartRate === undefined ? {} : { effortWeightedHeartRate }),
+    ...(loadCoveredTime === undefined ? {} : { loadCoveredTime }),
   };
 }
 

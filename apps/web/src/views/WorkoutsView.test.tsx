@@ -344,6 +344,19 @@ describe('#1043 — the block chart', () => {
     expect(chart(view.container)).toBeNull();
   });
 
+  it('draws the builder’s chart below Save workout, so it pushes the primary down by nothing — #1050', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    await addSteady(view, '10', '65');
+    const drawn = chart(view.container);
+    const save = buttonSaying(view.container, 'Save workout');
+    expect(drawn).not.toBeNull();
+    expect(save).toBeDefined();
+    expect(
+      (save as HTMLElement).compareDocumentPosition(drawn as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('draws a saved workout below its own controls, hidden from assistive technology', async () => {
     const view = await render(workoutStub(ATHLETE, [workout()]), undefined, 'workout-1');
     const drawn = chart(view.container);

@@ -187,12 +187,18 @@ async function summariseOne(port: AnalysisPort, id: ActivityId): Promise<boolean
   const power = streams.channels.includes('power')
     ? await port.store.getStreamChannel(port.athleteId, id, 'power')
     : undefined;
+  // Heart rate is decoded only when power gave no summary — no channel, a trace
+  // too short, or (#1070) one that read nought throughout. Asking whether power
+  // was ABSENT, as this did, never reached the strap of a ride whose power
+  // channel read 0 W, and that is the ride the backfill now has to redo.
+  const fromPower =
+    power === undefined ? undefined : loadSummaryOf({ power }, streams.sampleInterval);
   const heartRate =
-    power === undefined && streams.channels.includes('heartRate')
+    fromPower === undefined && streams.channels.includes('heartRate')
       ? await port.store.getStreamChannel(port.athleteId, id, 'heartRate')
       : undefined;
 
-  const summary = loadSummaryOf({ power, heartRate }, streams.sampleInterval);
+  const summary = fromPower ?? loadSummaryOf({ heartRate }, streams.sampleInterval);
   if (summary === undefined) {
     return false;
   }

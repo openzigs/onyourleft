@@ -42,7 +42,7 @@ import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/StatusMessage';
 import { useUnits } from '../units/context';
-import { formatDistance, measurementText } from '../units/format';
+import { formatDistance, measurementText, shownDistance } from '../units/format';
 
 import { ActivityExportError, exportActivity, LOSSY_CHANNELS } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -1244,9 +1244,13 @@ function ErasePanel({
  * either is decided.
  */
 function rideLabel(ride: ActivitySummary, units: UnitSystem): string {
-  const distance = measurementText(formatDistance(ride.distance, units));
-  const minutes = Math.round(ride.movingTime / 60);
-  return `${ride.name} — ${distance}, ${String(minutes)} min`;
+  const minutes = `${String(Math.round(ride.movingTime / 60))} min`;
+  // #1070: a stored 0 m says no distance is known, so the label leaves the
+  // distance out rather than inventing "0.0 km" (`units/format.ts` §`shownDistance`).
+  const known = shownDistance(ride.distance);
+  return known === undefined
+    ? `${ride.name} — ${minutes}`
+    : `${ride.name} — ${measurementText(formatDistance(known, units))}, ${minutes}`;
 }
 
 /**

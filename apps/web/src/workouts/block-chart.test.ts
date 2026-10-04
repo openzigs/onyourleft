@@ -213,4 +213,23 @@ describe('a block chart — #1043', () => {
     const [column] = subpaths(paths.bands[1] ?? '');
     expect(column?.[1]?.[1]).toBe(yOf(0.75));
   });
+
+  it('calls a column that is exactly half free riding free — the boundary is inclusive (#1050)', () => {
+    // Twice as many segments as columns, alternating a 100 % target and a free
+    // ride, each half a column long: every column is free riding for exactly
+    // half its time, which `loose >= time` calls free and `>` would not.
+    const many: BlockChartSegment[] = [];
+    for (let index = 0; index < 2 * BLOCK_CHART_MAX_BARS; index += 1) {
+      const target = index % 2 === 0 ? thresholdShare(1) : undefined;
+      many.push({
+        startsAt: seconds(index * 10),
+        endsAt: seconds(index * 10 + 10),
+        from: target,
+        to: target,
+      });
+    }
+    const paths = blockChartPaths(many);
+    expect(paths.bands.every((d) => d === '')).toBe(true);
+    expect(paths.freeRide).not.toBe('');
+  });
 });

@@ -296,12 +296,25 @@ export interface ActivityRecord {
    * label is what stops a bpm being read as watts; `streams.ts` states the same
    * rule for the same reason.
    *
+   * ⚠️ **"At most one" holds for what the client WRITES, not for every row**
+   * (#1070). A row written before #1070 with `effortWeightedPower: 0` — a
+   * power channel that read nought throughout — and then backfilled from heart
+   * rate holds both: the stale 0 and the heart-rate figure, because a summary
+   * is merged into the row. The client reads a 0 W here as absent, so the
+   * heart rate is the basis; `apps/web/src/analysis/summary.ts` §"This file
+   * owns one invariant" is that rule. This store neither enforces nor repairs
+   * it, and round-trips both fields as written.
+   *
    * Optional, so this is additive and needs no migration — see `README.md`
    * §"An optional field is not a migration".
    */
   readonly effortWeightedPower?: Watts;
 
-  /** @see effortWeightedPower — set only when the ride has no power. */
+  /**
+   * @see effortWeightedPower — set only when the ride has no power basis: no
+   * power channel, or (since #1070) one whose weighted power rounds to 0 W, in
+   * which case a backfilled row may still hold that stale 0 beside this.
+   */
   readonly effortWeightedHeartRate?: BeatsPerMinute;
 
   /**

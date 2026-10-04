@@ -38,6 +38,7 @@
  */
 
 import {
+  effortWeightedPower,
   heartRateLoad,
   heartRateZones,
   mergeCurves,
@@ -56,6 +57,7 @@ import {
 } from '@onyourleft/domain';
 import type { ActivityId, ActivitySummary, StreamSetSummary } from '@onyourleft/store';
 
+import { isPowerBasis } from './summary';
 import { thresholdsFor, type AthleteThresholds } from './thresholds';
 import type { AnalysisPort } from './store-port';
 
@@ -250,13 +252,25 @@ async function breakdownFor(
     // Computed here, where the samples are local, and returned as one number.
     // Reading this channel a second time to derive it would double the cost of
     // opening this screen for nothing.
+    //
+    // ⚠️ #1070: a power channel that read nought throughout is no basis, so
+    // its load is `undefined` and {@link loadFrom} falls to heart rate — the
+    // rule `summary.ts` §`isPowerBasis` applies to the stored half, so this
+    // screen and Home agree on a ride's load. The weighting is taken once more
+    // over the samples already in memory to ask it; that is arithmetic, not a
+    // second read of the channel.
     load:
       basis === 'power'
-        ? powerRideLoad(
-            samples as readonly (Watts | undefined)[],
-            streams.sampleInterval,
-            thresholds.thresholdPower,
+        ? isPowerBasis(
+            effortWeightedPower(samples as readonly (Watts | undefined)[], streams.sampleInterval)
+              ?.power,
           )
+          ? powerRideLoad(
+              samples as readonly (Watts | undefined)[],
+              streams.sampleInterval,
+              thresholds.thresholdPower,
+            )
+          : undefined
         : heartRateLoad(
             samples as readonly (BeatsPerMinute | undefined)[],
             streams.sampleInterval,

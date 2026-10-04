@@ -75,7 +75,7 @@ import {
   shownAveragePower,
 } from '../format';
 import { useUnits } from '../units/context';
-import { distanceUnit, formatDistance } from '../units/format';
+import { distanceUnit, formatDistance, shownDistance } from '../units/format';
 import {
   loadOverview,
   loadOwnTrack,
@@ -408,6 +408,8 @@ export function ActivityDetailView({
   const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
   // #1054: a stored average that shows as 0 W says nothing was measured.
   const averagePower = shownAveragePower(activity.averagePower);
+  // #1070: a stored 0 m says no distance is known (`units/format.ts` §`shownDistance`).
+  const distance = shownDistance(activity.distance);
 
   return (
     <>
@@ -430,15 +432,16 @@ export function ActivityDetailView({
             <Reading value={formatDuration(activity.movingTime)} />
           </dd>
         </div>
-        <div>
-          <dt>Distance</dt>
-          <dd>
-            <Reading
-              value={formatDistance(activity.distance, units).value}
-              unit={distanceUnit(units)}
-            />
-          </dd>
-        </div>
+        {/* #1070: a ride recorded with no speed channel stored 0 m, which is no
+            distance known — no row, as on Home and the result card. */}
+        {distance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading value={formatDistance(distance, units).value} unit={distanceUnit(units)} />
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Average power</dt>
           <dd>

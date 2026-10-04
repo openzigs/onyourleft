@@ -220,6 +220,30 @@ describe('loadRideZones — the ride load, and which channel it came from', () =
     expect(port.channelReads).toEqual(['ride-1:power', 'ride-1:heartRate']);
   });
 
+  it('takes the heart-rate load for a ride whose power read 0 W throughout — #1070', async () => {
+    // An all-zero power channel weighs to 0 W, and power winning would put
+    // "Load 0" on this screen while Home showed the strap's load.
+    const port = stubAnalysis(OWNER, [
+      ride('ride-1', { power: steadyPower(0, 3600), heartRate: steadyHeartRate(160, 3600) }),
+    ]);
+
+    const result = await loadRideZones(port, activityId('ride-1'));
+
+    expect(result?.load?.basis).toBe('heartRate');
+    expect(result?.load?.load).toBeCloseTo(100, 6);
+    // The power zones are still drawn: time spent at 0 W is what the channel said.
+    expect(result?.power?.time.covered).toBe(3600);
+    expect(port.channelReads).toEqual(['ride-1:power', 'ride-1:heartRate']);
+  });
+
+  it('has no load, not load 0, for a ride whose only channel read 0 W — #1070', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(0, 3600) })]);
+
+    const result = await loadRideZones(port, activityId('ride-1'));
+
+    expect(result?.load).toBeUndefined();
+  });
+
   it('has no load for a ride with neither channel', async () => {
     const port = stubAnalysis(OWNER, [ride('ride-1')]);
 

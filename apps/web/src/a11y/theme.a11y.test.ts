@@ -927,3 +927,14 @@ describe('what sits over a picture is the same in both palettes (#672)', () => {
     expect(value).toMatch(/^var\(--oyl-color-hud-[a-z-]+\)$/);
   });
 });
+
+describe('a kept-visible sentence stays in the reading measure on a sections route (#1048)', () => {
+  it('the sections rule that caps a direct paragraph caps KeptVisible’s wrapper too', () => {
+    const css = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    const rule = /\.oyl-main--sections > :is\(([^)]*)\) \{([^}]*)\}/.exec(css);
+    expect(rule, 'theme.css has no `.oyl-main--sections > :is(…)` measure rule').not.toBeNull();
+    expect(rule?.[1]).toContain('p');
+    expect(rule?.[1]).toContain('[data-oyl-kept-visible]');
+    expect(rule?.[2]).toContain('max-width: var(--oyl-measure)');
+  });
+});

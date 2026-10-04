@@ -288,7 +288,7 @@ export function TrainerPanel({
         is still here, unchanged, for a rider who can see it.
       */}
       {trainer.lost === undefined ? null : (
-        <StatusMessage tone="warning" label="Control lost">
+        <StatusMessage tone="warning" label="Control lost" kept>
           {LOSS_REASON[trainer.lost]}
         </StatusMessage>
       )}
@@ -301,7 +301,7 @@ export function TrainerPanel({
       */}
       {trainer.releaseFault === undefined ? null : (
         // Not `live` since #445, for the reason *Control lost* above is not.
-        <StatusMessage tone="danger" label="Not released">
+        <StatusMessage tone="danger" label="Not released" kept>
           {trainer.releaseFault}
         </StatusMessage>
       )}
@@ -316,7 +316,7 @@ export function TrainerPanel({
         changes; until then only a sighted rider was told.
       */}
       {trainer.ergRescue === undefined ? null : (
-        <StatusMessage tone="warning" label="Eased">
+        <StatusMessage tone="warning" label="Eased" kept>
           {rescueSentence(trainer.ergRescue)}
         </StatusMessage>
       )}

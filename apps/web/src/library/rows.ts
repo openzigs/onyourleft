@@ -12,7 +12,7 @@
 import type { ActivityOrder, ActivitySummary, SortDirection, UnitSystem } from '@onyourleft/store';
 
 import { formatDuration, formatPowerValue, formatStartedAt, shownAveragePower } from '../format';
-import { formatDistance } from '../units/format';
+import { formatDistance, shownDistance } from '../units/format';
 
 /**
  * How many summaries one read asks for.
@@ -73,12 +73,13 @@ export interface LibraryRow {
 
 export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow {
   const averagePower = shownAveragePower(summary.averagePower);
+  const distance = shownDistance(summary.distance);
   return {
     id: summary.id,
     name: summary.name,
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     duration: formatDuration(summary.elapsedTime),
-    distance: summary.distance > 0 ? formatDistance(summary.distance, units).value : undefined,
+    distance: distance === undefined ? undefined : formatDistance(distance, units).value,
     averagePower: averagePower === undefined ? undefined : formatPowerValue(averagePower),
     hasPosition: summary.hasPosition,
   };
