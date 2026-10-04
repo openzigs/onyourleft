@@ -328,6 +328,8 @@ describe('the audio may stop once nothing is riding — #447', () => {
       workoutRescue: () => undefined,
       recordingMayStop: () => false,
       gameRideEnded: () => undefined,
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
       readTrainer: () =>
         gameTrainerFrom(
           { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -353,6 +355,8 @@ describe('the audio may stop once nothing is riding — #447', () => {
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
     readTrainer: () =>
       gameTrainerFrom(
         { paired: true, controllable: true, canSimulate: true, hasControl: true },

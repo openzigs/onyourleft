@@ -81,6 +81,8 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
+import { rideInProgress, type RidePhase } from '../ride/controller';
+
 import type { GhostOutcome } from './ghost-outcome-kind';
 
 /**
@@ -284,6 +286,48 @@ export interface GameTrainerPort {
    * `GameView` stops calling it.
    */
   gameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * The moving time of the ride being RECORDED, in seconds — or `undefined`
+   * when no ride is in progress (recording or paused) — #1111.
+   *
+   * ⚠️ **The recorder's own figure, and the HUD has no other clock.** It is
+   * `RideSnapshot.movingSeconds`, which is the recorder session's
+   * `movingTime` — counted on the ride's own clock (`ride/controller.ts`
+   * §`rideSeconds`), held still through a pause and an auto-pause, and the
+   * number `recording/finish.ts` writes into the saved activity. A game ride
+   * that is not being recorded has none, and the HUD says so with a dash
+   * rather than inventing one from the simulation's clock.
+   *
+   * ⚠️ The game's own *Pause* pauses the SIMULATION; the recording is the
+   * Ride screen's (`RideSession`, above the router), and its auto-pause is
+   * what stops this figure when the rider stops. So this is the time the
+   * saved ride will say, which is the point of reading it — and why the HUD
+   * does not read it on the frame alone: see {@link watchRide}.
+   *
+   * A snapshot read, a property access. On the port for
+   * {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView` stops
+   * reading it — and named so nothing else in production calls it.
+   */
+  rideMovingSeconds(): number | undefined;
+  /**
+   * Be told whenever the ride controller's state changes — #1111's review.
+   * Returns the call that stops telling.
+   *
+   * ⚠️ **What keeps the moving time current while the GAME is paused.** The
+   * render loop does not run while the game is paused, so a figure read only
+   * during the tick's render froze at the press — while the recording, which
+   * the game's Pause does not pause, went on counting until its own
+   * auto-pause, or for as long as the rider kept pedalling. `GameView` reads
+   * {@link rideMovingSeconds} through `useSyncExternalStore` over this, so the
+   * HUD re-renders on the controller's own tick (once a second, on the ride's
+   * clock) whatever the game is doing. A notification, not a clock: the
+   * figure is still the recorder's.
+   *
+   * On the port for {@link recordingMayStop}'s reason, and named so nothing
+   * else in production calls a method of that name — the controller's is
+   * `subscribe` — so `WIRE003` goes red if `GameView` stops calling it.
+   */
+  watchRide(listener: () => void): () => void;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -308,12 +352,24 @@ interface GameTrainerSource {
       { readonly status: string; readonly rescue: WorkoutRescue | undefined } | undefined;
     /** #647. Optional here only so a source with no recording need not say. */
     readonly keepAliveFailed?: boolean;
+    /**
+     * #1111: whether a ride is in progress, and its moving time. Optional for
+     * {@link keepAliveFailed}'s reason; a source that says neither has no
+     * moving time to show.
+     */
+    readonly phase?: RidePhase;
+    readonly movingSeconds?: number;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
+  /** #1111. @see GameTrainerPort.watchRide */
+  subscribe(listener: () => void): () => void;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
 }
+
+/** What {@link GameTrainerPort.watchRide} returns with no ride controller: nothing to stop. */
+const NOT_WATCHING = (): void => undefined;
 
 /**
  * The game's trainer port over a ride controller, or over none — #362, #503.
@@ -354,6 +410,14 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
+    },
+    watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
+    rideMovingSeconds: () => {
+      // One snapshot read for both, so the phase and the time are one moment.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.movingSeconds
+        : undefined;
     },
   };
 }

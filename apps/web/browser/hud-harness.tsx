@@ -415,6 +415,13 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * consequence for what the gate can claim.
  */
 /**
+ * A moving time of 9:59:59 on every panel — #1111. The widest figure a ride
+ * under ten hours shows (`h:mm:ss` from the first second, tabular digits), so
+ * "no value overflows its track" is measured with the new field at its widest.
+ */
+const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
+/**
  * The one piece of geometry here that is this file's — see the header.
  *
  * `position: relative` puts the stage in the flow, so six of them stack; the
@@ -443,6 +450,7 @@ function Harness(): JSX.Element {
               state={STATE}
               cadence={{ value: 92, live: true }}
               heartRate={{ value: 168, live: true }}
+              movingSeconds={MOVING_SECONDS}
               chases={[BOT_GAP, ghostChase(outcome)]}
               paused={false}
               onPause={() => undefined}
@@ -464,6 +472,7 @@ function Harness(): JSX.Element {
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
             chases={[BOT_GAP, ghostChase('level')]}
             paused={false}
             onPause={() => undefined}
