@@ -11,7 +11,8 @@
 - **Deciders**: **the owner, on every product question**, in the epic
   [#1055](https://github.com/openzigs/onyourleft/issues/1055) and in comments on it and on
   [#1058](https://github.com/openzigs/onyourleft/issues/1058), all dated 2026-10-03 and quoted in
-  Context. **The author decided the engineering content**
+  Context, and in the owner's answers of **2026-10-04** to this ADR's seven questions, recorded in
+  D-3, D-6, D-8, D-11 and D-12. **The author decided the engineering content**
 - **Issue**: [#1058](https://github.com/openzigs/onyourleft/issues/1058), parent epic
   [#1055](https://github.com/openzigs/onyourleft/issues/1055). It blocks
   [#1060](https://github.com/openzigs/onyourleft/issues/1060),
@@ -87,6 +88,22 @@ So: whether an angle is ever drawn on or beside the live view is ADR 0045's. The
 message is a new D-3 message that the capture work after spike 0021 adds, and this ADR does not
 add it.
 
+### What the owner answered on 2026-10-04
+
+The first draft of this ADR left seven questions to the owner. The owner answered all seven on
+2026-10-04 and approved the wording: *"go ahead and do 1058 now I approve the wording"*. Each answer
+is recorded in the Decision where it applies:
+
+| # | The owner's answer | Where |
+|---|---|---|
+| 1 | The in-ride live view **remembers the rider's last choice**, stored on the device. It is not off at the start of every ride | D-8 |
+| 2 | A snapshot **may be taken during setup**. It is held in memory and **joins the next ride that is saved**. If no ride is saved, it is discarded | D-3 |
+| 3 | On a ride's page the snapshot section is **closed by default**, and no picture is mounted until it is opened | D-6 |
+| 4 | The outline is **stored as numbers and drawn when shown**, as drafted | D-3 |
+| 5 | A snapshot **never shows where in the ride it was taken, nor any reading**, as drafted | D-3 |
+| 6 | A snapshot is **never sent to the rider's computer or to a model**, as drafted | D-11 |
+| 7 | The camera screens set Android's **secure window flag** (`FLAG_SECURE`) **while a picture is shown**, which blocks the recent-apps thumbnail and screenshots on those screens | D-12 |
+
 ### Why this is a superseding ADR and not an amendment
 
 [ADR 0013](0013-adr-amendments.md) allows an appended amendment to record that **a statement of
@@ -135,11 +152,12 @@ transport.** D-2 says what follows from each answer.
 
 ## Decision
 
-Twelve rules. **D-0** says what this ADR builds. **D-1** is the supersession of ADR 0033 D-6.
+Thirteen rules. **D-0** says what this ADR builds. **D-1** is the supersession of ADR 0033 D-6.
 **D-2** is the transport, conditionally. **D-3** is the snapshot and its departure from D-3's join
 rule. **D-4** to **D-7** apply ADR 0029's metadata, error, store, shared-device and bystander rules
 to the new surfaces. **D-8** and **D-9** are the ride: where the view may sit and what it may say.
-**D-10** is the published wording. **D-11** is the rider's own computer on this path.
+**D-10** is the published wording. **D-11** is the rider's own computer on this path. **D-12** is
+Android's secure window flag while a picture is shown.
 
 ### D-0 — This ADR builds nothing, and the order of work is fixed here
 
@@ -153,7 +171,8 @@ No code changes with this ADR. The work is in the issues it blocks, in this orde
    not before it.
 3. **The live view during setup** ([#1061](https://github.com/openzigs/onyourleft/issues/1061)),
    then **during the ride** ([#1062](https://github.com/openzigs/onyourleft/issues/1062)), then
-   **the snapshot** ([#1063](https://github.com/openzigs/onyourleft/issues/1063)).
+   **the snapshot** ([#1063](https://github.com/openzigs/onyourleft/issues/1063)). The secure window
+   flag (D-12) lands with the first of these that shows a picture, #1061, in the same pull request.
 
 ### D-1 — ADR 0033 D-6 is superseded: a picture may be shown, and one the rider presses for may be kept
 
@@ -238,32 +257,44 @@ tablet joins them to a ride reading"*. The owner's ruling 3 departs from it for 
 
 - **What is joined**: a snapshot record names the **ride** (its activity id). That is the whole of
   the join.
-- **What is still never joined**, the author's choice and the narrower one: a snapshot is never
-  shown, stored or exported with a ride **reading** (power, cadence, heart rate, speed), a lap, a
-  workout segment, or its **offset into the ride**. Nothing computes where in the ride it was taken.
-  The record keeps `capturedAt`, which it already has and which the export's file name uses, but no
-  code reads it against the ride's streams.
+- **What is still never joined**, the owner's answer of 2026-10-04 to question 5, as drafted: *a
+  snapshot never shows where in the ride it was taken, nor any reading*. It is never shown, stored or
+  exported with a ride **reading** (power, cadence, heart rate, speed), a lap, a workout segment, or
+  its **offset into the ride**. Nothing computes where in the ride it was taken. The record keeps
+  `capturedAt`, which it already has and which the export's file name uses, but no code reads it
+  against the ride's streams.
 - **What does not move**: the pose numbers, the post-ride report and the pose summary (ADR 0035 D-6)
   stay under D-3's join rule exactly as written. The departure is for the snapshot record and
   nothing else.
 
-**When it is offered.** The author's choice, and the narrower one: *Save snapshot* is offered only
-while **a ride is under way** (recording, paused, or being saved), because a snapshot must have a
-ride to belong to. During setup with no ride under way, the live view is shown (ruling 1) and the
-control is absent, with a sentence saying why. Whether a snapshot taken before a ride should be
-offered, and then belong to the next ride saved, is in §"What the owner has not decided".
+**When it is offered.** The owner's answer of 2026-10-04 to question 2: *a snapshot may be taken
+during setup. It is held in memory and joins the next ride that is saved. If no ride is saved, it
+is discarded.* So *Save snapshot* is offered wherever the live view is shown: during setup, on the
+side-camera framing view, and during a ride while the in-ride view is on (D-8). During setup, beside
+the control, the rider is told in words that a snapshot taken now joins the next ride they save and
+is discarded if they save none. The words are #1060's, with the owner's approval (D-10).
 
-**Which ride.** The rule `camera/side-report-keeper.ts` already uses for the report (#388):
+**Which ride.** The rule `camera/side-report-keeper.ts` already uses for the report (#388), widened
+by the owner's answer for setup:
 
-1. A snapshot taken while a ride is under way is held **in this tab's memory**, owned by that ride,
-   and written to the store **in the same transaction as, or straight after, that ride's save**.
-2. If that ride's save comes back empty or failed, its snapshots are dropped and nothing was
-   written.
-3. A recovered ride saved later from the leftover list never collects a snapshot: the ride must
-   have been seen under way while the snapshot was taken.
+1. A snapshot taken **while a ride is under way** (recording, paused, or being saved) is held **in
+   this tab's memory**, owned by that ride, and written to the store **in the same transaction as,
+   or straight after, that ride's save**.
+2. A snapshot taken **during setup**, with no ride under way, is held **in this tab's memory** and
+   joins **the next ride started in this tab and saved**. It is written with that ride's save, as in
+   rule 1, and never before it: until then nothing about it is in the store.
+3. If the save of the ride a snapshot is held for comes back empty or failed, that ride's snapshots,
+   setup snapshots included, are dropped and nothing was written. The author's reading of *"the
+   next ride that is saved"*, and the narrower one: a setup snapshot does not wait on for a later
+   ride.
+4. **If no ride is saved, a setup snapshot is discarded.** It was only ever in memory, so closing or
+   reloading the tab, or the erase, discards it, and nothing was written.
+5. A recovered ride saved later from the leftover list never collects a snapshot, whether it was
+   taken during that ride or during setup: the ride must have been seen under way in this tab, or
+   started in it after the setup snapshot was taken. The author's reading, and the narrower one.
 
-The number held in memory per ride is bounded, and the bound is #1063's to set at its constant,
-with its provenance. A press past the bound is refused in words, not silently dropped.
+The number held in memory, per ride and for setup, is bounded, and the bound is #1063's to set at its
+constant, with its provenance. A press past the bound is refused in words, not silently dropped.
 
 **Where it is stored.** In `packages/store`'s existing `cameraFrames` table, as a
 `CameraFrameRecord`, in the next schema version. The author's choice, so that one table holds every
@@ -276,7 +307,8 @@ version adds:
 | `activityId` | The ride it belongs to. Required for a snapshot. `null` only for a row written before the new version, which has none |
 | The outline | The landmarks it was **shown with**, as image-plane shares: the pose model's near-side names and positions, as `FramingReferenceRecord` already stores them. `null` when the model had no pose for that picture. **No angle, no length and no difference** is stored with it |
 
-**The outline is drawn when shown, never burned into the bytes.** The author's choice: drawing it
+**The outline is drawn when shown, never burned into the bytes.** The owner's answer of 2026-10-04
+to question 4, as drafted: *the outline is stored as numbers and drawn when shown*. Drawing it
 into the picture would be a second encode of the picture on the tablet, which is a second place for
 D-9's strip to be got wrong, and it would make the outline impossible to leave out of a copy the
 rider wants without it. The bytes stay exactly what was stripped (D-2's table says where).
@@ -336,13 +368,16 @@ it, sees what the rider sees.
 **What another person near the tablet can see:**
 
 - **The live view, while it is on.** The rider and anybody else in frame, as a picture, on the
-  tablet's screen. That includes someone looking over the rider's shoulder and anyone the tablet's
-  screen is shared or cast to.
-- **A saved snapshot, only on that ride's page, and only after opening its section.** The section
-  is closed when the page opens, says how many snapshots there are in words, and does not mount a
-  picture until the rider opens it. That is how ruling 3's *"shows on that ride's page"* and D-11
-  rule 1's *"No frame … in the ride detail view's default render"* both hold: the default render
-  shows none, and the page is the one place a snapshot is reached.
+  tablet's screen. That includes someone looking over the rider's shoulder and, in a browser,
+  anyone the tablet's screen is shared or cast to. In the Android app the secure flag (D-12) blanks
+  a cast or a screen recording while a picture is shown.
+- **A saved snapshot, only on that ride's page, and only after opening its section.** The owner's
+  answer of 2026-10-04 to question 3: *on a ride's page, the snapshot section is closed by default,
+  and no picture is mounted until it is opened.* The section is closed when the page opens, says how
+  many snapshots there are in words, and does not mount a picture, or create its object URL (D-1),
+  until the rider opens it. That is how ruling 3's *"shows on that ride's page"* and D-11 rule 1's
+  *"No frame … in the ride detail view's default render"* both hold: the default render shows none,
+  and the page is the one place a snapshot is reached.
 
 **Where the picture may appear:** the Camera screen's side-camera framing view (during setup); the
 ride surfaces (the game's stage and the Ride screen) **only while the rider has the in-ride view
@@ -350,7 +385,8 @@ on**; and a ride's page, inside the snapshot section the rider opened.
 
 **Where it never appears**: the activity library, any list or row, Home, a thumbnail anywhere, a
 share sheet or share preview, an exported activity file, a notification (the Android recording
-service's included), the Devices, Settings or account screens, and an error (D-4).
+service's included), the Devices, Settings or account screens, an error (D-4), and, in the Android
+shell, Android's recent-apps thumbnail or a screenshot of a screen showing it (D-12).
 
 ⚠️ **This defends against the accidental case and not against a person who is looking.** That is
 D-11's own sentence, and it is truer now: a housemate who opens the rider's ride page and the
@@ -373,15 +409,20 @@ What changes is what the rider is told:
 
 ### D-8 — During a ride: where the live view may be, and the gates that hold it
 
-> **The rule.** During a ride the live view is **off until the rider turns it on for this ride**,
-> and a ride-time control turns it off again. Turning it off **removes** the element and stops
-> drawing; it is not hidden by a style. It never covers a ride-time control, a reading, a panel or
-> a standing notice, and never covers the rider in the game. It is shed before the world degrades.
+> **The rule.** During a ride the live view is **on or off as the rider last left it on this
+> device**, and a ride-time control turns it on or off. Turning it off **removes** the element and
+> stops drawing; it is not hidden by a style. It never covers a ride-time control, a reading, a
+> panel or a standing notice, and never covers the rider in the game. It is shed before the world
+> degrades.
 
-- **Off by default for each ride.** The author's choice, and the narrower one. It is the per-ride
-  shape of ADR 0029 D-2 and ADR 0030 D-7 S5, for the same reason: a view left on in March is a view
-  nobody chose on the ride that a guest walked into. Ruling 1 requires the view to be **available**
-  during the ride, and this keeps it so.
+- **It remembers the rider's last choice.** The owner's answer of 2026-10-04 to question 1: *the
+  in-ride live view remembers the rider's last choice, stored on the device. It is not off at the
+  start of every ride.* The choice is a device preference, kept beside the game's other device
+  preferences (`game/world-preference.ts`, `game/hud/announce-preference.ts`), and it is a
+  boolean: no picture and nothing derived from one is stored with it (D-4). Before the rider has
+  ever chosen, it is **off**, the author's choice and the narrower one. The draft's per-ride default
+  (the shape of ADR 0029 D-2 and ADR 0030 D-7 S5) is **not** taken; what that costs is in
+  §Consequences.
 - **The toggle and *Save snapshot* are ride-time controls.** They join
   `design/ride-time-controls.ts` §`RIDE_TIME_CONTROLS`, so each is 48 px and at least 8 px from the
   next (#669).
@@ -442,7 +483,8 @@ owner approves the words there, and the pull request that ships the behaviour ca
 | [`docs/privacy-policy.md`](../privacy-policy.md) §"Deleting your data" | It names snapshots among what the erase removes and what the account export carries |
 | `apps/mobile/src/android/data-safety.ts`, the **Photos and videos** row's `why` | Its *"analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6)"*. The **answers** (`collected`, `shared`) are expected not to change, because a picture shown or stored on the rider's own tablet is not collection under Play's definition. #1060 reads Play's text first-hand and says so rather than assuming it |
 | `apps/web/src/camera/consent.ts` §`CONSENT_STATEMENT`, and the Camera and side-camera screens' kept-visible sentences (`views/CameraView.tsx` §`CAMERA_KEPT_VISIBLE`, `views/SideCameraView.tsx` §`SIDE_CAMERA_KEPT_VISIBLE`) | The consent says what is captured, where it goes and what is kept. It gains the *"shown on this tablet"* sentence (D-7) and the snapshot. Each is kept visible (#666) |
-| `transfer/erase-device.ts` §`ERASE_REMOVES` | Re-read; D-5 expects its existing line to cover snapshots |
+| The side-camera setting in Settings (`views/SettingsView.tsx`), beside the consent's own sentence | Nothing there says screenshots are blocked. It gains D-12's sentence: in the Android app, screenshots and the app-switcher preview are blocked while a camera picture is on screen, and a browser cannot block them |
+| `transfer/erase-device.ts` §`ERASE_REMOVES` | Re-read; D-5 expects its existing line to cover snapshots, and a setup snapshot is only ever in memory (D-3) |
 | [ADR 0033](0033-side-camera-link.md) | Its wording is not edited. Its appended amendment points here (below) |
 
 ### D-11 — The rider's own computer, on this path (ADR 0033 D-11)
@@ -452,7 +494,48 @@ receives every picture, so it may show them in the live view. The outline is the
 a pose that passed `camera/pose-plausibility.ts`, and the view draws no outline for a picture whose
 answer was refused. **This ADR adds no new egress**: a snapshot is never sent to the rider's
 computer, to a hosted model or to an instance by anything this ADR permits, and a hosted model is
-still never sent a picture (ADR 0029's 2026-09-29 entries).
+still never sent a picture (ADR 0029's 2026-09-29 entries). That is the owner's answer of
+2026-10-04 to question 6, as drafted: *a snapshot is never sent to the rider's computer or to a
+model*, the write-up of ADR 0035 included, which reads no picture.
+
+### D-12 — Android's secure window flag, while a picture is shown
+
+> **The rule.** In the Android shell, while a side-camera picture is on screen (the live view during
+> setup or the ride, or a snapshot in an open section of a ride's page), the app's window carries
+> Android's secure flag, `WindowManager.LayoutParams.FLAG_SECURE`. It is set when the first picture
+> is mounted and cleared when the last one is removed. It is not set at any other time.
+
+The owner's answer of 2026-10-04 to question 7: *the camera screens set Android's secure window flag
+(`FLAG_SECURE`) while a picture is shown, which blocks the recents thumbnail and screenshots on those
+screens.* A snapshot shown in an open section of a ride's page is the same picture, so the author
+applies the flag there too, the narrower reading. While it is set, Android shows a blank recent-apps thumbnail for the app, refuses a
+screenshot or screen recording of it, and shows a non-secure display (a cast, for example) blank.
+
+**The native piece**, in `apps/mobile`, the shape `ThermalPlugin` and `RecordingServicePlugin`
+already have:
+
+- **A small Capacitor plugin**, for example `SecureWindowPlugin.java` beside `MainActivity.java`,
+  registered in `MainActivity` with `registerPlugin(...)` (which `plugin-registration.test.ts`
+  checks), with two methods: one that adds `FLAG_SECURE` to the activity's window
+  (`getWindow().addFlags`) and one that clears it (`clearFlags`), each on the UI thread. It takes no
+  argument and returns nothing but success; it reads nothing.
+- **Its TypeScript side** under `apps/mobile/src/`, as `thermal/` is, offered to the client through
+  `src/index.ts`, and reached in `apps/web` through a `*-port.ts` so `check:wiring` sees an unwired
+  method (§4j).
+- **One owner in the web client**: a reference count over the mounted pictures, so two pictures on
+  one screen, or a picture replaced by the next, never clear the flag early. Every picture
+  component takes it on mount and gives it back on unmount, the error path included.
+- **In a browser it does nothing.** A web page cannot stop a screenshot or the browser's own
+  tab-switcher preview, and the port is a no-op there. That is said to the rider (below), not
+  hidden.
+
+**What the rider is told.** The camera consent, and the side-camera setting in Settings, gain a
+sentence that, in the Android app, screenshots and the app-switcher preview are blocked while a
+camera picture is on screen, and that a browser cannot block them. The words are #1060's, with the
+owner's approval (D-10).
+
+**What it does not do.** It does not stop a person looking at the screen or photographing it with
+another device (D-6). It costs the rider their own screenshots of these screens, on purpose.
 
 ---
 
@@ -474,6 +557,13 @@ still never sent a picture (ADR 0029's 2026-09-29 entries).
 - **A picture of the rider in their home is now on a screen.** Anybody near the tablet sees it while
   the view is on, and anybody who opens a ride's snapshot section sees the snapshots. D-6 keeps it
   off every accidental surface and is honest that it does nothing against a person who is looking.
+- **A view left on stays on.** Because the in-ride view remembers the rider's last choice (D-8), a
+  ride a guest walks into starts with the picture on screen if the rider left it on last time. The
+  owner chose that over a per-ride default on 2026-10-04.
+- **The rider loses their own screenshots** of every screen showing a picture, in the Android app
+  (D-12), and gains a native plugin to maintain. A browser gets no such protection, and is told so.
+- **A setup snapshot can be lost without a word at the moment it is lost**: closing the tab before
+  any ride is saved discards it (D-3). The rider is told that beside the control, before pressing.
 - **Bystanders now appear on a screen and may be stored.** The consent says so. Nothing detects or
   hides them, and the outline is drawn for one person only.
 - **The account export grows more dangerous again**, by every snapshot (ADR 0029 D-3).
@@ -497,10 +587,10 @@ still never sent a picture (ADR 0029's 2026-09-29 entries).
 |---|---|
 | [#1057](https://github.com/openzigs/onyourleft/issues/1057), spike 0021 | D-2's table: every row of the branch it picks is a measurement it owes. Its result is appended here as an amendment |
 | [#1112](https://github.com/openzigs/onyourleft/issues/1112) | The live view is not usable at 0.3 a second on branch A. Its fix, or the spike's choice of branch B, comes first |
-| [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-10's table, with the owner's approval of each sentence, and D-7's consent sentence. The pointer amendment to ADR 0029 (above) if it touches `hosted-model.test.ts` |
-| [#1061](https://github.com/openzigs/onyourleft/issues/1061) | D-1 (no object URL for the live view, the model in the worker, at most one shown picture), D-6, D-7, D-9, and the setup half of D-8's gates |
-| [#1062](https://github.com/openzigs/onyourleft/issues/1062) | D-8 entire, D-9, and the device measurement against #554 |
-| [#1063](https://github.com/openzigs/onyourleft/issues/1063) | D-3, D-4, D-5 and D-6's snapshot section, the migration and its `down` |
+| [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-10's table, with the owner's approval of each sentence: D-7's consent sentence, D-3's setup-snapshot sentence and D-12's screenshot sentence. The pointer amendment to ADR 0029 (above) if it touches `hosted-model.test.ts` |
+| [#1061](https://github.com/openzigs/onyourleft/issues/1061) | D-1 (no object URL for the live view, the model in the worker, at most one shown picture), D-6, D-7, D-9, the setup half of D-8's gates, and D-12's plugin and port, which land with the first picture shown |
+| [#1062](https://github.com/openzigs/onyourleft/issues/1062) | D-8 entire, the remembered preference included, D-9, D-12 on the ride surfaces, and the device measurement against #554 |
+| [#1063](https://github.com/openzigs/onyourleft/issues/1063) | D-3 (setup snapshots and their discard included), D-4, D-5 and D-6's snapshot section, D-12 on a ride's page, the migration and its `down` |
 | [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-2's note on a fit-check burst, and the phone's tilt message (the owner's trunk-angle ruling), both added there and not here |
 | [#1059](https://github.com/openzigs/onyourleft/issues/1059), ADR 0045 | Whether any angle appears on the live view, a snapshot or a ride's page (D-9) |
 
@@ -508,31 +598,20 @@ still never sent a picture (ADR 0029's 2026-09-29 entries).
 
 ## What the owner has not decided
 
-Each is the author's choice above, the narrower option, and the owner's to widen:
-
-1. **Is the in-ride view off at the start of every ride** (D-8), or does it remember the rider's
-   last choice?
-2. **May a snapshot be taken during setup with no ride under way** (D-3), and if so, which ride does
-   it belong to?
-3. **Is the snapshot section on a ride's page closed by default** (D-6), with no picture mounted
-   until it is opened? Ruling 3 says it shows on that page; D-11 rule 1 says not in the default
-   render.
-4. **Is a snapshot stored with its outline as numbers and drawn when shown** (D-3), rather than with
-   the outline drawn into the picture?
-5. **May a snapshot ever be shown with where in the ride it was taken**, or a reading at that moment
-   (D-3)? This ADR says no.
-6. **Is a snapshot sent to the rider's own computer or a model**, for the write-up (ADR 0035)? This
-   ADR permits neither (D-11), and a model write-up never reads a picture today.
-7. **Android's recent-apps thumbnail** (below) — should the side-camera screens set the window's
-   secure flag while a picture is on screen?
+**None remain.** The first draft asked the owner seven questions, and the owner answered all seven
+on 2026-10-04 (*"go ahead and do 1058 now I approve the wording"*). The answers are in §Context
+§"What the owner answered on 2026-10-04" and in the Decision: question 1 in D-8, questions 2, 4 and
+5 in D-3, question 3 in D-6, question 6 in D-11 and question 7 in D-12. Where an answer left a detail
+open, the author took the narrower reading and says so at the place: the view is off before the
+rider has ever chosen (D-8), a setup snapshot does not wait past a failed save or join a recovered
+ride (D-3), and the secure flag also covers a snapshot on a ride's page (D-12). The author's other
+choices, such as one `cameraFrames` table for every kept picture (D-3), stand under the owner's
+approval of the wording.
 
 ## What this ADR did not consider
 
-- **Android's recent-apps screen and screenshots.** Android captures a thumbnail of the app for the
-  recent-apps list, and a live view on screen at that moment is in it. Setting the window's secure
-  flag would prevent that and would also block the rider's own screenshots. Not decided here; open
-  question 7.
-- **Screen casting and screen sharing** of the tablet, beyond saying in D-6 that they show the view.
+- **Screen casting and screen sharing** of the tablet in a browser, beyond saying in D-6 that they
+  show the view. In the Android app D-12's secure flag blanks them while a picture is shown.
 - **A second person's profile on one device**, which ADR 0029 D-11 already names as the day its
   argument changes (accounts, [#7](https://github.com/openzigs/onyourleft/issues/7)).
 - **iOS**, and **more than one side camera**, as in ADR 0033.
