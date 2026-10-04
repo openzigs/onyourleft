@@ -32,6 +32,11 @@ bill is implied**, and no issue may take a paid service as a prerequisite (ADR 0
 > rider's data is (#776); (d) nothing the client refuses to send leaves through the instance
 > (#777). A change that makes any of the four false is a change to an ADR, not a review note.
 >
+> ⚠️ **[ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) is
+> PROPOSED and would make (a) false for AI analysis alone**: a model's write-up of a ride would run
+> only on the rider's instance (the owner's rulings of 2026-10-04, #1092). Until the owner approves
+> it on #1093, (a) holds unchanged.
+>
 > ⚠️ **This section used to forbid a server.** It said *"There is no server in Phase 1. Do not add
 > one, do not scaffold `apps/api`"* — owner decision D6, which ADR 0036 supersedes. A reviewer who
 > remembers that sentence is reading the old file, and an issue body that repeats it predates the
@@ -5087,7 +5092,13 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0044.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0047.**
+  ⚠️ **0046 is [ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)**,
+  taken by [#1093](https://github.com/openzigs/onyourleft/issues/1093) on 2026-10-04 for AI analysis
+  on the rider's instance, and **Proposed** until the owner approves it. **0044 and 0045 are
+  reserved, not written**, by [#1058](https://github.com/openzigs/onyourleft/issues/1058) and
+  [#1059](https://github.com/openzigs/onyourleft/issues/1059). A reviewer who remembers this sentence
+  offering 0044 is reading the old file.
   ⚠️ **0043 is [ADR 0043](docs/adr/0043-ofl-display-typeface.md)**, taken by
   [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02 for the OFL display face. A
   reviewer who remembers this sentence offering 0043 is reading the old file.
