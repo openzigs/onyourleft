@@ -1890,6 +1890,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
+        // #1111: the RECORDER's moving time, read during render like `rescue`
+        // — the tick's `setState` schedules this render, so it is as fresh as
+        // the frame. Never the simulation's `elapsed`: that is a second clock,
+        // and it does not know about the recorder's auto-pause.
+        movingSeconds={props.trainer?.rideMovingSeconds()}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         // #783: a count and ONE chosen gap on a room ride, never a list.
         {...(roomRef.current === undefined

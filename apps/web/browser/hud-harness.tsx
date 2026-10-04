@@ -422,6 +422,13 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * HUD inside is `position: absolute; inset: 0` against this box exactly as it
  * is against the product's.
  */
+/**
+ * A moving time of 9:59:59 on every panel — #1111. The widest figure a ride
+ * under ten hours shows (`h:mm:ss` from the first second, tabular digits), so
+ * "no value overflows its track" is measured with the new field at its widest.
+ */
+const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
 const STAGE_IN_FLOW = { position: 'relative', inset: 'auto', height: '100vh' } as const;
 
 function Harness(): JSX.Element {
@@ -443,6 +450,7 @@ function Harness(): JSX.Element {
               state={STATE}
               cadence={{ value: 92, live: true }}
               heartRate={{ value: 168, live: true }}
+              movingSeconds={MOVING_SECONDS}
               chases={[BOT_GAP, ghostChase(outcome)]}
               paused={false}
               onPause={() => undefined}
@@ -464,6 +472,7 @@ function Harness(): JSX.Element {
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
             chases={[BOT_GAP, ghostChase('level')]}
             paused={false}
             onPause={() => undefined}

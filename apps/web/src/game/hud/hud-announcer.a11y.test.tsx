@@ -365,6 +365,7 @@ function trainerPort(hasControl: boolean): GameTrainerPort {
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
   };
 }
 

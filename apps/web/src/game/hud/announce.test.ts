@@ -42,7 +42,7 @@ import {
   type AnnouncerState,
 } from './announce';
 import { DEFAULT_ANNOUNCEMENTS, type AnnouncementPreference } from './announce-preference';
-import { NO_READING, hudReadings, type HudReading } from './fields';
+import { MOVING_TIME_KEY, NO_READING, hudReadings, type HudReading } from './fields';
 
 const ON: AnnouncementPreference = { ...DEFAULT_ANNOUNCEMENTS, enabled: true };
 
@@ -575,6 +575,26 @@ describe('what a sentence may say', () => {
       ON,
     );
     expect(said.join(' ')).not.toContain('ahead');
+  });
+
+  it('never speaks the moving time: it is a reading, not an event — #1111', () => {
+    expect(ANNOUNCEABLE_READINGS).not.toContain(MOVING_TIME_KEY);
+    const timed: HudReading = {
+      key: MOVING_TIME_KEY,
+      label: 'Moving',
+      value: '1:02:05',
+      unit: '',
+      stale: false,
+    };
+    // Every reading row at its most talkative, for ten minutes of seconds.
+    const calls: Partial<AnnounceInput>[] = [];
+    for (let second = 0; second <= 600; second += 1) {
+      calls.push({ now: second, readings: [power('200'), timed] });
+    }
+    const { said } = run(calls, { ...ON, powerEverySeconds: 15, distanceEvery: 0.1 });
+    // Non-vacuity: the run DID speak — power, on its cadence.
+    expect(said.filter((sentence) => sentence !== undefined).length).toBeGreaterThan(0);
+    expect(said.join(' ')).not.toMatch(/1:02:05|moving/i);
   });
 
   it('can carry no coordinate: no announceable reading is a position', () => {

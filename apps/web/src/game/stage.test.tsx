@@ -307,6 +307,7 @@ describe('a notice is laid out by the HUD — #423', () => {
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
     readTrainer: () => ({ kind: 'no-control', control: undefined }),
   };
 

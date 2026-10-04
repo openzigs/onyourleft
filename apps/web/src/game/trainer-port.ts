@@ -81,6 +81,8 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
+import { rideInProgress, type RidePhase } from '../ride/controller';
+
 import type { GhostOutcome } from './ghost-outcome-kind';
 
 /**
@@ -284,6 +286,29 @@ export interface GameTrainerPort {
    * `GameView` stops calling it.
    */
   gameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * The moving time of the ride being RECORDED, in seconds — or `undefined`
+   * when no ride is in progress (recording or paused) — #1111.
+   *
+   * ⚠️ **The recorder's own figure, and the HUD has no other clock.** It is
+   * `RideSnapshot.movingSeconds`, which is the recorder session's
+   * `movingTime` — counted on the ride's own clock (`ride/controller.ts`
+   * §`rideSeconds`), held still through a pause and an auto-pause, and the
+   * number `recording/finish.ts` writes into the saved activity. A game ride
+   * that is not being recorded has none, and the HUD says so with a dash
+   * rather than inventing one from the simulation's clock.
+   *
+   * ⚠️ The game's own *Pause* pauses the SIMULATION; the recording is the
+   * Ride screen's (`RideSession`, above the router), and its auto-pause is
+   * what stops this figure when the rider stops. So this is the time the
+   * saved ride will say, which is the point of reading it.
+   *
+   * Read on every frame, like {@link workoutRescue}, and for its reason: it
+   * decides no write, and a snapshot read is a property access. On the port
+   * for {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView`
+   * stops reading it — and named so nothing else in production calls it.
+   */
+  rideMovingSeconds(): number | undefined;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -308,6 +333,13 @@ interface GameTrainerSource {
       { readonly status: string; readonly rescue: WorkoutRescue | undefined } | undefined;
     /** #647. Optional here only so a source with no recording need not say. */
     readonly keepAliveFailed?: boolean;
+    /**
+     * #1111: whether a ride is in progress, and its moving time. Optional for
+     * {@link keepAliveFailed}'s reason; a source that says neither has no
+     * moving time to show.
+     */
+    readonly phase?: RidePhase;
+    readonly movingSeconds?: number;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -354,6 +386,13 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
+    },
+    rideMovingSeconds: () => {
+      // One snapshot read for both, so the phase and the time are one moment.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.movingSeconds
+        : undefined;
     },
   };
 }

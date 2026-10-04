@@ -46,6 +46,7 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
+import { formatDuration } from '../../format';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
@@ -146,7 +147,15 @@ export interface HudReading {
  * | tier | fields | why |
  * |---|---|---|
  * | `primary` | power, cadence, heart rate | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to |
- * | `secondary` | speed, gradient, to go, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the gaps and the wind change slowly |
+ * | `secondary` | speed, gradient, to go, moving time, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the moving time, the gaps and the wind change slowly |
+ *
+ * ⚠️ **Moving time is secondary, decided for #1111.** It is not a sensor and
+ * nothing is ridden TO it second by second: it climbs at one second a second,
+ * and a rider reads it the way they read the distance to go — now and then,
+ * to know how far into the ride they are. A primary slot would also cost the
+ * road the most: the primary tier is three 2.5 rem readings across the top,
+ * and a fourth there would widen the corner a rider's eye goes to first for
+ * the one number on the HUD that tells them nothing about the effort.
  *
  * ⚠️ **The order {@link hudReadings} returns is untouched**, and the primary
  * three were already its first three — so a field is still found by position
@@ -276,6 +285,25 @@ export interface HudInput {
    * thing.
    */
   readonly units?: UnitSystem | undefined;
+  /**
+   * The ride's moving time, in seconds — #1111. **The recorder's own figure**,
+   * `RideSnapshot.movingSeconds`, read through `trainer-port.ts`
+   * §`GameTrainerPort.rideMovingSeconds`: the number the saved activity's
+   * `movingTime` is written from, on the ride's own clock
+   * (`ride/controller.ts` §`rideSeconds`).
+   *
+   * ⚠️ **There is no second clock, and this file must never grow one.** Not
+   * the simulation's `state.elapsed`, not a frame count, not a timer: each of
+   * those would go on counting through a pause or an auto-pause the recorder
+   * does not count, and an hour in the HUD and the saved ride would disagree
+   * about how long the rider rode.
+   *
+   * `undefined` where nothing is being recorded — no ride controller, or no
+   * ride started on the Ride screen — and then the field shows
+   * {@link NO_READING}: there is no moving time to quote, and a zero would say
+   * the rider has not moved.
+   */
+  readonly movingSeconds?: number | undefined;
 }
 
 /**
@@ -367,10 +395,42 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     measured('speed', 'Speed', speed),
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
+    // #1111: beside the distance to go, the other "how far into it am I". It
+    // is always present, so its index is the same on every ride; it moved
+    // every gap, room and wind field one place along, once, for every ride.
+    movingTimeReading(input.movingSeconds),
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
   ];
+}
+
+/** The key of the moving-time field — #1111. @see movingTimeReading */
+export const MOVING_TIME_KEY = 'movingTime';
+
+/**
+ * The moving-time field — #1111.
+ *
+ * `h:mm:ss` from the first second (`format.ts` §`DurationHours`), so the
+ * field keeps one shape for the whole ride. No unit: the colons are the unit,
+ * as they are on the Ride screen's clock.
+ *
+ * ⚠️ **Labelled `Moving`, as the Ride screen's clock labels the same figure
+ * (`views/RideView.tsx` §`RideClock`), and not `Moving time`**: a secondary
+ * track is 5.5 rem at its narrowest, and a two-word label is the one that
+ * wraps there on the CI runner's wider fonts (`theme.css` §"COLUMN") — a
+ * second label line is a taller row on a HUD with no height to spare.
+ *
+ * ⚠️ **Never stale.** A dash here means "nothing is being recorded", which is
+ * not a sensor that dropped: no *Sensor lost* is said, because nothing was
+ * lost.
+ */
+function movingTimeReading(movingSeconds: number | undefined): HudReading {
+  const value =
+    movingSeconds === undefined || !Number.isFinite(movingSeconds)
+      ? NO_READING
+      : formatDuration(movingSeconds, 'always');
+  return { key: MOVING_TIME_KEY, label: 'Moving', value, unit: '', stale: false };
 }
 
 /**

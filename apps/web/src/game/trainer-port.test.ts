@@ -499,6 +499,30 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     }).not.toThrow();
   });
 
+  it('reads the moving time of a ride in progress off the controller, and nothing otherwise — #1111', () => {
+    let snapshot: { phase: 'idle' | 'recording' | 'paused' | 'stopped'; movingSeconds: number } = {
+      phase: 'idle',
+      movingSeconds: 0,
+    };
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined, ...snapshot }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+    });
+    // Nothing started on the Ride screen: there is no moving time to quote.
+    expect(port.rideMovingSeconds()).toBeUndefined();
+    snapshot = { phase: 'recording', movingSeconds: 65 };
+    expect(port.rideMovingSeconds()).toBe(65);
+    // Paused is still a ride in progress, and its time is the recorder's.
+    snapshot = { phase: 'paused', movingSeconds: 65 };
+    expect(port.rideMovingSeconds()).toBe(65);
+    // A stopped ride's figure is the saved ride's, not a running one.
+    snapshot = { phase: 'stopped', movingSeconds: 70 };
+    expect(port.rideMovingSeconds()).toBeUndefined();
+    expect(gameTrainerPortOver(undefined).rideMovingSeconds()).toBeUndefined();
+  });
+
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {
     const { controller } = controllerWith({ ...NO_CONTROL, hasControl: true }, 'finished');
     expect(gameTrainerPortOver(controller).readTrainer()).toMatchObject({

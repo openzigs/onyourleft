@@ -6117,6 +6117,115 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE MOVING TIME ON A NARROW PHONE ON ITS SIDE — #1111.
+ *
+ * The moving time is a seventh secondary reading on the widest ride a rider
+ * can start (a pacer, a ghost and a wind), and at 736 px the secondary panel
+ * is 328 px: three 5.5 rem tracks, so the seventh is a third row — measured in
+ * the pinned Chromium, the panel went from 129 to 196 px and its third row
+ * came down onto the leaning rider (x = 299 to 437, from y = 189) at 736×360.
+ *
+ * What gives is the PRIMARY panel's width, and only below 802 px: 19.5 rem
+ * rather than 24 leaves the secondary panel 400 px, which is four tracks — so
+ * seven readings are two rows again, as six were. The cost is the primary
+ * tier's unit: at 92 px a track, `168 bpm` at 2.5 rem (105 px) does not fit
+ * beside its number, so the unit goes under it, as it already does on every
+ * phone narrower than 24 rem (above). 802 px is where four secondary tracks
+ * fit beside a 24 rem primary panel (4 × 88 + 3 × 8 + 18 = 394 px of panel),
+ * so a wider phone keeps the primary tier exactly as it was.
+ * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport.
+ */
+@media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud {
+    grid-template-columns: minmax(0, 19.5rem) minmax(0, 1fr);
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+    display: block;
+  }
+}
+
+/*
+ * THE MOVING TIME ON AN UPRIGHT PHONE — #1111.
+ *
+ * Upright there is no fourth track to be had (a 344 px panel holds three), so
+ * on the widest ride the seventh secondary reading is a third row — and the
+ * column layout has no height for one: the top stack ended 41 px above the
+ * leaning rider's helmet at 360×752, and a standing Eased notice beside *Keep
+ * the screen on* ended 69 px above it against a 50 px floor
+ * (`ride.browser.spec.ts` §"#585", §"#647"). A row is 53 px.
+ *
+ * So upright, the moving time is lifted out of the grid and set beside *Pause*
+ * and *End ride*, which are stretched across the actions panel and give up
+ * 7 rem of their width for it: 99 px each at 360 px, against their 72 px
+ * floor (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). That costs the panel no
+ * height at all, which is what every combination of sounds, side camera and
+ * notice at the bottom of the screen needs — with sounds on, the actions
+ * panel began 32 px under the rider. It is the same reading in the same
+ * place in the document; only where it is DRAWN moves, by anchor positioning,
+ * as #576 moved the side camera's row.
+ *
+ * ⚠️ **With a third control — *Trainer notice* (#437) — there is no width to
+ * give**: three controls at 72 px and their gaps are 248 of 326 px. Then it is
+ * set on its own surface just ABOVE the actions panel instead: a ride with
+ * that control has no trainer line, and its actions panel began 121 px under
+ * the rider at 360×752.
+ *
+ * ⚠️ Where the engine has no anchor positioning (a WebView older than
+ * Chrome 125) none of this applies and the reading stays a third row in the
+ * grid, as #576's rule says of its own fallback.
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__actions {
+      anchor-name: --oyl-hud-actions;
+    }
+
+    .oyl-game--riding .oyl-hud__controls {
+      anchor-name: --oyl-hud-controls;
+      /* The moving time's 6 rem, and the controls' own gap. */
+      padding-inline-end: calc(6rem + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      position-anchor: --oyl-hud-controls;
+      top: anchor(top);
+      bottom: anchor(bottom);
+      right: anchor(right);
+      /* "9:59:59" at the secondary value size is 85 px in the pinned Chromium;
+         "MOVING" at the label size is under 60. */
+      width: 6rem;
+      justify-content: center;
+    }
+
+    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+      padding-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__fields--secondary
+      > .oyl-hud__field--moving {
+      position-anchor: --oyl-hud-actions;
+      top: auto;
+      bottom: anchor(top);
+      right: anchor(right);
+      width: auto;
+      margin-bottom: var(--oyl-space-sm);
+      box-sizing: border-box;
+      /* A panel of its own here, over the world, so it carries the panel's
+         surface: the colour pair `contrast.a11y.test.ts` checks is the pair a
+         rider sees. */
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      padding: var(--oyl-space-sm);
+    }
+  }
+}
+
 /* --- Capability queries (#307) --------------------------------------------- */
 
 /*

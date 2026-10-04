@@ -656,6 +656,7 @@ describe('your own best crossing the line (#259)', () => {
       gameRideEnded: (outcome) => {
         handed.push(outcome);
       },
+      rideMovingSeconds: () => undefined,
     };
     mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
     await settle();
@@ -683,6 +684,47 @@ describe('your own best crossing the line (#259)', () => {
     mounted?.unmount();
     mounted = undefined;
     expect(handed).toEqual(['beaten', 'not-beaten']);
+  });
+});
+
+describe('the ride’s moving time on the HUD — #1111', () => {
+  /**
+   * ⚠️ `HudPanel`'s `movingSeconds` is an optional prop threaded through JSX,
+   * which `check:wiring` cannot follow (CLAUDE.md §4j §Limits) — so this drives
+   * the real `GameView` and reads the HUD, rather than trusting that the port
+   * method being called means the field shows what it returned.
+   */
+  it('shows the recorder’s figure from the port, and nothing the simulation counted', async () => {
+    let recorded: number | undefined = 65;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => recorded,
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    // Ten seconds of frames: the simulation's clock runs, the field does not —
+    // the recorder (paused, say) has not moved, so neither does the HUD.
+    await pump(600);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    recorded = 3725;
+    await pump(2);
+    expect(hudField('Moving')).toBe('1:02:05');
+
+    // No recording under the ride: a dash, and no "Sensor lost".
+    recorded = undefined;
+    await pump(2);
+    expect(hudField('Moving')).toBe(NO_READING);
   });
 });
 

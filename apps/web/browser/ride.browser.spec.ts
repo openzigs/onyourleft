@@ -312,11 +312,20 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
-      // A pacer, a ghost AND a wind — six, where an ordinary ride has four.
-      expect(seen.secondary).toEqual(['Speed', 'Gradient', 'To go', 'Pacer', 'Your best', 'Wind']);
+      // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
+      // and since #1111 the moving time, beside the distance to go.
+      expect(seen.secondary).toEqual([
+        'Speed',
+        'Gradient',
+        'To go',
+        'Moving',
+        'Pacer',
+        'Your best',
+        'Wind',
+      ]);
       expect(seen.panels).toHaveLength(4);
-      // Nine readings, the strip, the plan view, the trainer line, two controls.
-      expect(seen.items).toHaveLength(14);
+      // Ten readings, the strip, the plan view, the trainer line, two controls.
+      expect(seen.items).toHaveLength(15);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -435,6 +444,52 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       );
     });
 
+    /**
+     * #1111: the moving time, at its widest (`ride-harness.tsx`
+     * §`MOVING_SECONDS`, 9:59:59), on the stage and clear of the LEANING
+     * rider and of every ride control — its margins published. The cases
+     * above already hold it inside the viewport, uncovered, with no panel
+     * over another or over the rider; this one names it, so the numbers a
+     * reviewer asks for are in the run.
+     */
+    test('the moving time is on the stage, clear of the rider and of every control — #1111', async ({
+      browser,
+    }, testInfo) => {
+      const page = await sharedRide(browser, viewport);
+      const seen = await measure(page);
+      const shown = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Moving',
+        );
+        return row?.querySelector('dd')?.textContent ?? '';
+      });
+      expect(shown).toBe('9:59:59');
+
+      const field = named(seen.items, 'reading: Moving');
+      expect(inside(field.box, viewport)).toBe(true);
+      expect(field.onTop).toBe(true);
+      const leaning = riderBox(viewport);
+      expect(overlap(field.box, leaning)).toBe(false);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls.length).toBeGreaterThanOrEqual(2);
+      expect(controls.filter((each) => overlap(each.box, field.box)).map(describeItem)).toEqual([]);
+
+      // Edge-to-edge clearance between two boxes: the larger of the two axis
+      // gaps, which is positive exactly when they do not overlap.
+      const clear = (a: Box, b: Box): number =>
+        Math.max(a.left - b.right, b.left - a.right, a.top - b.bottom, b.top - a.bottom);
+      const toRider = clear(field.box, leaning);
+      const toControl = Math.min(...controls.map((each) => clear(each.box, field.box)));
+      const toBottom = viewport.height - field.box.bottom;
+      const measured =
+        `moving time ${describeItem(field)}; ${toRider.toFixed(1)} px clear of the leaning ` +
+        `rider, ${toControl.toFixed(1)} px of the nearest control, ` +
+        `${toBottom.toFixed(1)} px above the bottom of the stage`;
+      testInfo.annotations.push({ type: '#1111', description: measured });
+      console.log(`#1111 — ${viewport.name} — ${measured}`);
+      expect(toRider).toBeGreaterThan(0);
+    });
+
     test('a primary reading is visibly larger than a secondary one', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
@@ -502,7 +557,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      expect(seen.items).toHaveLength(14);
+      // Ten readings since #1111's moving time, and the rest as above.
+      expect(seen.items).toHaveLength(15);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -602,6 +658,30 @@ test.describe('a ride with a standing notice', () => {
         const item = named(seen.items, name);
         expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
       }
+      // #1111: with a third control (*Trainer notice*) there is no width
+      // beside the controls on an upright phone, and the moving time is set
+      // ABOVE the actions panel on a surface of its own (`theme.css` §"THE
+      // MOVING TIME ON AN UPRIGHT PHONE") — over the world, inside no panel,
+      // so the panel checks above cannot see it. Held here, on this load.
+      const moving = named(seen.items, 'reading: Moving');
+      expect(inside(moving.box, viewport) && moving.onTop, describeItem(moving)).toBe(true);
+      const leaning = riderBox(viewport);
+      expect(overlap(moving.box, leaning), describeItem(moving)).toBe(false);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls).toHaveLength(3);
+      expect(controls.filter((each) => overlap(each.box, moving.box)).map(describeItem)).toEqual(
+        [],
+      );
+      const clearOfRider = Math.max(
+        moving.box.left - leaning.right,
+        leaning.left - moving.box.right,
+        moving.box.top - leaning.bottom,
+        leaning.top - moving.box.bottom,
+      );
+      console.log(
+        `#1111 with Trainer notice — ${viewport.name} — ${describeItem(moving)}; ` +
+          `${clearOfRider.toFixed(1)} px clear of the leaning rider`,
+      );
     });
   }
 });

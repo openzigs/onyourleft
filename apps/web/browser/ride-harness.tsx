@@ -408,6 +408,17 @@ const SIDE_PAIRING =
 const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
 
 /**
+ * The ride being recorded has a moving time of 9:59:59 — #1111. The HUD reads
+ * it from the port on every frame (`trainer-port.ts`
+ * §`GameTrainerPort.rideMovingSeconds`). The WIDEST figure a ride under ten
+ * hours produces, so every overlay viewport is measured with the moving-time
+ * field at its full width: `h:mm:ss` is one shape from the first second
+ * (`format.ts` §`DurationHours`), and the digits are tabular, so no figure
+ * under ten hours is wider than this one.
+ */
+const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
+/**
  * `ride.html?gradient=refused` — a trainer that refuses every gradient, so the
  * HUD carries the *Trainer* fault in its notice cell (#693's re-review: the
  * cell stacks every notice that is never put away, and keep-the-screen-on is
@@ -463,6 +474,7 @@ const TRAINER: GameTrainerPort = {
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
   gameRideEnded: () => undefined,
+  rideMovingSeconds: () => MOVING_SECONDS,
   readTrainer: () =>
     WITH_A_NOTICE
       ? {
