@@ -140,8 +140,16 @@ export function eagerLazyViews(
  * D-5, which admits `lucide-react` alone to the entry and requires any other
  * runtime UI dependency to load on demand. Radix Primitives (ADR 0042, #950)
  * are the first, matched by the scope every one of them is published under.
+ * Motion (ADR 0041 D-2, #1072) is the second: `motion`, and the three packages
+ * it is built from, each matched by its own directory name.
  */
-export const LAZY_ONLY_PACKAGES: readonly string[] = ['@radix-ui/'];
+export const LAZY_ONLY_PACKAGES: readonly string[] = [
+  '@radix-ui/',
+  'motion/',
+  'framer-motion/',
+  'motion-dom/',
+  'motion-utils/',
+];
 
 /**
  * Every module of a {@link LAZY_ONLY_PACKAGES} package in the entry's static
@@ -215,7 +223,8 @@ export function lazyViewsStayLazy(root: string): Plugin {
         this.error(
           `oyl-lazy-views-stay-lazy: a view or package meant to load on demand is in the entry ` +
             `chunk (#674, ADR 0034 D-5).\n  - ${problems.join('\n  - ')}\nImport a view through ` +
-            `AppShell's lazyView, never by name, and a Radix primitive only from a lazily loaded view.`,
+            `AppShell's lazyView, never by name, and a Radix primitive or Motion only from a lazily ` +
+            `loaded view.`,
         );
       }
     },

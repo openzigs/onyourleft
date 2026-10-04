@@ -36,6 +36,8 @@ export interface StubAnalysisRide {
   readonly activity: ActivityRecord;
   readonly power?: readonly (Watts | undefined)[];
   readonly heartRate?: readonly (BeatsPerMinute | undefined)[];
+  /** Altitude in metres, for #947's climbing badges. */
+  readonly altitude?: readonly (number | undefined)[];
   /** Seconds one sample is worth. Default 1 — ADR 0011's 1 Hz grid. */
   readonly sampleInterval?: number;
 }
@@ -49,6 +51,8 @@ export interface StubAnalysis extends AnalysisPort {
   readonly listReads: ListActivitiesOptions[];
   /** Every load-summary write, in order, so a backfill's work is countable. */
   readonly summaryWrites: ActivityId[];
+  /** Every badge-facts write (#947), in order. */
+  readonly factsWrites: ActivityId[];
   /** Every threshold save, so a test can assert what the form sent. */
   readonly thresholdWrites: {
     readonly thresholdPower?: Watts;
@@ -71,6 +75,7 @@ export function stubAnalysis(
   const summaryReads: string[] = [];
   const listReads: ListActivitiesOptions[] = [];
   const summaryWrites: ActivityId[] = [];
+  const factsWrites: ActivityId[] = [];
   const overrides = new Map<ActivityId, ActivityRecord>();
   const thresholdWrites: {
     readonly thresholdPower?: Watts;
@@ -93,6 +98,9 @@ export function stubAnalysis(
     }
     if (ride.heartRate !== undefined) {
       present.push('heartRate');
+    }
+    if (ride.altitude !== undefined) {
+      present.push('altitude');
     }
     return present;
   }
@@ -148,6 +156,17 @@ export function stubAnalysis(
       return Promise.resolve(true);
     },
 
+    setActivityRideFacts: (_owner: AthleteId, id: ActivityId, facts) => {
+      const ride = rideFor(id);
+      if (ride === undefined) {
+        return Promise.resolve(false);
+      }
+      // Onto the stub's own record, as the load summary above is: replaced.
+      factsWrites.push(id);
+      overrides.set(id, { ...ride.activity, rideFacts: facts });
+      return Promise.resolve(true);
+    },
+
     listActivitySummaries: (_owner: AthleteId, options: ListActivitiesOptions = {}) => {
       listReads.push(options);
       // ⚠️ The ordering options are **honoured**, not ignored. A stub that
@@ -184,7 +203,11 @@ export function stubAnalysis(
       if (channels.length === 0) {
         return Promise.resolve(undefined);
       }
-      const sampleCount = Math.max(ride.power?.length ?? 0, ride.heartRate?.length ?? 0);
+      const sampleCount = Math.max(
+        ride.power?.length ?? 0,
+        ride.heartRate?.length ?? 0,
+        ride.altitude?.length ?? 0,
+      );
       const summary: StreamSetSummary = {
         activityId: id,
         athleteId: owner,
@@ -210,7 +233,13 @@ export function stubAnalysis(
         return Promise.resolve(undefined);
       }
       const series =
-        channel === 'power' ? ride.power : channel === 'heartRate' ? ride.heartRate : undefined;
+        channel === 'power'
+          ? ride.power
+          : channel === 'heartRate'
+            ? ride.heartRate
+            : channel === 'altitude'
+              ? ride.altitude
+              : undefined;
       return Promise.resolve(series as Samples<C> | undefined);
     },
   };
@@ -222,6 +251,7 @@ export function stubAnalysis(
     summaryReads,
     listReads,
     summaryWrites,
+    factsWrites,
     thresholdWrites,
   };
 }

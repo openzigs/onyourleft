@@ -40,6 +40,17 @@ export function isRideRoute(id: RouteId): boolean {
 }
 
 /**
+ * Whether a card may be carried into its detail on `routeId` — #1072, ADR
+ * 0041 D-3: never on a ride route, and never while a ride has the screen.
+ * A list–detail route is never rendered under the stage today (only the game
+ * makes the shell immersive), so `immersive` is asked for the rule's sake: a
+ * future list on a ride-time screen is refused here rather than by luck.
+ */
+export function mayCarryOn(routeId: RouteId, immersive: boolean): boolean {
+  return !immersive && !isRideRoute(routeId);
+}
+
+/**
  * Whether the navigation from `from` to `to` may animate: never while a ride
  * has the screen, and never when either route is a ride route.
  */

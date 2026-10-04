@@ -668,6 +668,18 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'setActivityRideFacts',
+    leaks: "another athlete's ride, given badge facts a stranger worked out (#947)",
+    async run(store, mine, theirs) {
+      const before = await store.getActivity(theirs.owner, theirs.ride.id);
+      await expect(
+        store.setActivityRideFacts(mine.owner, theirs.ride.id, { workoutFinished: true }),
+      ).resolves.toBe(false);
+      const after = await store.getActivity(theirs.owner, theirs.ride.id);
+      expect(after).toStrictEqual(before);
+    },
+  },
+  {
     member: 'setActivityMayBeRaced',
     leaks:
       "another athlete's consent to be raced, given on their behalf — a stranger's ride offered as a ghost it never agreed to be",

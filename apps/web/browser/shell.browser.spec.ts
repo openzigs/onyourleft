@@ -1652,10 +1652,12 @@ test.describe('#397 — the announcement controls', () => {
     // each "never" and an interval, where they were four selects — #400's
     // Sounds panel, which carries the same class so its switch and its volume
     // slider are held to the same floor, and #475's Game world switch, which
-    // carries it for the same reason and shipped without it.
+    // carries it for the same reason and shipped without it. Twenty-seven since
+    // #946: the menus' own sounds switch, which carries the class too (its
+    // volume is offered only once it is on, and this page has it off).
     expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
     expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
-    expect(seen.length).toBe(26);
+    expect(seen.length).toBe(27);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);

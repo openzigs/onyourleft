@@ -81,6 +81,15 @@ const EVERY_FIELD: Required<ActivityRecord> = {
     sha256: 'a'.repeat(64),
   },
   mayBeRaced: true,
+  rideFacts: {
+    ascent: metres(412),
+    bestPower: [
+      { duration: seconds(5), power: watts(812) },
+      { duration: seconds(1200), power: watts(251) },
+    ],
+    workoutFinished: true,
+    ghostRaced: true,
+  },
   createdAt: unixSeconds(1_700_200_000),
 };
 

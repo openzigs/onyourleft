@@ -110,6 +110,7 @@ import {
   type ActivityId,
   type AthleteId,
   type FramingCheckRecord,
+  type RideFacts,
   type RideWriteUpRecord,
   type RideWriteUpSourceRecord,
   type RiderTextKind,
@@ -179,6 +180,23 @@ export interface ManifestEntry {
    * ({@link ManifestRideWriteUp}), never the row spread.
    */
   readonly rideWriteUp: ManifestRideWriteUp | { readonly unreadable: string } | null;
+  /**
+   * What this ride's badges (#947) are earned from — `packages/store`
+   * §`RideFacts` — or **`null`** where nothing has worked them out, for
+   * {@link signedRecord}'s reason. Named field by field
+   * ({@link ManifestRideFacts}). Two of them — a workout finished, a ghost
+   * raced — are known only to the ride that recorded them and no activity
+   * file carries either, so this is the only copy that leaves the device.
+   */
+  readonly rideFacts: ManifestRideFacts | null;
+}
+
+/** @see ManifestEntry.rideFacts — absent members are absent, never zero. */
+export interface ManifestRideFacts {
+  readonly ascent?: number;
+  readonly bestPower?: readonly { readonly duration: number; readonly power: number }[];
+  readonly workoutFinished?: boolean;
+  readonly ghostRaced?: boolean;
 }
 
 /**
@@ -828,6 +846,7 @@ export async function exportEverything(
           : writeUp === 'unreadable'
             ? { unreadable: RIDE_WRITE_UP_UNREADABLE }
             : manifestWriteUpOf(writeUp),
+      rideFacts: summary.rideFacts === undefined ? null : manifestFactsOf(summary.rideFacts),
     });
     outcomes.push(outcome);
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
@@ -1028,6 +1047,23 @@ function manifestPoseOf(pose: SideSessionSummaryRecord): ManifestPoseSummary {
 }
 
 /** A write-up, field by field. @see ManifestRideWriteUp */
+/** Field by field, so a member added to `RideFacts` is not exported until this says so. */
+function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
+  return {
+    ...(facts.ascent === undefined ? {} : { ascent: facts.ascent }),
+    ...(facts.bestPower === undefined
+      ? {}
+      : {
+          bestPower: facts.bestPower.map((each) => ({
+            duration: each.duration,
+            power: each.power,
+          })),
+        }),
+    ...(facts.workoutFinished === undefined ? {} : { workoutFinished: facts.workoutFinished }),
+    ...(facts.ghostRaced === undefined ? {} : { ghostRaced: facts.ghostRaced }),
+  };
+}
+
 function manifestWriteUpOf(writeUp: RideWriteUpRecord): ManifestRideWriteUp {
   return {
     text: writeUp.text,

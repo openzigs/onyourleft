@@ -253,6 +253,7 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Appearance',
     'Announcements',
     'Sounds',
+    'Menu sounds',
     'Game world',
     'Words to mask',
     'Documents for the analysis',

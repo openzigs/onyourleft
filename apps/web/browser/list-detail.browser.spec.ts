@@ -1569,3 +1569,108 @@ function rgbOf(hex: string): string {
   const value = Number.parseInt(hex.slice(1), 16);
   return `rgb(${String((value >> 16) & 255)}, ${String((value >> 8) & 255)}, ${String(value & 255)})`;
 }
+
+/**
+ * #1072 — a card carried into its detail, with Motion (ADR 0041).
+ *
+ * Each frame for 0.7 s after the press, the detail's wrapper
+ * (`ListDetail.tsx` §"Carrying a card into its detail") is read for its
+ * computed transform: a card carried shows frames that are not at rest, and
+ * ends at rest. ⚠️ **The control is the same selection by ADDRESS**: the hash
+ * set by hand, which no press asked for, must show no frame off rest — so
+ * the carried assertion is about the press, and not about some transition the
+ * pane always runs. And under `prefers-reduced-motion: reduce` a press must
+ * move nothing either, with the same press under no preference, on a list
+ * mounted afresh in the same page, as that case's control.
+ */
+test.describe('#1072 — a card carried into its detail', () => {
+  /** Frames whose transform was off rest, read for 0.7 s around `act`. */
+  async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
+    await page.evaluate(() => {
+      const held = window as unknown as { oylCarry?: string[] };
+      held.oylCarry = [];
+      const until = performance.now() + 700;
+      const sample = (): void => {
+        const wrapper = document.querySelector(
+          '[data-oyl-pane="detail"] .oyl-list-detail__carried',
+        );
+        if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
+        if (performance.now() < until) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await act();
+    await page.waitForTimeout(750);
+    const frames = await page.evaluate(
+      () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
+    );
+    expect(frames.length, 'no frame of the detail was read').toBeGreaterThan(10);
+    // It ends where it belongs, whatever happened on the way.
+    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
+    return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');
+  }
+
+  /** Motion's features arrive in a chunk of their own; a press before them is not carried. */
+  async function motionLoaded(page: Page): Promise<void> {
+    await page.waitForFunction(() =>
+      performance
+        .getEntriesByType('resource')
+        .some((entry) => entry.name.includes('motion-features')),
+    );
+    await page.waitForTimeout(100);
+  }
+
+  async function press(page: Page, route: RouteDefinition): Promise<() => Promise<void>> {
+    await visit(page, route, hrefFor(route));
+    await motionLoaded(page);
+    const id = await selectionOf(page, route);
+    return async () => {
+      await page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`).click();
+    };
+  }
+
+  for (const viewport of [SHORT_LANDSCAPE, PHONE]) {
+    test(`on every list–detail route at ${viewport.name}, and the control by address`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      expect(LIST_DETAIL.map((route) => route.id).sort()).toEqual([
+        'activities',
+        'routes',
+        'workouts',
+      ]);
+      for (const route of LIST_DETAIL) {
+        const carried = await framesOffRest(page, await press(page, route));
+        expect(carried.length, `${route.id}: the card was not carried`).toBeGreaterThan(0);
+
+        // The control: the same item chosen by address, with no press.
+        await visit(page, route, hrefFor(route));
+        const id = await selectionOf(page, route);
+        const byAddress = await framesOffRest(page, async () => {
+          await page.evaluate(
+            (hash) => {
+              window.location.hash = hash;
+            },
+            hrefForSelection(route, id),
+          );
+        });
+        expect(byAddress, `${route.id}: a selection by address moved`).toEqual([]);
+      }
+    });
+  }
+
+  test('under reduced motion a press moves nothing, and the control moves', async ({ page }) => {
+    // Asked before the page loads: Motion reads the preference when an
+    // element mounts (ADR 0041's amendment for #1072 says what that costs).
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page, SHORT_LANDSCAPE);
+    const [first, second] = LIST_DETAIL;
+    if (first === undefined || second === undefined) throw new Error('no list–detail routes');
+    const reduced = await framesOffRest(page, await press(page, first));
+    expect(reduced, 'a transform ran under prefers-reduced-motion: reduce').toEqual([]);
+    // The control: no preference, on a list mounted afresh — a press carries.
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const moved = await framesOffRest(page, await press(page, second));
+    expect(moved.length, 'the control did not move: the reading is blind').toBeGreaterThan(0);
+  });
+});

@@ -100,6 +100,7 @@ import {
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
+import type { MenuSounds } from './menu-sounds';
 import { mayAnimateBetween } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
@@ -284,6 +285,13 @@ export interface AppShellProps {
    * cannot-pair-here screen, which is also what Safari and Firefox get.
    */
   readonly rideController?: RideController | undefined;
+  /**
+   * The menus' sounds — #946. Every press in the shell is handed to it and it
+   * decides, alone, whether one plays (`menu-sounds.ts` says why the decision
+   * is not made here). `undefined` is silence: the accessibility suite and
+   * every test that does not ask for sounds render with none.
+   */
+  readonly menuSounds?: MenuSounds | undefined;
   /**
    * The trainer game's store reads and sensor sampling (#85).
    *
@@ -776,6 +784,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
     main.scrollIntoView({ block: 'start' });
   }
 
+  /*
+   * #946: every press in the shell, in the bubbling phase — so a control's own
+   * handler has already run (the Settings switch has saved the rider's choice)
+   * — handed to the menus' sounds, which decide everything. A `click` only:
+   * hover, focus and a hash changed by hand are not presses and never reach
+   * here. The phase is read at the press, not subscribed to.
+   */
+  function pressed(event: MouseEvent<HTMLDivElement>): void {
+    props.menuSounds?.press(event.target, {
+      immersive,
+      routeId: route.id,
+      ridePhase: props.rideController?.getSnapshot().phase,
+    });
+  }
+
   const view = (
     <ViewBoundary key={route.id}>
       <Suspense fallback={<ViewLoading />}>
@@ -789,7 +812,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
   return (
     <UnitsProvider units={units}>
-      <div className="oyl-shell">
+      {/* The listener is not an interaction of its own: it only answers the
+          controls inside it with a sound (#946). */}
+      <div className="oyl-shell" onClick={pressed}>
         {/*
         Outside `main`, and deliberately: a recording belongs to the app and not
         to whichever page is on screen. Mounted inside `viewFor` — as it was

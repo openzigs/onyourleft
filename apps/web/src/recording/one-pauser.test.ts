@@ -123,6 +123,8 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   // The Web Audio context, resumed inside a press. Not a ride.
   [join('game', 'audio-cues.ts')]: { pause: 0, resume: 1 },
   [join('game', 'web-audio.ts')]: { pause: 0, resume: 1 },
+  // The same context, resumed inside a press on a menu control (#946). Not a ride.
+  [join('shell', 'menu-sounds.ts')]: { pause: 0, resume: 1 },
   // The recorder delegating the rider's pause to the engine.
   [join('recording', 'recorder.ts')]: { pause: 1, resume: 1 },
   // The controller's own pause() delegating to the recorder, and `tick`

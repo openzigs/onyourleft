@@ -506,6 +506,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         `RiderMarker` kind `remote`, instances of the rider's
                         own meshes, and the HUD shows a COUNT and ONE chosen
                         rider's gap — never a list (ADR 0021 D-6)
+    src/progress/       streaks and badges (#947) — derived on the device from the ride
+                        summaries Home already reads and each ride's `rideFacts`
+                        (`packages/store` §`RideFacts`, written at save and import,
+                        and by Home's *Look at older rides*). Nothing earned is
+                        stored and nothing is synced; a recording under
+                        `RIDE_MINIMUM_MOVING_SECONDS` of moving time is not a ride
     src/library/        the activity library's row model, its port and its stub (#62).
                         ⚠️ Since #1041 every ride is a CARD at every width
                         (`views/ActivitiesView.tsx` §`RideCard`) and #660's
@@ -652,7 +658,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         preloaded by `main.tsx` once Home is idle. A view
                         imported by name from the entry's graph fails
                         `pnpm run build` (`tools/bundle/entry-graph.ts`), and
-                        the jsdom `mount`/`settle` wait for the loads
+                        the jsdom `mount`/`settle` wait for the loads.
+                        Since #946 `menu-sounds.ts` is the menus' sounds: every
+                        press in the shell goes to it and it alone decides —
+                        off by default (`oyl.menuSounds.v1`), never on a ride
+                        route, while recording or paused, or while immersive.
+                        ⚠️ Since #1072 `ListDetail.tsx` carries a card into its
+                        detail with Motion (ADR 0041), reached only through
+                        that lazily loaded chunk
     src/support/        browser-capability detection and its notice (#48), and
                         since #409 whether this browser may throw a rider's
                         history away — the one place `persist()` is asked for,
@@ -2920,7 +2933,11 @@ only — [ADR 0034](docs/adr/0034-lucide-icons.md)), and — since #950 — `tai
 source writes) and `@radix-ui/react-alert-dialog` 1.1.23 (MIT, a runtime dependency of `apps/web`
 reached only from the History group's lazily loaded chunk; its closure is sixteen `@radix-ui/*`
 packages, `react-remove-scroll` and its helpers, `aria-hidden`, `get-nonce`, `detect-node-es` and
-`use-callback-ref`, all MIT — [ADR 0042](docs/adr/0042-tailwind-and-radix-over-the-tokens.md)), are
+`use-callback-ref`, all MIT — [ADR 0042](docs/adr/0042-tailwind-and-radix-over-the-tokens.md)) and —
+since #1072 — `motion` 13.5.1 (MIT, with `framer-motion`, `motion-dom` and `motion-utils`, all MIT; a
+runtime dependency of `apps/web` reached only from the list–detail layout's lazily loaded chunk, and
+`tools/bundle/entry-graph.ts` fails the build if any of it is in the entry —
+[ADR 0041](docs/adr/0041-motion-for-menu-animation.md)), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489

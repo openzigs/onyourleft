@@ -270,6 +270,29 @@ test.describe('#994 — switches', () => {
   });
 });
 
+test.describe('#946 — the menu sounds’ switch and volume', () => {
+  test('each row is a 44 px target, measured three ways', async ({ page }) => {
+    await open(page, PHONE);
+    await visit(page, 'settings');
+    const toggle = page.getByRole('switch', { name: 'Play sounds in the menus' });
+    await expect(toggle).toHaveCount(1);
+    // The volume is offered once the sounds are on.
+    await expect(page.getByRole('slider', { name: 'Menu sound volume' })).toHaveCount(0);
+    await toggle.click();
+    await expect(page.getByRole('slider', { name: 'Menu sound volume' })).toHaveCount(1);
+    for (const selector of [
+      '.oyl-menu-sounds label:has(> input[type="checkbox"])',
+      '.oyl-menu-sounds input[type="range"]',
+    ]) {
+      const rows = await threeWays(page, selector, { height: 'min-height' });
+      expect(rows.count, selector).toBe(1);
+      for (const box of rows.shipped) expect(box.height, selector).toBeGreaterThanOrEqual(TARGET);
+      expect(rows.declared, selector).toEqual([`${String(TARGET)}px`]);
+      for (const height of rows.stripped) expect(height, selector).toBeLessThan(TARGET);
+    }
+  });
+});
+
 test.describe('#994 — steppers', () => {
   test('every step button on Settings is a 44 × 44 target, measured three ways', async ({
     page,

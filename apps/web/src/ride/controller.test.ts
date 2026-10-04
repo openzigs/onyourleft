@@ -7058,6 +7058,48 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
   });
 
+  it('#947: saves whether a workout was finished and a ghost raced, and forgets both for the next ride', async () => {
+    const written: NewActivity[] = [];
+    const { port } = savePort({
+      putActivity: (record) => {
+        written.push(record);
+        return Promise.resolve(record.id);
+      },
+    });
+    const short: WorkoutRecord = {
+      id: workoutId('w-short'),
+      createdBy: ATHLETE_A,
+      name: 'Short',
+      workout: {
+        name: 'Short',
+        blocks: [{ kind: 'steady', seconds: seconds(4), target: thresholdShare(0.6) }],
+      },
+      createdAt: unixSeconds(1),
+      updatedAt: unixSeconds(1),
+    };
+    const rig = benchWith({ rideSave: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(short, watts(250))).toBe(true);
+    await ride(rig, 8);
+    rig.controller.noteGameRideEnded('beaten');
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(written[0]?.rideFacts).toMatchObject({ workoutFinished: true, ghostRaced: true });
+
+    // The next ride rode neither, and must not inherit either.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(short, watts(250))).toBe(true);
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(written[1]?.rideFacts?.workoutFinished).toBeUndefined();
+    expect(written[1]?.rideFacts?.ghostRaced).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('drops a game outcome handed over while nothing is recording', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');

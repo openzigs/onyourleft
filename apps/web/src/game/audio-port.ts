@@ -25,8 +25,18 @@
  * Android WebView, and a tone is not a sentence.
  */
 
-/** The two short sounds. Their shapes are `web-audio.ts`'s, and this project's own. */
-export type CueName = 'interval' | 'distance';
+/** The ride's two short sounds. Their shapes are `web-audio.ts`'s, and this project's own. */
+export type RideCueName = 'interval' | 'distance';
+
+/**
+ * The menus' three short sounds — #946: a soft *select*, a *confirm* and a
+ * *back*. Played only by `shell/menu-sounds.ts`, only after a press, never
+ * during a ride; their shapes are `web-audio.ts`'s, and this project's own.
+ */
+export type MenuCueName = 'select' | 'confirm' | 'back';
+
+/** Every short sound the port can play. */
+export type CueName = RideCueName | MenuCueName;
 
 export interface CueOutput {
   /**

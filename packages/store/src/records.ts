@@ -362,7 +362,61 @@ export interface ActivityRecord {
    */
   readonly mayBeRaced: boolean;
 
+  /**
+   * What the rider's badges (#947) need to know about this ride that its
+   * other fields do not say — or absent where nothing has worked it out yet.
+   *
+   * ⚠️ **Present means "worked out", even when every member is absent**: a
+   * ride with no altitude and no power that has been looked at carries `{}`,
+   * so a backfill can tell it from one nobody has read yet and does not decode
+   * it again. @see RideFacts
+   *
+   * Optional, so this is additive and needs no migration — `README.md`
+   * §"An optional field is not a migration" — and a ride written before #947
+   * reads as one nothing has worked out, which is what it is.
+   */
+  readonly rideFacts?: RideFacts;
+
   readonly createdAt: UnixSeconds;
+}
+
+/**
+ * The facts about one ride a badge (#947) is earned from, beyond what the
+ * activity row already holds (its distance, moving time, start and route).
+ *
+ * Two kinds, and the difference matters to anyone reading them back:
+ *
+ * - **derived from the samples** — {@link ascent} and {@link bestPower}. Worked
+ *   out again from the stream set at any time, which is what a backfill does
+ *   for a ride saved before #947;
+ * - **known only while riding** — {@link workoutFinished} and
+ *   {@link ghostRaced}. Written by the ride that knew them, and by nothing
+ *   else: a ride saved before #947, or brought in from a file, does not say,
+ *   and nothing can find out afterwards.
+ *
+ * ⚠️ **Not a badge.** Nothing here says what was earned: badges are derived
+ * from these and the rest of the row at read time (`apps/web/src/progress/`),
+ * so deleting a ride takes away what it earned and nothing is left to go
+ * stale.
+ */
+export interface RideFacts {
+  /**
+   * Total ascent from the ride's own altitude readings, accumulated by run
+   * (`@onyourleft/domain` §`recordedAscent`). **Absent — never zero — where
+   * the ride recorded no elevation**: an indoor ride did not climb nought
+   * metres, it climbed nothing anybody measured.
+   */
+  readonly ascent?: Metres;
+  /**
+   * The ride's best average power over the durations the badges read, one
+   * entry per duration the ride covered with power. Absent where the ride had
+   * no power; an entry is absent for a duration no unbroken window covered.
+   */
+  readonly bestPower?: readonly { readonly duration: Seconds; readonly power: Watts }[];
+  /** `true` when a structured workout was ridden to its end on this ride. */
+  readonly workoutFinished?: boolean;
+  /** `true` when this ride raced the rider's own ghost and the race settled. */
+  readonly ghostRaced?: boolean;
 }
 
 /** @see {@link ActivityRecord.originalFile} */

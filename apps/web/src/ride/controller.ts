@@ -1059,6 +1059,13 @@ export function createRideController(options: RideControllerOptions): RideContro
   let resultAnnounced = false;
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
+  /**
+   * A structured workout was ridden to its end during this recording — #947.
+   * Latched when its session ends ({@link endWorkoutSession}), because the
+   * workout is gone by the time the ride is saved; cleared with the game
+   * outcome when a new ride starts.
+   */
+  let workoutFinishedInRide = false;
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
   let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
@@ -2201,6 +2208,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     current: Recorder | undefined,
     workoutName: string | undefined,
     outcomeInGame: GhostOutcome | undefined,
+    workoutFinished?: boolean,
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2220,6 +2228,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       timeZone: port.timeZone,
       now: now(),
       ...(workoutName === undefined ? {} : { workoutName }),
+      // #947: what only this ride knew. A recovered ride passes neither.
+      workoutFinished: workoutFinished === true,
+      ghostRaced: outcomeInGame !== undefined,
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -2401,6 +2412,10 @@ export function createRideController(options: RideControllerOptions): RideContro
   const endWorkoutSession = (handover: 'release' | 'replace' = 'release'): void => {
     if (workout === undefined) {
       return;
+    }
+    // #947: read before the session ends, which forgets the player's state.
+    if (workout.session.state().player.status === 'finished') {
+      workoutFinishedInRide = true;
     }
     if (handover === 'replace') {
       workout.session.supersede();
@@ -2711,7 +2726,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         await stopTrainer();
         await recording().stop(at);
         changed();
-        await saveTheRide(recorder, ridden, gameOutcome);
+        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide);
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -2756,6 +2771,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       // here (or a fresh controller), so `start` needs no second reset — two
       // would each be invisible to the suite.
       gameOutcome = undefined;
+      // #947: the same place, for the same reason.
+      workoutFinishedInRide = false;
       leftover = false;
       clock = now();
       changed();

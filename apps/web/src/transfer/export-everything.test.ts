@@ -35,6 +35,7 @@ import {
   geographicPosition,
   isVerified,
   metres,
+  seconds,
   unixSeconds,
   verifyRecordSignature,
   watts,
@@ -1257,6 +1258,32 @@ describe('exporting the side camera’s reports (#388)', () => {
     expect(listed.find((each) => each['activityId'] === fine.id)?.['sideCameraReport']).toEqual(
       expect.objectContaining({ summary: expect.any(String) as unknown }),
     );
+  });
+
+  describe('a ride’s badge facts (#947)', () => {
+    it('carries them in that ride’s entry, every field named, and null where none were worked out', async () => {
+      const { written } = await seedLibrary(2);
+      const ridden = written[1]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, {
+          ascent: metres(240),
+          bestPower: [{ duration: seconds(60), power: watts(380) }],
+          workoutFinished: true,
+          ghostRaced: true,
+        }),
+      );
+      const { files } = await runExport();
+      const all = entries(files);
+      expect(all.find((each) => each['activityId'] === ridden.id)?.['rideFacts']).toStrictEqual({
+        ascent: 240,
+        bestPower: [{ duration: 60, power: 380 }],
+        workoutFinished: true,
+        ghostRaced: true,
+      });
+      const other = all.find((each) => each['activityId'] !== ridden.id);
+      expect(other).toHaveProperty('rideFacts', null);
+    });
   });
 
   describe('a ride’s write-up (#800, #801)', () => {

@@ -55,6 +55,7 @@ import {
 } from './ids';
 import type {
   ActivityRecord,
+  RideFacts,
   AthleteRecord,
   CameraFrameRecord,
   FramingCheckRecord,
@@ -130,7 +131,17 @@ export interface PersistedActivity {
   originalFileSha256?: string;
   /** @see ActivityRecord.mayBeRaced — required since schema version 15 (#793). */
   mayBeRaced: boolean;
+  /** @see ActivityRecord.rideFacts — #947, optional, so no schema version. */
+  rideFacts?: PersistedRideFacts;
   createdAt: number;
+}
+
+/** @see RideFacts */
+export interface PersistedRideFacts {
+  ascent?: number;
+  bestPower?: { duration: number; power: number }[];
+  workoutFinished?: boolean;
+  ghostRaced?: boolean;
 }
 
 /**
@@ -529,7 +540,81 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
     row.originalFileKey = record.originalFile.key;
     row.originalFileSha256 = record.originalFile.sha256;
   }
+  if (record.rideFacts !== undefined) {
+    row.rideFacts = toPersistedRideFacts(record.rideFacts);
+  }
   return row;
+}
+
+/** Named field by field, so a member added to `RideFacts` is not written until this says so. */
+function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
+  const row: PersistedRideFacts = {};
+  if (facts.ascent !== undefined) row.ascent = facts.ascent;
+  if (facts.bestPower !== undefined) {
+    row.bestPower = facts.bestPower.map((each) => ({
+      duration: each.duration,
+      power: each.power,
+    }));
+  }
+  if (facts.workoutFinished !== undefined) row.workoutFinished = facts.workoutFinished;
+  if (facts.ghostRaced !== undefined) row.ghostRaced = facts.ghostRaced;
+  return row;
+}
+
+/** @throws {StoreDecodeError} */
+function fromPersistedRideFacts(row: unknown): RideFacts {
+  if (typeof row !== 'object' || row === null || Array.isArray(row)) {
+    throw new StoreDecodeError('activity.rideFacts: expected an object');
+  }
+  const facts = row as PersistedRideFacts;
+  const best = facts.bestPower;
+  if (best !== undefined && !Array.isArray(best)) {
+    throw new StoreDecodeError('activity.rideFacts.bestPower: expected a list');
+  }
+  return {
+    ...(facts.ascent === undefined
+      ? {}
+      : {
+          ascent: decoded(
+            'activity.rideFacts.ascent',
+            decodedNumber('activity.rideFacts.ascent', facts.ascent),
+            metres,
+          ),
+        }),
+    ...(best === undefined
+      ? {}
+      : {
+          bestPower: best.map((each: unknown) => {
+            if (typeof each !== 'object' || each === null) {
+              throw new StoreDecodeError('activity.rideFacts.bestPower: expected an object');
+            }
+            const entry = each as { duration?: unknown; power?: unknown };
+            return {
+              duration: decoded(
+                'activity.rideFacts.bestPower.duration',
+                decodedNumber('activity.rideFacts.bestPower.duration', entry.duration),
+                seconds,
+              ),
+              power: decoded(
+                'activity.rideFacts.bestPower.power',
+                decodedNumber('activity.rideFacts.bestPower.power', entry.power),
+                watts,
+              ),
+            };
+          }),
+        }),
+    ...(facts.workoutFinished === undefined
+      ? {}
+      : {
+          workoutFinished: decodedBoolean(
+            'activity.rideFacts.workoutFinished',
+            facts.workoutFinished,
+          ),
+        }),
+    ...(facts.ghostRaced === undefined
+      ? {}
+      : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
+  };
 }
 
 /** @throws {StoreDecodeError} */
@@ -618,6 +703,8 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
           ),
         }),
     ...(originalFile === undefined ? {} : { originalFile }),
+    // #947. Absent stays absent: a ride nothing has worked out yet.
+    ...(row.rideFacts === undefined ? {} : { rideFacts: fromPersistedRideFacts(row.rideFacts) }),
   };
   return record;
 }

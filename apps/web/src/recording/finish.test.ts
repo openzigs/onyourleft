@@ -137,6 +137,37 @@ describe('the ride reaches the store, and comes back through a fresh handle', ()
   });
 });
 
+describe('#947 — the facts the badges are earned from, saved with the ride', () => {
+  it('reads back the best power, no ascent where there was no altitude, and what only the ride knew', async () => {
+    await seedAthletes(harness);
+    const finished = rideToSave(input({ workoutFinished: true, ghostRaced: true }));
+    await harness.write(async (store) => saveFinishedRide(store, finished));
+    const read = await harness.read(async (store) =>
+      (await store.listActivitySummaries(ATHLETE_A)).find((each) => each.id === ACTIVITY),
+    );
+    expect(read?.rideFacts).toEqual({
+      // A 5 s window around the dropout is not covered; one after it is.
+      bestPower: [{ duration: 5, power: 200 }],
+      workoutFinished: true,
+      ghostRaced: true,
+    });
+  });
+
+  it('works out an ascent from the altitude a ride recorded, and says nothing it did not know', () => {
+    const climbing = series({
+      channels: {
+        ...series().channels,
+        altitude: [100, 104, 108, 112, undefined, 116, 120, 124, 128, 130],
+      },
+    } as Partial<RecordedSeries<StreamChannelValue>>);
+    const finished = rideToSave(input({ series: climbing }));
+    expect(finished?.activity.rideFacts).toEqual({
+      ascent: 30,
+      bestPower: [{ duration: 5, power: 200 }],
+    });
+  });
+});
+
 describe('what the activity says about the ride', () => {
   it('integrates distance from speed, and a dropout adds none', () => {
     // Nine readings at 5 m/s over one-second samples. The tenth second has no

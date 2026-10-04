@@ -16,6 +16,7 @@
  * | the last ride | the newest summary |
  * | this week | the summaries started today or on the six calendar days before it |
  * | fitness, fatigue, freshness | `fitnessSeries` over every summary's load, carried to today |
+ * | streaks and badges (#947) | `deriveProgress` over every summary and its `rideFacts` |
  *
  * ⚠️ **No stream is read, and `home.test.ts` counts that with the analysis
  * screens' own call-counting double.** A ride's load is stored half-computed
@@ -48,6 +49,7 @@ import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import type { AnalysisPort } from '../analysis/store-port';
 import { loadFromSummary } from '../analysis/summary';
 import { thresholdsFor } from '../analysis/thresholds';
+import { deriveProgress, type Progress } from '../progress/progress';
 import type { RoutePort } from '../routes/store-port';
 
 /**
@@ -141,6 +143,13 @@ export interface HomeData {
   readonly fitness: readonly FitnessPoint[];
   /** True when {@link HISTORY_ACTIVITY_LIMIT} cut the history short. */
   readonly truncated: boolean;
+  /**
+   * Streaks and badges — #947, `progress/progress.ts` — derived from the same
+   * rows, as of `now`. No read of its own.
+   */
+  readonly progress: Progress;
+  /** The rows everything above was derived from, for *Look at older rides* (#947). */
+  readonly summaries: readonly ActivitySummary[];
 }
 
 /**
@@ -225,6 +234,8 @@ export async function loadHome(
     lastRouteId,
     fitness: fitnessSeries(dailyLoads(entries)),
     truncated: summaries.length > limit,
+    progress: deriveProgress(considered, now),
+    summaries: considered,
   };
 }
 

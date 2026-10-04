@@ -9,7 +9,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { mayAnimateBetween, RIDE_ROUTE_IDS } from './route-motion';
+import { mayAnimateBetween, mayCarryOn, RIDE_ROUTE_IDS } from './route-motion';
+import { carriedFrom } from './ListDetail';
 import { ALL_ROUTES, matchHash, routeById, type RouteId } from './routes';
 
 function at(id: RouteId): ReturnType<typeof matchHash> {
@@ -40,5 +41,30 @@ describe('which navigations may animate (#945)', () => {
     for (const id of RIDE_ROUTE_IDS) {
       expect(ids.has(id)).toBe(true);
     }
+  });
+});
+
+describe('where a card may be carried into its detail (#1072, ADR 0041 D-3)', () => {
+  it('on a menu route, never on a ride route, and never while a ride has the screen', () => {
+    expect(mayCarryOn('activities', false)).toBe(true);
+    expect(mayCarryOn('routes', false)).toBe(true);
+    expect(mayCarryOn('workouts', false)).toBe(true);
+    expect(mayCarryOn('ride', false)).toBe(false);
+    expect(mayCarryOn('game', false)).toBe(false);
+    expect(mayCarryOn('activities', true)).toBe(false);
+  });
+
+  it('draws the detail over the card and carries it to rest, and refuses a box with no size', () => {
+    const card = { left: 10, top: 300, width: 200, height: 50 };
+    const pane = { left: 400, top: 100, width: 800, height: 500 };
+    expect(carriedFrom(card, pane)).toEqual({
+      x: [-390, 0],
+      y: [200, 0],
+      scaleX: [0.25, 1],
+      scaleY: [0.1, 1],
+      opacity: [0.4, 1],
+    });
+    expect(carriedFrom(card, { ...pane, width: 0 })).toBeUndefined();
+    expect(carriedFrom({ ...card, height: 0 }, pane)).toBeUndefined();
   });
 });
