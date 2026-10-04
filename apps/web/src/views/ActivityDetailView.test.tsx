@@ -221,6 +221,22 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     expect(summary?.textContent).not.toContain('No power meter');
   });
 
+  it('shows no Distance row, not "0.0 km", for a ride stored at 0 m — #1070', async () => {
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false, distance: metres(0) }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    const summary = document.querySelector('.oyl-ride-summary');
+    const terms = queryAll(summary as Element, 'dt').map((term) => term.textContent);
+    expect(terms).not.toContain('Distance');
+    // The rest of the summary is still there.
+    expect(terms).toContain('Moving');
+    expect(summary?.textContent).not.toMatch(/\b0\.0\b/);
+  });
+
   it('offers no shared view at all, because there is no track to share', async () => {
     mounted = await open(indoorRide());
     expect(document.body.textContent).not.toContain('What a shared copy would contain');

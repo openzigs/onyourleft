@@ -49,10 +49,20 @@
  *
  * ## This file owns one invariant
  *
- * **At most one basis is set.** `records.ts` states it and deliberately does not
- * enforce it — a store that policed it would be a second place that knows the
- * rule. {@link loadSummaryOf} is the only producer, so the rule is enforced
- * where the choice is made.
+ * **At most one basis is set** by {@link loadSummaryOf}. `records.ts` states it
+ * and deliberately does not enforce it — a store that policed it would be a
+ * second place that knows the rule. {@link loadSummaryOf} is the only producer,
+ * so the rule is enforced where the choice is made.
+ *
+ * ⚠️ **A stored ROW can hold two since #1070**: a ride stored before it with
+ * `effortWeightedPower: 0` and then backfilled keeps that stale 0 beside the
+ * new `effortWeightedHeartRate`, because the store merges a summary into the
+ * row (the paragraph above). So the invariant every READER may rely on is the
+ * weaker one: at most one basis that {@link isPowerBasis} admits — a 0 W
+ * power is read as absent, and the heart-rate figure beside it is the basis.
+ * Read a row's basis through {@link loadFromSummary} or
+ * {@link loadSummaryFieldsOf}, never by testing `effortWeightedPower` for
+ * `undefined`.
  */
 
 import {
