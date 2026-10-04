@@ -431,6 +431,100 @@ async function importOnTransfer(): Promise<void> {
 }
 
 /**
+ * The blocks `?builder=blocks` puts in the workout builder — #1050. One of
+ * each kind, so the list holds the longest line each kind writes and the block
+ * chart (#1043) draws a band, a ramp and a free ride: with no blocks the
+ * builder renders neither the list nor the chart, and nothing drawn only once
+ * a block exists was ever laid out here.
+ */
+const BUILDER_BLOCKS: readonly Readonly<Record<string, string>>[] = [
+  { kind: 'steady', minutes: '10', percent: '55' },
+  { kind: 'ramp', minutes: '8', percent: '60', toPercent: '90' },
+  {
+    kind: 'intervals',
+    minutes: '4',
+    percent: '105',
+    repeats: '5',
+    easyMinutes: '3',
+    easyPercent: '50',
+  },
+  { kind: 'free-ride', minutes: '5' },
+];
+
+/** Set a controlled field's value the way typing does, so React sees it. */
+function typeInto(element: HTMLInputElement | HTMLSelectElement, value: string): void {
+  const prototype =
+    element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(element, value);
+  element.dispatchEvent(
+    new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }),
+  );
+}
+
+/**
+ * Add {@link BUILDER_BLOCKS} through the builder's own *Add block* form, as a
+ * rider would — #1050. Only where the builder is on the page (no workout
+ * chosen), and only up to that many: the builder's blocks are the view's own
+ * state, so they are gone again once the route is left.
+ */
+async function buildOnWorkouts(): Promise<void> {
+  const form = document.querySelector<HTMLFormElement>('form[aria-label="Add a block"]');
+  if (form === null) {
+    return;
+  }
+  const added = (): number =>
+    form.closest('.oyl-sections')?.querySelectorAll('ol > li').length ?? 0;
+  for (const block of BUILDER_BLOCKS.slice(added())) {
+    const before = added();
+    const kind = form.querySelector<HTMLSelectElement>('#block-kind');
+    if (kind === null) {
+      throw new Error('the builder has no #block-kind to choose a kind with');
+    }
+    typeInto(kind, block['kind'] ?? 'steady');
+    await nextFrame();
+    const fields: Record<string, string> = {
+      minutes: '#block-minutes',
+      percent: '#block-percent',
+      toPercent: '#block-to-percent',
+      repeats: '#block-repeats',
+      easyMinutes: '#block-easy-minutes',
+      easyPercent: '#block-easy-percent',
+    };
+    for (const [key, selector] of Object.entries(fields)) {
+      const value = block[key];
+      if (value === undefined) continue;
+      const input = form.querySelector<HTMLInputElement>(selector);
+      if (input === null) {
+        throw new Error(`a ${String(block['kind'])} block has no ${selector} to type into`);
+      }
+      typeInto(input, value);
+    }
+    await nextFrame();
+    form.requestSubmit();
+    const deadline = performance.now() + PATIENCE_MS;
+    while (added() === before) {
+      if (performance.now() > deadline) {
+        throw new Error(`the builder refused a ${String(block['kind'])} block`);
+      }
+      await nextFrame();
+    }
+  }
+  const chart = form.closest('.oyl-sections')?.querySelector('svg.oyl-block-chart');
+  if (chart === null || chart === undefined) {
+    throw new Error('the builder holds blocks and drew no block chart');
+  }
+  // `&chart=above` — #1050's control: the chart put back between the block
+  // list and the Save form, where #1043 drew it.
+  if (new URLSearchParams(window.location.search).get('chart') === 'above') {
+    const save = document.querySelector('form[aria-label="Save this workout"]');
+    if (save === null) {
+      throw new Error('the builder has no Save form to put the chart above');
+    }
+    save.before(chart);
+  }
+}
+
+/**
  * What this page expects of each route — {@link POPULATED}, and for the Files
  * screen its own (#690), because this page, unlike the shell's other callers,
  * fills that screen's store and imports a file: both the ride chooser and the
@@ -1168,6 +1262,13 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     new URLSearchParams(window.location.search).get('data') === 'populated'
   ) {
     await importOnTransfer();
+    quiet = await untilQuiet();
+  }
+  if (
+    route.id === 'workouts' &&
+    new URLSearchParams(window.location.search).get('builder') === 'blocks'
+  ) {
+    await buildOnWorkouts();
     quiet = await untilQuiet();
   }
   await document.fonts.ready;

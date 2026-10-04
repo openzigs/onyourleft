@@ -659,8 +659,6 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   ))}
                 </ol>
               )}
-              <WorkoutBlockChart blocks={blocks} />
-
               <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
                 <p>
                   <label htmlFor="workout-name">Name</label>
@@ -693,6 +691,16 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   {saved}
                 </StatusMessage>
               )}
+
+              {/*
+            #1050: the chart goes BELOW *Save workout* and the line a save
+            writes, for the saved workout's reason above (#1043): drawn
+            between the list and the form it moved the builder's one primary
+            down by its 6rem, and on the owner's tablet in landscape, with a
+            block of each kind, that put *Save workout* under the browser
+            gate's 50 px floor (`controls-first.browser.spec.ts` §"#1050").
+          */}
+              <WorkoutBlockChart blocks={blocks} />
 
               {/*
             #670: the workout, its name and *Save workout* come BEFORE the
