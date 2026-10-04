@@ -660,4 +660,73 @@ describe('AnalysisView — fitness and fatigue (#77)', () => {
     expect(port.summaryWrites).toEqual(['old']);
     expect(mounted.container.textContent).toContain('Measured 1 more ride');
   });
+
+  it('says what it found with nothing to measure, and stops offering it — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('zero'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+        }),
+        power: Array.from({ length: 600 }, () => watts(0)),
+      },
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    const measure = queryAll(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Measure'),
+    );
+    expect(measure).toBeDefined();
+    await activateWithKeyboard(measure as HTMLElement);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(
+      'Measured 0 more rides, and found 1 with nothing to measure a load from — too short, or no usable power or heart rate.',
+    );
+    expect(text).toContain(
+      '1 ride has no load: it did not record enough power or heart rate to measure one from.',
+    );
+    // No offer left: no pass could measure it.
+    expect(
+      queryAll(mounted.container, 'button').some((button) =>
+        (button.textContent ?? '').startsWith('Measure'),
+      ),
+    ).toBe(false);
+    expect(text).not.toContain('imported before this device');
+  });
+
+  it('names the rides with no load beside a chart — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('loaded'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+          effortWeightedPower: watts(200),
+          loadCoveredTime: seconds(3600),
+        }),
+      },
+      ...['a', 'b'].map((id, index) => ({
+        activity: stubActivity({
+          id: activityId(id),
+          startedAt: unixSeconds(START + (index + 1) * 86_400),
+          startedAtTimeZone: 'UTC',
+          loadCoveredTime: seconds(0),
+        }),
+      })),
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain(
+      'Built from 1 measured ride, all measured from power. 2 rides have no load: they did not record enough power or heart rate to measure one from.',
+    );
+  });
 });

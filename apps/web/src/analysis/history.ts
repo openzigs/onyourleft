@@ -32,7 +32,13 @@ import {
 } from '@onyourleft/domain';
 import type { ActivityId, ActivitySummary } from '@onyourleft/store';
 
-import { loadFromSummary, loadSummaryOf, needsLoadSummary } from './summary';
+import {
+  hasNoLoadToWorkOut,
+  loadFromSummary,
+  loadSummaryOf,
+  NO_LOAD_TO_WORK_OUT,
+  needsLoadSummary,
+} from './summary';
 import type { AnalysisPort } from './store-port';
 import { thresholdsFor } from './thresholds';
 
@@ -57,8 +63,19 @@ export interface FitnessHistory {
    * Surfaced rather than swallowed: a ride with no summary and a rest day are
    * different things, and the whole chart turns on that distinction. The screen
    * offers to compute them.
+   *
+   * ⚠️ Since #1084 it counts only rides the backfill could still work out: a
+   * ride found to have nothing a load could come from is
+   * {@link ridesWithNoLoad}, so the screen does not offer, for ever, to
+   * measure a ride no pass can measure.
    */
   readonly ridesWithoutSummary: number;
+  /**
+   * How many rides have nothing a load could be worked out from (#1084) —
+   * `summary.ts` §`hasNoLoadToWorkOut`. Not a rest day and not a ride waiting
+   * to be measured: a ride with no load, which contributes nothing.
+   */
+  readonly ridesWithNoLoad: number;
   /**
    * Which bases the counted rides used.
    *
@@ -95,10 +112,15 @@ export async function loadFitnessHistory(
   const entries: LoadEntry[] = [];
   const bases = new Set<LoadBasis>();
   let withoutSummary = 0;
+  let withNoLoad = 0;
   for (const summary of considered) {
     const load = loadFromSummary(summary, thresholds);
     if (load === undefined) {
-      withoutSummary += 1;
+      if (hasNoLoadToWorkOut(summary)) {
+        withNoLoad += 1;
+      } else {
+        withoutSummary += 1;
+      }
       continue;
     }
     bases.add(load.basis);
@@ -113,6 +135,7 @@ export async function loadFitnessHistory(
     points: fitnessSeries(dailyLoads(entries)),
     ridesCounted: entries.length,
     ridesWithoutSummary: withoutSummary,
+    ridesWithNoLoad: withNoLoad,
     bases: [...bases],
     truncated: summaries.length > limit,
   };
@@ -122,8 +145,13 @@ export async function loadFitnessHistory(
 export interface BackfillOutcome {
   /** Rides given a summary by this pass. */
   readonly computed: number;
-  /** Rides this pass could not summarise — too short, or no usable trace. */
-  readonly skipped: number;
+  /**
+   * Rides this pass found to have nothing a load could be worked out from — too
+   * short, or no usable power or heart rate (#1084). Each is marked
+   * (`summary.ts` §`NO_LOAD_TO_WORK_OUT`) as it is found, so no later pass
+   * decodes it or counts it again.
+   */
+  readonly nothingToWorkOut: number;
   /** How many still have none afterwards, so the caller can offer another pass. */
   readonly remaining: number;
 }
@@ -159,29 +187,41 @@ export async function backfillLoadSummaries(
   const missing = summaries.filter((summary) => needsLoadSummary(summary));
 
   let computed = 0;
-  let skipped = 0;
+  let nothingToWorkOut = 0;
   for (const summary of missing.slice(0, batch)) {
     const wrote = await summariseOne(port, summary.id);
     if (wrote) {
       computed += 1;
     } else {
-      skipped += 1;
+      nothingToWorkOut += 1;
     }
   }
-  return { computed, skipped, remaining: missing.length - computed - skipped };
+  return {
+    computed,
+    nothingToWorkOut,
+    remaining: missing.length - computed - nothingToWorkOut,
+  };
 }
 
 /**
  * Decode one ride and store its summary. `false` when it has no usable trace.
  *
- * A ride that cannot be summarised is **not** retried on the next pass — it is
- * counted as skipped and the caller reports it. Retrying it forever would make
- * the "remaining" count never reach zero, and a control that never finishes is
- * a control a rider learns to ignore.
+ * A ride that cannot be summarised is **not** retried on the next pass: it is
+ * marked with `summary.ts` §`NO_LOAD_TO_WORK_OUT`, which `needsLoadSummary`
+ * reads as done (#1084). Until #1084 nothing was written, so "not retried" was
+ * true of one pass only — every later pass decoded the same ride and counted
+ * it as skipped again, and Home said its load was "not worked out yet". A
+ * ride with no stream set at all is marked too: there is nothing to decode.
+ * ⚠️ That cannot catch a save half-way: the activity row is written before
+ * its streams (`recording/finish.ts`), but since #1084 that row carries its
+ * summary or the marker from the moment it is written, so `needsLoadSummary`
+ * never selects it. A ride the backfill sees with no stream set is one whose
+ * streams were never written.
  */
 async function summariseOne(port: AnalysisPort, id: ActivityId): Promise<boolean> {
   const streams = await port.store.getStreamSetSummary(port.athleteId, id);
   if (streams === undefined) {
+    await port.store.setActivityLoadSummary(port.athleteId, id, NO_LOAD_TO_WORK_OUT);
     return false;
   }
   const power = streams.channels.includes('power')
@@ -200,6 +240,7 @@ async function summariseOne(port: AnalysisPort, id: ActivityId): Promise<boolean
 
   const summary = fromPower ?? loadSummaryOf({ heartRate }, streams.sampleInterval);
   if (summary === undefined) {
+    await port.store.setActivityLoadSummary(port.athleteId, id, NO_LOAD_TO_WORK_OUT);
     return false;
   }
   await port.store.setActivityLoadSummary(port.athleteId, id, summary);

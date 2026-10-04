@@ -216,6 +216,34 @@ describe('the home screen — #428', () => {
     expect(text()).toContain('No ride here has a load yet');
   });
 
+  it('says a ride with nothing to work a load out from has none, and offers no Analysis — #1084', async () => {
+    await openHome([
+      ride('marked', 2, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+    ]);
+    const load = [...lastRide().querySelectorAll('dt')].find((t) => t.textContent === 'Load');
+    expect(load?.nextElementSibling?.textContent).toBe(
+      'none: nothing on this ride to work one out from',
+    );
+    expect(text()).not.toContain('not worked out yet');
+    expect(text()).toContain('No ride here has a load, so there is nothing to smooth');
+    expect(text()).not.toContain('can work them out');
+    // No invented zero anywhere in the last ride's facts.
+    const readings = [...lastRide().querySelectorAll('.oyl-reading__value')].map(
+      (reading) => reading.textContent,
+    );
+    expect(readings).toEqual(['50:00', '30.0']);
+    expectClean('home, a ride with no load to work out');
+  });
+
+  it('still says "not worked out yet" beside a ride with nothing to work out — #1084', async () => {
+    await openHome([
+      ride('marked', 3, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+      ride('bare', 2, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+    ]);
+    expect(text()).toContain('not worked out yet');
+    expect(text()).toContain('Analysis can work them out');
+  });
+
   it('full: the week and the fitness sentences, from the same words Analysis uses', async () => {
     await openHome(
       Array.from({ length: 40 }, (_unused, index) => ride(`r${String(index)}`, 40 - index)),

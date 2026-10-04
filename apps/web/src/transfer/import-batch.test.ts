@@ -27,6 +27,8 @@ import {
   type StoreHarness,
 } from '@onyourleft/store/testing';
 
+import { needsLoadSummary } from '../analysis/summary';
+
 import { webCryptoDigest } from './browser';
 import { corpusSource } from './corpus';
 import {
@@ -240,6 +242,19 @@ describe('importActivityFiles — the facts badges are earned from (#947)', () =
     expect(summary?.rideFacts?.ascent).toBeGreaterThan(0);
     expect(summary?.rideFacts?.workoutFinished).toBeUndefined();
     expect(summary?.rideFacts?.ghostRaced).toBeUndefined();
+  });
+});
+
+describe('importActivityFiles — a ride with nothing to work a load out from (#1084)', () => {
+  it('is stored marked, and a fresh read sees no load and nothing left to work out', async () => {
+    // Five seconds of heart rate and no power: shorter than the smoothing
+    // window, so no pass could ever give it a load.
+    const open = await openSeeded();
+    await run(open, [bytesSource('brief.gpx', syntheticGpx(3))]);
+    const [summary] = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(summary?.loadCoveredTime).toBe(0);
+    expect(summary?.effortWeightedHeartRate).toBeUndefined();
+    expect(summary === undefined ? undefined : needsLoadSummary(summary)).toBe(false);
   });
 });
 

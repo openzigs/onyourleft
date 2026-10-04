@@ -47,7 +47,7 @@ import type { ActivitySummary, RouteId } from '@onyourleft/store';
 
 import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import type { AnalysisPort } from '../analysis/store-port';
-import { loadFromSummary } from '../analysis/summary';
+import { hasNoLoadToWorkOut, loadFromSummary, needsLoadSummary } from '../analysis/summary';
 import { thresholdsFor } from '../analysis/thresholds';
 import { deriveProgress, type Progress } from '../progress/progress';
 import type { RoutePort } from '../routes/store-port';
@@ -84,6 +84,14 @@ export interface HomeLastRide {
   readonly distance: Metres;
   /** The ride's `rideLoad`, or `undefined` when it carries no load summary. */
   readonly load: number | undefined;
+  /**
+   * True when the ride has nothing a load could be worked out from — a power
+   * channel that read nought with no strap, a trace too short — rather than a
+   * load nobody has worked out yet (#1084, `summary.ts`
+   * §`hasNoLoadToWorkOut`). {@link load} is `undefined` either way; this is
+   * what tells "not worked out yet" from "none".
+   */
+  readonly noLoadToWorkOut: boolean;
 }
 
 export interface HomeWeek {
@@ -141,6 +149,11 @@ export interface HomeData {
   readonly lastRouteId: RouteId | undefined;
   /** The fitness series carried to today; empty when no ride has a load. */
   readonly fitness: readonly FitnessPoint[];
+  /**
+   * How many rides the Analysis backfill could still work a load out for
+   * (#1084) — so Home offers it only when it has something to do.
+   */
+  readonly loadsToWorkOut: number;
   /** True when {@link HISTORY_ACTIVITY_LIMIT} cut the history short. */
   readonly truncated: boolean;
   /**
@@ -177,7 +190,11 @@ export async function loadHome(
   const daysBack = new Set<number>();
   let lastRide: HomeLastRide | undefined;
   let lastRouteId: RouteId | undefined;
+  let loadsToWorkOut = 0;
   for (const summary of considered) {
+    if (needsLoadSummary(summary)) {
+      loadsToWorkOut += 1;
+    }
     const load = loadFromSummary(summary, thresholds)?.load;
     if (load !== undefined) {
       entries.push({ startedAt: summary.startedAt, timeZone: summary.startedAtTimeZone, load });
@@ -216,6 +233,7 @@ export async function loadHome(
       movingTime: summary.movingTime,
       distance: summary.distance,
       load,
+      noLoadToWorkOut: hasNoLoadToWorkOut(summary),
     };
   }
 
@@ -233,6 +251,7 @@ export async function loadHome(
     previousWeek,
     lastRouteId,
     fitness: fitnessSeries(dailyLoads(entries)),
+    loadsToWorkOut,
     truncated: summaries.length > limit,
     progress: deriveProgress(considered, now),
     summaries: considered,

@@ -196,9 +196,10 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       const outcome = await backfillLoadSummaries(port);
       setBackfillNote(
         `Measured ${String(outcome.computed)} more ${outcome.computed === 1 ? 'ride' : 'rides'}` +
-          (outcome.skipped === 0
+          // #1084: these are marked as they are found, so no later pass counts them again.
+          (outcome.nothingToWorkOut === 0
             ? ''
-            : `, and could not measure ${String(outcome.skipped)} — too short, or no usable trace`) +
+            : `, and found ${String(outcome.nothingToWorkOut)} with nothing to measure a load from — too short, or no usable power or heart rate`) +
           (outcome.remaining === 0 ? '.' : `. ${String(outcome.remaining)} still to go.`),
       );
       setHistory(await loadFitnessHistory(port));
@@ -660,7 +661,10 @@ function FitnessPanel({ history, backfilling, note, onBackfill }: FitnessPanelPr
       <>
         <p className="oyl-muted">
           {history.ridesWithoutSummary === 0
-            ? 'Nothing to chart yet. This fills in as you record or import rides.'
+            ? history.ridesWithNoLoad === 0
+              ? 'Nothing to chart yet. This fills in as you record or import rides.'
+              : // #1084: rides are here, and none of them could ever give a load.
+                `Nothing to chart yet. ${noLoadSentence(history.ridesWithNoLoad)} This fills in as you record or import rides with power or heart rate.`
             : `None of the ${String(history.ridesWithoutSummary)} rides on this device has been measured for load yet.`}
         </p>
         {history.ridesWithoutSummary === 0 ? undefined : (
@@ -758,6 +762,20 @@ function BackfillNote({ note }: { readonly note: string | undefined }): JSX.Elem
  * them.
  */
 function basisNote(history: FitnessHistory): string {
+  // #1084: a ride with nothing to measure a load from is said, not hidden.
+  const without =
+    history.ridesWithNoLoad === 0 ? '' : ` ${noLoadSentence(history.ridesWithNoLoad)}`;
+  return `${basisOf(history)}${without}`;
+}
+
+/** How many rides have no load at all, and why — #1084. */
+function noLoadSentence(count: number): string {
+  return count === 1
+    ? '1 ride has no load: it did not record enough power or heart rate to measure one from.'
+    : `${String(count)} rides have no load: they did not record enough power or heart rate to measure one from.`;
+}
+
+function basisOf(history: FitnessHistory): string {
   const from = `Built from ${String(history.ridesCounted)} measured ${history.ridesCounted === 1 ? 'ride' : 'rides'}`;
   if (history.bases.length === 0) {
     return `${from}.`;
