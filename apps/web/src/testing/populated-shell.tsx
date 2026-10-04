@@ -292,15 +292,19 @@ function north(metresNorth: number, metresEast = 0): GeographicPosition {
 /**
  * The ride whose card is the hard case for its facts and its link (#1041's
  * review): ten hours and more, so its duration is the widest reading a card
- * draws (`10:23:45`, about 8.5rem at `xxl`), and a name of four letters, so its
- * link is narrower than 44 px unless the link's own floor holds it.
+ * draws (`10:23:45` at `xxl`: about 8.5rem in a Mac's system font, and about
+ * 9.6rem in the CI runner's Linux font, #1052), and a name of four letters, so
+ * its link is narrower than 44 px unless the link's own floor holds it. The
+ * name is "Spin" and not "Ride" (#1053): "Ride" is also a navigation label, and
+ * the route-sentence record is a SET, so a ride of that name lost its own entry
+ * on any route that also draws the navigation.
  */
 const SHORT_LONG_RIDE = 1;
 
 /** Long names, with spaces and without, because a name is where a row gets wide. */
 function rideName(index: number): string {
   if (index === SHORT_LONG_RIDE) {
-    return 'Ride';
+    return 'Spin';
   }
   if (index % 7 === 3) {
     return `Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch loop ${String(index)}`;
