@@ -330,6 +330,47 @@ test.describe('the activity library is cards at every width', () => {
   }
 });
 
+/**
+ * #1052, measured: Home's facts — *Last ride* and *This week* — hold every
+ * reading to one line inside its own fact at every viewport here. The
+ * populated fixture's last ride moves for `10:23:45` and its week for
+ * `28:35:45`, the widest a duration under a hundred hours draws, and they are
+ * asserted to be on the page, so a fixture that stopped drawing one cannot
+ * pass this green. Until #1052 the facts' tracks were 9rem, sized from a Mac's
+ * font; on the CI runner's Linux font the same numerals are about 153 px.
+ */
+test.describe("Home's facts hold a ten-hour duration on one line", () => {
+  const home = ALL_ROUTES.find((each) => each.id === 'home');
+  if (home === undefined) {
+    throw new Error('the route table has no home route');
+  }
+  for (const [width, height] of [...VIEWPORTS, [1280, 800]] as const) {
+    test(`at ${String(width)}×${String(height)}`, async ({ page }) => {
+      await open(page, width, height, 'data=populated');
+      const seen = await visit(page, hrefFor(home));
+      const facts = seen.homeFacts;
+      expect(facts, 'Home was not drawn').not.toBeNull();
+      const durations = (facts?.readings ?? []).filter((reading) =>
+        /^\d+:\d\d:\d\d$/.test(reading),
+      );
+      // Last ride's moving time and this week's: both, and both ten hours or more.
+      expect(durations, "Home's durations").toHaveLength(2);
+      for (const duration of durations) {
+        expect(duration, 'a duration under ten hours').toMatch(/^\d{2,}:/);
+      }
+      console.log(
+        `home facts at ${String(width)}×${String(height)}: ${(facts?.readings ?? []).join(', ')}; ` +
+          `spill ${String(facts?.readingSpill)} px, ${String(facts?.mostReadingLines)} line(s)`,
+      );
+      expect(facts?.mostReadingLines, 'a reading wrapped').toBe(1);
+      expect(facts?.readingSpill ?? 1, 'a reading spilled out of its fact').toBeLessThanOrEqual(
+        0.5,
+      );
+      expect(reflowFaults(home, seen, true)).toEqual([]);
+    });
+  }
+});
+
 test.describe('the controls', () => {
   const route = ALL_ROUTES[0];
   if (route === undefined) {

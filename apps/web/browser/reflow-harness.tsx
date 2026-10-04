@@ -193,6 +193,17 @@ export interface ReflowMeasurement {
     readonly mostReadingLines: number;
     readonly readingSpill: number;
   } | null;
+  /**
+   * Home's facts (#1052) — *Last ride* and *This week*: every reading's text,
+   * the most lines any reading's numerals are laid out on, and how far the
+   * furthest spills past its own fact's box (positive is a spill) — as
+   * {@link library} measures the cards' — or `null` on any other route.
+   */
+  readonly homeFacts: {
+    readonly readings: readonly string[];
+    readonly mostReadingLines: number;
+    readonly readingSpill: number;
+  } | null;
   /** The height of the library's sort control, or `null` on any other route. */
   readonly sortControlHeight: number | null;
   /**
@@ -671,6 +682,25 @@ function libraryCards(): ReflowMeasurement['library'] {
     link.getBoundingClientRect(),
   );
   const values = [...library.querySelectorAll('.oyl-activity-card__facts .oyl-reading__value')];
+  return {
+    cards: library.querySelectorAll('.oyl-activity-cards > li').length,
+    columns,
+    tables: library.querySelectorAll('table').length,
+    shortestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.height)),
+    narrowestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.width)),
+    ...readingFit(values),
+  };
+}
+
+/**
+ * How far each of `values` spills past its own fact's box: the furthest, and
+ * the most lines any is laid out on. A `10:23:45` in a track narrower than its
+ * numerals does one or the other (#992, #1041's review, #1052).
+ */
+function readingFit(values: readonly Element[]): {
+  readonly mostReadingLines: number;
+  readonly readingSpill: number;
+} {
   const lines = values.map((value) => value.getClientRects().length);
   const spills = values.map((value) => {
     const fact = value.closest('dd');
@@ -679,13 +709,18 @@ function libraryCards(): ReflowMeasurement['library'] {
       : value.getBoundingClientRect().right - fact.getBoundingClientRect().right;
   });
   return {
-    cards: library.querySelectorAll('.oyl-activity-cards > li').length,
-    columns,
-    tables: library.querySelectorAll('table').length,
-    shortestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.height)),
-    narrowestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.width)),
     mostReadingLines: lines.length === 0 ? 0 : Math.max(...lines),
     readingSpill: spills.length === 0 ? 0 : Math.max(...spills),
+  };
+}
+
+/** Home's facts, as {@link ReflowMeasurement.homeFacts} says. */
+function homeFacts(): ReflowMeasurement['homeFacts'] {
+  if (document.querySelector('.oyl-home') === null) return null;
+  const values = [...document.querySelectorAll('.oyl-home__facts .oyl-reading__value')];
+  return {
+    readings: values.map((value) => (value.textContent ?? '').trim()),
+    ...readingFit(values),
   };
 }
 
@@ -1300,6 +1335,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     spare: reach.spare,
     scrollBoxes: scrollBoxes(),
     library: libraryCards(),
+    homeFacts: homeFacts(),
     sortControlHeight:
       document.querySelector('#oyl-library-sort')?.getBoundingClientRect().height ?? null,
     expectation,
