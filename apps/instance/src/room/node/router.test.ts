@@ -95,9 +95,17 @@ describe('a worker that dies — #780 criterion 3', () => {
       5_000,
     );
     // New rooms, and the lost room opened again, land only on live workers.
-    for (const roomId of ['doomed', 'fresh-1', 'fresh-2', 'fresh-3']) {
-      const rider = await join(roomId, `ticket-${roomId}`);
-      await until(() => framesWith(rider, 1).length > 0, `${roomId} to run`, 15_000);
+    // All four at once (#1076): each waits a real tick for its first frame,
+    // and four rooms in turn waited four of them for one claim.
+    const roomIds = ['doomed', 'fresh-1', 'fresh-2', 'fresh-3'];
+    const riders = await Promise.all(roomIds.map((roomId) => join(roomId, `ticket-${roomId}`)));
+    await Promise.all(
+      riders.map((rider, index) =>
+        until(() => framesWith(rider, 1).length > 0, `${String(roomIds[index])} to run`, 15_000),
+      ),
+    );
+    for (const roomId of roomIds) {
+      expect(harness.router.placementOf(roomId)).toBeDefined();
       expect(harness.router.placementOf(roomId)).not.toBe(deadPid);
     }
   }, 60_000);

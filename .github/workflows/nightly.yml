@@ -19,13 +19,17 @@
 #   fuzz is a robustness sweep over the decoder: the named refusals the
 #   decoder makes -- XXE, bad CRC, the bounds -- are unit tests that stay in
 #   the required `test:coverage`. `check:test-split`, which stays required,
-#   still fails a file that is in neither Vitest run.
+#   still fails a file that is in no Vitest run. Since #1076 it also runs
+#   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
+#   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
+#   owner's ruling of 2026-10-03: the opt-in realistic world, #866's class.
 #
 #   test:browser:nightly -- every browser-gate describe tagged `@nightly`,
 #   which is the reviewed list in apps/web/browser/nightly.ts, with each
-#   describe's seconds and why it is not a safety gate. All of them draw the
+#   describe's seconds and why it is not a safety gate. All but one draw the
 #   realistic world, a rung a rider chooses and is off by default (ADR 0026
-#   D-3). `nightly-split.test.ts`, in the required suite, fails a tag that
+#   D-3); the one is the reflow walk's DARK palette (#1076, the owner's
+#   ruling of 2026-10-03), whose light-palette twin stays required. `nightly-split.test.ts`, in the required suite, fails a tag that
 #   list does not name and a script or workflow that stops running them.
 name: Nightly heavy checks
 
@@ -48,8 +52,11 @@ on:
       - apps/web/browser/nightly.ts
       - apps/web/browser/game.browser.spec.ts
       - apps/web/browser/realistic.browser.spec.ts
+      - apps/web/browser/reflow.browser.spec.ts
       - apps/web/playwright.config.ts
       - apps/web/src/game/near-field.test.ts
+      - apps/web/src/game/realistic-textures.test.ts
+      - package.json
       - packages/fit/tools/fuzz/decode-fuzz.test.ts
 
 # Read-only by default. Only the reporting job widens it, to issues alone.

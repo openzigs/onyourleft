@@ -50,6 +50,15 @@
  * behind. A load that throws is not remembered either: the key is held only
  * once the load has resolved.
  *
+ * ⚠️ **A shared case loses Playwright's own failure artefacts, so this attaches
+ * one** (#1075's review, #1076). The config's `screenshot: 'only-on-failure'`
+ * shoots the `page` FIXTURE, which a shared case never touched: a red shared
+ * case reported a blank page, or none. {@link attachSharedPageOnFailure},
+ * registered as the spec's `afterEach`, attaches a screenshot of the page the
+ * case actually read when the case did not end as expected; and a load that
+ * throws attaches the page it left before its context is closed. Attaching
+ * never replaces the failure: a screenshot that cannot be taken is skipped.
+ *
  * The context is made with `browser.newContext()` from inside the case that
  * first asks, so it carries that case's options exactly as the `page` fixture's
  * would — `baseURL`, `storageState` (`playwright.config.ts`
@@ -57,7 +66,7 @@
  * option the load depends on must put it in the key.
  */
 
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import type { Browser, BrowserContext, Page, TestInfo } from '@playwright/test';
 
 interface Held {
   readonly key: string;
@@ -68,6 +77,8 @@ interface Held {
 let held: Held | undefined;
 let loads = 0;
 let served = 0;
+/** The case that last asked for the page held — the one a screenshot is for. */
+let readBy: string | undefined;
 
 /**
  * The page `load` left for `key`, loading it first in a new context of
@@ -77,8 +88,10 @@ export async function sharedPage(
   browser: Browser,
   key: string,
   load: (page: Page) => Promise<void>,
+  testInfo: Pick<TestInfo, 'testId' | 'attach'>,
 ): Promise<Page> {
   served += 1;
+  readBy = testInfo.testId;
   if (held?.key === key) {
     return held.page;
   }
@@ -86,16 +99,51 @@ export async function sharedPage(
   held = undefined;
   await previous?.context.close();
   const context = await browser.newContext();
+  let page: Page | undefined;
   try {
-    const page = await context.newPage();
+    page = await context.newPage();
     await load(page);
     held = { key, context, page };
     loads += 1;
     return page;
   } catch (error) {
+    if (page !== undefined) {
+      await attachScreenshot(page, testInfo, `the shared load of ${key}, which threw`);
+    }
     await context.close();
     throw error;
   }
+}
+
+/**
+ * Attach a screenshot of the page held to a case that did not end as it was
+ * expected to. For `test.afterEach`, in every spec that shares a load.
+ */
+export async function attachSharedPageOnFailure(
+  testInfo: Pick<TestInfo, 'testId' | 'status' | 'expectedStatus' | 'attach'>,
+): Promise<void> {
+  // Only the page THIS case read: a case that took its own `page` has
+  // Playwright's own screenshot, and the page held is some other case's.
+  if (testInfo.status === testInfo.expectedStatus || held === undefined) return;
+  if (readBy !== testInfo.testId) return;
+  await attachScreenshot(held.page, testInfo, `the shared page ${held.key}`);
+}
+
+async function attachScreenshot(
+  page: Page,
+  testInfo: Pick<TestInfo, 'attach'>,
+  name: string,
+): Promise<void> {
+  if (page.isClosed()) return;
+  let body: Buffer;
+  try {
+    body = await page.screenshot();
+  } catch {
+    // A page that cannot be drawn any more says nothing a screenshot could;
+    // the case's own failure is the report.
+    return;
+  }
+  await testInfo.attach(name, { body, contentType: 'image/png' });
 }
 
 /** Close the page held, if any, and say how much loading it saved. For `test.afterAll`. */
@@ -110,4 +158,5 @@ export async function releaseSharedPage(): Promise<void> {
   }
   loads = 0;
   served = 0;
+  readBy = undefined;
 }

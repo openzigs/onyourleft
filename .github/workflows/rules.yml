@@ -239,8 +239,10 @@ jobs:
       #   package.json's own script, so it has a suite.
       #
       #   check:test-split -- #852. `test:coverage` leaves the heaviest files
-      #   out and `test:uninstrumented` runs exactly them; this asks Vitest
-      #   what each selects and fails on a file in neither run or in both. It
+      #   out and `test:uninstrumented` runs exactly them; since #1076 it also
+      #   leaves out every `.a11y.test.` file, which `test:a11y` runs. This
+      #   asks Vitest what each of the three selects and fails on a file in no
+      #   run or in two. It
       #   lists files and runs no test, so it has no case timeout to miss. Its
       #   suite, for the reason every checker here has one.
       #
@@ -342,10 +344,13 @@ jobs:
 
       # #48's fourth acceptance criterion: automated accessibility checks run on
       # every route and fail the build on a violation. The checks are Vitest
-      # tests, so `test:coverage` runs them too and this runs them again --
-      # deliberately. A failure buried among two hundred other cases is a
-      # failure somebody scrolls past; under a step called "Accessibility" it is
-      # not.
+      # tests, and they run HERE: a failure buried among two hundred other
+      # cases is a failure somebody scrolls past; under a step called
+      # "Accessibility" it is not. ⚠️ Until #1076 `test:coverage` ran all of
+      # them a second time, about 43 s on the EPYC 7763; it excludes them since
+      # the owner's ruling of 2026-10-03, so they run once, here, and the
+      # coverage REPORT stops counting what only they execute (CLAUDE.md
+      # section 5). `check:test-split` fails a file in no run or in two.
       #
       # In this job rather than a job of its own: `main` requires a status check
       # whose context is exactly "Repository rules", and a second job would
@@ -457,8 +462,11 @@ jobs:
       # the coverage REPORT stops counting what those two files alone execute,
       # which section 5 says is a signal and not a gate. `check:test-split`,
       # in the concurrent step above, is what stops the two lists coming apart
-      # -- a file in neither run is a file CI never runs. ⚠️ Since #866 those
-      # two files run in the NIGHTLY workflow, not in this job (below).
+      # -- a file in no run is a file CI never runs. ⚠️ Since #866 those
+      # two files run in the NIGHTLY workflow, not in this job (below), and
+      # since #1076 so does realistic-textures.test.ts. Since #1076 this step
+      # also excludes the `.a11y.test.` files, which the Accessibility step
+      # above runs, so they run once rather than twice.
       - name: Tests and coverage report
         run: pnpm run test:coverage
 
@@ -466,7 +474,7 @@ jobs:
       # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is
       # not a required check and cannot block a merge. A reviewer who remembers
       # a `Tests outside coverage` step here is reading the old file.
-      # `check:test-split`, above, still fails a file in neither Vitest run.
+      # `check:test-split`, above, still fails a file in no Vitest run.
 
       # --- The browser gate (#63) ----------------------------------------------
       #

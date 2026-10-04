@@ -90,7 +90,7 @@ import {
   type Insets,
 } from './insets';
 import type { RideViewControl, RideViewMeasurement, RideViewNotice } from './rideview-harness';
-import { releaseSharedPage, sharedPage } from './shared-load';
+import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 
@@ -203,13 +203,20 @@ async function open(page: Page, viewport: Viewport, query = ''): Promise<void> {
  * takes its own `page` and calls `open`.
  */
 async function sharedRideView(browser: Browser, viewport: Viewport, query = ''): Promise<Page> {
-  return sharedPage(browser, `rideview.html${query} at ${viewport.name}`, (page) =>
-    open(page, viewport, query),
+  return sharedPage(
+    browser,
+    `rideview.html${query} at ${viewport.name}`,
+    (page) => open(page, viewport, query),
+    test.info(),
   );
 }
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
+// What a red shared case read, since the `page` fixture's screenshot is not it (#1076).
+test.afterEach(async () => {
+  await attachSharedPageOnFailure(test.info());
+});
 
 async function measure(page: Page): Promise<RideViewMeasurement> {
   const measured = await page.evaluate(() => window.__oylRideView?.measure());
