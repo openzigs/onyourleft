@@ -3319,7 +3319,15 @@ And the two follow-ups from #1075's review: `check-env-example.sh`'s prefilter c
 `bash -e` to hold it), and `shared-load.ts` attaches a screenshot of the page a failing shared case
 read — the `page` fixture's own failure screenshot is of a page that case never touched.
 
-**What it bought on the runner**: {{MEASUREMENT}}
+**What it bought on the runner — n = 1, on the EPYC 7763 #1076 names**: PR #1077's run
+([37162466197](https://github.com/openzigs/onyourleft/actions/runs/37162466197)) took **1 296 s,
+204 s clear of the 1 500 s stop**, against 1 409–1 446 s on the seven 7763 `main` runs above.
+`Checks, concurrently` 189 s (210–220 s before #1075, 200 s on #1075's own 7763 run), Accessibility
+49 s (unchanged: it is now the only run of those files), Vitest with coverage **369 s** (436–458 s),
+browser gate **645 s** (656–675 s). One sample: the runner's speed varies by more than a minute on
+one CPU model (§4c above), so read it as one green job clear of the stop, not as a figure. The
+nightly run on the same pull request, with the dark walk and `realistic-textures.test.ts` in it,
+took 6m50s ([37162466198](https://github.com/openzigs/onyourleft/actions/runs/37162466198)).
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
