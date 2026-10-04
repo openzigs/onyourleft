@@ -472,21 +472,18 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         };
       });
       expect(shown.text).toBe('9:59:59');
-      // One line, and inside its own box: a time broken at a colon reads as
-      // two numbers, and on the CI runner's fonts it did break (run
-      // 37229623180). `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
-      // SIDE" says why the track is 19 rem's and not 19.5's.
+      // #1111's review: one line, and inside its own field, read off this
+      // engine's fonts. A time broken at a colon reads as two numbers, and on
+      // the CI runner's fonts `9:59:59` did break in an 89 px track (run
+      // 37229623180) — `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
+      // SIDE" gives it two tracks there now, and never breaks it, so a time
+      // too wide would spill rather than wrap; the width is what catches that.
       expect(shown.lines).toBe(1);
       expect(shown.width).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
-
-      // #1111's review: the time FITS its field, read off this engine's fonts
-      // — on the CI runner `9:59:59` was wider than an 89 px track and broke
-      // at a colon. `theme.css` never breaks it now, so a time too wide would
-      // spill rather than wrap; this is what catches that. And `10:00:00` at
-      // the word size (`fields.ts` §`movingTimeReading`), set on the live
-      // element for one synchronous read and put back: no fixture rides for
-      // ten hours.
-      const fit = await page.evaluate(() => {
+      // And `10:00:00` at the word size (`fields.ts` §`movingTimeReading`),
+      // set on the live element for one synchronous read and put back: no
+      // fixture rides for ten hours.
+      const atTen = await page.evaluate(() => {
         const row = [...document.querySelectorAll<HTMLElement>('.oyl-hud__field')].find(
           (each) => each.querySelector('dt')?.textContent === 'Moving',
         );
@@ -495,32 +492,29 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         if (row === undefined || value === undefined || value === null || !(text instanceof Text)) {
           return undefined;
         }
-        const width = (): number => {
-          const range = document.createRange();
-          range.selectNodeContents(text);
-          return range.getBoundingClientRect().width;
-        };
-        const field = row.getBoundingClientRect().width;
-        const atNine = width();
         const before = text.data;
         text.data = '10:00:00';
         value.classList.add('oyl-hud__value--word');
-        const atTen = width();
-        const fieldAtTen = row.getBoundingClientRect().width;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const measured = {
+          width: range.getBoundingClientRect().width,
+          lines: range.getClientRects().length,
+          field: row.getBoundingClientRect().width,
+        };
         text.data = before;
         value.classList.remove('oyl-hud__value--word');
-        return { field, atNine, atTen, fieldAtTen };
+        return measured;
       });
-      expect(fit).toBeDefined();
-      const room = fit ?? { field: 0, atNine: Infinity, atTen: Infinity, fieldAtTen: 0 };
+      const ten = atTen ?? { width: Infinity, lines: 0, field: 0 };
       const fits =
-        `9:59:59 ${room.atNine.toFixed(1)} px in a ${room.field.toFixed(1)} px field ` +
-        `(${(room.field - room.atNine).toFixed(1)} px to spare); 10:00:00 at the word size ` +
-        `${room.atTen.toFixed(1)} px in ${room.fieldAtTen.toFixed(1)} px ` +
-        `(${(room.fieldAtTen - room.atTen).toFixed(1)} px to spare)`;
+        `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+        `(${(shown.field - shown.width).toFixed(1)} px to spare); 10:00:00 at the word size ` +
+        `${ten.width.toFixed(1)} px in ${ten.field.toFixed(1)} px ` +
+        `(${(ten.field - ten.width).toFixed(1)} px to spare)`;
       console.log(`#1111 fit — ${viewport.name} — ${fits}`);
-      expect(room.atNine, fits).toBeLessThanOrEqual(room.field);
-      expect(room.atTen, fits).toBeLessThanOrEqual(room.fieldAtTen);
+      expect(ten.lines, fits).toBe(1);
+      expect(ten.width, fits).toBeLessThanOrEqual(ten.field + SUBPIXEL_TOLERANCE);
 
       const field = named(seen.items, 'reading: Moving');
       expect(inside(field.box, viewport)).toBe(true);
@@ -541,8 +535,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const measured =
         `moving time ${describeItem(field)}; ${toRider.toFixed(1)} px clear of the leaning ` +
         `rider, ${toControl.toFixed(1)} px of the nearest control, ` +
-        `${toBottom.toFixed(1)} px above the bottom of the stage; the time is ` +
-        `${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field`;
+        `${toBottom.toFixed(1)} px above the bottom of the stage`;
       testInfo.annotations.push({ type: '#1111', description: measured });
       console.log(`#1111 — ${viewport.name} — ${measured}`);
       expect(toRider).toBeGreaterThan(0);
