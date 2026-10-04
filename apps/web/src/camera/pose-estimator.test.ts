@@ -187,3 +187,70 @@ describe('letting it go', () => {
     expect(worker.posted).toHaveLength(1);
   });
 });
+
+describe('handing the picture back for the live view — #1061, ADR 0044 D-1', () => {
+  function decoded(closed: { count: number }): unknown {
+    return {
+      width: 256,
+      height: 256,
+      close: () => {
+        closed.count += 1;
+      },
+    };
+  }
+
+  it('asks the worker for the picture back only when the live view does', () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    void estimator.estimateSidePose(cleanFrameBytes(64));
+    void estimator.estimateSidePoseShowingPicture(cleanFrameBytes(64));
+    expect('show' in (worker.posted[0]?.message ?? {})).toBe(false);
+    expect((worker.posted[1]?.message as { show?: boolean } | undefined)?.show).toBe(true);
+  });
+
+  it('hands back the very picture the landmarks are about, with the answer', async () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    const look = estimator.estimateSidePoseShowingPicture(cleanFrameBytes(64));
+    const closed = { count: 0 };
+    const pixels = decoded(closed);
+    worker.reply({
+      id: worker.posted[0]?.message.id,
+      kind: 'landmarks',
+      width: 256,
+      height: 256,
+      values: [],
+      pixels,
+    });
+    const answered = await look;
+    expect(answered.outcome).toEqual({ kind: 'no-rider', cause: 'said-nobody' });
+    expect(answered.pixels).toBe(pixels);
+    expect(closed.count).toBe(0);
+  });
+
+  it('closes a picture nobody asked for back rather than holding it', async () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    const outcome = estimator.estimateSidePose(cleanFrameBytes(64));
+    const closed = { count: 0 };
+    worker.reply({
+      id: worker.posted[0]?.message.id,
+      kind: 'landmarks',
+      width: 256,
+      height: 256,
+      values: [],
+      pixels: decoded(closed),
+    });
+    await expect(outcome).resolves.toEqual({ kind: 'no-rider', cause: 'said-nobody' });
+    expect(closed.count).toBe(1);
+  });
+
+  it('gives no picture when the model is unavailable', async () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    const look = estimator.estimateSidePoseShowingPicture(cleanFrameBytes(64));
+    worker.crash();
+    await flush();
+    await expect(look).resolves.toEqual({ outcome: { kind: 'unavailable' }, pixels: undefined });
+  });
+});

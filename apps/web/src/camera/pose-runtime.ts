@@ -149,6 +149,13 @@ function urlOf(input: unknown): string {
 export interface PoseRequest {
   readonly id: number;
   readonly picture: ArrayBuffer;
+  /**
+   * Hand the decoded picture back with the landmarks rather than closing it —
+   * #1061, ADR 0044 D-1: the tablet's live view shows exactly the pixels the
+   * model looked at. Only while the live view is watched; otherwise the worker
+   * closes the picture as soon as the model has answered, as it always did.
+   */
+  readonly show?: boolean;
 }
 
 /**
@@ -166,6 +173,11 @@ export type PoseReply =
       readonly width: number;
       readonly height: number;
       readonly values: readonly number[];
+      /**
+       * The decoded picture, transferred back, when the request asked for it
+       * ({@link PoseRequest.show}) — #1061. Its receiver closes it.
+       */
+      readonly pixels?: ImageBitmap;
     }
   | { readonly id: number; readonly kind: 'unreadable' | 'unavailable' };
 
@@ -196,9 +208,29 @@ export function poseReplyFrom(data: unknown): PoseReply | undefined {
     Array.isArray(values) &&
     values.every((value) => typeof value === 'number')
   ) {
-    return { id, kind, width, height, values: values };
+    const { pixels } = reply;
+    return isPicture(pixels)
+      ? { id, kind, width, height, values, pixels }
+      : { id, kind, width, height, values };
   }
   return undefined;
+}
+
+/**
+ * Whether `value` is a decoded picture the worker handed back — #1061. Read
+ * by its shape, because a worker's reply is checked rather than trusted, and
+ * because `ImageBitmap` is not a constructor every test environment has.
+ */
+function isPicture(value: unknown): value is ImageBitmap {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate['width'] === 'number' &&
+    typeof candidate['height'] === 'number' &&
+    typeof candidate['close'] === 'function'
+  );
 }
 
 /** What a reply comes to. */

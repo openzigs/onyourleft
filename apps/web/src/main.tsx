@@ -75,6 +75,8 @@ import { readMaskingGuard } from './ride-analysis/hosted-mask';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
+import { documentForeground, SecureWindow } from './camera/secure-window';
+import { NO_SECURE_WINDOW } from './camera/secure-window-port';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
 import { SideAnalysis } from './camera/side-analysis';
@@ -987,7 +989,10 @@ async function buildCameraController(
       guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
     });
   if (!isNativeShell(platformCapacitor())) {
-    return new CameraController({ port, keep, analysis, hosted });
+    // #1061, ADR 0044 D-12: a browser cannot stop a screenshot, so the flag's
+    // owner is built over nothing — and the consent says so.
+    const secureWindow = new SecureWindow(NO_SECURE_WINDOW, documentForeground());
+    return new CameraController({ port, keep, analysis, hosted, secureWindow });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -999,12 +1004,23 @@ async function buildCameraController(
   // Behind the same `import()` as every other reach for `@onyourleft/mobile`,
   // so a browser downloads no line of Capacitor.
   const mobile = await import('@onyourleft/mobile');
+  // #1061, ADR 0044 D-12: Android's FLAG_SECURE while a camera picture is on
+  // screen, through `SecureWindowPlugin.java`, registered in `MainActivity`.
+  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
+  const secureWindow = new SecureWindow(
+    {
+      setSecureWindow: async (secure) =>
+        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
+    },
+    documentForeground(),
+  );
   return new CameraController({
     port,
     keep,
     analysis,
     hosted,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
+    secureWindow,
   });
 }
 

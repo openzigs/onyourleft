@@ -51,7 +51,7 @@ import {
 /** The slice of a dedicated worker's scope this file uses. */
 interface PoseWorkerScope {
   onmessage: ((event: { readonly data: unknown }) => void) | null;
-  postMessage(message: PoseReply): void;
+  postMessage(message: PoseReply, transfer?: Transferable[]): void;
   readonly location: { readonly origin: string };
 }
 
@@ -81,7 +81,12 @@ async function load(): Promise<PoseLandmarker | undefined> {
   return model;
 }
 
-/** One picture: decode it, look at it, drop it. */
+/**
+ * One picture: decode it, look at it, and drop it — or, when the page asked to
+ * show it (#1061, ADR 0044 D-1), hand the decoded picture back with the
+ * landmarks instead of closing it here. The page then holds the one picture it
+ * shows and closes it when the next replaces it.
+ */
 async function answer(request: PoseRequest): Promise<PoseReply> {
   const landmarker = await load();
   if (landmarker === undefined) {
@@ -93,20 +98,29 @@ async function answer(request: PoseRequest): Promise<PoseReply> {
   } catch {
     return { id: request.id, kind: 'unreadable' };
   }
+  let handedBack = false;
   try {
     const found = landmarker.detect(bitmap).landmarks[0] ?? [];
-    return {
+    const reply = {
       id: request.id,
-      kind: 'landmarks',
+      kind: 'landmarks' as const,
       width: bitmap.width,
       height: bitmap.height,
       values: found.flatMap((point) => [point.x, point.y, point.visibility]),
     };
+    if (request.show === true) {
+      handedBack = true;
+      return { ...reply, pixels: bitmap };
+    }
+    return reply;
   } catch {
     return { id: request.id, kind: 'unreadable' };
   } finally {
-    // The decoded picture goes now, not when the collector gets to it (D-6).
-    bitmap.close();
+    // The decoded picture goes now, not when the collector gets to it (D-6) —
+    // unless it is on its way back to the page to be shown.
+    if (!handedBack) {
+      bitmap.close();
+    }
   }
 }
 
@@ -127,7 +141,9 @@ scope.onmessage = (event) => {
   if (typeof data.id !== 'number' || !(data.picture instanceof ArrayBuffer)) {
     return;
   }
-  void answer({ id: data.id, picture: data.picture }).then((reply) => {
-    scope.postMessage(reply);
+  void answer({ id: data.id, picture: data.picture, show: data.show === true }).then((reply) => {
+    // A picture handed back is TRANSFERRED, so the worker keeps no copy of it.
+    const pixels = 'pixels' in reply ? reply.pixels : undefined;
+    scope.postMessage(reply, pixels === undefined ? [] : [pixels]);
   });
 };

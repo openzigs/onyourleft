@@ -37,6 +37,7 @@ import { CameraController } from '../src/camera/session';
 import { scriptedLink, scriptedSidePairing } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
+import { failLiveTablet, runLiveTablet } from './sidelive-harness';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -53,6 +54,13 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
  * tall as the screen.
  */
 const PAIRING_SCAN = new URLSearchParams(location.search).get('pairing') === 'scan';
+
+/**
+ * `?live=tablet` — #1061: the TABLET's live view of the side camera, which
+ * `sidelive-harness.tsx` draws and measures. Here rather than a page of its
+ * own, so it adds no build entry.
+ */
+const LIVE_TABLET = new URLSearchParams(location.search).get('live') === 'tablet';
 
 /** An upright phone's camera picture, as a stream a `<video>` can play. */
 function uprightPicture(): MediaStream {
@@ -372,6 +380,10 @@ async function run(): Promise<void> {
   }
   if (PAIRING_SCAN) {
     await runPairingScan(host);
+    return;
+  }
+  if (LIVE_TABLET) {
+    await runLiveTablet(host).catch(failLiveTablet);
     return;
   }
   globalThis.location.hash = '#/camera/side';

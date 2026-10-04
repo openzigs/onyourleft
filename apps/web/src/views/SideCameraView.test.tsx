@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BYSTANDER_SENTENCE } from '../camera/consent';
+import { BYSTANDER_SENTENCE, SCREENSHOT_SENTENCE } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { CameraController } from '../camera/session';
 import { LINK_LOSS_LIMIT_MILLISECONDS, LINK_LOSS_SENTENCE } from '../camera/side-camera';
@@ -42,6 +42,7 @@ import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../
 import {
   FILMING_WORD,
   NOT_PAIRED_TEXT,
+  SIDE_CAMERA_KEPT_VISIBLE,
   SIDE_PICTURES_GO_SENTENCE,
   SideCameraView,
   TABLET_DID_NOT_CONNECT,
@@ -137,6 +138,20 @@ describe('before the camera is ever on', () => {
     expect(document.body.textContent).toContain(SIDE_PICTURES_GO_SENTENCE);
     // And nothing has been asked of the camera: shown BEFORE, not beside.
     expect(camera.calls).toStrictEqual([]);
+  });
+
+  it('says the tablet shows the picture, and what a screenshot meets — #1061', async () => {
+    // ADR 0044 D-1 superseded ADR 0033 D-6 on this path: the picture is SHOWN
+    // on the tablet. The sentence that said the tablet throws each away at
+    // once is false from the first build that shows one.
+    await phone();
+    expect(SIDE_PICTURES_GO_SENTENCE).toContain('shows it on its screen');
+    expect(SIDE_PICTURES_GO_SENTENCE).toContain('anyone who can see that screen can see it');
+    expect(SIDE_PICTURES_GO_SENTENCE).not.toContain('throws it away at once');
+    expect(SIDE_PICTURES_GO_SENTENCE).not.toContain('Save snapshot');
+    // D-12: the phone's own framing preview is a camera picture on a screen.
+    expect(document.body.textContent).toContain(SCREENSHOT_SENTENCE);
+    expect(SIDE_CAMERA_KEPT_VISIBLE).toContain(SCREENSHOT_SENTENCE);
   });
 
   it('refuses to turn the camera on until both are acknowledged', async () => {

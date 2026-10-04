@@ -9,6 +9,7 @@
  * a controller that opened a camera and then reported itself off.
  */
 
+import { SecureWindow } from './secure-window';
 import { describe, expect, it } from 'vitest';
 
 import { CameraController } from './session';
@@ -332,6 +333,56 @@ describe('the live preview — #528', () => {
     camera.endTheTrack();
     controller.showPreview(surface());
     expect(camera.calls).not.toContain('preview');
+  });
+});
+
+describe('the secure window while a camera picture is on screen — #1061, ADR 0044 D-12', () => {
+  const surface = () => ({
+    srcObject: null,
+    muted: false,
+    playsInline: false,
+    play: async () => Promise.resolve(),
+  });
+
+  function secured(camera: ReturnType<typeof scriptedCamera>) {
+    const secureWindow = new SecureWindow(
+      { setSecureWindow: async () => Promise.resolve() },
+      { inForeground: () => true, onForeground: () => () => undefined },
+    );
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+      secureWindow,
+    });
+    controller.agree(AGREED);
+    return { controller, secureWindow };
+  }
+
+  it('holds the flag while a preview is attached, and gives it back on detach', async () => {
+    const { controller, secureWindow } = secured(scriptedCamera());
+    await controller.turnOn();
+    const detach = controller.showPreview(surface());
+    expect(secureWindow.holds).toBe(1);
+    detach();
+    expect(secureWindow.holds).toBe(0);
+  });
+
+  it('holds nothing when there is no picture to show', () => {
+    const { controller, secureWindow } = secured(scriptedCamera());
+    controller.showPreview(surface())();
+    expect(secureWindow.holds).toBe(0);
+  });
+
+  it('holds for the live view on request, and holds nothing with no owner — a browser', () => {
+    const { controller, secureWindow } = secured(scriptedCamera());
+    const giveBack = controller.holdSecureWindow();
+    expect(secureWindow.holds).toBe(1);
+    giveBack();
+    expect(secureWindow.holds).toBe(0);
+    const { controller: plain } = controllerFor(scriptedCamera());
+    expect(() => {
+      plain.holdSecureWindow()();
+    }).not.toThrow();
   });
 });
 

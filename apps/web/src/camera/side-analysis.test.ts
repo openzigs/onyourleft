@@ -22,6 +22,7 @@ import {
 } from './side-analysis';
 import type { SidePose, SidePoseEstimator, SidePoseOutcome } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
+import type { SideLiveEstimator, SideShownLook } from './side-live-view-port';
 import type { SideCameraControlPort, SideControlState } from './side-pairing-port';
 import type { SideReport } from './side-report';
 import type { SideSessionSummary } from './side-session-summary';
@@ -721,5 +722,163 @@ describe('only plausible poses reach the pose summary (#761, #801)', () => {
     for (const difference of Object.values(ended[0]?.pose?.differences ?? {})) {
       expect(difference).toBeCloseTo(0, 9);
     }
+  });
+});
+
+describe('the live view — #1061, ADR 0044 D-1', () => {
+  /** A model that can hand back its picture, whose answers the test hands out. */
+  function showingModel() {
+    const pending: { show: boolean; answer: (look: SideShownLook) => void }[] = [];
+    const estimator: SideLiveEstimator = {
+      estimateSidePose: async () =>
+        new Promise<SidePoseOutcome>((answer) => {
+          pending.push({ show: false, answer: (look) => answer(look.outcome) });
+        }),
+      estimateSidePoseShowingPicture: async () =>
+        new Promise<SideShownLook>((answer) => {
+          pending.push({ show: true, answer });
+        }),
+      closeSidePoseModel: () => undefined,
+    };
+    return { estimator, pending };
+  }
+
+  function pixels(closed: { count: number }): ImageBitmap {
+    return {
+      width: 640,
+      height: 360,
+      close: () => {
+        closed.count += 1;
+      },
+    };
+  }
+
+  async function answered(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  function filming() {
+    const link = scriptedControl();
+    const model = showingModel();
+    const analysis = new SideAnalysis({ control: link.control, estimator: () => model.estimator });
+    link.set({ phone: 'filming' });
+    return { link, model, analysis };
+  }
+
+  it('asks for no picture, and holds none, with nobody watching', async () => {
+    const { link, model, analysis } = filming();
+    link.picture();
+    expect(model.pending.map((each) => each.show)).toStrictEqual([false]);
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: undefined });
+    await answered();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+  });
+
+  it('holds the latest picture with the pose found in IT, and lets the one before go', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    analysis.onSideLiveView(() => undefined);
+    link.picture();
+    link.picture();
+    model.pending[0]?.answer({
+      outcome: { kind: 'pose', pose: pose(0.1) },
+      pixels: pixels(closed),
+    });
+    await answered();
+    expect(analysis.sideLiveView().picture?.sequence).toBe(0);
+    expect(analysis.sideLiveView().picture?.pose).toStrictEqual(pose(0.1));
+    model.pending[1]?.answer({
+      outcome: { kind: 'no-rider', cause: 'implausible' },
+      pixels: pixels(closed),
+    });
+    await answered();
+    expect(analysis.sideLiveView().picture?.sequence).toBe(1);
+    // A refused answer draws no outline, never the last picture's (D-11).
+    expect(analysis.sideLiveView().picture?.pose).toBeUndefined();
+    expect(closed.count).toBe(1);
+  });
+
+  it('drops the picture the moment the link is lost, and when the last viewer leaves', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    const stop = analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    link.set({ phone: 'lost' });
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(1);
+    // A late answer while lost is let go, not shown.
+    link.picture();
+    model.pending[1]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(2);
+    link.set({ phone: 'filming' });
+    link.picture();
+    model.pending[2]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.sideLiveView().picture?.sequence).toBe(2);
+    stop();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(3);
+  });
+
+  it('lets the picture go when the session ends, and closes one that arrives after', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    link.picture();
+    link.set({ phone: 'stopped' });
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(1);
+    // The picture the model was still looking at comes back after the end.
+    model.pending[1]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(2);
+  });
+
+  it('shows the stored reference as the ghost, once it is read', async () => {
+    const link = scriptedControl();
+    const model = showingModel();
+    const stored = referenceOf(pose());
+    const analysis = new SideAnalysis({
+      control: link.control,
+      estimator: () => model.estimator,
+      references: {
+        athleteId: ATHLETE,
+        store: {
+          getFramingReference: async () =>
+            Promise.resolve({ athleteId: ATHLETE, ...stored, check: 'matches' as const }),
+          putFramingReference: async () => Promise.resolve(),
+        },
+      },
+    });
+    link.set({ phone: 'framing' });
+    await answered();
+    expect(analysis.sideLiveView().reference).toStrictEqual(stored);
+  });
+
+  it('shows nothing from a model that cannot hand its picture back — the rider’s computer', async () => {
+    const link = scriptedControl();
+    const model = scriptedModel();
+    const analysis = new SideAnalysis({
+      control: link.control,
+      estimator: model.make,
+      place: 'computer',
+    });
+    link.set({ phone: 'filming' });
+    analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ kind: 'pose', pose: pose() });
+    await answered();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(analysis.sideAnalysisState().posed).toBe(1);
   });
 });

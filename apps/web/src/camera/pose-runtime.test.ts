@@ -155,3 +155,19 @@ describe('what the worker says back', () => {
     expect(poseOutcomeOf({ id: 1, kind: 'unavailable' })).toEqual({ kind: 'unavailable' });
   });
 });
+
+describe('a reply carrying the picture back — #1061', () => {
+  const landmarks = { id: 1, kind: 'landmarks', width: 4, height: 3, values: [] };
+
+  it('keeps a decoded picture the worker handed back', () => {
+    const pixels = { width: 4, height: 3, close: () => undefined };
+    expect(poseReplyFrom({ ...landmarks, pixels })).toEqual({ ...landmarks, pixels });
+  });
+
+  it('drops anything in its place that is not a picture, and keeps the answer', () => {
+    expect(poseReplyFrom({ ...landmarks, pixels: 'data:image/jpeg;base64,AAAA' })).toEqual(
+      landmarks,
+    );
+    expect(poseReplyFrom({ ...landmarks, pixels: { width: 4, height: 3 } })).toEqual(landmarks);
+  });
+});

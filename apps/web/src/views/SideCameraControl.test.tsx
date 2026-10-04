@@ -10,13 +10,14 @@
  */
 
 import { StrictMode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRIMARY_BUTTON_SELECTOR } from '../a11y/button-hierarchy';
 import { CameraController } from '../camera/session';
 import {
   SIDE_PAIRING_END_TEXT,
   SIDE_PHONE_STATE_TEXT,
+  SILENCE_IS_LOST_MILLISECONDS,
   sidePairingPort,
   type SidePairingOptions,
 } from '../camera/side-link';
@@ -39,6 +40,9 @@ import {
   virtualTime,
 } from '../camera/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { SecureWindow } from '../camera/secure-window';
+import { SIDE_LIVE_PICTURE_LABEL } from '../camera/SideLiveView';
+import type { SideLiveEstimator, SideShownLook } from '../camera/side-live-view-port';
 
 import {
   SIDE_FRAMING_TEXT,
@@ -87,6 +91,7 @@ async function tablet(
     readonly readerFails?: boolean;
     readonly analyse?: SidePairingOptions['analyse'];
     readonly camera?: Pick<ScriptedCameraOptions, 'startFails' | 'startFailsFacing' | 'holdStarts'>;
+    readonly secureWindow?: SecureWindow;
   } = {},
 ) {
   const network = sidePeerNetwork();
@@ -114,6 +119,7 @@ async function tablet(
   const controller = new CameraController({
     port: camera.port,
     schedule: manualSchedule().schedule,
+    ...(options.secureWindow === undefined ? {} : { secureWindow: options.secureWindow }),
     ...(options.readerFails === true
       ? {
           loadCodeReader: async () => {
@@ -147,6 +153,7 @@ async function tablet(
     controller,
     phoneReads,
     time,
+    network,
     holdUp,
     readerLoads: () => readerLoads,
   };
@@ -620,7 +627,11 @@ describe('what the tablet says about the pictures — #530', () => {
   it('says none has arrived before the first picture, and that they are thrown away', async () => {
     await analysing();
     expect(document.body.textContent).toContain('None has arrived yet');
-    expect(document.body.textContent).toContain('thrown away at once');
+    // #1061: shown until the next replaces it, so no longer "at once".
+    expect(document.body.textContent).toContain(
+      'shown here until the next one replaces them, and then thrown away',
+    );
+    expect(document.body.textContent).not.toContain('thrown away at once');
   });
 
   it('counts the pictures looked at, and says nothing about what the model found in them', async () => {
@@ -739,3 +750,312 @@ describe('what the tablet says about the pictures — #530', () => {
     );
   });
 });
+
+/** A decoded picture, as the worker hands one back: a size, and a close that is counted. */
+function fakePixels(closed: { count: number }, width = 640, height = 360): ImageBitmap {
+  return {
+    width,
+    height,
+    close: () => {
+      closed.count += 1;
+    },
+  };
+}
+
+/** A pose at one point, so a test can tell one picture's outline from another's. */
+function poseAt(x: number): SidePoseOutcome {
+  return {
+    kind: 'pose',
+    pose: {
+      aspect: 16 / 9,
+      nearSide: 'left',
+      landmarks: [
+        { name: 'shoulder', x, y: 0.3, visibility: 0.9 },
+        { name: 'hip', x, y: 0.5, visibility: 0.9 },
+        { name: 'knee', x: x + 0.05, y: 0.7, visibility: 0.9 },
+      ],
+    },
+  };
+}
+
+describe('the live view: the side camera’s picture with its outline — #1061, ADR 0044', () => {
+  /** Every picture the canvas was asked to draw, in order. jsdom draws nothing itself. */
+  let drawn: unknown[] = [];
+  beforeEach(() => {
+    drawn = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: (source: unknown) => {
+        drawn.push(source);
+      },
+    } as unknown as CanvasRenderingContext2D);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Each picture's answer, settled by the test when it chooses. */
+  interface Pending {
+    readonly settle: (look: SideShownLook) => void;
+  }
+
+  async function watching(options: { readonly secureWindow?: SecureWindow } = {}) {
+    const pending: Pending[] = [];
+    const shownAsked: boolean[] = [];
+    const estimator: SideLiveEstimator = {
+      estimateSidePose: async () => {
+        shownAsked.push(false);
+        return new Promise((resolve) => {
+          pending.push({ settle: (look) => resolve(look.outcome) });
+        });
+      },
+      estimateSidePoseShowingPicture: async () => {
+        shownAsked.push(true);
+        return new Promise((resolve) => {
+          pending.push({ settle: resolve });
+        });
+      },
+      closeSidePoseModel: () => undefined,
+    };
+    const context = await tablet({
+      analyse: (control) => new SideAnalysis({ control, estimator: () => estimator }),
+      ...options,
+    });
+    await press('Pair a phone');
+    const phone = await context.phoneReads();
+    await press('Read the phone’s code');
+    await scanOnce();
+    phone.link.reportToTablet({ state: 'filming' });
+    await flushSideLink();
+    await settle();
+    let sequence = 0;
+    const send = async (): Promise<void> => {
+      phone.link.sendPictureToTablet({
+        sequence,
+        milliseconds: sequence * 200,
+        bytes: cleanFrameBytes(),
+      });
+      sequence += 1;
+      await flushSideLink();
+      await settle();
+    };
+    const answer = async (index: number, look: SideShownLook): Promise<void> => {
+      pending[index]?.settle(look);
+      await settle();
+      await settle();
+    };
+    return { ...context, phone, send, answer, shownAsked };
+  }
+
+  const picture = (): Element | null => document.querySelector('[data-oyl-live-sequence]');
+  const outline = (): Element | null => document.querySelector('[data-oyl-live-outline-sequence]');
+  const jointX = (name: string): number =>
+    Number(document.querySelector(`[data-oyl-live-joint="${name}"]`)?.getAttribute('cx'));
+
+  it('asks the model for its picture back only while the view is on screen', async () => {
+    const { send, shownAsked } = await watching();
+    await send();
+    expect(shownAsked).toStrictEqual([true]);
+  });
+
+  it('never draws a picture with another picture’s outline — frame 1’s answer arriving after frame 2', async () => {
+    const closed = { count: 0 };
+    const { send, answer } = await watching();
+    // Frame 0 goes to the model; frame 1 arrives while it is busy and waits.
+    await send();
+    await send();
+    expect(picture()).toBeNull();
+    // Frame 0's landmarks arrive AFTER frame 1's picture did.
+    const first = fakePixels(closed);
+    await answer(0, { outcome: poseAt(0.4), pixels: first });
+    expect(picture()?.getAttribute('data-oyl-live-sequence')).toBe('0');
+    expect(outline()?.getAttribute('data-oyl-live-outline-sequence')).toBe('0');
+    expect(jointX('hip')).toBeCloseTo(0.4 * (640 / 360));
+    expect(drawn.at(-1)).toBe(first);
+    // Frame 1: the model found nobody. Its picture is drawn with NO outline,
+    // never with frame 0's.
+    const second = fakePixels(closed);
+    await answer(1, {
+      outcome: { kind: 'no-rider', cause: 'said-nobody' },
+      pixels: second,
+    });
+    expect(drawn.at(-1)).toBe(second);
+    expect(picture()?.getAttribute('data-oyl-live-sequence')).toBe('1');
+    expect(outline()).toBeNull();
+    expect(document.body.textContent).toContain('did not find you in this picture');
+    // And the picture it replaced was let go: one held, never two (D-1).
+    expect(closed.count).toBe(1);
+  });
+
+  it('draws each picture with its own outline as the pictures go on', async () => {
+    const closed = { count: 0 };
+    const { send, answer } = await watching();
+    await send();
+    await answer(0, { outcome: poseAt(0.3), pixels: fakePixels(closed) });
+    await send();
+    await answer(1, { outcome: poseAt(0.6), pixels: fakePixels(closed) });
+    expect(picture()?.getAttribute('data-oyl-live-sequence')).toBe('1');
+    expect(outline()?.getAttribute('data-oyl-live-outline-sequence')).toBe('1');
+    expect(jointX('hip')).toBeCloseTo(0.6 * (640 / 360));
+  });
+
+  it('says what the picture is, and draws the guide solid and the outline dotted', async () => {
+    const { send, answer } = await watching();
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+    const shown = picture();
+    expect(shown?.getAttribute('role')).toBe('img');
+    expect(shown?.getAttribute('aria-label')).toBe(SIDE_LIVE_PICTURE_LABEL);
+    expect(shown?.querySelector('canvas')?.getAttribute('aria-hidden')).toBe('true');
+    expect(shown?.querySelector('.oyl-framing__guide')).not.toBeNull();
+    expect(shown?.querySelector('.oyl-framing__outline')).not.toBeNull();
+    expect(document.body.textContent).toContain('The solid outline is where to stand the bike.');
+    expect(document.body.textContent).toContain('The dotted line, with a dot at each point');
+    // The framing check stays the primary signal, in words, ABOVE the picture.
+    const words = document.querySelector('[data-oyl-side-pictures]');
+    expect(words).not.toBeNull();
+    expect(
+      (words?.compareDocumentPosition(shown as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('removes the picture — not hides it — when the phone stops', async () => {
+    const closed = { count: 0 };
+    const { send, answer, phone } = await watching();
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels(closed) });
+    expect(document.querySelector('canvas')).not.toBeNull();
+    phone.link.reportToTablet({ state: 'stopped', reason: 'rider' });
+    await flushSideLink();
+    await settle();
+    expect(document.querySelector('canvas')).toBeNull();
+    expect(document.querySelector('[data-oyl-side-live]')).toBeNull();
+    expect(document.body.textContent).toContain(SIDE_PHONE_STATE_TEXT.stopped);
+    expect(closed.count).toBe(1);
+  });
+
+  it('removes the picture when the link is lost, and says so in words', async () => {
+    const closed = { count: 0 };
+    const { send, answer, network, time } = await watching();
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels(closed) });
+    expect(document.querySelector('canvas')).not.toBeNull();
+    network.drop();
+    time.advance(SILENCE_IS_LOST_MILLISECONDS + 1000);
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain(SIDE_PHONE_STATE_TEXT.lost);
+    expect(document.querySelector('canvas')).toBeNull();
+    expect(closed.count).toBe(1);
+  });
+
+  it('holds Android’s secure window flag while the picture is shown, and lets it go after — D-12', async () => {
+    const asked: boolean[] = [];
+    const secureWindow = new SecureWindow(
+      {
+        setSecureWindow: async (secure) => {
+          asked.push(secure);
+          return Promise.resolve();
+        },
+      },
+      { inForeground: () => true, onForeground: () => () => undefined },
+    );
+    const { send, answer, phone } = await watching({ secureWindow });
+    // The scan's viewfinder held it, and gave it back once the code was read.
+    expect(asked).toStrictEqual([true, false]);
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+    await settle();
+    expect(secureWindow.holds).toBe(1);
+    expect(asked.at(-1)).toBe(true);
+    phone.link.reportToTablet({ state: 'stopped', reason: 'rider' });
+    await flushSideLink();
+    await settle();
+    await settle();
+    expect(secureWindow.holds).toBe(0);
+    expect(asked.at(-1)).toBe(false);
+  });
+
+  it('makes no object URL and leaves no picture in storage — ADR 0029 D-10', async () => {
+    const made: unknown[] = [];
+    const original = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (thing: Blob | MediaSource) => {
+      made.push(thing);
+      return original(thing);
+    };
+    try {
+      const { send, answer } = await watching();
+      for (let index = 0; index < 3; index += 1) {
+        await send();
+        await answer(index, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+      }
+      expect(made).toStrictEqual([]);
+      expect(await storedPictureBytes()).toStrictEqual([]);
+    } finally {
+      URL.createObjectURL = original;
+    }
+  });
+});
+
+/**
+ * Every place a page can keep bytes, read afresh, for anything that looks like
+ * a picture: a JPEG's start-of-image marker in `localStorage` or
+ * `sessionStorage` (as text or base64), Cache Storage when the environment has
+ * it, and every value in every IndexedDB database, through a fresh open.
+ */
+async function storedPictureBytes(): Promise<string[]> {
+  const found: string[] = [];
+  const looksLikeJpeg = (value: unknown): boolean => {
+    if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+      const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+      return bytes[0] === 0xff && bytes[1] === 0xd8;
+    }
+    if (typeof value === 'string') {
+      return (
+        value.includes('/9j/') || value.startsWith('\u00ff\u00d8') || value.includes('data:image')
+      );
+    }
+    if (typeof value === 'object' && value !== null) {
+      return Object.values(value).some(looksLikeJpeg);
+    }
+    return false;
+  };
+  for (const storage of [globalThis.localStorage, globalThis.sessionStorage]) {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index) ?? '';
+      if (looksLikeJpeg(storage.getItem(key))) {
+        found.push(`storage:${key}`);
+      }
+    }
+  }
+  if ('caches' in globalThis) {
+    const names = await globalThis.caches.keys();
+    found.push(...names.map((name) => `cache:${name}`));
+  }
+  for (const { name } of await indexedDB.databases()) {
+    if (name === undefined) {
+      continue;
+    }
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        reject(new Error('could not open'));
+      };
+    });
+    for (const store of Array.from(database.objectStoreNames)) {
+      const values = await new Promise<unknown[]>((resolve) => {
+        const request = database.transaction(store).objectStore(store).getAll();
+        request.onsuccess = () => {
+          resolve(request.result as unknown[]);
+        };
+      });
+      if (values.some(looksLikeJpeg)) {
+        found.push(`indexeddb:${name}/${store}`);
+      }
+    }
+    database.close();
+  }
+  return found;
+}

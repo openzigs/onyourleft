@@ -18,6 +18,7 @@
  * the browser actually wrote.
  */
 
+import type { SideLiveView, SideLiveViewPort } from './side-live-view-port';
 import type {
   CameraAvailability,
   CameraFacing,
@@ -905,7 +906,10 @@ class FakeSidePeer implements ScriptedSidePeer {
  * `set` replaces fields and tells every listener, as `side-link.ts` does on
  * every change; `commands` records what the tablet sent.
  */
-export function scriptedSidePairing(initial: Partial<SideControlState> = {}): SidePairingPort & {
+export function scriptedSidePairing(
+  initial: Partial<SideControlState> = {},
+  liveView?: SideLiveViewPort,
+): SidePairingPort & {
   readonly control: SideCameraControlPort;
   readonly commands: PhoneCommand[];
   set(next: Partial<SideControlState>): void;
@@ -941,6 +945,7 @@ export function scriptedSidePairing(initial: Partial<SideControlState> = {}): Si
     acceptSidePhoneCode: () => Promise.resolve(undefined),
     control,
     analysis: undefined,
+    liveView,
   };
   return {
     control,
@@ -952,6 +957,35 @@ export function scriptedSidePairing(initial: Partial<SideControlState> = {}): Si
     offerSideCamera: () => Promise.resolve(pairing),
     currentSideCamera: () => pairing,
     answerSideCamera: () => Promise.reject(new Error('the scripted pairing is the tablet’s')),
+  };
+}
+
+/**
+ * A live view the test sets — #1061. `show` puts a picture (and its pose) on
+ * it and tells every watcher, as `side-analysis.ts` does; `watchers` says how
+ * many are watching.
+ */
+export function scriptedLiveView(
+  initial: SideLiveView = { picture: undefined, reference: undefined },
+): SideLiveViewPort & {
+  show(next: SideLiveView): void;
+  watchers(): number;
+} {
+  let view = initial;
+  const listeners = new Set<() => void>();
+  return {
+    sideLiveView: () => view,
+    onSideLiveView: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    show: (next) => {
+      view = next;
+      for (const listener of [...listeners]) listener();
+    },
+    watchers: () => listeners.size,
   };
 }
 
