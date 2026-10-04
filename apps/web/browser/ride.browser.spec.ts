@@ -476,8 +476,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // engine's fonts. A time broken at a colon reads as two numbers, and on
       // the CI runner's fonts `9:59:59` did break in an 89 px track (run
       // 37229623180) — `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
-      // SIDE" gives it two tracks there now, and never breaks it, so a time
-      // too wide would spill rather than wrap; the width is what catches that.
+      // SIDE" draws it across the primary panel there now. It is never broken,
+      // so a time too wide would spill rather than wrap; the width is what
+      // catches that.
       expect(shown.lines).toBe(1);
       expect(shown.width).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
       // And `10:00:00` at the word size (`fields.ts` §`movingTimeReading`),
@@ -723,9 +724,12 @@ test.describe('a ride with a standing notice', () => {
       expect(controls.filter((each) => overlap(each.box, moving.box)).map(describeItem)).toEqual(
         [],
       );
-      // #1111's review: and over no other laid-out panel. The secondary
-      // panel is excused only where the field is drawn INSIDE it (a phone on
-      // its side, a tablet), which is where it is in the document.
+      // #1111's review: and over no other laid-out panel. A panel is excused
+      // only where the field is drawn wholly INSIDE it: the secondary panel
+      // on a tablet and a wide phone on its side, where it is in the
+      // document, and the primary panel below 802 px on its side, which
+      // makes room for it (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+      // ITS SIDE"). Upright it is inside none.
       const within = (inner: Box, outer: Box): boolean =>
         inner.left >= outer.left &&
         inner.right <= outer.right &&
@@ -735,7 +739,11 @@ test.describe('a ride with a standing notice', () => {
         laidOut
           .filter(
             (each) =>
-              !(each.name.includes('oyl-hud__fields--secondary') && within(moving.box, each.box)),
+              !(
+                (each.name.includes('oyl-hud__fields--secondary') ||
+                  each.name.includes('oyl-hud__fields--primary')) &&
+                within(moving.box, each.box)
+              ),
           )
           .filter((each) => overlap(each.box, moving.box))
           .map(describeItem),

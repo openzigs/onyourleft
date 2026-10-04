@@ -6126,45 +6126,55 @@ select.oyl-input {
  * the pinned Chromium, the panel went from 129 to 196 px and its third row
  * came down onto the leaning rider (x = 299 to 437, from y = 189) at 736×360.
  *
- * What gives is the PRIMARY panel's width, and only below 802 px: 19.5 rem
- * rather than 24 leaves the secondary panel 400 px, which is four tracks — so
- * seven readings are two rows again, as six were. The cost is the primary
- * tier's unit: at 92 px a track, `168 bpm` at 2.5 rem (105 px) does not fit
- * beside its number, so the unit goes under it, as it already does on every
- * phone narrower than 24 rem (above). 802 px is where four secondary tracks
- * fit beside a 24 rem primary panel (4 × 88 + 3 × 8 + 18 = 394 px of panel),
- * so a wider phone keeps the primary tier exactly as it was.
+ * ⚠️ **A fourth track is not to be had here, and that is measured on the CI
+ * runner rather than argued.** The first version narrowed the primary panel to
+ * 19.5 rem so the secondary panel took four 89 px tracks. On a Mac every
+ * reading fitted. On the runner, whose system face has wider digits, `9:59:59`
+ * at 1.5 rem is 92.5 px and `36.2 km/h` wraps as well, so the first row grew
+ * from 45 to 70 px and the bottom row went off a 736×360 stage (run
+ * 37229623180, and 37232559179 with the time spanning two tracks). Four tracks
+ * that hold the secondary tier on those fonts and three primary tracks that
+ * hold a four-digit power do not fit in 736 px together.
  *
- * ⚠️ **And the moving time takes TWO of those four tracks, because of the CI
- * runner's fonts.** A track here is 89 px, and `9:59:59` at 1.5 rem is 85 px
- * in this repository's Chromium on a Mac and wider than the track on the
- * runner, whose system face has wider digits: it broke at a colon, the first
- * row grew from 45 to 70 px, and the bottom row went off a 736×360 stage
- * (run 37229623180). Two tracks are about 186 px, which holds `10:00:00` and
- * more at either size. It costs no row on the widest ride: seven readings and
- * one extra cell are two rows of four, as seven were — `dense` back-fills the
- * fourth cell of the first row with the reading after it, so the moving time
- * is drawn at the start of the second row. An ordinary ride's four readings
- * become two rows rather than one, no taller than the widest ride's panel,
- * which is the one measured.
+ * So below 802 px the primary panel keeps its 24 rem and the secondary tier
+ * keeps the six readings it had, and the moving time is DRAWN in the primary
+ * panel, on one line of its own under the three numbers — its label BESIDE
+ * its value, so the line is one value high: the panel gives itself the room
+ * with padding, and the field is placed in it by anchor positioning, as on an
+ * upright phone (below). One line, because the left column under the primary
+ * panel is where #576 lifts the side camera's row when sounds are on (above),
+ * and a label-over-value row ran 9 px into it. The field spans the panel's
+ * inner width, so the time has 300 px where it needs 93. It stays in the
+ * secondary list in the document, where a screen reader and #94's order meet
+ * it. 802 px is where four secondary tracks fit beside a 24 rem primary panel
+ * (4 × 88 + 3 × 8 + 18 = 394 px of panel); from there the time is a fourth
+ * track's reading on the second row.
+ *
+ * ⚠️ Without anchor positioning this does not apply and the time is a third
+ * secondary row — over the rider at 736×360. #1120, with the upright layout's
+ * same fallback (below).
  * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport,
  * and how much room the time has in its field.
  */
-@media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
-  .oyl-game--riding .oyl-hud {
-    grid-template-columns: minmax(0, 19.5rem) minmax(0, 1fr);
-  }
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      anchor-name: --oyl-hud-primary;
+      /* The moving time's one line (a 1.5 rem value at line-height 1.05) and
+         the grid's own gap above it. */
+      padding-block-end: calc(var(--oyl-space-sm) * 2 + 1.6rem);
+    }
 
-  .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
-    display: block;
-  }
-
-  .oyl-game--riding .oyl-hud__fields--secondary {
-    grid-auto-flow: row dense;
-  }
-
-  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
-    grid-column: span 2;
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      position-anchor: --oyl-hud-primary;
+      left: calc(anchor(left) + var(--oyl-space-sm));
+      right: calc(anchor(right) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
   }
 }
 
