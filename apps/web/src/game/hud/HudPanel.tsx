@@ -61,6 +61,7 @@ import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { useUnits } from '../../units/context';
 
 import {
+  MOVING_TIME_KEY,
   NO_READING,
   hudReadings,
   profileReading,
@@ -423,6 +424,22 @@ function hasContent(node: ReactNode): boolean {
   return node !== undefined && node !== null && node !== false && node !== '';
 }
 
+/**
+ * A field's classes. `oyl-hud__field--moving` is #1111's: on an upright phone
+ * `theme.css` §"THE MOVING TIME ON AN UPRIGHT PHONE" lifts that one field out
+ * of the secondary grid and sets it beside *Pause* and *End ride*, because a
+ * seventh secondary reading is a third row the column layout has no height
+ * for. It stays in this list in the document, where a screen reader and
+ * #94's order meet it.
+ */
+function fieldClass(reading: HudReading): string {
+  return [
+    'oyl-hud__field',
+    ...(reading.stale ? ['oyl-hud__field--stale'] : []),
+    ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
+  ].join(' ');
+}
+
 /** One tier's readings, as the description list `HudPanel` explains. */
 function FieldList(props: {
   readonly tier: ReadingTier;
@@ -432,10 +449,7 @@ function FieldList(props: {
   return (
     <dl className={`oyl-hud__panel oyl-hud__fields oyl-hud__fields--${props.tier}`}>
       {mine.map((reading) => (
-        <div
-          key={reading.key}
-          className={reading.stale ? 'oyl-hud__field oyl-hud__field--stale' : 'oyl-hud__field'}
-        >
+        <div key={reading.key} className={fieldClass(reading)}>
           <dt className="oyl-hud__label">{reading.label}</dt>
           <dd
             className={

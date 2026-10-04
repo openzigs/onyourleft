@@ -312,11 +312,20 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
-      // A pacer, a ghost AND a wind — six, where an ordinary ride has four.
-      expect(seen.secondary).toEqual(['Speed', 'Gradient', 'To go', 'Pacer', 'Your best', 'Wind']);
+      // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
+      // and since #1111 the moving time, beside the distance to go.
+      expect(seen.secondary).toEqual([
+        'Speed',
+        'Gradient',
+        'To go',
+        'Moving',
+        'Pacer',
+        'Your best',
+        'Wind',
+      ]);
       expect(seen.panels).toHaveLength(4);
-      // Nine readings, the strip, the plan view, the trainer line, two controls.
-      expect(seen.items).toHaveLength(14);
+      // Ten readings, the strip, the plan view, the trainer line, two controls.
+      expect(seen.items).toHaveLength(15);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -435,6 +444,113 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       );
     });
 
+    /**
+     * #1111: the moving time, at its widest (`ride-harness.tsx`
+     * §`MOVING_SECONDS`, 9:59:59), on the stage and clear of the LEANING
+     * rider and of every ride control — its margins published. The cases
+     * above already hold it inside the viewport, uncovered, with no panel
+     * over another or over the rider; this one names it, so the numbers a
+     * reviewer asks for are in the run.
+     */
+    test('the moving time is on the stage, clear of the rider and of every control — #1111', async ({
+      browser,
+    }, testInfo) => {
+      const page = await sharedRide(browser, viewport);
+      const seen = await measure(page);
+      const shown = await page.evaluate(() => {
+        const row = [...document.querySelectorAll('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Moving',
+        );
+        const text = row?.querySelector('dd')?.firstChild;
+        const range = document.createRange();
+        if (text !== null && text !== undefined) range.selectNodeContents(text);
+        return {
+          text: row?.querySelector('dd')?.textContent ?? '',
+          width: text === null || text === undefined ? 0 : range.getBoundingClientRect().width,
+          field: row?.getBoundingClientRect().width ?? 0,
+          lines: row === undefined ? 0 : range.getClientRects().length,
+        };
+      });
+      expect(shown.text).toBe('9:59:59');
+      // #1111's review: one line, and inside its own field, read off this
+      // engine's fonts. A time broken at a colon reads as two numbers, and on
+      // the CI runner's fonts `9:59:59` did break in an 89 px track (run
+      // 37229623180) — `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
+      // SIDE" draws it across the primary panel there now. It is never broken,
+      // so a time too wide would spill rather than wrap; the width is what
+      // catches that.
+      expect(shown.lines).toBe(1);
+      expect(shown.width).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
+      // And `10:00:00` at the word size (`fields.ts` §`movingTimeReading`),
+      // set on the live element for one synchronous read and put back: no
+      // fixture rides for ten hours.
+      const atTen = await page.evaluate(() => {
+        const row = [...document.querySelectorAll<HTMLElement>('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Moving',
+        );
+        const value = row?.querySelector<HTMLElement>('dd');
+        const text = value?.firstChild;
+        if (row === undefined || value === undefined || value === null || !(text instanceof Text)) {
+          return undefined;
+        }
+        const before = text.data;
+        text.data = '10:00:00';
+        value.classList.add('oyl-hud__value--word');
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const measured = {
+          width: range.getBoundingClientRect().width,
+          lines: range.getClientRects().length,
+          field: row.getBoundingClientRect().width,
+        };
+        text.data = before;
+        value.classList.remove('oyl-hud__value--word');
+        return measured;
+      });
+      const ten = atTen ?? { width: Infinity, lines: 0, field: 0 };
+      const fits =
+        `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+        `(${(shown.field - shown.width).toFixed(1)} px to spare); 10:00:00 at the word size ` +
+        `${ten.width.toFixed(1)} px in ${ten.field.toFixed(1)} px ` +
+        `(${(ten.field - ten.width).toFixed(1)} px to spare)`;
+      console.log(`#1111 fit — ${viewport.name} — ${fits}`);
+      expect(ten.lines, fits).toBe(1);
+      expect(ten.width, fits).toBeLessThanOrEqual(ten.field + SUBPIXEL_TOLERANCE);
+
+      const field = named(seen.items, 'reading: Moving');
+      expect(inside(field.box, viewport)).toBe(true);
+      expect(field.onTop).toBe(true);
+      const leaning = riderBox(viewport);
+      expect(overlap(field.box, leaning)).toBe(false);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls.length).toBeGreaterThanOrEqual(2);
+      expect(controls.filter((each) => overlap(each.box, field.box)).map(describeItem)).toEqual([]);
+      // Nor over any other reading: below 802 px on its side it is drawn
+      // INSIDE the primary panel, under the three numbers, which pads itself
+      // to make the room (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+      // ITS SIDE") — so the panel checks cannot see it land on them.
+      expect(
+        seen.items
+          .filter((each) => each !== field && overlap(each.box, field.box))
+          .map(describeItem),
+      ).toEqual([]);
+
+      // Edge-to-edge clearance between two boxes: the larger of the two axis
+      // gaps, which is positive exactly when they do not overlap.
+      const clear = (a: Box, b: Box): number =>
+        Math.max(a.left - b.right, b.left - a.right, a.top - b.bottom, b.top - a.bottom);
+      const toRider = clear(field.box, leaning);
+      const toControl = Math.min(...controls.map((each) => clear(each.box, field.box)));
+      const toBottom = viewport.height - field.box.bottom;
+      const measured =
+        `moving time ${describeItem(field)}; ${toRider.toFixed(1)} px clear of the leaning ` +
+        `rider, ${toControl.toFixed(1)} px of the nearest control, ` +
+        `${toBottom.toFixed(1)} px above the bottom of the stage`;
+      testInfo.annotations.push({ type: '#1111', description: measured });
+      console.log(`#1111 — ${viewport.name} — ${measured}`);
+      expect(toRider).toBeGreaterThan(0);
+    });
+
     test('a primary reading is visibly larger than a secondary one', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
@@ -502,7 +618,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      expect(seen.items).toHaveLength(14);
+      // Ten readings since #1111's moving time, and the rest as above.
+      expect(seen.items).toHaveLength(15);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -602,6 +719,55 @@ test.describe('a ride with a standing notice', () => {
         const item = named(seen.items, name);
         expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
       }
+      // #1111: with a third control (*Trainer notice*) there is no width
+      // beside the controls on an upright phone, and the moving time is set
+      // ABOVE the actions panel on a surface of its own (`theme.css` §"THE
+      // MOVING TIME ON AN UPRIGHT PHONE") — over the world, inside no panel,
+      // so the panel checks above cannot see it. Held here, on this load.
+      const moving = named(seen.items, 'reading: Moving');
+      expect(inside(moving.box, viewport) && moving.onTop, describeItem(moving)).toBe(true);
+      const leaning = riderBox(viewport);
+      expect(overlap(moving.box, leaning), describeItem(moving)).toBe(false);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls).toHaveLength(3);
+      expect(controls.filter((each) => overlap(each.box, moving.box)).map(describeItem)).toEqual(
+        [],
+      );
+      // #1111's review: and over no other laid-out panel. A panel is excused
+      // only where the field is drawn wholly INSIDE it: the secondary panel
+      // on a tablet and a wide phone on its side, where it is in the
+      // document, and the primary panel below 802 px on its side, which
+      // makes room for it (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+      // ITS SIDE"). Upright it is inside none.
+      const within = (inner: Box, outer: Box): boolean =>
+        inner.left >= outer.left &&
+        inner.right <= outer.right &&
+        inner.top >= outer.top &&
+        inner.bottom <= outer.bottom;
+      expect(
+        laidOut
+          .filter(
+            (each) =>
+              !(
+                (each.name.includes('oyl-hud__fields--secondary') ||
+                  each.name.includes('oyl-hud__fields--primary')) &&
+                within(moving.box, each.box)
+              ),
+          )
+          .filter((each) => overlap(each.box, moving.box))
+          .map(describeItem),
+        describeItem(moving),
+      ).toEqual([]);
+      const clearOfRider = Math.max(
+        moving.box.left - leaning.right,
+        leaning.left - moving.box.right,
+        moving.box.top - leaning.bottom,
+        leaning.top - moving.box.bottom,
+      );
+      console.log(
+        `#1111 with Trainer notice — ${viewport.name} — ${describeItem(moving)}; ` +
+          `${clearOfRider.toFixed(1)} px clear of the leaning rider`,
+      );
     });
   }
 });

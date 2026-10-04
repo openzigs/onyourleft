@@ -25,6 +25,16 @@ describe('what is left here is not a unit a rider chooses', () => {
     expect(formatDuration(125)).toBe('2:05');
   });
 
+  it('writes the hour when there is none only when asked to, for the ride HUD — #1111', () => {
+    expect(formatDuration(0, 'always')).toBe('0:00:00');
+    expect(formatDuration(125, 'always')).toBe('0:02:05');
+    expect(formatDuration(3725, 'always')).toBe('1:02:05');
+    // The same seconds, the same floor: a fraction is not a second yet.
+    expect(formatDuration(59.9, 'always')).toBe('0:00:59');
+    // And everything that does not ask is unchanged.
+    expect(formatDuration(125, 'when-some')).toBe('2:05');
+  });
+
   it('names power in watts, which is the same word in both systems', () => {
     expect(POWER_UNIT).toBe('W');
   });

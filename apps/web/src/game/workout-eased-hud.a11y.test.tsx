@@ -100,6 +100,7 @@ const CONTROLLER = {
   simulationControl: () => undefined,
   requestTrainerControl: () => Promise.resolve(),
   noteGameRideEnded: () => undefined,
+  subscribe: () => () => undefined,
 };
 
 let pending: FrameRequestCallback[] = [];
