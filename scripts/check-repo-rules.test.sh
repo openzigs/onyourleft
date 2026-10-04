@@ -1468,6 +1468,20 @@ printf 'apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
 assert_violation "an exemption covers only the path it names" LIC002 \
   "apps/mobile/icon2.xml: no SPDX-License-Identifier"
 
+# #1051 reads the list once and matches a path between two newlines. An entry
+# the scanned path is a PREFIX of, and one it is a SUFFIX of, both name real
+# files (so LIC006 is silent) and neither may exempt it: without the trailing
+# newline in that match the first would, and without the leading one the second.
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf 'notes\n' > "${fixture_root}/apps/mobile/icon.xml.orig"
+mkdir -p "${fixture_root}/nested/apps/mobile"
+printf 'notes\n' > "${fixture_root}/nested/apps/mobile/icon.xml"
+printf 'apps/mobile/icon.xml.orig\nnested/apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an exemption is the whole path, not a prefix or a suffix of one" LIC002 \
+  "apps/mobile/icon.xml: no SPDX-License-Identifier"
+
 new_fixture
 write_good_app mobile
 printf 'apps/mobile/gone.xml\n' > "${fixture_root}/.spdx-exempt"
@@ -2948,18 +2962,14 @@ write_script \
   "printf '%s' a ${P} grep -v q || :"
 assert_clean "a here-string, a comment, \`|| grep -q\`, and a grep without -q all pass"
 
-# --- The real repository must pass -------------------------------------------
-
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-out="$(bash "${CHECKER}" "${REPO_ROOT}" 2>&1)"
-status=$?
-if [ "${status}" -eq 0 ]; then
-  pass=$((pass + 1))
-  printf 'ok   this repository passes its own rules\n'
-else
-  fail=$((fail + 1))
-  printf 'FAIL this repository passes its own rules\n     exit %s\n%s\n' "${status}" "${out}"
-fi
+# --- The real repository is NOT checked here (#1076) ---------------------------
+#
+# This suite used to end by running the checker over this repository and
+# requiring it clean. CI runs exactly that command -- `bash
+# scripts/check-repo-rules.sh` -- beside this suite in the same step, so the
+# case ran the whole checker a second time for no finding the first run could
+# miss; the owner dropped it on 2026-10-03 for CI time. Run the checker itself
+# (`pnpm run check:repo` runs both) to know whether the tree is clean.
 
 printf '\n%s passed, %s failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

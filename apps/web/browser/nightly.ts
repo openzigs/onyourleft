@@ -20,9 +20,12 @@
  * What may NOT be listed, whatever it costs (#866): anything that gates
  * trainer control; privacy (no network, no picture, masking, scoping,
  * erasure); licences and notices; accessibility and layout; the wiring gate.
- * Every describe below draws the REALISTIC world, which is a rung a rider
- * chooses in Settings and is off by default (ADR 0026 D-3), or measures the
- * owner's instruments for it.
+ * Every describe below but one draws the REALISTIC world, which is a rung a
+ * rider chooses in Settings and is off by default (ADR 0026 D-3), or measures
+ * the owner's instruments for it. The one is #1076's: the reflow walk's DARK
+ * palette, which the owner moved on 2026-10-03 with its light twin kept
+ * required — so layout stays a required gate, in the palette every rider
+ * starts in, and what moved is the repeat of it in the other.
  */
 
 /**
@@ -96,5 +99,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     why:
       'the owner’s measuring instruments (a triangle counter and a layer switch) for the ' +
       'realistic world; `realistic.html` is not a gate and ships in no build.',
+  },
+  {
+    spec: 'reflow.browser.spec.ts',
+    describe: 'the dark palette — #672, nightly since #1076',
+    seconds: 'about 22 s on the EPYC 7763 (run 37131982824): six walks of every route',
+    why:
+      'the SAME reflow walk as the light palette’s, which stays required, repeated under a ' +
+      'dark device. Colour moves no box, so what only this walk can find is a route that ' +
+      'throws or lays out differently in the dark palette alone (a `color-scheme: dark` ' +
+      'scrollbar). The dark palette’s colours stay required in `theme.browser.spec.ts`, ' +
+      '`links`, `button-hierarchy` and `controls-first`. Moved on the owner’s ruling of ' +
+      '2026-10-03 (#1076).',
   },
 ];

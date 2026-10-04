@@ -56,9 +56,10 @@
  * particular what the page does not prove.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
+import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
 
@@ -197,6 +198,28 @@ async function openRide(page: Page, viewport: Viewport, query = ''): Promise<voi
   expect(published.ready).toBe(true);
 }
 
+/**
+ * {@link openRide}, loaded once for every case in a row that only MEASURES the
+ * page at this viewport and query — #1051, `shared-load.ts`. A case that
+ * changes the page (a control taking the stage's class off, an inset, a click)
+ * takes its own `page` and calls `openRide`.
+ */
+async function sharedRide(browser: Browser, viewport: Viewport, query = ''): Promise<Page> {
+  return sharedPage(
+    browser,
+    `ride.html${query} at ${String(viewport.width)}×${String(viewport.height)}`,
+    (page) => openRide(page, viewport, query),
+    test.info(),
+  );
+}
+
+// The page the cases below share goes when this file's cases do (`shared-load.ts`).
+test.afterAll(releaseSharedPage);
+// What a red shared case read, since the `page` fixture's screenshot is not it (#1076).
+test.afterEach(async () => {
+  await attachSharedPageOnFailure(test.info());
+});
+
 async function measure(page: Page): Promise<StageMeasurement> {
   const measured = await page.evaluate(() => window.__oylRide?.measure());
   if (measured === undefined) {
@@ -279,8 +302,10 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * first version of `ride-harness.tsx` (#373) unmounted the whole shell and
      * set its ready flag anyway; this is what a harness like that fails.
      */
-    test('the harness is on the stage, with the widest HUD a rider can start', async ({ page }) => {
-      await openRide(page, viewport);
+    test('the harness is on the stage, with the widest HUD a rider can start', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.viewport).toEqual({ width: viewport.width, height: viewport.height });
@@ -294,8 +319,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       expect(seen.items).toHaveLength(14);
     });
 
-    test('the world fills the viewport', async ({ page }) => {
-      await openRide(page, viewport);
+    test('the world fills the viewport', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       for (const box of [seen.stage, seen.world]) {
@@ -306,8 +331,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       }
     });
 
-    test('the page chrome is absent', async ({ page }) => {
-      await openRide(page, viewport);
+    test('the page chrome is absent', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.chrome).toEqual({
@@ -325,8 +350,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * ride*, wholly inside the viewport, uncovered, with nothing scrolled —
      * and nothing scrollable, so there is no second position to be wrong at.
      */
-    test('every reading and every control is on screen with no scrolling', async ({ page }) => {
-      await openRide(page, viewport);
+    test('every reading and every control is on screen with no scrolling', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.scrollY).toBe(0);
@@ -341,8 +366,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * outgrew its cell would be CLIPPED — and a clipped panel still has a box,
      * which is why this asks about the panels as well as about what is in them.
      */
-    test('every panel is whole, and no panel is laid over another', async ({ page }) => {
-      await openRide(page, viewport);
+    test('every panel is whole, and no panel is laid over another', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
@@ -369,8 +394,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * the real renderer drew. A panel over that box is a panel over the one
      * thing #424 exists to make prominent.
      */
-    test('no panel is laid over the rider', async ({ page }) => {
-      await openRide(page, viewport);
+    test('no panel is laid over the rider', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       const box = riderBox(viewport);
@@ -384,9 +409,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * rather than asserted, so a reader of the run sees both widths.
      */
     test('the rider’s box, upright and at the lean cap, is a measurement', async ({
-      page,
+      browser,
     }, testInfo) => {
-      await openRide(page, viewport);
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       const upright = riderBox(viewport, 0);
@@ -410,8 +435,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       );
     });
 
-    test('a primary reading is visibly larger than a secondary one', async ({ page }) => {
-      await openRide(page, viewport);
+    test('a primary reading is visibly larger than a secondary one', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.secondaryValuePixels).toBeGreaterThan(0);
@@ -424,8 +449,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      * #373's property, kept: the line is above the controls **in the panel the
      * controls are in**, so a rider who can see *Pause* can see it.
      */
-    test('the trainer line is above the ride controls, in their panel', async ({ page }) => {
-      await openRide(page, viewport);
+    test('the trainer line is above the ride controls, in their panel', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       const line = named(seen.items, 'the trainer line').box;
@@ -472,8 +497,8 @@ for (const viewport of OVERLAY_VIEWPORTS) {
  */
 for (const viewport of STACKED_VIEWPORTS) {
   test.describe(viewport.name, () => {
-    test('the harness is on the stage, stacked', async ({ page }) => {
-      await openRide(page, viewport);
+    test('the harness is on the stage, stacked', async ({ browser }) => {
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
@@ -486,9 +511,9 @@ for (const viewport of STACKED_VIEWPORTS) {
     });
 
     test('Pause, End ride and the trainer line are on screen with no scrolling', async ({
-      page,
+      browser,
     }) => {
-      await openRide(page, viewport);
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       expect(seen.scrollY).toBe(0);
@@ -503,10 +528,10 @@ for (const viewport of STACKED_VIEWPORTS) {
       }
     });
 
-    test('nothing is wider than the viewport', async ({ page }) => {
+    test('nothing is wider than the viewport', async ({ browser }) => {
       // SC 1.4.10 is about scrolling in TWO dimensions. 320 px is the width at
       // which #423's first layout ran the heart rate off the right-hand edge.
-      await openRide(page, viewport);
+      const page = await sharedRide(browser, viewport);
       const seen = await measure(page);
 
       const wide = [...seen.items, ...seen.panels].filter(
