@@ -1,15 +1,20 @@
 # ADR 0045: Fit from one side camera — four rough sagittal angles on one surface, inside the patent design-around and the wellness carve-out
 
-- **Status**: Accepted, on the owner's rulings of 2026-10-03, which are quoted verbatim in Context,
-  and **subject to the owner reading this text and approving it before it merges** (#1059's last
-  acceptance criterion). Every point the rulings do not settle is marked **the author's choice**
-  where it is made, and each takes the narrower option. **Nothing is built by this ADR**, and D-0
-  says what has to be true before anything that renders a fit angle may ship
+- **Status**: Accepted, on the owner's rulings of 2026-10-03 and 2026-10-04, which are quoted
+  verbatim in Context. **The owner approved this ADR for merge on 2026-10-04**: asked *"Do you
+  approve ADR 0045 (bike fit) for merge?"*, the owner answered *"Approve"* (#1059's last acceptance
+  criterion). The same day the owner ruled that a model's write-up may give equipment and position
+  advice (*"Allow advice too"*), which D-1, D-2, D-10 and D-11 record. Every point the rulings do not
+  settle is marked **the author's choice** where it is made, and each takes the narrower option.
+  **Nothing is built by this ADR**, and D-0 says what has to be true before anything that renders a
+  fit angle may ship
 - **Date**: 2026-10-04
 - **Deciders**: **the owner**, on whether fit exists at all (ruling 3 of epic
   [#1055](https://github.com/openzigs/onyourleft/issues/1055)), on the FDA condition-6 risk, on the
   trunk angle's reference, and on tying a capture to its ride (the three rulings in the comment on
-  #1055 and #1059). The author decided the engineering content and drafted the wording
+  #1055 and #1059), and on **2026-10-04** on approving this ADR, on one small ADR for the phone's
+  tilt and ADR 0044's acceptance, and on equipment and position advice in a model's write-up. The
+  author decided the engineering content and drafted the wording
 - **Issue**: [#1059](https://github.com/openzigs/onyourleft/issues/1059). Parent epic
   [#1055](https://github.com/openzigs/onyourleft/issues/1055)
 - **Number**: **0045**, reserved by epic #1055 on 2026-10-03, which read *"The next free number is
@@ -25,17 +30,25 @@
 - **Supersedes**, each **to the extent named in D-1 and no further**:
   - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-3**, *"No absolute joint angle is ever
     reported as a number"*, for **the four angles D-3 below defines, on the one surface D-7 names**.
-  - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-5**, for its **product boundary
-    only**: the program now offers a check it calls a *fit check*. **Both clauses of ADR 0030
-    D-5's rule stand unchanged**, the equipment clause and the verdict clause (D-1, D-8).
+  - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-5**, for its **product boundary**:
+    the program now offers a check it calls a *fit check*. **And, by the owner's ruling of
+    2026-10-04, for a model's write-up (ADR 0035)**: ADR 0030 D-5's equipment clause, ADR 0030
+    **R4**, and the *"or otherwise"* half of ADR 0030 **R7** no longer bind a write-up, which may
+    name a component and suggest an equipment or position change (D-10). **For everything the app
+    itself writes, the Fit check section included, ADR 0030 D-5's equipment clause, R4 and R7 stand
+    unchanged**, and ADR 0030 D-5's verdict clause stands everywhere (D-1, D-8).
   - ADR 0030's body is not edited. It carries an appended `## Amendments` entry dated **2026-10-04**
     pointing here, under [ADR 0013](0013-adr-amendments.md), as ADR 0033 and ADR 0035 each did.
+  - ADR 0035's body is not edited and **no ADR 0035 decision is superseded**: ADR 0035 D-1 left
+    ADR 0030 D-5 unscreened on model text as an accepted risk, and the owner's ruling turns that
+    risk into a permission (D-10).
 - **Narrows, without superseding**: ADR 0030 **D-8**, what a machine checks. It **stands**, with its
   first bullet **narrowed, not deleted**, for one file named by exact path (D-1, D-7).
-- **Does NOT supersede**, named so none of it is read as touched: ADR 0030 **D-1**, **D-2** as
-  amended on 2026-09-28 (R1 to R10, with R1 relaxed only as D-3 above), **D-4** (nothing
-  frontal-plane), **D-6** (decided explicitly in D-9 below: **kept**) and **D-7** (the live silence
-  rule); ADR 0030's 2026-09-23 amendment and its six conditions; [ADR 0029](0029-camera-imagery-as-a-data-class.md)
+- **Does NOT supersede**, named so none of it is read as touched: **ADR 0030 D-1**; **ADR 0030
+  D-2** as amended on 2026-09-28 (R1 to R10, with R1 relaxed only as this ADR's D-3 says, and R4
+  and R7's non-medical half relaxed for a model's write-up only, as above); **ADR 0030 D-4**
+  (nothing frontal-plane); **ADR 0030 D-6** (decided explicitly in this ADR's D-9: **kept**); and
+  **ADR 0030 D-7** (the live silence rule); ADR 0030's 2026-09-23 amendment and its six conditions; [ADR 0029](0029-camera-imagery-as-a-data-class.md)
   **D-8** and **D-9**; [ADR 0033](0033-side-camera-link.md) **D-3**, including its rule that nothing
   joins pose numbers to a ride reading or a wall-clock time (this ADR's D-5 and D-12 keep it);
   [ADR 0035](0035-model-written-ride-write-ups.md) **D-4**'s degree screen, which D-10 keeps whole;
@@ -96,7 +109,30 @@ The owner's comment on #1055 and on #1059, posted **2026-10-03**, verbatim:
 These are decided and are not argued again below. Ruling 3 is about a **snapshot**, which ADR 0044
 owns. This ADR applies the same tie to a **fit check** (D-12). ⚠️ **That application is the
 author's reading of the ruling**, made because a fit check and a snapshot are taken in the same
-session on the same path, and it is one of the points the owner confirms before this merges.
+session on the same path. The owner approved this ADR, that reading included, on 2026-10-04 (below).
+
+### The owner's rulings of 2026-10-04
+
+Asked on 2026-10-04, answered the same day, each question with its answer verbatim:
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | *"Do you approve ADR 0045 (bike fit) for merge?"* | *"Approve"* |
+| 2 | The phone's tilt message on ADR 0033 D-3's list, together with ADR 0044's acceptance | *"One small ADR for both"* |
+| 3 | AI write-ups and bike components | *"Allow advice too"* |
+
+What each one does here:
+
+1. **This ADR is approved** for merge, with the author's choices marked in it. The Status records it.
+2. **One small ADR, written separately, will add the phone's tilt message to ADR 0033 D-3's list
+   and accept ADR 0044.** This ADR does not write it. Until it is accepted, D-0's item 4 and its
+   trunk precondition both stand, and the trunk reads *"not measured"*.
+3. **A model's write-up (ADR 0035) may now name components and may suggest equipment or position
+   changes**, such as *"raise your saddle"* or *"a shorter crank may suit you"*. That supersedes
+   ADR 0030 D-5's equipment clause, R4 and R7's non-medical half **for write-ups only** (D-1),
+   removes the component-withholding screen the draft of this ADR planned as P8 for #1067 (D-2,
+   D-10), and puts element (g) of US 12,499,571 in play in write-up output (D-2). **The Fit check
+   section is unchanged by it**: the app's own sentences show numbers and give no advice (D-7).
 
 The review of spike 0020 ([PR #1073](https://github.com/openzigs/onyourleft/pull/1073)), recorded in
 a comment on #1059 on 2026-10-03, asks this ADR to carry four things. Each is carried:
@@ -115,7 +151,9 @@ independent claims 1, 10 and 17 on 2026-10-03 against the fit design #1055 propo
 
 - **The fit design is still outside on (d), (e), (f) and (g)**, and in the US on (h). What the
   ruling cost is **margin**: ADR 0030 D-5's verdict clause was one of the reasons for (g), and the
-  standing half of ADR 0030 D-5 (no size, component or direction) is what holds it now.
+  standing half of ADR 0030 D-5 (no size, component or direction) is what held it. ⚠️ **Since the
+  owner's ruling of 2026-10-04 that half no longer binds a model's write-up**, so (g) may be present
+  in write-up output, and D-2 records what still keeps the claims outside.
 - ⚠️ **The pending Canadian family member CA 3,183,442 A1 has no Markush group (h) in its claim
   1.** Spike 0006 did not record it. In Canada (d) must hold by itself.
 - **Element (c) is uncertain.** An angle taken from two directions needs no length, which is the
@@ -123,7 +161,8 @@ independent claims 1, 10 and 17 on 2026-10-03 against the fit design #1055 propo
   multiplying every coordinate by k, so a second rule is needed. And shipped code
   (`pose-plausibility.ts` §`implausibility`, `side-report.ts` §`saddleOf` and §`jointAngle`)
   already computes segment lengths and their proportions.
-- **Eight checkable rules, P1 to P8**, which D-2 below adopts.
+- **Eight checkable rules, P1 to P8**, which D-2 below adopts, with P8 replaced by the owner's
+  ruling of 2026-10-04 (D-2).
 
 ### The regulatory documents, re-read for this ADR
 
@@ -210,7 +249,10 @@ item 5 → D-10; item 6 → D-11; item 7 → D-12; item 8 → D-13.
 >    shows no knee number (this ADR's D-5 and D-6). Item 1 is about the owner's devices; this is about the rider's.
 > 4. **ADR 0044 is accepted** ([#1058](https://github.com/openzigs/onyourleft/issues/1058)). It merged
 >    on 2026-10-04 with its Status *Proposed* and the owner's approval of its wording, and its D-2 is
->    conditional on spike 0021, so this item holds once its Status reads *Accepted*. It is a
+>    conditional on spike 0021, so this item holds once its Status reads *Accepted*. By the owner's
+>    ruling of 2026-10-04, **one small ADR**, written separately, accepts ADR 0044 and adds the
+>    phone's tilt message (Context), so it discharges this item and the trunk precondition below
+>    together. It is a
 >    precondition because the capture's transport and any picture buffer are its decisions, and the privacy policy and
 >    Play Data Safety wording ([#1060](https://github.com/openzigs/onyourleft/issues/1060)) are
 >    approved by the owner, under [ADR 0033](0033-side-camera-link.md) D-10's rule that the
@@ -232,7 +274,9 @@ sweep. It is written down so that changing it is a decision.
 > precondition**, and the trunk stays *"not measured"* until an accepted ADR widens the list.
 > Until such an ADR is accepted, **every fit check reports the trunk as *"not measured"*** with its
 > reason in words (D-6), and BDC and TDC are found by D-4's fallback. The other three angles do
-> not wait for it. Who writes that ADR is an open question for the owner.
+> not wait for it. **Which ADR does it is decided**: the owner ruled on 2026-10-04 for *"One small
+> ADR for both"*, the tilt message and ADR 0044's acceptance (Context). It is written separately,
+> and this precondition holds until it is accepted.
 
 Code that cannot reach a rider (the pure computation, the store record, fixtures) may land before
 the preconditions hold. The rule is about what a rider can start and see.
@@ -244,13 +288,14 @@ the preconditions hold. The rule is about what a rider can start and see.
 | ADR 0030 **D-3**, no absolute joint angle | **Superseded** for exactly the four angles D-3 defines, rendered only on the surface D-7 names, each with D-8's caveat in the same sentence. Everywhere else D-3 stands, including for a limb angle, a segment length and a body dimension, which this ADR never permits anywhere |
 | ADR 0030 **D-3**'s second reason, condition 6 | **Accepted as a risk by the owner** (D-11). It is not argued away |
 | ADR 0030 **R1**, a quantity only as a change | **Relaxed only as D-3 is**: the four fit angles may be standing values on D-7's surface. Everything else this app says about a body is still a difference |
-| ADR 0030 **D-5**, no sizing, no equipment, no fit verdict | **Superseded for its product boundary only**: the program offers a *fit check*. **The equipment clause stands** (patent element g, and spike 0008 §7's EU reason). **The verdict clause stands**: no fit check output characterises a position or fit as correct, optimal, good or bad, and no verdict, **signed or unsigned**, is adopted (D-8) |
+| ADR 0030 **D-5**, no sizing, no equipment, no fit verdict | **Superseded for its product boundary**: the program offers a *fit check*. **The equipment clause is superseded for a model's write-up only**, by the owner's ruling of 2026-10-04 (*"Allow advice too"*): a write-up may name a component and suggest an equipment or position change (D-10). **For everything the app itself writes, the Fit check section included, the equipment clause stands** (D-7). **The verdict clause stands everywhere**: no fit check output characterises a position or fit as correct, optimal, good or bad, and no verdict, **signed or unsigned**, is adopted (D-8). ⚠️ **That the verdict clause also stands for write-ups is the author's reading** of a ruling that names advice and not verdicts, and it is the narrower one |
 | ADR 0030 **D-4**, nothing frontal-plane | **Stands, unchanged**, as a number, a word, or a line drawn on a picture. The fit check is sagittal and near-side only |
-| ADR 0030 **R4 to R9** | **Stand.** R4: no component, size or direction. R5: no condition or injury, in any tense. R6: no clinical, professional or *"accurate to"* framing (D-8 records the one fixed negative phrase the owner's ruling uses). R7: no prompt or alert. R8: **load-bearing**, every fit number carries its uncertainty in the same sentence. R9: no score or ranking |
+| ADR 0030 **R4 to R9** | **Stand**, with **R4 and R7's non-medical half relaxed for a model's write-up only** (D-10). R4: no component, size or direction, still binding every sentence the app writes. R5: no condition or injury, in any tense, write-ups included. R6: no clinical, professional or *"accurate to"* framing, write-ups included (D-8 records the one fixed negative phrase the owner's ruling uses). R7: no prompt or alert; a write-up may now suggest an equipment or position change, and still no medical prompt and no alert. R8: **load-bearing**, every fit number carries its uncertainty in the same sentence, and a write-up says its advice rests on a rough estimate (D-10). R9: no score or ranking |
 | ADR 0030 **R10** and **D-6**, literature ranges | **Kept**, decided explicitly in D-9 |
 | ADR 0030 **D-7**, live silence | **Stands.** No fit angle is shown, spoken or sent while a ride is recording or paused (D-7) |
 | ADR 0030 **D-8**, what a machine checks | **Stands**, and its first bullet is **narrowed, not deleted**, for one file named by exact path (D-7). It is not superseded |
-| ADR 0035 **D-4**, the degree screen on model text | **Stands whole** (D-10), and gains one screen for write-ups that carry fit |
+| ADR 0035 **D-4**, the degree screen on model text | **Stands whole** (D-10). The component screen the draft added here (P8) is **removed** by the owner's ruling of 2026-10-04; one narrow screen for mobility words is added for (e) (D-2, D-10) |
+| ADR 0035 **D-1**, ADR 0030 D-5 unscreened on model text as an accepted risk | **Not superseded.** The owner's ruling turns that accepted risk into a permission for equipment and position advice (D-10) |
 | ADR 0033 **D-3**, the join rule | **Stands** (this ADR's D-5 and D-12) |
 
 ⚠️ **The epic allowed more than this ADR takes.** Ruling 3 supersedes ADR 0030 D-3 and D-5 *"to the
@@ -274,10 +319,29 @@ and the check that holds it.
 | **P5** (e) | **Every angle is reported at a named crank event (D-3), never as a minimum, a maximum or a range over the stroke**, and no output names a flexibility, mobility or range-of-motion category | The output type has one value per angle at a named event, and a test asserts its keys. The wording falls under R5, R6 and D-8 |
 | **P6** (g, claim 17) | **No data about equipment exists in the fit path.** No frame size, stack, reach, saddle height, setback, stem, crank length, component or catalogue, as a table, a type field or a model input | A test asserts the keys of every fit type and of the model's fit section. A source scan of the fit modules for those words |
 | **P7** (g) | **No fit output names a component, a size, or a direction to move either.** No verdict is adopted (D-8), so the question of signing one does not arise | A closed list of every fit sentence, in one wording module (D-7), with a test over the list for D-8's component, size, direction and verdict words |
-| **P8** (g) | **A model's write-up that names a component, a size, or a direction to move one is withheld whole** by the write-up screen, whatever the prompt said, **whether or not its input carried a fit section**. This is spike 0020's P8 as written, unconditional. The matchers are D-10's | `write-up-screen.test.ts` cases built with `model-answers-testing.ts` ([#1067](https://github.com/openzigs/onyourleft/issues/1067)), including one whose input has **no** fit section. Mutation: redact instead of withhold; or apply the screen only when the input has a fit section, which that case turns red |
+| **P8** (e) | ⚠️ **Spike 0020's P8, which withheld a write-up naming a component, a size or a direction to move one, is withdrawn** by the owner's ruling of 2026-10-04 (*"Allow advice too"*): a write-up may now do all three (D-10). **In its place: a model's write-up that assesses the rider's flexibility, mobility or range of motion is withheld whole** by the write-up screen, whatever the prompt said, **whether or not its input carried a fit section**, so that advice cannot carry element (e) into the product. The matchers are D-10's | `write-up-screen.test.ts` cases built with `model-answers-testing.ts` ([#1067](https://github.com/openzigs/onyourleft/issues/1067)), including one whose input has **no** fit section, and one that names a component and **is shown**. Mutation: redact instead of withhold; or apply the screen only when the input has a fit section, which the first case turns red; or keep the old component screen, which the second turns red |
 
 **P1 and P3 together** are the claim that matters: the numbers depend on segment directions alone.
 One without the other is a vacuous pass.
+
+> **Element (g) and the owner's ruling of 2026-10-04.** Asked about AI write-ups and bike
+> components, the owner answered *"Allow advice too"* on **2026-10-04**. The effect, stated plainly:
+>
+> - **Element (g) of US 12,499,571**, *"selecting … the sporting equipment based on the model from
+>   one or more models of sporting equipment"*, **may now be present in write-up output.** A
+>   write-up that says *"a shorter crank may suit you"* is arguably a selection of equipment. P6
+>   and P7 still keep (g) out of everything the app itself computes and writes: no equipment data
+>   on the fit path, and no component, size or direction in a fit sentence.
+> - **The US claims stay outside because (d), (e), (f) and (h) are still absent.** There is no
+>   calibration factor from a height or a marker (P1, P2), so no calibrated segment lengths (d) and
+>   no calibrated model (f) to base a selection on, and (h)'s two formulas are never computed. No
+>   mobility is assessed (P5 for the app's output, P8 for a write-up's). **P1 to P8 stay, and each is
+>   now load-bearing**: with (g) no longer an absence in write-ups, every independent claim of '571
+>   is avoided only through these four elements.
+> - **In Canada the margin is thinner.** CA 3,183,442's claim 1 has **no (h)**, so there it rests
+>   on (d), (e) and (f) alone, held by P1, P2 and P5/P8. (Its (g) reads *"based on the calibrated
+>   model"*, which still needs (f), but that is the same absence counted again, not a new one.)
+> - **The owner accepted this risk** with the ruling. Question **G** below is what to ask a lawyer.
 
 > **The output property, stated once.** **No fit output type has a length, a size, a component or
 > a direction field.** "Fit output type" means every type on the fit path: the computation's
@@ -421,13 +485,20 @@ one is a decision for this ADR's successor.
 
 > **The rule.** A fit angle is rendered as a number in **one** place: the **Fit check** section of a
 > saved ride's page. Every other surface stays under ADR 0030 D-3 exactly as it was.
+>
+> **The Fit check section shows numbers only, and gives no advice.** The owner's ruling of
+> 2026-10-04 allows equipment and position advice in **a model's write-up only** (D-10). Every
+> sentence on this section is the app's own, from the wording module, and stays under ADR 0030
+> D-5's equipment clause, R4 and P7: no component, no size, no direction to move either. Advice
+> appears only in a write-up, which is its own section of the ride's page (ADR 0035), and never
+> inside the Fit check section.
 
 | Surface | May show a fit angle? |
 |---|---|
 | **The Fit check section of a ride's page**, `apps/web/src/detail/FitCheckSection.tsx`, rendered by `views/ActivityDetailView.tsx` on route `activity-detail` (`#/activities/:activity`) and the same page in the Activities list–detail pane (`#/activities/selected/:id`), for a ride that has a fit check | **Yes**, and only in sentences from the wording module below |
 | **The account export** (#35), as numeric data in the fit check's manifest entry (D-12) | **Yes, as data**: numbers in named fields, no sentence. It is the rider's own copy, not a screen |
 | The HUD, the game, the Ride screen, the live view (ADR 0044), the Camera and side-camera screens, Home, the library and every list row, Analysis, the side-camera report section, an announcement, a sound, a notification, a share preview, and any single-ride file export (FIT, GPX, TCX) | **No** |
-| A model's write-up (ADR 0035) | **No**: D-10 |
+| A model's write-up (ADR 0035) | **No angle**: D-10. It is the one place advice may appear |
 
 ⚠️ **The author's choice**: one section on the ride's page rather than a route of its own. A fit
 check belongs to the ride it was taken in (D-12), the ride's page is where its snapshot already
@@ -471,7 +542,7 @@ the fit path fires a notification or an announcement.
 ### D-8 — Wording: R8's caveat in every sentence, the R6 phrase, and no verdict
 
 **Every sentence that carries a fit angle has the caveat in the same sentence (R8).** The form is
-drafted here, and the owner approves it with this ADR. ⚠️ **Drafted, not yet approved**:
+drafted here, and the owner approved it with this ADR on 2026-10-04 (*"Approve"*):
 
 > *"Knee at the bottom of the stroke: about 145°, a rough estimate from one camera and not a
 > professional bike fit; studies of camera measurements like this one found them off by about 6 to
@@ -553,42 +624,68 @@ not be copied without reading the source: the author's recollection, **not verif
 Holmes et al. is usually cited for 25 to 35 degrees of knee **flexion**, which as the interior angle
 D-3 defines is 145 to 155 degrees.
 
-### D-10 — The model write-up (ADR 0035): it may read fit, and it may not restate an angle
+### D-10 — The model write-up (ADR 0035): it may read fit and give advice, and it may not restate an angle
+
+> **The owner's ruling, 2026-10-04.** Asked about AI write-ups and bike components, the owner
+> answered *"Allow advice too"*. **A model's write-up may name components, and may suggest
+> equipment or position changes**, such as *"raise your saddle"* or *"a shorter crank may suit
+> you"*. This is the only place in the product that advice may appear (D-7).
 
 - **What a model is sent**: the fit check of **the ride the write-up is about**, and only that one,
   as angles (rounded as D-3 renders them), the reason for each one not measured, and the revolution
   count. No length, coordinate, picture, id or time (#1067, and P6 for the section's keys). No fit
-  section, never zeros, when the ride has no fit check.
+  section, never zeros, when the ride has no fit check. ⚠️ **Advice changes nothing about the
+  input**: no rider height, no segment length and no equipment data is sent, so a model has nothing
+  to calibrate with (P2, P6), and that is what keeps (d), (f) and (h) absent from its advice (D-2).
 - **The write-up screen's degree matchers are NOT narrowed.** [ADR 0035](0035-model-written-ride-write-ups.md)
   D-4 withholds a write-up containing a degree sign, *"deg"* after a number, or the word *"degree"*,
-  and it still does. A model's write-up is **not** an angle surface (D-7). A model may write about
-  the rider's fit in words. The angles themselves are on the section above it, from this program's
-  own wording, with R8's caveat. ⚠️ **The author's choice**, and the narrower one. A model's
-  restated angle would carry whatever caveat the model chose, or none, and R8 cannot be screened
-  on free text.
-- **P8 is added, for every write-up**: a write-up is also withheld whole if it names a component, a
-  size, or a direction to move one, **whether or not its input carried a fit section**. Unconditional
-  is spike 0020's rule as written, and element (g) is the reason: a write-up built from the
-  side-report summary alone can say *"raise your saddle 5 mm"* as readily as one built with fit
-  (spike 0020 §2.1). The one-rewrite-then-withhold rule of ADR 0035 D-4 applies.
-  - **What it matches**, case-insensitively and **on word boundaries**: the component words saddle,
-    seatpost, stem, handlebar, cleat, spacer, shim and setback, with their plurals; the phrases
-    *frame size*, *crank length*, *saddle height*, *seat height*, *stack* and *reach* **when next to
-    a component word or a number**; and a number followed by a unit of length (*mm*, *millimetre*,
-    *cm*, *centimetre*, *inch*, and their plurals and abbreviations). D-8's *crank*, *bars* and
-    *seat* are left out on their own, because *"crank"*, *"energy bars"* and *"stayed in the seat"*
-    are ordinary ride prose; *crank length* and *seat height* are in. A direction to
-    move a component necessarily names the component or a size, so it is caught by those. **D-8's
-    direction and verdict words are not matched on their own in model text**: *"up"*, *"down"*,
-    *"high"* and *"low"* are ordinary words about a ride (*"your power was high on the climb"*), and
-    matching them would withhold nearly every write-up. ⚠️ **The author's choice**. #1067 may add to
-    the list, never remove, and records each word it adds with the false withholds it measured on
-    `model-answers-testing.ts`.
-  - **What this does to ADR 0035.** It **tightens** ADR 0035 D-1, which left ADR 0030 D-5 unscreened on model
-    output and recorded that as an accepted risk (*"What is accepted and not narrowed"*). Narrowing
-    an accepted risk is not a reversal, so ADR 0035 is **not** superseded, but a write-up ADR 0035
-    would have shown is now withheld if it names a component. This is an owner question with this
-    ADR.
+  and it still does. A model's write-up is **not** an angle surface (D-7). **It may not restate an
+  absolute angle**, advice included: *"raise your saddle until your knee is at 150°"* is withheld.
+  A model may write about the rider's fit in words. The angles themselves are on the section above
+  it, from this program's own wording, with R8's caveat. ⚠️ **The author's choice**, and the
+  narrower one. A model's restated angle would carry whatever caveat the model chose, or none, and
+  R8 cannot be screened on free text.
+- **ADR 0030 D-4 holds for write-ups**: nothing in the frontal plane, as advice or otherwise, and
+  ADR 0035 D-4's frontal-plane screen is unchanged.
+- **The component screen the draft planned for #1067 is removed.** The draft added a P8 that
+  withheld every write-up naming a component, a size or a direction to move one. The owner's ruling
+  withdraws it (D-2): a write-up that says *"raise your saddle 5 mm"* is now **shown**. #1067 does
+  not build that screen, and its tests include a write-up giving equipment advice that passes. Its
+  new template version also stops asking the model not to recommend a size, a component or a
+  direction to move one, which ADR 0035 D-1's item 5 records as a request of the template, not a
+  decision; the template's other asks (no angle, nothing side to side, no condition) stay.
+- **What still binds advice in a write-up**:
+  - **R6**: no clinical, professional or *"accurate to"* framing. Advice is a suggestion from a
+    rough estimate, never *"what a fitter would set"*. ⚠️ **The author's choice**: now that advice
+    is allowed, #1067 adds a screen that withholds a write-up containing *"clinical"*, *"medical"*,
+    *"validated"*, *"accurate to"*, *"professional fit"* or *"professional bike fit"*, matched
+    case-insensitively on word boundaries. *"Professional"* alone is not matched, because
+    *"professional riders"* is ordinary ride prose.
+  - **R8's rough-estimate caveat**: wherever a write-up's input carried a fit section or a pose
+    summary, the app shows, in its own words beside the write-up, that anything it says about
+    position rests on a rough estimate from one camera and is not a professional bike fit. The
+    template (#1067) also asks the model to say so beside any advice; that half is a request.
+  - **R5 and condition 3: no clinical or medical claim.** Advice may not name a condition, an
+    injury or a symptom, or claim to prevent or relieve one (*"to stop your knee pain"*). The
+    template asks it, and as ADR 0035 D-1 records for R5 on model text, that is a request, not a
+    screen.
+  - **R7's medical half**: no prompt to see a clinician, and no alert. A write-up is still read
+    only when the rider opens the ride's page.
+  - **P8 (e)**: no assessment of flexibility, mobility or range of motion. A write-up that names
+    one is withheld whole, with or without a fit section, matched case-insensitively on word
+    boundaries: *flexibility*, *flexible*, *inflexible*, *mobility*, *range of motion*, *tight
+    hamstrings*, *tight hips*. ⚠️ **The author's choice**, as narrow as it can be while keeping (e)
+    out of advice. #1067 may add to the list, never remove, and records each word it adds with the
+    false withholds it measured on `model-answers-testing.ts`. The one-rewrite-then-withhold rule
+    of ADR 0035 D-4 applies.
+  - **ADR 0030 D-5's verdict clause, R3 and R9**: advice suggests a change, and does not call the
+    rider's position correct, wrong, good, bad or optimal, or score it (D-1). That is a template
+    instruction, not a screen.
+- **What this does to ADR 0035.** ADR 0035 D-1 left ADR 0030 D-5 unscreened on model output and
+  recorded that as an accepted risk (*"What is accepted and not narrowed"*). The owner's ruling turns
+  the equipment half of that risk into a permission. ADR 0035 is **not** superseded: no ADR 0035
+  decision changes, and the screens it built stand. The two screens this ADR adds (R6's words and
+  P8's mobility words) narrow what ADR 0035 would have shown, which is not a reversal.
 - ⚠️ **The known gap, stated rather than hidden**: ADR 0035 D-1 already records that a bare number
   such as *"your knee reached 145 at the bottom"* passes the screen. With fit in the input, that gap
   is wider. The new template version (#1067) asks the model not to restate the angles, and that is
@@ -605,13 +702,26 @@ ADR 0030 quotes it.
 | 2 | *"do not involve an intervention or technology that may pose a risk to the safety of users or other persons if specific regulatory controls are not applied"* | **Holds.** Nothing on the fit path reaches a trainer control point, the HUD, the announcer or a ride-time screen. Nothing is shown during a ride (D-7) |
 | 3 | *"are not intended for the diagnosis, cure, mitigation, prevention, or treatment of a disease or condition"* | **Holds while R5 holds**, and D-8's body words make it a test on the fit sentences |
 | 4 | *"are not intended to substitute for an FDA-authorized, cleared, or approved device"* | **Holds while R6 holds**: the caveat says in words that it is *"not a professional bike fit"* |
-| 5 | *"do not include claims, functionality, or outputs that prompt or guide specific clinical action or medical management"* | **Holds while R7 and ADR 0030 D-5's equipment clause hold.** Read only after the rider opens the ride's page; no alert; no verdict, no range comparison and no direction (D-8, D-9), which is what stops a number becoming guidance |
+| 5 | *"do not include claims, functionality, or outputs that prompt or guide specific clinical action or medical management"* | **Holds while R7's medical half holds.** On the Fit check section: read only after the rider opens the ride's page; no alert; no verdict, no range comparison and no direction (D-7, D-8, D-9). In a write-up: equipment and position advice is allowed (D-10), and **is not *"specific clinical action or medical management"***, recorded below |
 | 6 | *"do not include values that mimic those used clinically unless validated (e.g. manufacturer testing, peer-reviewed clinical literature) to reflect those values"* | ⚠️ **Breached on its face, and accepted.** A knee angle at bottom dead centre is a value used clinically, and nothing in this program validates one from a single uncalibrated phone. The peer-reviewed literature that exists puts markerless error at 6 to 10 degrees with **four** cameras |
 
 > **The decision, the owner's.** Fit angles are shown although they may breach condition 6, and so
 > may place the product outside the general-wellness carve-out. **The owner accepts that risk**, on
 > 2026-10-03, in ruling 1 of the comment quoted in Context, *"accept the risk, framed"*, on the
 > precedent of [ADR 0035](0035-model-written-ride-write-ups.md) D-1.
+
+**Equipment and position advice under condition 5.** Condition 5, in full, is that the product's
+features *"do not include claims, functionality, or outputs that prompt or guide specific clinical
+action or medical management"*. Since the owner's ruling of 2026-10-04 a write-up may prompt an
+action: *"raise your saddle"*, *"a shorter crank may suit you"*. **The author's reading, recorded
+here: that action is not clinical and is not medical management.** It is a change to a bicycle,
+which a rider makes in a garage, and it names no condition, symptom or treatment. It stays that
+way only while the advice keeps clear of the clinical: no condition, injury or symptom (R5), no
+claim to prevent or relieve one, no prompt to see a clinician (R7's medical half), and no
+clinical, professional or *"accurate to"* framing (R6), as D-10 lists. ⚠️ **An unsigned engineer's
+reading, not a regulatory opinion**: *"lower your saddle to ease your knee pain"* would be advice
+toward managing a symptom, and it is R5, not condition 5's wording, that keeps it out. Question
+R-1 below covers condition 6, and **R-5** asks this one.
 
 This is option **(i)** of #1059's three. **(ii)**, narrowing the claim, is taken as far as it goes
 without removing the numbers: four angles, one surface, rounded, caveated, no verdict, no range
@@ -626,7 +736,11 @@ and gives the published error (D-8); and no number is placed against a target (D
 wellness exclusion of MDCG 2019-11 still holds while the intended purpose is fitness (§4.1). What
 fit changes is that spike 0008's Question A was asked about a product where *"no absolute value is
 rendered"*, and that is no longer true. R5 remains the rule carrying the EU margin (§4.3), ADR 0030
-D-5's equipment clause the second (§7), and ADR 0030 D-6 is kept for spike 0008's reason (D-9). ⚠️ **And Article
+D-5's equipment clause the second (§7) for everything the app itself writes, and ADR 0030 D-6 is
+kept for spike 0008's reason (D-9). ⚠️ **For a model's write-up that second margin is gone** since
+the owner's ruling of 2026-10-04: spike 0008 §7 found the musculoskeletal example turns on
+*recommending* something to do, and a write-up may now recommend an equipment or position change,
+so in a write-up R5 carries the EU margin alone. ⚠️ **And Article
 2(12)'s *intended purpose* includes promotional material**: the word *"fit"* in a store listing,
 a release note or `README.md` is the manufacturer describing the product, and spike 0008 §8's gap,
 that nothing scans those, is wider now that the product has a feature called a fit check.
@@ -679,6 +793,13 @@ that nothing scans those, is wider now that the product has a feature called a f
   superseding ADR, not a review note.
 - **A model restates an angle without a degree sign**, and the gap D-10 records is exploited. Then
   the write-up screen needs a rule for write-ups that carry fit, which this ADR did not write.
+- **A write-up's advice is argued to be (g) based on a calibrated model**, or to assess mobility.
+  Since 2026-10-04 (g) is no longer an absence in write-ups, so every claim of the family is avoided
+  only by (d), (e), (f), and in the US (h). A length, a height or a mobility word reaching a
+  write-up's input or output would remove that last margin.
+- **Advice drifts into the clinical**: a write-up that ties a change to a symptom or a condition.
+  Then condition 5 and R5 are breached together, and the template's request has failed often
+  enough to need a screen.
 - **The FDA guidance is revised**, or spike 0008's documents are. Every quotation here is from
   ADR 0030's read of 2026-09-22 and spike 0008's.
 - **One of spike 0006 §5's ten unread documents is closer than '571.** A fit report with absolute
@@ -695,8 +816,10 @@ that nothing scans those, is wider now that the product has a feature called a f
 - **#1064 to #1067 can be written against rules rather than a taste**: each rule in D-2 is a test,
   D-7 names exactly what the gate is narrowed to, and D-8 gives #1066 its word lists.
 - **The rider gets the thing ADR 0030 said riders come for, partly.** Four of their own angles, with
-  the honest error beside each. Not *"your saddle is 8 mm too low"*: that sentence is still
-  refused, by ADR 0030 D-5's equipment clause, R4 and element (g).
+  the honest error beside each, on the Fit check section. **And, since the owner's ruling of
+  2026-10-04, advice in a write-up**: a model may say *"raise your saddle"* or *"a shorter crank may
+  suit you"*. The app itself still never says *"your saddle is 8 mm too low"*: on the Fit check
+  section that sentence is refused by ADR 0030 D-5's equipment clause, R4 and P7.
 
 ### What this costs, stated plainly
 
@@ -708,27 +831,30 @@ that nothing scans those, is wider now that the product has a feature called a f
   own** numbers, framed. Every other condition now rests on wording rules holding: one alert, one
   *"reduces the risk of"*, or one range placed beside a number would argue the product out of the
   carve-out it relies on.
-- **The patent margin is thinner too.** ADR 0030 D-5's verdict clause still stands, which keeps (g) where
-  spike 0020 put it. But the product now computes absolute body angles, closer to a conventional
-  bike-fit tool than #377's difference report, and spike 0006 §5's ten documents are still unread.
+- **The patent margin is thinner too, and thinner again since 2026-10-04.** The product now
+  computes absolute body angles, closer to a conventional bike-fit tool than #377's difference
+  report, and spike 0006 §5's ten documents are still unread. And **element (g) may now be present
+  in write-up output** (D-2), so in the US the claims are avoided by (d), (e), (f) and (h) alone,
+  and in Canada, where claim 1 has no (h), by (d), (e) and (f). The owner accepted that risk.
 - **No verdict and no range comparison**, which is what a rider might expect a fit check to give.
   They read four numbers and some cited prose and decide for themselves.
 - **The trunk needs a phone-side change** and a new link message, which an accepted ADR has to add
   to ADR 0033 D-3's list, and **no ADR owns that yet** (D-0). Until one does, the trunk is *"not
   measured"*.
-- **A model may know the rider's fit and may not restate it.** A write-up that does is withheld,
-  and the rider is told why, which some riders will find odd.
+- **A model may know the rider's fit and advise on it, and may not restate it.** A write-up that
+  restates an angle, or assesses flexibility or mobility, is withheld, and the rider is told why,
+  which some riders will find odd.
 
 ### Constraints this places on other work
 
 | Issue | What it inherits |
 |---|---|
-| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The capture transport whose rate D-0 measures, and D-0 item 4 (its Status reading *Accepted*). ADR 0044, merged on 2026-10-04, does **not** add the tilt message to ADR 0033 D-3's list and says so, so it does not discharge D-0's trunk precondition; which accepted ADR does is an owner question |
+| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The capture transport whose rate D-0 measures, and D-0 item 4 (its Status reading *Accepted*). ADR 0044, merged on 2026-10-04, does **not** add the tilt message to ADR 0033 D-3's list and says so. By the owner's ruling of 2026-10-04, **one small ADR**, written separately, accepts ADR 0044 and adds the tilt message, discharging D-0 item 4 and the trunk precondition together |
 | [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-8's caveat and D-9's range sentence in the published wording; whether the policy names the tilt (D-4) |
 | [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-0's measurement and fixtures, D-3's event definitions, this ADR's D-5 tolerance, N and steadiness tests, no sensor join. ADR 0044 gives it the tilt message too, and it cannot add that to ADR 0033 D-3's list without an accepted ADR (D-0) |
 | [#1065](https://github.com/openzigs/onyourleft/issues/1065) | P1 to P6, D-3's definitions and rounding, D-6's conditions, D-12's record (no taken-at time, one per ride) |
 | [#1066](https://github.com/openzigs/onyourleft/issues/1066) | D-7 entire: a section, not a route; one wording module; `ANGLE_SURFACES` and the import-graph test; D-8 and D-9 |
-| [#1067](https://github.com/openzigs/onyourleft/issues/1067) | D-10: the screen's degree matchers unchanged, P8 added for every write-up, with or without a fit section |
+| [#1067](https://github.com/openzigs/onyourleft/issues/1067) | D-10: the screen's degree and frontal-plane matchers unchanged; **no component screen** (the draft's P8 is withdrawn by the owner's ruling of 2026-10-04), with a test that a write-up giving equipment advice is shown; the template stops asking the model not to recommend equipment; P8's mobility screen and the R6 word screen added for every write-up, with or without a fit section; R8's caveat beside a write-up whose input carried a fit section or a pose summary |
 | [#1112](https://github.com/openzigs/onyourleft/issues/1112) | Its fix is the first half of D-0 |
 
 ---
@@ -755,6 +881,16 @@ Following [ADR 0007](0007-patent-posture.md)'s model. None is *"are we safe"*.
 - **D. A verdict in words** is **not adopted**, so not worth buying unless a verdict is proposed.
 - **C. Publication**, unchanged from spike 0006: this ADR is a third dated public record of the same
   patent.
+- **G. Equipment and position advice in a model's write-up**, allowed by the owner on 2026-10-04.
+  (1) Is a write-up that says *"a shorter crank may suit you"* or *"raise your saddle"*, written by
+  a model sent four rough, uncalibrated angles and no length, *"selecting … the sporting equipment
+  based on the model"* under element **(g)** of US 12,499,571's claims 1, 10 and 17, and does it
+  matter that this project neither trains nor chooses the model? (2) With (g) arguably present,
+  how much weight do (d), (e), (f) and (h) bear, and does the doctrine of equivalents on any of
+  them reach a pipeline that never computes a length? (3) **Against CA 3,183,442**, whose claim 1
+  has no (h) and whose (g) reads *"based on the calibrated model"*: is advice from an uncalibrated
+  model outside that wording, and how thin is the margin if (d) is ever argued? **Worth buying
+  before advice ships**, because it is the margin the owner's ruling spent.
 
 **Regulatory.**
 
@@ -769,3 +905,7 @@ Following [ADR 0007](0007-patent-posture.md)'s model. None is *"are we safe"*.
   check* in a store listing or release note move the product toward MDCG 2019-11's musculoskeletal
   examples, and what wording keeps it a fitness app?
 - **R-4. Northern Ireland**, spike 0008 Question C, unchanged.
+- **R-5. Equipment and position advice under condition 5.** Is a write-up that suggests a saddle,
+  crank or position change, with no condition named, *"specific clinical action or medical
+  management"* (D-11)? And under MDCG 2019-11, does recommending an equipment change from body
+  angles move the product toward the musculoskeletal examples spike 0008 §7 names?

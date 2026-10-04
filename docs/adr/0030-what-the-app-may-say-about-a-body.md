@@ -682,14 +682,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     relaxed for those four values on that surface only.
   - **D-3's second reason, condition 6**, is not argued away: the owner accepts the risk, framed
     (ADR 0045 D-11).
-  - **D-5** is superseded for its **product boundary only**: the program offers a *fit check*.
-    **The equipment half of D-5 is untouched** (no size, no component, no component position, no
-    direction to move one), and so is its verdict clause (no position or fit is called correct,
-    optimal, good or bad; ADR 0045 adopts no verdict, signed or unsigned).
+  - **D-5** is superseded for its **product boundary**: the program offers a *fit check*. **Its
+    equipment half is superseded for a model's write-up only** (ADR 0035), on the owner's ruling of
+    2026-10-04, *"Allow advice too"*: a write-up may name a component and suggest an equipment or
+    position change (ADR 0045 D-10). **For everything the app itself writes, the Fit check section
+    included, the equipment half is untouched** (no size, no component, no component position, no
+    direction to move one), and the verdict clause is untouched everywhere (no position or fit is
+    called correct, optimal, good or bad; ADR 0045 adopts no verdict, signed or unsigned).
   - **D-8 stands**, as amended on 2026-09-28, with its **first bullet narrowed, not deleted**:
     ADR 0045 D-7 lifts its three degree rules in one file, named by exact path, and nowhere else.
     The frontal-plane rule is not narrowed anywhere.
   - **What stands exactly as written**: D-1, **D-4** (nothing in the frontal plane, as a number, a
     word or a picture), D-6 (kept explicitly by ADR 0045 D-9) and D-7. **D-2 stands as amended on
-    2026-09-28** (R2 to R10; **R4 to R7 untouched**, and R1 relaxed only as above). The body above
+    2026-09-28** (R2 to R10; **R5 and R6 untouched**, **R4 and R7's non-medical half relaxed for a
+    model's write-up only** as above, and R1 relaxed only as above). The body above
     is not edited.
