@@ -1154,8 +1154,11 @@ h3:first-child {
 /*
  * Not a list: Devices' garage (`.oyl-pairing`, #942) is a list of cards that
  * is ITS column grid, and given the width it holds three cards in a row.
+ * `[data-oyl-kept-visible]` (#1048) is `KeptVisible`'s wrapper: it holds a
+ * paragraph, and without it that paragraph left the measure (1248 px, not
+ * 685, at 1280).
  */
-.oyl-main--sections > :is(p, details, .oyl-note) {
+.oyl-main--sections > :is(p, details, .oyl-note, [data-oyl-kept-visible]) {
   max-width: var(--oyl-measure);
 }
 
