@@ -6141,12 +6141,15 @@ select.oyl-input {
  * panel, on one line of its own under the three numbers — its label BESIDE
  * its value, so the line is one value high: the panel gives itself the room
  * with padding, and the field is placed in it by anchor positioning, as on an
- * upright phone (below). One line, because the left column under the primary
- * panel is where #576 lifts the side camera's row when sounds are on (above),
- * and a label-over-value row ran 9 px into it. The field spans the panel's
- * inner width, so the time has 300 px where it needs 93. It stays in the
- * secondary list in the document, where a screen reader and #94's order meet
- * it. 802 px is where four secondary tracks fit beside a 24 rem primary panel
+ * upright phone (below). The primary units go under their numbers, as they do
+ * below 24 rem. Measured on the runner's fonts, that panel is then 134 px
+ * against the secondary panel's 137, so the top row of the stage, and every
+ * panel under it, does not move: with sounds on and a side camera paired at
+ * 736×360 both columns are full to within 16 px, and #576 lifts the side
+ * camera's row into the left one, under this panel. The field spans the
+ * panel's inner width, so the time has 360 px where it needs 93. It stays in
+ * the secondary list in the document, where a screen reader and #94's order
+ * meet it. 802 px is where four secondary tracks fit beside a 24 rem primary panel
  * (4 × 88 + 3 × 8 + 18 = 394 px of panel); from there the time is a fourth
  * track's reading on the second row.
  *
@@ -6160,9 +6163,18 @@ select.oyl-input {
   @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
     .oyl-game--riding .oyl-hud__fields--primary {
       anchor-name: --oyl-hud-primary;
-      /* The moving time's one line (a 1.5 rem value at line-height 1.05) and
-         the grid's own gap above it. */
-      padding-block-end: calc(var(--oyl-space-sm) * 2 + 1.6rem);
+      /* The moving time's one line (a 1.5 rem value at line-height 1.05), and
+         half a gap above it. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    /* The unit under the number, on a line of its own size. Beside it, on the
+       runner's fonts, `168 bpm` is 117 px in a 117 px track and wraps — onto
+       a second 42 px VALUE line, which made the panel 129 px before the time
+       was added. Under it is about 17 px, on every machine, for every value
+       including a four-digit power. */
+    .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+      display: block;
     }
 
     .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
