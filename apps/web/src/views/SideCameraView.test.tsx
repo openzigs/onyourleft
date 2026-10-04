@@ -18,9 +18,14 @@ import { BYSTANDER_SENTENCE } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { CameraController } from '../camera/session';
 import { LINK_LOSS_LIMIT_MILLISECONDS, LINK_LOSS_SENTENCE } from '../camera/side-camera';
-import { CONNECT_LIMIT_MILLISECONDS, sidePairingPort } from '../camera/side-link';
+import {
+  CONNECT_LIMIT_MILLISECONDS,
+  sidePairingPort,
+  TABLET_READ_LIMIT_MILLISECONDS,
+} from '../camera/side-link';
 import { PAIRING_REFUSAL_TEXT } from '../camera/side-link-code';
 import { pairingCodeModules } from '../camera/side-link-qr';
+import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { SidePairingPort, TabletSidePairing } from '../camera/side-pairing-port';
 import { PAIRING_READER_UNLOADED } from '../camera/usePairingScan';
 import {
@@ -39,6 +44,9 @@ import {
   NOT_PAIRED_TEXT,
   SIDE_PICTURES_GO_SENTENCE,
   SideCameraView,
+  TABLET_DID_NOT_CONNECT,
+  TABLET_READ_TIMED_OUT,
+  tabletReadSentence,
 } from './SideCameraView';
 import { CAMERA_NO_PORT } from './CameraView';
 
@@ -275,9 +283,13 @@ describe('pairing the phone with the tablet — #529', () => {
   }
 
   async function pairingPhone(
-    options: { readonly showAnswer?: boolean; readonly readerFails?: boolean } = {},
+    options: {
+      readonly showAnswer?: boolean;
+      readonly readerFails?: boolean;
+      readonly connects?: boolean;
+    } = {},
   ) {
-    const network = sidePeerNetwork();
+    const network = sidePeerNetwork(options.connects === false ? { connects: false } : {});
     const time = virtualTime();
     const port = sidePairingPort({
       peer: network.peer,
@@ -286,6 +298,7 @@ describe('pairing the phone with the tablet — #529', () => {
       every: time.every,
     });
     const answers: string[] = [];
+    const links: SideCameraLinkPort[] = [];
     const phonePort: SidePairingPort = {
       offerSideCamera: async () => port.offerSideCamera(),
       currentSideCamera: () => port.currentSideCamera(),
@@ -293,6 +306,7 @@ describe('pairing the phone with the tablet — #529', () => {
         const made = await port.answerSideCamera(offerCode);
         if (typeof made === 'object') {
           answers.push(made.answerCode);
+          links.push(made.link);
         }
         return made;
       },
@@ -326,7 +340,7 @@ describe('pairing the phone with the tablet — #529', () => {
       <SideCameraView controller={controller} pairing={phonePort} timers={time} />,
     );
     await settle();
-    return { tablet, camera, answers, time, readerLoads: () => readerLoads };
+    return { tablet, camera, answers, links, time, readerLoads: () => readerLoads };
   }
 
   it('reads the tablet’s code, shows its own, and is paired once the tablet reads it', async () => {
@@ -382,18 +396,88 @@ describe('pairing the phone with the tablet — #529', () => {
     expect(document.body.textContent).toContain('Looking for the tablet’s code');
   });
 
-  it('says the tablet did not connect, and offers to scan again', async () => {
+  it('says the tablet did not read the code in time, and offers to scan again (#1108)', async () => {
     const { answers, time } = await pairingPhone();
     await tick();
     await press('Turn the camera on');
     await scanOnce();
     expect(answers).toHaveLength(1);
-    // The tablet never reads the answer: the phone's end gives up.
+    // Fifteen seconds is a person still aiming, not a tablet that gave up.
     time.advance(CONNECT_LIMIT_MILLISECONDS);
     await settle();
-    expect(document.body.textContent).toContain('The tablet did not connect');
+    expect(document.querySelector('[data-oyl-pairing-code]')).not.toBeNull();
+    // The tablet never reads the answer: the phone's end gives up.
+    time.advance(TABLET_READ_LIMIT_MILLISECONDS - CONNECT_LIMIT_MILLISECONDS);
+    await settle();
+    expect(document.body.textContent).toContain(TABLET_READ_TIMED_OUT);
+    expect(document.body.textContent).not.toContain(TABLET_DID_NOT_CONNECT);
     await press('Scan the tablet’s code again');
     expect(document.body.textContent).toContain('Looking for the tablet’s code');
+  });
+
+  it('shows how long the tablet has left to read the code, counting down (#1108)', async () => {
+    const { time } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    const timer = (): string | null | undefined =>
+      document.querySelector('[data-oyl-side-pairing] [role="timer"]')?.textContent;
+    expect(timer()).toBe(tabletReadSentence(TABLET_READ_LIMIT_MILLISECONDS / 1000));
+    expect(timer()).toBe('The tablet has 2:00 left to read this code.');
+    time.advance(61_000);
+    await settle();
+    expect(timer()).toBe('The tablet has 0:59 left to read this code.');
+  });
+
+  it('lets the rider start again while the code is still waiting (#1108)', async () => {
+    const { answers, links } = await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    expect(answers).toHaveLength(1);
+    await press('Scan the tablet’s code again');
+    // The code the rider walked away from can no longer pair.
+    expect(links[0]?.sideLinkCondition()).toBe('ended');
+    expect(document.querySelector('[data-oyl-pairing-code]')).toBeNull();
+    expect(document.body.textContent).toContain('Looking for the tablet’s code');
+    // Neither failure sentence: the rider asked for this.
+    expect(document.body.textContent).not.toContain(TABLET_READ_TIMED_OUT);
+    expect(document.body.textContent).not.toContain(TABLET_DID_NOT_CONNECT);
+    await scanOnce();
+    expect(answers).toHaveLength(2);
+  });
+
+  it('says the tablet did not connect when the link fails before the time is up (#1108)', async () => {
+    const { tablet, answers } = await pairingPhone({ connects: false });
+    await tick();
+    await press('Turn the camera on');
+    await scanOnce();
+    // The tablet reads the answer, and there is no path between the two.
+    await tablet.acceptSidePhoneCode(answers[0] ?? '');
+    await flushSideLink();
+    await settle();
+    expect(document.body.textContent).toContain(TABLET_DID_NOT_CONNECT);
+    expect(document.body.textContent).not.toContain(TABLET_READ_TIMED_OUT);
+  });
+
+  it('puts the instruction and its status ABOVE the camera’s picture — #1108', async () => {
+    await pairingPhone();
+    await tick();
+    await press('Turn the camera on');
+    const pairing = document.querySelector('[data-oyl-side-pairing]');
+    const picture = document.querySelector('video');
+    expect(pairing?.textContent).toContain('To pair with your tablet');
+    expect(pairing?.textContent).toContain('Looking for the tablet’s code');
+    expect(picture).not.toBeNull();
+    expect(
+      (pairing?.compareDocumentPosition(picture as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await scanOnce();
+    // And the code the tablet reads, with its countdown, is above it too —
+    // drawn as wide as the screen allows.
+    const code = document.querySelector('[data-oyl-pairing-code]');
+    expect(pairing?.contains(code)).toBe(true);
+    expect(code?.classList.contains('oyl-pairing-code--full')).toBe(true);
   });
 
   it('stops looking, and says so, when the code reader will not load — #550’s second review', async () => {

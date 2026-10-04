@@ -8,12 +8,14 @@
  * one unit a module inside a four-module quiet zone, which is the margin the
  * QR specification asks for and what a reader needs to find the corners.
  *
- * ⚠️ **Dark on light, and never themed.** The colours are the HUD's ink and
- * surface tokens, which are the same in both palettes — they were `canvas` and
- * `ink` until #672's dark palette swapped those, which would have drawn the code
- * light on dark — and `forced-color-adjust: none` keeps a high-contrast mode from
- * repainting a code into something a camera cannot read (`theme.css`
- * §"THE PAIRING CODE"). A code has no text alternative a person could use —
+ * ⚠️ **Black on white, and never themed** — #1108. A code is a symbol for a
+ * camera, not text for a person, so it is drawn at the most contrast a screen
+ * has, 21:1, with {@link PAIRING_CODE_INK} and {@link PAIRING_CODE_PAPER}
+ * written into the drawing itself rather than taken from a palette. It was the
+ * HUD's ink and surface tokens until #1108 (17.07:1), and `canvas` and `ink`
+ * before #672, which the dark palette swaps. `forced-color-adjust: none` keeps a
+ * high-contrast mode from repainting it into something a camera cannot read
+ * (`theme.css` §"THE PAIRING CODE"). A code has no text alternative a person could use —
  * the credentials in it are for a camera — so the image is named for what it
  * is FOR, and the sentence beside it says what to do.
  *
@@ -59,13 +61,24 @@ export const PAIRING_CODE_UNDRAWN =
   'open it again, then try again.';
 
 /** The quiet zone, in modules: the QR specification's four. */
-const QUIET_ZONE = 4;
+export const PAIRING_CODE_QUIET_ZONE = 4;
+
+/** The code's dark modules: black — #1108. Not a palette colour; see the file header. */
+export const PAIRING_CODE_INK = '#000000';
+/** The code's light modules and quiet zone: white. */
+export const PAIRING_CODE_PAPER = '#ffffff';
 
 export interface PairingCodeProps {
   /** The code's text. */
   readonly code: string;
   /** What the picture is for, which is its accessible name. */
   readonly label: string;
+  /**
+   * As wide as the screen allows — #1108. The phone's code is read by the
+   * tablet's front camera, held at arm's length, and every module it gains is
+   * a module the tablet resolves from further away.
+   */
+  readonly fullWidth?: boolean;
   /**
    * How the drawer is loaded. A test's way to make the load fail; the screens
    * leave it alone.
@@ -76,6 +89,7 @@ export interface PairingCodeProps {
 export function PairingCode({
   code,
   label,
+  fullWidth = false,
   load = loadPairingCodeDrawer,
 }: PairingCodeProps): JSX.Element {
   const [draw, setDraw] = useState<PairingCodeDrawer | 'failed' | undefined>(undefined);
@@ -110,12 +124,13 @@ export function PairingCode({
       </StatusMessage>
     );
   }
-  return <DrawnCode code={code} label={label} draw={draw} />;
+  return <DrawnCode code={code} label={label} fullWidth={fullWidth} draw={draw} />;
 }
 
 function DrawnCode({
   code,
   label,
+  fullWidth,
   draw,
 }: PairingCodeProps & { readonly draw: PairingCodeDrawer }): JSX.Element {
   const { size, path } = useMemo(() => {
@@ -124,23 +139,32 @@ function DrawnCode({
     for (const [row, cells] of modules.entries()) {
       for (const [column, dark] of cells.entries()) {
         if (dark) {
-          parts.push(`M${String(column + QUIET_ZONE)} ${String(row + QUIET_ZONE)}h1v1h-1z`);
+          parts.push(
+            `M${String(column + PAIRING_CODE_QUIET_ZONE)} ${String(row + PAIRING_CODE_QUIET_ZONE)}h1v1h-1z`,
+          );
         }
       }
     }
-    return { size: modules.length + QUIET_ZONE * 2, path: parts.join('') };
+    return { size: modules.length + PAIRING_CODE_QUIET_ZONE * 2, path: parts.join('') };
   }, [code, draw]);
   return (
     <svg
-      className="oyl-pairing-code"
+      className={
+        fullWidth === true ? 'oyl-pairing-code oyl-pairing-code--full' : 'oyl-pairing-code'
+      }
       role="img"
       aria-label={label}
       viewBox={`0 0 ${String(size)} ${String(size)}`}
       shapeRendering="crispEdges"
       data-oyl-pairing-code="true"
     >
-      <rect className="oyl-pairing-code__paper" width={size} height={size} />
-      <path className="oyl-pairing-code__ink" d={path} />
+      <rect
+        className="oyl-pairing-code__paper"
+        width={size}
+        height={size}
+        fill={PAIRING_CODE_PAPER}
+      />
+      <path className="oyl-pairing-code__ink" d={path} fill={PAIRING_CODE_INK} />
     </svg>
   );
 }

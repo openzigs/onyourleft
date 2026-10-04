@@ -17,7 +17,8 @@ import { PAIRING_READER_UNAVAILABLE, type CameraController } from './session';
 /**
  * How often a code is looked for: about three times a second. A rider moving
  * a phone into view of a screen is found within a third of a second, and each
- * read is a 640-pixel draw on the thread that draws the screen.
+ * read is a draw of up to 1280 pixels (`camera-port.ts` §`CODE_PIXELS_LONG_SIDE`)
+ * on the thread that draws the screen.
  */
 export const SCAN_INTERVAL_MILLISECONDS = 300;
 

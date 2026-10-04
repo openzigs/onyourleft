@@ -898,8 +898,9 @@ describe('the other native controls are styled from tokens (#667)', () => {
 // grep was run over this change by hand and is clean.
 
 /**
- * #672: what is drawn over the world or a camera's picture — and the pairing
- * code a phone's camera has to read — does not change with the page's palette.
+ * #672: what is drawn over the world or a camera's picture does not change
+ * with the page's palette. (The pairing code was in this list until #1108,
+ * which made it black on white in the drawing itself: see the block below.)
  *
  * Found by building the dark palette: `ink` was the backdrop of the ride stage
  * and of every camera picture, and `canvas`/`ink` were the pairing code's paper
@@ -914,8 +915,6 @@ describe('what sits over a picture is the same in both palettes (#672)', () => {
     ['.oyl-framing__picture', 'background'],
     ['.oyl-scan-viewfinder__video', 'background'],
     ['.oyl-framing__guide *', 'stroke'],
-    ['.oyl-pairing-code__paper', 'fill'],
-    ['.oyl-pairing-code__ink', 'fill'],
   ])('`%s` paints its %s with a HUD token', (selector, property) => {
     const css = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
     const escaped = selector.replaceAll(/[()[\]:.,*+?^$|\\]/g, '\\$&');
@@ -925,6 +924,27 @@ describe('what sits over a picture is the same in both palettes (#672)', () => {
     expect(bodies, `theme.css has no \`${selector}\` rule`).toHaveLength(1);
     const value = new RegExp(`\\n\\s*${property}:\\s*([^;]+);`).exec(bodies[0] ?? '')?.[1];
     expect(value).toMatch(/^var\(--oyl-color-hud-[a-z-]+\)$/);
+  });
+});
+
+/**
+ * #1108: the pairing code is black on white, written into the drawing itself
+ * (`camera/PairingCode.tsx` §`PAIRING_CODE_INK`) — and a CSS `fill` on either
+ * of its parts would override that attribute without a word. So there is none.
+ */
+describe('nothing in theme.css repaints the pairing code (#1108)', () => {
+  it('sets no fill on the code’s paper or its modules', () => {
+    const css = themeCss.replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    for (const selector of ['.oyl-pairing-code__paper', '.oyl-pairing-code__ink']) {
+      expect(css, selector).not.toContain(selector);
+    }
+    expect(css).not.toMatch(/\.oyl-pairing-code[^{]*\{[^}]*\bfill:/);
+  });
+
+  it('can see a fill on the code, so the check above is not vacuous', () => {
+    expect('\n.oyl-pairing-code__ink {\n  fill: red;\n}').toMatch(
+      /\.oyl-pairing-code[^{]*\{[^}]*\bfill:/,
+    );
   });
 });
 

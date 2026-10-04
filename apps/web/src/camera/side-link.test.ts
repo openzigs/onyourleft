@@ -31,6 +31,7 @@ import {
   sideCommandText,
   sidePairingPort,
   SIDE_PHONE_STATE_TEXT,
+  TABLET_READ_LIMIT_MILLISECONDS,
 } from './side-link';
 import type { PhoneSidePairing, TabletSidePairing } from './side-pairing-port';
 import type { SideLinkEvent } from './side-camera-link-port';
@@ -561,11 +562,72 @@ describe('pairing, through both codes', () => {
     });
   });
 
-  it('gives up on a phone the tablet never answers', async () => {
+  it('gives up on a phone the tablet never answers — after a person’s wait, not a machine’s (#1108)', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    // The tablet's own (its offer's lifetime), which the phone's end must not add to once it ends.
+    const tabletTimers = context.time.active();
+    const phone = await answer(context.port, tablet.offerCode);
+    // The owner's report: the phone gave up at fifteen seconds while the rider
+    // was still holding it up to the tablet. It is still waiting at that point.
+    context.time.advance(CONNECT_LIMIT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    context.time.advance(TABLET_READ_LIMIT_MILLISECONDS - CONNECT_LIMIT_MILLISECONDS - 1);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    expect(phone.secondsForTabletToRead()).toBe(1);
+    context.time.advance(1);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    // Zero, not nothing: the screen tells a wait that ran out from any other end.
+    expect(phone.secondsForTabletToRead()).toBe(0);
+    // And no timer of the phone's is left running: not the wait, not the countdown.
+    expect(context.time.active()).toBe(tabletTimers);
+  });
+
+  it('waits two minutes for the tablet to read the phone’s code, inside the offer’s own five (#1108)', () => {
+    expect(TABLET_READ_LIMIT_MILLISECONDS).toBe(2 * 60 * 1000);
+    expect(TABLET_READ_LIMIT_MILLISECONDS).toBeGreaterThan(CONNECT_LIMIT_MILLISECONDS);
+    expect(TABLET_READ_LIMIT_MILLISECONDS).toBeLessThan(OFFER_LIFETIME_MILLISECONDS);
+  });
+
+  it('counts the wait down once a second, and stops counting once the tablet has read the code (#1108)', async () => {
     const context = setUp();
     const tablet = await offer(context.port);
     const phone = await answer(context.port, tablet.offerCode);
-    context.time.advance(CONNECT_LIMIT_MILLISECONDS);
+    let told = 0;
+    const unsubscribe = phone.onTabletReadCountdown(() => {
+      told += 1;
+    });
+    expect(phone.secondsForTabletToRead()).toBe(TABLET_READ_LIMIT_MILLISECONDS / 1000);
+    context.time.advance(3000);
+    expect(told).toBe(3);
+    expect(phone.secondsForTabletToRead()).toBe(TABLET_READ_LIMIT_MILLISECONDS / 1000 - 3);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await context.pass(HEARTBEAT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    expect(phone.secondsForTabletToRead()).toBeUndefined();
+    const after = told;
+    // Read, then nothing more to count: the countdown's timer is gone.
+    await context.pass(TABLET_READ_LIMIT_MILLISECONDS);
+    expect(told).toBe(after);
+    expect(phone.link.sideLinkCondition()).toBe('connected');
+    unsubscribe();
+  });
+
+  it('once the tablet has the code, waits only the machine handshake for it to finish (#1108)', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    context.time.advance(60_000);
+    // A `control` channel arriving is the phone's sign that the tablet read
+    // its code. One on which the tablet never says anything is a handshake
+    // that never finished, and it is bounded by the machine's limit again.
+    const phonePeer = context.network.peers[1];
+    const stray = context.network.peer().createDataChannel(CONTROL_CHANNEL, { ordered: true });
+    phonePeer?.ondatachannel?.({ channel: stray });
+    expect(phone.secondsForTabletToRead()).toBeUndefined();
+    context.time.advance(CONNECT_LIMIT_MILLISECONDS - 1);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    context.time.advance(1);
     expect(phone.link.sideLinkCondition()).toBe('ended');
   });
 

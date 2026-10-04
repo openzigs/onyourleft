@@ -6563,11 +6563,18 @@ select.oyl-input {
  * THE PAIRING CODE — #529, ADR 0033 D-1.
  *
  * `camera/PairingCode.tsx` draws one QR code for the other device's camera.
- * Dark on light, square, as large as the screen comfortably allows — a phone
+ * Black on white, square, as large as the screen comfortably allows — a phone
  * held a forearm away has to resolve every module of it — and never repainted:
  * `forced-color-adjust: none`, because a high-contrast mode that inverted or
  * flattened it would make a code no camera could read, and a code is not text
  * a person reads.
+ *
+ * ⚠️ **No `fill` here, on purpose** (#1108). The drawing carries its own black
+ * and white as presentation attributes, which any `fill` in this file would
+ * override; `theme.a11y.test.ts` §"#1108" fails one that comes back. Until
+ * #1108 these were the HUD's ink and surface, 17.07:1 — the code is now 21:1,
+ * the most a screen has — and before #672 `canvas`/`ink`, which the dark
+ * palette swaps.
  * ========================================================================== */
 .oyl-pairing-code {
   block-size: auto;
@@ -6577,14 +6584,9 @@ select.oyl-input {
   margin: 0 0 var(--oyl-space-md);
 }
 
-/* ⚠️ #672: dark on light in BOTH palettes. These were `canvas` and `ink`, which
-   the dark palette swaps, and a code drawn light on dark is one a phone's
-   camera reader may refuse. The HUD's pair is the theme-independent one, at
-   17.07:1. */
-.oyl-pairing-code__paper {
-  fill: var(--oyl-color-hud-ink);
-}
-
-.oyl-pairing-code__ink {
-  fill: var(--oyl-color-hud-surface);
+/* #1108: the PHONE's code, which the tablet's front camera reads at arm's
+   length. As wide as its column, and no taller than most of the screen so the
+   instruction above it stays in view. */
+.oyl-pairing-code--full {
+  inline-size: min(100%, 75vh);
 }
