@@ -7,7 +7,9 @@
  * and that every way the worker can fail falls back to the main thread.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { CameraCaptureError } from './camera-port';
 
 import { sideEncodeReplyFrom, sideEncodeRequestFrom } from './side-encode-messages';
 import {
@@ -82,6 +84,46 @@ function manualAfter(): {
       pending?.();
     },
   };
+}
+
+/**
+ * Hand-run timers that keep every task, so an EARLIER picture's deadline can
+ * be fired while a later one waits. `fire` runs a task whether or not it was
+ * cancelled — a timer the platform had already queued — and `cancelled` says
+ * whether the encoder tried to stop it.
+ */
+function manualTimers(): {
+  after: (task: () => void, milliseconds: number) => () => void;
+  fire: (index: number) => void;
+  cancelled: (index: number) => boolean;
+} {
+  const timers: { task: () => void; cancelled: boolean }[] = [];
+  return {
+    after: (task) => {
+      const timer = { task, cancelled: false };
+      timers.push(timer);
+      return () => {
+        timer.cancelled = true;
+      };
+    },
+    fire: (index) => {
+      timers[index]?.task();
+    },
+    cancelled: (index) => timers[index]?.cancelled ?? false,
+  };
+}
+
+/** A bitmap that counts how often it is closed. */
+function countedBitmap(): ImageBitmap & { closed: number } {
+  const bitmap = {
+    width: 4,
+    height: 3,
+    closed: 0,
+    close: () => {
+      bitmap.closed += 1;
+    },
+  };
+  return bitmap;
 }
 
 async function settle(): Promise<void> {
@@ -233,19 +275,174 @@ describe('the worker encoder', () => {
       fallback,
       after: manualAfter().after,
     });
+    await settle();
+    encoder.release();
+    expect(fallback.released).toBe(1);
+    encoder.release();
+    expect(fallback.released).toBe(2);
+  });
+
+  it('makes no picture of one in flight at release, and never hands it to the main thread — ADR 0033 D-5', async () => {
+    const worker = fakeWorker();
+    const fallback = countingFallback();
+    let made = 0;
+    const encoder = workerJpegEncoder({
+      worker: () => {
+        made += 1;
+        return worker;
+      },
+      bitmap: () => Promise.resolve(BITMAP),
+      fallback,
+      after: manualAfter().after,
+    });
     const encoding = encoder.encode(CANVAS);
     await settle();
     encoder.release();
     expect(worker.terminated).toBe(1);
-    expect(fallback.released).toBe(1);
-    // The picture in flight is not left hanging: it falls back like a failure.
-    await expect(encoding).resolves.toMatchObject({ encoder: 'main-thread' });
+    await expect(encoding).rejects.toBeInstanceOf(CameraCaptureError);
+    // An answer the worker had already sent changes nothing.
+    worker.answer({ id: lastId(worker), bytes: new Uint8Array([1]).buffer });
+    // And a picture asked for afterwards is refused too, with no worker made.
+    await expect(encoder.encode(CANVAS)).rejects.toBeInstanceOf(CameraCaptureError);
+    expect(made).toBe(1);
+    expect(fallback.calls).toBe(0);
+    expect(worker.posted).toHaveLength(1);
+  });
+
+  it('closes the pixels and posts nothing when released while they were being taken', async () => {
+    const worker = fakeWorker();
+    const fallback = countingFallback();
+    const bitmap = countedBitmap();
+    let hand: (made: ImageBitmap) => void = () => undefined;
+    const encoder = workerJpegEncoder({
+      worker: () => worker,
+      bitmap: () =>
+        new Promise<ImageBitmap>((resolve) => {
+          hand = resolve;
+        }),
+      fallback,
+      after: manualAfter().after,
+    });
+    const encoding = encoder.encode(CANVAS);
+    await settle();
+    encoder.release();
+    hand(bitmap);
+    await expect(encoding).rejects.toBeInstanceOf(CameraCaptureError);
+    expect(bitmap.closed).toBe(1);
+    expect(worker.posted).toEqual([]);
+    expect(fallback.calls).toBe(0);
+  });
+
+  it('closes the pixels when they cannot be posted, and falls back', async () => {
+    const worker = fakeWorker();
+    worker.postMessage = () => {
+      throw new DOMException('could not clone', 'DataCloneError');
+    };
+    const bitmap = countedBitmap();
+    const encoder = workerJpegEncoder({
+      worker: () => worker,
+      bitmap: () => Promise.resolve(bitmap),
+      fallback: countingFallback(),
+      after: manualAfter().after,
+    });
+    expect((await encoder.encode(CANVAS)).encoder).toBe('main-thread');
+    expect(bitmap.closed).toBe(1);
+  });
+
+  it('does not let an earlier picture’s deadline fail the picture waiting now', async () => {
+    const worker = fakeWorker();
+    const fallback = countingFallback();
+    const timers = manualTimers();
+    const encoder = workerJpegEncoder({
+      worker: () => worker,
+      bitmap: () => Promise.resolve(BITMAP),
+      fallback,
+      after: timers.after,
+    });
+    const first = encoder.encode(CANVAS);
+    await settle();
+    worker.answer({ id: lastId(worker), bytes: new Uint8Array([1]).buffer });
+    expect((await first).encoder).toBe('worker');
+    // Picture 1's deadline was stopped once it was answered…
+    expect(timers.cancelled(0)).toBe(true);
+
+    let second: { readonly encoder: string } | undefined;
+    void encoder.encode(CANVAS).then((made) => {
+      second = made;
+    });
+    await settle();
+    // …and if it goes off anyway, while picture 2 waits, picture 2 is untouched.
+    timers.fire(0);
+    worker.answer({ id: lastId(worker), bytes: new Uint8Array([2]).buffer });
+    await settle();
+    expect(second).toEqual({ bytes: new Uint8Array([2]), encoder: 'worker' });
+    expect(worker.terminated).toBe(0);
+    expect(fallback.calls).toBe(0);
   });
 });
 
 describe('which encoder a page gets', () => {
-  it('is the main thread where the engine has no OffscreenCanvas — jsdom has none', () => {
-    expect(typeof OffscreenCanvas).toBe('undefined');
-    expect(sidePictureEncoder()).toMatchObject({ encode: expect.any(Function) as unknown });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
+
+  /** A canvas whose `toBlob` is counted and never answers. */
+  function countedCanvas(): HTMLCanvasElement & { toBlobs: number } {
+    const canvas = {
+      toBlobs: 0,
+      toBlob: () => {
+        canvas.toBlobs += 1;
+      },
+    };
+    return canvas as unknown as HTMLCanvasElement & { toBlobs: number };
+  }
+
+  /** Every platform piece the worker encoder needs, with the workers made counted. */
+  function stubTheEngine(): { workers: unknown[] } {
+    const workers: unknown[] = [];
+    vi.stubGlobal(
+      'Worker',
+      class {
+        onmessage = null;
+        onerror = null;
+        constructor() {
+          workers.push(this);
+        }
+        postMessage(): void {
+          // Never answers; the test releases the encoder instead.
+        }
+        terminate(): void {
+          // Nothing held.
+        }
+      },
+    );
+    vi.stubGlobal('OffscreenCanvas', class {});
+    vi.stubGlobal('createImageBitmap', () => Promise.resolve(BITMAP));
+    return { workers };
+  }
+
+  it('is the worker where the engine has Worker, OffscreenCanvas and createImageBitmap', async () => {
+    const { workers } = stubTheEngine();
+    const encoder = sidePictureEncoder();
+    const canvas = countedCanvas();
+    const encoding = encoder.encode(canvas).catch(() => undefined);
+    await settle();
+    expect(workers).toHaveLength(1);
+    expect(canvas.toBlobs).toBe(0);
+    encoder.release();
+    await encoding;
+  });
+
+  it.each(['Worker', 'OffscreenCanvas', 'createImageBitmap'])(
+    'is the main thread where the engine has no %s',
+    async (missing) => {
+      const { workers } = stubTheEngine();
+      vi.stubGlobal(missing, undefined);
+      const canvas = countedCanvas();
+      void sidePictureEncoder().encode(canvas);
+      await settle();
+      expect(canvas.toBlobs).toBe(1);
+      expect(workers).toEqual([]);
+    },
+  );
 });

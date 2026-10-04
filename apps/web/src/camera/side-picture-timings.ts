@@ -13,6 +13,7 @@
  * the owner's phone with `apps/mobile/tools/webview-probe.mjs`:
  *
  * ```bash
+ * node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.summary().sentPerSecondSinceStart'
  * node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().summary'
  * node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot()'
  * ```
@@ -130,8 +131,16 @@ export interface SideTimingsSummary {
   /** The newest tick's time, in milliseconds since filming began. */
   readonly lastTickAt: number | undefined;
   readonly windowMilliseconds: number;
-  /** Pictures the link accepted per second over the window. */
+  /** Pictures the link accepted per second over the window — the last ten seconds only. */
   readonly sentPerSecond: number;
+  /**
+   * Pictures the link accepted per second since filming began: every accepted
+   * picture (`totals.sent`, which the ring's trimming does not touch) over the
+   * newest tick's time, which is how long the session has been filming. This
+   * is the rate #1112's criterion 2 asks for over at least two minutes; the
+   * windowed {@link sentPerSecond} says what the last ten seconds did.
+   */
+  readonly sentPerSecondSinceStart: number;
   /** Ticks per second over the window — five, unless the timer itself is slowed. */
   readonly ticksPerSecond: number;
   readonly outcomes: Readonly<Record<SideTickOutcome, number>>;
@@ -246,8 +255,9 @@ export class SidePictureTimings implements SidePictureTimingsSink {
     const span =
       lastTickAt === undefined ? 0 : Math.min(SIDE_TIMINGS_WINDOW_MILLISECONDS, lastTickAt);
     const sent = recent.filter((record) => record.outcome === 'sent');
-    const perSecond = (count: number): number =>
-      span <= 0 ? 0 : Math.round((count / span) * 1000 * 100) / 100;
+    const rate = (count: number, milliseconds: number): number =>
+      milliseconds <= 0 ? 0 : Math.round((count / milliseconds) * 1000 * 100) / 100;
+    const perSecond = (count: number): number => rate(count, span);
     const sentTimes = numbers(sent, (record) => record.sentAt);
     const intervals: number[] = [];
     for (let index = 1; index < sentTimes.length; index += 1) {
@@ -266,6 +276,7 @@ export class SidePictureTimings implements SidePictureTimingsSink {
       lastTickAt,
       windowMilliseconds: SIDE_TIMINGS_WINDOW_MILLISECONDS,
       sentPerSecond: perSecond(sent.length),
+      sentPerSecondSinceStart: rate(this.#totals.sent, lastTickAt ?? 0),
       ticksPerSecond: perSecond(recent.length),
       outcomes: counted(recent),
       totals: { ...this.#totals },

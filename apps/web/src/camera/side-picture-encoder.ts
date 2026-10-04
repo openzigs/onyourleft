@@ -63,7 +63,11 @@ export interface EncodedSidePicture {
 export interface JpegEncoder {
   /** @throws {CameraCaptureError} from the fixed table, never a platform message. */
   encode(canvas: HTMLCanvasElement): Promise<EncodedSidePicture>;
-  /** Lets go of the worker, if there is one. Idempotent. */
+  /**
+   * Lets go of the worker, if there is one. Idempotent. The worker encoder
+   * then refuses a picture in flight or asked for afterwards rather than
+   * encoding it (ADR 0033 D-5; {@link workerJpegEncoder}).
+   */
   release(): void;
 }
 
@@ -116,25 +120,41 @@ function timeoutAfter(task: () => void, milliseconds: number): () => void {
   };
 }
 
+/** The fixed refusal for a picture asked for, or still in flight, after release. */
+function releasedError(): CameraCaptureError {
+  return new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+}
+
+/** What one picture's wait on the worker ends in. */
+type WorkerAnswer = { readonly bytes: Uint8Array } | 'failed' | 'released';
+
 /**
  * The encoder that hands each picture to a worker, and falls back to
  * `options.fallback` for good the first time the worker fails.
+ *
+ * ⚠️ **Released is not failed.** A picture asked for, or still in flight,
+ * after {@link JpegEncoder.release} is refused with the fixed
+ * `CameraCaptureError` and never handed to the fallback: the session has
+ * stopped, and ADR 0033 D-5 says a picture then is dropped at once, not
+ * encoded on the main thread and dropped afterwards.
  */
 export function workerJpegEncoder(options: WorkerEncoderOptions): JpegEncoder {
   const after = options.after ?? timeoutAfter;
   let worker: EncoderWorkerLike | undefined;
   let broken = false;
+  let released = false;
   let next = 0;
   // The one picture waiting on the worker. One at a time is the session's own
-  // rule (`side-camera.ts`), so there is never a second to keep apart.
-  let waiting: ((reply: { readonly bytes: Uint8Array } | 'failed') => void) | undefined;
+  // rule (`side-camera.ts`), so there is never a second to keep apart — but a
+  // deadline armed for one picture can still go off while the NEXT one waits,
+  // which is why its timer asks whose waiter this is before it acts.
+  let waiting: ((reply: WorkerAnswer) => void) | undefined;
 
   const giveUp = (): void => {
     broken = true;
     worker?.terminate();
     worker = undefined;
     waiting?.('failed');
-    waiting = undefined;
   };
 
   const ready = (): EncoderWorkerLike | undefined => {
@@ -155,6 +175,9 @@ export function workerJpegEncoder(options: WorkerEncoderOptions): JpegEncoder {
 
   return {
     async encode(canvas: HTMLCanvasElement): Promise<EncodedSidePicture> {
+      if (released) {
+        throw releasedError();
+      }
       const current = ready();
       if (current === undefined) {
         return options.fallback.encode(canvas);
@@ -163,25 +186,39 @@ export function workerJpegEncoder(options: WorkerEncoderOptions): JpegEncoder {
       try {
         bitmap = await options.bitmap(canvas);
       } catch {
+        if (released) {
+          throw releasedError();
+        }
         giveUp();
         return options.fallback.encode(canvas);
       }
+      if (released) {
+        bitmap.close();
+        throw releasedError();
+      }
       next += 1;
       const id = next;
-      const reply = await new Promise<{ readonly bytes: Uint8Array } | 'failed'>((resolve) => {
-        const cancel = after(() => {
-          waiting = undefined;
-          resolve('failed');
-        }, SIDE_ENCODE_DEADLINE_MILLISECONDS);
-        waiting = (answer) => {
+      const reply = await new Promise<WorkerAnswer>((resolve) => {
+        let cancel: () => void = () => undefined;
+        const own = (answer: WorkerAnswer): void => {
           cancel();
+          if (waiting === own) {
+            waiting = undefined;
+          }
           resolve(answer);
         };
+        waiting = own;
+        cancel = after(() => {
+          // Only this picture's own wait: a late deadline from an earlier
+          // picture must not fail the one waiting now (#1112's review).
+          if (waiting === own) {
+            own('failed');
+          }
+        }, SIDE_ENCODE_DEADLINE_MILLISECONDS);
         current.onmessage = (event) => {
           const answer = sideEncodeReplyFrom(event.data, id);
           if (answer !== undefined) {
             waiting?.(answer);
-            waiting = undefined;
           }
         };
         try {
@@ -193,10 +230,14 @@ export function workerJpegEncoder(options: WorkerEncoderOptions): JpegEncoder {
           };
           current.postMessage(request, [bitmap]);
         } catch {
-          waiting?.('failed');
-          waiting = undefined;
+          // Not transferred, so still ours to close.
+          bitmap.close();
+          own('failed');
         }
       });
+      if (reply === 'released') {
+        throw releasedError();
+      }
       if (reply === 'failed') {
         giveUp();
         return options.fallback.encode(canvas);
@@ -204,10 +245,10 @@ export function workerJpegEncoder(options: WorkerEncoderOptions): JpegEncoder {
       return { bytes: reply.bytes, encoder: 'worker' };
     },
     release(): void {
+      released = true;
       worker?.terminate();
       worker = undefined;
-      waiting?.('failed');
-      waiting = undefined;
+      waiting?.('released');
       options.fallback.release();
     },
   };

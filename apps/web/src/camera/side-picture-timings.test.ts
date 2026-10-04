@@ -113,6 +113,33 @@ describe('the summary', () => {
     expect(summary.encode.p95).toBe(2990);
   });
 
+  it('reads the rate since filming began over the whole session, past the ring and the window', () => {
+    const timings = new SidePictureTimings();
+    // Two minutes: the first at five a second, the second sending nothing.
+    for (let tick = 1; tick <= 600; tick += 1) {
+      timings.record(
+        tick <= 300 ? sent(tick * 200) : { tickAt: tick * 200, outcome: 'still-taking' },
+      );
+    }
+    const summary = timings.summary();
+    expect(summary.sentPerSecondSinceStart).toBe(2.5);
+    // The ring and the window both see only the second minute.
+    expect(summary.sentPerSecond).toBe(0);
+    expect(timings.snapshot().records.every((each) => each.outcome === 'still-taking')).toBe(true);
+  });
+
+  it('reads the owner’s phone since filming began: ten pictures in thirty seconds', () => {
+    const timings = new SidePictureTimings();
+    for (let tick = 1; tick <= 150; tick += 1) {
+      timings.record(
+        tick % 15 === 0 ? sent(tick * 200) : { tickAt: tick * 200, outcome: 'still-taking' },
+      );
+    }
+    expect(timings.summary().sentPerSecondSinceStart).toBe(0.33);
+    timings.started();
+    expect(timings.summary().sentPerSecondSinceStart).toBe(0);
+  });
+
   it('divides a young session by how long it has been filming, not by the whole window', () => {
     const timings = new SidePictureTimings();
     for (let tick = 1; tick <= 10; tick += 1) {

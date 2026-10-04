@@ -3520,13 +3520,15 @@ only, no picture. What this Part settles is whether that was the phone's cause.
 | Step | What to do |
 |---|---|
 | AI1 | Install a **debug** APK of #1112's merge on the phone (`webview-probe.mjs` attaches only to a debug build). Pair it with the tablet and start filming from the tablet, as #554 does |
-| AI2 | With the filming sign up for **at least 2 minutes**, forward the phone's WebView (the `adb forward` lines in `apps/mobile/tools/webview-probe.mjs`' header, with the PHONE's `pidof`) and read the summary: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().summary'` |
+| AI2 | With the filming sign up for **at least 2 minutes**, forward the phone's WebView (the `adb forward` lines in `apps/mobile/tools/webview-probe.mjs`' header, with the PHONE's `pidof`) and read the rate since filming began and how long that was: `node apps/mobile/tools/webview-probe.mjs 'JSON.stringify({ rate: window.__oylSideCameraTimings?.summary().sentPerSecondSinceStart, filmingMs: window.__oylSideCameraTimings?.summary().lastTickAt })'` — then the whole summary: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().summary'` |
 | AI3 | Read the last minute of ticks too, for the table below: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().records.slice(-60)'` |
 | AI4 | On the tablet, count the pictures it received over the same session (the #554 reading) |
 
 | Reading (AI2) | Value |
 |---|---|
-| `sentPerSecond` (designed: about 5) | |
+| `sentPerSecondSinceStart` (designed: about 5) — **the criterion**: every accepted picture over the whole session, read with `lastTickAt` at 120 000 ms or more | |
+| `lastTickAt`, ms (how long it had been filming) | |
+| `sentPerSecond` — the last 10 seconds only, so it says what the session was doing at the end, not over 2 minutes | |
 | `ticksPerSecond` (the timer itself: 5 unless it is throttled) | |
 | `encoder` (`worker` expected; `main-thread` means the fallback ran) | |
 | `outcomes` — `still-taking`, `busy`, `no-link`, `link-not-ready`, `dropped` counts | |
@@ -3538,7 +3540,9 @@ only, no picture. What this Part settles is whether that was the phone's cause.
 | `visibility` | |
 | Pictures the tablet received, and over how long (AI4) | |
 
-**Reading it.** A `sentPerSecond` near 5 with `encoder: worker` is #1112 confirmed. Many
+**Reading it.** A `sentPerSecondSinceStart` near 5 over at least 2 minutes (`lastTickAt` ≥ 120 000)
+with `encoder: worker` is #1112 confirmed. ⚠️ **Not `sentPerSecond`**: that is a 10-second window,
+so a good last ten seconds after a slow start reads as five. Many
 `still-taking` with a long `encode` is the encode still waiting. Many `busy` with a large
 `maxBufferedBefore` is the `frames` channel (ADR 0033 D-3), not the encode. A `ticksPerSecond`
 well under 5 is the timer being throttled (power management), and `visibility: hidden` says the
