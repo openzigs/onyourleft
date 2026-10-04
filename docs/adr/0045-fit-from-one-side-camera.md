@@ -23,6 +23,8 @@
   - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-5**, for its **product boundary
     only**: the program now offers a check it calls a *fit check*. **Both clauses of D-5's rule
     stand unchanged**, the equipment clause and the verdict clause (D-1, D-8).
+  - ADR 0030's body is not edited. It carries an appended `## Amendments` entry dated **2026-10-04**
+    pointing here, under [ADR 0013](0013-adr-amendments.md), as ADR 0033 and ADR 0035 each did.
 - **Does NOT supersede**, named so none of it is read as touched: ADR 0030 **D-1**, **D-2** (R1 to
   R10, with R1 relaxed only as D-3 above), **D-4** (nothing frontal-plane), **D-6** (decided
   explicitly in D-9 below: **kept**), **D-7** (the live silence rule) and **D-8**; ADR 0030's
@@ -127,15 +129,16 @@ Condition 6 is the one fit breaks on its face:
 > *"do not include values that mimic those used clinically unless validated (e.g. manufacturer
 > testing, peer-reviewed clinical literature) to reflect those values."*
 
-[Spike 0008](../spikes/0008-eu-uk-medical-device-read.md) was re-read for this ADR, §4.3 and §7
-in particular. What it says that bears on fit:
+[Spike 0008](../spikes/0008-eu-uk-medical-device-read.md) was re-read for this ADR, §4.2, §4.3 and
+§7 in particular. What it says that bears on fit:
 
 - **§4.1**: MDCG 2019-11 Rev.1 names *"wellness or fitness apps"* as not qualifying as medical
   device software. The fitness claim of #495 Q1 is what keeps the product inside that exclusion.
 - **§4.3**: *"In the EU, the distance between this product and a class IIa medical device is
-  carried by ADR 0030 R5, and by very little else."* The worked class IIa example is software
-  *"intended to prevent the risk of illnesses or pathologies by analysing physiological parameters
-  (e.g. placement of the dorsal vertebrae …)"*. A trunk angle is posture measured from anatomy.
+  carried by ADR 0030 R5, and by very little else."*
+- **§4.2**: the worked class IIa example (MDCG 2019-11, sub-rule 11a) is software *"intended to
+  prevent the risk of illnesses or pathologies by analysing physiological parameters (e.g.
+  placement of the dorsal vertebrae …)"*. A trunk angle is posture measured from anatomy.
 - **§7**: D-3 gained **no** third reason from the EU or UK read. D-5 gained one: the
   musculoskeletal example turns on *recommending* something to do. And on D-6: *"Placing a rider
   against a published range is the closest this product could come to 'potential detection of
@@ -170,14 +173,15 @@ possible only by sweeping. D-0 makes a measured, sufficient rate a precondition.
 
 ## Decision
 
-Thirteen decisions. **D-0** is what must hold before anything ships. **D-1** draws the boundary of
+Fourteen decisions. **D-0** is what must hold before anything ships. **D-1** draws the boundary of
 the reversal. **D-2** is the patent design-around as checkable rules. **D-3** to **D-6** are the
 measurements, the trunk's reference, the capture and the confidence. **D-7** is the closed list of
 surfaces and how the gate is narrowed. **D-8** and **D-9** are the wording and the literature
 ranges. **D-10** is the model write-up. **D-11** is the regulatory position. **D-12** is storage.
+**D-13** is what would make this ADR wrong.
 
 The issue's eight items map to: item 1 → D-2; item 2 → D-3, D-4; item 3 → D-0, D-5; item 4 → D-7;
-item 5 → D-10; item 6 → D-11; item 7 → D-12; item 8 → §"What would make this ADR wrong".
+item 5 → D-10; item 6 → D-11; item 7 → D-12; item 8 → D-13.
 
 ### D-0 — Preconditions: fit is not offered until a sufficient picture rate is measured
 
@@ -206,6 +210,17 @@ item 5 → D-10; item 6 → D-11; item 7 → D-12; item 8 → §"What would make
 ⚠️ **Item 2's 60 s is the author's choice**: a fit check a rider has to hold steady for longer
 than a minute is one most riders will not finish, and a longer window lets cadence drift spoil the
 sweep. It is written down so that changing it is a decision.
+
+> **The trunk angle has a fifth precondition.** It is **blocked** until an **accepted ADR widens
+> [ADR 0033](0033-side-camera-link.md) D-3's phone-to-tablet list**, which says *"and nothing
+> else"*, to admit the phone's tilt message (D-4). **This ADR does not widen it**, and no open pull
+> request does yet: neither ADR 0044 draft ([#1113](https://github.com/openzigs/onyourleft/pull/1113),
+> [#1116](https://github.com/openzigs/onyourleft/pull/1116)) adds the message, read 2026-10-04.
+> #1113 names [#1064](https://github.com/openzigs/onyourleft/issues/1064) as where it is added,
+> and #1064 is an implementation issue: it cannot widen an ADR's list.
+> Until such an ADR is accepted, **every fit check reports the trunk as *"not measured"*** with its
+> reason in words (D-6), and BDC and TDC are found by D-4's fallback. The other three angles do
+> not wait for it. Who writes that ADR is an open question for the owner.
 
 Code that cannot reach a rider (the pure computation, the store record, fixtures) may land before
 the preconditions hold. The rule is about what a rider can start and see.
@@ -240,17 +255,27 @@ and the check that holds it.
 
 | Rule | Statement, checkable | Check |
 |---|---|---|
-| **P1** (d, f, h) | **Multiplying every image-plane landmark coordinate by any k > 0, and adding any offset, leaves every reported fit number unchanged.** The only scale applied is the picture's own aspect ratio, which turns normalised coordinates into square pixels. **And** rotating every landmark about any point together with the gravity reference (D-4) leaves every number unchanged | A property test over k ∈ {0.25, 1, 4, 17}, random offsets and random rotations ([#1065](https://github.com/openzigs/onyourleft/issues/1065)). Mutation: divide by the frame height, or by any segment length |
+| **P1** (d, f, h) | **Multiplying every image-plane landmark coordinate by any k > 0, and adding any offset, leaves every reported fit number unchanged.** The only scale applied is the picture's own aspect ratio, which turns normalised coordinates into square pixels. **And** rotating every landmark about any point together with the **reference direction** leaves every number unchanged. The reference direction is an explicit input of the computation: the phone's gravity direction (D-4) when it passed D-4's test, and **in D-4's fallback the picture's own downward axis, passed in as a unit direction rather than read as a hard-coded axis**, so the clause holds in both cases. No angle may read the picture's axes except through that input | A property test over k ∈ {0.25, 1, 4, 17}, random offsets and random rotations ([#1065](https://github.com/openzigs/onyourleft/issues/1065)), run once with a gravity direction and once in the fallback. Mutation: divide by the frame height, or by any segment length; or find BDC by the raw picture *y* coordinate instead of the reference input, which the fallback's rotation case turns red |
 | **P2** (d, f, h) | **No input to the fit path carries a physical unit of length.** The computation's input is poses and the gravity reference only. Rider height, mass and the athlete row are not inputs, nothing in the fit path's import closure is under `apps/web/src/athlete/`, and MediaPipe's `worldLandmarks`, which its declaration says are *"in meters"*, are never read anywhere in `apps/web/src` | A test asserts the input type's keys. A source scan finds no `worldLandmarks` under `apps/web/src`. The import-closure walk below finds nothing under `src/athlete/` |
 | **P3** (c) | **Each interior angle (knee, hip, elbow) is unchanged when either end landmark is moved along its ray from the joint, by independent factors.** **The trunk angle is unchanged when the shoulder is moved along the hip-to-shoulder ray, by any factor**, because it has one landmark ray and one reference direction, and the gravity reference is a unit direction with no position. The numbers depend on directions only, never on a length or a ratio of lengths | A property test that slides the end landmarks of each angle along their rays by different factors, and the shoulder along the trunk ray. Mutation: report a ratio of lengths, or weight by a length. P1 cannot catch either, and P3 does |
 | **P4** (c) | **No segment length is computed in the fit path, even as an intermediate.** Angles are taken with `Math.atan2(cross, dot)`, never `Math.acos` over a product of norms. **The rule reaches the whole import closure of the fit computation**, not only its own file: a fit module that imported `side-report.ts` §`jointAngle` or `pose-plausibility.ts` would pass a scan of its own source and still compute lengths | A transitive import walk from the fit computation's entry module(s) with `apps/web/src/camera/import-walk-testing.ts`, which fails on `Math.hypot`, `Math.sqrt` or `Math.acos` in any production module it reaches, and on reaching `side-report.ts` or `pose-plausibility.ts` at all. Mutation: import `jointAngle` into the fit module |
 | **P5** (e) | **Every angle is reported at a named crank event (D-3), never as a minimum, a maximum or a range over the stroke**, and no output names a flexibility, mobility or range-of-motion category | The output type has one value per angle at a named event, and a test asserts its keys. The wording falls under R5, R6 and D-8 |
 | **P6** (g, claim 17) | **No data about equipment exists in the fit path.** No frame size, stack, reach, saddle height, setback, stem, crank length, component or catalogue, as a table, a type field or a model input | A test asserts the keys of every fit type and of the model's fit section. A source scan of the fit modules for those words |
 | **P7** (g) | **No fit output names a component, a size, or a direction to move either.** No verdict is adopted (D-8), so the question of signing one does not arise | A closed list of every fit sentence, in one wording module (D-7), with a test over the list for D-8's component, size, direction and verdict words |
-| **P8** (g) | **A model's write-up whose input carried a fit section, and which names a component, a size, or a direction to move one, is withheld whole** by the write-up screen, whatever the prompt said | `write-up-screen.test.ts` cases built with `model-answers-testing.ts` ([#1067](https://github.com/openzigs/onyourleft/issues/1067)). Mutation: redact instead of withhold |
+| **P8** (g) | **A model's write-up that names a component, a size, or a direction to move one is withheld whole** by the write-up screen, whatever the prompt said, **whether or not its input carried a fit section**. This is spike 0020's P8 as written, unconditional. The matchers are D-10's | `write-up-screen.test.ts` cases built with `model-answers-testing.ts` ([#1067](https://github.com/openzigs/onyourleft/issues/1067)), including one whose input has **no** fit section. Mutation: redact instead of withhold; or apply the screen only when the input has a fit section, which that case turns red |
 
 **P1 and P3 together** are the claim that matters: the numbers depend on segment directions alone.
 One without the other is a vacuous pass.
+
+> **The output property, stated once.** **No fit output type has a length, a size, a component or
+> a direction field.** "Fit output type" means every type on the fit path: the computation's
+> result, the stored fit check record (D-12), the model's fit section (D-10), the account export's
+> fit entry (D-7), and the wording module's inputs. Each may hold an angle in degrees, a count, a
+> spread in degrees, a side, a reason from a closed list, a flag and a definitions version, and
+> nothing else. "Direction" means a direction to move something; the gravity reference is an
+> **input** (D-4) and is never stored or output. P2, P4 and P6 are the input and computation halves
+> of this property, and the check is one test that asserts the keys of each of those types against
+> a list.
 
 **Where the fit computation lives is #1065's licence question**, under `CLAUDE.md` §3: a pure,
 platform-free computation could go in `packages/domain` (Apache-2.0). These rules bind it wherever
@@ -296,8 +321,9 @@ accepts. **Each rendered value is rounded to the nearest 5°** and introduced wi
 to 10 degrees (R8), and a value given to the degree would be the spurious precision R8 names as its
 own violation. The stored value keeps the median unrounded (D-12).
 
-Every angle is computed with `atan2(cross, dot)` (P4) and is invariant to scale, offset and, for the
-three interior angles, rotation (P1).
+Every angle is computed with `atan2(cross, dot)` (P4) and is invariant to scale, offset, and a
+rotation of the landmarks together with the reference direction (P1). The three interior angles are
+also invariant to a rotation of the landmarks alone.
 
 ### D-4 — The trunk's reference: the phone sends its own tilt
 
@@ -317,13 +343,13 @@ horizontal that direction gives.
   measured**, and BDC and TDC are found along the picture's own vertical instead, which the fit check
   records (D-12). ⚠️ **2° and a fifth are the author's engineering choices**, and not
   measurements.
-- ⚠️ **This adds a message to [ADR 0033](0033-side-camera-link.md) D-3's phone-to-tablet list,
-  which says *"and nothing else"*.** The wire format, and the entry in that list, belong with the
-  transport, which [ADR 0044](https://github.com/openzigs/onyourleft/issues/1058) (#1058) records
-  from spike 0021 ([#1057](https://github.com/openzigs/onyourleft/issues/1057)), as the owner's
-  ruling says: *"File it with the capture work once spike 0021 settles the transport."* **This ADR
-  decides that the trunk is measured against it, and that until that message exists the trunk is
-  "not measured"**. It does not itself widen ADR 0033 D-3.
+- ⚠️ **This needs a message on [ADR 0033](0033-side-camera-link.md) D-3's phone-to-tablet list,
+  which says *"and nothing else"*.** The wire format belongs with the transport, which spike 0021
+  ([#1057](https://github.com/openzigs/onyourleft/issues/1057)) settles, as the owner's ruling
+  says: *"File it with the capture work once spike 0021 settles the transport."* **This ADR decides
+  that the trunk is measured against it. It does not itself widen ADR 0033 D-3**, and D-0 makes
+  the widening, by an accepted ADR, a precondition of the trunk angle: until then the trunk is
+  *"not measured"*.
 - Whether the privacy policy names the tilt is #1060's question. It is device orientation, not data
   about the rider.
 
@@ -405,7 +431,14 @@ does it, in `apps/web/src/camera/no-absolute-angles.ts` and its test:
    section renders strings from it and holds no degree literal of its own.
 2. **A new list, `ANGLE_SURFACES`, names that one file by exact path**, with its reason, beside the
    existing `EXEMPT` list. In that file, and only there, the three **degree** rules (a degree sign,
-   the word, a `'degree'` formatter) are lifted.
+   the word, a `'degree'` formatter) are lifted. ⚠️ **The lift is file-wide, and that is decided,
+   not overlooked.** It is **not** keyed per sentence the way `EXEMPT` is: `EXEMPT` matches a file
+   **and the exact text** of one string (`no-absolute-angles.ts` §`EXEMPT`), and a fit sentence is
+   a template with a number in it, so there is no exact text to match. The file-wide lift is
+   acceptable because that file is a closed wording module and nothing else: every sentence in it is
+   on #1066's list, which holds R8's caveat and D-8's word lists over each one, and item 5 below
+   keeps its importers to the one section. A degree sign added to that file outside an angle
+   sentence would pass this gate; the closed-list test is what catches it.
 3. **The frontal-plane rule is not narrowed anywhere**, that file included.
 4. **Matching is by path equality**, never by directory or prefix. An entry naming a file that does
    not exist, or one that excuses no finding, fails the gate, as `EXEMPT`'s entries do.
@@ -446,7 +479,10 @@ the caveat is in each angle's sentence.
   form. The error figure is phrased as *"off by about"*, never as accuracy.
 
 **P7's word list, for every angle sentence in the wording module**, as the minimum #1066's test
-holds (it may add, never remove):
+holds (it may add, never remove). **Matching is case-insensitive and on word boundaries**, never
+by substring: *"low"* is in *"follow"*, *"up"* in *"upright"* and *"too"* in *"took"*, and a
+substring match would refuse innocent capture-state wording. A multi-word entry (*"open up"*)
+matches as a phrase.
 
 | Kind | Words |
 |---|---|
@@ -485,8 +521,14 @@ all four readings, headed as what published sources say**, is not. Every range s
 
 - contains no rider value, no *"you"* or *"your"*, and none of D-8's direction or verdict words;
 - names its source in the same sentence;
-- is followed, in the same sub-section, by the sentence ADR 0030 D-6's example already used:
-  *"This app does not compare your numbers with these ranges."*
+- is followed, in the same sub-section, by a closing sentence on the model of ADR 0030 D-6's
+  example, which reads *"This app does not measure that, and the pictures below are not that
+  measurement."* That wording no longer fits, because the app now does measure an angle. The
+  closing sentence drafted here is *"This app does not compare a rider's angles with these
+  ranges."* ⚠️ **Drafted by the author, not quoted from ADR 0030**, and it obeys the first bullet
+  above: no *"you"* or *"your"*. It is the one fixed sentence of the sub-section that is **not** a
+  range sentence, so #1066's walk over the range-sentence list does not include it; #1066 holds it
+  to the first bullet by a test of its own.
 
 **Which ranges** are a closed list in the wording module, each read first-hand from its source by
 #1066 with the date it was read. **This ADR names none as decided.** ⚠️ ADR 0030 D-6's example,
@@ -508,11 +550,29 @@ D-3 defines is 145 to 155 degrees.
   own wording, with R8's caveat. ⚠️ **The author's choice**, and the narrower one. A model's
   restated angle would carry whatever caveat the model chose, or none, and R8 cannot be screened
   on free text.
-- **P8 is added**: a write-up **whose input carried a fit section** is also withheld whole if it
-  names a component, a size, or a direction to move one, using D-8's component, size and direction
-  words. This **tightens** ADR 0035 D-1, which left D-5 unscreened on model output, and only for
-  write-ups that carry fit, because that is where a general model is likeliest to say *"raise your
-  saddle 5 mm"* (spike 0020 §2.1). The one-rewrite-then-withhold rule of ADR 0035 D-4 applies.
+- **P8 is added, for every write-up**: a write-up is also withheld whole if it names a component, a
+  size, or a direction to move one, **whether or not its input carried a fit section**. Unconditional
+  is spike 0020's rule as written, and element (g) is the reason: a write-up built from the
+  side-report summary alone can say *"raise your saddle 5 mm"* as readily as one built with fit
+  (spike 0020 §2.1). The one-rewrite-then-withhold rule of ADR 0035 D-4 applies.
+  - **What it matches**, case-insensitively and **on word boundaries**: the component words saddle,
+    seatpost, stem, handlebar, cleat, spacer, shim and setback, with their plurals; the phrases
+    *frame size*, *crank length*, *saddle height*, *seat height*, *stack* and *reach* **when next to
+    a component word or a number**; and a number followed by a unit of length (*mm*, *millimetre*,
+    *cm*, *centimetre*, *inch*, and their plurals and abbreviations). D-8's *crank*, *bars* and
+    *seat* are left out on their own, because *"crank"*, *"energy bars"* and *"stayed in the seat"*
+    are ordinary ride prose; *crank length* and *seat height* are in. A direction to
+    move a component necessarily names the component or a size, so it is caught by those. **D-8's
+    direction and verdict words are not matched on their own in model text**: *"up"*, *"down"*,
+    *"high"* and *"low"* are ordinary words about a ride (*"your power was high on the climb"*), and
+    matching them would withhold nearly every write-up. ⚠️ **The author's choice**. #1067 may add to
+    the list, never remove, and records each word it adds with the false withholds it measured on
+    `model-answers-testing.ts`.
+  - **What this does to ADR 0035.** It **tightens** ADR 0035 D-1, which left D-5 unscreened on model
+    output and recorded that as an accepted risk (*"What is accepted and not narrowed"*). Narrowing
+    an accepted risk is not a reversal, so ADR 0035 is **not** superseded, but a write-up ADR 0035
+    would have shown is now withheld if it names a component. This is an owner question with this
+    ADR.
 - ⚠️ **The known gap, stated rather than hidden**: ADR 0035 D-1 already records that a bare number
   such as *"your knee reached 145 at the bottom"* passes the screen. With fit in the input, that gap
   is wider. The new template version (#1067) asks the model not to restate the angles, and that is
@@ -571,7 +631,8 @@ that nothing scans those, is wider now that the product has a feature called a f
   result, and **this ADR's definitions version**, so a later change to D-3 is visible in old
   records.
 - **What it never holds**: a picture, a landmark coordinate, a segment length, a ratio of lengths,
-  or anything about equipment (P2, P6). A snapshot, if the rider presses for one, is ADR 0044's
+  or anything about equipment (P2, P6), and no length, size, component or direction field (D-2's
+  output property). A snapshot, if the rider presses for one, is ADR 0044's
   record, not this one's.
 - **One fit check per ride.** A second check during the same ride replaces the first. ⚠️ **The
   author's choice**: it keeps *"the fit check of this ride"* a single thing on the page, in the
@@ -580,6 +641,34 @@ that nothing scans those, is wider now that the product has a feature called a f
   **Not** in any single-ride file export or shared copy.
 - The store, the migration, the scoping and erasure tests and the fake are #1065's, under
   `CLAUDE.md` §5's round-trip harness.
+
+### D-13 — What would make this ADR wrong
+
+- **The owner withdraws the acceptance in D-11.** Then this ADR is superseded and no absolute angle
+  is rendered anywhere, which is ADR 0030 D-3 as written.
+- **The rate never reaches D-0's bar**, on the owner's devices or a rider's. Then fit is a decision
+  with nothing built, and should be said to be so rather than shipped at a rate that cannot prove
+  BDC.
+- **A continuation issues, or CA 3,183,442 grants as published.** Then D-2's chart may be of the
+  wrong claims, and in Canada (d) is held by P2 alone.
+- **Element (c) is read broadly**, to reach a skeleton's implicit distances or the shipped
+  proportion check. The chart still has four elements outside, but the margin narrows, and
+  reworking `pose-plausibility.ts` and `side-report.ts` to directions only becomes worth its cost.
+- **A rule in D-2 lands without its test**, or P1 lands without P3, or P4 checks only the fit
+  module's own source. A pipeline that reports a ratio of lengths passes P1 alone.
+- **Something reads `worldLandmarks`, a height or a marker.** Then (d) is a question, not an
+  absence.
+- **The narrowed gate is widened by convenience**: a second entry in `ANGLE_SURFACES`, a directory
+  match, or a second importer of the wording module. Each is a new angle surface, and each needs a
+  superseding ADR, not a review note.
+- **A model restates an angle without a degree sign**, and the gap D-10 records is exploited. Then
+  the write-up screen needs a rule for write-ups that carry fit, which this ADR did not write.
+- **The FDA guidance is revised**, or spike 0008's documents are. Every quotation here is from
+  ADR 0030's read of 2026-09-22 and spike 0008's.
+- **One of spike 0006 §5's ten unread documents is closer than '571.** A fit report with absolute
+  angles is closer to a conventional bike-fit tool than #377's design was, so the unread art matters
+  more.
+- **Anyone reads this as clearance.**
 
 ---
 
@@ -608,8 +697,9 @@ that nothing scans those, is wider now that the product has a feature called a f
   bike-fit tool than #377's difference report, and spike 0006 §5's ten documents are still unread.
 - **No verdict and no range comparison**, which is what a rider might expect a fit check to give.
   They read four numbers and some cited prose and decide for themselves.
-- **The trunk needs a phone-side change** and a new link message, owned by the transport work.
-  Until it exists, the trunk is *"not measured"*.
+- **The trunk needs a phone-side change** and a new link message, which an accepted ADR has to add
+  to ADR 0033 D-3's list, and **no ADR owns that yet** (D-0). Until one does, the trunk is *"not
+  measured"*.
 - **A model may know the rider's fit and may not restate it.** A write-up that does is withheld,
   and the rider is told why, which some riders will find odd.
 
@@ -617,20 +707,13 @@ that nothing scans those, is wider now that the product has a feature called a f
 
 | Issue | What it inherits |
 |---|---|
-| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The tilt message in ADR 0033 D-3's list (D-4). The capture transport whose rate D-0 measures |
+| [#1058](https://github.com/openzigs/onyourleft/issues/1058) (ADR 0044) | No angle on the live view (D-7). The capture transport whose rate D-0 measures. If ADR 0044 is where ADR 0033 D-3's list gains the tilt message, it discharges D-0's trunk precondition; neither draft does today |
 | [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-8's caveat and D-9's range sentence in the published wording; whether the policy names the tilt (D-4) |
 | [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-0's measurement and fixtures, D-3's event definitions, D-5's tolerance, N and steadiness tests, no sensor join |
 | [#1065](https://github.com/openzigs/onyourleft/issues/1065) | P1 to P6, D-3's definitions and rounding, D-6's conditions, D-12's record (no taken-at time, one per ride) |
 | [#1066](https://github.com/openzigs/onyourleft/issues/1066) | D-7 entire: a section, not a route; one wording module; `ANGLE_SURFACES` and the import-graph test; D-8 and D-9 |
-| [#1067](https://github.com/openzigs/onyourleft/issues/1067) | D-10: the screen's degree matchers unchanged, P8 added for fit-carrying write-ups |
+| [#1067](https://github.com/openzigs/onyourleft/issues/1067) | D-10: the screen's degree matchers unchanged, P8 added for every write-up, with or without a fit section |
 | [#1112](https://github.com/openzigs/onyourleft/issues/1112) | Its fix is the first half of D-0 |
-
-### ADR 0030 and an amendment
-
-ADR 0030's body is not edited. An appended `## Amendments` entry on ADR 0030 pointing here, as
-[ADR 0013](0013-adr-amendments.md) allows and as ADR 0033 and ADR 0035 each did, is **not made in
-this pull request** and is left as a follow-up for the owner to confirm. Until it exists, a reader
-of ADR 0030 D-3 and D-5 finds this ADR through `docs/architecture.md`'s index.
 
 ---
 
@@ -670,33 +753,3 @@ Following [ADR 0007](0007-patent-posture.md)'s model. None is *"are we safe"*.
   check* in a store listing or release note move the product toward MDCG 2019-11's musculoskeletal
   examples, and what wording keeps it a fitness app?
 - **R-4. Northern Ireland**, spike 0008 Question C, unchanged.
-
----
-
-## What would make this ADR wrong
-
-- **The owner withdraws the acceptance in D-11.** Then this ADR is superseded and no absolute angle
-  is rendered anywhere, which is ADR 0030 D-3 as written.
-- **The rate never reaches D-0's bar**, on the owner's devices or a rider's. Then fit is a decision
-  with nothing built, and should be said to be so rather than shipped at a rate that cannot prove
-  BDC.
-- **A continuation issues, or CA 3,183,442 grants as published.** Then D-2's chart may be of the
-  wrong claims, and in Canada (d) is held by P2 alone.
-- **Element (c) is read broadly**, to reach a skeleton's implicit distances or the shipped
-  proportion check. The chart still has four elements outside, but the margin narrows, and
-  reworking `pose-plausibility.ts` and `side-report.ts` to directions only becomes worth its cost.
-- **A rule in D-2 lands without its test**, or P1 lands without P3, or P4 checks only the fit
-  module's own source. A pipeline that reports a ratio of lengths passes P1 alone.
-- **Something reads `worldLandmarks`, a height or a marker.** Then (d) is a question, not an
-  absence.
-- **The narrowed gate is widened by convenience**: a second entry in `ANGLE_SURFACES`, a directory
-  match, or a second importer of the wording module. Each is a new angle surface, and each needs a
-  superseding ADR, not a review note.
-- **A model restates an angle without a degree sign**, and the gap D-10 records is exploited. Then
-  the write-up screen needs a rule for fit-carrying write-ups that this ADR did not write.
-- **The FDA guidance is revised**, or spike 0008's documents are. Every quotation here is from
-  ADR 0030's read of 2026-09-22 and spike 0008's.
-- **One of spike 0006 §5's ten unread documents is closer than '571.** A fit report with absolute
-  angles is closer to a conventional bike-fit tool than #377's design was, so the unread art matters
-  more.
-- **Anyone reads this as clearance.**
