@@ -93,6 +93,15 @@ export interface StatusMessageProps {
   readonly live?: boolean;
   readonly id?: string;
   /**
+   * A safety or privacy sentence that must stay on the screen — #666, #1048.
+   * Marks the message's sentence `data-oyl-kept-visible`, as `KeptVisible.tsx`
+   * does, without a wrapper box around the message: the mark the browser
+   * gate's fold rule and `a11y/kept-visible.a11y.test.tsx` read. With
+   * {@link more} the mark is on the sentence only, never on the disclosure
+   * under it, which is not kept.
+   */
+  readonly kept?: boolean;
+  /**
    * What a rider may open to read the rest — #605. The sentence in
    * `children` stays on the screen; this is a `<details>` inside the same
    * surface, under it, closed until pressed.
@@ -122,8 +131,10 @@ export function StatusMessage({
   label,
   live = false,
   id,
+  kept = false,
   more,
 }: StatusMessageProps): JSX.Element {
+  const mark = kept ? { 'data-oyl-kept-visible': '' } : {};
   if (more !== undefined) {
     return (
       <div className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})}>
@@ -131,7 +142,7 @@ export function StatusMessage({
           {GLYPH[tone]}
         </span>
         <div>
-          <p className="oyl-status__sentence">
+          <p className="oyl-status__sentence" {...mark}>
             <span className="oyl-status__label">{label ?? DEFAULT_LABEL[tone]}: </span>
             {children}
           </p>
@@ -144,7 +155,7 @@ export function StatusMessage({
     );
   }
   return (
-    <p className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})}>
+    <p className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})} {...mark}>
       <span className="oyl-status__glyph" aria-hidden="true">
         {GLYPH[tone]}
       </span>

@@ -116,6 +116,15 @@ export const HOSTED_CONSENT: {
 };
 
 /**
+ * What masking cannot promise, in one sentence — the end of
+ * {@link HOSTED_MASKING_NOTICE} and the start of Settings' masked-words caveat
+ * (`athlete/MaskedWordsPanel.tsx` §`MASKED_WORDS_CAVEAT`), shared so the two
+ * cannot drift (#1048).
+ */
+export const MASKING_LIMIT =
+  'Masking reduces what is sent; it does not guarantee that nothing personal gets through.';
+
+/**
  * What masking does and does not do, said beside the hosted consent — #839,
  * drafted for the owner to approve in ADR 0029's amendment of 2026-09-29
  * (#839), which quotes it after {@link HOSTED_CONSENT} unchanged.
@@ -133,8 +142,8 @@ export const HOSTED_CONSENT: {
 export const HOSTED_MASKING_NOTICE =
   'Before anything is sent to it, e-mail addresses, phone numbers, links, street addresses, ' +
   'postcodes, coordinates, the names of your privacy zones and everything on your list of words ' +
-  'to mask are replaced with a placeholder. A name is masked only if it is on that list. Masking ' +
-  'reduces what is sent; it does not guarantee that nothing personal gets through.';
+  'to mask are replaced with a placeholder. A name is masked only if it is on that list. ' +
+  MASKING_LIMIT;
 
 /** Where the rider's answer is kept: this device's `localStorage`, and nothing else. */
 export type HostedModelStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;

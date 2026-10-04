@@ -532,7 +532,9 @@ describe('#1041 — every ride a card, at every width', () => {
       distance: metres(0),
       elapsedTime: seconds(3_600),
     });
-    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [nothing])} />);
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [nothing])} selected="no-speed" />,
+    );
     await settle();
 
     const card = queryAll(document.body, '.oyl-activity-cards > li')[0];
@@ -544,6 +546,18 @@ describe('#1041 — every ride a card, at every width', () => {
     expect(
       queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
     ).toStrictEqual(['1:00:00']);
+
+    // The selected ride's summary says so with an em dash, never
+    // "undefined km" or "0.0 km" (#1053).
+    const summaryFacts = document.getElementById(SELECTED_HEADING_ID)?.nextElementSibling;
+    const facts = new Map(
+      queryAll(summaryFacts as Element, ':scope > div').map((fact): [string, string] => [
+        fact.querySelector('dt')?.textContent ?? '',
+        fact.querySelector('dd')?.textContent ?? '',
+      ]),
+    );
+    expect(facts.get('Distance')).toBe('—');
+    expect(summaryFacts?.textContent ?? '').not.toMatch(/undefined|\b0(\.0)? (km|mi)\b/);
   });
 
   it('invents no 0 W for a ride whose power readings were all 0 — #1054', async () => {
