@@ -3294,8 +3294,12 @@ function requireCount(what: string, value: number): void {
  * `loadCoveredTime`, so on the real store every ride read as unsummarised and
  * the backfill re-summarised every ride on every pass. Their stubs carried the
  * fields, so every test above the store was green. A new OPTIONAL field on
- * `ActivityRecord` needs the same decision made by hand, and a test here that
- * reads it back through `listActivitySummaries`.
+ * `ActivityRecord` needs the same decision made by hand. #1088 found the next
+ * one, `routeId`, which Home's "Next up" reads; since then
+ * `activity-store.summary-projection.test.ts` makes the decision a red test
+ * rather than a memory: its fixture is a `Required<ActivityRecord>`, so a new
+ * optional field does not compile until it is set, and the list row must then
+ * carry it unless `SUMMARY_EXCLUSIONS` names it with a reason.
  */
 function summaryOf(record: ActivityRecord): ActivitySummary {
   const {
@@ -3309,6 +3313,7 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     distance,
     visibility,
     hasPosition,
+    routeId,
     averagePower,
     effortWeightedPower,
     effortWeightedHeartRate,
@@ -3327,6 +3332,9 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     visibility,
     hasPosition,
     createdAt,
+    // #1088: Home's "Next up" (#1010) reads the newest ride's route off the
+    // list row; dropped here, it offered "A free ride" to every rider.
+    ...(routeId === undefined ? {} : { routeId }),
     ...(averagePower === undefined ? {} : { averagePower }),
     // The load summary #77's list readers are built on — see the ⚠️ above.
     ...(effortWeightedPower === undefined ? {} : { effortWeightedPower }),
