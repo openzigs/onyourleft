@@ -3,8 +3,8 @@
 - **Status**: Proposed. It records the owner's rulings of 2026-10-03 and the owner's answers of
   2026-10-04 to the seven questions the first draft left open (§"What the owner answered on
   2026-10-04"). **The owner approved the wording on 2026-10-04**: *"go ahead and do 1058 now I
-  approve the wording"*. Where an answer left a detail open, the narrower reading is marked *the
-  author's choice* at the place, and §"What the owner has not decided" says none remain. ⚠️ **D-2
+  approve the wording"*. Where an answer left a detail open, the more protective reading is marked
+  *the author's choice* at the place, and §"What the owner has not decided" says none remain. ⚠️ **D-2
   is conditional on spike 0021
   ([#1057](https://github.com/openzigs/onyourleft/issues/1057))**, which has not been run. D-2
   decides what follows from each of its outcomes, so the spike needs only an appended amendment
@@ -206,7 +206,7 @@ trainer"*.
 | No per-ride keep on this path | **Stands.** A snapshot is one press for one picture. There is no switch that keeps a ride's pictures, and no "always" |
 | What is kept: pose numbers, then the pose summary (ADR 0035 D-6's supersession) | **Stands** |
 | Pose numbers never reach an announcement or a trainer | **Stands** |
-| Pose numbers never reach the HUD or the ride screen | **Superseded for the outline only.** The outline is a drawing of the landmarks over the picture they came from. No number derived from them (an angle, a length, a difference, a verdict) reaches the HUD or the ride screen by this ADR. ADR 0045 decides whether any angle is drawn anywhere, and the issue's own reading is that its surface list excludes the ride |
+| Pose numbers never reach the HUD or the ride screen | **Superseded for the outline only.** The outline is a drawing of the landmarks over the picture they came from. No number derived from them (an angle, a length, a difference, a verdict) reaches the HUD or the ride screen by this ADR. ADR 0045 decides whether any angle is drawn anywhere, and [#1059](https://github.com/openzigs/onyourleft/issues/1059)'s item 4 already names the HUD, the ride screen and the live view as surfaces its closed list excludes |
 | **No object URL** | **Stands for the live view.** It is drawn from a decoded bitmap onto a `<canvas>`, or played by `srcObject` into a `<video>` if D-2's video-track branch is taken. Neither is a URL. **A saved snapshot on its ride's page** needs an image source, so it may have an object URL, created only while the rider has the snapshot section open (D-6) and revoked when it closes or unmounts. That URL is never logged, never put in an error (D-4), and never reaches the service worker, which does not intercept `blob:` URLs (ADR 0029 D-10) |
 | The model runs in the worker | **Stands**, and is now a rule rather than an observation: nothing in the live view may move inference to the main thread (spike 0010) |
 
@@ -281,25 +281,34 @@ by the owner's answer for setup:
 
 1. A snapshot taken **while a ride is under way** (recording, paused, or being saved) is held **in
    this tab's memory**, owned by that ride, and written to the store **in the same transaction as,
-   or straight after, that ride's save**.
+   or straight after, that ride's save**. **A snapshot row is never written before its ride's row
+   is durable**: either both commit in one transaction, or the snapshot's write starts only after
+   the ride's save has committed. A snapshot can therefore never name a ride the store does not
+   hold.
 2. A snapshot taken **during setup**, with no ride under way, is held **in this tab's memory** and
-   joins **the next ride started in this tab and saved**. It is written with that ride's save, as in
-   rule 1, and never before it: until then nothing about it is in the store.
-3. If the save of the ride a snapshot is held for comes back empty or failed, that ride's snapshots,
-   setup snapshots included, are dropped and nothing was written. The author's reading of *"the
-   next ride that is saved"*, and the narrower one: a setup snapshot does not wait on for a later
-   ride.
-4. **If no ride is saved, a setup snapshot is discarded.** It was only ever in memory, so closing or
-   reloading the tab, or the erase, discards it, and nothing was written.
-5. A recovered ride saved later from the leftover list never collects a snapshot, whether it was
-   taken during that ride or during setup: the ride must have been seen under way in this tab, or
-   started in it after the setup snapshot was taken. The author's reading, and the narrower one.
+   joins **the next ride started in this tab after it was taken and saved**. It is written with that
+   ride's save, as in rule 1, and never before it: until then nothing about it is in the store.
+3. **Only a save consumes a setup snapshot.** The owner's sentence decides this: *"joins the next
+   ride that is saved"*. If a ride started after the setup snapshot comes back from its save empty
+   or failed, or is discarded unsaved, the setup snapshot is **not** dropped: it stays in this tab's
+   memory and carries to the next ride this tab starts, and joins the first of them that is saved.
+   A snapshot taken **during** a ride whose save comes back empty or failed is not a setup snapshot:
+   it is dropped with that ride, and nothing of it was written.
+4. **If no ride is saved, a setup snapshot is discarded.** It was only ever in memory, so it is
+   discarded, with nothing written, when the tab is closed or reloaded, when the erase runs, or when
+   the local athlete changes.
+5. A recovered ride saved later from the leftover list **never collects a snapshot**, whether one was
+   taken during that ride or during setup: the ride must have been started in this tab after the
+   setup snapshot was taken. Saving a recovered ride therefore does **not** consume a setup
+   snapshot: it keeps waiting, in this tab's memory, for the next ride this tab starts and saves.
+   *The author's choice*, so that a snapshot never joins a ride the rider was not on when it was
+   taken.
 
 The number held in memory, per ride and for setup, is bounded, and the bound is #1063's to set at its
 constant, with its provenance. A press past the bound is refused in words, not silently dropped.
 
 **Where it is stored.** In `packages/store`'s existing `cameraFrames` table, as a
-`CameraFrameRecord`, in the next schema version. The author's choice, so that one table holds every
+`CameraFrameRecord`, in the next schema version. *The author's choice*, so that one table holds every
 picture this device keeps and ADR 0029 D-1's *"its own store record"* stays one record. The new
 version adds:
 
@@ -422,7 +431,7 @@ What changes is what the rider is told:
   start of every ride.* The choice is a device preference, kept beside the game's other device
   preferences (`game/world-preference.ts`, `game/hud/announce-preference.ts`), and it is a
   boolean: no picture and nothing derived from one is stored with it (D-4). Before the rider has
-  ever chosen, it is **off**, the author's choice and the narrower one. The draft's per-ride default
+  ever chosen, it is **off**, *the author's choice*. The draft's per-ride default
   (the shape of ADR 0029 D-2 and ADR 0030 D-7 S5) is **not** taken; what that costs is in
   §Consequences.
 - **The toggle and *Save snapshot* are ride-time controls.** They join
@@ -449,7 +458,7 @@ What changes is what the rider is told:
 
 | Gate | What it gains |
 |---|---|
-| `ride.browser.spec.ts` | The view inside every overlay viewport after insets, over no panel, reading or control (hit-tested), clear of the leaning rider box with its margin published; a control that places it over the box and must fail |
+| `ride.browser.spec.ts` | The view inside every overlay viewport after insets, over no panel, reading or control (hit-tested), clear of the leaning rider box with its margin published; a control that places it over the box and must fail. The standing-notice cell hit-tested with each standing notice shown (the view never covers one), with a control that places the view over the notice and must fail |
 | `rideview.browser.spec.ts` | With the view on, every ride control and standing notice still 50 px above the fold at every tablet in the shell both ways up; a control that moves it above *Pause* / *Stop* and must fail |
 | `ride-targets.browser.spec.ts` | The toggle and *Save snapshot* found on a scene and measured #316's three ways at 48 px |
 | `theme.browser.spec.ts` | The view in the HUD's palette in both page palettes |
@@ -502,15 +511,19 @@ model*, the write-up of ADR 0035 included, which reads no picture.
 
 ### D-12 — Android's secure window flag, while a picture is shown
 
-> **The rule.** In the Android shell, while a side-camera picture is on screen (the live view during
-> setup or the ride, or a snapshot in an open section of a ride's page), the app's window carries
-> Android's secure flag, `WindowManager.LayoutParams.FLAG_SECURE`. It is set when the first picture
-> is mounted and cleared when the last one is removed. It is not set at any other time.
+> **The rule.** In the Android shell, while a camera picture is on screen (the side camera's live
+> view during setup or the ride, a snapshot in an open section of a ride's page, the phone's own
+> framing preview, `camera/FramingPreview.tsx`, or the tablet's pairing viewfinder,
+> `camera/ScanViewfinder.tsx`), the app's window carries Android's secure flag,
+> `WindowManager.LayoutParams.FLAG_SECURE`. It is set when the first picture is mounted and cleared
+> when the last one is removed, and only by an in-app change made while the app is in the
+> foreground. It is not set at any other time.
 
 The owner's answer of 2026-10-04 to question 7: *the camera screens set Android's secure window flag
 (`FLAG_SECURE`) while a picture is shown, which blocks the recents thumbnail and screenshots on those
-screens.* A snapshot shown in an open section of a ride's page is the same picture, so the author
-applies the flag there too, the narrower reading. While it is set, Android shows a blank recent-apps thumbnail for the app, refuses a
+screens.* The phone's framing preview and the tablet's QR viewfinder are camera screens showing a
+picture, so the flag covers both. A snapshot shown in an open section of a ride's page is the same
+picture as the live view showed, so the flag covers it too, *the author's choice*. While it is set, Android shows a blank recent-apps thumbnail for the app, refuses a
 screenshot or screen recording of it, and shows a non-secure display (a cast, for example) blank.
 
 **The native piece**, in `apps/mobile`, the shape `ThermalPlugin` and `RecordingServicePlugin`
@@ -527,6 +540,14 @@ already have:
 - **One owner in the web client**: a reference count over the mounted pictures, so two pictures on
   one screen, or a picture replaced by the next, never clear the flag early. Every picture
   component takes it on mount and gives it back on unmount, the error path included.
+- **It is not cleared on the way to the background.** Android takes the recent-apps snapshot as the
+  app goes to the background, so a flag cleared then (by an unmount on `pause`, a `visibilitychange`
+  handler, or a picture removed because the link dropped while the app was leaving) could leave the
+  picture in that snapshot. The count is given back only on an explicit in-app transition while the
+  app is in the foreground; a picture surface removed while the app is in the background keeps the
+  flag until the app is next in the foreground. Whether a real device's recents thumbnail is blank
+  is a device check #1061 owes, as a row on the owner's device-check list,
+  [#733](https://github.com/openzigs/onyourleft/issues/733).
 - **In a browser it does nothing.** A web page cannot stop a screenshot or the browser's own
   tab-switcher preview, and the port is a no-op there. That is said to the rider (below), not
   hidden.
@@ -577,10 +598,13 @@ another device (D-6). It costs the rider their own screenshots of these screens,
 - **The transport is undecided.** If spike 0021 picks a video track, D-3 reason 3 falls in full, the
   QR payload grows, and a strip point moves to the tablet for snapshots.
 - **ADR 0029 gains no pointer amendment in this pull request**, though #1058 asks for one. Its newest
-  `## Amendments` entry is read by `apps/web/src/camera/hosted-model.test.ts`, which requires it to
-  be the 2026-09-29 hosted-consent entry. Appending a pointer would turn that test red, and this pull
-  request changes no code. The pointer is owed, and lands with whichever pull request next changes
-  that test's reading of the section (#1060 is the natural one). Until then a reader of ADR 0029 D-2
+  `## Amendments` entry is read by `apps/web/src/camera/hosted-model.test.ts` §`newestAmendment`,
+  which takes the **last** entry of ADR 0029's section and requires it to be the 2026-09-29
+  hosted-consent entry. Appending a pointer would turn that test red, and this pull request changes
+  no code. So before any pointer amendment is appended, `newestAmendment` must be changed to find
+  the 2026-09-29 hosted-consent entry **by its content** (for example the entry that quotes
+  *ADR 0035 D-9 C*) rather than by its position. The pointer is owed, and lands with #1060, which
+  makes that change to the test first (§"Constraints this places on other work"). Until then a reader of ADR 0029 D-2
   finds this ADR through ADR 0033's amendment and `docs/architecture.md`'s index.
 
 ### Constraints this places on other work
@@ -589,8 +613,8 @@ another device (D-6). It costs the rider their own screenshots of these screens,
 |---|---|
 | [#1057](https://github.com/openzigs/onyourleft/issues/1057), spike 0021 | D-2's table: every row of the branch it picks is a measurement it owes. Its result is appended here as an amendment |
 | [#1112](https://github.com/openzigs/onyourleft/issues/1112) | The live view is not usable at 0.3 a second on branch A. Its fix, or the spike's choice of branch B, comes first |
-| [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-10's table, with the owner's approval of each sentence: D-7's consent sentence, D-3's setup-snapshot sentence and D-12's screenshot sentence. The pointer amendment to ADR 0029 (above) if it touches `hosted-model.test.ts` |
-| [#1061](https://github.com/openzigs/onyourleft/issues/1061) | D-1 (no object URL for the live view, the model in the worker, at most one shown picture), D-6, D-7, D-9, the setup half of D-8's gates, and D-12's plugin and port, which land with the first picture shown |
+| [#1060](https://github.com/openzigs/onyourleft/issues/1060) | D-10's table, with the owner's approval of each sentence: D-7's consent sentence, D-3's setup-snapshot sentence and D-12's screenshot sentence. The pointer amendment to ADR 0029 (§"What this costs"), after first changing `hosted-model.test.ts` §`newestAmendment` to find the 2026-09-29 hosted-consent entry by content rather than as the last entry |
+| [#1061](https://github.com/openzigs/onyourleft/issues/1061) | D-1 (no object URL for the live view, the model in the worker, at most one shown picture), D-6, D-7, D-9, the setup half of D-8's gates, and D-12's plugin and port, which land with the first picture shown and cover `camera/FramingPreview.tsx` and `camera/ScanViewfinder.tsx` as well; the device check that the recents thumbnail is blank, as a row on [#733](https://github.com/openzigs/onyourleft/issues/733) |
 | [#1062](https://github.com/openzigs/onyourleft/issues/1062) | D-8 entire, the remembered preference included, D-9, D-12 on the ride surfaces, and the device measurement against #554 |
 | [#1063](https://github.com/openzigs/onyourleft/issues/1063) | D-3 (setup snapshots and their discard included), D-4, D-5 and D-6's snapshot section, D-12 on a ride's page, the migration and its `down` |
 | [#1064](https://github.com/openzigs/onyourleft/issues/1064) | D-2's note on a fit-check burst, and the phone's tilt message (the owner's trunk-angle ruling), both added there and not here |
@@ -604,9 +628,11 @@ another device (D-6). It costs the rider their own screenshots of these screens,
 on 2026-10-04 (*"go ahead and do 1058 now I approve the wording"*). The answers are in §Context
 §"What the owner answered on 2026-10-04" and in the Decision: question 1 in D-8, questions 2, 4 and
 5 in D-3, question 3 in D-6, question 6 in D-11 and question 7 in D-12. Where an answer left a detail
-open, the author took the narrower reading and says so at the place: the view is off before the
-rider has ever chosen (D-8), a setup snapshot does not wait past a failed save or join a recovered
-ride (D-3), and the secure flag also covers a snapshot on a ride's page (D-12). The author's other
+open, the author took the more protective reading and marks it *the author's choice* at the place:
+the view is off before the rider has ever chosen (D-8), a setup snapshot never joins a recovered
+ride (D-3), and the secure flag also covers a snapshot on a ride's page (D-12). Whether a setup
+snapshot waits past a failed save is **not** an author's choice: the owner's *"the next ride that
+is saved"* decides it, and D-3 rule 3 follows it. The author's other
 choices, such as one `cameraFrames` table for every kept picture (D-3), stand under the owner's
 approval of the wording.
 
