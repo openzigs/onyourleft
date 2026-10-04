@@ -1030,3 +1030,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   | `apps/web/src/ride-analysis/RideWriteUpControl.tsx` | *See what will be sent* shows the masked text a hosted run sends, and is shown before the first hosted run since the app was opened; nothing is sent from it |
   | `apps/web/src/athlete/MaskedWordsPanel.tsx`, `packages/store` | The rider's list of words to mask, on Settings, stored on the athlete row (`AthleteRecord.maskedWords`), erased with it, and not in the account export |
   | [`docs/privacy-policy.md`](../privacy-policy.md) | §"Questions sent to a service you chose, on your own key" says what is masked, and that masking is not a guarantee |
+- **2026-10-04** — **On the side-camera path, D-2 now allows one still per press, and D-11 applies
+  to a picture on a screen; both in [ADR 0044](0044-side-camera-live-view-and-snapshot.md).** The
+  2026-09-25 entry above recorded that [ADR 0033](0033-side-camera-link.md) left *discard* as the
+  only option on this path. On the owner's rulings of 2026-10-03, ADR 0044 D-3 lets the rider save
+  **one picture per press**, tied to the ride it was taken in and deleted with it. That is not D-2's
+  per-ride keep, which is still not offered on this path, and D-2's default (discarded after
+  analysis) is unchanged. ADR 0044 D-5 is the store: every read owner-scoped, a snapshot a kept
+  frame for D-3 (in the account export, named in the manifest, never in an activity file) and for
+  D-4 (`ERASE_REMOVES`' existing line covers it and the outline stored with it). ADR 0044 D-6
+  applies D-11 to the live picture and to every snapshot, and D-12 there sets Android's secure
+  window flag while a picture is shown. ADR 0044 D-7 adds a sentence for a screen **beside** D-5's
+  bystander sentence, which stands word for word. D-9's one strip point stays on the phone (ADR
+  0044 D-2). **This entry is not about the hosted path**: a hosted model is still never sent a
+  picture (ADR 0044 D-11), and the hosted consent wording is still the one the entry above titled
+  *"Everything the hosted path sends is masked first, and the consent says what masking does and
+  does not do — drafted by #839 for the owner to approve"* quotes, which is the entry
+  `apps/web/src/camera/hosted-model.test.ts` holds it to. The body above is not edited.

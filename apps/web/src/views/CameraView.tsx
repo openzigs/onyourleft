@@ -202,7 +202,12 @@ export const ANALYSIS_WHAT_IS_SENT =
  * — #666: what the camera captures, where a picture goes and what
  * is kept (ADR 0029, #382's consent statement), anyone else in the room (ADR
  * 0029 D-5), and what is sent to the rider's own computer, unencrypted
- * (ADR 0029's amendment, Q1). `a11y/kept-visible.a11y.test.tsx` holds them.
+ * (ADR 0029's amendment, Q1). Since #1060 the consent statement also says a
+ * side camera's picture is shown on this tablet, what a snapshot keeps, and
+ * that a screenshot is blocked in the Android app and not in a browser (ADR
+ * 0044 D-7, D-3, D-12) — all of it through {@link CONSENT_STATEMENT}, so each
+ * is kept visible with no second list to forget.
+ * `a11y/kept-visible.a11y.test.tsx` holds them.
  */
 /**
  * The kept-visible sentences that render only once the camera is agreed to:

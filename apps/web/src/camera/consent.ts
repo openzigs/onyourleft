@@ -71,6 +71,18 @@ export const BYSTANDER_SENTENCE =
   'will not be in it, or leave the camera off.';
 
 /**
+ * What a screenshot of a camera picture meets — #1060,
+ * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-12. In the Android shell the window carries `FLAG_SECURE` while a camera
+ * picture is on screen; a web page cannot stop a screenshot or the browser's
+ * own tab-switcher preview, and the rider is told so rather than left to
+ * assume. Shown on the Camera page (in {@link CONSENT_STATEMENT}) and on the
+ * side-camera phone's page, whose own framing preview D-12 covers too.
+ */
+export const SCREENSHOT_SENTENCE =
+  'In the Android app, screenshots and the app-switcher preview are blocked while a camera picture is on the screen. A browser cannot block them.';
+
+/**
  * What is captured, where it goes, and what is kept — #382's third criterion.
  *
  * Each line is a decision in ADR 0029 rather than a reassurance:
@@ -91,6 +103,17 @@ export const BYSTANDER_SENTENCE =
  * 4. **what an erase cannot reach** — D-4's honest half, said **before** the
  *    rider presses anything rather than discovered afterwards.
  *
+ * ⚠️ **Since #1060 a side camera's picture is SHOWN and one can be KEPT**, and
+ * a reviewer who remembers line 3 reading *"thrown away as soon as it has been
+ * looked at"* with no other way to keep one is reading the old file.
+ * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * supersedes ADR 0033 D-6 on that path: the picture is shown on the tablet
+ * while the rider has the view on (D-1, D-8), anyone who can see the screen
+ * sees it (D-6, D-7), and one press of *Save snapshot* keeps one still with its
+ * ride (D-3, D-5). D-7 and D-12 ask this list for two more sentences — the
+ * picture is shown on this tablet, and {@link SCREENSHOT_SENTENCE} — and D-10
+ * says the words are #1060's, with the owner's approval.
+ *
  * ⚠️ The fourth line is short today and will get longer, and it is worth
  * knowing why it is short: the two sentences ADR 0029 D-4 writes for
  * `ERASE_CANNOT_REACH` are both about a copy that **left the device** — a
@@ -103,8 +126,11 @@ export const BYSTANDER_SENTENCE =
 export const CONSENT_STATEMENT: readonly string[] = [
   'The camera takes still pictures of you while you ride, and only while the "Camera on" sign is showing.',
   'Nothing is sent anywhere unless you set up a computer of your own below and switch it on. Then a picture goes to that one computer, only when you press the button that sends it, and nowhere else — or, if you also switch on sending the side camera’s pictures there, every picture the side camera takes while it films.',
-  'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first. There is no setting that keeps them always.',
-  'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. A copy you have already exported is yours and is wherever you put it.',
+  'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first or, for a side camera, press "Save snapshot". There is no setting that keeps them always.',
+  'A side camera’s picture is shown on this tablet while you set it up and, if you leave its view on, during a ride, with an outline of where it found you. Anyone who can see this tablet’s screen can see it, and anyone else in the picture is shown too.',
+  'Pressing "Save snapshot" keeps that one picture with the ride it was taken in, shown only on that ride’s page once you open its section. A snapshot taken while you set up joins the next ride you save, and is thrown away if you save none. A snapshot is never sent to your computer or to any service.',
+  'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. It is in the account export, and is never put in a ride you export or share. A copy you have already exported is yours and is wherever you put it.',
+  SCREENSHOT_SENTENCE,
 ];
 
 /** Both answers a rider can give. @see consentDecision */

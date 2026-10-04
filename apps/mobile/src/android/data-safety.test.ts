@@ -313,7 +313,33 @@ describe('the declaration filed on Play', () => {
     const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
     expect(photos?.why).toContain('#530');
     expect(photos?.why).toContain('end-to-end encrypted');
-    expect(photos?.why).toContain('never stored, shown or sent on');
+  });
+
+  it('says the side camera’s picture is shown on the tablet and a pressed snapshot is stored — #1060, ADR 0044', () => {
+    // ADR 0044 D-1 superseded ADR 0033 D-6 on this path, and D-10 put this
+    // row's `why` among what must change: "never stored, shown or sent on" is
+    // false from the build that shows a picture.
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    const why = photos?.why ?? '';
+    expect(why).not.toMatch(/never stored, shown/);
+    expect(why).not.toMatch(/never[^.;]*\bshown\b/);
+    expect(why).toContain(
+      'shown on the tablet’s own screen while the rider has the side camera’s view on',
+    );
+    // "Stored" of the snapshot the rider pressed for, and of nothing else on
+    // this path: every other picture is still discarded.
+    expect(why).toContain(
+      'the one picture the rider saves with each press of “Save snapshot” is stored on the tablet',
+    );
+    expect(why).toContain('discarded once the next replaces it');
+    const storedClauses = why.split(/[.;]/).filter((clause) => /\bstored\b/.test(clause));
+    expect(storedClauses).toHaveLength(1);
+    expect(storedClauses[0]).toContain('Save snapshot');
+    // And it is still never sent on (ADR 0044 D-11), which is what keeps the
+    // answers where they were.
+    expect(why).toContain('is never sent on');
+    expect(photos?.collected).toBe(true);
+    expect(photos?.shared).toBe(false);
   });
 
   it('names the side camera’s stream to the rider’s computer — #553, ADR 0033 D-11', () => {

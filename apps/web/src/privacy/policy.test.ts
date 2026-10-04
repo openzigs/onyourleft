@@ -72,6 +72,19 @@ describe('the published privacy policy', () => {
     expect(text).not.toContain('`sendBeacon` call at all');
   });
 
+  it('names snapshots among what an erase removes and what the account export carries — #1060', () => {
+    // ADR 0044 D-5 and D-10: §"Deleting your data" names a side-camera
+    // snapshot both ways, read inside that section rather than anywhere in the
+    // file, where the side-camera section already says so.
+    const text = readFileSync(POLICY, 'utf8');
+    const erase = text
+      .slice(text.indexOf('## Deleting your data'), text.indexOf('## Children'))
+      .replaceAll(/\s+/g, ' ');
+    expect(erase).toContain('every picture you kept — side-camera snapshots included —');
+    expect(erase).toContain('Deleting a ride deletes its snapshots with it.');
+    expect(erase).toContain('includes every picture you kept, snapshots included.');
+  });
+
   it('says what the side-camera link carries — #529 — and, since #530, the pictures', () => {
     // ADR 0033 D-10: the policy changes in the pull request that sends the
     // first link byte, and the words about pictures land with #530. So this
@@ -91,8 +104,28 @@ describe('the published privacy policy', () => {
     // ones, because it is false now.
     expect(text).not.toContain('in this version — **no picture**');
     expect(text).toContain('second go from the phone to the tablet');
-    // D-6, in the owner's words' terms: none kept, none shown, none sent on.
-    expect(text).toContain('No picture is ever saved on the tablet');
+    // ⚠️ Since #1060 ADR 0044 supersedes D-6 on this path: a picture is SHOWN
+    // while the view is on, and one press of Save snapshot keeps one. D-6's
+    // "No picture is ever saved on the tablet, shown on its screen …" is false
+    // from the build that shows one, so it is pinned gone, not left beside.
+    // Compared as prose, so a re-wrapped line is not a failure.
+    const flat = text.replaceAll(/\s+/g, ' ');
+    expect(flat).not.toContain('No picture is ever saved on the tablet');
+    expect(flat).toContain('the tablet shows the picture on its screen');
+    expect(flat).toContain('No picture is saved on the tablet unless you press *Save snapshot*');
+    // None sent on: a snapshot included (ADR 0044 D-11).
+    expect(flat).toContain(
+      'It is never sent to your own computer, to a service you chose, or to an instance.',
+    );
+    // D-7: whoever else is in the picture is on the screen and in a snapshot.
+    expect(flat).toContain(
+      'Anyone else in the room who is in the picture is shown too, and is in a snapshot you save.',
+    );
+    // D-12: what Android blocks, and the honest half a browser cannot.
+    expect(flat).toContain(
+      'screenshots, screen recordings and the app-switcher preview are blocked while a camera picture is on the screen',
+    );
+    expect(flat).toContain('A browser cannot block them');
     // And the dependency that would report home, disclosed with what stops it.
     expect(text).toContain('contains a usage logger');
     expect(text).toContain('The app blocks it');

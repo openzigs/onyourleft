@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-30.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-04.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -84,7 +84,7 @@ your own action:
 | Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | The address of an instance you connected to, the account id it gave you, and this device's sign-in to it (a session token) | kept in this device's browser storage when you press *Connect*; never put in an export; *Disconnect* and *Erase everything* remove it |
-| Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride. Otherwise a picture is thrown away as soon as it has been looked at |
+| Pictures from the camera — only the ones you chose to keep | the camera, if you turn it on and then turn on "keep the pictures from this ride" for that ride; or a side camera's picture you saved by pressing *Save snapshot*, kept with the ride it was taken in. Otherwise a picture is thrown away as soon as it has been looked at |
 | The address and model name of your own computer, if you set one up | typed by you on the Camera page, and kept in this device's browser storage |
 | The address and model name of a hosted service, and **your key for it**, if you set one up | typed by you on the Camera page, and kept in this device's browser storage; never put in an export; *Erase everything* removes it |
 | Where you were in the side camera's picture — a handful of positions, not a picture — from your last session whose check found the camera where it was the time before (or your first session), and whether that check passed | worked out on the tablet from the side-camera phone's pictures, so the next session can check the camera is in the same place |
@@ -251,9 +251,13 @@ directly, over your own Wi-Fi.
   it was taken, and nothing else. Each is re-encoded from its pixels on the phone, so it carries no
   location or device metadata. Not your rides, not your position, not your heart rate, not a name,
   and not the time of day.
-- **What the tablet does with a picture:** a pose model running on the tablet itself looks at it,
-  and it is thrown away as soon as it has been looked at. **No picture is ever saved on the tablet,
-  shown on its screen, or sent anywhere else** — not to us and not to any service — **unless you
+- **What the tablet does with a picture:** a pose model running on the tablet itself looks at it.
+  **While you have the side camera's view on — while you set the camera up and, if you leave the
+  view on, during a ride — the tablet shows the picture on its screen**, with an outline of where
+  the model found you, until the next picture replaces it. Then it is thrown away. The tablet
+  remembers only whether you last had the view on or off during a ride. **No
+  picture is saved on the tablet unless you press *Save snapshot*** (below), **and no picture is
+  sent anywhere else** — not to us and not to any service — **unless you
   switched on sending the side camera's pictures to a computer of your own**, in which case each
   one goes to that computer instead of the tablet's model, as described under **Pictures sent to
   your own computer** below, and is still not kept on the tablet. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
@@ -269,6 +273,25 @@ directly, over your own Wi-Fi.
   where it was the time before — kept only when the check passed, or when there was nothing to
   check against yet, so that a camera that creeps a little each time is still noticed. Deleting a
   ride removes its report; erasing the device removes both; and the account export includes both.
+- **A snapshot, when you press for one:** pressing *Save snapshot* keeps the one picture on the
+  screen at that moment, with its outline, and nothing else. It is one picture for one press: there
+  is no setting that keeps a ride's pictures. It is kept on this device with the ride it was taken
+  in, and shown only on that ride's page, in a section that stays closed until you open it. It is
+  never shown with where in the ride it was taken, or with any reading. A snapshot taken while you
+  set up, before a ride, joins the next ride you save, and is thrown away if you save none. A
+  snapshot stays on this device until you delete it, delete its ride, or erase the device. It is in
+  the account export, and never in a ride you export or share. It is never sent to your own
+  computer, to a service you chose, or to an instance.
+- **Anyone near the tablet** can see the picture while the view is on, and anyone who opens a
+  ride's snapshot section can see that ride's snapshots: the app has no sign-in and no lock of its
+  own. **Anyone else in the room who is in the picture is shown too, and is in a snapshot you
+  save.** The app cannot tell who is in a picture and does not try to hide anyone; the outline is
+  drawn for one person only. If somebody else might walk behind you, point the camera so they will
+  not be in it, or leave the camera off.
+- **Screenshots:** in the Android app, screenshots, screen recordings and the app-switcher preview
+  are blocked while a camera picture is on the screen — the side camera's view, a snapshot you
+  opened, or a camera's own preview. **A browser cannot block them**, so in a browser a screenshot
+  of the picture can be taken like any other.
 - **The pose model** is Google's MediaPipe Pose Landmarker, and it is part of the app: it and the
   code that runs it are served from the app itself, never downloaded from Google. ⚠️ **That code
   contains a usage logger that would send Google a report** of how often the model ran and how long
@@ -441,8 +464,11 @@ can do the same analysis.
 ## Deleting your data
 
 Uninstalling the app removes everything it holds. Inside the app, **Files → Erase this device**
-deletes every ride, route, segment, effort, workout and setting, and the signing key with them, and
-makes this device forget any instance it was connected to, after you type a confirmation phrase.
+deletes every ride, route, segment, effort, workout and setting, every picture you kept — side-camera
+snapshots included — and the signing key with them, and makes this device forget any instance it
+was connected to, after you type a confirmation phrase. Deleting a ride deletes its snapshots with
+it. The account export (**Files → Export everything**) includes every picture you kept,
+snapshots included.
 
 Some things an erase cannot reach, and the app says so before you press it: files you have already
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
