@@ -26,6 +26,8 @@
  * starts, and goes red when either is removed.
  */
 
+import { createContext } from 'react';
+
 import type { RouteId, RouteMatch } from './routes';
 
 /**
@@ -40,11 +42,19 @@ export function isRideRoute(id: RouteId): boolean {
 }
 
 /**
+ * Whether a ride has the screen (`AppShell.tsx` §`immersive`), for a view to
+ * read where it decides about motion of its own — #1072's review (N5).
+ * `AppShell` provides its own state; `false` outside a shell.
+ */
+export const RideHasTheScreen = createContext(false);
+
+/**
  * Whether a card may be carried into its detail on `routeId` — #1072, ADR
  * 0041 D-3: never on a ride route, and never while a ride has the screen.
  * A list–detail route is never rendered under the stage today (only the game
- * makes the shell immersive), so `immersive` is asked for the rule's sake: a
- * future list on a ride-time screen is refused here rather than by luck.
+ * makes the shell immersive), so `immersive` is the shell's real state
+ * ({@link RideHasTheScreen}) for the rule's sake: a future list on a
+ * ride-time screen is refused here rather than by luck.
  */
 export function mayCarryOn(routeId: RouteId, immersive: boolean): boolean {
   return !immersive && !isRideRoute(routeId);

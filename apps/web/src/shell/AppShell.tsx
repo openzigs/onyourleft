@@ -101,7 +101,7 @@ import {
   type RouteMatch,
 } from './routes';
 import type { MenuSounds } from './menu-sounds';
-import { mayAnimateBetween } from './route-motion';
+import { mayAnimateBetween, RideHasTheScreen } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
@@ -800,14 +800,18 @@ export function AppShell(props: AppShellProps): JSX.Element {
   }
 
   const view = (
-    <ViewBoundary key={route.id}>
-      <Suspense fallback={<ViewLoading />}>
-        {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-          colour: kitColour,
-          onChange: setKitColour,
-        })}
-      </Suspense>
-    </ViewBoundary>
+    // #1072's review (N5): a view deciding about motion of its own reads
+    // whether a ride has the screen here (`route-motion.ts` §`mayCarryOn`).
+    <RideHasTheScreen value={immersive}>
+      <ViewBoundary key={route.id}>
+        <Suspense fallback={<ViewLoading />}>
+          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+            colour: kitColour,
+            onChange: setKitColour,
+          })}
+        </Suspense>
+      </ViewBoundary>
+    </RideHasTheScreen>
   );
 
   return (

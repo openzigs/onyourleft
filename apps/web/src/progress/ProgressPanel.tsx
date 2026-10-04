@@ -97,6 +97,16 @@ export function streakText(progress: Progress): string {
   return `${now} Your longest run is ${weeks(longest)}.`;
 }
 
+/**
+ * What a rider is told when a look at older rides skipped some (#947's
+ * review, N3): they are still unread, tried again on the next look, and a
+ * new best power is not claimed over them until then.
+ */
+function skippedText(count: number): string {
+  const which = count === 1 ? '1 older ride' : `${String(count)} older rides`;
+  return `${which} could not be read just now. ${count === 1 ? 'It is' : 'They are'} tried again when you look next, and until then a new best power may not be shown.`;
+}
+
 export interface ProgressPanelProps {
   readonly progress: Progress;
   readonly summaries: readonly ActivitySummary[];
@@ -114,15 +124,20 @@ export function ProgressPanel({
   const units = useUnits();
   const [looking, setLooking] = useState(false);
   const [failed, setFailed] = useState(false);
+  // #947's review (N3): rides the last look skipped because their samples
+  // could not be read. They stay unread, so they hold a new best back.
+  const [skipped, setSkipped] = useState(0);
   const badges = shownBadges(progress.badges);
 
   function look(): void {
     if (analysis === undefined || looking) return;
     setLooking(true);
     setFailed(false);
+    setSkipped(0);
     lookAtOlderRides(analysis, summaries).then(
-      () => {
+      (outcome) => {
         setLooking(false);
+        setSkipped(outcome.unreadable);
         onRead();
       },
       () => {
@@ -175,6 +190,7 @@ export function ProgressPanel({
       {failed ? (
         <StatusMessage tone="warning">Your older rides could not be read just now.</StatusMessage>
       ) : null}
+      {skipped === 0 ? null : <StatusMessage tone="warning">{skippedText(skipped)}</StatusMessage>}
     </section>
   );
 }

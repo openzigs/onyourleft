@@ -75,6 +75,12 @@ export const LOOK_BATCH = 50;
 export interface LookOutcome {
   /** Rides read by this pass. */
   readonly read: number;
+  /**
+   * Rides whose samples could not be read this pass (#947's review, N3). Each
+   * is skipped and left unread — nothing is written for it — so the next pass
+   * tries it again, and is counted in {@link remaining}.
+   */
+  readonly unreadable: number;
   /** Counted rides still unread afterwards, so the control can offer another pass. */
   readonly remaining: number;
 }
@@ -83,6 +89,9 @@ export interface LookOutcome {
  * Work out the facts for up to {@link LOOK_BATCH} counted rides that have
  * none, oldest first — a best is only claimed over every earlier ride, so the
  * oldest unread ride is the one holding the most back.
+ *
+ * A ride whose samples cannot be read is skipped and left unread, and the
+ * rest of the batch goes on ({@link LookOutcome.unreadable}).
  *
  * ⚠️ **Called from a control, never from a render.** @see the module note
  */
@@ -95,10 +104,23 @@ export async function lookAtOlderRides(
     .filter((summary) => countsAsRide(summary) && summary.rideFacts === undefined)
     .sort((left, right) => left.startedAt - right.startedAt);
   let read = 0;
+  let unreadable = 0;
   for (const summary of unread.slice(0, batch)) {
-    if (await readOne(port, summary.id)) read += 1;
+    // ⚠️ One ride whose samples cannot be read must not stop the pass: it
+    // used to reject the whole batch, identically on every later press, so
+    // no ride was ever marked read and no new best could be earned again.
+    // The ride is skipped and NOTHING is written for it — `{}` would mark it
+    // read with nothing to say, and it would never be tried again.
+    let wrote: boolean;
+    try {
+      wrote = await readOne(port, summary.id);
+    } catch {
+      unreadable += 1;
+      continue;
+    }
+    if (wrote) read += 1;
   }
-  return { read, remaining: unread.length - read };
+  return { read, unreadable, remaining: unread.length - read };
 }
 
 async function readOne(port: AnalysisPort, id: ActivityId): Promise<boolean> {

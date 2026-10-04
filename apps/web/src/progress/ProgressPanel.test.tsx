@@ -112,4 +112,40 @@ describe('Home — streaks and badges (#947)', () => {
     expect(port.listReads).toHaveLength(2);
     expect(panel().textContent).not.toContain('has not been looked at');
   });
+
+  it('says in words that a ride could not be read, and leaves it to be looked at again', async () => {
+    const stub = stubAnalysis(OWNER, [
+      ride('a', 3, { averagePower: watts(230) }),
+      ride('broken', 2, { averagePower: watts(230) }),
+    ]);
+    const port = {
+      ...stub,
+      store: {
+        ...stub.store,
+        getStreamChannel: (async (owner, id, channel) => {
+          if (id === 'broken') throw new Error('the stream could not be decoded');
+          return stub.store.getStreamChannel(owner, id, channel);
+        }) as typeof stub.store.getStreamChannel,
+      },
+    };
+    mounted = await mount(<HomeView analysis={port} controller={undefined} now={() => NOW} />);
+    await settle();
+    const button = [...panel().querySelectorAll('button')].find(
+      (each) => each.textContent === 'Look at older rides',
+    );
+    if (button === undefined) throw new Error('no button');
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(stub.factsWrites).toEqual(['a']);
+    expect(panel().textContent).toContain(
+      '1 older ride could not be read just now. It is tried again when you look next, and until then a new best power may not be shown.',
+    );
+    expect(panel().textContent).toContain(
+      '1 ride from before badges has not been looked at for climbing and best power yet.',
+    );
+    expect(panel().textContent).not.toContain('Your older rides could not be read just now.');
+  });
 });

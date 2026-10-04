@@ -80,7 +80,7 @@ describe('lookAtOlderRides', () => {
 
     const outcome = await lookAtOlderRides(port, summaries);
 
-    expect(outcome).toEqual({ read: 2, remaining: 0 });
+    expect(outcome).toEqual({ read: 2, unreadable: 0, remaining: 0 });
     expect(port.factsWrites).toEqual(['older', 'newer']);
     const after = await port.store.listActivitySummaries(OWNER);
     expect(after.find((each) => each.id === 'older')?.rideFacts).toEqual({
@@ -100,6 +100,37 @@ describe('lookAtOlderRides', () => {
     );
     const port = stubAnalysis(OWNER, rides);
     const outcome = await lookAtOlderRides(port, await port.store.listActivitySummaries(OWNER));
-    expect(outcome).toEqual({ read: LOOK_BATCH, remaining: 3 });
+    expect(outcome).toEqual({ read: LOOK_BATCH, unreadable: 0, remaining: 3 });
+  });
+
+  it('skips a ride whose stream cannot be read, writes the rest, and tries it again next time', async () => {
+    const rides = [olderRide('first', 9), olderRide('broken', 5), olderRide('last', 1)];
+    const stub = stubAnalysis(OWNER, rides);
+    let failing = true;
+    const port = {
+      ...stub,
+      store: {
+        ...stub.store,
+        getStreamChannel: (async (owner, id, channel) => {
+          if (failing && id === 'broken') throw new Error('the stream could not be decoded');
+          return stub.store.getStreamChannel(owner, id, channel);
+        }) as typeof stub.store.getStreamChannel,
+      },
+    };
+
+    const first = await lookAtOlderRides(port, await port.store.listActivitySummaries(OWNER));
+
+    expect(first).toEqual({ read: 2, unreadable: 1, remaining: 1 });
+    expect(stub.factsWrites).toEqual(['first', 'last']);
+    const between = await port.store.listActivitySummaries(OWNER);
+    // Nothing was written for it, not even `{}`: it is still unread.
+    expect(between.find((each) => each.id === 'broken')?.rideFacts).toBeUndefined();
+    expect(deriveProgress(between, NOW).unread).toBe(1);
+
+    // The next press tries it again, and this time it reads.
+    failing = false;
+    const second = await lookAtOlderRides(port, between);
+    expect(second).toEqual({ read: 1, unreadable: 0, remaining: 0 });
+    expect(stub.factsWrites).toEqual(['first', 'last', 'broken']);
   });
 });

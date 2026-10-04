@@ -15,12 +15,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { act, type JSX } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mount, settle, type Mounted } from '../testing/mount';
 import { answerTwoPanes, rotatablePanes } from '../testing/panes';
 
 import { CREATE_HEADING_ID, CreateLink, ListDetail, SELECTED_HEADING_ID } from './ListDetail';
+import { RideHasTheScreen } from './route-motion';
 import { matchHash, routeById } from './routes';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
@@ -394,5 +395,40 @@ describe('the create link', () => {
     await mounted.rerender(withForm(undefined));
     await settle();
     expect(document.activeElement?.getAttribute('data-oyl-select')).toBe('a');
+  });
+});
+
+/**
+ * #1072's review (N5): the card is carried only where `mayCarryOn` says so,
+ * and what it is asked is the shell's OWN state — `RideHasTheScreen` — not a
+ * literal. A press is noted by measuring the pressed card, so whether the
+ * card was measured is whether a carry was noted.
+ */
+describe('#1072 — a card is never carried while a ride has the screen', () => {
+  async function measuredOnPress(rideHasTheScreen: boolean): Promise<number> {
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(
+      <RideHasTheScreen value={rideHasTheScreen}>{layout(undefined)}</RideHasTheScreen>,
+    );
+    const link = document.querySelector<HTMLElement>('[data-oyl-select="b"]');
+    const card = link?.closest('li');
+    if (link === null || card === null || card === undefined) throw new Error('no card');
+    const measured = vi.spyOn(card, 'getBoundingClientRect');
+    // A pointer's press: `detail` 1, which a keyboard's Enter never carries.
+    await act(async () => {
+      link.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, button: 0 }),
+      );
+      await Promise.resolve();
+    });
+    return measured.mock.calls.length;
+  }
+
+  it('is not noted while a ride has the screen', async () => {
+    expect(await measuredOnPress(true)).toBe(0);
+  });
+
+  it('is noted for the same press with no ride on the screen — the control', async () => {
+    expect(await measuredOnPress(false)).toBeGreaterThan(0);
   });
 });

@@ -168,3 +168,5 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   app: wrapping the app would put Motion in the entry, which D-2 forbids. ⚠️ Motion reads the
   reader's preference when an element MOUNTS, so a preference changed while a list is on screen
   takes effect the next time a list is opened; the browser gate's reduced-motion case says so.
+  Any new Motion surface must therefore carry its own `MotionConfig reducedMotion="user"`, because
+  the app root cannot hold one without putting Motion in the entry chunk.

@@ -92,6 +92,28 @@
  *   press is simply not animated.
  */
 
+import { LazyMotion, m, MotionConfig } from 'motion/react';
+import {
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
+
+import { ButtonLink } from '../design/Button';
+import { MOTION_FOR_SCRIPT } from '../design/tokens';
+import { ScreenNotes } from '../design/ScreenHelp';
+import { SectionHeading } from '../design/SectionHelp';
+
+import { mayCarryOn, RideHasTheScreen } from './route-motion';
+import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
+
 /** Where a pressed card was, and where its detail will be drawn. */
 interface Carry {
   readonly id: string;
@@ -132,27 +154,6 @@ export function carriedFrom(
     opacity: [0.4, 1],
   };
 }
-
-import { LazyMotion, m, MotionConfig } from 'motion/react';
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type JSX,
-  type MouseEvent,
-  type ReactNode,
-} from 'react';
-
-import { ButtonLink } from '../design/Button';
-import { MOTION_FOR_SCRIPT } from '../design/tokens';
-import { ScreenNotes } from '../design/ScreenHelp';
-import { SectionHeading } from '../design/SectionHelp';
-
-import { mayCarryOn } from './route-motion';
-import { hrefFor, hrefForSelection, type RouteDefinition } from './routes';
 
 /** The custom property `theme.css` declares the two-pane width in. */
 export const LIST_DETAIL_FROM_PROPERTY = '--oyl-list-detail-from';
@@ -267,6 +268,8 @@ export function ListDetail({
   const focusCreate = useRef(false);
   const wasTwo = useRef(two);
   const carry = useRef<Carry | undefined>(undefined);
+  // #1072's review (N5): the shell's own state, not a literal `false`.
+  const rideHasTheScreen = useContext(RideHasTheScreen);
 
   useEffect(() => {
     if (!started.current) {
@@ -372,9 +375,9 @@ export function ListDetail({
     // must be where the heading is from that moment (#723's measurement),
     // not travelling in from a card the keyboard never pointed at.
     if (event.detail === 0) return;
-    // Asked of the route on screen; a list–detail route is never under a
-    // ride's stage, which the shell would have to say. @see mayCarryOn
-    if (!mayCarryOn(route.id, false)) return;
+    // Asked of the route on screen and of the shell's own state: never while
+    // a ride has the screen. @see mayCarryOn
+    if (!mayCarryOn(route.id, rideHasTheScreen)) return;
     const link =
       event.target instanceof Element ? event.target.closest(`[${SELECT_ATTRIBUTE}]`) : null;
     const id = link?.getAttribute(SELECT_ATTRIBUTE);
