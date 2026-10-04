@@ -525,6 +525,15 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const controls = seen.items.filter((each) => each.name.startsWith('control: '));
       expect(controls.length).toBeGreaterThanOrEqual(2);
       expect(controls.filter((each) => overlap(each.box, field.box)).map(describeItem)).toEqual([]);
+      // Nor over any other reading: below 802 px on its side it is drawn
+      // INSIDE the primary panel, under the three numbers, which pads itself
+      // to make the room (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+      // ITS SIDE") — so the panel checks cannot see it land on them.
+      expect(
+        seen.items
+          .filter((each) => each !== field && overlap(each.box, field.box))
+          .map(describeItem),
+      ).toEqual([]);
 
       // Edge-to-edge clearance between two boxes: the larger of the two axis
       // gaps, which is positive exactly when they do not overlap.
