@@ -250,10 +250,10 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   settings: [
     'Units',
     'Your weight',
+    'Menu sounds',
     'Appearance',
     'Announcements',
     'Sounds',
-    'Menu sounds',
     'Game world',
     'Words to mask',
     'Documents for the analysis',

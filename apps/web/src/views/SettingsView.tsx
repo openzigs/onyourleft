@@ -562,6 +562,15 @@ export function SettingsView({
           {...(kitColour === undefined ? {} : { kitColour })}
           {...(onKitColourChange === undefined ? {} : { onKitColourChange })}
         />
+
+        {/*
+          #946: the menus' own switch and volume — how the app answers the
+          rider's own presses, apart from the ride's sounds in *Look and sound*.
+          Here rather than beside those because there it made that card 2.07×
+          this one on the CI runner, over #1026's balance rule
+          (`sections.browser.spec.ts` §`ROW_BALANCE_LIMIT`).
+        */}
+        <MenuSoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
       </SettingsCard>
 
       <SettingsCard id="oyl-settings-look" title={SETTINGS_CARD_TITLES.look} picture={<Sky />}>
@@ -581,9 +590,6 @@ export function SettingsView({
         />
 
         <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
-
-        {/* #946: the menus' own switch and volume, beside the ride's and apart from them. */}
-        <MenuSoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
       </SettingsCard>
 
       <SettingsCard
@@ -1101,10 +1107,7 @@ function MenuSoundsPanel({
   }
 
   return (
-    <section
-      className="oyl-panel oyl-announce oyl-sounds oyl-menu-sounds"
-      aria-labelledby="oyl-menu-sounds-heading"
-    >
+    <section className="oyl-panel oyl-menu-sounds" aria-labelledby="oyl-menu-sounds-heading">
       <SectionHeading
         level={3}
         id="oyl-menu-sounds-heading"
