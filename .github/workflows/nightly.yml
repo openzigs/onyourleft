@@ -10,7 +10,10 @@
 # before the merge that caused it. The owner accepted that trade on 2026-09-29
 # for the checks moved here, and ONLY for checks that are not safety gates:
 # trainer control, privacy, licences and notices, accessibility and layout, and
-# the wiring gate all stay in the required job.
+# the wiring gate all stay in the required job. ONE exception, the owner's of
+# 2026-10-03 (#1076): the reflow walk in the DARK palette runs here, while the
+# same walk in the light palette stays required -- so layout is still gated on
+# every pull request, and what moved is its repeat in the second palette.
 #
 # What runs here, each moved out of rules.yml by #866:
 #
