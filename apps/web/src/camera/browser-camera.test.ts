@@ -15,12 +15,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CameraCaptureError } from './camera-port';
+import { CameraCaptureError, CODE_PIXELS_LONG_SIDE } from './camera-port';
 import {
   CAMERA_CONSTRAINTS,
   FIRST_FRAME_MILLISECONDS,
   browserCameraPort,
   cameraConstraints,
+  PAIRING_SCAN_IDEAL,
   frameProgress,
   onceReady,
   type FrameGrabber,
@@ -198,9 +199,25 @@ describe('which way the camera faces — #557', () => {
     await port.startCamera('user');
     expect(asked).toStrictEqual([
       { video: { facingMode: { ideal: 'environment' } }, audio: false },
-      { video: { facingMode: { ideal: 'user' } }, audio: false },
+      {
+        video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      },
     ]);
     expect(CAMERA_CONSTRAINTS).toStrictEqual(cameraConstraints('environment'));
+  });
+
+  it('asks the front camera — the one that reads a pairing code — for 1280 × 720, and never requires it (#1108)', () => {
+    const asked = cameraConstraints('user').video;
+    expect(asked.width).toStrictEqual({ ideal: PAIRING_SCAN_IDEAL.width });
+    expect(asked.height).toStrictEqual({ ideal: PAIRING_SCAN_IDEAL.height });
+    expect(PAIRING_SCAN_IDEAL.width).toBeGreaterThanOrEqual(1280);
+    expect(PAIRING_SCAN_IDEAL.height).toBeGreaterThanOrEqual(720);
+    // An `ideal`, never `exact` or `min`: a camera that cannot do it must
+    // still open, rather than `getUserMedia` refusing with OverconstrainedError.
+    expect(JSON.stringify(cameraConstraints('user'))).not.toMatch(/exact|min|max/);
+    // The read is the whole of that frame, not a 640-pixel copy of it.
+    expect(CODE_PIXELS_LONG_SIDE).toBeGreaterThanOrEqual(PAIRING_SCAN_IDEAL.width);
   });
 });
 

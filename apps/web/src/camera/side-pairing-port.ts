@@ -165,6 +165,20 @@ export interface PhoneSidePairing {
   readonly answerCode: string;
   /** The link, `connecting` until the tablet reads the answer. */
   readonly link: SideCameraLinkPort;
+  /**
+   * Whole seconds left for the tablet to read {@link answerCode} — #1108.
+   * `side-link.ts` §`TABLET_READ_LIMIT_MILLISECONDS` is the wait, and why it is
+   * a person's rather than a machine's. `undefined` once the tablet has read
+   * the code; `0` once the time ran out, which ends the link.
+   */
+  secondsForTabletToRead(): number | undefined;
+  /**
+   * Call `listener` whenever {@link secondsForTabletToRead} may have changed:
+   * about once a second while the code is on the screen.
+   *
+   * @returns the unsubscribe.
+   */
+  onTabletReadCountdown(listener: () => void): () => void;
 }
 
 /** Where a pairing comes from, on either device. */

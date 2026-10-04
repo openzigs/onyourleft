@@ -378,6 +378,22 @@ function SessionScreen({
       {state.phase === 'framing' ? (
         <section aria-labelledby="oyl-side-camera-framing">
           <h3 id="oyl-side-camera-framing">Line up the bike</h3>
+          {/*
+            #1108: the pairing comes BEFORE the picture. The picture is as tall
+            as a phone's screen, and under it the instruction and "Looking for
+            the tablet's code…" were below the fold at 390×844 — the owner
+            found no way to pair. `sidecamera.browser.spec.ts` §"#1108" holds
+            the order, with this one's opposite as its control.
+          */}
+          <div className="oyl-side-camera__pairing" data-oyl-side-pairing="true">
+            {state.paired ? (
+              <p>{linkSentence(state)}</p>
+            ) : pairing === undefined ? (
+              <p>{NOT_PAIRED_TEXT}</p>
+            ) : (
+              <PhonePairing controller={controller} pairing={pairing} session={session} />
+            )}
+          </div>
           <FramingPreview controller={controller} reference={state.reference} />
           <p>
             {state.verdict !== undefined
@@ -386,13 +402,6 @@ function SessionScreen({
                 ? FRAMING_VERDICT_TEXT['no-reference']
                 : null}
           </p>
-          {state.paired ? (
-            <p>{linkSentence(state)}</p>
-          ) : pairing === undefined ? (
-            <p>{NOT_PAIRED_TEXT}</p>
-          ) : (
-            <PhonePairing controller={controller} pairing={pairing} session={session} />
-          )}
           {state.secondsLeft === undefined ? null : (
             <p role="timer">{countdownSentence(state.secondsLeft)}</p>
           )}
@@ -425,8 +434,28 @@ type PairingStep =
   | { readonly kind: 'scan' }
   | { readonly kind: 'answering' }
   | { readonly kind: 'answer'; readonly answer: PhoneSidePairing }
-  | { readonly kind: 'failed' }
+  | { readonly kind: 'failed'; readonly timedOut: boolean }
   | { readonly kind: 'unavailable' };
+
+/**
+ * What the phone says while its code waits for the tablet — #1108. Minutes and
+ * seconds, because the wait is two minutes.
+ */
+export function tabletReadSentence(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const rest = String(seconds % 60).padStart(2, '0');
+  return `The tablet has ${String(minutes)}:${rest} left to read this code.`;
+}
+
+/** What the phone says when the tablet did not read its code in time — #1108. */
+export const TABLET_READ_TIMED_OUT =
+  'The tablet did not read this code in time. Scan the tablet’s code again to show a fresh one ' +
+  'here.';
+
+/** What the phone says when the tablet did not connect for any other reason. */
+export const TABLET_DID_NOT_CONNECT =
+  'The tablet did not connect. Press “Pair a phone” on the tablet to show a fresh code, then ' +
+  'scan it here.';
 
 /**
  * Read the tablet's code, answer it, show the answer, and hand the link to the
@@ -471,7 +500,8 @@ function PhonePairing({
     if (step.kind !== 'answer') {
       return;
     }
-    const { link } = step.answer;
+    const { answer } = step;
+    const { link } = answer;
     const settle = (): void => {
       const condition = link.sideLinkCondition();
       if (condition === 'connected') {
@@ -481,7 +511,7 @@ function PhonePairing({
           link.endSideLink();
         }
       } else if (condition === 'ended') {
-        setStep({ kind: 'failed' });
+        setStep({ kind: 'failed', timedOut: answer.secondsForTabletToRead() === 0 });
       }
     };
     const unsubscribe = link.onSideLinkEvent((event) => {
@@ -501,13 +531,15 @@ function PhonePairing({
 
   if (step.kind === 'answer') {
     return (
-      <>
-        <PairingCode code={step.answer.answerCode} label="Pairing code for your tablet to scan" />
-        <p>
-          Now press &ldquo;Read the phone&rsquo;s code&rdquo; on the tablet, and hold the tablet so
-          its camera can see this code.
-        </p>
-      </>
+      <AnswerShown
+        answer={step.answer}
+        again={() => {
+          // The link is ended by the effect above, on leaving this step: it
+          // is still `connecting`, and nobody will use it.
+          setRefusal(undefined);
+          setStep({ kind: 'scan' });
+        }}
+      />
     );
   }
   if (step.kind === 'unavailable') {
@@ -521,8 +553,7 @@ function PhonePairing({
     return (
       <>
         <StatusMessage tone="warning" live>
-          The tablet did not connect. Press &ldquo;Pair a phone&rdquo; on the tablet to show a fresh
-          code, then scan it here.
+          {step.timedOut ? TABLET_READ_TIMED_OUT : TABLET_DID_NOT_CONNECT}
         </StatusMessage>
         <Button
           variant="secondary"
@@ -547,6 +578,42 @@ function PhonePairing({
       {refusal === undefined ? null : (
         <StatusMessage tone="warning">{PAIRING_REFUSAL_TEXT[refusal]}</StatusMessage>
       )}
+    </>
+  );
+}
+
+/**
+ * The phone's answer on the screen, how long the tablet has left to read it,
+ * and a way to start again — #1108. The instruction and the countdown come
+ * first: the code is as wide as the screen, and they are what the rider reads
+ * before holding the phone up.
+ */
+function AnswerShown({
+  answer,
+  again,
+}: {
+  readonly answer: PhoneSidePairing;
+  readonly again: () => void;
+}): JSX.Element {
+  const seconds = useSyncExternalStore(
+    useCallback((listener: () => void) => answer.onTabletReadCountdown(listener), [answer]),
+    () => answer.secondsForTabletToRead(),
+  );
+  return (
+    <>
+      <p>
+        Now press &ldquo;Read the phone&rsquo;s code&rdquo; on the tablet, and hold this phone so
+        the tablet&rsquo;s front camera can see this code.
+      </p>
+      {seconds === undefined ? null : <p role="timer">{tabletReadSentence(seconds)}</p>}
+      <PairingCode
+        code={answer.answerCode}
+        label="Pairing code for your tablet to scan"
+        fullWidth
+      />
+      <Button variant="secondary" onClick={again}>
+        Scan the tablet&rsquo;s code again
+      </Button>
     </>
   );
 }

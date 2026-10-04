@@ -36,7 +36,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import type { SideCameraMeasurement } from './sidecamera-harness';
+import type { PairingMeasurement, SideCameraMeasurement } from './sidecamera-harness';
 
 /** The touch target, SC 2.5.5. */
 const TOUCH_TARGET_PIXELS = 44;
@@ -211,3 +211,87 @@ for (const viewport of PHONES) {
     });
   });
 }
+
+/**
+ * **#1108: on an unpaired phone, the pairing instruction and its status are on
+ * the screen** — at 390×844, with the 50 px floor every fold measurement here
+ * keeps (`rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`), under a camera
+ * picture the shape an upright phone's camera gives.
+ *
+ * The owner, setting up the tablet and the phone on 2026-10-04, saw no way to
+ * pair: *"To pair with your tablet…"* and *"Looking for the tablet's code…"*
+ * sat under a picture as tall as the screen. ⚠️ **The control is that order**:
+ * `oldOrder()` moves the same pairing block back below the picture, and the
+ * status must then fall under the floor — without it, a page whose picture
+ * never took its upright shape would pass.
+ */
+test.describe('#1108 — the phone’s pairing instruction, above its camera picture', () => {
+  const FOLD_MARGIN_PIXELS = 50;
+  const UPRIGHT: Viewport = { name: 'a phone upright — 390×844', width: 390, height: 844 };
+
+  async function openScan(page: Page): Promise<void> {
+    await page.setViewportSize({ width: UPRIGHT.width, height: UPRIGHT.height });
+    const response = await page.goto('/sidecamera.html?pairing=scan');
+    expect(response?.status()).toBe(200);
+    await page.waitForFunction(() => window.__oylSideCamera !== undefined);
+    const published = await page.evaluate(() => ({
+      ready: window.__oylSideCamera?.ready,
+      errors: window.__oylSideCamera?.errors,
+    }));
+    expect(published.errors, 'the side-camera harness reported an error').toEqual([]);
+    expect(published.ready).toBe(true);
+  }
+
+  async function pairing(page: Page): Promise<PairingMeasurement> {
+    const measured = await page.evaluate(() => window.__oylSideCamera?.pairing?.());
+    if (measured === undefined) {
+      throw new Error('the side-camera harness published no pairing measurement');
+    }
+    return measured;
+  }
+
+  test('puts “To pair with your tablet…” and “Looking for the tablet’s code…” above the fold', async ({
+    page,
+  }) => {
+    await openScan(page);
+    const measured = await pairing(page);
+    const { instruction, status, picture } = measured;
+    expect(instruction, 'the pairing instruction is not on the page').toBeDefined();
+    expect(status, 'its status is not on the page').toBeDefined();
+    expect(picture, 'the camera picture is not on the page').toBeDefined();
+    if (instruction === undefined || status === undefined || picture === undefined) {
+      return;
+    }
+    console.log(
+      `#1108 at 390×844: instruction ends ${(measured.fold - instruction.bottom).toFixed(1)} px ` +
+        `and status ${(measured.fold - status.bottom).toFixed(1)} px above the fold ` +
+        `(${measured.fold.toFixed(0)} px); the picture is ${picture.height.toFixed(0)} px tall`,
+    );
+    expect(measured.scrollY).toBe(0);
+    // The picture is the upright one, as tall as most of the screen — the
+    // condition #1108 was filed under, or this measured nothing.
+    expect(picture.height).toBeGreaterThan(measured.viewport.height / 2);
+    expect(instruction.bottom).toBeLessThanOrEqual(measured.fold - FOLD_MARGIN_PIXELS);
+    expect(status.bottom).toBeLessThanOrEqual(measured.fold - FOLD_MARGIN_PIXELS);
+    expect(status.bottom).toBeLessThanOrEqual(picture.top + SUBPIXEL_TOLERANCE);
+  });
+
+  test('control: with the pairing back below the picture, its status falls under the floor', async ({
+    page,
+  }) => {
+    await openScan(page);
+    await page.evaluate(() => {
+      window.__oylSideCamera?.oldOrder?.();
+    });
+    const measured = await pairing(page);
+    const { status } = measured;
+    expect(status).toBeDefined();
+    if (status === undefined) {
+      return;
+    }
+    console.log(
+      `#1108 control: status ends ${(measured.fold - status.bottom).toFixed(1)} px above the fold`,
+    );
+    expect(status.bottom).toBeGreaterThan(measured.fold - FOLD_MARGIN_PIXELS);
+  });
+});

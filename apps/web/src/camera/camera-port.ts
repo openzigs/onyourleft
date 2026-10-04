@@ -332,12 +332,16 @@ export interface CameraSession {
 }
 
 /**
- * The longest side, in pixels, a pairing-code read is drawn at: 640. A code on
- * a tablet or a phone at arm's length fills a good part of the picture, and
- * `jsqr` reads one of version 10 at this size; a larger read is more work on
- * the thread drawing the screen, several times a second, for nothing.
+ * The longest side, in pixels, a pairing-code read is drawn at: 1280 — the
+ * long side of what the tablet's front camera is asked for
+ * (`browser-camera.ts` §`PAIRING_SCAN_IDEAL`), so the frame is read WHOLE
+ * (#1108). It was 640, which halved even that frame's resolution before `jsqr`
+ * looked at it: the phone's answer is a dense code, and every module it loses
+ * to scaling is distance the rider has to make up by holding the phone closer.
+ * It is still a ceiling, so a camera that hands back more than it was asked
+ * for costs no more than four times the old read.
  */
-export const CODE_PIXELS_LONG_SIDE = 640;
+export const CODE_PIXELS_LONG_SIDE = 1280;
 
 /**
  * The longest side, in pixels, of a side-camera picture: 256.

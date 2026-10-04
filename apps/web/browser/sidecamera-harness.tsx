@@ -34,7 +34,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
 import { CameraController } from '../src/camera/session';
-import { scriptedLink } from '../src/camera/testing';
+import { scriptedLink, scriptedSidePairing } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -44,6 +44,42 @@ import '../src/design/theme.css';
 import '../src/design/tailwind.css';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+
+/**
+ * `?pairing=scan` — #1108: the phone UNPAIRED, framing, looking for the
+ * tablet's code, with a camera picture the shape an upright phone's camera
+ * gives (720 × 1280). That is the screen the owner found no way to pair on:
+ * the instruction and "Looking for the tablet's code…" were under a picture as
+ * tall as the screen.
+ */
+const PAIRING_SCAN = new URLSearchParams(location.search).get('pairing') === 'scan';
+
+/** An upright phone's camera picture, as a stream a `<video>` can play. */
+function uprightPicture(): MediaStream {
+  const canvas = document.createElement('canvas');
+  canvas.width = 720;
+  canvas.height = 1280;
+  const context = canvas.getContext('2d');
+  if (context !== null) {
+    context.fillStyle = '#556';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  return canvas.captureStream(1);
+}
+
+/** What `?pairing=scan` measures: where the pairing is, against the fold. */
+export interface PairingMeasurement {
+  readonly viewport: { readonly width: number; readonly height: number };
+  /** The pairing instruction, "To pair with your tablet…". */
+  readonly instruction: Box | undefined;
+  /** Its status, "Looking for the tablet's code…". */
+  readonly status: Box | undefined;
+  /** The camera's picture. */
+  readonly picture: Box | undefined;
+  /** The top of a bottom navigation bar, or the viewport's bottom. */
+  readonly fold: number;
+  readonly scrollY: number;
+}
 const PATIENCE_MS = 10_000;
 
 export interface Box {
@@ -105,6 +141,13 @@ declare global {
        * was not measuring the stylesheet.
        */
       readonly unstyle: () => void;
+      /** `?pairing=scan` only (#1108): where the pairing is. */
+      readonly pairing?: () => PairingMeasurement;
+      /**
+       * `?pairing=scan` only: the control — the pairing moved back BELOW the
+       * picture, which is the order #1108 was filed against.
+       */
+      readonly oldOrder?: () => void;
     };
   }
 }
@@ -223,10 +266,113 @@ function press(text: string): void {
   button.click();
 }
 
+function measurePairing(): PairingMeasurement {
+  const pairing = document.querySelector('[data-oyl-side-pairing]');
+  const paragraphs = pairing === null ? [] : [...pairing.querySelectorAll('p')];
+  const instruction = paragraphs.find((each) =>
+    textOf(each).startsWith('To pair with your tablet'),
+  );
+  const status = pairing?.querySelector('[role="status"]');
+  const picture = document.querySelector('.oyl-framing__picture');
+  const bars = [...document.querySelectorAll('nav')]
+    .map((nav) => nav.getBoundingClientRect())
+    .filter((box) => box.height > 0 && box.top > innerHeight / 2);
+  return {
+    viewport: { width: innerWidth, height: innerHeight },
+    instruction: instruction === undefined ? undefined : boxOf(instruction),
+    status: status === null || status === undefined ? undefined : boxOf(status),
+    picture: picture === null ? undefined : boxOf(picture),
+    fold: Math.min(innerHeight, ...bars.map((box) => box.top)),
+    scrollY,
+  };
+}
+
+async function runPairingScan(host: Element): Promise<void> {
+  globalThis.location.hash = '#/camera/side';
+  const camera = new CameraController({
+    port: {
+      cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
+      requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),
+      startCamera: () =>
+        Promise.resolve({
+          captureFrame: () => Promise.reject(new Error('this harness does not capture')),
+          sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
+          // Nothing to read, so the screen goes on looking — the state measured.
+          readCodePixels: () => Promise.reject(new Error('this harness reads no code')),
+          captureSideFrame: () => Promise.reject(new Error('this harness sends no picture')),
+          attachCameraPreview: (surface) => {
+            surface.srcObject = uprightPicture();
+            surface.muted = true;
+            surface.playsInline = true;
+            void surface.play().catch(() => undefined);
+            return () => {
+              surface.srcObject = null;
+            };
+          },
+          stopCamera: () => undefined,
+          live: true,
+        }),
+    },
+    schedule: () => () => undefined,
+  });
+  await viewGroupsLoaded();
+  flushSync(() => {
+    createRoot(host).render(
+      <StrictMode>
+        <AppShell
+          capabilities={NO_BLUETOOTH}
+          camera={camera}
+          sidePairing={scriptedSidePairing({ phone: 'pairing', answered: false })}
+        />
+      </StrictMode>,
+    );
+  });
+  await until(() => document.querySelector('input[type="checkbox"]') !== null, 'the consent');
+  document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+  await until(
+    () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === true,
+    'the box to be ticked',
+  );
+  press('Turn the camera on');
+  await until(
+    () =>
+      (document.querySelector('[data-oyl-side-pairing]')?.textContent ?? '').includes(
+        'Looking for the tablet',
+      ),
+    'the phone looking for the tablet’s code',
+  );
+  // The picture takes its upright shape once the video knows its size.
+  await until(
+    () =>
+      (document.querySelector('.oyl-framing__picture')?.getBoundingClientRect().height ?? 0) >
+      innerWidth,
+    'an upright camera picture',
+  );
+  window.__oylSideCamera = {
+    ready: true,
+    errors,
+    measure,
+    loseLink: () => undefined,
+    unstyle: () => undefined,
+    pairing: measurePairing,
+    oldOrder: () => {
+      const pairing = document.querySelector('[data-oyl-side-pairing]');
+      const figure = document.querySelector('figure.oyl-framing');
+      if (pairing !== null && figure !== null) {
+        figure.after(pairing);
+      }
+    },
+  };
+}
+
 async function run(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
     throw new Error('side-camera harness: #shell is missing from sidecamera.html');
+  }
+  if (PAIRING_SCAN) {
+    await runPairingScan(host);
+    return;
   }
   globalThis.location.hash = '#/camera/side';
 

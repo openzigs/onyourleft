@@ -253,6 +253,25 @@ export const OFFER_LIFETIME_MILLISECONDS = 5 * 60 * 1000;
 export const CONNECT_LIMIT_MILLISECONDS = 15_000;
 
 /**
+ * How long the phone waits, once its code is on the screen, for the tablet to
+ * read it: two minutes — #1108.
+ *
+ * ⚠️ **A person's wait, not a machine's.** Between the phone showing its
+ * answer and the connection opening, somebody has to press *Read the phone's
+ * code* on the tablet and hold the phone up to the tablet's front camera until
+ * it reads. On the owner's Pixel Tablet (2026-10-04) that ran past
+ * {@link CONNECT_LIMIT_MILLISECONDS}' fifteen seconds while the rider was
+ * still aiming, and the phone gave up under them. Two minutes is several
+ * attempts at aiming; it is well under {@link OFFER_LIFETIME_MILLISECONDS}, so
+ * the offer the phone answered can still be live when it runs out; and it is
+ * short enough that a code left on a phone nobody is holding up stops being
+ * answerable. Once the tablet has the answer — the phone hears its `control`
+ * channel arrive — the wait is the machine handshake's again,
+ * {@link CONNECT_LIMIT_MILLISECONDS}.
+ */
+export const TABLET_READ_LIMIT_MILLISECONDS = 2 * 60 * 1000;
+
+/**
  * How long to wait for candidates. D-1: *"Host candidates gather within
  * milliseconds"*; this bounds a platform that never says it has finished, and
  * whatever was gathered by then is what the code carries.
@@ -991,7 +1010,14 @@ async function answerFrom(
     link.endSideLink();
     return made.refusal;
   }
-  return { answerCode: made.text, link };
+  // The code goes on the screen now: from here the wait is a person's (#1108).
+  link.waitForTabletRead();
+  return {
+    answerCode: made.text,
+    link,
+    secondsForTabletToRead: () => link.secondsForTabletToRead(),
+    onTabletReadCountdown: (listener) => link.onTabletReadCountdown(listener),
+  };
 }
 
 /**
@@ -1005,7 +1031,18 @@ export class PhoneSideLink implements SideCameraLinkPort {
   readonly #secret: string;
   readonly #timers: Resolved;
   readonly #listeners = new Set<(event: SideLinkEvent) => void>();
+  readonly #countdownListeners = new Set<() => void>();
   readonly #cancels: (() => void)[] = [];
+  /**
+   * The one bound on a phone not yet connected, replaced as the pairing moves
+   * on (#1108): {@link CONNECT_LIMIT_MILLISECONDS} while the answer is made,
+   * {@link TABLET_READ_LIMIT_MILLISECONDS} while it is on the screen, and
+   * {@link CONNECT_LIMIT_MILLISECONDS} again once the tablet has read it.
+   */
+  #cancelWait: () => void = () => undefined;
+  /** When the tablet's time to read the answer runs out, on the timers' clock. */
+  #readDeadline: number | undefined;
+  #cancelReadTick: () => void = () => undefined;
 
   #channel: SideChannel | undefined;
   /** The `frames` channel, which this phone only ever sends on. */
@@ -1032,13 +1069,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#peer = peer;
     this.#secret = secret;
     this.#timers = timers;
-    this.#cancels.push(
-      timers.after(() => {
-        if (this.#condition === 'connecting') {
-          this.endSideLink();
-        }
-      }, CONNECT_LIMIT_MILLISECONDS),
-    );
+    this.#waitFor(CONNECT_LIMIT_MILLISECONDS);
     peer.ondatachannel = (event) => {
       this.#adopt(event.channel);
     };
@@ -1054,6 +1085,66 @@ export class PhoneSideLink implements SideCameraLinkPort {
 
   sideLinkCondition(): SideLinkCondition {
     return this.#condition;
+  }
+
+  /**
+   * The answer is on the screen: wait {@link TABLET_READ_LIMIT_MILLISECONDS}
+   * for the tablet to read it, and count it down (#1108). Called once, by
+   * {@link answerFrom}.
+   */
+  waitForTabletRead(): void {
+    if (this.#condition !== 'connecting' || this.#channel !== undefined) {
+      return;
+    }
+    this.#readDeadline = this.#timers.clock() + TABLET_READ_LIMIT_MILLISECONDS;
+    this.#waitFor(TABLET_READ_LIMIT_MILLISECONDS);
+    this.#cancelReadTick = this.#timers.every(() => {
+      this.#countdownChanged();
+    }, 1000);
+    this.#countdownChanged();
+  }
+
+  /**
+   * Whole seconds left for the tablet to read the answer: `undefined` before
+   * the answer is shown and once the tablet has read it, and `0` once the time
+   * ran out — which is how the screen tells a wait that ran out from any other
+   * end (#1108).
+   */
+  secondsForTabletToRead(): number | undefined {
+    if (this.#readDeadline === undefined) {
+      return undefined;
+    }
+    return Math.max(0, Math.ceil((this.#readDeadline - this.#timers.clock()) / 1000));
+  }
+
+  /** Call `listener` whenever {@link secondsForTabletToRead} may have changed. */
+  onTabletReadCountdown(listener: () => void): () => void {
+    this.#countdownListeners.add(listener);
+    return () => {
+      this.#countdownListeners.delete(listener);
+    };
+  }
+
+  /** Replace the one bound on a phone still `connecting` with one of `milliseconds`. */
+  #waitFor(milliseconds: number): void {
+    this.#cancelWait();
+    this.#cancelWait = this.#timers.after(() => {
+      if (this.#condition === 'connecting') {
+        this.endSideLink();
+      }
+    }, milliseconds);
+  }
+
+  /** The tablet has read the answer, or the link ended: the countdown stops. */
+  #stopCountdown(): void {
+    this.#cancelReadTick();
+    this.#cancelReadTick = () => undefined;
+  }
+
+  #countdownChanged(): void {
+    for (const listener of [...this.#countdownListeners]) {
+      listener();
+    }
   }
 
   onSideLinkEvent(listener: (event: SideLinkEvent) => void): () => void {
@@ -1111,6 +1202,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
     for (const cancel of this.#cancels.splice(0)) {
       cancel();
     }
+    this.#cancelWait();
+    this.#stopCountdown();
     this.#peer.ondatachannel = null;
     this.#peer.onconnectionstatechange = null;
     if (this.#channel !== undefined) {
@@ -1123,6 +1216,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
     }
     letGo(this.#peer, this.#channel, this.#timers);
     this.#setCondition('ended');
+    this.#countdownChanged();
   }
 
   #adopt(channel: SideChannel): void {
@@ -1145,6 +1239,12 @@ export class PhoneSideLink implements SideCameraLinkPort {
       return;
     }
     this.#channel = channel;
+    // #1108: the tablet has read the answer, so the person's wait is over and
+    // the rest is the machine handshake's.
+    this.#readDeadline = undefined;
+    this.#stopCountdown();
+    this.#waitFor(CONNECT_LIMIT_MILLISECONDS);
+    this.#countdownChanged();
     // #568: nothing is sent from here. A message sent inside `ondatachannel`
     // can be dropped by the engine with no error, so the phone waits for the
     // tablet's opening ping and sends its secret in answer (§`#greet`).
@@ -1213,7 +1313,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
       // Between its secret and the welcome the phone has no silence check of
       // its own: these pings are dropped before `#heard()` and its heartbeat
       // has not started. What ends a phone that is never welcomed is the
-      // constructor's CONNECT_LIMIT_MILLISECONDS, or the tablet closing
+      // CONNECT_LIMIT_MILLISECONDS set when `control` arrived, or the tablet closing
       // `control` (its three-second `unanswered` does, for a lost secret).
       if (message.t === 'ping') {
         // One of the opening pings, sent before the tablet had the secret.

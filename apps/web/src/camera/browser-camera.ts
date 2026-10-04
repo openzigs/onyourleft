@@ -256,22 +256,53 @@ function problemFor(error: unknown): CameraProblemKind {
  * and an exact constraint would make `getUserMedia` reject with
  * `OverconstrainedError` rather than use it.
  *
- * ⚠️ There is **no resolution constraint**, deliberately. Asking for a
- * specific size makes the browser scale, which costs a copy per frame for a
- * property nothing in this milestone reads; `frame.ts` records the actual
+ * ⚠️ There is **no resolution constraint on the back camera**, deliberately.
+ * Asking for a specific size makes the browser scale, which costs a copy per
+ * frame for a property nothing here reads; `frame.ts` records the actual
  * dimensions instead, so whatever the device gave is what is written down.
+ * The FRONT camera is different, and {@link cameraConstraints} says why.
  */
 export const CAMERA_CONSTRAINTS = cameraConstraints('environment');
 
 /**
+ * The size the FRONT camera is asked for: 1280 × 720 — #1108.
+ *
+ * The front camera is opened for one thing, the tablet reading the phone's
+ * pairing code (`camera-port.ts` §`CameraFacing`), and asked for nothing it
+ * delivered its default: 640 × 480 on the owner's Pixel Tablet, where the
+ * phone's answer — a dense code — read only held close and square. An
+ * `ideal`, never a requirement: a camera that cannot give it gives what it
+ * can, rather than `getUserMedia` refusing with `OverconstrainedError`.
+ */
+export const PAIRING_SCAN_IDEAL = { width: 1280, height: 720 } as const;
+
+/** What the camera is asked for, facing `facing` — #557, and #1108's size for the front. */
+export interface CameraConstraints {
+  readonly video: {
+    readonly facingMode: { readonly ideal: CameraFacing };
+    readonly width?: { readonly ideal: number };
+    readonly height?: { readonly ideal: number };
+  };
+  readonly audio: false;
+}
+
+/**
  * What the camera is asked for, facing `facing` — #557. The same shape as
  * {@link CAMERA_CONSTRAINTS} and the same `ideal`, so a device with only the
- * other camera still opens it rather than refusing.
+ * other camera still opens it rather than refusing. Facing the user it also
+ * asks for {@link PAIRING_SCAN_IDEAL} (#1108), as an `ideal` too.
  */
-export function cameraConstraints(facing: CameraFacing): {
-  readonly video: { readonly facingMode: { readonly ideal: CameraFacing } };
-  readonly audio: false;
-} {
+export function cameraConstraints(facing: CameraFacing): CameraConstraints {
+  if (facing === 'user') {
+    return {
+      video: {
+        facingMode: { ideal: facing },
+        width: { ideal: PAIRING_SCAN_IDEAL.width },
+        height: { ideal: PAIRING_SCAN_IDEAL.height },
+      },
+      audio: false,
+    };
+  }
   return { video: { facingMode: { ideal: facing } }, audio: false };
 }
 
