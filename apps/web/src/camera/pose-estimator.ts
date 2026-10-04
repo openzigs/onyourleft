@@ -131,6 +131,14 @@ export function workerPoseEstimator(
       }
       worker.onmessage = (event) => {
         const reply = poseReplyFrom(event.data);
+        const pixels = reply?.kind === 'landmarks' ? reply.pixels : undefined;
+        // A picture the checked reply does not carry on — a malformed reply,
+        // or one whose kind has no picture — is closed here, not dropped for
+        // the collector (D-1; #1123's review, N7).
+        const sent = pictureIn(event.data);
+        if (sent !== undefined && sent !== pixels) {
+          sent.close();
+        }
         if (reply === undefined) {
           fail();
           return;
@@ -138,7 +146,6 @@ export function workerPoseEstimator(
         const entry = waiting.get(reply.id);
         waiting.delete(reply.id);
         entry?.cancel();
-        const pixels = reply.kind === 'landmarks' ? reply.pixels : undefined;
         if (entry?.show !== true) {
           // A picture nobody asked for back, or for a request nobody is
           // waiting on any more, is closed here rather than held (D-1).
@@ -206,4 +213,22 @@ export function workerPoseEstimator(
       release();
     },
   };
+}
+
+/**
+ * Whatever a worker's message carries as `pixels` that could be closed — read
+ * by its shape, before the reply is checked, so that a picture inside a reply
+ * that does not pass the check is still let go.
+ */
+function pictureIn(data: unknown): { close(): void } | undefined {
+  if (typeof data !== 'object' || data === null || !('pixels' in data)) {
+    return undefined;
+  }
+  const { pixels } = data as { readonly pixels: unknown };
+  return typeof pixels === 'object' &&
+    pixels !== null &&
+    'close' in pixels &&
+    typeof pixels.close === 'function'
+    ? (pixels as { close(): void })
+    : undefined;
 }

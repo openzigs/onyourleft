@@ -127,6 +127,7 @@ import type {
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera, stillRoom } from '../camera/testing';
 import { PRESENCE_CHECK_MILLISECONDS } from '../camera/presence';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const TRAINER = deviceId('kickr');
 const STRAP = deviceId('strap');
@@ -5369,6 +5370,7 @@ describe('#390 — a trainer holding a target at an empty bike', () => {
     // The camera's clock is the bench's, once there is a bench.
     let benchSeconds = (): number => 0;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera({ luminance: () => stillRoom() }).port,
       schedule: timers.schedule,
       clock: () => benchSeconds() * 1000,

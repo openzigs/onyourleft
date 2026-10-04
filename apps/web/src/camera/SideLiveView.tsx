@@ -43,14 +43,7 @@
  * `boundary.test.ts` holds every camera platform name inside this directory.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useSyncExternalStore,
-  type JSX,
-} from 'react';
+import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type JSX } from 'react';
 
 import {
   FRAMING_GUIDE,
@@ -106,7 +99,12 @@ function LivePicture({
   const canvas = useRef<HTMLCanvasElement>(null);
 
   // D-12: a camera picture is on the screen for as long as this is mounted.
-  useEffect(() => controller.holdSecureWindow(), [controller]);
+  // ⚠️ A LAYOUT effect, declared before the draw below, so the hold is taken
+  // before the first picture is drawn and painted — React runs a component's
+  // layout effects in the order they are declared (#1123's review, N5). The
+  // platform call it starts is still asynchronous; this is the earliest it
+  // can be asked for.
+  useLayoutEffect(() => controller.holdSecureWindow(), [controller]);
 
   // Drawn before the browser paints, so a picture and its outline reach the
   // screen in the same frame.

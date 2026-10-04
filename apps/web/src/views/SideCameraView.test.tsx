@@ -50,6 +50,7 @@ import {
   tabletReadSentence,
 } from './SideCameraView';
 import { CAMERA_NO_PORT } from './CameraView';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -93,6 +94,7 @@ async function phone(options: { readonly paired?: boolean } = {}): Promise<{
 }> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
@@ -340,6 +342,7 @@ describe('pairing the phone with the tablet — #529', () => {
     });
     let readerLoads = 0;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       ...(options.readerFails === true

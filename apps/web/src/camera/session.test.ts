@@ -15,12 +15,14 @@ import { describe, expect, it } from 'vitest';
 import { CameraController } from './session';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import type { CapturedFrame } from './camera-port';
+import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 
 function controllerFor(camera: ReturnType<typeof scriptedCamera>, sink?: CapturedFrame[]) {
   const timers = manualSchedule();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: timers.schedule,
     ...(sink === undefined
@@ -203,6 +205,7 @@ describe('capturing', () => {
     let keeping = false;
     const { controller } = new (class {
       readonly controller = new CameraController({
+        secureWindow: browserSecureWindow(),
         port: camera.port,
         schedule: manualSchedule().schedule,
         sink: { accept: async () => Promise.resolve(keeping) },
@@ -226,6 +229,7 @@ describe('capturing', () => {
     const camera = scriptedCamera();
     const { controller } = new (class {
       readonly controller = new CameraController({
+        secureWindow: browserSecureWindow(),
         port: camera.port,
         schedule: manualSchedule().schedule,
         sink: { accept: async () => Promise.resolve(true) },
@@ -252,6 +256,7 @@ describe('capturing', () => {
     const camera = scriptedCamera();
     const { controller } = new (class {
       readonly controller = new CameraController({
+        secureWindow: browserSecureWindow(),
         port: camera.port,
         schedule: manualSchedule().schedule,
         sink: {

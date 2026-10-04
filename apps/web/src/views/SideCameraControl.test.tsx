@@ -51,6 +51,7 @@ import {
   TABLET_NEXT_STEP,
   TABLET_SCAN_NEEDS_CONSENT,
 } from './SideCameraControl';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -119,7 +120,7 @@ async function tablet(
   const controller = new CameraController({
     port: camera.port,
     schedule: manualSchedule().schedule,
-    ...(options.secureWindow === undefined ? {} : { secureWindow: options.secureWindow }),
+    secureWindow: options.secureWindow ?? browserSecureWindow(),
     ...(options.readerFails === true
       ? {
           loadCodeReader: async () => {
@@ -462,6 +463,7 @@ describe('pairing, on the tablet', () => {
     const port = sidePairingPort({ peer: () => undefined });
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -973,6 +975,33 @@ describe('the live view: the side camera’s picture with its outline — #1061,
     await settle();
     expect(secureWindow.holds).toBe(0);
     expect(asked.at(-1)).toBe(false);
+  });
+
+  // #1123's review (N5): the hold was taken in `useEffect`, after the canvas had been drawn in a
+  // layout effect and painted — so the first picture reached the screen before FLAG_SECURE was
+  // asked for. It is a layout effect now, declared before the draw.
+  it('takes the secure window hold before the first picture is drawn — D-12', async () => {
+    const order: string[] = [];
+    const secureWindow = new SecureWindow(
+      { setSecureWindow: async () => Promise.resolve() },
+      { inForeground: () => true, onForeground: () => () => undefined },
+    );
+    const hold = secureWindow.hold.bind(secureWindow);
+    vi.spyOn(secureWindow, 'hold').mockImplementation(() => {
+      order.push('hold');
+      return hold();
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: () => {
+        order.push('draw');
+      },
+    } as unknown as CanvasRenderingContext2D);
+    const { send, answer } = await watching({ secureWindow });
+    // The scan's viewfinder held it and gave it back; only the live view counts here.
+    order.length = 0;
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+    expect(order.slice(0, 2)).toStrictEqual(['hold', 'draw']);
   });
 
   it('makes no object URL and leaves no picture in storage — ADR 0029 D-10', async () => {

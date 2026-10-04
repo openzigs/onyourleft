@@ -454,6 +454,10 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
       case 'unavailable':
         this.#waiting = undefined;
         this.#set({ model: 'unavailable' });
+        // Nothing will be shown again (`#arrive` takes no picture now), so the
+        // one on screen goes at once rather than at the end of the session —
+        // the setup view says pictures are not being looked at (#1123, N2).
+        this.#dropPicture();
         return;
     }
   }

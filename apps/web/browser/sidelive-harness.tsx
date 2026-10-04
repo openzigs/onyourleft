@@ -29,6 +29,7 @@ import { CameraController } from '../src/camera/session';
 import { SideLiveView } from '../src/camera/SideLiveView';
 import type { SidePose, SidePoseLandmark } from '../src/camera/side-analysis-port';
 import { scriptedLiveView } from '../src/camera/testing';
+import { browserSecureWindow } from '../src/camera/secure-window-testing';
 
 /** The picture's size: a landscape phone's camera, small, as ADR 0033 D-3's pictures are. */
 const WIDTH = 640;
@@ -159,6 +160,7 @@ function measure(): readonly LiveCaseMeasurement[] {
 
 export async function runLiveTablet(host: Element): Promise<void> {
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),

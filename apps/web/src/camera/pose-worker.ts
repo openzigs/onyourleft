@@ -47,6 +47,7 @@ import {
   type PoseReply,
   type PoseRequest,
 } from './pose-runtime';
+import { respondToPoseRequest, type PoseWorkerPoint } from './pose-worker-core';
 
 /** The slice of a dedicated worker's scope this file uses. */
 interface PoseWorkerScope {
@@ -81,47 +82,17 @@ async function load(): Promise<PoseLandmarker | undefined> {
   return model;
 }
 
-/**
- * One picture: decode it, look at it, and drop it — or, when the page asked to
- * show it (#1061, ADR 0044 D-1), hand the decoded picture back with the
- * landmarks instead of closing it here. The page then holds the one picture it
- * shows and closes it when the next replaces it.
- */
-async function answer(request: PoseRequest): Promise<PoseReply> {
+/** The model's look at one decoded picture: its one person's points, or none. */
+async function look(): Promise<((picture: ImageBitmap) => readonly PoseWorkerPoint[]) | undefined> {
   const landmarker = await load();
-  if (landmarker === undefined) {
-    return { id: request.id, kind: 'unavailable' };
-  }
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(new Blob([request.picture], { type: 'image/jpeg' }));
-  } catch {
-    return { id: request.id, kind: 'unreadable' };
-  }
-  let handedBack = false;
-  try {
-    const found = landmarker.detect(bitmap).landmarks[0] ?? [];
-    const reply = {
-      id: request.id,
-      kind: 'landmarks' as const,
-      width: bitmap.width,
-      height: bitmap.height,
-      values: found.flatMap((point) => [point.x, point.y, point.visibility]),
-    };
-    if (request.show === true) {
-      handedBack = true;
-      return { ...reply, pixels: bitmap };
-    }
-    return reply;
-  } catch {
-    return { id: request.id, kind: 'unreadable' };
-  } finally {
-    // The decoded picture goes now, not when the collector gets to it (D-6) —
-    // unless it is on its way back to the page to be shown.
-    if (!handedBack) {
-      bitmap.close();
-    }
-  }
+  return landmarker === undefined
+    ? undefined
+    : (picture) => landmarker.detect(picture).landmarks[0] ?? [];
+}
+
+/** Decode a JPEG the page sent. */
+async function decode(picture: ArrayBuffer): Promise<ImageBitmap> {
+  return createImageBitmap(new Blob([picture], { type: 'image/jpeg' }));
 }
 
 /** `close` from the page: let the model go, which is also when MediaPipe flushes its log. */
@@ -141,9 +112,12 @@ scope.onmessage = (event) => {
   if (typeof data.id !== 'number' || !(data.picture instanceof ArrayBuffer)) {
     return;
   }
-  void answer({ id: data.id, picture: data.picture, show: data.show === true }).then((reply) => {
-    // A picture handed back is TRANSFERRED, so the worker keeps no copy of it.
-    const pixels = 'pixels' in reply ? reply.pixels : undefined;
-    scope.postMessage(reply, pixels === undefined ? [] : [pixels]);
-  });
+  // What becomes of the picture is `pose-worker-core.ts`'s, where it is tested (#1123).
+  void respondToPoseRequest(
+    { id: data.id, picture: data.picture, show: data.show === true },
+    { look, decode },
+    (reply, transfer) => {
+      scope.postMessage(reply, transfer);
+    },
+  );
 };

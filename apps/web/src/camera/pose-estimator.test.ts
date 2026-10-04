@@ -245,6 +245,29 @@ describe('handing the picture back for the live view — #1061, ADR 0044 D-1', (
     expect(closed.count).toBe(1);
   });
 
+  // #1123's review (N7): a reply that fails the check is a failed worker — and a picture inside
+  // it is still closed, not left for the collector.
+  it('closes a picture inside a malformed reply, and fails the worker', async () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    const look = estimator.estimateSidePoseShowingPicture(cleanFrameBytes(64));
+    const closed = { count: 0 };
+    worker.reply({ id: worker.posted[0]?.message.id, kind: 'landmarks', pixels: decoded(closed) });
+    await expect(look).resolves.toEqual({ outcome: { kind: 'unavailable' }, pixels: undefined });
+    expect(closed.count).toBe(1);
+    expect(worker.terminated).toBe(1);
+  });
+
+  it('closes a picture sent with a reply whose kind carries none', async () => {
+    const worker = scriptedWorker();
+    const estimator = workerPoseEstimator(() => worker);
+    const look = estimator.estimateSidePoseShowingPicture(cleanFrameBytes(64));
+    const closed = { count: 0 };
+    worker.reply({ id: worker.posted[0]?.message.id, kind: 'unreadable', pixels: decoded(closed) });
+    await expect(look).resolves.toEqual({ outcome: { kind: 'unreadable' }, pixels: undefined });
+    expect(closed.count).toBe(1);
+  });
+
   it('gives no picture when the model is unavailable', async () => {
     const worker = scriptedWorker();
     const estimator = workerPoseEstimator(() => worker);

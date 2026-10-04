@@ -43,6 +43,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { browserSecureWindow } from '../src/camera/secure-window-testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -298,6 +299,7 @@ function measurePairing(): PairingMeasurement {
 async function runPairingScan(host: Element): Promise<void> {
   globalThis.location.hash = '#/camera/side';
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),
@@ -389,6 +391,7 @@ async function run(): Promise<void> {
   globalThis.location.hash = '#/camera/side';
 
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),

@@ -84,6 +84,7 @@ import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
 import { workoutStub } from '../workouts/testing';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 const ATHLETE = athleteId('local');
@@ -615,6 +616,7 @@ function athleteMassPort(): AthleteMassPort {
 /** A camera that never opens anything — `shell-harness.tsx`'s, for its reason. */
 function quietCamera(): CameraController {
   return new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'no-camera' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'no-camera' as const }),

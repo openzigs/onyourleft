@@ -881,4 +881,44 @@ describe('the live view — #1061, ADR 0044 D-1', () => {
     expect(analysis.sideLiveView().picture).toBeUndefined();
     expect(analysis.sideAnalysisState().posed).toBe(1);
   });
+
+  // #1123's review (B1): the last viewer leaves while a picture it asked to see is still with the
+  // model. Nothing is held yet, so leaving drops nothing — the guard in `#show` is the only thing
+  // that stops the picture going on screen for nobody when it comes back.
+  it('closes a picture that comes back after the last viewer left, and holds nothing', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    const seen: number[] = [];
+    const stop = analysis.onSideLiveView(() => {
+      seen.push(analysis.sideLiveView().picture?.sequence ?? -1);
+    });
+    link.picture();
+    expect(model.pending.map((each) => each.show)).toStrictEqual([true]);
+    stop();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(1);
+    expect(seen).toStrictEqual([]);
+    // The pose still counts: only the picture is let go.
+    expect(analysis.sideAnalysisState().posed).toBe(1);
+  });
+
+  // #1123's review (N2): a model that fails settles with no picture, and nothing is ever shown
+  // again — so the picture already on screen must go then, not at the end of the session.
+  it('lets the picture on screen go when the model becomes unavailable', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.sideLiveView().picture?.sequence).toBe(0);
+    link.picture();
+    model.pending[1]?.answer({ outcome: { kind: 'unavailable' }, pixels: undefined });
+    await answered();
+    expect(analysis.sideAnalysisState().model).toBe('unavailable');
+    expect(analysis.sideLiveView().picture).toBeUndefined();
+    expect(closed.count).toBe(1);
+  });
 });

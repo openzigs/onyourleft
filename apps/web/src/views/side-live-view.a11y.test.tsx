@@ -23,6 +23,7 @@ import {
 import { mount, settle, type Mounted } from '../testing/mount';
 
 import { SideCameraControl } from './SideCameraControl';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -59,6 +60,7 @@ async function screen(withPose: boolean): Promise<void> {
   });
   const pairing = scriptedSidePairing({ phone: 'filming' }, live);
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
   });
