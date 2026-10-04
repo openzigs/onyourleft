@@ -335,6 +335,61 @@ describe('the stylesheet keeps the promises the checks depend on', () => {
 });
 
 /**
+ * The route cross-fade (#945). Every `::view-transition-*` animation runs on a
+ * motion token, and both blocks that collapse motion name those pseudo-elements
+ * themselves — `*::before` does not match them, so without this a rider who
+ * asked for less motion, or a screen that cannot repaint, would still get the
+ * fade. The browser gate (`motion.browser.spec.ts`) reads the reduced-motion
+ * half off a live transition; Playwright cannot emulate `update: slow`, so this
+ * is the only gate on that one.
+ */
+describe('the route cross-fade (#945)', () => {
+  const PSEUDOS = [
+    '::view-transition-group(*)',
+    '::view-transition-image-pair(*)',
+    '::view-transition-old(*)',
+    '::view-transition-new(*)',
+  ];
+
+  function blockAfter(marker: string): string {
+    const start = themeCss.indexOf(marker);
+    expect(start, `${marker} is not in theme.css`).toBeGreaterThanOrEqual(0);
+    return themeCss.slice(start, themeCss.indexOf('}', start) + 1);
+  }
+
+  it('runs every view-transition animation on a motion token of at most 200 ms', () => {
+    const declarations = [
+      ...themeCss.matchAll(/::view-transition-[a-z-]+\([^)]*\)[^{]*\{([^}]*)\}/g),
+    ].map((match) => match[1] ?? '');
+    const durations = declarations.flatMap((body) => [
+      ...body.matchAll(/animation-duration:\s*([^;]+);/g),
+    ]);
+    expect(durations.length).toBeGreaterThan(0);
+    for (const [, value] of durations) {
+      const token = /^var\(--oyl-motion-([a-z]+)\)$/.exec((value ?? '').trim());
+      if (token === null) {
+        // The two collapse blocks' own value.
+        expect(value?.trim()).toBe('0.01ms !important');
+        continue;
+      }
+      const ms = (MOTION_DURATION_MS as Record<string, number>)[token[1] ?? ''];
+      expect(ms, `--oyl-motion-${String(token[1])} is not a duration token`).toBeDefined();
+      expect(ms).toBeLessThanOrEqual(MOTION_DURATION_MS.medium);
+    }
+  });
+
+  it('collapses it under prefers-reduced-motion and under update: slow', () => {
+    for (const marker of ['@media (prefers-reduced-motion: reduce)', '@media (update: slow)']) {
+      const block = blockAfter(marker);
+      for (const pseudo of PSEUDOS) {
+        expect(block, `${marker} does not name ${pseudo}`).toContain(pseudo);
+      }
+      expect(block).toContain('animation-duration: 0.01ms !important');
+    }
+  });
+});
+
+/**
  * The motion ceiling (#936): no duration in the stylesheet above
  * {@link MOTION_DURATION_MS}' `medium`, 200 ms — epic #935's principle 4.
  *

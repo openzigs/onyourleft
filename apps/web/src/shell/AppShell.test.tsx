@@ -71,8 +71,9 @@ async function open(path: string): Promise<void> {
 
 describe('the router', () => {
   it('renders the view the fragment selects, including on first load', async () => {
-    // Not "renders the default and then corrects itself". `useRoute` uses
-    // `useSyncExternalStore` precisely so the first paint is already right; an
+    // Not "renders the default and then corrects itself". `useRoute` seeds its
+    // state from the address on the first render (#945; before it, a
+    // `useSyncExternalStore`) precisely so the first paint is already right; an
     // effect-based reader would flash the ride view here.
     await open('/about');
     expect(document.querySelector('h1')?.textContent).toBe(routeById('about').title);

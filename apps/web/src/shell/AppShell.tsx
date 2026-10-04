@@ -36,7 +36,15 @@
  * the route does **not** change.
  */
 
-import { Suspense, useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
+import {
+  Suspense,
+  useLayoutEffect,
+  useRef,
+  useState,
+  ViewTransition,
+  type JSX,
+  type MouseEvent,
+} from 'react';
 
 import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
@@ -92,7 +100,8 @@ import {
   type RouteDefinition,
   type RouteMatch,
 } from './routes';
-import { useRoute } from './useRoute';
+import { mayAnimateBetween } from './route-motion';
+import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
 
 /**
@@ -152,6 +161,13 @@ const APP_NAME = 'On Your Left';
 const VIEW_TITLE_ID = 'oyl-view-title';
 
 export interface AppShellProps {
+  /**
+   * How a change of fragment reaches React — #945, `useRoute.ts`
+   * §`RouteUpdates`. `main.tsx` passes none, and the default is the product.
+   * `'synchronous'` is the browser gate's control: the router as it was before
+   * #945, under which the route cross-fade must start nothing.
+   */
+  readonly routeUpdates?: RouteUpdates | undefined;
   /**
    * The browser capabilities, probed once at start-up.
    *
@@ -662,7 +678,10 @@ function viewFor(
 }
 
 export function AppShell(props: AppShellProps): JSX.Element {
-  const match = useRoute();
+  // #423, and described at length below. Declared before the router because
+  // #945 asks it, per navigation, whether the navigation may animate.
+  const [immersive, setImmersive] = useState(false);
+  const match = useRoute((from, to) => mayAnimateBetween(from, to, immersive), props.routeUpdates);
   const route = match.route;
   // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
   const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
@@ -700,19 +719,31 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * That would be less code, and it would hide the header with CSS — which is
    * the one thing CLAUDE.md §4e says makes the accessibility suite wrong rather
    * than the control safe.
+   *
+   * ⚠️ Declared at the top of this component since #945 (the router asks it),
+   * and this note stays here beside what it describes.
    */
-  const [immersive, setImmersive] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
-  useEffect(() => {
+  /*
+   * ⚠️ LAYOUT effects, the focus move and the title both, since #945's
+   * review. Under a view transition React runs passive effects only once the
+   * fade has FINISHED, so as `useEffect`s these left keyboard focus on the old
+   * route's control, and the old title for a screen reader to announce, for
+   * the whole 200 ms. A layout effect runs in the commit itself — inside the
+   * transition's update, as soon as the new DOM is in place.
+   * `motion.browser.spec.ts` §"focus and the title move in the commit that
+   * changes the route" goes red with either one passive again.
+   */
+  useLayoutEffect(() => {
     if (previousRouteId.current !== null && previousRouteId.current !== route.id) {
       mainRef.current?.focus();
     }
     previousRouteId.current = route.id;
   }, [route.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // The document title is the first thing a screen reader announces after a
     // page change and the only thing a tab strip shows, so it moves with the
     // route rather than staying on whatever index.html said.
@@ -736,6 +767,17 @@ export function AppShell(props: AppShellProps): JSX.Element {
     main.focus({ preventScroll: true });
     main.scrollIntoView({ block: 'start' });
   }
+
+  const view = (
+    <ViewBoundary key={route.id}>
+      <Suspense fallback={<ViewLoading />}>
+        {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
+          colour: kitColour,
+          onChange: setKitColour,
+        })}
+      </Suspense>
+    </ViewBoundary>
+  );
 
   return (
     <UnitsProvider units={units}>
@@ -840,14 +882,27 @@ export function AppShell(props: AppShellProps): JSX.Element {
             heading, so the focus the effect above puts on `main` survives the
             view replacing its fallback.
           */}
-          <ViewBoundary key={route.id}>
-            <Suspense fallback={<ViewLoading />}>
-              {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive, {
-                colour: kitColour,
-                onChange: setKitColour,
-              })}
-            </Suspense>
-          </ViewBoundary>
+          {/*
+            #945: the cross-fade between menu routes. Keyed by route, so a
+            navigation is the old view leaving and the new one entering — each
+            on `theme.css` §"THE ROUTE CROSS-FADE"'s short fade — and
+            `update="none"`, so a lazy view's chunk arriving (a Suspense reveal
+            inside the same route, which React animates too) is not a second
+            fade — and so a ride view's chunk arriving after a navigation that
+            was not animated is not a first one. ⚠️ A navigation to or from a
+            ride route, or while a ride has the screen, is applied outside
+            `startTransition` (`route-motion.ts` says why), and React animates
+            no other update.
+          */}
+          <ViewTransition
+            key={route.id}
+            enter="oyl-route"
+            exit="oyl-route"
+            update="none"
+            default="none"
+          >
+            {view}
+          </ViewTransition>
           {/*
             #993: the safety and privacy sentences that were the second half of
             the line under the title stay on the screen, below what a rider

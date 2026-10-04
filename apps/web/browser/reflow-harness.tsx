@@ -446,10 +446,14 @@ const EXPECTATIONS: Record<RouteId, PopulatedExpectation> = {
 
 function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
+  // #945's control: the router as it was before #945, every change of fragment
+  // applied outside `startTransition` (`shell/useRoute.ts` §`RouteUpdates`).
+  const synchronous = new URLSearchParams(window.location.search).get('routes') === 'synchronous';
   return (
     <PopulatedShell
       populated={populated}
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
+      {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
       transfer={transfer}
       map={realMap}
       basemap={{
@@ -477,6 +481,36 @@ async function untilHeading(title: string): Promise<boolean> {
     await nextFrame();
   }
   return false;
+}
+
+/**
+ * Resolve once the route cross-fade (#945) has finished, if one is running.
+ *
+ * ⚠️ React runs a transition's passive effects — where a view starts reading
+ * its port — only once the view transition has finished, so for the 200 ms of
+ * the fade the DOM is still, and {@link untilQuiet} would call a view that has
+ * not begun to load "settled". A frame first, so a transition React has just
+ * started has its animations.
+ */
+async function viewTransitionsFinished(): Promise<void> {
+  await nextFrame();
+  const fades = document
+    .getAnimations()
+    .filter((animation) => {
+      const effect = animation.effect;
+      return (
+        effect instanceof KeyframeEffect &&
+        (effect.pseudoElement ?? '').startsWith('::view-transition')
+      );
+    })
+    .map(async (animation) =>
+      animation.finished.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+  await Promise.all(fades);
+  await nextFrame();
 }
 
 /** Resolve once the DOM has not changed for {@link QUIET_MS}, or at the deadline. */
@@ -1127,6 +1161,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   window.location.hash = hash;
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
+  await viewTransitionsFinished();
   let quiet = await untilQuiet();
   if (
     route.id === 'transfer' &&
@@ -1397,6 +1432,30 @@ function applyChooserControl(): void {
   document.head.append(style);
 }
 
+/**
+ * The route cross-fade (#945), made instant unless `?motion=on`.
+ *
+ * Every navigation on this page still goes through the real `startTransition`
+ * and `<ViewTransition>` — focus, the lazy-view retry and the layout are
+ * measured through the path a rider takes — but its animations last no time.
+ * The layout walks here make hundreds of navigations, and a 200 ms fade each
+ * (with React running the new view's effects only once the fade has finished)
+ * cost the browser gate about two minutes on the CI runner. What the fade
+ * itself does is `motion.browser.spec.ts`'s, which opens this page with
+ * `?motion=on`.
+ */
+function applyMotionSetting(): void {
+  if (new URLSearchParams(window.location.search).get('motion') === 'on') {
+    return;
+  }
+  const style = document.createElement('style');
+  style.setAttribute('data-oyl-control', 'motion=instant');
+  style.textContent =
+    '::view-transition-group(*), ::view-transition-image-pair(*), ' +
+    '::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; }';
+  document.head.append(style);
+}
+
 async function main(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -1406,6 +1465,7 @@ async function main(): Promise<void> {
   if (data !== 'empty' && data !== 'populated') {
     throw new Error(`reflow harness: ?data must be "empty" or "populated", not ${String(data)}`);
   }
+  applyMotionSetting();
   applyLayoutControl();
   applyPanesControl();
   applySectionsControl();
@@ -1467,7 +1527,12 @@ window.__oylTabModel = () => {
 };
 
 // #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
-viewGroupsLoaded()
+// ⚠️ Except under `?chunks=lazy` (#945), where each group is fetched on its
+// first visit as it is in the product — so a spec can make one fail.
+(new URLSearchParams(window.location.search).get('chunks') === 'lazy'
+  ? Promise.resolve()
+  : viewGroupsLoaded()
+)
   .then(() => main())
   .catch((error: unknown) => {
     errors.push(error instanceof Error ? error.message : String(error));
