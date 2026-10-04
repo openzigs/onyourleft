@@ -39,7 +39,7 @@ function runsTheModel(code: string): boolean {
   return (
     /from\s+['"]@mediapipe\/tasks-vision/.test(bare) ||
     /import\s*\(\s*['"]@mediapipe\/tasks-vision/.test(bare) ||
-    /\.detect(ForVideo)?\s*\(/.test(bare)
+    /\.detect(ForVideo)?\s*(\?\.)?\s*\(/.test(bare)
   );
 }
 
@@ -60,6 +60,7 @@ describe('the pose model stays in the worker — #1061, ADR 0044 D-1', () => {
   it('catches a view that calls the estimator itself', () => {
     expect(runsTheModel('const found = landmarker.detect(bitmap);')).toBe(true);
     expect(runsTheModel('landmarker.detectForVideo(frame, now);')).toBe(true);
+    expect(runsTheModel('landmarker?.detect?.(bitmap);')).toBe(true);
     expect(runsTheModel("import { PoseLandmarker } from '@mediapipe/tasks-vision';")).toBe(true);
     expect(runsTheModel('// landmarker.detect(bitmap) is the worker’s')).toBe(false);
   });
