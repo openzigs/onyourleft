@@ -41,6 +41,7 @@ import {
   watts,
   type GeographicPosition,
   type RoutePoint,
+  type UnixSeconds,
   type WorkoutBlock,
 } from '@onyourleft/domain';
 import {
@@ -348,6 +349,29 @@ export function seedRouteDraft(populated: boolean, storage: Storage): void {
   }
 }
 
+/**
+ * The ride Home describes as *Last ride* — the newest — moves for ten hours
+ * and more (#1052), so Home's widest reading, a moving time of `10:23:45`, is
+ * on the page in its facts. With {@link homeNow} its week is the same width
+ * again (`28:35:45`), and the week before it `21:14:00`.
+ */
+const LAST_RIDE = 0;
+
+function movingTimeOf(index: number): number {
+  return index === LAST_RIDE ? 10 * 3600 + 23 * 60 + 45 : 3 * 3600 + 2 * 60;
+}
+
+function elapsedTimeOf(index: number): number {
+  if (index === SHORT_LONG_RIDE) return 10 * 3600 + 23 * 60 + 45;
+  return index === LAST_RIDE ? 10 * 3600 + 41 * 60 : 3 * 3600 + 17 * 60;
+}
+
+/**
+ * Home's clock: the fixture's own instant, which its rides are dated back
+ * from (#1052). On the wall clock *This week* is a week nobody rode in.
+ */
+const homeNow = (): UnixSeconds => unixSeconds(NOW);
+
 function ride(index: number): ActivityRecord {
   return stubActivity({
     id: activityId(`ride-${String(index)}`),
@@ -355,9 +379,8 @@ function ride(index: number): ActivityRecord {
     name: rideName(index),
     startedAt: unixSeconds(NOW - index * DAY),
     startedAtTimeZone: 'Europe/London',
-    elapsedTime:
-      index === SHORT_LONG_RIDE ? seconds(10 * 3600 + 23 * 60 + 45) : seconds(3 * 3600 + 17 * 60),
-    movingTime: seconds(3 * 3600 + 2 * 60),
+    elapsedTime: seconds(elapsedTimeOf(index)),
+    movingTime: seconds(movingTimeOf(index)),
     distance: metres(123_456),
     averagePower: watts(234),
     hasPosition: index % 2 === 0,
@@ -679,6 +702,7 @@ export function PopulatedShell({
   return (
     <AppShell
       capabilities={capabilities}
+      homeNow={homeNow}
       camera={quietCamera()}
       rideController={stubRideController(populated ? ridingSnapshot() : idleSnapshot()).controller}
       settings={settingsPort()}
