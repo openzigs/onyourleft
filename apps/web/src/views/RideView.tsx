@@ -207,7 +207,7 @@ function LiveRide({
             // re-review), so it is the whole message and there is no
             // disclosure. Not `live`: the ride's one region says it
             // (`RideAnnouncer.tsx`). Gone the moment a later ask succeeds.
-            <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+            <StatusMessage tone="warning" label={KEEP_SCREEN_ON_LABEL} kept>
               {RIDE_MAY_STOP_WITH_SCREEN_OFF}
             </StatusMessage>
           ) : null}
@@ -253,7 +253,7 @@ function LiveRide({
           // 77.9 px UNDER the fold — the controls that end a recording, off
           // the screen, on the one platform that shows this sentence.
           // `rideInProgress` is the branch of `RideControls` it rendered in.
-          <StatusMessage tone="info" label="No notification" live>
+          <StatusMessage tone="info" label="No notification" live kept>
             {snapshot.notificationNotice}
           </StatusMessage>
         ) : null}

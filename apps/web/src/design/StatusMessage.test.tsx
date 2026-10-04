@@ -122,3 +122,42 @@ describe('more to read — #605', () => {
     expect(container.querySelector('details')).toBeNull();
   });
 });
+
+describe('kept visible — #1048', () => {
+  it('is not marked by default', async () => {
+    const container = await render('warning');
+    expect(container.querySelector('[data-oyl-kept-visible]')).toBeNull();
+  });
+
+  it('marks the message itself, with no box around it', async () => {
+    mounted = await mount(
+      <StatusMessage tone="danger" label="Not released" kept>
+        It may still be holding resistance.
+      </StatusMessage>,
+    );
+    const marked = mounted.container.querySelectorAll('[data-oyl-kept-visible]');
+    expect(marked).toHaveLength(1);
+    expect(marked[0]?.classList.contains('oyl-status')).toBe(true);
+  });
+
+  it('marks only the sentence when there is more to read, never the disclosure', async () => {
+    mounted = await mount(
+      <StatusMessage
+        tone="warning"
+        label="Eased"
+        kept
+        more={{ summary: 'Why', detail: 'The rest.' }}
+      >
+        The target is eased.
+      </StatusMessage>,
+    );
+    const marked = mounted.container.querySelectorAll('[data-oyl-kept-visible]');
+    expect(marked).toHaveLength(1);
+    expect(marked[0]?.textContent).toContain('The target is eased.');
+    expect(marked[0]?.closest('details')).toBeNull();
+    expect(marked[0]?.querySelector('details')).toBeNull();
+    expect(
+      mounted.container.querySelector('details')?.closest('[data-oyl-kept-visible]'),
+    ).toBeNull();
+  });
+});

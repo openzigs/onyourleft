@@ -132,6 +132,16 @@ const PHONE_LIMITS: readonly string[] = [
   'There is no silent reconnect: after the app is closed, each device is chosen again.',
 ];
 
+/**
+ * The sentences the Devices screen never tucks where the Android shell can
+ * pair — {@link DEVICES_KEPT_VISIBLE}'s counterpart (#1048), held by
+ * `a11y/kept-visible.a11y.test.tsx`.
+ */
+export const DEVICES_SHELL_KEPT_VISIBLE: readonly string[] = [
+  ONE_GESTURE_PER_DEVICE,
+  ...PHONE_LIMITS,
+];
+
 function NoController(): JSX.Element {
   return (
     <StatusMessage tone="warning" label="Not available">
