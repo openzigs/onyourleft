@@ -244,3 +244,86 @@ describe('backfillLoadSummaries — the explicit act', () => {
     expect(BACKFILL_BATCH).toBe(50);
   });
 });
+
+describe('#1070 — a power channel that read 0 W is no basis for a load', () => {
+  /** A ride stored before #1070 from an all-zero power channel. */
+  function storedAtZero(id: string, offset: number, extra: Partial<StubAnalysisRide> = {}) {
+    return {
+      activity: stubActivity({
+        id: activityId(id),
+        startedAt: unixSeconds(START + offset * DAY),
+        startedAtTimeZone: 'UTC',
+        effortWeightedPower: watts(0),
+        loadCoveredTime: seconds(600),
+      }),
+      power: Array.from({ length: 600 }, () => watts(0)),
+      ...extra,
+    };
+  }
+
+  it('counts a ride stored at 0 W as having no load, not as a rest day', async () => {
+    const port = stubAnalysis(OWNER, [summarised('real', 0), storedAtZero('zero', 1)]);
+
+    const history = await loadFitnessHistory(port);
+
+    expect(history.ridesCounted).toBe(1);
+    expect(history.ridesWithoutSummary).toBe(1);
+  });
+
+  it('backfills a ride stored at 0 W from its heart-rate strap', async () => {
+    const port = stubAnalysis(OWNER, [
+      storedAtZero('zero', 0, {
+        heartRate: Array.from({ length: 600 }, () => beatsPerMinute(150)),
+      }),
+    ]);
+
+    const outcome = await backfillLoadSummaries(port);
+    const history = await loadFitnessHistory(port);
+
+    expect(outcome.computed).toBe(1);
+    expect(port.summaryWrites).toEqual(['zero']);
+    // Read back fresh: the stale 0 W is still on the row beside the new
+    // heart-rate figure, and it is the read rule that keeps it out.
+    expect(history.ridesCounted).toBe(1);
+    expect(history.ridesWithoutSummary).toBe(0);
+    expect(history.bases).toEqual(['heartRate']);
+  });
+
+  it('summarises an unsummarised all-zero power ride from heart rate', async () => {
+    const port = stubAnalysis(OWNER, [
+      unsummarised('zero', 0, {
+        power: Array.from({ length: 600 }, () => watts(0)),
+        heartRate: Array.from({ length: 600 }, () => beatsPerMinute(150)),
+      }),
+    ]);
+
+    await backfillLoadSummaries(port);
+    const history = await loadFitnessHistory(port);
+
+    expect(history.bases).toEqual(['heartRate']);
+  });
+
+  it('skips an all-zero power ride with no strap, and writes nothing', async () => {
+    const port = stubAnalysis(OWNER, [
+      unsummarised('zero', 0, { power: Array.from({ length: 600 }, () => watts(0)) }),
+    ]);
+
+    const outcome = await backfillLoadSummaries(port);
+
+    expect(outcome.computed).toBe(0);
+    expect(outcome.skipped).toBe(1);
+    expect(port.summaryWrites).toEqual([]);
+  });
+
+  it('still reads only power for a ride whose power gave a summary', async () => {
+    const port = stubAnalysis(OWNER, [
+      unsummarised('real', 0, {
+        heartRate: Array.from({ length: 600 }, () => beatsPerMinute(150)),
+      }),
+    ]);
+
+    await backfillLoadSummaries(port);
+
+    expect(port.channelReads).toEqual(['real:power']);
+  });
+});

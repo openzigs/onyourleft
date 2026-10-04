@@ -260,6 +260,27 @@ export function formatSpeed(
 }
 
 /**
+ * A ride's stored distance, as a figure worth showing — or `undefined` when it
+ * says no distance is known (#1070).
+ *
+ * A ride recorded with no speed channel stores `metres(0)`
+ * (`recording/finish.ts` §`distanceOf`): "no distance known", not a ride of
+ * 0.0 km. Drawn large it reads as a measurement, which is #1041's invented
+ * zero for distance — the same decision `format.ts` §`shownAveragePower`
+ * makes for power. Every surface that draws a ride's distance asks this one
+ * question, so the library card, Home's last ride, the result card, the ride
+ * page's summary and the Files ride chooser cannot disagree about which rides
+ * have one. A LAP's distance is not passed through this, for the reason
+ * `format.ts` §`shownAveragePower` gives about a lap's power: it is stated
+ * small, in a column of other laps' figures.
+ *
+ * ⚠️ **This decides what is SHOWN, not what is stored**: the row keeps its 0.
+ */
+export function shownDistance(distance: Metres): Metres | undefined {
+  return distance > 0 ? distance : undefined;
+}
+
+/**
  * A ride-scale distance, for display.
  *
  * @param decimals overrides the default precision. A *precision* argument, not

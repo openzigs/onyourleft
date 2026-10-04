@@ -381,6 +381,40 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('listActivitySummaries carries the load summary, a stale 0 W beside heart rate included (#1070)', async () => {
+    // The list row is what #77's chart, Home and the backfill read. Until
+    // #1070 `summaryOf` dropped all three fields, so every ride read as
+    // unsummarised on the real store while the web stubs carried them.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide({
+        effortWeightedPower: watts(0),
+        loadCoveredTime: seconds(600),
+      });
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+
+      const row = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setActivityLoadSummary(ATHLETE_A, ride.id, {
+            effortWeightedHeartRate: beatsPerMinute(150),
+            loadCoveredTime: seconds(600),
+          }),
+        async (fresh) =>
+          (await fresh.listActivitySummaries(ATHLETE_A)).find((summary) => summary.id === ride.id),
+      );
+
+      // The merge keeps the stale 0 beside the new basis; the client's read
+      // rule (`apps/web/src/analysis/summary.ts` §`isPowerBasis`) is what
+      // makes that harmless, and it can only do so if the list row has both.
+      expect(row?.effortWeightedPower).toBe(0);
+      expect(row?.effortWeightedHeartRate).toBe(150);
+      expect(row?.loadCoveredTime).toBe(600);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('setActivityLoadSummary refuses another athlete’s ride', async () => {
     // ⚠️ CLAUDE.md §6's cross-athlete class: a query that matches on an entity
     // id without also filtering on the owner passes every single-athlete test

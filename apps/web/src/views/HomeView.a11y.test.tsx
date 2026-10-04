@@ -133,6 +133,15 @@ function expectClean(where: string): void {
 
 const text = (): string => document.querySelector('main')?.textContent ?? '';
 
+/** The last ride's section, by its heading. */
+function lastRide(): Element {
+  const section = document.getElementById('oyl-home-last')?.closest('section');
+  if (section === null || section === undefined) {
+    throw new Error('no last-ride section');
+  }
+  return section;
+}
+
 /**
  * The load metrics' familiar names, which are registered trademarks
  * (CLAUDE.md §6) — as whole words, so "IF" is not found inside "different".
@@ -185,6 +194,26 @@ describe('the home screen — #428', () => {
       ]),
     );
     expectClean('home, one ride');
+  });
+
+  it('draws no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
+    // `recording/finish.ts` §`distanceOf` stores 0 m for a ride recorded with
+    // no speed channel: no distance known, as the Activities card reads it.
+    await openHome([ride('still', 2, { distance: metres(0) })]);
+    const terms = [...lastRide().querySelectorAll('dt')].map((t) => t.textContent);
+    expect(terms).toEqual(['When', 'Moving time', 'Load']);
+    expect(text()).not.toMatch(/0\.0\s*km/);
+    expectClean('home, a ride with no distance');
+  });
+
+  it('shows no load 0 for a ride stored from a power channel that read 0 W — #1070', async () => {
+    await openHome([ride('zero', 2, { effortWeightedPower: watts(0) })]);
+    const readings = [...lastRide().querySelectorAll('.oyl-reading__value')].map(
+      (reading) => reading.textContent,
+    );
+    expect(readings).toEqual(['50:00', '30.0']);
+    expect(text()).toContain('not worked out yet');
+    expect(text()).toContain('No ride here has a load yet');
   });
 
   it('full: the week and the fitness sentences, from the same words Analysis uses', async () => {
