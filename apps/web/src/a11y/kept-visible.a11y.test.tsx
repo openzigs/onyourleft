@@ -39,6 +39,7 @@ import type { StoreHarness } from '@onyourleft/store/testing';
 
 import { watts } from '@onyourleft/domain';
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
+import { mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
 
 import { CameraController } from '../camera/session';
 import { CAMERA_NOTICE_SENTENCES, CAMERA_NOTICES } from '../camera/notice';
@@ -52,16 +53,19 @@ import {
 } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { LOSS_REASON } from '../ride/TrainerPanel';
+import { RELEASE_INCOMPLETE } from '../workout/session';
 import { ALL_ROUTES, routeById, type RouteDefinition, type RouteId } from '../shell/routes';
 import { openRoute } from '../testing/hierarchy-walk';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { sentencesIn } from '../testing/route-sentences';
+import { capacitorShellSupport } from '../support/shell-support';
 import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
 import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
 import {
   DEVICES_KEPT_VISIBLE,
   DEVICES_NO_BLUETOOTH_KEPT_VISIBLE,
+  DEVICES_SHELL_KEPT_VISIBLE,
   DevicesView,
 } from '../views/DevicesView';
 import {
@@ -123,11 +127,18 @@ const RIDE_POPULATED_KEPT_VISIBLE: readonly string[] = [
   'A workout’s targets are a share of it, so there is no number to send without one.',
 ];
 
+/** The stall rescue's own words for the eased case below — `erg-safety.ts`'s. */
+const RESCUE_REASON =
+  'Cadence is falling under the target, so it has been eased to let you spin back up.';
+
 /** A controlled trainer the stall rescue has eased, whose release was refused, mid-ride. */
 const RIDE_CONTROLLED_KEPT_VISIBLE: readonly string[] = [
   ...RIDE_POPULATED_KEPT_VISIBLE,
   'Not released',
+  // #1048: the notice's sentence carries the mark, so its words are listed.
+  RELEASE_INCOMPLETE,
   'Eased',
+  RESCUE_REASON,
   'comes back by itself once your cadence has held steady for',
   'Press End ERG to leave it off.',
   KEEP_SCREEN_ON_LABEL,
@@ -170,9 +181,9 @@ const KEPT: Record<RouteId, Kept> = {
     // is one line with its "more"; where pairing works and what still works
     // here are kept on the screen after it.
     sentences: DEVICES_NO_BLUETOOTH_KEPT_VISIBLE,
-    elsewhere: DEVICES_KEPT_VISIBLE,
+    elsewhere: [...DEVICES_KEPT_VISIBLE, ...DEVICES_SHELL_KEPT_VISIBLE],
     reason:
-      'the can-pair state, where the disclosure is, is mounted below with DEVICES_KEPT_VISIBLE',
+      'the can-pair states, where the disclosure is, are mounted below — a browser with DEVICES_KEPT_VISIBLE and the Android shell with DEVICES_SHELL_KEPT_VISIBLE',
   },
   segments: {
     sentences: [],
@@ -404,10 +415,31 @@ function headingsInSummaries(root: Element): string[] {
   );
 }
 
+const KEPT_MARK = '[data-oyl-kept-visible]';
+
+/**
+ * Every listed sentence on the page that no `data-oyl-kept-visible` element
+ * holds — #1048, the reverse of {@link unlistedMarkedSentences}. The mark is
+ * what the browser gate's fold rule and prose budget read, so a kept sentence
+ * that lost it would be measured as ordinary prose while this file still
+ * called it kept. A sentence not on the page is {@link keptVisibleFaults}'
+ * finding, not this one's.
+ */
+function unmarkedListedSentences(root: Element, sentences: readonly string[]): string[] {
+  const faults: string[] = [];
+  for (const sentence of sentences) {
+    if (holders(root, sentence).some((element) => element.closest(KEPT_MARK) === null)) {
+      faults.push(`listed as kept visible and not marked data-oyl-kept-visible: “${sentence}”`);
+    }
+  }
+  return faults;
+}
+
 /** Every fault the whole rule finds on a page: the list, the mark, and the summary. */
 function allFaults(root: Element, kept: readonly string[], listed: readonly string[]): string[] {
   return [
     ...keptVisibleFaults(root, kept),
+    ...unmarkedListedSentences(root, kept),
     ...unlistedMarkedSentences(root, listed),
     ...headingsInSummaries(root),
   ];
@@ -470,6 +502,28 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     expect(allFaults(main, DEVICES_KEPT_VISIBLE, everyListed(KEPT.devices))).toEqual([]);
   });
 
+  it('Devices in the Android shell, where it can pair: the one-gesture sentence and the phone’s limit stay out of its disclosure (#1048)', async () => {
+    const shell = capacitorShellSupport({
+      availability: async () => Promise.resolve({ kind: 'available' }),
+      notice: permissionNotice,
+      mayShowDeviceList,
+    });
+    mounted = await mount(
+      <main>
+        <DevicesView
+          capabilities={{ bluetooth: undefined, secureContext: true }}
+          shell={shell}
+          controller={stubRideController(idleSnapshot()).controller}
+        />
+      </main>,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(main.querySelector('details'), 'the can-pair state has no disclosure').not.toBeNull();
+    expect(allFaults(main, DEVICES_SHELL_KEPT_VISIBLE, everyListed(KEPT.devices))).toEqual([]);
+  });
+
   it('Camera, agreed to: what is sent to the rider’s own computer stays out of any disclosure', async () => {
     const controller = new CameraController({
       port: scriptedCamera().port,
@@ -495,12 +549,11 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       notificationNotice: RIDE_NOTIFICATION_REFUSED,
       trainer: {
         ...riding.trainer,
-        releaseFault: 'It may still be holding resistance.',
+        releaseFault: RELEASE_INCOMPLETE,
         ergRescue: {
           target: watts(150),
           holding: 'relief',
-          reason:
-            'Cadence is falling under the target, so it has been eased to let you spin back up.',
+          reason: RESCUE_REASON,
           pending: undefined,
         },
       },
@@ -576,6 +629,38 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       'marked data-oyl-kept-visible and tucked: “A marked one.”',
     ]);
   });
+  it('the rule itself: a listed sentence that does not carry the mark is reported (#1048)', async () => {
+    mounted = await mount(
+      <main>
+        <div data-oyl-kept-visible="">
+          <p>A marked sentence.</p>
+        </div>
+        <p>An unmarked sentence.</p>
+        <p data-oyl-kept-visible="">
+          <span>Its label: </span>A sentence marked on its own paragraph.
+        </p>
+      </main>,
+    );
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(
+      allFaults(
+        main,
+        [
+          'A marked sentence.',
+          'An unmarked sentence.',
+          'Its label',
+          'A sentence marked on its own paragraph.',
+        ],
+        ['A marked sentence.', 'An unmarked sentence.', 'A sentence marked on its own paragraph.'],
+      ),
+    ).toEqual([
+      'listed as kept visible and not marked data-oyl-kept-visible: “An unmarked sentence.”',
+    ]);
+    // Absent is the presence check's finding, and only that one's.
+    expect(unmarkedListedSentences(main, ['Not there at all.'])).toEqual([]);
+  });
+
   it('the rule itself: a kept-visible sentence inside an illustration’s wrapper is reported (#942)', async () => {
     // The fixture #942 names: a card's picture and its kept sentence under one
     // `aria-hidden` wrapper — drawn, and silent to a screen reader.

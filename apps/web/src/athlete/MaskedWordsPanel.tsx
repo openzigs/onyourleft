@@ -20,6 +20,7 @@ import { useEffect, useId, useState, type JSX } from 'react';
 
 import { parseMaskedWords } from '@onyourleft/store';
 
+import { MASKING_LIMIT } from '../camera/hosted-model';
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
@@ -38,8 +39,7 @@ export const MASKED_WORDS_LEAD =
  * (#1040, the owner's ruling of 2026-10-03): it is about what leaves, so it is
  * never behind the section's ⓘ, where #839 and #1031 had put it.
  */
-export const MASKED_WORDS_CAVEAT =
-  'Masking reduces what is sent; it does not guarantee that nothing personal gets through. Your own computer is sent the text in full.';
+export const MASKED_WORDS_CAVEAT = `${MASKING_LIMIT} Your own computer is sent the text in full.`;
 
 export const MASKED_WORDS_NO_STORE =
   'This browser has no local store, so a list made here would be forgotten as soon as the page reloaded.';
