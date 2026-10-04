@@ -5359,6 +5359,7 @@ top of an issue **supersedes its body**.
 | Why the load metrics are not called by the names you know, and what the trademark check found | `packages/domain/src/analysis/load.ts` §"The names are somebody's trademarks" |
 | What a ride's load is derived from, why power wins over heart rate, and why a gap is never scored as zero | `packages/domain/src/analysis/load.ts`, `apps/web/src/analysis/load.ts` §`loadFrom` |
 | Why a ride stores half a load rather than a whole one, and what goes stale if it stores the whole one | `apps/web/src/analysis/summary.ts`, `packages/store/src/records.ts` §`effortWeightedPower` |
+| Why a power channel that read 0 W gives a ride no load (or its heart-rate load), and what happens to rides already stored at 0 W | `apps/web/src/analysis/summary.ts` §`isPowerBasis` and §"A power channel that read nought is not a basis", `apps/web/src/analysis/history.ts` §`summariseOne`, [#1070](https://github.com/openzigs/onyourleft/issues/1070) |
 | How the fitness chart is drawn from one store read and no stream decode, and what the backfill control is for | `apps/web/src/analysis/history.ts` §`HISTORY_ACTIVITY_LIMIT`, §`backfillLoadSummaries` |
 | Why the fitness series walks the calendar rather than the rides, and what its seeding does not invent | `packages/domain/src/analysis/fitness.ts` §`fitnessSeries`, §`FitnessPoint.warmingUp` |
 | Why a malformed day key draws nothing instead of hanging the tab | `packages/domain/src/analysis/fitness.ts` §`dayCount` and the counted loop above it |

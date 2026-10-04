@@ -74,7 +74,12 @@ import type { RoutePort } from '../routes/store-port';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, hrefForGameRoute, routeById } from '../shell/routes';
 import { useUnits } from '../units/context';
-import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
+import {
+  formatDistance,
+  formatSmallDistance,
+  measurementText,
+  shownDistance,
+} from '../units/format';
 
 export interface HomeViewProps {
   readonly analysis: AnalysisPort | undefined;
@@ -181,6 +186,7 @@ function GettingStarted(): JSX.Element {
 function Rides({ data }: { readonly data: HomeData }): JSX.Element {
   const units = useUnits();
   const last = data.lastRide;
+  const lastDistance = last === undefined ? undefined : shownDistance(last.distance);
   const readings = trendReadings(data.fitness);
   return (
     <>
@@ -201,12 +207,16 @@ function Rides({ data }: { readonly data: HomeData }): JSX.Element {
                 <Reading value={formatDuration(last.movingTime)} />
               </dd>
             </div>
-            <div>
-              <dt>Distance</dt>
-              <dd>
-                <Reading {...formatDistance(last.distance, units)} />
-              </dd>
-            </div>
+            {/* #1070: a ride recorded with no speed channel stored 0 m, which is
+                no distance known — no reading, as the Activities card. */}
+            {lastDistance === undefined ? null : (
+              <div>
+                <dt>Distance</dt>
+                <dd>
+                  <Reading {...formatDistance(lastDistance, units)} />
+                </dd>
+              </div>
+            )}
             <div>
               <dt>Load</dt>
               <dd>

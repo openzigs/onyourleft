@@ -62,7 +62,7 @@ import {
 } from '../format';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
-import { distanceUnit, formatDistance, spokenDistanceUnit } from '../units/format';
+import { distanceUnit, formatDistance, shownDistance, spokenDistanceUnit } from '../units/format';
 import { GAME_OUTCOME_TEXT, type SavedRide } from './ride-result';
 
 /** The unit a heart rate is shown in — `ride/MetricGrid.tsx`'s. */
@@ -96,11 +96,17 @@ export function RideResultCard({
 }: RideResultCardProps): JSX.Element {
   const units = useUnits();
   const headingId = useId();
-  const distance = formatDistance(result.distance, units);
+  // #1070: a ride recorded with no speed channel saves 0 m, which is no
+  // distance known — no reading, and the sentence says nothing of one.
+  const known = shownDistance(result.distance);
+  const distance = known === undefined ? undefined : formatDistance(known, units);
   // #1054: a ride whose power readings were all 0 saves an average of 0 W, and
   // that says nothing was measured — the card says what it says for no power.
   const averagePower = shownAveragePower(result.averagePower);
-  const spoken = resultSentence(result, distance.value, spokenDistanceUnit(units));
+  const spoken = resultSentence(
+    result,
+    distance === undefined ? undefined : `${distance.value} ${spokenDistanceUnit(units)}`,
+  );
   // Decided as the card mounts. The controller hearing `onAnnounced` turns the
   // prop to `false` on the very next render, and that must not empty the
   // region this card has just filled.
@@ -129,12 +135,14 @@ export function RideResultCard({
             <Reading value={formatDuration(result.elapsedTime)} />
           </dd>
         </div>
-        <div>
-          <dt>Distance</dt>
-          <dd>
-            <Reading value={distance.value} unit={distanceUnit(units)} />
-          </dd>
-        </div>
+        {distance === undefined ? null : (
+          <div>
+            <dt>Distance</dt>
+            <dd>
+              <Reading value={distance.value} unit={distanceUnit(units)} />
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Average power</dt>
           <dd>
@@ -171,12 +179,18 @@ export function RideResultCard({
 }
 
 /**
- * What the card's region says, once — the save, the two facts every ride has,
+ * What the card's region says, once — the save, its elapsed time and distance,
  * and the game's outcome where there is one. Distance in the unit's spoken
- * word, `units/format.ts` §`spokenDistanceUnit`'s reason.
+ * word, `units/format.ts` §`spokenDistanceUnit`'s reason, and `undefined` for
+ * a ride that knows none (#1070): the sentence then states the elapsed time
+ * alone rather than "0.0 kilometres".
  */
-export function resultSentence(result: SavedRide, distance: string, spokenUnit: string): string {
-  const facts = `Ride saved: ${formatDuration(result.elapsedTime)} elapsed, ${distance} ${spokenUnit}.`;
+export function resultSentence(result: SavedRide, spokenDistance: string | undefined): string {
+  const elapsed = `${formatDuration(result.elapsedTime)} elapsed`;
+  const facts =
+    spokenDistance === undefined
+      ? `Ride saved: ${elapsed}.`
+      : `Ride saved: ${elapsed}, ${spokenDistance}.`;
   return result.gameOutcome === undefined
     ? facts
     : `${facts} ${GAME_OUTCOME_TEXT[result.gameOutcome]}`;
