@@ -80,6 +80,8 @@
  * frame.
  */
 
+import type { SidePictureStages } from './side-picture-timings';
+
 /** Why a camera cannot be used here. @see CameraNotice */
 export type CameraProblemKind =
   /** No camera API at all — an old browser, or a page served over plain HTTP. */
@@ -169,6 +171,12 @@ export interface CapturedFrame {
   readonly mediaType: string;
   readonly width: number;
   readonly height: number;
+  /**
+   * #1112: how long a SIDE picture's draw and encode took, for
+   * `side-picture-timings.ts`. Numbers and an enumeration only — never part of
+   * the image, and absent on every other frame.
+   */
+  readonly stages?: SidePictureStages | undefined;
 }
 
 /**

@@ -295,3 +295,69 @@ test.describe('#1108 — the phone’s pairing instruction, above its camera pic
     expect(status.bottom).toBeGreaterThan(measured.fold - FOLD_MARGIN_PIXELS);
   });
 });
+
+/**
+ * **#1112 — five pictures a second while the filming sign is up.** The owner's
+ * phone sent about 0.3. A JPEG encode on the page's main thread waits for the
+ * page to go idle (`camera/side-picture-encoder.ts`' header), and the
+ * `?pictures=` page films through the real shell and the real camera path
+ * with a main thread that never idles — the harness's own header says why
+ * that is a stand-in. The product's worker must keep the rate near the five a
+ * second ADR 0033 D-3 asks for; the control puts `canvas.toBlob` back and must
+ * fall under the floor, or this measured nothing.
+ */
+test.describe('#1112 — the picture rate while filming', () => {
+  /** The floor: three a second, against the designed five. */
+  const MINIMUM_PICTURES_PER_SECOND = 3;
+
+  async function rate(
+    page: Page,
+    encoder: 'worker' | 'main-thread',
+  ): Promise<{ perSecond: number; timings: unknown; filmingThroughout: boolean }> {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const response = await page.goto(`/sidecamera.html?pictures=${encoder}`);
+    expect(response?.status()).toBe(200);
+    await page.waitForFunction(() => window.__oylSideCamera !== undefined, undefined, {
+      timeout: 30_000,
+    });
+    const published = await page.evaluate(() => window.__oylSideCamera);
+    expect(published?.errors).toEqual([]);
+    const pictures = published?.pictures;
+    if (pictures === undefined) {
+      throw new Error('the ?pictures= page measured nothing');
+    }
+    const perSecond = (pictures.pictures / pictures.milliseconds) * 1000;
+    console.log(
+      `side camera, ${encoder} encoder, main thread never idle: ${String(pictures.pictures)} pictures in ${String(Math.round(pictures.milliseconds))} ms, ${perSecond.toFixed(2)} a second`,
+    );
+    return { perSecond, timings: pictures.timings, filmingThroughout: pictures.filmingThroughout };
+  }
+
+  test('the product keeps near five a second with the filming sign up', async ({ page }) => {
+    const { perSecond, timings, filmingThroughout } = await rate(page, 'worker');
+    expect(filmingThroughout).toBe(true);
+    expect(perSecond).toBeGreaterThanOrEqual(MINIMUM_PICTURES_PER_SECOND);
+    // The recorder the coordinating session reads on the phone is on the page,
+    // says the worker encoded, and holds numbers and words only.
+    const summary = (timings as { summary?: { encoder?: string; sentPerSecond?: number } }).summary;
+    expect(summary?.encoder).toBe('worker');
+    expect(summary?.sentPerSecond).toBeGreaterThan(0);
+    const leaves = JSON.stringify(timings).match(/"[^"]*"/g) ?? [];
+    for (const leaf of leaves) {
+      expect(leaf, 'a timing record holds a string that is not a key or a known word').toMatch(
+        /^"[a-zA-Z0-9-]*"$/,
+      );
+    }
+  });
+
+  test('control: the encoder #1112 replaced falls under the floor on the same page', async ({
+    page,
+  }) => {
+    const { perSecond, timings } = await rate(page, 'main-thread');
+    expect(
+      (timings as { summary?: { encoder?: string } }).summary?.encoder,
+      'the control did not run the main-thread encoder',
+    ).toBe('main-thread');
+    expect(perSecond).toBeLessThan(MINIMUM_PICTURES_PER_SECOND);
+  });
+});

@@ -57,6 +57,7 @@ import {
   type SideCameraState,
 } from '../camera/side-camera';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
+import { sidePictureTimingsForThisPage } from '../camera/side-picture-timings';
 import { PairingCode } from '../camera/PairingCode';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import type { PhoneSidePairing, SidePairingPort } from '../camera/side-pairing-port';
@@ -198,6 +199,8 @@ function SideCamera({
       // pairing is one session's (ADR 0033 D-4), and "Set up again" must scan
       // again rather than show "Paired with your tablet" over a dead link.
       link: link?.sideLinkCondition() === 'ended' ? undefined : link,
+      // #1112: every picture tick, readable as `window.__oylSideCameraTimings`.
+      timings: sidePictureTimingsForThisPage(),
       ...(timers ?? {}),
     });
     setSession(created);

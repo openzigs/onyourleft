@@ -24,6 +24,7 @@ import {
   STOPPED_TEXT,
 } from './side-camera';
 import type { SideLinkCondition } from './side-camera-link-port';
+import { SidePictureTimings } from './side-picture-timings';
 import { manualSchedule, scriptedCamera, scriptedLink, virtualTime } from './testing';
 
 /** A session over a real controller, with consent already given. */
@@ -603,5 +604,159 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
 
   it('takes a picture every interval the owner named: five a second', () => {
     expect(1000 / PICTURE_INTERVAL_MILLISECONDS).toBe(5);
+  });
+});
+
+describe('every picture tick is recorded — #1112', () => {
+  async function settle(): Promise<void> {
+    for (let round = 0; round < 10; round += 1) {
+      await Promise.resolve();
+    }
+  }
+
+  /** A session whose camera's pictures carry stages, recording into `timings`. */
+  async function recorded(): Promise<{
+    readonly timings: SidePictureTimings;
+    readonly link: ReturnType<typeof scriptedLink>;
+    readonly time: ReturnType<typeof virtualTime>;
+    readonly hold: () => () => void;
+  }> {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    let held: Promise<void> | undefined;
+    const staged = {
+      turnOn: async () => controller.turnOn(),
+      turnOff: () => {
+        controller.turnOff();
+      },
+      state: () => controller.state(),
+      subscribe: (listener: () => void) => controller.subscribe(listener),
+      captureSideFrame: async () => {
+        if (held !== undefined) {
+          await held;
+        }
+        const frame = await controller.captureSideFrame();
+        return frame === undefined
+          ? undefined
+          : {
+              ...frame,
+              stages: {
+                drawMilliseconds: 2,
+                encodeMilliseconds: 7,
+                videoFrames: 41,
+                encoder: 'worker' as const,
+              },
+            };
+      },
+    };
+    const link = scriptedLink();
+    const time = virtualTime();
+    const timings = new SidePictureTimings({ visibility: () => 'visible' });
+    const session = new SideCameraSession({ camera: staged, link, ...time, timings });
+    await session.turnOnForFraming();
+    link.emit({ kind: 'start' });
+    return {
+      timings,
+      link,
+      time,
+      hold: () => {
+        let release: () => void = () => undefined;
+        held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => {
+          held = undefined;
+          release();
+        };
+      },
+    };
+  }
+
+  it('records a sent picture with its stages, its size and what the channel held', async () => {
+    const { timings, link, time } = await recorded();
+    link.waiting = 512;
+    time.advance(PICTURE_INTERVAL_MILLISECONDS);
+    await settle();
+    const [record] = timings.snapshot().records;
+    expect(record).toEqual({
+      tickAt: 200,
+      outcome: 'sent',
+      captureMilliseconds: 0,
+      drawMilliseconds: 2,
+      encodeMilliseconds: 7,
+      videoFrames: 41,
+      encoder: 'worker',
+      bytes: link.pictures[0]?.bytes.length,
+      bufferedBefore: 512,
+      sentAt: 200,
+      visibility: 'visible',
+    });
+  });
+
+  it('records what the link answered when it would not take one', async () => {
+    const { timings, link, time } = await recorded();
+    link.answer = 'busy';
+    time.advance(PICTURE_INTERVAL_MILLISECONDS);
+    await settle();
+    expect(timings.snapshot().records.map((each) => each.outcome)).toEqual(['busy']);
+  });
+
+  it('records a tick that found the last picture still being taken, which used to say nothing', async () => {
+    const { timings, time, hold } = await recorded();
+    const release = hold();
+    for (let tick = 0; tick < 4; tick += 1) {
+      time.advance(PICTURE_INTERVAL_MILLISECONDS);
+      await settle();
+    }
+    release();
+    await settle();
+    const records = timings.snapshot().records;
+    expect(records.map((each) => [each.tickAt, each.outcome])).toEqual([
+      [400, 'still-taking'],
+      [600, 'still-taking'],
+      [800, 'still-taking'],
+      [200, 'sent'],
+    ]);
+    // The picture took from its tick at 200 until it was released at 800.
+    expect(records[3]?.captureMilliseconds).toBe(600);
+  });
+
+  it('records the ticks that find no link, and a picture dropped because the link went', async () => {
+    const { timings, link, time, hold } = await recorded();
+    const release = hold();
+    time.advance(PICTURE_INTERVAL_MILLISECONDS);
+    await settle();
+    link.emit({ kind: 'condition', condition: 'lost' });
+    release();
+    await settle();
+    time.advance(PICTURE_INTERVAL_MILLISECONDS);
+    await settle();
+    expect(timings.snapshot().records.map((each) => each.outcome)).toEqual([
+      'dropped',
+      'link-not-ready',
+    ]);
+  });
+
+  it('starts a fresh record when filming starts', async () => {
+    const timings = new SidePictureTimings();
+    timings.record({ tickAt: 5, outcome: 'sent' });
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    const link = scriptedLink();
+    const time = virtualTime();
+    const session = new SideCameraSession({ camera: controller, link, ...time, timings });
+    await session.turnOnForFraming();
+    expect(timings.snapshot().records).toHaveLength(1);
+    link.emit({ kind: 'start' });
+    expect(timings.snapshot().records).toEqual([]);
+    expect(timings.summary().totals.sent).toBe(0);
   });
 });
