@@ -2059,9 +2059,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           // exists to refuse. The rest is not lost: the HUD's one region still
           // SAYS the whole sentence (`easedText`, above), and the Ride screen
           // shows it behind its disclosure. `ride.browser.spec.ts` §"#585"
-          // publishes the margin.
+          // publishes the margin. Kept (#1086): the mark is an attribute on
+          // the notice itself, no wrapper, so it moves nothing.
           rescue === undefined ? undefined : (
-            <StatusMessage key="workout-eased" tone="warning" label="Eased">
+            <StatusMessage key="workout-eased" tone="warning" label="Eased" kept>
               {workoutRescueHeadline(rescue)}
             </StatusMessage>
           ),
@@ -2135,9 +2136,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           // (`ride/controller.ts` §`askAgainIfRefused`), and a rider who lost
           // the elevation strip for that has not lost a ride.
           // `ride.browser.spec.ts` §"#647" measures it at every overlay
-          // viewport, with and without the road notice beside it.
+          // viewport, with and without the road notice beside it. Kept
+          // (#1086), by an attribute on the notice and no wrapper.
           mayStop ? (
-            <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+            <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL} kept>
               {RIDE_MAY_STOP_WITH_SCREEN_OFF}
             </StatusMessage>
           ) : undefined,

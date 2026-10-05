@@ -7,7 +7,8 @@
  * ## Pure, and derived — nothing here is stored
  *
  * {@link deriveProgress} is a function of the ride summaries Home already
- * reads (`home/home.ts`, ONE `listActivitySummaries`) and a clock. No badge,
+ * reads (`home/home.ts`, ONE `listActivitySummaries` — two past the read
+ * budget, {@link deriveProgressAcross}, #1107) and a clock. No badge,
  * no "earned at" and no streak is written anywhere: delete a ride and what it
  * earned goes with it, and nothing can go stale. What a badge needs that the
  * row did not already say — a ride's ascent, its best powers, whether a
@@ -239,6 +240,48 @@ export function deriveProgress(summaries: readonly ActivitySummary[], now: UnixS
     badges: badges.reverse(),
     rides: rides.length,
     unread,
+  };
+}
+
+/**
+ * Streaks and badges for a rider with more rides than one read holds — #1107.
+ *
+ * Home reads at most `HISTORY_ACTIVITY_LIMIT` summaries at a time, so past
+ * that bound it has two windows: the `oldest` and the `newest`, with rides
+ * between them it has not read.
+ *
+ * - **The current streak comes from the newest window.** It is about now.
+ *   It is short only if one run of weeks is longer than the whole window,
+ *   which at the bound is 5,000 RECORDINGS, not 5,000 counted rides: a
+ *   recording under {@link RIDE_MINIMUM_MOVING_SECONDS}' five minutes takes a
+ *   slot in the window without adding a week to any streak.
+ * - **The badges, and what holds a best back, come from the oldest window**,
+ *   exactly as they did before #1107. Every badge is a claim about the whole
+ *   history: worked out from the newest window alone, its first ride would be
+ *   called the first and every total would start from nought. From the
+ *   oldest window each one is true; badges earned in the rides between the
+ *   windows are not shown, which is the bound biting rather than a false claim.
+ * - **The longest streak is the longer of the two windows'.** A run that
+ *   spans the gap is not seen, so it is never more than the truth.
+ */
+export function deriveProgressAcross(
+  oldest: readonly ActivitySummary[],
+  newest: readonly ActivitySummary[],
+  now: UnixSeconds,
+): Progress {
+  const early = deriveProgress(oldest, now);
+  const recent = deriveProgress(newest, now);
+  const counted = new Set(
+    [...oldest, ...newest].filter((summary) => countsAsRide(summary)).map((summary) => summary.id),
+  );
+  return {
+    streak: {
+      current: recent.streak.current,
+      longest: Math.max(early.streak.longest, recent.streak.longest),
+    },
+    badges: early.badges,
+    rides: counted.size,
+    unread: early.unread,
   };
 }
 
