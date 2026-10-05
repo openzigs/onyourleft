@@ -391,6 +391,19 @@ async function bothWays(page: Page): Promise<(readonly [string, StageMeasurement
   ];
 }
 
+/**
+ * #1124: the least room `9:59:59` may have in its field, in CSS pixels — at
+ * every overlay viewport, both ways (with anchor positioning and without).
+ * Until #1124 the field was a fixed track or a fixed 6 rem and the time was
+ * measured into what was left: 1.0 px at 844×390 and both landscape tablets
+ * on the CI runner's DejaVu Sans, which a font change would have turned red
+ * with nothing wrong in the product. The field is sized from its value's
+ * own digits now (`theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124"), and
+ * the spare width is published at every viewport and held to this, as the
+ * fold checks hold 50 px.
+ */
+const MOVING_TIME_SPARE_PIXELS = 4;
+
 for (const viewport of OVERLAY_VIEWPORTS) {
   test.describe(viewport.name, () => {
     /**
@@ -601,6 +614,15 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         // what catches that.
         expect(shown.lines, how).toBe(1);
         expect(shown.width, how).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
+        // #1124: and with room to spare, published below.
+        const spare = shown.field - shown.width;
+        expect(spare, `${how}: ${spare.toFixed(1)} px to spare`).toBeGreaterThanOrEqual(
+          MOVING_TIME_SPARE_PIXELS,
+        );
+        expect(
+          shown.secondaryOverflow,
+          `${how}: the secondary tier past its panel`,
+        ).toBeLessThanOrEqual(0);
         let fits =
           `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
           `(${(shown.field - shown.width).toFixed(1)} px to spare)`;
@@ -758,6 +780,55 @@ for (const viewport of OVERLAY_VIEWPORTS) {
  * to; that is the cost, it is `theme.css` §`.oyl-game--riding`'s to argue, and
  * it is why this block does not assert what the overlay blocks assert.
  */
+/**
+ * #1124 — a phone on its side from 802 px to the first overlay viewport
+ * (844×390), which no case above measures. From 802 px four EQUAL secondary
+ * tracks fitted, 88 to 93.5 px, and `9:59:59` is 92.5 px on the CI runner's
+ * fonts: measured for #1124, the time ran up to 4.5 px past its field at
+ * 802×390 with every gate green. Here the time draws in the primary panel up
+ * to 51 rem and in a content-sized fourth track from there; each viewport is
+ * held to one line, {@link MOVING_TIME_SPARE_PIXELS} to spare and no overlap
+ * with any other reading or control, both ways. A tall one (802×600, a
+ * corners layout outside the short band) has three tracks.
+ */
+const MOVING_TIME_BAND_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a phone on its side — 802×390', width: 802, height: 390, unstagedFails: true },
+  { name: 'a phone on its side — 816×390', width: 816, height: 390, unstagedFails: true },
+  { name: 'a phone on its side — 820×390', width: 820, height: 390, unstagedFails: true },
+  { name: 'a short tablet window — 802×600', width: 802, height: 600, unstagedFails: true },
+];
+
+for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
+  test(`#1124 — the moving time fits its field with room to spare — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await openRide(page, viewport);
+    for (const [how, seen] of await bothWays(page)) {
+      const shown = seen.moving;
+      const spare = shown.field - shown.width;
+      const field = named(seen.items, 'reading: Moving');
+      const note =
+        `${how}: 9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+        `(${spare.toFixed(1)} px to spare); secondary tier ${String(shown.secondaryOverflow)} px ` +
+        `past its panel; ${describeItem(field)}`;
+      testInfo.annotations.push({ type: '#1124', description: note });
+      console.log(`#1124 — ${viewport.name} — ${note}`);
+      expect(shown.text, note).toBe('9:59:59');
+      expect(shown.lines, note).toBe(1);
+      expect(spare, note).toBeGreaterThanOrEqual(MOVING_TIME_SPARE_PIXELS);
+      // The room is not taken by running the grid past its panel.
+      expect(shown.secondaryOverflow, note).toBeLessThanOrEqual(0);
+      expect(inside(field.box, viewport), note).toBe(true);
+      expect(
+        seen.items
+          .filter((each) => each !== field && overlap(each.box, field.box))
+          .map(describeItem),
+        note,
+      ).toEqual([]);
+    }
+  });
+}
+
 for (const viewport of STACKED_VIEWPORTS) {
   test.describe(viewport.name, () => {
     test('the harness is on the stage, stacked', async ({ browser }) => {
