@@ -6882,6 +6882,31 @@ select.oyl-input {
   stroke-dasharray: 8 6;
 }
 
+/* The live view's outline of where the model found the rider (#1061, ADR 0044
+   D-9): DOTTED, with a dot at each point, so it is told from the SOLID guide
+   and the DASHED ghost by its pattern, not its colour (#48). Drawn over the
+   camera's picture, so in HUD ink in both palettes (#672). */
+.oyl-framing__outline * {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
+}
+
+.oyl-framing__overlay .oyl-framing__joint {
+  fill: var(--oyl-color-hud-ink);
+  stroke: none;
+}
+
+/* The tablet's live view sits in the Camera screen's column, under its
+   controls and words; bounded so a landscape picture does not fill the page. */
+.oyl-side-live {
+  max-inline-size: 40rem;
+}
+
+.oyl-side-live .oyl-framing__picture {
+  max-block-size: 50vh;
+}
+
 /* =============================================================================
  * THE TABLET'S VIEWFINDER WHILE IT READS THE PHONE'S CODE — #557.
  *

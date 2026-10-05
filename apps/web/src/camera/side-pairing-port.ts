@@ -29,6 +29,7 @@
 
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
+import type { SideLiveViewPort } from './side-live-view-port';
 import type { PairingRefusal } from './side-link-code';
 import type { SidePicture } from './side-link-pictures';
 import type { PhoneCommand } from './side-link-messages';
@@ -157,6 +158,13 @@ export interface TabletSidePairing {
    * with it.
    */
   readonly analysis: SideAnalysisPort | undefined;
+  /**
+   * The side camera's live picture with its pose outline — #1061, ADR 0044
+   * D-1 — or `undefined` where this build's analysis cannot show one. Made
+   * with the pairing and ends with it; it holds at most one picture, and only
+   * while it is watched.
+   */
+  readonly liveView?: SideLiveViewPort | undefined;
 }
 
 /** The phone's pairing, once it has read the tablet's offer. */

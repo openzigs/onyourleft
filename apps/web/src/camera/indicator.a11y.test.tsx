@@ -33,6 +33,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import { CAMERA_LIVE_LABEL, CameraIndicator } from './indicator';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -44,6 +45,7 @@ afterEach(() => {
 async function liveController(): Promise<CameraController> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
   });

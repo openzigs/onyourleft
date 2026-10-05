@@ -15,6 +15,7 @@ import { endpointDecision, readAnalysisEndpoint, type EndpointStorage } from './
 import { riderAnalysisPort, type AnalysisSend } from './analysis-transport';
 import { CameraController, type FrameSink } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 
@@ -67,6 +68,7 @@ async function liveController(
 ): Promise<{ controller: CameraController; camera: ReturnType<typeof scriptedCamera> }> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
     analysis,
@@ -97,6 +99,7 @@ describe('with no configuration the app makes no request at all', () => {
   it('refuses the same way when the controller was built with no analysis at all', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -154,6 +157,7 @@ describe('consent and the camera come first', () => {
     let consulted = 0;
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       analysis: () => {
@@ -173,6 +177,7 @@ describe('consent and the camera come first', () => {
     const answering = answeringPort();
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       analysis: () => answering.port,
@@ -194,6 +199,7 @@ describe('consent and the camera come first', () => {
     const answering = answeringPort();
     const camera = scriptedCamera({ captureFails: 'unavailable' });
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       analysis: () => answering.port,

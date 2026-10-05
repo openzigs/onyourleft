@@ -16,6 +16,7 @@ import {
 } from './presence';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera, stillRoom } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 
@@ -47,6 +48,7 @@ function rig(luminance?: (sample: number) => LuminanceGrid, sampleFails = false)
   const sunk: unknown[] = [];
   let now = 1_000_000;
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: timers.schedule,
     clock: () => now,
@@ -221,6 +223,7 @@ describe('absence is decided on the camera’s side and read on the ride’s', (
     const camera = scriptedCamera({ luminance: EMPTY });
     const timers = manualSchedule();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: timers.schedule,
       clock: () => now,
@@ -294,6 +297,7 @@ describe('a check in flight when the watch is reset — #516', () => {
     const timers = manualSchedule();
     let letGo: (() => void) | undefined;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: timers.schedule,
       clock: () => 1_000_000,

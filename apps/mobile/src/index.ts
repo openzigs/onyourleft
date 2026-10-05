@@ -49,6 +49,11 @@ export type { AnalysisPostReply, AnalysisPostRequest } from './http/analysis-htt
 export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';
 export type { ThermalPlugin, ThermalReply } from './thermal/thermal';
 export {
+  capacitorSecureWindowPlugin,
+  setCapacitorSecureWindow,
+} from './secure-window/secure-window';
+export type { SecureWindowPlugin } from './secure-window/secure-window';
+export {
   capacitorRecordingServicePlugin,
   recordingServiceKeepAlive,
   recordingServiceNotificationPermission,

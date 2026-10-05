@@ -9,7 +9,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     /**
-     * ⚠️ {@link RecordingServicePlugin} and {@link ThermalPlugin} (#247) are registered here, BEFORE
+     * ⚠️ {@link RecordingServicePlugin}, {@link ThermalPlugin} (#247) and {@link SecureWindowPlugin}
+     * (#1061) are registered here, BEFORE
      * {@code super.onCreate}. Capacitor
      * auto-discovers plugins that ship as packages; one that lives in the application's own source
      * tree has to be registered by hand, and registering it after the bridge is built is a silent
@@ -19,6 +20,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(android.os.Bundle savedInstanceState) {
         registerPlugin(RecordingServicePlugin.class);
         registerPlugin(ThermalPlugin.class);
+        registerPlugin(SecureWindowPlugin.class);
         super.onCreate(savedInstanceState);
         // #672: the WebView draws white until the page paints, which in the device's dark mode is a
         // white frame in a dark room. The page's canvas instead, per palette -- res/values and
