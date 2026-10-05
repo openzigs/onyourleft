@@ -606,6 +606,10 @@ async function untilHeading(title: string): Promise<boolean> {
  * runner that took longer than {@link QUIET_MS} with frames running, and
  * {@link untilQuiet} called the fallback settled: `sections.browser.spec.ts`
  * then counted no sections at all. A still DOM is not a shown view.
+ *
+ * ⚠️ It sees the shell's top-level fallback only: a view's own nested
+ * `Suspense` boundary (AnalysisView's lazy `FitnessChart`, whose fallback is
+ * `null`) leaves no mark, so `shown` does not mean every boundary resolved.
  */
 async function untilViewShown(): Promise<boolean> {
   const deadline = performance.now() + PATIENCE_MS;
@@ -1322,7 +1326,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
   // Before the fade and the quiet: the reveal is a view transition of its own.
-  const shown = await untilViewShown();
+  const shown = headed && (await untilViewShown());
   await viewTransitionsFinished();
   let quiet = await untilQuiet();
   if (
