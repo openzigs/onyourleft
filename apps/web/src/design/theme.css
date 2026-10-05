@@ -6038,10 +6038,11 @@ select.oyl-input {
  *   measured with 16 px to spare. Anchored rather than placed by the grid,
  *   because the row is INSIDE the actions panel in the document — beside
  *   Pause and End ride, where a keyboard and a screen reader meet it — and a
- *   grid cannot lift a grandchild into another column. ⚠️ Where the engine
- *   has no anchor positioning (a WebView older than Chrome 125) the rule does
- *   not apply and the panel is what it was before #576; `@supports` says so
- *   rather than leaving a half-applied rule.
+ *   grid cannot lift a grandchild into another column as an in-flow item.
+ *   ⚠️ Where the engine has no anchor positioning (a WebView older than
+ *   Chrome 125) this rule does not apply, and since #1120 the block after it
+ *   lifts the row by grid placement instead; a reviewer who remembers "the
+ *   panel is what it was before #576" there is reading the old file.
  *
  * - **Column (a phone upright): the side camera's row and the sound row
  *   SHARE one row**, because width is what an upright phone has and height is
@@ -6076,6 +6077,52 @@ select.oyl-input {
       border-radius: var(--oyl-radius);
       color: var(--oyl-color-hud-ink);
       padding: var(--oyl-space-sm);
+    }
+  }
+}
+
+/*
+ * #576 WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * An engine with no anchor positioning (Android System WebView older than
+ * Chrome 125) skips the block above, and until #1120 that left the side
+ * camera's row stacked inside the actions panel — which ran off a 736×360 and
+ * an 844×390 stage, exactly #576's defect. So it is lifted here too, by a
+ * placement every engine with CSS grid has: the row is `position: absolute`,
+ * its containing block is the HUD's grid (nothing between them is
+ * positioned), and its grid placement names the cell it is drawn against.
+ * An absolutely positioned DESCENDANT of a grid is placed by its own
+ * `grid-area` — measured in Chromium 124, which has no anchor positioning.
+ *
+ * ⚠️ **Hung from the TOP of the free strip in the left column, where the
+ * anchored rule hangs it from the bottom** — the top of the route panel, or of
+ * the notice in its cell. Grid placement has no edge of a sibling's content to
+ * hang from, only grid lines, and the line under the first row is the one that
+ * is the same place on every ride: `top: 100%` of row one is the bottom of the
+ * taller of the two top panels. Both forms need the same room — the strip
+ * between the primary panel and the bottom-start cell — and on the CI runner's
+ * fonts at 736×360 the row is drawn from y = 141 to 200 and the route panel
+ * begins at 211 (`ride.browser.spec.ts` §"with sounds on" publishes it, both
+ * ways). The row's vertical padding is the extra-small step for that room.
+ *
+ * ⚠️ **Explicit lines, both ends.** For an absolutely positioned item an
+ * `auto` grid line is the grid's padding EDGE, not one track on: `grid-row: 2`
+ * alone put this row at the bottom of the stage on the first try.
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound) > .oyl-hud__side-camera-row {
+      position: absolute;
+      grid-area: 1 / 1 / 2 / 2;
+      top: calc(100% + var(--oyl-space-xs));
+      left: 0;
+      width: min(100%, 16rem);
+      box-sizing: border-box;
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      color: var(--oyl-color-hud-ink);
+      padding: var(--oyl-space-xs) var(--oyl-space-sm);
     }
   }
 }
@@ -6153,9 +6200,9 @@ select.oyl-input {
  * (4 × 88 + 3 × 8 + 18 = 394 px of panel); from there the time is a fourth
  * track's reading on the second row.
  *
- * ⚠️ Without anchor positioning this does not apply and the time is a third
- * secondary row — over the rider at 736×360. #1120, with the upright layout's
- * same fallback (below).
+ * ⚠️ Without anchor positioning this does not apply, and since #1120 the block
+ * after it draws the time in the same place by grid placement; until then it
+ * was a third secondary row over the rider at 736×360.
  * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport,
  * and how much room the time has in its field.
  */
@@ -6183,6 +6230,44 @@ select.oyl-input {
       left: calc(anchor(left) + var(--oyl-space-sm));
       right: calc(anchor(right) + var(--oyl-space-sm));
       bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+  }
+}
+
+/*
+ * #1111 ON ITS SIDE, WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * The block above, for an engine with no anchor positioning: the moving time
+ * is drawn across the bottom of the primary panel by grid placement instead —
+ * `position: absolute` in the HUD's own `primary` area, which is the primary
+ * panel's box once the panel is stretched to its row (`align-self: stretch`
+ * here, where the corners layout starts it). The panel is then as tall as the
+ * secondary panel beside it, a few pixels on the runner's fonts, and the
+ * secondary tier keeps its six readings in two rows, as with anchors. Without
+ * this the time was a third secondary row over the leaning rider at 736×360
+ * (#1120: 16 cases of `ride.browser.spec.ts`; 14 of the states a ride can be
+ * in, measured in Chromium 124).
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      align-self: stretch;
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+      display: block;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      grid-area: primary;
+      left: var(--oyl-space-sm);
+      right: var(--oyl-space-sm);
+      bottom: var(--oyl-space-sm);
       flex-direction: row;
       align-items: baseline;
       gap: var(--oyl-space-sm);
@@ -6226,14 +6311,16 @@ select.oyl-input {
  * that control has no trainer line, and its actions panel began 121 px under
  * the rider at 360×752.
  *
- * ⚠️ **This layout ASSUMES anchor positioning: Android System WebView /
- * Chrome 125 or later.** Where the engine has none, none of this applies and
- * the reading stays a third row in the grid — and that fallback does NOT hold
- * the upright layout's floors. Measured for #1111's review with this block
- * deleted: 13 cases of `ride.browser.spec.ts` fail at 360×752 and 360×800 (a
- * panel over the leaning rider, #585's and #647's 50 px floors, the sounds and
- * the side camera). #576's own fallback takes the same stance; making either
- * hold without anchors is #1120.
+ * ⚠️ **Anchor positioning is Android System WebView / Chrome 125 or later,
+ * and since #1120 this layout no longer assumes it** — a reviewer who
+ * remembers "this layout ASSUMES anchor positioning" is reading the old file.
+ * Where the engine has none, the block after this one places the reading by
+ * grid placement. Before it, the reading stayed a third row in the grid and
+ * did not hold the upright layout's floors: measured for #1111's review with
+ * this block deleted, 13 cases of `ride.browser.spec.ts` failed at 360×752 and
+ * 360×800 (a panel over the leaning rider, #585's and #647's 50 px floors, the
+ * sounds and the side camera). `ride.browser.spec.ts` now measures every
+ * overlay case both ways, through the CSSOM (§`withoutAnchors`).
  */
 @supports (anchor-name: --oyl-probe) {
   @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
@@ -6277,6 +6364,81 @@ select.oyl-input {
       /* A panel of its own here, over the world, so it carries the panel's
          surface: the colour pair `contrast.a11y.test.ts` checks is the pair a
          rider sees. */
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      padding: var(--oyl-space-sm);
+    }
+  }
+}
+
+/*
+ * #1111 UPRIGHT, WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * The block above, for an engine with no anchor positioning: the moving time
+ * is placed in the HUD's `actions` area by grid placement — `position:
+ * absolute`, its containing block the HUD's grid — at the TOP-END corner of
+ * the actions panel, 6 rem wide. The controls give up the same width they give
+ * up with anchors, so the field is beside *Pause* and *End ride* when they are
+ * the panel's first row.
+ *
+ * ⚠️ **What it costs, which #419 asks to have written down: the trainer line
+ * gives up the same 7 rem**, because grid placement has no edge of the
+ * controls to hang from — only the panel's own top — and the trainer line is
+ * above the controls (#373). On the CI runner's fonts `Trainer: simulating
+ * 0.9% (1 sent)` is 262 px in 326, so it takes a second line, and the actions
+ * panel is one line (25 px) taller than with anchors. The field is shorter
+ * than that line and the controls together, so it never reaches below them.
+ * At 360×752 with sounds on and a side camera paired the panel then begins
+ * 6 px under the leaning rider's box, where it begins 31 px under it with
+ * anchors; `ride.browser.spec.ts` publishes both, and holds both to no
+ * overlap. Measured in Chromium 124 on a Mac, nothing on the stage overlaps
+ * anything at any of the nine overlay viewports in fourteen states.
+ *
+ * ⚠️ With *Trainer notice* (#437) it is set above the actions panel, on its
+ * own surface, as with anchors — in the empty row over the controls
+ * (`grid-area: 4 / 1 / 5 / 2`, every line named: an `auto` line is the grid's
+ * padding edge for an absolutely positioned item).
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__controls {
+      padding-inline-end: calc(6rem + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__actions > .oyl-hud__trainer {
+      margin-inline-end: calc(6rem + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      grid-area: actions;
+      top: calc(var(--oyl-space-sm) + 1px);
+      right: calc(var(--oyl-space-sm) + 1px);
+      width: 6rem;
+    }
+
+    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+      padding-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__actions
+      > .oyl-hud__trainer {
+      margin-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__fields--secondary
+      > .oyl-hud__field--moving {
+      grid-area: 4 / 1 / 5 / 2;
+      top: auto;
+      bottom: 0;
+      right: 0;
+      width: auto;
+      box-sizing: border-box;
       background: var(--oyl-color-hud-surface);
       border: 1px solid var(--oyl-color-hud-border);
       border-radius: var(--oyl-radius);
