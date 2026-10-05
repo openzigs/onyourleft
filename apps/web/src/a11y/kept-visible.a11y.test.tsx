@@ -541,11 +541,17 @@ const GAME_RENDERER: GameRenderer = {
   }),
 };
 
-/** A trainer port for the game cases, a workout owning a ready trainer. */
+/**
+ * A trainer port for the game cases: a ready trainer this app holds, owned by
+ * a running workout only when `workoutRunning` says so. A refused release ends
+ * the workout (§4h), so the chooser's case is `ready` and the HUD's eased case
+ * is the only one with a workout running.
+ */
 function gameTrainer(state: {
   readonly releaseFault?: string;
   readonly rescue?: WorkoutRescue;
   readonly mayStop?: boolean;
+  readonly workoutRunning?: boolean;
 }): GameTrainerPort {
   return {
     askForControlOnRide: () => Promise.resolve(),
@@ -567,7 +573,7 @@ function gameTrainer(state: {
           setSimulationParameters: () => Promise.resolve(),
           letGo: () => Promise.resolve({ kind: 'stopped' as const }),
         } satisfies GradientTrainer,
-        true,
+        state.workoutRunning ?? false,
       ),
   };
 }
@@ -756,6 +762,11 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     await settle();
     const main = document.querySelector('main');
     if (main === null) throw new Error('no main');
+    // The state production reaches: the refused release ended the workout, so
+    // the trainer is `ready` and #503's promise stands beside *Not released*.
+    expect(main.textContent, 'the trainer is ready, no workout running').toContain(
+      'Your trainer will follow this route’s hills: the gradient is sent to it as you ride.',
+    );
     expect(allFaults(main, GAME_CHOOSER_KEPT_VISIBLE, everyListed(KEPT.game))).toEqual([]);
   });
 
@@ -765,7 +776,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       <main>
         <GameView
           port={GAME_PORT}
-          trainer={gameTrainer({ rescue: GAME_STALLED, mayStop: true })}
+          trainer={gameTrainer({ rescue: GAME_STALLED, mayStop: true, workoutRunning: true })}
           renderer={() => Promise.resolve(GAME_RENDERER)}
         />
       </main>,
