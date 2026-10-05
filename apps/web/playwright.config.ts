@@ -155,6 +155,13 @@ export const LAUNCH_ARGS = [
  * measured it, and 19 s by #682 once the build its sum left out is counted
  * (592 + 9 + 580), which is how 20 became 25.
  *
+ * ⚠️ **That 59 s is gone, and a reviewer who remembers this stop ending the
+ * required gate inside the job is reading the old file (#1128).** On the 7763
+ * the step started 650 to 707 s into the job on the six runs #1128 read
+ * (`gh api …/attempts/N/jobs`: 37261811267 attempt 5 at 650 s, 37250669777 on
+ * `main` at 707 s), so 707 + 10 + 840 is 1 557 s — 57 s PAST the job's 1 500.
+ * What bounds the required step since #1128 is {@link GATE_STEP_MS}, not this.
+ *
  * ⚠️ **It is 840 s since #682, and a reviewer who remembers 580 is reading
  * the old file.** A GREEN gate took 547 s of Playwright's 580 on 36405580515
  * — 94 %, its four game loads at 69 % to 93 % of their own budgets — where
@@ -185,8 +192,10 @@ export const GATE_BUDGET_MS = 840_000;
  * `chromium` project on {@link CHROMIUM_WORKERS} workers, then the `game`
  * project alone. `test:browser` passes each to `--global-timeout` (the CLI
  * overrides {@link GATE_BUDGET_MS} for that run), and `nightly-split.test.ts`
- * holds the script's numbers to these and their sum to {@link GATE_BUDGET_MS},
- * so the gate as a whole stops where it did before the split.
+ * holds the script's numbers to these and their sum under
+ * {@link GATE_BUDGET_MS}. ⚠️ Their sum was EQUAL to it until #1128's review;
+ * the gate now stops sooner, because 840 s did not fit inside the job
+ * ({@link GATE_STEP_MS}).
  *
  * ⚠️ Why two runs, measured on the CI runner (#1128): a third worker for the
  * whole gate overlapped the `chromium` specs' waiting — most of a
@@ -196,7 +205,8 @@ export const GATE_BUDGET_MS = 840_000;
  * EPYC 7763, red). Run after the `chromium` project has finished, the game's
  * loads are alone on the CPU, as #651's "game LAST" meant them to be: 25 s and
  * 41 s on the 7763 (run 37254251351, attempt 5). The `game` run starts
- * whatever the `chromium` run's result, and the step fails if either did —
+ * whatever the `chromium` run's result (but not after a failed build, which
+ * ends the step at once), and the step fails if either did —
  * which a project `dependencies` entry would not give (it skips the dependant
  * on a failure).
  *
@@ -204,14 +214,49 @@ export const GATE_BUDGET_MS = 840_000;
  * workers (594 s, the 7763, run 37254251351 attempt 5); the single run it
  * replaces stopped at 840 s against a green 738 s, 1.14 times (run
  * 37244296171), so the split leaves that margin no thinner — and no wider.
- * 150 s holds the game run's worst case — both of its loads hanging, 60 + 70 s,
- * every describe that reads them failing at once in its hook (the ledger in
- * `game.browser.spec.ts` §`loadLedger`), and its two servers starting — where a
- * green one takes 38 to 72 s.
+ * 85 s is about 1.2 times the slowest green game run on the 7763 (71 s, run
+ * 37254251351 attempt 5). ⚠️ **It was 150 s until #1128's review, and a
+ * reviewer who remembers it holding both game loads hanging (60 + 70 s) is
+ * reading the old file**: that did not fit inside the job (see
+ * {@link GATE_STEP_MS}). If the plain load hangs, its describes fail at 60 s
+ * and the `?shadow-map` load is interrupted by this stop, which still names
+ * what was running.
  */
 export const CHROMIUM_PART_MS = 690_000;
 /** @see CHROMIUM_PART_MS */
-export const GAME_PART_MS = 150_000;
+export const GAME_PART_MS = 85_000;
+/**
+ * What bounds the required gate's STEP — #1128's review. `rules.yml` runs
+ * `test:browser` under `timeout --verbose --kill-after=10s` this many seconds,
+ * with the step's own `timeout-minutes: 13` behind it, and
+ * `nightly-split.test.ts` holds the workflow to both.
+ *
+ * ⚠️ **Why it exists.** Run 37254251351 attempt 3 (an EPYC 9V45) started the
+ * gate 425 s into the job and was still in it when the job hit its 25 minutes,
+ * past both Playwright stops. Its log ends at 02:52:53, in the Vitest step, 86 s
+ * BEFORE the gate began (02:54:19), and the job did not finish cancelling until
+ * 30 minutes: the runner stopped sending its log and stopped answering, which
+ * no command inside it can cause or bound. What a command CAN leave unbounded
+ * — the two `vite build`s, a `webServer` that never answers, a worker or a
+ * browser that does not exit after a `--global-timeout`, the second run
+ * starting after the first overran — is bounded by this from outside, and a
+ * hang now ends as a red `Browser gate` with `timeout: sending signal TERM`,
+ * and the coverage steps still run, rather than as a job cancelled with
+ * nothing named.
+ *
+ * ⚠️ **The arithmetic, on the 7763.** The step starts at most 707 s in (six
+ * runs, 650–707 s); 707 + 765 + 10 (the kill) is 1 482 s, and the coverage
+ * publish and upload take 4 s, so the step ends 14 s inside the job's 1 500.
+ * The step's `timeout-minutes: 13` (780 s) is the backstop, ending it by
+ * 1 487 s plus the runner's own few seconds of cancelling. 765 s is 1.14 times
+ * the slowest green step (672 s, 37269334621 attempt 2). The two Playwright
+ * stops inside it are each about 1.15 times their slowest green figure —
+ * {@link CHROMIUM_PART_MS} 690 s against 597 s, this 85 s against 71 s — and
+ * with the builds (10 s) they come to 785 s, 20 s MORE than this: so a
+ * `chromium` run that uses all of its 690 s leaves the game run 65 s, and this
+ * stop, not the game's, is the one that names it.
+ */
+export const GATE_STEP_MS = 765_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
 export const CHROMIUM_WORKERS = 3;
 

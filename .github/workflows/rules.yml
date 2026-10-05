@@ -500,9 +500,18 @@ jobs:
       # two Playwright runs in this one step: the `chromium` project on three
       # workers, then the `game` project alone, each with its own stop
       # (`playwright.config.ts` §`CHROMIUM_PART_MS`), the game run starting
-      # whatever the first run's result.
+      # whatever the first run's result. ⚠️ Since #1128's review the STEP is
+      # bounded from outside as well (`playwright.config.ts` §`GATE_STEP_MS`):
+      # 765 s under `timeout`, which signals the whole process group and
+      # prints that it did, then KILLs it 10 s later; `timeout-minutes` is the
+      # backstop behind that. A hang anywhere in the step -- a build, a server,
+      # a run that does not exit -- ends as this step, red and named, with the
+      # coverage steps still to run, rather than as a cancelled job. GNU
+      # coreutils `timeout`, on the runner image; locally `pnpm run
+      # test:browser` is the same command without it.
       - name: Browser gate
-        run: pnpm run test:browser
+        timeout-minutes: 13
+        run: timeout --verbose --kill-after=10s 765s pnpm run test:browser
 
       # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
       # §5 make the mutation list the gate and forbid a percentage floor. This

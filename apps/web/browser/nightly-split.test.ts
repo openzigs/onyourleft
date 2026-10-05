@@ -27,6 +27,7 @@ import config, {
   CHROMIUM_WORKERS,
   GAME_PART_MS,
   GATE_BUDGET_MS,
+  GATE_STEP_MS,
 } from '../playwright.config';
 
 import { NIGHTLY, NIGHTLY_CHECKS } from './nightly';
@@ -179,14 +180,35 @@ describe('the browser gate is split into a required run and a nightly one — #8
     );
     expect(runs).toEqual([
       `--project chromium --workers ${String(CHROMIUM_WORKERS)} --global-timeout ${String(CHROMIUM_PART_MS)}`,
-      `--project game --global-timeout ${String(GAME_PART_MS)}`,
+      `--project game --global-timeout ${String(GAME_PART_MS)} --output browser/dist/test-results/game`,
     ]);
-    // The two stops are the one the gate had before the split.
-    expect(CHROMIUM_PART_MS + GAME_PART_MS).toBe(GATE_BUDGET_MS);
+    // The two stops sit inside the config's own backstop (#1128's review: no
+    // longer equal to it, because 840 s did not fit inside the job).
+    expect(CHROMIUM_PART_MS + GAME_PART_MS).toBeLessThanOrEqual(GATE_BUDGET_MS);
+    // A failed build ends the step before either run starts.
+    expect(script).toMatch(
+      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test --project chromium /,
+    );
     // The game run is not skipped when the chromium run fails (`;`, not
     // `&&`), and the step fails when EITHER did.
     expect(script).toContain('; chromium=$?; playwright test --project game');
     expect(script).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
+  });
+
+  it('bounds the required gate’s step from outside, inside what the job has left — #1128’s review', () => {
+    const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
+    const step = /^ +- name: Browser gate\n((?: {8}.+\n)+)/m.exec(rules)?.[1] ?? '';
+    const seconds = GATE_STEP_MS / 1000;
+    expect(step).toContain(
+      `run: timeout --verbose --kill-after=10s ${String(seconds)}s pnpm run test:browser\n`,
+    );
+    const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
+    // The step's own stop is behind the wrapper and its kill, never in front.
+    expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
+    // ...and the step's stop ends inside the job's, from the latest start the
+    // 7763 has shown (707 s) with the coverage steps (4 s) after it.
+    const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
+    expect(707 + minutes * 60 + 4).toBeLessThan(job * 60);
   });
 });
 
@@ -205,7 +227,10 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   it('leaves the required job running the gate and the covered suite', () => {
     const commands = runCommands(rules);
     expect(commands).toEqual(
-      expect.arrayContaining(['pnpm run test:coverage', 'pnpm run test:browser']),
+      expect.arrayContaining([
+        'pnpm run test:coverage',
+        'timeout --verbose --kill-after=10s 765s pnpm run test:browser',
+      ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');
   });
