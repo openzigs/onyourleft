@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { ConfirmDialog } from './ConfirmDialog';
+import { CONFIRM_FAILED_TEXT, ConfirmDialog } from './ConfirmDialog';
 
 let mounted: Mounted | undefined;
 
@@ -30,7 +30,7 @@ afterEach(() => {
   mounted = undefined;
 });
 
-function Harness({ onConfirm }: { readonly onConfirm: () => void }): JSX.Element {
+function Harness({ onConfirm }: { readonly onConfirm: () => void | Promise<void> }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -80,7 +80,7 @@ async function press(key: string, shiftKey = false): Promise<void> {
   });
 }
 
-async function opened(onConfirm = vi.fn()): Promise<void> {
+async function opened(onConfirm: () => void | Promise<void> = vi.fn()): Promise<void> {
   mounted = await mount(<Harness onConfirm={onConfirm} />);
   await activateWithKeyboard(button('Delete it'));
   await settle();
@@ -174,5 +174,52 @@ describe('ConfirmDialog — #950', () => {
     await settle();
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(dialog()).toBeNull();
+  });
+
+  describe('a confirmation that returns a promise — #959', () => {
+    it('stays open and busy until it settles, and Escape does not close it meanwhile', async () => {
+      let finish: () => void = () => undefined;
+      await opened(
+        async () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await activateWithKeyboard(button('Delete the ride'));
+      await settle();
+      expect(dialog()?.getAttribute('aria-busy')).toBe('true');
+      await press('Escape');
+      await settle();
+      expect(dialog()).not.toBeNull();
+
+      finish();
+      await settle();
+      expect(dialog()).toBeNull();
+    });
+
+    it('stays open when it rejects, says so in an alert, and keeps focus inside', async () => {
+      await opened(async () => Promise.reject(new Error('the disk is full')));
+      const remove = button('Delete the ride');
+      await activateWithKeyboard(remove);
+      await settle();
+      const alert = dialog()?.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain(CONFIRM_FAILED_TEXT);
+      expect(alert?.textContent).not.toContain('the disk is full');
+      expect(document.activeElement).toBe(remove);
+      const violations = auditAccessibility(document);
+      expect(violations, formatViolations(violations)).toStrictEqual([]);
+    });
+
+    it('forgets a failure once it is closed and opened again', async () => {
+      await opened(async () => Promise.reject(new Error('no')));
+      await activateWithKeyboard(button('Delete the ride'));
+      await settle();
+      await activateWithKeyboard(button('Keep the ride'));
+      await settle();
+      expect(dialog()).toBeNull();
+      await activateWithKeyboard(button('Delete it'));
+      await settle();
+      expect(dialog()?.querySelector('[role="alert"]')).toBeNull();
+    });
   });
 });
