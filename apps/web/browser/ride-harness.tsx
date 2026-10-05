@@ -170,6 +170,49 @@ export interface StageMeasurement {
   readonly pageOverflow: number;
   /** What `theme.css` resolved a panel's background to, as a load check. */
   readonly panelBackground: string;
+  /**
+   * #1111: the moving time's text against its own field — how wide the value
+   * is drawn, how wide the field is, and on how many lines. Here rather than
+   * read by the spec so a measurement taken without anchor positioning (#1120)
+   * carries it too.
+   */
+  readonly moving: {
+    readonly text: string;
+    readonly width: number;
+    readonly field: number;
+    readonly lines: number;
+  };
+}
+
+/**
+ * #1120 — which `@supports not (anchor-name: …)` rules are in force when the
+ * stage is laid out as an engine with no anchor positioning lays it out.
+ *
+ * - `'shipped'`: what such an engine applies — every `@supports (anchor-name:
+ *   …)` block taken out and every `@supports not (anchor-name: …)` block put in
+ *   force. The fallback a rider on a WebView older than Chrome 125 gets.
+ * - `'none'`: the anchor blocks taken out and the fallback blocks taken out
+ *   too — what `main` gave such an engine before #1120. The CONTROL: the same
+ *   floors must FAIL over it, or the fallback is being held over a layout that
+ *   never depended on it.
+ */
+export type AnchorFallback = 'shipped' | 'none';
+
+/** What {@link withoutAnchors} measured, and the proof that it changed something. */
+export interface WithoutAnchors {
+  readonly measurement: StageMeasurement;
+  /** `@supports (anchor-name: …)` blocks taken out. */
+  readonly removed: number;
+  /** `@supports not (anchor-name: …)` blocks put in force. */
+  readonly forced: number;
+  /** `@supports not (anchor-name: …)` blocks taken out (`'none'` only). */
+  readonly dropped: number;
+  /** Elements on the stage with an `anchor-name` or a `position-anchor`, before. */
+  readonly anchoredBefore: number;
+  /** The same count with the blocks taken out — zero, or nothing was taken out. */
+  readonly anchoredAfter: number;
+  /** Whether every rule was put back exactly: the stylesheet's text, before and after. */
+  readonly restored: boolean;
 }
 
 declare global {
@@ -186,6 +229,8 @@ declare global {
       readonly restoreFullHeightShell: () => void;
       /** #437's control: a notice takes the route cell even collapsed. */
       readonly restoreNoticeTakesTheRoute: () => void;
+      /** #1120: the stage as an engine with no anchor positioning lays it out. */
+      readonly withoutAnchors: (fallback: AnchorFallback) => WithoutAnchors;
     };
   }
 }
@@ -594,6 +639,12 @@ function measure(): StageMeasurement {
   const labels = (selector: string): string[] =>
     [...document.querySelectorAll(`${selector} dt`)].map(textOf);
   const panel = document.querySelector('.oyl-hud__panel');
+  const movingRow = [...document.querySelectorAll('.oyl-hud__field')].find(
+    (each) => each.querySelector('dt')?.textContent === 'Moving',
+  );
+  const movingText = movingRow?.querySelector('dd')?.firstChild;
+  const movingRange = document.createRange();
+  if (movingText !== null && movingText !== undefined) movingRange.selectNodeContents(movingText);
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     stage: stage === null ? undefined : boxOf(stage),
@@ -629,6 +680,137 @@ function measure(): StageMeasurement {
     stageScrollTop: stage?.scrollTop ?? 0,
     pageOverflow: document.documentElement.scrollHeight - window.innerHeight,
     panelBackground: panel === null ? '' : window.getComputedStyle(panel).backgroundColor,
+    moving: {
+      text: movingRow?.querySelector('dd')?.textContent ?? '',
+      width:
+        movingText === null || movingText === undefined
+          ? 0
+          : movingRange.getBoundingClientRect().width,
+      field: movingRow?.getBoundingClientRect().width ?? 0,
+      lines:
+        movingText === null || movingText === undefined ? 0 : movingRange.getClientRects().length,
+    },
+  };
+}
+
+/** A `@supports` block about anchor positioning, and where it sits. */
+interface AnchorBlock {
+  readonly parent: CSSStyleSheet | CSSGroupingRule;
+  readonly index: number;
+  readonly rule: CSSSupportsRule;
+  /** `@supports not (…)` — the fallback — rather than `@supports (…)`. */
+  readonly negated: boolean;
+}
+
+function anchorBlocks(): AnchorBlock[] {
+  const found: AnchorBlock[] = [];
+  const walk = (parent: CSSStyleSheet | CSSGroupingRule): void => {
+    [...parent.cssRules].forEach((rule, index) => {
+      if (rule instanceof CSSSupportsRule && rule.conditionText.includes('anchor-name')) {
+        found.push({
+          parent,
+          index,
+          rule,
+          negated: rule.conditionText.trim().startsWith('not'),
+        });
+      } else if (rule instanceof CSSGroupingRule) {
+        walk(rule);
+      }
+    });
+  };
+  for (const sheet of document.styleSheets) {
+    walk(sheet);
+  }
+  return found;
+}
+
+/** Everything the stage lays out by anchor positioning, as the engine computed it. */
+function anchoredOnStage(): number {
+  return [...document.querySelectorAll('.oyl-hud, .oyl-hud *')].filter((each) => {
+    const style = window.getComputedStyle(each);
+    return (
+      style.getPropertyValue('anchor-name') !== 'none' ||
+      style.getPropertyValue('position-anchor').startsWith('--')
+    );
+  }).length;
+}
+
+/**
+ * Where every anchor block is and what it says, and how many rules each
+ * stylesheet or group holding one has — for "was it put back exactly". Not
+ * the whole stylesheet's text: `theme.css` serialised is most of a call's
+ * cost, and this is called twice a case at every overlay viewport. A rule put
+ * back at the wrong index, or not at all, moves an index or a count here.
+ */
+function anchorLayout(blocks: readonly AnchorBlock[]): string {
+  const parents = [...new Set(blocks.map((block) => block.parent))];
+  return JSON.stringify([
+    blocks.map((block) => [block.index, block.rule.cssText]),
+    parents.map((parent) => parent.cssRules.length),
+  ]);
+}
+
+/**
+ * #1120 — measure the stage as an engine with NO anchor positioning lays it
+ * out (Android System WebView older than Chrome 125), on the page as it is, and
+ * put the stylesheet back before returning.
+ *
+ * ⚠️ **Why the rules and not a second build.** This Chromium supports anchor
+ * positioning, so `@supports (anchor-name: …)` is true here and `@supports not`
+ * false — the opposite of the engine #1120 is about. Taking the first out and
+ * putting the second in force through the CSSOM is exactly what such an engine
+ * applies: nothing else in `theme.css` asks about anchors (`anchorBlocks` finds
+ * every block that does, at any depth). It is all one synchronous call — take
+ * out, measure, put back — so no frame is drawn in between and a page shared
+ * between cases (`shared-load.ts`) is left as it was; `restored` says so.
+ *
+ * ⚠️ **It cannot pass over a page where nothing was taken out**: the spec
+ * requires `removed` to be every anchor block `theme.css` has, `anchoredAfter`
+ * to be zero, and — where the layout uses anchors at all — `anchoredBefore` to
+ * be more than zero.
+ */
+function withoutAnchors(fallback: AnchorFallback): WithoutAnchors {
+  const anchoredBefore = anchoredOnStage();
+  const blocks = anchorBlocks();
+  const before = anchorLayout(blocks);
+  // Last first, so an index taken out does not move the next one's.
+  const reversed = [...blocks].reverse();
+  let removed = 0;
+  let forced = 0;
+  let dropped = 0;
+  for (const block of reversed) {
+    block.parent.deleteRule(block.index);
+    if (!block.negated) {
+      removed += 1;
+    } else if (fallback === 'shipped') {
+      const inner = [...block.rule.cssRules].map((rule) => rule.cssText).join('\n');
+      block.parent.insertRule(`@media all {\n${inner}\n}`, block.index);
+      forced += 1;
+    } else {
+      dropped += 1;
+    }
+  }
+  let measurement: StageMeasurement;
+  let anchoredAfter: number;
+  try {
+    anchoredAfter = anchoredOnStage();
+    measurement = measure();
+  } finally {
+    for (const block of blocks) {
+      if (block.negated && fallback === 'shipped') {
+        block.parent.deleteRule(block.index);
+      }
+      block.parent.insertRule(block.rule.cssText, block.index);
+    }
+  }
+  return {
+    measurement,
+    removed,
+    forced,
+    dropped,
+    anchoredBefore,
+    anchoredAfter,
+    restored: anchorLayout(anchorBlocks()) === before,
   };
 }
 
@@ -726,6 +908,7 @@ async function run(): Promise<void> {
       setSafeArea,
       restoreFullHeightShell,
       restoreNoticeTakesTheRoute,
+      withoutAnchors,
     };
     return;
   }
@@ -823,6 +1006,7 @@ async function run(): Promise<void> {
     setSafeArea,
     restoreFullHeightShell,
     restoreNoticeTakesTheRoute,
+    withoutAnchors,
   };
 }
 
@@ -836,5 +1020,6 @@ run().catch((error: unknown) => {
     setSafeArea,
     restoreFullHeightShell,
     restoreNoticeTakesTheRoute,
+    withoutAnchors,
   };
 });
