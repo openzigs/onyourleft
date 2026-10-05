@@ -2035,6 +2035,22 @@ h3:first-child {
   .oyl-main {
     scroll-margin-top: 7rem;
   }
+
+  /*
+   * #990: what a sticky header costs KEYBOARD focus. Chromium scrolls a
+   * control that Tab or Shift+Tab reaches off the screen just far enough to
+   * put it at the edge, and the top edge is where the header is — on
+   * Settings a control reached backwards was focused up to 44 px under it
+   * (WCAG 2.2 SC 2.4.11). So the whole document's scroll area starts below
+   * the header: its declared height (#671) and the band it sticks under, the
+   * same two numbers its `top` and its box are made of, so they cannot come
+   * apart. #983 did this for the game's chooser alone; this replaces it.
+   * `browser/sticky-header.browser.spec.ts` walks Settings backwards, with
+   * the padding taken off as its control.
+   */
+  :root {
+    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
+  }
 }
 
 .oyl-footer {
@@ -4365,11 +4381,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The two `scroll-padding` rules left are not this chooser's pin — it has none
+ * The `scroll-padding` rule left here is not this chooser's pin — it has none
  * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * and the header (sticky, `--oyl-header-height`, on a large one) would
- * otherwise sit over a control Tab scrolls to the edge. They are scoped to
- * the chooser; the app-wide gap is a follow-up.
+ * would otherwise sit over a control Tab scrolls to the bottom edge. It is
+ * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
+ * large window) was too until #990, which made it the whole document's —
+ * see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -4599,13 +4616,6 @@ select.oyl-input {
 @media (max-width: 37.49rem) and (min-height: 30rem) {
   :root:has(.oyl-chooser) {
     scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
-  }
-}
-
-/* The sticky HEADER — the shell's own query and height, restated. */
-@media (min-width: 64rem) and (min-height: 40rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
   }
 }
 
