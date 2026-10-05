@@ -17,7 +17,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
-    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test --project chromium --workers 3 --global-timeout 660000; chromium=$?; playwright test --project game --global-timeout 180000; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]",
+    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test --project chromium --workers 3 --global-timeout 690000; chromium=$?; playwright test --project game --global-timeout 150000; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]",
     "test:browser:nightly": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1"
   },
   "dependencies": {
