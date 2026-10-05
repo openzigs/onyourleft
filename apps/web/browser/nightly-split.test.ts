@@ -22,7 +22,12 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import config from '../playwright.config';
+import config, {
+  CHROMIUM_PART_MS,
+  CHROMIUM_WORKERS,
+  GAME_PART_MS,
+  GATE_BUDGET_MS,
+} from '../playwright.config';
 
 import { NIGHTLY, NIGHTLY_CHECKS } from './nightly';
 
@@ -162,6 +167,26 @@ describe('the browser gate is split into a required run and a nightly one — #8
       required.map((project) => String(project.name)).sort(),
     );
     expect(projectsOf(scripts['test:browser:nightly'])).toEqual(['nightly']);
+  });
+
+  it('runs the chromium project on its workers and stop, then the game project alone on its stop, and fails if either fails — #1128', () => {
+    const script = String(
+      (JSON.parse(read(BROWSER, '..', 'package.json')) as { scripts: Record<string, string> })
+        .scripts['test:browser'],
+    );
+    const runs = [...script.matchAll(/playwright test ([^;&]+)/g)].map((match) =>
+      String(match[1]).trim(),
+    );
+    expect(runs).toEqual([
+      `--project chromium --workers ${String(CHROMIUM_WORKERS)} --global-timeout ${String(CHROMIUM_PART_MS)}`,
+      `--project game --global-timeout ${String(GAME_PART_MS)}`,
+    ]);
+    // The two stops are the one the gate had before the split.
+    expect(CHROMIUM_PART_MS + GAME_PART_MS).toBe(GATE_BUDGET_MS);
+    // The game run is not skipped when the chromium run fails (`;`, not
+    // `&&`), and the step fails when EITHER did.
+    expect(script).toContain('; chromium=$?; playwright test --project game');
+    expect(script).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
   });
 });
 

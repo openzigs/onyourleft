@@ -2319,7 +2319,9 @@ pnpm run build
 # beside `browser/dist` on 4319. One CI job, because a second job reports under
 # a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
-# says why the game spec is last and why it is not split further.
+# says why the game spec is last and why it is not split further. ⚠️ Since
+# #1128 they are TWO runs in this one command: `chromium` on three workers,
+# then `game` alone, each with its own stop (§4c §"23m50s of 25 — #1128").
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -3368,7 +3370,10 @@ from there.
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
 334 s — while its summed test time rose from 676 s to 807 s and one case passed its timeout, and
-Playwright keeps its default of two workers. The job is CPU-bound from end to end: running more
+Playwright kept its default of two workers until #1128, which measured a third for the `chromium`
+project alone (§"23m50s of 25 — #1128" above): the Vitest half is CPU-bound, but a
+browser-gate case that walks `reflow.html` mostly waits for the DOM to go quiet, and a third worker
+overlaps that waiting. Otherwise the job is CPU-bound from end to end: running more
 things at once moves time around, and only doing less work removes it. #651 measured what the
 browser gate's game loads spent their time on and removed the probes each load ran for nobody
 (§4f); it split the near-field rides into files of their own and started the heaviest Vitest files

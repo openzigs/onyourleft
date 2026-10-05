@@ -181,6 +181,38 @@ export const LAUNCH_ARGS = [
 export const GATE_BUDGET_MS = 840_000;
 
 /**
+ * The required gate is TWO runs since #1128, and these are their stops: the
+ * `chromium` project on {@link CHROMIUM_WORKERS} workers, then the `game`
+ * project alone. `test:browser` passes each to `--global-timeout` (the CLI
+ * overrides {@link GATE_BUDGET_MS} for that run), and `nightly-split.test.ts`
+ * holds the script's numbers to these and their sum to {@link GATE_BUDGET_MS},
+ * so the gate as a whole stops where it did before the split.
+ *
+ * ⚠️ Why two runs, measured on the CI runner (#1128): a third worker for the
+ * whole gate took the `chromium` specs from 687 s to 532 s of wall time on an
+ * AMD EPYC 7763 — most of a reflow-harness case is waiting for the DOM to go
+ * quiet, which a third worker overlaps — but the game group then started
+ * beside the last `chromium` specs, and the plain and `?shadow-map` loads ran
+ * out of their 60 s and 70 s (run 37248143495, red). Run after the `chromium`
+ * project has finished, the game's loads are alone on the CPU, as #651's
+ * "game LAST" meant them to be. The `game` run starts whatever the `chromium`
+ * run's result, and the step fails if either did — which a project
+ * `dependencies` entry would not give (it skips the dependant on a failure).
+ *
+ * ⚠️ 660 s is 1.24 times the slowest `chromium` run measured on three workers
+ * (532 s, the 7763, before #1128's cuts); the single run it replaces stopped at
+ * 840 s against a green 738 s, 1.14 times (run 37244296171). 180 s holds the
+ * game run's worst case — both of its loads hanging, 60 + 70 s, every describe
+ * that reads them failing in its hook, and its two servers starting — where a
+ * green one takes 38 to 55 s.
+ */
+export const CHROMIUM_PART_MS = 660_000;
+/** @see CHROMIUM_PART_MS */
+export const GAME_PART_MS = 180_000;
+/** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
+export const CHROMIUM_WORKERS = 3;
+
+/**
  * Every context this gate opens starts with "Match this device" chosen — #992.
  *
  * The owner's ruling of 2026-10-02 made a device that has never chosen DARK.
@@ -258,6 +290,10 @@ export default defineConfig({
   ],
   // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
   globalTimeout: GATE_BUDGET_MS,
+  // ⚠️ **Since #1128 `test:browser` runs the `chromium` project with THREE
+  // workers and the `game` project after it, alone** — @see CHROMIUM_PART_MS.
+  // What follows is the default every other run (`playwright test` bare, the
+  // nightly run's own `--workers 1`) still has, and why it was two.
   // ⚠️ **Playwright's default of half the cores, and that is measured — #651.**
   // The `ubuntu-latest` runner's four vCPUs are two cores' hyperthreads
   // (`lscpu`, run 36333257690). On that run a fourth Vitest worker made the

@@ -496,7 +496,11 @@ jobs:
       # nightly.ts, a reviewed list, all of them the opt-in realistic world)
       # run in .github/workflows/nightly.yml, which cannot block a merge. ⚠️ Since #651 it stops ITSELF before this job's
       # timeout (`playwright.config.ts` §`GATE_BUDGET_MS`), so a hang is
-      # reported by name rather than cancelled in silence.
+      # reported by name rather than cancelled in silence. ⚠️ Since #1128 it is
+      # two Playwright runs in this one step: the `chromium` project on three
+      # workers, then the `game` project alone, each with its own stop
+      # (`playwright.config.ts` §`CHROMIUM_PART_MS`), the game run starting
+      # whatever the first run's result.
       - name: Browser gate
         run: pnpm run test:browser
 
