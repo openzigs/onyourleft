@@ -29,7 +29,7 @@ import { HARNESS_ORIGIN } from '../playwright.config';
 const SHOWN_WITHIN_MS = 500;
 
 /** Every request for the full logo, in either palette. */
-const LOGO_REQUEST = /\/logo-(light|dark)-[^/]+\.png$/;
+const LOGO_REQUEST = /\/logo-(light|dark)-[^/]+\.webp$/;
 
 async function navigateWithTheLogoHeld(
   page: Page,
