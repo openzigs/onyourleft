@@ -741,11 +741,7 @@ class FakeSideChannel implements ScriptedSideChannel {
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
 
-  constructor(
-    label: string,
-    network: FakeNetwork,
-    init: SideChannelInit | undefined,
-  ) {
+  constructor(label: string, network: FakeNetwork, init: SideChannelInit | undefined) {
     this.label = label;
     this.network = network;
     this.init = init;
