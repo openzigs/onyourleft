@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startInstance, type StartedInstance } from '../src/instance.ts';
-import { testConfig } from '../src/instance-testing.ts';
+import { freeLoopbackPort, testConfig } from '../src/instance-testing.ts';
 import { readServerConfig } from '../src/server-config.ts';
 import { migrateForDeploy } from '../src/store/serving.ts';
 import { idleProbe, soak } from './tunnel-soak-run.ts';
@@ -46,8 +46,9 @@ async function instance(pingIntervalMs: string) {
     );
     expect(opened.status, opened.stderr).toBe(0);
   }
-  // The origin is filled in once the port is known: a device signs it.
-  const port = 30_000 + Math.floor(Math.random() * 20_000);
+  // The origin is filled in once the port is known: a device signs it. The
+  // port is the operating system's choice, never a random one (#954).
+  const port = await freeLoopbackPort();
   const origin = `http://127.0.0.1:${String(port)}`;
   const server = readServerConfig({ database: path, origin, roomWorkers: '1', pingIntervalMs }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));

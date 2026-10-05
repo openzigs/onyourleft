@@ -25,7 +25,7 @@ import type { Resolver } from './history/address.ts';
 import { RETRY_PERIOD_MS } from './history/history.ts';
 import { startInstance, type InstanceOptions, type StartedInstance } from './instance.ts';
 import type { SweepTimers } from './node-listener.ts';
-import { testConfig } from './instance-testing.ts';
+import { freeLoopbackPort, testConfig } from './instance-testing.ts';
 import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
@@ -445,7 +445,8 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       cli(path, 'room-open', 'race-1', '--kind', 'race', '--length', '40', '--countdown', '0')
         .status,
     ).toBe(0);
-    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    // The operating system's choice, never a random one: #954.
+    const port = await freeLoopbackPort();
     const child = spawn(process.execPath, [MAIN], {
       cwd: INSTANCE,
       env: {
