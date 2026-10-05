@@ -70,6 +70,10 @@ describe('a document file (#836)', () => {
       expect(readDocument('plan.md', bytes(`![me](${url})`))).toMatchObject({ refusal: 'picture' });
     }
     // Not a data URL: no slash, or no comma.
+    // RFC 2397 lets the media type be left out (#933).
+    expect(readDocument('plan.md', bytes('![me](data:;base64,iVBORw0KGgo=)'))).toMatchObject({
+      refusal: 'picture',
+    });
     expect(readDocument('plan.md', bytes('data: none today'))).toMatchObject({ kind: 'document' });
     expect(readDocument('plan.md', bytes('metadata:x/y and more'))).toMatchObject({
       kind: 'document',
@@ -84,17 +88,22 @@ describe('a document file (#836)', () => {
     ).toMatchObject({ refusal: 'too-long' });
   });
 
-  it('looks for a picture in linear time, however the file is made (#920 review)', () => {
-    // `data:a/` and then a long run with no comma is the input the old pattern,
-    // /data:[a-z0-9.+-]*\/[a-z0-9.+-]*[^,\s]*,/, took quadratic time over: two
-    // quantifiers after the slash that both match `a`, retried at every split.
-    // Measured in Node 24 on a Mac: 6.7 s for 100 000 characters, on the main
-    // thread. The pattern shipped takes about a millisecond. The bound is
-    // generous for a slow runner and still several times under the old cost.
-    const hostile = `data:a/${'a'.repeat(MAXIMUM_DOCUMENT_CHARACTERS - 7)}`;
-    const started = performance.now();
-    expect(readDocument('plan.md', bytes(hostile))).toMatchObject({ kind: 'document' });
-    expect(performance.now() - started).toBeLessThan(1_000);
+  it('looks for a picture in linear time, however the file is made (#920 review, #933)', () => {
+    // #920's pattern, /\bdata:[a-z0-9.+-]*\/[^,\s]*,/iu, fixed `data:a/` and a
+    // long run, and still took 0.86 s on `data:a/` REPEATED to this length on
+    // the main thread (Node 24, measured for #933): retried from every `data:`,
+    // each to the end of the text. `data-url.ts` §holdsDataUrl, a scan, takes
+    // a few milliseconds. The bound is generous for a slow runner under
+    // coverage and still far under the old cost; seen red with #920's pattern.
+    for (const hostile of [
+      `data:a/${'a'.repeat(MAXIMUM_DOCUMENT_CHARACTERS - 7)}`,
+      'data:a/'.repeat(Math.floor(MAXIMUM_DOCUMENT_CHARACTERS / 7)),
+      'data:'.repeat(Math.floor(MAXIMUM_DOCUMENT_CHARACTERS / 5)),
+    ]) {
+      const started = performance.now();
+      expect(readDocument('plan.md', bytes(hostile))).toMatchObject({ kind: 'document' });
+      expect(performance.now() - started).toBeLessThan(250);
+    }
   });
 
   it('drops a bidirectional override from a name, so it is kept as it really reads', () => {
