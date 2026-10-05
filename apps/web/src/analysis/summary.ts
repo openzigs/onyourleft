@@ -70,6 +70,7 @@ import {
   effortWeightedHeartRate as weighDomainHeartRate,
   effortWeightedPower as weighDomainPower,
   LOAD_AT_THRESHOLD_FOR_ONE_HOUR,
+  seconds,
   type BeatsPerMinute,
   type RideLoad,
   type Seconds,
@@ -193,9 +194,62 @@ export function isPowerBasis(power: Watts | undefined): power is Watts {
   return power !== undefined && Math.round(power) > 0;
 }
 
-/** Whether a ride is missing the summary the chart needs. @see loadSummaryOf */
+/**
+ * What is stored for a ride that has nothing a load could be worked out from
+ * (#1084): no basis, and a load that covers no time at all.
+ *
+ * {@link loadSummaryOf} answers `undefined` for such a ride — a power channel
+ * that read nought with no strap beside it, a trace shorter than the smoothing
+ * window, no power or heart rate at all — and until #1084 that answer was
+ * stored as nothing. Nothing is also what a ride imported before #77 carries,
+ * so Home said "not worked out yet" of a ride nothing could ever work out, and
+ * every Analysis backfill pass decoded it again and counted it again.
+ *
+ * ⚠️ **It is a marker written in an existing field, not a new one.**
+ * `loadCoveredTime: 0` with no basis is literally true — the load covers no
+ * time — so it needs no store change and no migration, and an older build
+ * reading it sees a ride with no load, which is what it is. The only reader
+ * that tells it apart is {@link hasNoLoadToWorkOut}; {@link loadFromSummary}
+ * gives `undefined` for it as for any ride with no basis, so it is never a
+ * zero.
+ *
+ * Written at save by `recording/finish.ts` and `transfer/import-batch.ts`
+ * (through {@link loadSummaryToStore}), and by the backfill
+ * (`history.ts` §`backfillLoadSummaries`) for a ride stored before #1084.
+ */
+export const NO_LOAD_TO_WORK_OUT: LoadSummary = { loadCoveredTime: seconds(0) };
+
+/**
+ * The summary to store for a ride being saved: {@link loadSummaryOf}, or
+ * {@link NO_LOAD_TO_WORK_OUT} when its samples hold nothing to work one out
+ * from. The samples are all in hand at save, so that answer is final.
+ */
+export function loadSummaryToStore(
+  channels: Parameters<typeof loadSummaryOf>[0],
+  sampleInterval: Seconds,
+): LoadSummary {
+  return loadSummaryOf(channels, sampleInterval) ?? NO_LOAD_TO_WORK_OUT;
+}
+
+/**
+ * Whether a stored ride was found to have nothing a load could be worked out
+ * from (#1084) — as against one nobody has worked out yet. @see NO_LOAD_TO_WORK_OUT
+ *
+ * A row stored before #1070 with `effortWeightedPower: 0` and then marked
+ * holds that stale 0 beside the marker; {@link isPowerBasis} reads the 0 as
+ * absent, so it is marked all the same.
+ */
+export function hasNoLoadToWorkOut(summary: ActivitySummary): boolean {
+  return summary.loadCoveredTime === 0 && loadSummaryFieldsOf(summary) === undefined;
+}
+
+/**
+ * Whether a ride is missing the summary the chart needs, and could be given
+ * one: never for a ride {@link hasNoLoadToWorkOut} (#1084), which no pass can
+ * summarise. @see loadSummaryOf
+ */
 export function needsLoadSummary(summary: ActivitySummary): boolean {
-  return loadSummaryFieldsOf(summary) === undefined;
+  return loadSummaryFieldsOf(summary) === undefined && !hasNoLoadToWorkOut(summary);
 }
 
 /** The stored fields, or `undefined` if the ride carries none. */

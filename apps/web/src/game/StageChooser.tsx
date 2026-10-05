@@ -317,8 +317,9 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
     ) : undefined,
     props.releaseNotice === undefined ? undefined : (
       // #372: about the machine under the rider now rather than the road they
-      // are about to choose.
-      <StatusMessage key="release" tone="danger" label="Not released" live>
+      // are about to choose. Kept (#1086): trainer-control text is never
+      // tucked away, and the mark is what holds that.
+      <StatusMessage key="release" tone="danger" label="Not released" live kept>
         {props.releaseNotice}
       </StatusMessage>
     ),

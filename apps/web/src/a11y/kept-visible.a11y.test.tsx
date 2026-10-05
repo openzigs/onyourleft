@@ -29,15 +29,27 @@
  * (N5), wherever it came from.
  *
  * States the walk does not reach are mounted on their own below: Devices where
- * a browser can pair, the Camera agreed to, and the Ride screen with a
- * controlled trainer eased and not released, and with control lost (N1).
+ * a browser can pair, the Camera agreed to, the Ride screen with a
+ * controlled trainer eased and not released, and with control lost (N1), and
+ * the game's chooser with a release refused and its HUD with a workout eased
+ * and the recording service refused (#1086).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { StoreHarness } from '@onyourleft/store/testing';
 
-import { watts } from '@onyourleft/domain';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  routeProfile,
+  watts,
+  type RoutePoint,
+  type WorkoutRescue,
+} from '@onyourleft/domain';
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 import { mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
 
@@ -45,6 +57,9 @@ import { CameraController } from '../camera/session';
 import { CAMERA_NOTICE_SENTENCES, CAMERA_NOTICES } from '../camera/notice';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 
+import { GameView, type GamePort, type RidableRoute } from '../game/GameView';
+import type { GameRenderer } from '../game/port';
+import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../game/trainer-port';
 import { OSM_ATTRIBUTION, PUBLISHED_BASEMAP_URL } from '../map/basemap';
 import {
   KEEP_SCREEN_ON_LABEL,
@@ -53,10 +68,11 @@ import {
 } from '../ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { LOSS_REASON } from '../ride/TrainerPanel';
+import { workoutRescueHeadline } from '../workout/rescue-text';
 import { RELEASE_INCOMPLETE } from '../workout/session';
 import { ALL_ROUTES, routeById, type RouteDefinition, type RouteId } from '../shell/routes';
 import { openRoute } from '../testing/hierarchy-walk';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { sentencesIn } from '../testing/route-sentences';
 import { capacitorShellSupport } from '../support/shell-support';
 import { emptyTransferPort } from '../testing/transfer-port';
@@ -157,6 +173,30 @@ const RIDE_UNCONTROLLED_KEPT_VISIBLE: readonly string[] = [
   'A workout sets targets on the trainer, and it will refuse every one until control is granted.',
 ];
 
+/**
+ * The game's chooser with a trainer whose release was refused — #1086. The
+ * chooser says so above Ride (`StageChooser.tsx`, #372). Written here, as
+ * the Ride screen's are, because `game/` is watched by the wiring gate.
+ */
+const GAME_CHOOSER_KEPT_VISIBLE: readonly string[] = ['Not released', RELEASE_INCOMPLETE];
+
+/** A stall rescue holding a running workout's target down at the trainer's lowest. */
+const GAME_STALLED: WorkoutRescue = {
+  kind: 'floor',
+  reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
+};
+
+/**
+ * A game ride's HUD with a workout's target eased (#585) and the recording
+ * service refused (#647) — #1086. Both stand in the HUD's notice cell.
+ */
+const GAME_RIDING_KEPT_VISIBLE: readonly string[] = [
+  'Eased',
+  workoutRescueHeadline(GAME_STALLED),
+  KEEP_SCREEN_ON_LABEL,
+  RIDE_MAY_STOP_WITH_SCREEN_OFF,
+];
+
 /** Every route in the table, and what on it must stay on the screen. */
 const KEPT: Record<RouteId, Kept> = {
   settings: { sentences: SETTINGS_KEPT_VISIBLE },
@@ -200,8 +240,11 @@ const KEPT: Record<RouteId, Kept> = {
   },
   game: {
     sentences: [],
+    // #1086: the release refused, the workout eased and the recording service
+    // refused render only with a trainer and a ride the walk does not have.
+    elsewhere: [...GAME_CHOOSER_KEPT_VISIBLE, ...GAME_RIDING_KEPT_VISIBLE],
     reason:
-      'what it tucks (#1011) is how the loadout works and where the realistic world goes when it cannot load; every trainer notice and #503’s promise stay boxes above Ride',
+      'what it tucks (#1011) is how the loadout works and where the realistic world goes when it cannot load; every trainer notice and #503’s promise stay boxes above Ride. Its safety notices render only in states the walk does not reach; two mounted cases below cover them',
   },
   workouts: { sentences: [], reason: NOTHING_TUCKED },
   activities: { sentences: ACTIVITIES_KEPT_VISIBLE },
@@ -291,6 +334,8 @@ let harness: StoreHarness | undefined;
 afterEach(async () => {
   mounted?.unmount();
   mounted = undefined;
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await harness?.destroy();
   harness = undefined;
   globalThis.location.hash = '';
@@ -458,6 +503,119 @@ async function open(route: RouteDefinition, populated: boolean): Promise<Element
   return main;
 }
 
+/** A flat four-kilometre route for the game cases — #1086. */
+function gameRoute(): RidableRoute {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 400; index += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(10),
+    });
+  }
+  return { id: 'route-flat', name: 'Flat', profile: routeProfile(points), attempts: 0 };
+}
+
+const GAME_PORT: GamePort = {
+  listRoutes: () => Promise.resolve([gameRoute()]),
+  loadGhost: () => Promise.resolve(undefined),
+  readSensors: () => ({
+    rider: { power: watts(230), live: true, paired: true },
+    cadence: { value: 90, live: true, paired: true },
+    heartRate: { value: 140, live: true, paired: true },
+  }),
+};
+
+const GAME_RENDERER: GameRenderer = {
+  loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+  create: () => ({
+    hasContext: true,
+    prepare: () => Promise.resolve(),
+    render: () => undefined,
+    setQuality: () => undefined,
+    setRiderKit: () => undefined,
+    resize: () => undefined,
+    destroy: () => undefined,
+  }),
+};
+
+/**
+ * A trainer port for the game cases: a ready trainer this app holds, owned by
+ * a running workout only when `workoutRunning` says so. A refused release ends
+ * the workout (§4h), so the chooser's case is `ready` and the HUD's eased case
+ * is the only one with a workout running.
+ */
+function gameTrainer(state: {
+  readonly releaseFault?: string;
+  readonly rescue?: WorkoutRescue;
+  readonly mayStop?: boolean;
+  readonly workoutRunning?: boolean;
+}): GameTrainerPort {
+  return {
+    askForControlOnRide: () => Promise.resolve(),
+    workoutRescue: () => state.rescue,
+    recordingMayStop: () => state.mayStop ?? false,
+    gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
+    readTrainer: () =>
+      gameTrainerFrom(
+        {
+          paired: true,
+          controllable: true,
+          canSimulate: true,
+          hasControl: true,
+          ...(state.releaseFault === undefined ? {} : { releaseFault: state.releaseFault }),
+        },
+        {
+          setSimulationParameters: () => Promise.resolve(),
+          letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+        } satisfies GradientTrainer,
+        state.workoutRunning ?? false,
+      ),
+  };
+}
+
+/** Animation frames held for the test to run, half a second of ride each. */
+function rideFrames(): { pump: (frames: number) => Promise<void> } {
+  const pending: FrameRequestCallback[] = [];
+  let nowMs = 1_000_000;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    pending.push(callback);
+    return pending.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => undefined);
+  vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+  return {
+    pump: async (frames) => {
+      for (let index = 0; index < frames; index += 1) {
+        const next = pending.shift();
+        if (next === undefined) return;
+        nowMs += 500;
+        await act(async () => {
+          next(nowMs);
+          await Promise.resolve();
+        });
+      }
+    },
+  };
+}
+
+/** Press the button whose text starts with `label`, and let React settle. */
+async function pressButton(label: string): Promise<void> {
+  const button = queryAll<HTMLButtonElement>(document.body, 'button').find((each) =>
+    (each.textContent ?? '').startsWith(label),
+  );
+  if (button === undefined) throw new Error(`no "${label}" button`);
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+}
+
 describe('#666 — safety and privacy sentences are never in a closed disclosure', () => {
   it('the route table lists exactly the literal notes, and nothing else as one (#993)', () => {
     for (const route of ALL_ROUTES) {
@@ -589,6 +747,47 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     const main = document.querySelector('main');
     if (main === null) throw new Error('no main');
     expect(allFaults(main, RIDE_UNCONTROLLED_KEPT_VISIBLE, everyListed(KEPT.ride))).toEqual([]);
+  });
+
+  it('the game’s chooser, a trainer whose release was refused (#1086)', async () => {
+    mounted = await mount(
+      <main>
+        <GameView
+          port={GAME_PORT}
+          trainer={gameTrainer({ releaseFault: RELEASE_INCOMPLETE })}
+          renderer={() => Promise.resolve(GAME_RENDERER)}
+        />
+      </main>,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    // The state production reaches: the refused release ended the workout, so
+    // the trainer is `ready` and #503's promise stands beside *Not released*.
+    expect(main.textContent, 'the trainer is ready, no workout running').toContain(
+      'Your trainer will follow this route’s hills: the gradient is sent to it as you ride.',
+    );
+    expect(allFaults(main, GAME_CHOOSER_KEPT_VISIBLE, everyListed(KEPT.game))).toEqual([]);
+  });
+
+  it('the game’s HUD, a workout eased and the recording service refused, mid-ride (#1086)', async () => {
+    const frames = rideFrames();
+    mounted = await mount(
+      <main>
+        <GameView
+          port={GAME_PORT}
+          trainer={gameTrainer({ rescue: GAME_STALLED, mayStop: true, workoutRunning: true })}
+          renderer={() => Promise.resolve(GAME_RENDERER)}
+        />
+      </main>,
+    );
+    await settle();
+    await pressButton('Ride ');
+    await frames.pump(2);
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(main.querySelector('.oyl-hud__notices'), 'the ride started').not.toBeNull();
+    expect(allFaults(main, GAME_RIDING_KEPT_VISIBLE, everyListed(KEPT.game))).toEqual([]);
   });
 
   it('Camera: the side camera’s way in comes before “What this does” — the reorder, guarded by itself', async () => {
