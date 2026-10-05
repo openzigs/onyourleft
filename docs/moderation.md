@@ -139,7 +139,8 @@ does not happen.
 | Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
 | Lift a suspension | `POST /v1/moderation/athletes/{id}/unsuspend` | The rider can sign in again and is visible again. |
-| Read the log | `GET /v1/moderation/log` | Every action ever taken, oldest first. |
+| List suspended accounts | `GET /v1/moderation/suspended` | Every suspended account, most recently suspended first, a page at a time (`?limit=`, `?cursor=` from the page before). So you can lift a suspension without finding the id in the log (#961). |
+| Read the log | `GET /v1/moderation/log` | Every action ever taken, **newest first**, a page at a time: `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. ⚠️ Until #961 it was every action in one answer, oldest first. |
 
 An action on a person can name the report it decides (`reportId`). That closes the report, with the
 action recorded as its outcome.

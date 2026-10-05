@@ -25,8 +25,10 @@ import { readInstanceAccount } from './sign-in';
 import {
   createModerationPort,
   isConflict,
+  MODERATION_LOG_PAGE,
   MODERATION_REFUSAL_TEXT,
   NOTHING_CHANGED_TEXT,
+  SUSPENDED_PAGE,
   type ModerationPort,
   type ModerationRead,
 } from './moderation-port';
@@ -194,11 +196,15 @@ function asModerator(read: ModerationRead) {
   return read;
 }
 
-/** A moderator's read's log, which must have been read. */
+/**
+ * A moderator's read's first page of the log, which must have been read —
+ * turned oldest first, so the newest entry is `.at(-1)`. The instance pages
+ * it newest first (#961).
+ */
 function logOf(read: ModerationRead) {
   const { log } = asModerator(read);
   if (log === undefined) throw new Error('the log was not read');
-  return log;
+  return [...log.items].reverse();
 }
 
 /**
@@ -445,6 +451,68 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
   });
 });
 
+describe('the suspended accounts — #961', () => {
+  it('lists each suspended account, most recently suspended first, and a lifted one leaves it', async () => {
+    const { world, moderator, rider } = await moderatedWorld();
+    const carys = await rider('Carys');
+    const dafydd = await rider('Dafydd');
+    expect(asModerator(await moderator.read()).suspended).toEqual({ items: [], next: null });
+    await moderator.actOnAccount(carys.athleteId, 'suspend', 'First.');
+    world.clock.ms += 1000;
+    await moderator.actOnAccount(dafydd.athleteId, 'suspend', 'Second.');
+    const read = asModerator(await moderator.read());
+    expect(read.suspended?.items.map((each) => [each.athleteId, each.displayName])).toEqual([
+      [dafydd.athleteId, 'Dafydd'],
+      [carys.athleteId, 'Carys'],
+    ]);
+    expect(read.suspended?.next).toBeNull();
+    // Lifted by the id the list gave, with no hunt through the log.
+    const [first] = read.suspended?.items ?? [];
+    expect(await moderator.actOnAccount(first?.athleteId ?? '', 'unsuspend', 'Lifted.')).toEqual({
+      kind: 'done',
+    });
+    expect(
+      asModerator(await moderator.read()).suspended?.items.map((each) => each.athleteId),
+    ).toEqual([carys.athleteId]);
+  });
+
+  it(`pages past ${String(SUSPENDED_PAGE)}, and More gives the rest`, async () => {
+    const { world, moderator, rider } = await moderatedWorld();
+    const ids: string[] = [];
+    for (let index = 0; index <= SUSPENDED_PAGE; index += 1) {
+      const each = await rider(`Rider ${String(index)}`);
+      await moderator.actOnAccount(each.athleteId, 'suspend', 'r');
+      ids.push(each.athleteId);
+    }
+    expect(world.clock.ms).toBeGreaterThan(0);
+    const first = asModerator(await moderator.read()).suspended;
+    expect(first?.items).toHaveLength(SUSPENDED_PAGE);
+    const second = await moderator.moreSuspended(first?.next ?? '');
+    expect(second?.items).toHaveLength(1);
+    expect(second?.next).toBeNull();
+    // The first suspended is the last listed.
+    expect(second?.items[0]?.athleteId).toBe(ids[0]);
+    expect(
+      [...(first?.items ?? []), ...(second?.items ?? [])].map((each) => each.athleteId).sort(),
+    ).toEqual([...ids].sort());
+  });
+
+  it('still gives the queues when the suspended accounts cannot be read', async () => {
+    const world = await moderatedWorld();
+    const read = asModerator(
+      await answeredAt(world, '/v1/moderation/suspended', () =>
+        Response.json({
+          items: [{ athleteId: '../x', displayName: 'x', suspendedAt: 1 }],
+          next: null,
+        }),
+      ).read(),
+    );
+    expect(read.suspended).toBeUndefined();
+    expect(read.registrations).toHaveLength(1);
+    expect(read.log).toBeDefined();
+  });
+});
+
 describe('the moderation log — #891, #899, #955', () => {
   // #957's review: the log is read on its own, so a log the client cannot
   // take does not take the two queues with it.
@@ -454,12 +522,15 @@ describe('the moderation log — #891, #899, #955', () => {
       () =>
         Response.json({
           entries: [{ logId: 1, action: 'suspend', actorAthleteId: '../x', reason: 'r', at: 1 }],
+          next: null,
         }),
     ],
+    ['a next cursor it does not accept', () => Response.json({ entries: [], next: 'not/ours' })],
     [
+      // A page is read under the ordinary 256 KiB since #961, not a room route's 2 MiB.
       'an answer past its bound',
       () =>
-        new Response(`{"entries":[],"pad":"${'x'.repeat(2 * 1024 * 1024 + 1)}"}`, {
+        new Response(`{"entries":[],"next":null,"pad":"${'x'.repeat(256 * 1024 + 1)}"}`, {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -475,6 +546,45 @@ describe('the moderation log — #891, #899, #955', () => {
     expect(read.reports).toEqual([]);
     // The control: read straight, the same instance gives its log.
     expect(logOf(await world.moderator.read())).toEqual(expect.any(Array));
+  });
+
+  it(`is read newest first, ${String(MODERATION_LOG_PAGE)} at a time, and More reaches the rest exactly once — #961`, async () => {
+    const { moderator, rider, ordinaryId } = await moderatedWorld();
+    const carys = await rider('Carys');
+    await moderator.decideRegistration(ordinaryId, 'approve', 'ok');
+    // Enough actions for a second page: a suspension put on and lifted, over and over.
+    for (let round = 0; round < MODERATION_LOG_PAGE; round += 1) {
+      await moderator.actOnAccount(carys.athleteId, round % 2 === 0 ? 'suspend' : 'unsuspend', 'r');
+    }
+    const first = asModerator(await moderator.read()).log;
+    expect(first?.items).toHaveLength(MODERATION_LOG_PAGE);
+    expect(first?.items[0]).toMatchObject({ action: 'suspend', targetAthleteId: carys.athleteId });
+    const ids = first?.items.map((entry) => entry.logId) ?? [];
+    expect(ids).toEqual([...ids].sort((left, right) => right - left));
+    expect(first?.next).toEqual(expect.any(String));
+
+    const second = await moderator.moreLog(first?.next ?? '');
+    expect(second).toEqual({
+      items: [
+        expect.objectContaining({ action: 'approve_registration', targetAthleteId: ordinaryId }),
+      ],
+      next: null,
+    });
+    expect(new Set([...ids, ...(second?.items ?? []).map((entry) => entry.logId)]).size).toBe(
+      MODERATION_LOG_PAGE + 1,
+    );
+  });
+
+  it('sends nothing for a cursor the instance could not have written, and reads none for a rider who is not a moderator', async () => {
+    const { moderator, ordinary, send } = await moderatedWorld();
+    const sent = send.mock.calls.length;
+    expect(await moderator.moreLog('../auth/session')).toBeUndefined();
+    expect(await moderator.moreSuspended('')).toBeUndefined();
+    expect(send.mock.calls.length).toBe(sent);
+    // The instance's own refusal of a cursor it did not write.
+    expect(await moderator.moreLog('bm90LW91cnM')).toBeUndefined();
+    // An ordinary rider is answered as though there were no such route.
+    expect(await ordinary.moreLog('bm90LW91cnM')).toBeUndefined();
   });
 
   it('is read, newest last as the instance keeps it, and outlives an erased account', async () => {

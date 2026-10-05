@@ -30,7 +30,9 @@ import {
   MODERATION_NO_PORT,
   MODERATION_STANDING_TEXT,
   ModerationView,
+  MORE_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
+  SUSPENDED_UNREADABLE_TEXT,
   suspendConfirmation,
 } from './ModerationView';
 
@@ -441,5 +443,163 @@ describe('suspending and hiding a name are confirmed first — #962', () => {
     answer();
     await settle();
     expect(scripted.calls.filter((call) => call.startsWith('unsuspend'))).toHaveLength(1);
+  });
+});
+
+describe('the suspended accounts — #961', () => {
+  it('lists each suspended account, and lifts a suspension from its row with no id typed', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.suspended.set('rider-carys', 1_790_020_000);
+    scripted.held.suspended.set('rider-dafydd', 1_790_030_000);
+    await open(scripted);
+    const list = section('Suspended accounts');
+    const heads = [...list.querySelectorAll('h3')].map((each) => each.textContent);
+    expect(heads).toEqual(['rider-dafydd', 'rider-carys']);
+    expect(text(list)).toContain('suspended 2026-09-21');
+
+    await decide(item('rider-carys'), 'Appeal upheld.', 'Lift the suspension');
+    expect(scripted.calls).toContain('unsuspend rider-carys');
+    expect(scripted.held.suspended.has('rider-carys')).toBe(false);
+    // Read back: the row has gone because the instance says so.
+    expect(
+      [...section('Suspended accounts').querySelectorAll('h3')].map((each) => each.textContent),
+    ).toEqual(['rider-dafydd']);
+    expect(text()).toContain(ACTION_DONE_TEXT);
+  });
+
+  it('says when nobody is suspended, and adds a suspension made on the page', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    expect(text(section('Suspended accounts'))).toContain('No account is suspended.');
+    await decide(item('Report 7'), 'For the report.', 'Suspend the account');
+    expect(scripted.held.suspended.has('rider-dafydd')).toBe(true);
+    expect(text(section('Suspended accounts'))).toContain('rider-dafydd');
+  });
+
+  it('says the suspended accounts could not be read, and still shows the queues', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.suspendedReadable = false;
+    await open(scripted);
+    expect(text(section('Suspended accounts'))).toContain(SUSPENDED_UNREADABLE_TEXT);
+    expect(text(section('Waiting for approval'))).toContain('Anna');
+  });
+
+  it('shows more suspended accounts a page at a time, until there are no more', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.pageSize = 1;
+    scripted.held.suspended.set('rider-carys', 1_790_020_000);
+    scripted.held.suspended.set('rider-dafydd', 1_790_030_000);
+    await open(scripted);
+    const list = (): string[] =>
+      [...section('Suspended accounts').querySelectorAll('h3')].map(
+        (each) => each.textContent ?? '',
+      );
+    expect(list()).toEqual(['rider-dafydd']);
+    await activateWithKeyboard(
+      button(section('Suspended accounts'), 'Show more suspended accounts'),
+    );
+    await settle();
+    expect(scripted.calls).toContain('more suspended 1');
+    expect(list()).toEqual(['rider-dafydd', 'rider-carys']);
+    expect(
+      [...section('Suspended accounts').querySelectorAll('button')].some(
+        (each) => each.textContent === 'Show more suspended accounts',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('the log, a page at a time — #961', () => {
+  const logLines = (): string[] =>
+    [...section('Moderation log').querySelectorAll('li')].map((each) => text(each));
+
+  /** A scripted instance whose log has a third entry, and pages one entry at a time. */
+  function paged(): ScriptedModeration {
+    const scripted = scriptedModeration();
+    scripted.held.pageSize = 1;
+    scripted.held.log.push(
+      {
+        logId: 2,
+        action: 'hide_display_name',
+        actorAthleteId: SCRIPTED_MODERATOR,
+        targetAthleteId: 'rider-dafydd',
+        reportId: null,
+        reason: 'Rude name.',
+        at: 1_789_991_000,
+      },
+      {
+        logId: 3,
+        action: 'suspend',
+        actorAthleteId: SCRIPTED_MODERATOR,
+        targetAthleteId: 'rider-dafydd',
+        reportId: null,
+        reason: 'Again.',
+        at: 1_789_992_000,
+      },
+    );
+    return scripted;
+  }
+
+  it('shows the newest page first, and older entries on Show older entries, each once', async () => {
+    const scripted = paged();
+    const all = scripted.held.log.map((entry) => entry.logId);
+    await open(scripted);
+    expect(logLines()).toHaveLength(1);
+    for (let page = 1; page < all.length; page += 1) {
+      await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+      await settle();
+      expect(logLines()).toHaveLength(page + 1);
+    }
+    expect(
+      [...section('Moderation log').querySelectorAll('button')].map((each) => each.textContent),
+    ).toEqual([]);
+    // Newest first: the scripted log's last entry is the first line.
+    expect(logLines()[0]).toContain('Suspended an account');
+    expect(logLines()[1]).toContain('Hid a display name');
+    expect(logLines()[2]).toContain('account rider-carys');
+  });
+
+  it('says a page did not come, keeps what is shown, and offers it again', async () => {
+    const scripted = paged();
+    await open(scripted);
+    scripted.held.moreReadable = false;
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await settle();
+    expect(text(section('Moderation log'))).toContain(MORE_UNREADABLE_TEXT);
+    expect(logLines()).toHaveLength(1);
+    scripted.held.moreReadable = true;
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await settle();
+    expect(text(section('Moderation log'))).not.toContain(MORE_UNREADABLE_TEXT);
+    expect(logLines()).toHaveLength(2);
+  });
+
+  it('starts again from the newest page after an action, rather than keep a stale tail', async () => {
+    const scripted = paged();
+    await open(scripted);
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await settle();
+    expect(logLines()).toHaveLength(2);
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    expect(logLines()).toHaveLength(1);
+    expect(logLines()[0]).toContain('Approved an account');
+  });
+
+  it('passes the accessibility audit with both lists paged', async () => {
+    const scripted = paged();
+    scripted.held.suspended.set('rider-carys', 1_790_020_000);
+    scripted.held.suspended.set('rider-dafydd', 1_790_030_000);
+    // The shell's own landmark and title, which the route gives the view.
+    mounted = await mount(
+      <main>
+        <h1>Moderation</h1>
+        <ModerationView port={scripted.port} />
+      </main>,
+    );
+    await settle();
+    expect(button(section('Moderation log'), 'Show older entries')).toBeDefined();
+    expect(button(section('Suspended accounts'), 'Show more suspended accounts')).toBeDefined();
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
   });
 });
