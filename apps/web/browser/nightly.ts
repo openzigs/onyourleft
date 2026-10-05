@@ -23,20 +23,22 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in CLAUDE.md §4c.
- * Every describe below but one draws the REALISTIC world, which is a rung a
- * rider chooses in Settings and is off by default (ADR 0026 D-3), or measures
- * the owner's instruments for it. The one is #1076's: the reflow walk's DARK
- * palette, which the owner moved on 2026-10-03 with its light twin kept
- * required — so layout stays a required gate, in the palette every rider
- * starts in, and what moved is the repeat of it in the other.
+ * Four of the ten describes below draw the REALISTIC world, which is a rung
+ * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
+ * measure the owner's instruments for it. The other six are the DEFAULT
+ * world, every rider's, and each is an owner's exception. One is #1076's: the
+ * reflow walk's DARK palette, which the owner moved on 2026-10-03 with its
+ * light twin kept required — so layout stays a required gate, in the palette
+ * every rider starts in, and what moved is the repeat of it in the other.
  *
- * #1137's (the owner's ruling of 2026-10-05, to bring the required job 180 s
- * clear of its stop on the EPYC 7763) moved four LAYOUT and MOTION checks of
- * the default world: #941's card-shape margins, #1072's card carry, #945's
- * cross-fade and #1014's two-column sections. Each entry names the required
- * test that still holds the accessibility or safety half of its claim; where
- * a describe held both, it was SPLIT and only the appearance half is tagged —
- * reduced motion, focus, a 44 × 44 target, an `aria-hidden` drawing and every
+ * The other five are #1137's (the owner's ruling of 2026-10-05, to bring the
+ * required job 180 s clear of its stop on the EPYC 7763): four LAYOUT and
+ * MOTION checks of the default world, in five describes — #941's card-shape
+ * margins, #1072's card carry, #945's cross-fade and #1014's two-column
+ * sections. Each entry names the required test that still holds the
+ * accessibility or safety half of its claim; where a describe held both, it
+ * was SPLIT and only the appearance half is tagged — reduced motion, focus, a
+ * 44 × 44 target, an `aria-hidden` drawing and every
  * ride-route case of #945 stay required.
  */
 

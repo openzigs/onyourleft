@@ -2352,7 +2352,10 @@ pnpm run test:browser
 # carry, #945's cross-fade, #1014's two-column sections; each one's
 # accessibility or safety half stays here) —
 # run in the `nightly` project, one worker, from `.github/workflows/nightly.yml`,
-# which is NOT a required check. This is that run. About 1.3 minutes on a Mac;
+# which is NOT a required check. This is that run. On the runner, with #1137's
+# four describes in it: 431 s of browser checks in an 8 m 47 s (527 s) nightly
+# job on an EPYC 7763 (run 37288924707); the "about 1.3 minutes on a Mac" this
+# line said predates #1076 and #1137 and is not re-measured.
 # `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
 # name and a test in both runs or in neither.
 pnpm run test:browser:nightly

@@ -115,8 +115,8 @@ import '../src/design/tailwind.css';
  * How long the DOM must be still before a route counts as settled.
  *
  * 100 ms since #1137 (it was 250), on the owner's ruling of 2026-10-05 to try
- * it and keep it only if the flaky rate does not rise; the pull request for
- * #1137 records the measurement, under CPU load locally and on the runner.
+ * it and keep it only if the flaky rate does not rise; PR #1138 records the
+ * measurement, under CPU load locally and on the runner (CI run 37288932952).
  * Every route visit pays it at least once, so it is about 40 % of the case
  * time of the walks on this page. What guards the shapes that resolved too
  * early before is not this number: {@link untilViewShown} (a Suspense
