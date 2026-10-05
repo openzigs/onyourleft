@@ -118,7 +118,7 @@ describe('#1084 — a ride with nothing to work out is marked once, through the 
     const first = await open.write((store) =>
       backfillLoadSummaries({ athleteId: ATHLETE_A, store }),
     );
-    expect(first).toEqual({ computed: 0, nothingToWorkOut: 1, remaining: 0 });
+    expect(first).toEqual({ computed: 0, nothingToWorkOut: 1, noStreamsYet: 0, remaining: 0 });
 
     const row = await open.read(async (store) =>
       (await store.listActivitySummaries(ATHLETE_A)).find((summary) => summary.id === ride.id),
@@ -129,7 +129,7 @@ describe('#1084 — a ride with nothing to work out is marked once, through the 
     const second = await open.write((store) =>
       backfillLoadSummaries({ athleteId: ATHLETE_A, store }),
     );
-    expect(second).toEqual({ computed: 0, nothingToWorkOut: 0, remaining: 0 });
+    expect(second).toEqual({ computed: 0, nothingToWorkOut: 0, noStreamsYet: 0, remaining: 0 });
 
     const history = await open.read((store) => loadFitnessHistory({ athleteId: ATHLETE_A, store }));
     expect(history.ridesWithoutSummary).toBe(0);

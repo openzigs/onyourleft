@@ -686,11 +686,9 @@ describe('AnalysisView — fitness and fatigue (#77)', () => {
 
     const text = mounted.container.textContent ?? '';
     expect(text).toContain(
-      'Measured 0 more rides, and found 1 with nothing to measure a load from — too short, or no usable power or heart rate.',
+      'Measured 0 more rides, and found 1 with nothing to work a load out from — too short, or no usable power or heart rate.',
     );
-    expect(text).toContain(
-      '1 ride has no load: it did not record enough power or heart rate to measure one from.',
-    );
+    expect(text).toContain('1 ride has no load: nothing on it was enough to work one out from.');
     // No offer left: no pass could measure it.
     expect(
       queryAll(mounted.container, 'button').some((button) =>
@@ -698,6 +696,35 @@ describe('AnalysisView — fitness and fatigue (#77)', () => {
       ),
     ).toBe(false);
     expect(text).not.toContain('imported before this device');
+  });
+
+  it('says a ride with no recording stored yet is looked at again, and does not call it no load — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('saving'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+        }),
+      },
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    const measure = queryAll(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Measure'),
+    );
+    await activateWithKeyboard(measure as HTMLElement);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(
+      'Measured 0 more rides. 1 ride has no recording stored yet, so it was left to look at again next time.',
+    );
+    expect(text).not.toContain('has no load');
+    expect(port.summaryWrites).toEqual([]);
   });
 
   it('names the rides with no load beside a chart — #1084', async () => {
@@ -726,7 +753,7 @@ describe('AnalysisView — fitness and fatigue (#77)', () => {
     await settle();
 
     expect(mounted.container.textContent).toContain(
-      'Built from 1 measured ride, all measured from power. 2 rides have no load: they did not record enough power or heart rate to measure one from.',
+      'Built from 1 measured ride, all measured from power. 2 rides have no load: nothing on them was enough to work one out from.',
     );
   });
 });

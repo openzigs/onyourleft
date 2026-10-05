@@ -34,6 +34,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -241,6 +242,23 @@ describe('the home screen — #428', () => {
       ride('bare', 2, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
     ]);
     expect(text()).toContain('not worked out yet');
+    expect(text()).toContain('Analysis can work them out');
+  });
+
+  it('keeps the Analysis link when the history was cut short — #1084', async () => {
+    // Every ride inside the window is marked; the one past it has no summary
+    // at all, and only Analysis can work it out.
+    const marked = Array.from({ length: HISTORY_ACTIVITY_LIMIT }, (_unused, index) =>
+      ride(`m${String(index)}`, HISTORY_ACTIVITY_LIMIT + 10 - index, {
+        effortWeightedPower: undefined,
+        loadCoveredTime: seconds(0),
+      }),
+    );
+    await openHome([
+      ...marked,
+      ride('past', 1, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+    ]);
+    expect(text()).not.toContain('nothing on any of them was enough');
     expect(text()).toContain('Analysis can work them out');
   });
 

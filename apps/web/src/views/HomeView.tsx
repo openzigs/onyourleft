@@ -260,12 +260,15 @@ function Rides({
       <section className="oyl-panel" aria-labelledby="oyl-home-form">
         <h2 id="oyl-home-form">Fitness and freshness</h2>
         {readings.length === 0 ? (
-          data.loadsToWorkOut === 0 ? (
+          data.loadsToWorkOut === 0 && !data.truncated ? (
             // #1084: every ride here was found to have nothing a load could
-            // come from, so there is nothing for Analysis to work out.
+            // come from, so there is nothing for Analysis to work out. Not when
+            // the history was cut short: `loadsToWorkOut` counts only the rides
+            // inside `HISTORY_ACTIVITY_LIMIT`, and one past it may still need
+            // working out (#1084's review).
             <p className="oyl-muted">
-              No ride here has a load, so there is nothing to smooth: none of them recorded enough
-              power or heart rate to work one out from.
+              No ride here has a load, so there is nothing to smooth: nothing on any of them was
+              enough to work one out from.
             </p>
           ) : (
             <p className="oyl-muted">

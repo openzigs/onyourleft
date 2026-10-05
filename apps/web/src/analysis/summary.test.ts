@@ -106,6 +106,17 @@ describe('#1084 — a ride with nothing to work a load out from', () => {
     expect(needsLoadSummary(row)).toBe(false);
   });
 
+  it('is not said of a 0 s row that keeps a heart-rate basis beside a stale 0 W', () => {
+    // "No load" is 0 s covered AND no basis: the stale 0 W reads as absent, but
+    // the heart-rate figure is a basis, so this ride is not marked.
+    const row = stubActivity({
+      effortWeightedPower: watts(0),
+      effortWeightedHeartRate: beatsPerMinute(150),
+      loadCoveredTime: seconds(0),
+    });
+    expect(hasNoLoadToWorkOut(row)).toBe(false);
+  });
+
   it('is not said of a ride nobody has worked out, nor of one with a load', () => {
     const bare = stubActivity({});
     expect(hasNoLoadToWorkOut(bare)).toBe(false);

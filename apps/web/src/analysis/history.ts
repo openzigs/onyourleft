@@ -152,7 +152,19 @@ export interface BackfillOutcome {
    * decodes it or counts it again.
    */
   readonly nothingToWorkOut: number;
-  /** How many still have none afterwards, so the caller can offer another pass. */
+  /**
+   * How many had no stream set stored, and were left as they were (#1084's
+   * review). Such a ride may be a save still in progress from a tab running an
+   * older bundle (ADR 0027), which writes the activity row first and its
+   * streams after, so it is neither worked out nor marked: the next pass looks
+   * at it again, and counts it here again. It costs one summary read and none
+   * of {@link BACKFILL_BATCH}.
+   */
+  readonly noStreamsYet: number;
+  /**
+   * How many have not been looked at yet, so the caller can offer another
+   * pass. A ride counted in {@link noStreamsYet} is not among them.
+   */
   readonly remaining: number;
 }
 
@@ -188,41 +200,60 @@ export async function backfillLoadSummaries(
 
   let computed = 0;
   let nothingToWorkOut = 0;
-  for (const summary of missing.slice(0, batch)) {
-    const wrote = await summariseOne(port, summary.id);
-    if (wrote) {
+  let noStreamsYet = 0;
+  let looked = 0;
+  // A ride with no stream set does not use up the batch: otherwise fifty of
+  // them, oldest first, would stop every pass reaching a ride it could decode.
+  for (const summary of missing) {
+    if (computed + nothingToWorkOut >= batch) {
+      break;
+    }
+    looked += 1;
+    const found = await summariseOne(port, summary.id);
+    if (found === 'computed') {
       computed += 1;
-    } else {
+    } else if (found === 'nothing') {
       nothingToWorkOut += 1;
+    } else {
+      noStreamsYet += 1;
     }
   }
   return {
     computed,
     nothingToWorkOut,
-    remaining: missing.length - computed - nothingToWorkOut,
+    noStreamsYet,
+    remaining: missing.length - looked,
   };
 }
 
 /**
- * Decode one ride and store its summary. `false` when it has no usable trace.
+ * Decode one ride and store its summary, or the marker when its streams hold
+ * nothing a load could come from.
  *
- * A ride that cannot be summarised is **not** retried on the next pass: it is
- * marked with `summary.ts` §`NO_LOAD_TO_WORK_OUT`, which `needsLoadSummary`
- * reads as done (#1084). Until #1084 nothing was written, so "not retried" was
- * true of one pass only — every later pass decoded the same ride and counted
- * it as skipped again, and Home said its load was "not worked out yet". A
- * ride with no stream set at all is marked too: there is nothing to decode.
- * ⚠️ That cannot catch a save half-way: the activity row is written before
- * its streams (`recording/finish.ts`), but since #1084 that row carries its
- * summary or the marker from the moment it is written, so `needsLoadSummary`
- * never selects it. A ride the backfill sees with no stream set is one whose
- * streams were never written.
+ * A ride whose streams were read and gave nothing is **not** retried on the
+ * next pass: it is marked with `summary.ts` §`NO_LOAD_TO_WORK_OUT`, which
+ * `needsLoadSummary` reads as done (#1084). Until #1084 nothing was written,
+ * so "not retried" was true of one pass only — every later pass decoded the
+ * same ride and counted it as skipped again, and Home said its load was "not
+ * worked out yet".
+ *
+ * ⚠️ **A ride with no stream set is NOT marked**, because the marker is
+ * permanent and an absent read is not a final one. This build writes a ride's
+ * summary (or the marker) on its activity row, so `needsLoadSummary` never
+ * selects one of its own saves half-way. But a tab left on an older bundle
+ * (ADR 0027) saves as builds before #1084 did — a bare activity row, then
+ * `putStreamSet` — and a pass that ran between the two would have marked a
+ * ride that has power or heart rate as having no load, for ever. So it is left
+ * unmarked and answered `'no-streams'`: the next pass looks again, and the
+ * backfill's report counts it apart (`BackfillOutcome.noStreamsYet`).
  */
-async function summariseOne(port: AnalysisPort, id: ActivityId): Promise<boolean> {
+async function summariseOne(
+  port: AnalysisPort,
+  id: ActivityId,
+): Promise<'computed' | 'nothing' | 'no-streams'> {
   const streams = await port.store.getStreamSetSummary(port.athleteId, id);
   if (streams === undefined) {
-    await port.store.setActivityLoadSummary(port.athleteId, id, NO_LOAD_TO_WORK_OUT);
-    return false;
+    return 'no-streams';
   }
   const power = streams.channels.includes('power')
     ? await port.store.getStreamChannel(port.athleteId, id, 'power')
@@ -241,8 +272,8 @@ async function summariseOne(port: AnalysisPort, id: ActivityId): Promise<boolean
   const summary = fromPower ?? loadSummaryOf({ heartRate }, streams.sampleInterval);
   if (summary === undefined) {
     await port.store.setActivityLoadSummary(port.athleteId, id, NO_LOAD_TO_WORK_OUT);
-    return false;
+    return 'nothing';
   }
   await port.store.setActivityLoadSummary(port.athleteId, id, summary);
-  return true;
+  return 'computed';
 }

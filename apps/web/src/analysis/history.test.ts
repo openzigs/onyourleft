@@ -346,32 +346,57 @@ describe('#1084 — a ride that can never have a load is found once, not on ever
     const port = stubAnalysis(OWNER, [nothingIn('brief', 0), unsummarised('real', 1)]);
 
     const first = await backfillLoadSummaries(port);
-    expect(first).toEqual({ computed: 1, nothingToWorkOut: 1, remaining: 0 });
+    expect(first).toEqual({ computed: 1, nothingToWorkOut: 1, noStreamsYet: 0, remaining: 0 });
     const decodedOnce = port.channelReads.length;
 
     const second = await backfillLoadSummaries(port);
-    expect(second).toEqual({ computed: 0, nothingToWorkOut: 0, remaining: 0 });
+    expect(second).toEqual({ computed: 0, nothingToWorkOut: 0, noStreamsYet: 0, remaining: 0 });
     // Nothing was decoded again: the marked ride is not selected.
     expect(port.channelReads).toHaveLength(decodedOnce);
   });
 
-  it('marks a ride with no stream set at all', async () => {
-    const port = stubAnalysis(OWNER, [
-      {
-        activity: stubActivity({
-          id: activityId('bare'),
-          startedAt: unixSeconds(START),
-          startedAtTimeZone: 'UTC',
-        }),
-      },
-    ]);
+  it('leaves a ride with no stream set unmarked, so a save still in progress is looked at again', async () => {
+    // ADR 0027: a tab on an older bundle writes a bare activity row, then its
+    // streams. A pass between the two must not mark the ride for ever.
+    const saving: StubAnalysisRide = {
+      activity: stubActivity({
+        id: activityId('saving'),
+        startedAt: unixSeconds(START),
+        startedAtTimeZone: 'UTC',
+      }),
+    };
+    // Mutable: the stub reads this list on every call, so replacing the entry
+    // is the streams landing.
+    const rides: StubAnalysisRide[] = [saving];
+    const port = stubAnalysis(OWNER, rides);
 
     const first = await backfillLoadSummaries(port);
-    const second = await backfillLoadSummaries(port);
+    expect(first).toEqual({ computed: 0, nothingToWorkOut: 0, noStreamsYet: 1, remaining: 0 });
+    expect(port.summaryWrites).toEqual([]);
+    const between = await loadFitnessHistory(port);
+    expect(between.ridesWithNoLoad).toBe(0);
+    expect(between.ridesWithoutSummary).toBe(1);
 
-    expect(first.nothingToWorkOut).toBe(1);
-    expect(second.nothingToWorkOut).toBe(0);
-    expect((await loadFitnessHistory(port)).ridesWithNoLoad).toBe(1);
+    // The older tab's streams land; the next pass works the ride out.
+    rides[0] = { ...saving, power: Array.from({ length: 600 }, () => watts(200)) };
+    const second = await backfillLoadSummaries(port);
+    expect(second).toEqual({ computed: 1, nothingToWorkOut: 0, noStreamsYet: 0, remaining: 0 });
+    expect((await loadFitnessHistory(port)).ridesCounted).toBe(1);
+  });
+
+  it('does not let rides with no stream set use up the batch', async () => {
+    const bare = (id: string, offset: number): StubAnalysisRide => ({
+      activity: stubActivity({
+        id: activityId(id),
+        startedAt: unixSeconds(START + offset * DAY),
+        startedAtTimeZone: 'UTC',
+      }),
+    });
+    const port = stubAnalysis(OWNER, [bare('a', 0), bare('b', 1), unsummarised('real', 2)]);
+
+    const outcome = await backfillLoadSummaries(port, 1);
+
+    expect(outcome).toEqual({ computed: 1, nothingToWorkOut: 0, noStreamsYet: 2, remaining: 0 });
   });
 
   it('works a stale 0 W ride out from its strap, and marks one with no strap', async () => {
@@ -394,7 +419,7 @@ describe('#1084 — a ride that can never have a load is found once, not on ever
     const outcome = await backfillLoadSummaries(port);
     const history = await loadFitnessHistory(port);
 
-    expect(outcome).toEqual({ computed: 1, nothingToWorkOut: 1, remaining: 0 });
+    expect(outcome).toEqual({ computed: 1, nothingToWorkOut: 1, noStreamsYet: 0, remaining: 0 });
     expect(history.ridesCounted).toBe(1);
     expect(history.ridesWithNoLoad).toBe(1);
     expect(history.ridesWithoutSummary).toBe(0);
