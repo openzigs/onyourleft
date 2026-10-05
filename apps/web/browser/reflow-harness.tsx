@@ -220,6 +220,11 @@ export interface ReflowMeasurement {
    * walk began (#683's review).
    */
   readonly errors: readonly string[];
+  /**
+   * The route's `h1` came, its view was on the page rather than its `Suspense`
+   * fallback (#1132), and the DOM then went still — each within
+   * {@link PATIENCE_MS}.
+   */
   readonly settledWithinPatience: boolean;
   /**
    * The first control in `main`, in document order, that is laid out — #666.
@@ -581,6 +586,32 @@ async function untilHeading(title: string): Promise<boolean> {
   const deadline = performance.now() + PATIENCE_MS;
   while (performance.now() < deadline) {
     if (document.querySelector('h1')?.textContent === title) {
+      return true;
+    }
+    await nextFrame();
+  }
+  return false;
+}
+
+/**
+ * Resolve once `main` holds the route's view and not its `Suspense` fallback,
+ * or at the deadline — #1132.
+ *
+ * ⚠️ The groups are preloaded here, so a view's chunk is in memory, and the
+ * view can STILL suspend on its first visit: React 19.3 holds a transition's
+ * commit for an `<img>` that has not loaded (a "suspensey" image), so About —
+ * whose logo (`brand/Brand.tsx` §`FullLogo`) is the one image a `sections`
+ * route draws — commits its `h1` over "Loading this page…" and reveals the
+ * page only when the logo has loaded or React stops waiting for it. On a slow
+ * runner that took longer than {@link QUIET_MS} with frames running, and
+ * {@link untilQuiet} called the fallback settled: `sections.browser.spec.ts`
+ * then counted no sections at all. A still DOM is not a shown view.
+ */
+async function untilViewShown(): Promise<boolean> {
+  const deadline = performance.now() + PATIENCE_MS;
+  while (performance.now() < deadline) {
+    // `shell/lazy-view.tsx` §`ViewLoading`, the fallback's own mark.
+    if (document.querySelector('main [data-oyl-view-loading]') === null) {
       return true;
     }
     await nextFrame();
@@ -1290,6 +1321,8 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   window.location.hash = hash;
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
+  // Before the fade and the quiet: the reveal is a view transition of its own.
+  const shown = await untilViewShown();
   await viewTransitionsFinished();
   let quiet = await untilQuiet();
   if (
@@ -1341,7 +1374,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     expectation,
     markerPresent: marker === undefined ? null : document.querySelector(marker) !== null,
     errors: raised,
-    settledWithinPatience: headed && quiet,
+    settledWithinPatience: headed && shown && quiet,
     firstControl: firstControl(),
     fold: foldLine(),
     proseBeforeFirstControl: proseBeforeFirstControl(),
