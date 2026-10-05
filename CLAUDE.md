@@ -3445,11 +3445,14 @@ owner's plan of 2026-10-04):
 696–742 s. ⚠️ **#1128's "at least 180 s clear" is met by the second (199 s) and not by the first
 (153 s)**: about 50–70 s of job on the 7763, which a spec added to the gate spends again. The cuts
 that would buy more are the owner's (the questions on PR #1131: `QUIET_MS`, and nightly
-candidates). ⚠️ **Three failures on PR #1131's heads, none of them a check this PR changed**:
-[#1135](https://github.com/openzigs/onyourleft/issues/1135)'s `sections` case read About as fewer
-than two columns twice (37254251351 attempt 2, 37261811267 attempt 4); it failed once on two workers
-on another branch too ([37247091721](https://github.com/openzigs/onyourleft/actions/runs/37247091721),
-1 in about 86 runs), so three workers probably make it more frequent rather than cause it. And
+candidates). ⚠️ **Three failures on PR #1131's heads, none of them a check this PR changed**: the
+`sections` case read About as fewer than two columns twice (37254251351 attempt 2, 37261811267
+attempt 4), and once on two workers on another branch
+([37247091721](https://github.com/openzigs/onyourleft/actions/runs/37247091721), 1 in about 86
+runs), so three workers made it more frequent rather than caused it.
+[#1132](https://github.com/openzigs/onyourleft/issues/1132) found the cause — React 19.3 holds a
+transition's commit for About's unloaded logo, and the harness called the fallback settled — and
+`reflow-harness.tsx` §`untilViewShown` now waits for the view. And
 37254251351 attempt 3 was cancelled at 25 minutes with its browser gate unfinished, on a 9V45, its
 log lost from the Vitest step onwards, so what hung cannot be read.
 
