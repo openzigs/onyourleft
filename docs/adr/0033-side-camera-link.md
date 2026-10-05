@@ -771,3 +771,41 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   of reason 3 change waits on spike 0021
   ([#1057](https://github.com/openzigs/onyourleft/issues/1057)). D-8 and D-10 stand. ⚠️ ADR 0044 is
   **Proposed** on this date: until the owner accepts it, this entry is a pointer and D-6 governs.
+- **2026-10-05** — **Each end now makes both of D-3's channels itself, negotiated on agreed
+  streams, so neither is handed over in a `datachannel` event, and a channel the other end opens in
+  band ends the pairing. D-3's two channels, their delivery and direction, and D-4 are unchanged.**
+  The 2026-09-27 entry's stranding, which it recorded as *"a reading of the source … and not caught
+  in the real engine"*, has now been caught. On 2026-10-05, two bare peer connections in one page
+  of the pinned Playwright's Chromium, the offerer making `control` and `frames` as the tablet did,
+  were run 3 000 times on a machine under full CPU load. Six times one of the answering end's
+  handed-over channels was still `connecting` five seconds after the connection opened, and its
+  `send` threw `InvalidStateError`. Four were `control` (the 2026-09-27 mode). Two were `frames`,
+  on which a connected, filming phone could never send a picture, with nothing to notice. That is
+  [#568](https://github.com/openzigs/onyourleft/issues/568)'s last open mode, and the
+  `sidelink.browser.spec.ts` failure on PR #1145 (*"picture 0: the phone said no-link"*). The same
+  3 000 pairings with both channels negotiated stranded none. What changes:
+  - **Both ends make `control` on stream 0 and `frames` on stream 2**, with D-3's delivery
+    (`side-link.ts` §`CONTROL_CHANNEL_INIT`, §`FRAMES_CHANNEL_INIT`). The streams are even so that
+    an older tablet's in-band channel, which takes an odd stream because the phone is the DTLS
+    client (RFC 8832 §6), arrives as a `datachannel` event rather than colliding.
+  - **A channel opened in band is one D-3 does not list**, and the phone ends the link (D-4). This
+    narrows what the 2026-09-27 entry's *"Considered and not done"* rejected, a phone-made channel
+    the tablet would have to accept. Here neither end opens a channel for the other: each makes the
+    same two, and nothing is accepted.
+  - **The phone treats `control` opening as its sign that the tablet read the answer** (#1108),
+    where a `control` channel arriving was the sign before.
+  - **What stands.** The ping, the secret in answer to it, the welcome, and the three-second
+    `unanswered` and unanswerable backstops are all unchanged. Nothing here shows that a channel an
+    end made itself can never be lost, and the protocol does not rely on that.
+  - **Cost.** A tablet and a phone on builds either side of this change cannot pair. A newer tablet
+    sends no in-band channel, so an older phone never gets one and stays silent. The tablet ends
+    that pairing as `unanswered` three seconds after `control` opened. An older tablet's in-band
+    `control` reaches a newer phone as a `datachannel` event, which ends the link, and the tablet
+    then ends the pairing as `unanswered`. The pairing code's prefix, `OYLSIDE1`, is not bumped,
+    because the code's fields are unchanged: the 2026-09-30 entry broke the same pairs the same way
+    without a bump. Whether to bump it, so that a skewed pair is refused at the scan with *"update
+    both devices"*, is the owner's call.
+  `camera/side-link.ts` §"Why each end makes its own channels" is the record, and
+  `side-link.test.ts` pairs, commands and sends pictures with the engine's two faults on handed
+  channels (`testing.ts` §`strandsHandedChannels`, §`losesSendsInDataChannelEvent`). On the code
+  before this entry, that test fails at the first step.

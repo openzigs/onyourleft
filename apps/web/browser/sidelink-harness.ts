@@ -56,6 +56,15 @@
  * reported as one rather than retried here, because a gate that paired
  * twice would pass over a product that needed two scans every time.
  *
+ * And a FIFTH, on PR #1145's CI (run 37356795884): every `control` step
+ * green, then `picture 0: the phone said no-link` for ten seconds. The
+ * phone's `frames` channel, handed to it in `datachannel`, had been left
+ * `connecting` for good by the engine — the same stranding as the fourth,
+ * caught on the other channel in bare peer connections under load. Since
+ * #568's fourth fix both ends make both channels themselves, negotiated,
+ * and nothing is handed over (`side-link.ts` §"Why each end makes its own
+ * channels").
+ *
  * ## What this does NOT prove
  *
  * - **Two devices.** Both ends are in one browser on one machine, so the path

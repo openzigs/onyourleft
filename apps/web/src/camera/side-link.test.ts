@@ -21,7 +21,9 @@ import { LINK_LOSS_LIMIT_MILLISECONDS, SideCameraSession } from './side-camera';
 import { PAIRING_CODE_PREFIX, type PairingRefusal } from './side-link-code';
 import {
   CONTROL_CHANNEL,
+  CONTROL_CHANNEL_INIT,
   FRAMES_CHANNEL,
+  FRAMES_CHANNEL_INIT,
   COMMAND_ACK_MILLISECONDS,
   CONNECT_LIMIT_MILLISECONDS,
   HEARTBEAT_MILLISECONDS,
@@ -160,17 +162,56 @@ describe('pairing, through both codes', () => {
     });
   });
 
-  it('pairs when the engine loses what the phone sends inside ondatachannel — #568', async () => {
-    // Chromium did this to the phone's secret about one pairing in a hundred
-    // in CI: sent, `open`, nothing buffered, never delivered. A phone that
-    // spoke first was then ended as `not-our-phone` by its next message.
-    const { tablet, phone, pass } = await paired({ losesSendsInDataChannelEvent: true });
+  it('makes both channels itself on each end, on the same agreed streams, and is handed none — #568', async () => {
+    const { network } = await paired();
+    for (const peer of network.peers.slice(0, 2)) {
+      expect(peer.channels.map((channel) => [channel.label, channel.init])).toEqual([
+        [CONTROL_CHANNEL, CONTROL_CHANNEL_INIT],
+        [FRAMES_CHANNEL, FRAMES_CHANNEL_INIT],
+      ]);
+    }
+    expect(CONTROL_CHANNEL_INIT).toEqual({ ordered: true, negotiated: true, id: 0 });
+    expect(FRAMES_CHANNEL_INIT).toEqual({
+      ordered: false,
+      maxRetransmits: 0,
+      negotiated: true,
+      id: 2,
+    });
+  });
+
+  it('pairs, commands and sends pictures however the engine treats a channel it hands over — #568, and PR #1145’s CI', async () => {
+    // A channel the other end opened in band is handed over in `datachannel`,
+    // and the pinned Chromium was caught doing two things to one: losing a
+    // send made inside the event (#568's first mode), and leaving the channel
+    // `connecting` for good while it still hears the other end — under load,
+    // about one loaded loopback pairing in 500 on 2026-10-05, `control` or
+    // `frames` alike. A stranded `control` is #568's second mode; a stranded
+    // `frames` is `sidelink.browser.spec.ts` failing with "picture 0: the
+    // phone said no-link" (run 37356795884). Neither end is handed a channel
+    // any more, so neither can happen to the link.
+    const { tablet, phone, pass } = await paired({
+      losesSendsInDataChannelEvent: true,
+      strandsHandedChannels: true,
+    });
     expect(phone.link.sideLinkCondition()).toBe('connected');
     phone.link.reportToTablet({ state: 'framing' });
     await flushSideLink();
-    await pass(HEARTBEAT_MILLISECONDS);
-    expect(tablet.control.sideControlState().ended).toBeUndefined();
     expect(tablet.control.sideControlState().phone).toBe('framing');
+    tablet.control.commandSideCamera('start');
+    await flushSideLink();
+    expect(tablet.control.sideControlState().command).toEqual({
+      kind: 'start',
+      status: 'acknowledged',
+    });
+    const heard: SidePicture[] = [];
+    tablet.control.onSideCameraPicture((picture) => heard.push(picture));
+    const picture = { sequence: 0, milliseconds: 0, bytes: cleanFrameBytes(2000) };
+    expect(phone.link.sendPictureToTablet(picture)).toBe('sent');
+    await flushSideLink();
+    expect(heard).toEqual([picture]);
+    await pass(CONNECT_LIMIT_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    expect(phone.link.sideLinkCondition()).toBe('connected');
   });
 
   it('keeps its secret while its channel says it cannot answer, and pairs once it can — #568', async () => {
@@ -178,7 +219,9 @@ describe('pairing, through both codes', () => {
     // can then leave it saying `connecting` while the tablet's pings still
     // arrive. A secret sent then is dropped before it leaves the page, and
     // the phone's next message would end a genuine pairing as not-our-phone.
-    const context = setUp({ strandsHandedChannels: true });
+    // Not seen in the real engine for a channel an end made itself (#568's
+    // fourth fix); the backstop stays, and this is what drives it.
+    const context = setUp({ strandsAnsweringChannels: true });
     const tablet = await offer(context.port);
     const phone = await answer(context.port, tablet.offerCode);
     await tablet.acceptSidePhoneCode(phone.answerCode);
@@ -215,7 +258,7 @@ describe('pairing, through both codes', () => {
     // channel stranded and never put right, both ends now end within the
     // silence bound, and the tablet says why in words that do not blame the
     // network.
-    const context = setUp({ strandsHandedChannels: true });
+    const context = setUp({ strandsAnsweringChannels: true });
     const tablet = await offer(context.port);
     const phone = await answer(context.port, tablet.offerCode);
     await tablet.acceptSidePhoneCode(phone.answerCode);
@@ -623,12 +666,15 @@ describe('pairing, through both codes', () => {
     const tablet = await offer(context.port);
     const phone = await answer(context.port, tablet.offerCode);
     context.time.advance(60_000);
-    // A `control` channel arriving is the phone's sign that the tablet read
-    // its code. One on which the tablet never says anything is a handshake
-    // that never finished, and it is bounded by the machine's limit again.
-    const phonePeer = context.network.peers[1];
-    const stray = context.network.peer().createDataChannel(CONTROL_CHANNEL, { ordered: true });
-    phonePeer?.ondatachannel?.({ channel: stray });
+    // `control` opening is the phone's sign that the tablet read its code
+    // (since #568's fourth fix; a `control` channel ARRIVING was, before).
+    // One on which the tablet never says anything is a handshake that never
+    // finished, and it is bounded by the machine's limit again.
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    Object.assign(phoneControl ?? {}, { readyState: 'open' });
+    phoneControl?.onopen?.();
     expect(phone.secondsForTabletToRead()).toBeUndefined();
     context.time.advance(CONNECT_LIMIT_MILLISECONDS - 1);
     expect(phone.link.sideLinkCondition()).toBe('connecting');
@@ -749,10 +795,12 @@ describe('untrusted input ends the pairing (D-4)', () => {
     expect(tablet.control.sideControlState().ended).toBe('broken');
   });
 
-  it('on the phone, for a second channel of a name it already has', async () => {
+  it('on the phone, for a channel handed over in band, a second of a name it already has included', async () => {
     const { phone, network } = await paired();
-    // #530: the tablet's offer carries `control` AND `frames`, so a THIRD
-    // channel — a second `frames` — is what D-3 does not list.
+    // #530: the link carries `control` AND `frames`, and since #568's fourth
+    // fix each end makes both itself, so ANY channel the other end opens in
+    // band — an older tablet's `control`, a second `frames` — is not one D-3
+    // lists.
     network.peers[1]?.ondatachannel?.({
       channel: {
         label: 'frames',
@@ -1041,9 +1089,10 @@ describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
     const { network } = await paired();
     const [control, frames] = network.peers[0]?.channels ?? [];
     expect(control?.label).toBe(CONTROL_CHANNEL);
-    expect(control?.init).toEqual({ ordered: true });
+    expect(control?.init).toMatchObject({ ordered: true });
+    expect(control?.init?.maxRetransmits).toBeUndefined();
     expect(frames?.label).toBe(FRAMES_CHANNEL);
-    expect(frames?.init).toEqual({ ordered: false, maxRetransmits: 0 });
+    expect(frames?.init).toMatchObject({ ordered: false, maxRetransmits: 0 });
     // Both ends read a picture as an ArrayBuffer, never as a Blob.
     expect(frames?.binaryType).toBe('arraybuffer');
     expect(network.peers[1]?.channels.find((c) => c.label === FRAMES_CHANNEL)?.binaryType).toBe(
