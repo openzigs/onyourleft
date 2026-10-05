@@ -3533,6 +3533,48 @@ that. ⚠️ **Nothing re-checks the 14 s** but
 `nightly-split.test.ts`, which holds 707 + 780 + 4 under the job's stop: a step added before the
 gate, or a slower 7763, eats it first.
 
+#### Four describes to nightly and `QUIET_MS` 100 ms — #1137
+
+[#1137](https://github.com/openzigs/onyourleft/issues/1137) carried PR #1131's two questions to the
+owner, who ruled on 2026-10-05: **lower `reflow-harness.tsx` §`QUIET_MS` from 250 ms to 100 ms**, to
+be kept only if the flaky rate does not rise, and **move four layout and motion describes to
+nightly** (§"The nightly job" above: #941's card-shape margins, #1072's card carry, #945's
+cross-fade, #1014's two-column sections, each with its accessibility or safety half kept required).
+
+**Flakiness, measured both ways.** Locally (a Mac, 12 cores, eight `yes` processes beside the run,
+three workers, `--repeat-each 6`), `reflow`, `controls-first` and `sections` in the `chromium` and
+`nightly` projects — 60 cases a repeat: at 100 ms **720 of 720 passed** over two runs (2 241 s and
+1 996 s of case time, 12.8 and 11.5 min); at 250 ms **360 of 360 passed** (3 166 s, 18.4 min), and a
+first 250 ms run that `GATE_BUDGET_MS`' 840 s stopped had passed its 185. No failure and no retry
+either way (`retries: 0`). On the runner: eight attempts of PR #1138's run, **every case green on
+every attempt** (no flaky failure). 100 ms took about 30–37 % off those three specs' case time
+locally; on the 7763 the `reflow.html` specs' case time fell by about 140 s, of which the
+moved describes are about 85 s. **`QUIET_MS` 100 ms is kept.**
+
+| | Run | CPU | Job | `Checks, concurrently` | Accessibility | Vitest with coverage | Browser gate |
+|---|---|---|--:|--:|--:|--:|--:|
+| **Before**, `main` after #1131 | [37285410833](https://github.com/openzigs/onyourleft/actions/runs/37285410833) | EPYC 7763 | 1333 | 193 | 54 | 384 | 661 |
+| **After**, PR #1138 at b6ae773 | [37288932952](https://github.com/openzigs/onyourleft/actions/runs/37288932952) attempt 1 | EPYC 9V45 | 929 | 149 | 34 | 249 | 462 |
+| | attempt 2 | EPYC 7763 | **1329** | 196 | 54 | 391 | **646** |
+| | attempt 3 | EPYC 7763 | **1301** | 195 | 53 | 384 | **626** |
+| | attempt 4 | EPYC 7763 | **1302** | 192 | 54 | 384 | **630** |
+| | attempt 5 | EPYC 7763 | **1308** | 195 | 53 | 382 | **631** |
+| | attempt 6 | Xeon 6973P-C | 908 | 135 | 34 | 252 | 452 |
+| | attempt 7 | Xeon 8573C | 1075 | 151 | 42 | 298 | 547 |
+| | attempt 8 | EPYC 9V74 | 1281 | 185 | 50 | 367 | 631 |
+
+**On the 7763, n = 4 after: 1 329, 1 301, 1 302 and 1 308 s** — 171, 199, 198 and 192 s clear of
+the 1 500 s stop, the first short of #1137's 180 — with the browser gate
+626–646 s against 647–699 s on #1131's five and 661 s on `main`. So #1137's criterion — a green job
+180 s clear on the 7763 on at least three runs — is met by three of the four. ⚠️ **The gain is
+smaller than the case seconds moved**: about 140 s of case time left the `chromium` run, and the
+gate's step fell about 30 s. The `chromium` project runs each spec FILE in one worker (no
+`fullyParallel`), so its wall time is set by how the files pack onto three workers, and the
+largest files (`list-detail`, `controls-first`, `links`) decide the tail; the rest of the job
+(the concurrent step, Accessibility and Vitest with coverage, about 630 s on the 7763) this does not
+touch. The margin is therefore about 180–200 s and no more, as #1076's was: a spec or step added to
+the job spends it from there.
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
