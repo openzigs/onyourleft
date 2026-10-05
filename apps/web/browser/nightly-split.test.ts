@@ -139,10 +139,12 @@ describe('the browser gate is split into a required run and a nightly one — #8
     }
   });
 
-  it('reads no DEFAULT-world load from a nightly describe, so the world every rider gets stays required — #878’s review', () => {
-    // A nightly describe is about the realistic world (nightly.ts). One that
-    // reads the plain load (`game.html` with no query) is asserting something
-    // about the DEFAULT world, which then reaches main unchecked: #878's first
+  it('reads no DEFAULT-world game load from a nightly describe, so the game every rider gets stays required — #878’s review', () => {
+    // A nightly describe in `game.browser.spec.ts` is about the realistic
+    // world (nightly.ts; the default-world entries there, #1076's and
+    // #1137's, are other specs and owner's exceptions). One that reads the
+    // plain load (`game.html` with no query) is asserting something about the
+    // DEFAULT world's game, which then reaches main unchecked: #878's first
     // cut did exactly that with #501's shader-compile case and D-7's "the
     // default world fetches none of the realistic set". Those halves belong in
     // a required describe, where the plain load is already paid for.

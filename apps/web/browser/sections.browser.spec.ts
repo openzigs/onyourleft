@@ -79,6 +79,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { NIGHTLY } from './nightly';
 
 interface Viewport {
   readonly name: string;
@@ -317,7 +318,14 @@ function hashOf(route: RouteDefinition): string {
   return `#${route.path}`;
 }
 
-test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
+/*
+ * The two #1014 describes below run NIGHTLY since #1137, on the owner's ruling
+ * of 2026-10-05 (`nightly.ts`). What stays required on these screens: #1014's
+ * detail panes and #1026's row balance (below them), the first control above
+ * the fold both ways up on the tablet (`controls-first`), and reflow at 320 px
+ * and on a phone (`reflow`).
+ */
+test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: NIGHTLY }, () => {
   test('the walk finds the screens #1014 names', () => {
     expect(SECTIONS.map((route) => route.id).sort()).toEqual([
       'about',
@@ -419,7 +427,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
   });
 });
 
-test.describe('#1014 — the sections are read across, in rows', () => {
+test.describe('#1014 — the sections are read across, in rows', { tag: NIGHTLY }, () => {
   for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT]) {
     test(`row-major at ${viewport.name}, and fails under the first cut's columns`, async ({
       page: grid,

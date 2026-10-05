@@ -111,8 +111,19 @@ import {
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
 
-/** How long the DOM must be still before a route counts as settled. */
-const QUIET_MS = 250;
+/**
+ * How long the DOM must be still before a route counts as settled.
+ *
+ * 100 ms since #1137 (it was 250), on the owner's ruling of 2026-10-05 to try
+ * it and keep it only if the flaky rate does not rise; PR #1138 records the
+ * measurement, under CPU load locally and on the runner (CI run 37288932952).
+ * Every route visit pays it at least once, so it is about 40 % of the case
+ * time of the walks on this page. What guards the shapes that resolved too
+ * early before is not this number: {@link untilViewShown} (a Suspense
+ * fallback is not a shown view) and {@link viewTransitionsFinished} (a fade's
+ * still DOM is not a settled one).
+ */
+const QUIET_MS = 100;
 /** The most a route is waited for, first for its `h1` and then for quiet. */
 const PATIENCE_MS = 10_000;
 

@@ -44,6 +44,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { MOTION_DURATION_MS } from '../src/design/tokens';
 import { hrefFor, routeById, type RouteId } from '../src/shell/routes';
 
+import { NIGHTLY } from './nightly';
+
 interface TransitionLog {
   started: number;
   settled: number;
@@ -337,7 +339,16 @@ async function counted(page: Page, id: RouteId): Promise<number> {
   return (await go(page, id)).started - before;
 }
 
-test.describe('the route cross-fade — #945', () => {
+/*
+ * The cross-fade itself — that a menu navigation starts exactly one view
+ * transition (with its control) and that it lasts the medium motion token —
+ * runs NIGHTLY since #1137, on the owner's ruling of 2026-10-05 (`nightly.ts`).
+ * Everything else in #945 stays in the required describe below: the
+ * reduced-motion pair, the ride routes that must never fade or be pressed
+ * through a fade (each with its own count of a menu fade as a control), focus
+ * and the title under a fade, and a failed chunk leaving no transition hanging.
+ */
+test.describe('the route cross-fade — #945, how it runs', { tag: NIGHTLY }, () => {
   test('Home → Activities starts exactly one view transition', async ({ page }) => {
     await open(page, '');
     expect(await counted(page, 'activities')).toBe(1);
@@ -350,6 +361,17 @@ test.describe('the route cross-fade — #945', () => {
     expect(await counted(page, 'activities')).toBe(0);
   });
 
+  test('is short: every animation it runs lasts the medium motion token', async ({ page }) => {
+    await open(page, '');
+    await go(page, 'activities');
+    const { longest } = await log(page);
+    console.log(`#945: the longest view-transition animation ran ${String(longest)} ms`);
+    expect(longest).toHaveLength(1);
+    expect(longest[0]).toBe(MOTION_DURATION_MS.medium);
+  });
+});
+
+test.describe('the route cross-fade — #945', () => {
   test('never to or from a ride route', async ({ page }) => {
     await open(page, '');
     const counts = {
@@ -379,15 +401,6 @@ test.describe('the route cross-fade — #945', () => {
     expect(await counted(page, 'ride')).toBe(0);
     expect(await counted(page, 'home')).toBe(0);
     expect(await counted(page, 'activities')).toBe(1);
-  });
-
-  test('is short: every animation it runs lasts the medium motion token', async ({ page }) => {
-    await open(page, '');
-    await go(page, 'activities');
-    const { longest } = await log(page);
-    console.log(`#945: the longest view-transition animation ran ${String(longest)} ms`);
-    expect(longest).toHaveLength(1);
-    expect(longest[0]).toBe(MOTION_DURATION_MS.medium);
   });
 
   test('reduced motion: at most one transition, and no animation over 1 ms', async ({ page }) => {
