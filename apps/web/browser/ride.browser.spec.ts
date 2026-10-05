@@ -919,9 +919,67 @@ test.describe('a ride with a standing notice', () => {
           );
         });
       }
+
+      // #1120's control for this fixture, on the same load: at 360×800 the
+      // plain ride had room without the fallback, and what failed on `main`
+      // was this one — the notice beside the moving time as a third row. The
+      // anchor blocks out and no fallback in their place must give a finding
+      // here, or the "without anchor positioning" pass above is as true of a
+      // fallback that was never needed.
+      if (viewport.width === 360 && viewport.height === 800) {
+        await test.step('the control — without anchors and without the fallback (#1120)', async () => {
+          const bare = await withoutAnchors(page, 'none');
+          const found = standingNoticeFindings(bare, viewport);
+          console.log(
+            `#1120 control with Trainer notice — ${viewport.name} — as main laid it out ` +
+              `without anchors: ${found.length === 0 ? 'nothing found' : found.join('; ')}`,
+          );
+          expect(found).not.toEqual([]);
+        });
+      }
     });
   }
 });
+
+/**
+ * What §"a ride with a standing notice" holds, as findings rather than
+ * assertions, for #1120's control: a laid-out panel outside the viewport, over
+ * another, or over the leaning rider; *Pause* or *End ride* off the screen or
+ * covered; and the moving time over the rider, a control or a panel it is not
+ * drawn wholly inside.
+ */
+function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): string[] {
+  const leaning = riderBox(viewport);
+  const laidOut = seen.panels.filter((each) => each.box.height > 0);
+  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+  laidOut.forEach((a, index) => {
+    for (const b of laidOut.slice(index + 1)) {
+      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  found.push(...laidOut.filter((each) => overlap(each.box, leaning)).map(describeItem));
+  for (const name of ['control: Pause', 'control: End ride']) {
+    const item = named(seen.items, name);
+    if (!inside(item.box, viewport) || !item.onTop) found.push(describeItem(item));
+  }
+  const moving = named(seen.items, 'reading: Moving');
+  const within = (inner: Box, outer: Box): boolean =>
+    inner.left >= outer.left &&
+    inner.right <= outer.right &&
+    inner.top >= outer.top &&
+    inner.bottom <= outer.bottom;
+  if (overlap(moving.box, leaning)) found.push(`${describeItem(moving)} over the rider`);
+  for (const each of seen.items.filter((item) => item.name.startsWith('control: '))) {
+    if (overlap(each.box, moving.box))
+      found.push(`${describeItem(moving)} × ${describeItem(each)}`);
+  }
+  for (const each of laidOut) {
+    if (overlap(each.box, moving.box) && !within(moving.box, each.box)) {
+      found.push(`${describeItem(moving)} × ${describeItem(each)}`);
+    }
+  }
+  return found;
+}
 
 /**
  * #585 — a running workout's stall rescue, on the game's HUD (PR #599's

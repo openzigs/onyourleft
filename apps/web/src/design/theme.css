@@ -6396,10 +6396,29 @@ select.oyl-input {
  * publishes both, and holds both to no overlap. Measured in Chromium 124 on a Mac, nothing on the stage overlaps
  * anything at any of the nine overlay viewports in fourteen states.
  *
+ * ⚠️ **That 6 px rests on the trainer line wrapping to at most TWO lines.**
+ * Here the line has 326 px less 7 rem, 214 px at 360 px, so two lines are
+ * about 428 px; the longest sentence `fields.ts` §`trainerLine` can produce
+ * (`Trainer: simulating -40.0% (99999 sent)`, the steepest grade a trainer is
+ * sent and over 27 hours of writes) is about 310 px. A third line would put the
+ * actions panel about 19 px INTO the leaning rider's box. `fields.test.ts`
+ * §"wraps to at most two lines" holds the sentence to that budget on save, by
+ * estimate; the browser gate is the measurement.
+ *
  * ⚠️ With *Trainer notice* (#437) it is set above the actions panel, on its
  * own surface, as with anchors — in the empty row over the controls
  * (`grid-area: 4 / 1 / 5 / 2`, every line named: an `auto` line is the grid's
  * padding edge for an absolutely positioned item).
+ *
+ * The `calc(var(--oyl-space-sm) + 1px)` insets are the actions panel's own
+ * padding and border (`.oyl-hud__panel`): grid placement's containing block is
+ * the grid area's outer edge, so the field is moved in by both to sit where the
+ * panel's content begins, as `anchor()` against the controls puts it. And there
+ * is no `justify-content: center` here, unlike the anchored rule: there the
+ * field is stretched to the controls' height (`top` and `bottom` both set) and
+ * centred in it; here only `top` is set, the field is its own content's height,
+ * and centring has no space to act on — the controls are not an edge grid
+ * placement can reach.
  */
 @supports not (anchor-name: --oyl-probe) {
   @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
