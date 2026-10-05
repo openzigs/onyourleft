@@ -325,6 +325,13 @@ export interface ActivityRecord {
    * third light, and `analysis/load.ts` records why that is reported rather
    * than corrected: inventing the missing third is the fabrication the gap rule
    * exists to prevent.
+   *
+   * ⚠️ **`0` with no basis beside it is a marker, not a measurement** (#1084):
+   * the client found nothing a load could be worked out from — too short, or
+   * no usable power or heart rate — and says so rather than leaving the field
+   * absent, which reads as a ride nobody has worked out yet.
+   * `apps/web/src/analysis/summary.ts` §`NO_LOAD_TO_WORK_OUT` owns the rule;
+   * this store round-trips it as written, and no migration was needed.
    */
   readonly loadCoveredTime?: Seconds;
 
