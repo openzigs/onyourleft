@@ -61,6 +61,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { NIGHTLY } from './nightly';
 import type { ReflowMeasurement } from './reflow-harness';
 
 /** `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`, for its reason (#439). */
@@ -1342,7 +1343,14 @@ function boundFor(before: PrimaryMargin): number {
   return before.margin - before.cardsAbove * SHAPE_CARD_COST_PIXELS - 0.5;
 }
 
-test.describe('#941 — cards with their shape drawn on them', () => {
+/*
+ * #941 is two describes since #1137. The primaries' margins with the drawings
+ * on and their control are LAYOUT measurements, and run NIGHTLY on the owner's
+ * ruling of 2026-10-05 (`nightly.ts`); what a card's drawing is to assistive
+ * technology (one `aria-hidden` shape, empty of text) and its link's 44 × 44
+ * target stay in the required describe below it.
+ */
+test.describe('#941 — the drawings’ cost to each primary', { tag: NIGHTLY }, () => {
   /*
    * In both palettes (#941 asks for both), parametrised over `THEMES` with
    * `colorScheme` as the reflow walk is. Not only for form's sake: the dark
@@ -1417,7 +1425,9 @@ test.describe('#941 — cards with their shape drawn on them', () => {
     expect(before?.cardsAbove ?? 0).toBeGreaterThan(0);
     expect(tall?.margin ?? Number.POSITIVE_INFINITY).toBeLessThan(bound);
   });
+});
 
+test.describe('#941 — cards with their shape drawn on them', () => {
   for (const theme of THEMES) {
     test(`every card carries one painted, aria-hidden shape, in the ${theme} palette`, async ({
       page,
@@ -1582,53 +1592,56 @@ function rgbOf(hex: string): string {
  * pane always runs. And under `prefers-reduced-motion: reduce` a press must
  * move nothing either, with the same press under no preference, on a list
  * mounted afresh in the same page, as that case's control.
+ *
+ * Since #1137 the carry runs NIGHTLY (`nightly.ts`, the owner's ruling of
+ * 2026-10-05) and the reduced-motion case is its own describe, which stays in
+ * the required job; the helpers below are shared by both.
  */
-test.describe('#1072 — a card carried into its detail', () => {
-  /** Frames whose transform was off rest, read for 0.7 s around `act`. */
-  async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
-    await page.evaluate(() => {
-      const held = window as unknown as { oylCarry?: string[] };
-      held.oylCarry = [];
-      const until = performance.now() + 700;
-      const sample = (): void => {
-        const wrapper = document.querySelector(
-          '[data-oyl-pane="detail"] .oyl-list-detail__carried',
-        );
-        if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
-        if (performance.now() < until) requestAnimationFrame(sample);
-      };
-      requestAnimationFrame(sample);
-    });
-    await act();
-    await page.waitForTimeout(750);
-    const frames = await page.evaluate(
-      () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
-    );
-    expect(frames.length, 'no frame of the detail was read').toBeGreaterThan(10);
-    // It ends where it belongs, whatever happened on the way.
-    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
-    return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');
-  }
 
-  /** Motion's features arrive in a chunk of their own; a press before them is not carried. */
-  async function motionLoaded(page: Page): Promise<void> {
-    await page.waitForFunction(() =>
-      performance
-        .getEntriesByType('resource')
-        .some((entry) => entry.name.includes('motion-features')),
-    );
-    await page.waitForTimeout(100);
-  }
-
-  async function press(page: Page, route: RouteDefinition): Promise<() => Promise<void>> {
-    await visit(page, route, hrefFor(route));
-    await motionLoaded(page);
-    const id = await selectionOf(page, route);
-    return async () => {
-      await page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`).click();
+/** Frames whose transform was off rest, read for 0.7 s around `act`. */
+async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
+  await page.evaluate(() => {
+    const held = window as unknown as { oylCarry?: string[] };
+    held.oylCarry = [];
+    const until = performance.now() + 700;
+    const sample = (): void => {
+      const wrapper = document.querySelector('[data-oyl-pane="detail"] .oyl-list-detail__carried');
+      if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
+      if (performance.now() < until) requestAnimationFrame(sample);
     };
-  }
+    requestAnimationFrame(sample);
+  });
+  await act();
+  await page.waitForTimeout(750);
+  const frames = await page.evaluate(
+    () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
+  );
+  expect(frames.length, 'no frame of the detail was read').toBeGreaterThan(10);
+  // It ends where it belongs, whatever happened on the way.
+  expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
+  return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');
+}
 
+/** Motion's features arrive in a chunk of their own; a press before them is not carried. */
+async function motionLoaded(page: Page): Promise<void> {
+  await page.waitForFunction(() =>
+    performance
+      .getEntriesByType('resource')
+      .some((entry) => entry.name.includes('motion-features')),
+  );
+  await page.waitForTimeout(100);
+}
+
+async function press(page: Page, route: RouteDefinition): Promise<() => Promise<void>> {
+  await visit(page, route, hrefFor(route));
+  await motionLoaded(page);
+  const id = await selectionOf(page, route);
+  return async () => {
+    await page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`).click();
+  };
+}
+
+test.describe('#1072 — a card carried into its detail', { tag: NIGHTLY }, () => {
   for (const viewport of [SHORT_LANDSCAPE, PHONE]) {
     test(`on every list–detail route at ${viewport.name}, and the control by address`, async ({
       page,
@@ -1658,7 +1671,13 @@ test.describe('#1072 — a card carried into its detail', () => {
       }
     });
   }
+});
 
+/*
+ * #1072's reduced-motion half stays REQUIRED (#1137): a rider who asked for
+ * less motion is an accessibility claim, and the carry above it is appearance.
+ */
+test.describe('#1072 — a card is not carried under reduced motion', () => {
   test('under reduced motion a press moves nothing, and the control moves', async ({ page }) => {
     // Asked before the page loads: Motion reads the preference when an
     // element mounts (ADR 0041's amendment for #1072 says what that costs).

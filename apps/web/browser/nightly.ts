@@ -20,14 +20,24 @@
  * What may NOT be listed, whatever it costs (#866): anything that gates
  * trainer control; privacy (no network, no picture, masking, scoping,
  * erasure); licences and notices; accessibility and layout; the wiring gate —
- * with ONE exception, the owner's of 2026-10-03 (#1076), named below. Any
- * further exception is the owner's ruling, recorded here and in CLAUDE.md §4c.
+ * with the owner's exceptions, named below: #1076's of 2026-10-03 and
+ * #1137's of 2026-10-05. Any further exception is the owner's ruling,
+ * recorded here and in CLAUDE.md §4c.
  * Every describe below but one draws the REALISTIC world, which is a rung a
  * rider chooses in Settings and is off by default (ADR 0026 D-3), or measures
  * the owner's instruments for it. The one is #1076's: the reflow walk's DARK
  * palette, which the owner moved on 2026-10-03 with its light twin kept
  * required — so layout stays a required gate, in the palette every rider
  * starts in, and what moved is the repeat of it in the other.
+ *
+ * #1137's (the owner's ruling of 2026-10-05, to bring the required job 180 s
+ * clear of its stop on the EPYC 7763) moved four LAYOUT and MOTION checks of
+ * the default world: #941's card-shape margins, #1072's card carry, #945's
+ * cross-fade and #1014's two-column sections. Each entry names the required
+ * test that still holds the accessibility or safety half of its claim; where
+ * a describe held both, it was SPLIT and only the appearance half is tagged —
+ * reduced motion, focus, a 44 × 44 target, an `aria-hidden` drawing and every
+ * ride-route case of #945 stay required.
  */
 
 /**
@@ -113,5 +123,65 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'scrollbar). The dark palette’s colours stay required in `theme.browser.spec.ts`, ' +
       '`links`, `button-hierarchy` and `controls-first`. Moved on the owner’s ruling of ' +
       '2026-10-03 (#1076).',
+  },
+  {
+    spec: 'list-detail.browser.spec.ts',
+    describe: '#941 — the drawings’ cost to each primary',
+    seconds:
+      '32.6 s of case time on the EPYC 7763 (run 37244296171): eight margin walks and the control',
+    why:
+      'how far a primary action moves down once the cards carry their drawing, against ' +
+      '#982’s bound, in both palettes. Layout, moved on the owner’s ruling of 2026-10-05 ' +
+      '(#1137). Still required: the first control above the fold with the 50 px floor on every ' +
+      'route at the tablet and the phone (`controls-first`), each primary’s place on the ' +
+      'list–detail routes (#670 in this spec), and #941’s accessibility half — one ' +
+      '`aria-hidden` drawing per card and the card link’s 44 × 44 target — in the describe ' +
+      'that keeps #941’s name.',
+  },
+  {
+    spec: 'list-detail.browser.spec.ts',
+    describe: '#1072 — a card carried into its detail',
+    seconds: '15.7 s of case time on the EPYC 7763 (run 37244296171): two walks',
+    why:
+      'that a press carries a card into its detail on every list–detail route at two ' +
+      'viewports, and that a selection by address does not. Motion, moved on the owner’s ' +
+      'ruling of 2026-10-05 (#1137). Still required: `#1072 — a card is not carried under ' +
+      'reduced motion`, which also holds that a press with no preference DOES carry, as its ' +
+      'control; and #670’s focus and selection cases, which run with the motion at no ' +
+      'duration.',
+  },
+  {
+    spec: 'motion.browser.spec.ts',
+    describe: 'the route cross-fade — #945, how it runs',
+    seconds: '3.2 s of case time on the EPYC 7763 (run 37244296171): three cases',
+    why:
+      'that a menu navigation starts exactly one view transition, its control, and that the ' +
+      'fade lasts the medium motion token — appearance, moved on the owner’s ruling of ' +
+      '2026-10-05 (#1137). ⚠️ Of #945’s 21.6 s only these 3.2 s are the fade alone: the ' +
+      'reduced-motion pair (the owner’s), the ride routes that must never fade or be pressed ' +
+      'through a fade (#945’s review, safety), focus and the title under a fade, and a failed ' +
+      'chunk leaving no transition hanging stay in the required `the route cross-fade — #945`, ' +
+      'whose ride-route case still counts one fade for a menu navigation as its control.',
+  },
+  {
+    spec: 'sections.browser.spec.ts',
+    describe: '#1014 — a screen of sections uses a tablet’s width',
+    seconds: '16.6 s of case time on the EPYC 7763 (run 37244296171): four walks',
+    why:
+      'that the `sections` routes lay out in columns across a tablet both ways up, one column ' +
+      'on a phone, with prose as the control. Layout, moved on the owner’s ruling of ' +
+      '2026-10-05 (#1137). Still required: reflow at 320 px and on a phone (`reflow`), the ' +
+      'first control above the fold on the tablet both ways up (`controls-first`), #1014’s ' +
+      'detail panes and #1026’s row balance in this spec.',
+  },
+  {
+    spec: 'sections.browser.spec.ts',
+    describe: '#1014 — the sections are read across, in rows',
+    seconds: '17.4 s of case time on the EPYC 7763 (run 37244296171): two walks of two pages',
+    why:
+      'that the sections are row-major on the tablet, with CSS columns as the control. ' +
+      'Layout, moved on the owner’s ruling of 2026-10-05 (#1137). The grid places sections in ' +
+      'DOM order with no `dense` packing, so the tab order is not this layout’s to change; ' +
+      'still required are #1026’s row balance in this spec, and `controls-first` and `reflow`.',
   },
 ];
