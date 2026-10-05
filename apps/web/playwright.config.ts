@@ -245,7 +245,7 @@ export const GAME_PART_MS = 85_000;
  * and the coverage steps still run, rather than as a job cancelled with
  * nothing named.
  *
- * ⚠️ **The arithmetic, on the 7763.** The step starts at most 707 s in (seven
+ * ⚠️ **The arithmetic, on the 7763.** The step starts at most 707 s in (eight
  * runs, 650–707 s); 707 + 765 + 10 (the kill) is 1 482 s, and the coverage
  * publish and upload take 4 s, so the step ends 14 s inside the job's 1 500.
  * The step's `timeout-minutes: 13` (780 s) is the backstop, ending it by

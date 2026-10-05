@@ -3449,11 +3449,14 @@ owner's plan of 2026-10-04):
 | | [37269334621](https://github.com/openzigs/onyourleft/actions/runs/37269334621) attempt 2 | EPYC 7763 | **1362** | 195 | 53 | 382 | **672** |
 | The same with the step bound, at 5b0d8618 | [37274106339](https://github.com/openzigs/onyourleft/actions/runs/37274106339) attempt 1 | Xeon 8573C | 1041 | 145 | 40 | 285 | 532 |
 | | [37274106339](https://github.com/openzigs/onyourleft/actions/runs/37274106339) attempt 2 | EPYC 7763 | **1409** | 212 | 56 | 396 | **699** |
+| The `chromium` stop at 720 s, d96ba0f2 | [37278024081](https://github.com/openzigs/onyourleft/actions/runs/37278024081) attempt 1 | EPYC 9V74 | 1296 | 188 | 50 | 367 | 651 |
+| | [37278024081](https://github.com/openzigs/onyourleft/actions/runs/37278024081) attempt 2 | EPYC 7763 | **1337** | 198 | 54 | 381 | **660** |
 
-**What it bought — n = 4 on the 7763, so samples and not a figure**: 1 347 s, 1 301 s, 1 362 s and
-1 409 s (median 1 355) against 1 346–1 443 s (median 1 373) on the twelve runs above, the browser
-gate 669 s, 647 s, 672 s and 699 s against 696–742 s. ⚠️ **#1128's "at least 180 s clear" is met by
-one of the four (199 s) and not by the other three (153 s, 138 s and 91 s)**: the fourth ran on a
+**What it bought — n = 5 on the 7763, so samples and not a figure**: 1 347 s, 1 301 s, 1 362 s,
+1 409 s and 1 337 s (median 1 347) against 1 346–1 443 s (median 1 373) on the twelve runs above,
+the browser gate 669 s, 647 s, 672 s, 699 s and 660 s against 696–742 s. ⚠️ **#1128's "at least
+180 s clear" is met by one of the five (199 s) and not by the other four (153 s, 138 s, 91 s and
+163 s)**: the fourth ran on a
 slow 7763 (its concurrent step 212 s and Vitest 396 s, both the slowest here, which this PR does not
 touch), so read the gain as about 20–70 s of job, which a spec added to the gate spends again. The cuts
 that would buy more are the owner's (the questions on PR #1131: `QUIET_MS`, and nightly
@@ -3490,10 +3493,10 @@ preview` servers with it**: Playwright starts them in a process group of their o
 left running (their stdio were sockets to the dead runner, not the step's output, so the step still
 ended in 60 s). On CI the runner removes them at the end of the job.
 
-**The arithmetic, on the 7763.** The gate's step started **650 to 707 s** into the job on seven
+**The arithmetic, on the 7763.** The gate's step started **650 to 707 s** into the job on eight
 runs (`gh api …/attempts/N/jobs`; 37261811267 attempt 5 at 650 s, `main`'s
 [37250669777](https://github.com/openzigs/onyourleft/actions/runs/37250669777) at 707 s, the final
-head's 37269334621 attempt 2 at 683 s, 37274106339 attempt 2 at 703 s), and the coverage publish, upload and post steps after it
+head's 37269334621 attempt 2 at 683 s, 37274106339 attempt 2 at 703 s, 37278024081 attempt 2 at 670 s), and the coverage publish, upload and post steps after it
 took 4 s.
 
 | | seconds |
