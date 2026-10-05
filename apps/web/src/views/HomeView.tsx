@@ -237,8 +237,14 @@ function Rides({
             <div>
               <dt>Load</dt>
               <dd>
+                {/* #1084: "not worked out yet" promises the backfill can; for a
+                    ride with nothing to work a load out from it cannot. */}
                 {last.load === undefined ? (
-                  'not worked out yet'
+                  last.noLoadToWorkOut ? (
+                    'none: nothing on this ride to work one out from'
+                  ) : (
+                    'not worked out yet'
+                  )
                 ) : (
                   <Reading value={String(Math.round(last.load))} />
                 )}
@@ -254,10 +260,22 @@ function Rides({
       <section className="oyl-panel" aria-labelledby="oyl-home-form">
         <h2 id="oyl-home-form">Fitness and freshness</h2>
         {readings.length === 0 ? (
-          <p className="oyl-muted">
-            No ride here has a load yet, so there is nothing to smooth.{' '}
-            <a href={hrefFor(routeById('analysis'))}>Analysis</a> can work them out.
-          </p>
+          data.loadsToWorkOut === 0 && !data.truncated ? (
+            // #1084: every ride here was found to have nothing a load could
+            // come from, so there is nothing for Analysis to work out. Not when
+            // the history was cut short: `loadsToWorkOut` counts only the rides
+            // inside `HISTORY_ACTIVITY_LIMIT`, and one past it may still need
+            // working out (#1084's review).
+            <p className="oyl-muted">
+              No ride here has a load, so there is nothing to smooth: nothing on any of them was
+              enough to work one out from.
+            </p>
+          ) : (
+            <p className="oyl-muted">
+              No ride here has a load yet, so there is nothing to smooth.{' '}
+              <a href={hrefFor(routeById('analysis'))}>Analysis</a> can work them out.
+            </p>
+          )
         ) : (
           <>
             <ul>

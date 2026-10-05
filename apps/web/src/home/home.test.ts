@@ -68,6 +68,7 @@ const anyRide: HomeLastRide = {
   movingTime: seconds(60),
   distance: metres(100),
   load: undefined,
+  noLoadToWorkOut: false,
 };
 
 describe('the read budget — #428', () => {
@@ -520,5 +521,53 @@ describe('next up — #1010', () => {
         },
       ),
     ).toEqual({ kind: 'free' });
+  });
+});
+
+describe('a ride that can never have a load — #1084', () => {
+  it('tells "nothing to work out" apart from "not worked out yet"', async () => {
+    const marked = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('marked', 1, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+      ]),
+      NOW,
+    );
+    expect(marked.lastRide?.load).toBeUndefined();
+    expect(marked.lastRide?.noLoadToWorkOut).toBe(true);
+    expect(marked.loadsToWorkOut).toBe(0);
+    // No invented zero in the week either: a ride, and no ride with a load.
+    expect(marked.week.rides).toBe(1);
+    expect(marked.week.ridesWithLoad).toBe(0);
+
+    const bare = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('bare', 1, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+      ]),
+      NOW,
+    );
+    expect(bare.lastRide?.load).toBeUndefined();
+    expect(bare.lastRide?.noLoadToWorkOut).toBe(false);
+    expect(bare.loadsToWorkOut).toBe(1);
+  });
+
+  it('reads a stale 0 W ride as still to work out until the backfill marks it', async () => {
+    const stale = await loadHome(
+      stubAnalysis(OWNER, [ride('stale', 1, { effortWeightedPower: watts(0) })]),
+      NOW,
+    );
+    expect(stale.lastRide?.noLoadToWorkOut).toBe(false);
+    expect(stale.loadsToWorkOut).toBe(1);
+  });
+
+  it('counts only the rides the backfill could still work out', async () => {
+    const home = await loadHome(
+      stubAnalysis(OWNER, [
+        ride('loaded', 3),
+        ride('marked', 2, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+        ride('bare', 1, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+      ]),
+      NOW,
+    );
+    expect(home.loadsToWorkOut).toBe(1);
   });
 });

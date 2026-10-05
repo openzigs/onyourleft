@@ -74,7 +74,7 @@ import type {
   StreamChannelValue,
 } from '@onyourleft/store';
 
-import { loadSummaryOf } from '../analysis/summary';
+import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
 /** The activity and the samples behind it, ready to write. */
@@ -154,8 +154,9 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     // reason too: the fitness chart's own criterion forbids decoding streams to
     // draw it, so the threshold-independent half has to be stored at write
     // time or never. `analysis/summary.ts` records why the load itself is not.
-    ...(loadSummaryOf({ power, heartRate: series.channels.heartRate }, series.sampleInterval) ??
-      {}),
+    // #1084: a ride with nothing to work a load out from is marked so, rather
+    // than stored as nothing — which reads as a ride not worked out yet.
+    ...loadSummaryToStore({ power, heartRate: series.channels.heartRate }, series.sampleInterval),
     // #947: what the badges need, worked out while the samples are in hand —
     // and the two things only the ride itself knew, which nothing can find out
     // later. `progress/ride-facts.ts` says why at save rather than on Home.
