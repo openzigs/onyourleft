@@ -45,6 +45,7 @@ import {
   RIDE_NOTIFICATION_REFUSED,
 } from '../ride/controller';
 import type { RecordingCheckpointStore } from '../recording/recorder';
+import { accessibleName } from '../a11y/audit';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
 import { RideView } from './RideView';
@@ -428,7 +429,7 @@ describe('#1012 — one sensor banner, and the readings as Readings', () => {
     ['before a ride', idleSnapshot()],
     ['while recording', { ...idleSnapshot(), phase: 'recording' as const, elapsedSeconds: 30 }],
   ] as const) {
-    it(`with nothing paired ${name}, says so ONCE, with one Pair link to Devices and no tiles`, async () => {
+    it(`with nothing paired ${name}, says so ONCE, with one Pair a sensor link to Devices and no tiles`, async () => {
       await show(stubRideController(snapshot));
 
       expect(banners()).toHaveLength(1);
@@ -438,8 +439,15 @@ describe('#1012 — one sensor banner, and the readings as Readings', () => {
       );
       const links = queryAll<HTMLAnchorElement>(banner ?? document, 'a');
       expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-        ['Pair', '#/devices'],
+        ['Pair a sensor', '#/devices'],
       ]);
+      // #1021: the link's NAME says what it pairs, so a link list or a Tab
+      // does not announce a bare "Pair, link" (WCAG 2.4.4).
+      const pair = links[0];
+      if (pair === undefined) {
+        throw new Error('no Pair link');
+      }
+      expect(accessibleName(pair)).toBe('Pair a sensor');
       // Drawn as a button, and a secondary one: the screen's primary is the
       // ride's own next step (#668).
       expect(links[0]?.className).toContain('oyl-button--secondary');
