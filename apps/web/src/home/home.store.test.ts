@@ -12,7 +12,7 @@
  * handle first, CLAUDE.md §5).
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { metres, unixSeconds } from '@onyourleft/domain';
 import { activityId } from '@onyourleft/store';
 import {
   ATHLETE_A,
@@ -75,19 +75,23 @@ const WEEK = 7 * 86_400;
 /** Weeks of riding at the recent end, one ride each, the newest this week. */
 const RECENT_WEEKS = 12;
 /**
- * About 5,020 puts to fake-indexeddb. Slowest figures: 8.9 s under coverage on
- * CI (run 37244354955, the case before athlete B's rides were added) and
- * 12.6–14.4 s locally on #1126's review. 45 s is about three times the
- * slowest, §4c's convention; 30 s was only twice it.
+ * About 5,020 puts to fake-indexeddb. Slowest figures: 11.2 s under coverage
+ * on CI (#1130's measurement, with athlete B's rides) and 12.6–14.4 s locally
+ * on #1126's review. 45 s is about three times the slowest, §4c's convention;
+ * 30 s was only twice it.
  */
 const SEEDING_TIMEOUT_MILLISECONDS = 45_000;
 /** Athlete B's rides: older than all of A's, and newer than all of A's. */
+/** An old ride's distance: the 5,000 of them total exactly 5,000 km. */
+const OLD_RIDE_METRES = 1_000;
+/** A recent ride's: the tenth, oldest first, takes the total to 10,000 km. */
+const RECENT_RIDE_METRES = 500_000;
 const B_OLDER = ['b-older-0', 'b-older-1', 'b-older-2'];
 const B_NEWER = ['b-newer-0', 'b-newer-1', 'b-newer-2'];
 
-describe('#1107 — past the read budget, Home reads the NEWEST rides, through the real store', () => {
+describe('#1107, #1130 — past the read budget, Home reads the NEWEST rides and the badges keep moving, through the real store', () => {
   it(
-    'keeps the current streak and the last ride past 5,000 rides, takes the badges from the oldest, and reads no other athlete’s rides',
+    'keeps the current streak and the last ride past 5,000 rides, earns the badges over the whole history, and reads no other athlete’s rides',
     async () => {
       const open = createStoreHarness();
       harness = open;
@@ -97,10 +101,10 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
       const old = HISTORY_ACTIVITY_LIMIT;
       const OLD_FROM = 1_500_000_000;
       await open.write(async (store) => {
-        // Athlete B either side of every ride of A's (CLAUDE.md §6), so a read
-        // of either window that dropped the owner would take B's first: the
-        // oldest read would start with B's older rides, the newest with B's
-        // newer ones.
+        // Athlete B either side of every ride of A's (CLAUDE.md §6). A newest
+        // read that dropped the owner would begin with B's newer rides, and a
+        // forward walk that did would begin with B's older ones; the
+        // assertions below look for B's ids in what each produced.
         for (const [index, id] of B_OLDER.entries()) {
           await store.putActivity(
             rideFor(ATHLETE_B, {
@@ -126,6 +130,7 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
             rideFor(ATHLETE_A, {
               id: activityId(`old-${String(index).padStart(5, '0')}`),
               startedAt: unixSeconds(OLD_FROM + index * 60),
+              distance: metres(OLD_RIDE_METRES),
               startedAtTimeZone: 'UTC',
             }),
           );
@@ -136,6 +141,7 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
               id: activityId(`recent-${String(week).padStart(2, '0')}`),
               name: `Recent ${String(week)}`,
               startedAt: unixSeconds(NOW - 3_600 - week * WEEK),
+              distance: metres(RECENT_RIDE_METRES),
               startedAtTimeZone: 'UTC',
             }),
           );
@@ -150,22 +156,32 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
       expect(home.lastRide?.name).toBe('Recent 0');
       expect(home.week.rides).toBe(1);
       expect(home.progress.streak.current).toBe(RECENT_WEEKS);
-      // The badges are claims about the whole history, so they come from the
-      // oldest window: the first ride is the oldest one, not the 5,000th-newest.
+      // The badges are claims about the whole history: the first ride is the
+      // oldest one, not the 5,000th-newest…
       const first = home.progress.badges.find(
         (badge) => badge.kind === 'first' && badge.first === 'ride',
       );
       expect(first?.activityId).toBe(activityId('old-00000'));
+      const distance = (metresCrossed: number): string | undefined =>
+        home.progress.badges.find(
+          (badge) => badge.kind === 'distance' && badge.metres === metresCrossed,
+        )?.activityId;
+      expect(distance(5_000_000)).toBe(activityId('old-04999'));
+      // …and they keep moving past it (#1130): 10,000 km is crossed by a ride
+      // in neither the oldest 5,000 nor anything #1107 read for the badges.
+      expect(distance(10_000_000)).toBe(activityId('recent-02'));
+      expect(home.progress.rides).toBe(old + RECENT_WEEKS);
+      // Every ride of A's, read once, oldest first.
+      expect(home.summaries).toHaveLength(old + RECENT_WEEKS);
       expect(home.summaries[0]?.id).toBe(activityId('old-00000'));
+      expect(home.summaries.at(-1)?.id).toBe(activityId('recent-00'));
 
-      // Nothing of athlete B's, in either window or anything derived from them.
+      // Nothing of athlete B's in the rows the badges came from (the walk and
+      // the newest window together), in the badges, or in the last ride.
       const theirs = new Set<string>([...B_OLDER, ...B_NEWER]);
       expect(home.summaries.filter((summary) => theirs.has(summary.id))).toEqual([]);
       expect(home.summaries.every((summary) => summary.athleteId === ATHLETE_A)).toBe(true);
       expect(home.progress.badges.filter((badge) => theirs.has(badge.activityId))).toEqual([]);
-      expect(home.lastRide?.name).toBe('Recent 0');
-      expect(home.week.rides).toBe(1);
-      expect(home.progress.streak.current).toBe(RECENT_WEEKS);
     },
     SEEDING_TIMEOUT_MILLISECONDS,
   );

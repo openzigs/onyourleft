@@ -7,8 +7,8 @@
  * ## Pure, and derived — nothing here is stored
  *
  * {@link deriveProgress} is a function of the ride summaries Home already
- * reads (`home/home.ts`, ONE `listActivitySummaries` — two past the read
- * budget, {@link deriveProgressAcross}, #1107) and a clock. No badge,
+ * reads (`home/home.ts`, ONE `listActivitySummaries`, and past the read budget
+ * a bounded forward walk over the rest of the history, #1130) and a clock. No badge,
  * no "earned at" and no streak is written anywhere: delete a ride and what it
  * earned goes with it, and nothing can go stale. What a badge needs that the
  * row did not already say — a ride's ascent, its best powers, whether a
@@ -246,9 +246,11 @@ export function deriveProgress(summaries: readonly ActivitySummary[], now: UnixS
 /**
  * Streaks and badges for a rider with more rides than one read holds — #1107.
  *
- * Home reads at most `HISTORY_ACTIVITY_LIMIT` summaries at a time, so past
- * that bound it has two windows: the `oldest` and the `newest`, with rides
- * between them it has not read.
+ * Home reads at most `HISTORY_ACTIVITY_LIMIT` summaries at a time. Since
+ * #1130 it walks the whole history past that bound, and calls this only when
+ * the walk's own bound (`home.ts` §`PROGRESS_PAGE_LIMIT`, fifty thousand
+ * recordings) runs out first: then it has two windows, the `oldest` and the
+ * `newest`, with rides between them it has not read.
  *
  * - **The current streak comes from the newest window.** It is about now.
  *   It is short only if one run of weeks is longer than the whole window,
