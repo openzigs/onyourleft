@@ -6100,9 +6100,10 @@ select.oyl-input {
  * hang from, only grid lines, and the line under the first row is the one that
  * is the same place on every ride: `top: 100%` of row one is the bottom of the
  * taller of the two top panels. Both forms need the same room — the strip
- * between the primary panel and the bottom-start cell — and on the CI runner's
- * fonts at 736×360 the row is drawn from y = 141 to 200 and the route panel
- * begins at 211 (`ride.browser.spec.ts` §"with sounds on" publishes it, both
+ * between the primary panel and the bottom-start cell. On the CI runner's
+ * fonts at 736×360 (run 37250318689) the row is drawn from y = 141 to 201: 4 px
+ * under the primary panel and 10 px above the route panel, where the anchored
+ * row is 1 px and 8 px (`ride.browser.spec.ts` §"with sounds on" publishes both
  * ways). The row's vertical padding is the extra-small step for that room.
  *
  * ⚠️ **Explicit lines, both ends.** For an absolutely positioned item an
@@ -6390,9 +6391,9 @@ select.oyl-input {
  * panel is one line (25 px) taller than with anchors. The field is shorter
  * than that line and the controls together, so it never reaches below them.
  * At 360×752 with sounds on and a side camera paired the panel then begins
- * 6 px under the leaning rider's box, where it begins 31 px under it with
- * anchors; `ride.browser.spec.ts` publishes both, and holds both to no
- * overlap. Measured in Chromium 124 on a Mac, nothing on the stage overlaps
+ * 6 px under the leaning rider's box, where it begins 30 px under it with
+ * anchors (the CI runner's fonts, run 37250318689); `ride.browser.spec.ts`
+ * publishes both, and holds both to no overlap. Measured in Chromium 124 on a Mac, nothing on the stage overlaps
  * anything at any of the nine overlay viewports in fourteen states.
  *
  * ⚠️ With *Trainer notice* (#437) it is set above the actions panel, on its
