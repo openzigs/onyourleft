@@ -17,6 +17,7 @@ import {
   CLIMBING_MILESTONES_METRES,
   countsAsRide,
   deriveProgress,
+  deriveProgressAcross,
   DISTANCE_MILESTONES_METRES,
   RIDE_MINIMUM_MOVING_SECONDS,
   weekOf,
@@ -203,5 +204,36 @@ describe('order and reading', () => {
     expect(progress.badges.at(-1)).toMatchObject({ kind: 'first', first: 'ride' });
     const at: UnixSeconds | undefined = progress.badges[0]?.earnedAt;
     expect(at).toBe(rides[1]?.startedAt);
+  });
+});
+
+describe('past the read budget — two windows, #1107', () => {
+  // The oldest window: four weeks running, years ago, the first ride in it.
+  const oldest = [ride(400 * 7), ride(399 * 7), ride(398 * 7), ride(397 * 7)];
+  // The newest window: this week and the two before it.
+  const newest = [ride(14), ride(7), ride(0)];
+
+  it('takes the current streak from the newest window', () => {
+    const progress = deriveProgressAcross(oldest, newest, NOW);
+    expect(progress.streak.current).toBe(3);
+    // The oldest window alone reads nought: the defect #1107 was filed for.
+    expect(deriveProgress(oldest, NOW).streak.current).toBe(0);
+  });
+
+  it('keeps the longer of the two windows’ longest runs', () => {
+    expect(deriveProgressAcross(oldest, newest, NOW).streak.longest).toBe(4);
+    expect(deriveProgressAcross(oldest.slice(0, 2), newest, NOW).streak.longest).toBe(3);
+  });
+
+  it('takes the badges from the oldest window, so the first ride is the oldest', () => {
+    const progress = deriveProgressAcross(oldest, newest, NOW);
+    const firsts = kinds(progress.badges, 'first');
+    expect(firsts.map((badge) => badge.activityId)).toEqual([oldest[0]?.id]);
+    expect(progress.badges).toEqual(deriveProgress(oldest, NOW).badges);
+  });
+
+  it('counts every counted ride in both windows once', () => {
+    expect(deriveProgressAcross(oldest, newest, NOW).rides).toBe(7);
+    expect(deriveProgressAcross(oldest, [...newest, oldest[3]!], NOW).rides).toBe(7);
   });
 });

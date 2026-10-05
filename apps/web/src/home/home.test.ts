@@ -90,6 +90,38 @@ describe('the read budget — #428', () => {
     expect(port.listReads[0]?.limit).toBe(3);
     expect(home.truncated).toBe(true);
   });
+
+  it('reads the NEWEST rides, so the bound drops the oldest — #1107', async () => {
+    const port = stubAnalysis(OWNER, [ride('a', 30), ride('b', 2), ride('c', 1)]);
+    const home = await loadHome(port, NOW, 2);
+    expect(port.listReads[0]).toMatchObject({ orderBy: 'startedAt', direction: 'descending' });
+    expect(home.lastRide?.name).toBe('Ride c');
+    expect(home.week.rides).toBe(2);
+  });
+
+  it('past the bound, makes ONE more read — the oldest, bounded — for the badges, and no more — #1107', async () => {
+    const port = stubAnalysis(OWNER, [ride('a', 30), ride('b', 2), ride('c', 1)]);
+    const home = await loadHome(port, NOW, 2);
+    expect(port.listReads).toHaveLength(2);
+    expect(port.listReads[1]).toMatchObject({
+      orderBy: 'startedAt',
+      direction: 'ascending',
+      limit: 2,
+    });
+    expect(port.channelReads).toEqual([]);
+    const first = home.progress.badges.find(
+      (badge) => badge.kind === 'first' && badge.first === 'ride',
+    );
+    expect(first?.activityId).toBe(activityId('a'));
+    expect(home.summaries.map((summary) => summary.id)).toEqual([activityId('a'), activityId('b')]);
+  });
+
+  it('makes no second read inside the bound (the control)', async () => {
+    const port = stubAnalysis(OWNER, [ride('a', 30), ride('b', 2), ride('c', 1)]);
+    const home = await loadHome(port, NOW, 3);
+    expect(port.listReads).toHaveLength(1);
+    expect(home.truncated).toBe(false);
+  });
 });
 
 describe('the three states — #428', () => {
