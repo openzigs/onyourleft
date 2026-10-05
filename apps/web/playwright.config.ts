@@ -258,6 +258,8 @@ export default defineConfig({
   ],
   // ⚠️ **A backstop, not a budget — #651.** @see GATE_BUDGET_MS
   globalTimeout: GATE_BUDGET_MS,
+  // #1128 EXPERIMENT: a third worker, measured on the runner.
+  workers: 3,
   // ⚠️ **Playwright's default of half the cores, and that is measured — #651.**
   // The `ubuntu-latest` runner's four vCPUs are two cores' hyperthreads
   // (`lscpu`, run 36333257690). On that run a fourth Vitest worker made the
