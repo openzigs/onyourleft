@@ -61,13 +61,57 @@ function memoryStorage(): HostedModelStorage & { readonly rows: Map<string, stri
   };
 }
 
-/** The newest entry of an ADR's `## Amendments` section, as prose. */
-function newestAmendment(markdown: string): string {
+/** Every entry of an ADR's `## Amendments` section, as raw markdown, oldest first. */
+function amendmentEntries(markdown: string): readonly string[] {
   const section = markdown.slice(markdown.indexOf('## Amendments'));
-  const entries = [...section.matchAll(/^- \*\*(\d{4}-\d{2}-\d{2})\*\*/gm)];
-  const last = entries.at(-1);
-  return last === undefined ? '' : asProse(section.slice(last.index));
+  const starts = [...section.matchAll(/^- \*\*(\d{4}-\d{2}-\d{2})\*\*/gm)].map(
+    (entry) => entry.index,
+  );
+  return starts.map((start, at) => section.slice(start, starts[at + 1]));
 }
+
+/** An entry's headline: the bold sentence after its date. */
+function headline(entry: string): string {
+  return /^- \*\*\d{4}-\d{2}-\d{2}\*\* — \*\*([^*]+)\*\*/.exec(entry)?.[1] ?? '';
+}
+
+/**
+ * The newest entry of ADR 0029's `## Amendments` section ON THE HOSTED PATH,
+ * as prose — the newest whose headline says "hosted".
+ *
+ * It used to be the newest entry of all, which held only while every entry
+ * after 2026-09-28 was about the hosted path. #1058 appended one about the side
+ * camera (ADR 0044), and a test reading "the newest" would then have compared
+ * the consent with an entry that never mentions it. What stops this selector
+ * skipping a NEWER entry that re-rules the consent is the case below that no
+ * later entry quotes a hosted consent at all.
+ */
+function newestAmendment(markdown: string): string {
+  const hosted = amendmentEntries(markdown).filter((entry) => /hosted/i.test(headline(entry)));
+  return asProse(hosted.at(-1) ?? '');
+}
+
+describe('the entry the hosted consent is held to is the newest that rules on it (#1058)', () => {
+  const markdown = readFileSync(ADR_0029, 'utf8');
+  const entries = amendmentEntries(markdown);
+  const chosen = entries.findLastIndex((entry) => /hosted/i.test(headline(entry)));
+
+  it('finds an entry on the hosted path', () => {
+    expect(chosen).toBeGreaterThanOrEqual(0);
+  });
+
+  it('is not passed over by a later entry that quotes a hosted consent', () => {
+    // A later entry that quoted the consent's words would be a newer ruling on
+    // them; the selector above would skip it if its headline did not say
+    // "hosted", and the drift test would read the old words. So none may.
+    const consentQuotes = (entry: string): boolean =>
+      entry
+        .split('\n')
+        .filter((line) => line.trimStart().startsWith('>'))
+        .some((line) => asProse(line).includes('using your own key'));
+    expect(entries.slice(chosen + 1).filter(consentQuotes)).toEqual([]);
+  });
+});
 
 describe('the hosted consent wording is the one ADR 0029’s newest amendment quotes (#803)', () => {
   const markdown = readFileSync(ADR_0029, 'utf8');
