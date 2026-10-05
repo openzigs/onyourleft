@@ -570,6 +570,10 @@ h3:first-child {
  * the accessibility tree as well as off the screen, which is safe because both
  * are `alt=""`: the name is a visually hidden span beside them.
  *
+ * ⚠️ The full logo on About is NOT switched here since #972: it is one picture
+ * whose source `Brand.tsx` §`FullLogo` picks from the same `data-theme`, so a
+ * visit fetches one file rather than both.
+ *
  * ⚠️ The wordmark is INLINE, in the paragraph's own line box, and 1.5 rem tall —
  * shorter than the line `.oyl-wordmark`'s type sets, so the paragraph is the
  * height it was as text and the header's measured height did not move
@@ -590,6 +594,8 @@ h3:first-child {
   display: block;
   width: 100%;
   max-width: 16rem;
+  /* With the picture's own `width` and `height` attributes, `auto` keeps its
+     box at the picture's ratio before it has loaded (#1136). */
   height: auto;
 }
 
@@ -603,10 +609,6 @@ h3:first-child {
 
 :root[data-theme='dark'] .oyl-wordmark__image.oyl-brand--dark {
   display: inline-block;
-}
-
-:root[data-theme='dark'] .oyl-brand-logo__image.oyl-brand--dark {
-  display: block;
 }
 
 /*
