@@ -3435,16 +3435,23 @@ owner's plan of 2026-10-04):
 | | [37254251351](https://github.com/openzigs/onyourleft/actions/runs/37254251351) attempt 1 | EPYC 9V74 | 1071 | 151 | 40 | 300 | 543 |
 | | [37254251351](https://github.com/openzigs/onyourleft/actions/runs/37254251351) attempt 4 | EPYC 9V45 | 906 | 142 | 33 | 246 | 450 |
 | | [37254251351](https://github.com/openzigs/onyourleft/actions/runs/37254251351) attempt 5 | EPYC 7763 | **1347** | 197 | 54 | 385 | **669** |
+| The same, merged with `main` at #1129 | [37261811267](https://github.com/openzigs/onyourleft/actions/runs/37261811267) attempt 1 | EPYC 9V45 | 851 | 118 | 31 | 228 | 440 |
+| | [37261811267](https://github.com/openzigs/onyourleft/actions/runs/37261811267) attempt 2 | EPYC 9V74 | 1076 | 156 | 40 | 304 | 537 |
+| | [37261811267](https://github.com/openzigs/onyourleft/actions/runs/37261811267) attempt 3 | Xeon 8573C | 1237 | 175 | 48 | 335 | 638 |
+| | [37261811267](https://github.com/openzigs/onyourleft/actions/runs/37261811267) attempt 5 | EPYC 7763 | **1301** | 187 | 52 | 374 | **647** |
 
-**What it bought — n = 1 on the 7763, so a sample and not a figure**: 1 347 s against 1 346–1 443 s
-(median 1 373) on the twelve runs above, the browser gate 669 s against 696–742 s. ⚠️ **That is
-153 s clear of the stop, short of #1128's 180 s**, and the cuts that would reach it are the owner's
-(the questions on PR #1131: `QUIET_MS`, and nightly candidates). ⚠️ Two failures on the same head,
-neither attributed to the split: attempt 2 failed
-[#1135](https://github.com/openzigs/onyourleft/issues/1135)'s `sections` case, which run
-[37247091721](https://github.com/openzigs/onyourleft/actions/runs/37247091721) had already failed
-on two workers on another branch; and attempt 3 was cancelled at 25 minutes with its browser gate
-unfinished, on a 9V45, its log lost from the Vitest step onwards, so what hung cannot be read.
+**What it bought — n = 2 on the 7763, so samples and not a figure**: 1 347 s and 1 301 s against
+1 346–1 443 s (median 1 373) on the twelve runs above, the browser gate 669 s and 647 s against
+696–742 s. ⚠️ **#1128's "at least 180 s clear" is met by the second (199 s) and not by the first
+(153 s)**: about 50–70 s of job on the 7763, which a spec added to the gate spends again. The cuts
+that would buy more are the owner's (the questions on PR #1131: `QUIET_MS`, and nightly
+candidates). ⚠️ **Three failures on PR #1131's heads, none of them a check this PR changed**:
+[#1135](https://github.com/openzigs/onyourleft/issues/1135)'s `sections` case read About as fewer
+than two columns twice (37254251351 attempt 2, 37261811267 attempt 4); it failed once on two workers
+on another branch too ([37247091721](https://github.com/openzigs/onyourleft/actions/runs/37247091721),
+1 in about 86 runs), so three workers probably make it more frequent rather than cause it. And
+37254251351 attempt 3 was cancelled at 25 minutes with its browser gate unfinished, on a 9V45, its
+log lost from the Vitest step onwards, so what hung cannot be read.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
