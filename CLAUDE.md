@@ -3418,12 +3418,13 @@ owner's plan of 2026-10-04):
   reads a request still loads its own. Locally the spec went from 33.7 s to 28.3 s on one worker.
 - **The `chromium` project runs on THREE workers, and the `game` project after it, alone** —
   `test:browser` is two Playwright runs in the one step, each with its own stop
-  (`playwright.config.ts` §`CHROMIUM_PART_MS` 690 s, `GAME_PART_MS` 85 s), the game run starting
+  (`playwright.config.ts` §`CHROMIUM_PART_MS` 720 s, `GAME_PART_MS` 85 s), the game run starting
   whatever the first run's result (but not after a failed build) and the step failing if either
   did (`nightly-split.test.ts` holds the script to the constants). ⚠️ **The two stops summed to
   `GATE_BUDGET_MS`' 840 s until #1128's review, and a reviewer who remembers that is reading the old
   file**: 840 s did not fit inside the job (below), so the game's is 85 s, about 1.2 times its
-  slowest green 71 s, and the STEP has a bound of its own (§"What bounds the browser gate's step"). ⚠️ **A third worker for the whole
+  slowest green 71 s, the `chromium` run's is 720 s (690 s until a 7763 took 625 s), and the STEP
+  has a bound of its own (§"What bounds the browser gate's step"). ⚠️ **A third worker for the whole
   gate was measured first and failed**: the game group started beside the last `chromium` specs and
   the plain and `?shadow-map` loads ran out of their 60 s and 70 s (run
   [37248143495](https://github.com/openzigs/onyourleft/actions/runs/37248143495), 7763, red).
@@ -3446,12 +3447,15 @@ owner's plan of 2026-10-04):
 | | [37261811267](https://github.com/openzigs/onyourleft/actions/runs/37261811267) attempt 5 | EPYC 7763 | **1301** | 187 | 52 | 374 | **647** |
 | The same, at 034925f2 | [37269334621](https://github.com/openzigs/onyourleft/actions/runs/37269334621) attempt 1 | EPYC 9V45 | 823 | 115 | 30 | 221 | 424 |
 | | [37269334621](https://github.com/openzigs/onyourleft/actions/runs/37269334621) attempt 2 | EPYC 7763 | **1362** | 195 | 53 | 382 | **672** |
+| The same with the step bound, at 5b0d8618 | [37274106339](https://github.com/openzigs/onyourleft/actions/runs/37274106339) attempt 1 | Xeon 8573C | 1041 | 145 | 40 | 285 | 532 |
+| | [37274106339](https://github.com/openzigs/onyourleft/actions/runs/37274106339) attempt 2 | EPYC 7763 | **1409** | 212 | 56 | 396 | **699** |
 
-**What it bought — n = 3 on the 7763, so samples and not a figure**: 1 347 s, 1 301 s and 1 362 s
-(median 1 347) against 1 346–1 443 s (median 1 373) on the twelve runs above, the browser gate
-669 s, 647 s and 672 s against 696–742 s. ⚠️ **#1128's "at least 180 s clear" is met by one of the
-three (199 s) and not by the other two (153 s and 138 s)**: about 25–70 s of job on the 7763, which
-a spec added to the gate spends again. The cuts
+**What it bought — n = 4 on the 7763, so samples and not a figure**: 1 347 s, 1 301 s, 1 362 s and
+1 409 s (median 1 355) against 1 346–1 443 s (median 1 373) on the twelve runs above, the browser
+gate 669 s, 647 s, 672 s and 699 s against 696–742 s. ⚠️ **#1128's "at least 180 s clear" is met by
+one of the four (199 s) and not by the other three (153 s, 138 s and 91 s)**: the fourth ran on a
+slow 7763 (its concurrent step 212 s and Vitest 396 s, both the slowest here, which this PR does not
+touch), so read the gain as about 20–70 s of job, which a spec added to the gate spends again. The cuts
 that would buy more are the owner's (the questions on PR #1131: `QUIET_MS`, and nightly
 candidates). ⚠️ **Three failures on PR #1131's heads, none of them a check this PR changed**: the
 `sections` case read About as fewer than two columns twice (37254251351 attempt 2, 37261811267
@@ -3486,10 +3490,10 @@ preview` servers with it**: Playwright starts them in a process group of their o
 left running (their stdio were sockets to the dead runner, not the step's output, so the step still
 ended in 60 s). On CI the runner removes them at the end of the job.
 
-**The arithmetic, on the 7763.** The gate's step started **650 to 707 s** into the job on six
+**The arithmetic, on the 7763.** The gate's step started **650 to 707 s** into the job on seven
 runs (`gh api …/attempts/N/jobs`; 37261811267 attempt 5 at 650 s, `main`'s
 [37250669777](https://github.com/openzigs/onyourleft/actions/runs/37250669777) at 707 s, the final
-head's 37269334621 attempt 2 at 683 s), and the coverage publish, upload and post steps after it
+head's 37269334621 attempt 2 at 683 s, 37274106339 attempt 2 at 703 s), and the coverage publish, upload and post steps after it
 took 4 s.
 
 | | seconds |
@@ -3500,11 +3504,14 @@ took 4 s.
 | **inside the job's 1 500** | **1 486** |
 
 `timeout-minutes: 13` (780 s) ends it by 1 487 s plus the runner's own few seconds of cancelling.
-765 s is 1.14 times the slowest green step (672 s). Inside it, `CHROMIUM_PART_MS` 690 s is 1.16 times
-the slowest green `chromium` run (594 s, 37254251351 attempt 5) and `GAME_PART_MS` 85 s about 1.2
-times the slowest green game run (71 s); with the two builds (10 s) they come to **785 s, 20 s more
-than the wrapper** — so a `chromium` run that uses all of its 690 s leaves the game run 65 s, and
-the wrapper, not the game's stop, names that. ⚠️ **Nothing re-checks the 14 s** but
+⚠️ **765 s is only 1.09 times the slowest green step** (699 s, 37274106339 attempt 2) — short of the
+1.15 every other stop here keeps, and nothing widens it inside 25 minutes, because the job leaves no
+more: the room is the owner's cuts (PR #1131's questions), not a longer stop. Inside it,
+`CHROMIUM_PART_MS` 720 s is 1.15 times the slowest green `chromium` run (625 s with its servers,
+37274106339 attempt 2) and `GAME_PART_MS` 85 s about 1.2 times the slowest green game run (71 s);
+with the two builds (10 s) they come to **815 s, 50 s more than the wrapper** — so a `chromium` run
+that uses all of its 720 s leaves the game run 35 s, and the wrapper, not the game's stop, names
+that. ⚠️ **Nothing re-checks the 14 s** but
 `nightly-split.test.ts`, which holds 707 + 780 + 4 under the job's stop: a step added before the
 gate, or a slower 7763, eats it first.
 
@@ -4008,7 +4015,7 @@ browser runs**.
 | `brand.browser.spec.ts` | since [#965](https://github.com/openzigs/onyourleft/issues/965), the owner's wordmark and logo against the PRODUCT build in both palettes: exactly one wordmark drawn in the header and one logo on About, each the palette's own variant, decoded, and the banner still named "On Your Left". ⚠️ Its control deletes `theme.css`'s dark-palette selectors for the switch through the CSSOM and requires the dark page to draw the LIGHT wordmark |
 | `motion.browser.spec.ts` | since [#945](https://github.com/openzigs/onyourleft/issues/945), the route cross-fade (React 19.3's `<ViewTransition>`), on `reflow.html` over the populated fixture: an init script wraps `Document.prototype.startViewTransition` and counts what the page starts, whether each `finished` settles, and the longest animation `document.getAnimations()` holds at `ready`. Home → Activities starts **exactly one** (200 ms, the medium token); Home → Ride, Ride → Home, Home → game and game → Home start **none** (`shell/route-motion.ts`); under reduced motion exactly one starts and none lasts over 1 ms; with each group's chunk fetched on its first visit (`?chunks=lazy`) the reveal is not a second one and a ride route's is none; a History chunk made to fail still offers *Reload* and leaves no transition hanging; focus is on `main` after. Since #945's review: focus and the title are on the new route in the COMMIT that changes it, inside the fade (`AppShell.tsx`'s two layout effects — as passive ones they waited for the fade to end); a ride route asked for while a menu fade is preparing (six attempts) or animating commits in under 200 ms with no `::view-transition` live and its first control hit-testing as itself (`useRoute.ts` §`endRunningFade`); and #670's Enter-then-Back lands focus with motion on and starts NO transition, because a selection is an update inside the route's `<ViewTransition>` (`update="none"`). ⚠️ **Its control is `?routes=synchronous`** — the router as it was before #945, every change applied outside `startTransition` — which must count ZERO: React animates only a transition, and a `<ViewTransition>` over a `useSyncExternalStore` router animated nothing with every other gate green. The reduced-motion control deletes that block through the CSSOM and requires the 200 ms back. ⚠️ Playwright cannot emulate `update: slow`; `theme.a11y.test.ts` §"the route cross-fade" is the only gate on that block. ⚠️ **It opens the page with `&motion=on`**: every other spec on `reflow.html` gets the fade at no duration (`reflow-harness.tsx` §`applyMotionSetting`), still through the real `startTransition`, because at 200 ms a navigation (React runs the new view's effects only once a fade has finished) the layout walks cost the gate about two minutes on the EPYC 7763 and the job hit its 25-minute stop |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
-| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, **840 s since #682** — a reviewer who remembers 580 s is reading the old file) so the gate stops itself and names what was running. ⚠️ **It no longer ends before the job's `timeout-minutes`, and this row used to say it did**: by #1128 the step started up to 707 s into the job, and 707 + 840 is past 1 500 s. ⚠️ **Since [#1128](https://github.com/openzigs/onyourleft/issues/1128) `test:browser` is two runs** — `chromium` on three workers, then `game` alone — each with its own stop (`CHROMIUM_PART_MS` 690 s, `GAME_PART_MS` 85 s, together under `GATE_BUDGET_MS`), and on CI the STEP runs under `timeout` for 765 s (`GATE_STEP_MS`, §4c §"What bounds the browser gate's step"), which is what ends it inside the job. `GATE_BUDGET_MS` is still the stop of a bare run and of the nightly run. Playwright's default of two workers stays for a bare run: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds. ⚠️ Since [#651](https://github.com/openzigs/onyourleft/issues/651) **two projects, `game` listed LAST**, so its four loads run alone after everything else — run beside the other specs they slowed by half or more, because SwiftShader draws on the CPU — and a `globalTimeout` (`GATE_BUDGET_MS`, **840 s since #682** — a reviewer who remembers 580 s is reading the old file) so the gate stops itself and names what was running. ⚠️ **It no longer ends before the job's `timeout-minutes`, and this row used to say it did**: by #1128 the step started up to 707 s into the job, and 707 + 840 is past 1 500 s. ⚠️ **Since [#1128](https://github.com/openzigs/onyourleft/issues/1128) `test:browser` is two runs** — `chromium` on three workers, then `game` alone — each with its own stop (`CHROMIUM_PART_MS` 720 s, `GAME_PART_MS` 85 s, together under `GATE_BUDGET_MS`), and on CI the STEP runs under `timeout` for 765 s (`GATE_STEP_MS`, §4c §"What bounds the browser gate's step"), which is what ends it inside the job. `GATE_BUDGET_MS` is still the stop of a bare run and of the nightly run. Playwright's default of two workers stays for a bare run: the runner is two cores (§4c). A reviewer who remembers one `chromium` project is reading the old file. `playwright.config.ts` §`projects` says why, and what splitting the game further did |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no

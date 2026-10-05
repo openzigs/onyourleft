@@ -210,10 +210,11 @@ export const GATE_BUDGET_MS = 840_000;
  * which a project `dependencies` entry would not give (it skips the dependant
  * on a failure).
  *
- * ⚠️ 690 s is 1.16 times the slowest green `chromium` run measured on three
- * workers (594 s, the 7763, run 37254251351 attempt 5); the single run it
- * replaces stopped at 840 s against a green 738 s, 1.14 times (run
- * 37244296171), so the split leaves that margin no thinner — and no wider.
+ * ⚠️ 720 s is 1.15 times the slowest green `chromium` run measured on three
+ * workers (625 s with its two servers, the 7763, run 37274106339 attempt 2);
+ * the single run it replaces stopped at 840 s against a green 738 s, 1.14
+ * times (run 37244296171). ⚠️ It was 690 s until #1128's review, 1.16 times
+ * the 594 s of 37254251351 attempt 5, and the next 7763 took 625 s.
  * 85 s is about 1.2 times the slowest green game run on the 7763 (71 s, run
  * 37254251351 attempt 5). ⚠️ **It was 150 s until #1128's review, and a
  * reviewer who remembers it holding both game loads hanging (60 + 70 s) is
@@ -222,7 +223,7 @@ export const GATE_BUDGET_MS = 840_000;
  * and the `?shadow-map` load is interrupted by this stop, which still names
  * what was running.
  */
-export const CHROMIUM_PART_MS = 690_000;
+export const CHROMIUM_PART_MS = 720_000;
 /** @see CHROMIUM_PART_MS */
 export const GAME_PART_MS = 85_000;
 /**
@@ -244,17 +245,19 @@ export const GAME_PART_MS = 85_000;
  * and the coverage steps still run, rather than as a job cancelled with
  * nothing named.
  *
- * ⚠️ **The arithmetic, on the 7763.** The step starts at most 707 s in (six
+ * ⚠️ **The arithmetic, on the 7763.** The step starts at most 707 s in (seven
  * runs, 650–707 s); 707 + 765 + 10 (the kill) is 1 482 s, and the coverage
  * publish and upload take 4 s, so the step ends 14 s inside the job's 1 500.
  * The step's `timeout-minutes: 13` (780 s) is the backstop, ending it by
- * 1 487 s plus the runner's own few seconds of cancelling. 765 s is 1.14 times
- * the slowest green step (672 s, 37269334621 attempt 2). The two Playwright
- * stops inside it are each about 1.15 times their slowest green figure —
- * {@link CHROMIUM_PART_MS} 690 s against 597 s, this 85 s against 71 s — and
- * with the builds (10 s) they come to 785 s, 20 s MORE than this: so a
- * `chromium` run that uses all of its 690 s leaves the game run 65 s, and this
- * stop, not the game's, is the one that names it.
+ * 1 487 s plus the runner's own few seconds of cancelling. ⚠️ **765 s is only
+ * 1.09 times the slowest green step** (699 s, 37274106339 attempt 2), short of
+ * the 1.15 every other stop here keeps, and nothing can widen it inside 25
+ * minutes: the job leaves no more. The two Playwright stops inside it each
+ * keep 1.15 — {@link CHROMIUM_PART_MS} 720 s against 625 s, {@link
+ * GAME_PART_MS} 85 s against 71 s — and with the builds (10 s) they come to
+ * 815 s, 50 s MORE than this: so a `chromium` run that uses all of its 720 s
+ * leaves the game run 35 s, and this stop, not the game's, is the one that
+ * names it.
  */
 export const GATE_STEP_MS = 765_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
