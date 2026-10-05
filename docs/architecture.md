@@ -155,7 +155,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         an edit makes stale, undo over whole drafts, the draft
                         kept across a reload, and the elevation profile. The
                         INTERFACE is in packages/domain; there is no engine
-                        adapter — CLAUDE.md section 4i says why
+                        adapter — docs/agents/route-planning.md section 4i says why
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
@@ -561,7 +561,7 @@ in one file:
   `tokens.ts` in both directions, which is what makes the token-level contrast check a statement
   about what the browser paints.
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
-  in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
+  in docs/agents/accessibility.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
 **Views load per navigation group since [#674](https://github.com/openzigs/onyourleft/issues/674).**
 Home, the shell, the route table and the not-found page are in the entry chunk; every other view is
@@ -708,7 +708,7 @@ expanded window — `theme.css` §`--oyl-list-detail-from`, 52.5rem, the one pla
 written — the list sits in a 22.5rem pane and the detail takes the rest; below it there is one pane.
 `shell/ListDetail.tsx` decides the panes by reading that property back and asking `matchMedia`, and
 writes `hidden` on the pane that is not shown rather than styling it away, because the audit loads no
-stylesheet (§4e of CLAUDE.md). A selection lives in the URL — `#/<list>/selected/<id>`, a route's
+stylesheet (§4e of docs/agents/accessibility.md). A selection lives in the URL — `#/<list>/selected/<id>`, a route's
 `selection` path, which `matchHash` matches to the LIST route with the id as its parameter — so the
 view stays mounted, and back, reload and a shared link land on the same item; `#/activities/<id>`
 is still a ride's own full page. An id the list did not read is read on its own (`getActivity`,
@@ -756,7 +756,7 @@ So the header now sticks only where it is cheap — `@media (min-width: 64rem) a
 whose worst admitted case is a 97 px header on a 640 px viewport — and `apps/web/browser/shell.html`
 measures it. The general rule that falls out is worth more than the fix: **`position`, `z-index`,
 `scroll-margin` and the size of persistent chrome are reviewed by measuring them in the pinned
-Chromium, never by reading the CSS.** CLAUDE.md §4f is the record.
+Chromium, never by reading the CSS.** docs/agents/browser-gate.md §4f is the record.
 
 **The unsupported-browser experience is a feature of this component, not an error path.**
 `src/support/bluetooth-support.ts` classifies the browser into six states —
@@ -774,7 +774,7 @@ then that screen said *"Not built yet"* while Home and the More tab sent a new r
 pairing buttons were on the Ride screen. `ride/SensorPairing.tsx` §`PairingPanel` is that block,
 moved rather than copied: it drives the one ride controller `main.tsx` builds — mounted above the
 router, so a device paired on Devices is the device Ride and Home show — through whichever
-transport §4h of CLAUDE.md chose. The Ride screen says what is connected, in words, and links to
+transport §4h of docs/agents/game.md chose. The Ride screen says what is connected, in words, and links to
 Devices. The controls come first and what the platform cannot do is beneath them in a closed
 `<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
 `SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
@@ -1121,11 +1121,11 @@ alternatives are there.
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Map rendering | **MapLibre GL JS 6.11.2** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
 | Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre (6.10, and 6.11 since #756) draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
-| Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; CLAUDE.md §4g "Admitted is not the same as noticed" is the rest |
+| Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; docs/agents/licence-gates.md §4g "Admitted is not the same as noticed" is the rest |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
 Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.3.0. Everything
-else in the table is a decision that no `package.json` has acted on yet. `CLAUDE.md` section 4b
+else in the table is a decision that no `package.json` has acted on yet. `docs/agents/project-state.md` section 4b
 keeps that list; the commands are in section 4a.
 
 ### The map dependencies, recorded because #63's definition of done asks for it
@@ -1446,7 +1446,7 @@ once its Local Network Access permission is granted, and the transport annotates
 plain-`http:` LAN address at all has not been measured. `docs/analysis-on-your-own-computer.md` says
 so to the rider.
 
-⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
+⚠️ **The interface and both implementations are in `apps/web`, and that is docs/agents/game.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture
 pipeline under `apps/mobile/src` would typecheck, test green and never be copied into the APK — and
 `apps/web` already depends on `@onyourleft/mobile`, so the reverse dependency would be a workspace
@@ -1540,7 +1540,7 @@ socket through the Hibernation API, the tick as a storage alarm that is not re-s
 running, and a lobby that survives eviction by replaying a log of the core's own calls. Whether the
 managed platform hosts rooms only or the whole instance is left to #790 (ADR 0037 D-2), so nothing
 routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
-a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
+a local `workerd` in `test:workerd` (`docs/agents/commands.md` §4a). `src/room/conformance.test.ts` drives the
 core directly and every adapter with one script and requires byte-identical text on every socket —
 #780's Node adapter, over real `ws` sockets, is in that file since #780.
 
@@ -1812,7 +1812,7 @@ or `\`; and `RoomSession` refuses such an id for good before a ticket is asked f
 review the ticket's path was built from the id unchecked and could steer the rider's bearer-token
 POST. ⚠️ **No ticket without a declared weight**: a rider who has set none is told to, and is not raced
 at a default (ADR 0028 D-1). ⚠️ `check:wiring` watches this directory since that review, for exports
-and port methods only (CLAUDE.md §4j).
+and port methods only (docs/agents/wiring-gate.md §4j).
 
 ### The realistic world: what is built, and how a rider chooses it
 

@@ -5,7 +5,7 @@
  * #866, and the owner's ruling of 2026-09-29.
  *
  * ⚠️ **A nightly check cannot block a merge.** `main` requires one status
- * check, `Repository rules` (CLAUDE.md §4c), and the nightly workflow
+ * check, `Repository rules` (docs/agents/ci.md §4c), and the nightly workflow
  * (`.github/workflows/nightly.yml`) reports under another. A break in anything
  * listed here is found the next morning, by an issue the nightly run opens,
  * and not before the merge that caused it. The owner accepted that trade for
@@ -22,7 +22,7 @@
  * erasure); licences and notices; accessibility and layout; the wiring gate —
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
- * recorded here and in CLAUDE.md §4c.
+ * recorded here and in docs/agents/ci.md §4c.
  * Four of the ten describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT

@@ -33,7 +33,7 @@
  * trainer line below the fold**; about 53 % of the display blank. #419 had
  * already measured the same thing in this harness at four viewports. Every
  * gate was green, because `test:a11y` renders into jsdom, which performs no
- * layout (CLAUDE.md §4e); `shell.browser.spec.ts` measures chrome at 320×256
+ * layout (docs/agents/accessibility.md §4e); `shell.browser.spec.ts` measures chrome at 320×256
  * and never renders a HUD; `hud.browser.spec.ts` measures grid tracks and never
  * asks where the panel is on the page; and **nothing measured any ride screen
  * at a landscape-tablet viewport at all**.

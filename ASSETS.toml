@@ -88,7 +88,7 @@
 # changed is that its bytes can no longer be swapped without a diff.
 #
 # ⚠️ **The FIT corpus is generated, and its digests move when the generator
-# does.** That is a cost and it is deliberate: CLAUDE.md §4a says
+# does.** That is a cost and it is deliberate: docs/agents/commands.md §4a says
 # `fixtures:generate` "is DETERMINISTIC: running it on a clean tree leaves
 # `git status` clean", and these twelve digests are the only thing that makes
 # that claim checkable by something other than a person remembering to look.

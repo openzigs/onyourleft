@@ -282,7 +282,7 @@ export interface GameViewProps {
    * is what stops a rider who leaves with the browser's own Back button being
    * left on some other page with no header.
    *
-   * ⚠️ **Absent rather than hidden, and that is CLAUDE.md §4e rather than
+   * ⚠️ **Absent rather than hidden, and that is docs/agents/accessibility.md §4e rather than
    * taste.** The accessibility suite loads no stylesheet, so a header hidden
    * with `display: none` is, to `tabbableElements`, eleven focusable links —
    * and to a keyboard user behind an opaque full-bleed stage it is eleven tab

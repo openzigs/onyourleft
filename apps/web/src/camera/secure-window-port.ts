@@ -19,7 +19,7 @@
  * §`SCREENSHOT_SENTENCE`) rather than leaving it to be assumed.
  *
  * A `*-port.ts` so `check:wiring` watches it: a method here that nothing in
- * production calls is a red `WIRE003` (CLAUDE.md §4j). `secure-window.ts` is
+ * production calls is a red `WIRE003` (docs/agents/wiring-gate.md §4j). `secure-window.ts` is
  * the one caller, and the one owner of the flag: a count over the pictures on
  * screen, so two pictures, or a picture replaced by the next, never clear it
  * early.

@@ -23,7 +23,7 @@ which.
 | The Data Safety form | **Answered, not filed.** The answers are `src/android/data-safety.ts` and the "no location" one is asserted against the merged manifest. §4 |
 | A signed build installed on a device | **Not done.** This is #95's definition of done and it is outstanding. §8 says how to get the APK now that a dispatch run keeps one |
 
-CLAUDE.md §4a's rule — that a documented command nobody has run is the most
+docs/agents/commands.md §4a's rule — that a documented command nobody has run is the most
 expensive kind of wrong — is why that table is first rather than last.
 
 ## 2. Why the key scan is a repository rule rather than a CI step
@@ -144,7 +144,7 @@ twice over:
   permission unbounded is a runtime grant everywhere.
 
 ⚠️ **Two limits on that, stated rather than implied.** The assertions skip
-loudly where no Gradle build has been run, which includes CI — CLAUDE.md §4c —
+loudly where no Gradle build has been run, which includes CI — docs/agents/ci.md §4c —
 so they are a local gate rather than a pull-request one. And only the **debug**
 variant's merge has ever been produced; `merged-manifest.ts` looks for the
 release variant too and has never found one.
@@ -194,7 +194,7 @@ records it, so a distribution channel closing is not a surprise.
 by a `v*` tag and by `workflow_dispatch`.
 
 Deliberately a **separate workflow** from `rules.yml` rather than a job inside
-it. CLAUDE.md §4c's warning — that a second job reports under a different context
+it. docs/agents/ci.md §4c's warning — that a second job reports under a different context
 and cannot block a merge — is about _gates_, and this is not a gate: it runs on a
 tag, after review, and blocking a merge is not its purpose. Adding it to
 `rules.yml` would run an Android build on every pull request, which is minutes of
@@ -245,7 +245,7 @@ agree:
 | `.github/workflows/release.yml` | `MINIMUM_TARGET_SDK: '36'` — read back out of the packaged APK |
 
 ⚠️ **`REL002` used to read `variables.gradle` alone, take the first match in it,
-and pass silently if the file was absent.** That is the #142 shape (CLAUDE.md
+and pass silently if the file was absent.** That is the #142 shape (docs/agents/accessibility.md
 §4e): a selector asserted to exist rather than discovered. Four regressions were
 green under it and each is now a fixture — deleting `variables.gradle` and
 inlining the values, a literal in `app/build.gradle` overriding the ext

@@ -315,7 +315,7 @@ describe('inputs the integrator cannot honour', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
   // runners, a job over 1 000 s) — 71 % of that default. 11 s is about three times the slowest, so
   // a slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot
-  // interrupt one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
+  // interrupt one, so a genuine hang is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('still accepts the longest tick that is under the bound', () => {
     // The bound has to be above anything legitimate, or it is a bug rather than
     // a guard. Ten thousand seconds is nearly three hours asked for in one call.

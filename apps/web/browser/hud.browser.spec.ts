@@ -5,7 +5,7 @@
  *
  * The third page in the browser gate, and it is here for the same reason as the
  * other two: **jsdom performs no layout**. `test:a11y` renders this panel and
- * audits it on every run (CLAUDE.md §4e) and cannot measure a single pixel;
+ * audits it on every run (docs/agents/accessibility.md §4e) and cannot measure a single pixel;
  * `hud-value-size.test.ts` reads `theme.css` as a file and compares type sizes
  * against constants somebody measured by hand once. Neither can answer the only
  * question that matters to a rider glancing at a bar-mounted phone: **does the
@@ -271,7 +271,7 @@ async function measure(
   // at another is the defect this gate is about, arriving inside the gate.
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   const response = await page.goto(`${HARNESS_ORIGIN}/hud.html`);
-  // ⚠️ The status is checked rather than assumed, and that is CLAUDE.md §4f's
+  // ⚠️ The status is checked rather than assumed, and that is docs/agents/browser-gate.md §4f's
   // own warning being acted on: a page missing from
   // `vite.browser.config.ts`'s `build.rollupOptions.input` is simply not built,
   // and the symptom is a 404 at run time rather than a build error. Without
@@ -489,7 +489,7 @@ test.describe('the plan view is drawn at a size a rider can see', () => {
  * its tables are empty. This cannot substitute for that.
  *
  * Why here and not in the fast suite: jsdom loads no stylesheet, so a region
- * that a stylesheet hid would pass every `.a11y.test` there is (CLAUDE.md §4e),
+ * that a stylesheet hid would pass every `.a11y.test` there is (docs/agents/accessibility.md §4e),
  * and jsdom performs no layout, so nothing there can say what moved.
  */
 

@@ -22,7 +22,7 @@
  * ## Why no gate saw it
  *
  * `test:a11y` renders this route into jsdom on every run and audits it, and
- * jsdom performs no layout (CLAUDE.md §4e): a control in the document and a
+ * jsdom performs no layout (docs/agents/accessibility.md §4e): a control in the document and a
  * control on the screen are the same observation there. The browser gate
  * measured the shell's chrome at 320×256 and the HUD at a phone's width, and
  * **nothing measured this screen at all**, at any viewport.

@@ -244,7 +244,7 @@ describe('powerDurationCurve — the stated time budget', () => {
    * The first version of this test called `performance.now()` and the
    * platform-isolation closure rejected it — `packages/domain` compiles with
    * `lib: ["ES2024"]` and `types: []`, so `performance` is simply not a name
-   * that exists here (CLAUDE.md §4d). That is the rule working, and the
+   * that exists here (docs/agents/lint-boundaries.md §4d). That is the rule working, and the
    * replacement is better than what it rejected: Vitest fails the test if it
    * exceeds the timeout, so the budget is enforced by the harness while the
    * code under test still cannot tell the time.

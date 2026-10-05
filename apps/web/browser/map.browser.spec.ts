@@ -227,7 +227,7 @@ const PLACE_NAME_RANGES = [
  * kept as folklore. #756 re-measured 6.11.2 against 6.10.0: a 404 is still asked
  * for once, and a connection dropped by #535's own method
  * (`route.abort('internetdisconnected')`) was asked for once on BOTH versions,
- * so the "twice" does not reproduce on either (CLAUDE.md §4f).
+ * so the "twice" does not reproduce on either (docs/agents/browser-gate.md §4f).
  *
  * The advice still holds, for a reason that does not depend on MapLibre's
  * retry policy: `networkidle` resolves just as happily over a page that asked

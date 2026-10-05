@@ -1040,7 +1040,7 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * slowdown, which thirty would hide. ⚠️ This used to say it was also red
    * "for a cull that stops terminating", and it is not: the case is
    * synchronous, Vitest cannot interrupt a synchronous case, and a cull that
-   * never returns is caught only by the CI job's own stop (CLAUDE.md §4c).
+   * never returns is caught only by the CI job's own stop (docs/agents/ci.md §4c).
    */
   it('never drops an item that is on screen and not yet fogged out', { timeout: 15_000 }, () => {
     let clear = 0;

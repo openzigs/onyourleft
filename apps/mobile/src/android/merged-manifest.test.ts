@@ -21,7 +21,7 @@
  *    before a skip is a sentence somebody can act on.
  * 2. **Everything under "the manifest the app actually ships"** needs a Gradle
  *    build and **skips loudly** without one. CI does not build Android
- *    (`CLAUDE.md` §4c), so those assertions are not a CI gate and this file
+ *    (`docs/agents/ci.md` §4c), so those assertions are not a CI gate and this file
  *    says so rather than letting a green run imply otherwise.
  */
 

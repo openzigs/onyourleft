@@ -388,7 +388,7 @@ describe('its cost — #499', () => {
    * runners — so it was measuring the runner and coverage's counters as much
    * as the solver: the same code took 1.3 s run alone on a Mac and 5.6 s under
    * coverage there. And it could not detect a hang at all, because a
-   * synchronous case is judged only once it returns (CLAUDE.md §4c).
+   * synchronous case is judged only once it returns (docs/agents/ci.md §4c).
    *
    * #734 did two things, and #751 asked which:
    *

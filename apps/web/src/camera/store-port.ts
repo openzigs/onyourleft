@@ -30,7 +30,7 @@
  * to a file the rider asked for rather than to a screen.
  *
  * ⚠️ **A `*-port.ts`, so `check:wiring`'s `WIRE003` watches every method**
- * (CLAUDE.md §4j). All three have a production caller: `keep.ts` writes,
+ * (docs/agents/wiring-gate.md §4j). All three have a production caller: `keep.ts` writes,
  * `views/CameraView.tsx` counts and deletes. Delete any one of them and the
  * gate goes red naming it — the mutation list in this pull request records the
  * run.

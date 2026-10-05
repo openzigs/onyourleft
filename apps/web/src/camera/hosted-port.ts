@@ -41,7 +41,7 @@
  *
  * ## Why a `*-port.ts`
  *
- * CLAUDE.md §4j: `check:wiring` reports a method declared here that no
+ * docs/agents/wiring-gate.md §4j: `check:wiring` reports a method declared here that no
  * production declaration calls. {@link HostedPort.sendHostedQuestion} has a
  * name nothing else in the client uses, for the reason `analysis-port.ts`
  * gives — the controller's own method is `askHostedModel`, so the hook calling

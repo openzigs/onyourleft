@@ -148,7 +148,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
   /**
    * The one sentence the announcer last produced, or `''` — #397.
    *
-   * ⚠️ **Required, and that is the wiring, not a style.** CLAUDE.md §4j's
+   * ⚠️ **Required, and that is the wiring, not a style.** docs/agents/wiring-gate.md §4j's
    * third limit is that an optional prop nobody supplies is green in every
    * gate, and an announcer threaded in as one would announce nothing in the
    * shipped app with the whole suite passing. `GameView` computes it through

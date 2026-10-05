@@ -2962,6 +2962,37 @@ write_script \
   "printf '%s' a ${P} grep -v q || :"
 assert_clean "a here-string, a comment, \`|| grep -q\`, and a grep without -q all pass"
 
+# --- AGENT001 / AGENT002: the root CLAUDE.md is an index ----------------------
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+printf '# CLAUDE.md\n\n| [docs/agents/ci.md](docs/agents/ci.md) | CI |\n' > "${fixture_root}/CLAUDE.md"
+assert_clean "a topic file the index links passes"
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+printf '# Topic\n' > "${fixture_root}/docs/agents/orphan.md"
+printf '# CLAUDE.md\n\n[ci](docs/agents/ci.md), and docs/agents/orphan.md in prose only\n' > "${fixture_root}/CLAUDE.md"
+assert_violation "a topic file the index does not LINK is AGENT001" AGENT001 \
+  "docs/agents/orphan.md: not linked from CLAUDE.md"
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+assert_violation "a topic file with no index at all is AGENT001" AGENT001 \
+  "docs/agents/ci.md: there is no CLAUDE.md"
+
+new_fixture
+head -c 49152 /dev/zero | tr '\0' 'x' > "${fixture_root}/CLAUDE.md"
+assert_clean "an index of exactly 48 KiB passes"
+
+new_fixture
+head -c 49153 /dev/zero | tr '\0' 'x' > "${fixture_root}/CLAUDE.md"
+assert_violation "an index one byte over 48 KiB is AGENT002" AGENT002 \
+  "CLAUDE.md: 49153 bytes"
+
 # --- The real repository is NOT checked here (#1076) ---------------------------
 #
 # This suite used to end by running the checker over this repository and

@@ -3,7 +3,7 @@
 # Dependabot version updates.
 #
 # ⚠️ Repository-level Dependabot **security** updates and alerts are already on
-# and are not configured here — CLAUDE.md §4c records that, and adding a
+# and are not configured here — docs/agents/ci.md §4c records that, and adding a
 # security-only config would duplicate it. This file is the other half: the
 # routine version bump.
 #

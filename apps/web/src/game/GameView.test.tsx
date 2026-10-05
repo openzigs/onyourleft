@@ -691,7 +691,7 @@ describe('your own best crossing the line (#259)', () => {
 describe('the ride’s moving time on the HUD — #1111', () => {
   /**
    * ⚠️ `HudPanel`'s `movingSeconds` is an optional prop threaded through JSX,
-   * which `check:wiring` cannot follow (CLAUDE.md §4j §Limits) — so this drives
+   * which `check:wiring` cannot follow (docs/agents/wiring-gate.md §4j §Limits) — so this drives
    * the real `GameView` and reads the HUD, rather than trusting that the port
    * method being called means the field shows what it returned.
    */
@@ -1261,7 +1261,7 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
   // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
   // slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('draws every animation frame at the top two rungs, then 30, 24 and 20 a second — #482', async () => {
     const frames = await startRiding({ pacer: false });
     const drawnPerMeasure = async (): Promise<number> => {
@@ -1685,7 +1685,7 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
     // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
     // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
     // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
-    // that never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+    // that never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
     it('climbs one rung, not all of them, on one cool reading', async () => {
       const port = settable(0.95);
       await startRiding({ pacer: false, thermal: port });

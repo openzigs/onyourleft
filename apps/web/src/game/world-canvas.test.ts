@@ -20,7 +20,7 @@
  * ## What this CANNOT check, stated so nobody mistakes a green run for proof
  *
  * ⚠️ **It does not check that the canvas is visible, or sized correctly, or
- * sized at all at runtime.** `CLAUDE.md` §4e: jsdom "performs no layout and
+ * sized at all at runtime.** `docs/agents/accessibility.md` §4e: jsdom "performs no layout and
  * resolves no custom property". `clientWidth` is `0` for every element in the
  * suite, so a sized canvas and an unsized one are indistinguishable here — which
  * is precisely why the defect survived a suite that renders this route.

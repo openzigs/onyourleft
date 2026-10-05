@@ -8,7 +8,7 @@
   // `tsconfig.json` is the wide program and still covers these files, for the
   // editor and for ESLint's project service; this is the one that ENFORCES —
   // `pnpm --filter @onyourleft/instance run typecheck` runs both, the shape
-  // `packages/fit` and `packages/sensors` use (CLAUDE.md §4d).
+  // `packages/fit` and `packages/sensors` use (docs/agents/lint-boundaries.md §4d).
   //
   // ⚠️ `Date`, `Math.random` and the ECMAScript-free names survive `lib`, so
   // `eslint.config.js`'s room-core block bans the clock and the timers by name.

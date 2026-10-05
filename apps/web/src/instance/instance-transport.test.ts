@@ -271,7 +271,7 @@ describe('no camera type can reach the instance module — ADR 0036 D-3 (d)', ()
    * ride. So what is held now is the whole closure: every module an instance
    * module reaches, however far, stays out of the camera and names no frame,
    * and the only packages it reaches are the three that cannot import a
-   * client module at all (`boundaries/dependencies`, CLAUDE.md §4d).
+   * client module at all (`boundaries/dependencies`, docs/agents/lint-boundaries.md §4d).
    */
   const PACKAGES_REACHED = ['@onyourleft/domain', '@onyourleft/fit', '@onyourleft/store'];
 

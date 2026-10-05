@@ -138,7 +138,7 @@
  * `start` and `stop` are numbered and acknowledged. One that is not
  * acknowledged within {@link COMMAND_ACK_MILLISECONDS} is reported as
  * `unacknowledged` — **never assumed to have arrived**, which is the trainer
- * control point's posture (`CLAUDE.md` §4h) applied to a camera.
+ * control point's posture (`docs/agents/game.md` §4h) applied to a camera.
  *
  * ## What neither end keeps
  *

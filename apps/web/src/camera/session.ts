@@ -324,7 +324,7 @@ export interface CameraControllerOptions {
    *
    * ⚠️ **Required** since #1123's review: it is all of D-12 on Android, and an
    * optional field the shell forgot to pass was green under every gate,
-   * `check:wiring` included (CLAUDE.md §4j §Limits). Tests and harnesses pass
+   * `check:wiring` included (docs/agents/wiring-gate.md §4j §Limits). Tests and harnesses pass
    * `secure-window-testing.ts` §`browserSecureWindow`, or a double.
    */
   readonly secureWindow: SecureWindow;

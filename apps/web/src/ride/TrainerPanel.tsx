@@ -154,7 +154,7 @@ export interface TrainerPanelProps {
    * under §4f's 50. `rideview.browser.spec.ts` §"#605".
    *
    * Required rather than optional, so a screen that forgets it is a compile
-   * error rather than a form that comes back (CLAUDE.md §4j's §Limits: an
+   * error rather than a form that comes back (docs/agents/wiring-gate.md §4j's §Limits: an
    * optional prop nobody supplies is invisible to the wiring gate).
    */
   readonly workoutOwnsTarget: boolean;

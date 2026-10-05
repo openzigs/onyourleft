@@ -6,7 +6,7 @@
  *
  * `check:wiring` sees that the port's methods have a production caller, and
  * nothing more: the page is handed the port as an OPTIONAL prop, and a
- * `main.tsx` that stopped passing it would be green there (CLAUDE.md §4j
+ * `main.tsx` that stopped passing it would be green there (docs/agents/wiring-gate.md §4j
  * §Limits). So this renders the real `AppShell` at the real detail route,
  * handed a port built from the same functions with the same arguments as
  * `main.tsx` §`buildRideAnalysis` — `riderModelStepSource` over a scripted

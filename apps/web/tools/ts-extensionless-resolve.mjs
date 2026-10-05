@@ -16,7 +16,7 @@
  * The scripts used to run `node --import ../../packages/fit/tools/ts-extensionless-resolve.mjs`,
  * which made a tool of this app depend on another package's AUTHORING-TIME
  * directory layout: a move of that file would break them, and no gate runs
- * them, so nothing would say so (#477's review, #478). CLAUDE.md §4b declines
+ * them, so nothing would say so (#477's review, #478). docs/agents/project-state.md §4b declines
  * the same coupling for `fit-file-parser`'s ambient declaration and pays for it
  * with a second copy, and so does this: thirty lines, the same logic as
  * `packages/fit/tools/ts-extensionless-resolve.mjs`, under this app's own

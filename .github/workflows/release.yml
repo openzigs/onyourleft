@@ -9,7 +9,7 @@
 # step at the bottom is the one part of this file nothing has executed.
 # `apps/mobile/RELEASE.md` §1 is the table of which is which.
 #
-# ⚠️ Deliberately NOT a job inside `rules.yml`. CLAUDE.md §4c's rule that a
+# ⚠️ Deliberately NOT a job inside `rules.yml`. docs/agents/ci.md §4c's rule that a
 # second job cannot block a merge is about *gates*; this is not one. It runs on a
 # tag, after review, and adding it to the pull-request workflow would run an
 # Android build on every pull request for a check nothing depends on.
@@ -162,7 +162,7 @@ jobs:
       # failure surfaces at the worst possible moment: after the tag exists.
       #
       # The target level is read here for the same reason. REL002 reads the
-      # Gradle sources on a bare clone (CLAUDE.md §4a); this reads what the
+      # Gradle sources on a bare clone (docs/agents/commands.md §4a); this reads what the
       # manifest inside the packaged APK actually says, which is the only number
       # Play ever sees.
       - name: Verify the artefact is signed and targets the required API level

@@ -650,7 +650,7 @@ h3:first-child {
  * is a `banner` landmark labelled "On Your Left" (`AppShell.tsx`). The
  * wordmark is taken off the SCREEN only — the visually-hidden pattern this
  * stylesheet already uses, which is safe for a paragraph because it is not a
- * control and so cannot mislead the tab-order model (CLAUDE.md §4e). The
+ * control and so cannot mislead the tab-order model (docs/agents/accessibility.md §4e). The
  * header's box is then zero tall: its band above still paints the inset.
  */
 @media (max-width: 37.49rem) {
@@ -680,7 +680,7 @@ h3:first-child {
  * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
  * decides which it is, on the window's size.
  *
- * ⚠️ **Persistent chrome, so measured rather than read** — CLAUDE.md §4f.
+ * ⚠️ **Persistent chrome, so measured rather than read** — docs/agents/browser-gate.md §4f.
  * `shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET` now counts the bar and
  * the rail as well as the header, and the one place a pinned bar would not fit
  * is the one #307 failed at: at 320×256 a 64 px bar is 25 % of the screen. So
@@ -4244,7 +4244,7 @@ select.oyl-input {
  *
  * ## `position: fixed`, and what §4f requires of that
  *
- * CLAUDE.md §4f: a change to `position` or `z-index` *"is reviewed by measuring
+ * docs/agents/browser-gate.md §4f: a change to `position` or `z-index` *"is reviewed by measuring
  * it in the pinned Chromium, not by reading the CSS."*
  * `browser/ride.browser.spec.ts` is that measurement — the stage's box against
  * the viewport, every control inside it with `scrollY === 0`, at a phone in
@@ -5865,7 +5865,7 @@ select.oyl-input {
  * reader reaches it, and the control reopens it. The rule below hides the
  * route only for a notice that is standing OPEN.
  *
- * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
+ * ⚠️ `display: none`, which docs/agents/accessibility.md §4e warns about — for CONTROLS. The
  * accessibility suite loads no stylesheet, so an element hidden here still
  * looks focusable to `tabbableElements`; this panel holds an `svg` with a text
  * equivalent and no control at all, so there is nothing for that to be wrong
@@ -5976,7 +5976,7 @@ select.oyl-input {
  * 365 / 0.52 is 702 px. On the runner they are **373 px at 320 px wide**: a
  * different `system-ui`, wider glyphs, and a label that wraps in a 90 px track.
  * The pull request's first CI run put the route panel 8 px over the rider's
- * helmet at 320×704 while the same spec was green locally — CLAUDE.md §4f's
+ * helmet at 320×704 while the same spec was green locally — docs/agents/browser-gate.md §4f's
  * *"a green browser gate on a developer's machine says nothing about…"*, this
  * time about fonts. So: 373 / 0.52 is 717 px, 47 rem is 752, and a phone
  * narrower than 360 px — where the tracks are narrow enough to wrap a label —
@@ -6646,7 +6646,7 @@ select.oyl-input {
  * THE LIVE CAMERA INDICATOR — #382, ADR 0029 D-5.
  *
  * `camera/indicator.tsx` is the component and the argument; this is the half
- * CLAUDE.md §4f says must be *"reviewed by measuring it in the pinned Chromium,
+ * docs/agents/browser-gate.md §4f says must be *"reviewed by measuring it in the pinned Chromium,
  * not by reading the CSS"*, and `browser/shell.browser.spec.ts` §"the live
  * camera indicator" is that measurement.
  *
@@ -6724,7 +6724,7 @@ select.oyl-input {
  *
  * `views/SideCameraView.tsx` is the component. Two things are drawn here: the
  * framing picture a rider lines the bike up by, and the full-screen sign the
- * tripod phone shows while it films. The sign is the half CLAUDE.md §4f says is
+ * tripod phone shows while it films. The sign is the half docs/agents/browser-gate.md §4f says is
  * *"reviewed by measuring it in the pinned Chromium, not by reading the CSS"*,
  * and `browser/sidecamera.browser.spec.ts` is that measurement.
  *
