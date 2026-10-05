@@ -596,9 +596,10 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
         '?limit=201',
         '?limit=two',
         '?cursor=nonsense!',
-        // A cursor this instance writes, but for the OTHER list.
+        // A cursor shaped as the OTHER list writes one; for the log, its id is a
+        // well-formed log id, so only the key refuses it.
         path.endsWith('log')
-          ? `?cursor=${encodeURIComponent(btoa(JSON.stringify(['1', 'abc'])).replace(/=+$/, ''))}`
+          ? `?cursor=${encodeURIComponent(btoa(JSON.stringify(['1', '2'])).replace(/=+$/, ''))}`
           : `?cursor=${encodeURIComponent(btoa(JSON.stringify(['log', '1'])).replace(/=+$/, ''))}`,
       ]) {
         const answer = await w.as(w.owner, 'GET', `${path}${query}`);

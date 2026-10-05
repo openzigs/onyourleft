@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useId, useState, type JSX } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -592,9 +592,16 @@ export function ModerationView({
   const [last, setLast] = useState<ModerationOutcome | undefined>(undefined);
   /** Whether the last *Show more* on each list failed (#961). */
   const [moreFailed, setMoreFailed] = useState({ log: false, suspended: false });
+  /**
+   * Counts the reads begun: a page asked for under one read is dropped when
+   * another has begun since, because it is the next page of a list no longer
+   * shown — the read-back after an action starts both lists again.
+   */
+  const generation = useRef(0);
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
+    generation.current += 1;
     const read = await port.read();
     setMoreFailed({ log: false, suspended: false });
     setState(read);
@@ -603,14 +610,14 @@ export function ModerationView({
   /** Append the next page of one list to what is shown, or say it did not come. */
   async function more(list: 'log' | 'suspended', cursor: string): Promise<void> {
     if (port === undefined) return;
+    const askedUnder = generation.current;
     const next = list === 'log' ? await port.moreLog(cursor) : await port.moreSuspended(cursor);
+    if (generation.current !== askedUnder) return;
     setMoreFailed((failed) => ({ ...failed, [list]: next === undefined }));
     if (next === undefined) return;
     setState((current) => {
       if (current?.kind !== 'moderator') return current;
-      const shown = current[list];
-      // A read-back since the press replaced the list: this page is not its next.
-      if (shown?.next !== cursor) return current;
+      if (current[list]?.next !== cursor) return current;
       return list === 'log'
         ? {
             ...current,

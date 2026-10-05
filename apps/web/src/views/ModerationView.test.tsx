@@ -585,6 +585,40 @@ describe('the log, a page at a time — #961', () => {
     expect(logLines()[0]).toContain('Approved an account');
   });
 
+  it('drops a page that arrives after an action read everything back — it is not the new list’s next', async () => {
+    const scripted = paged();
+    await open(scripted);
+    // Hold the next page until the read-back after an action has landed.
+    const real = scripted.port.moreLog.bind(scripted.port);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    scripted.port.moreLog = async (cursor) => {
+      const page = await real(cursor);
+      await held;
+      return page;
+    };
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    expect(logLines()).toHaveLength(1);
+    release();
+    await settle();
+    expect(logLines()).toHaveLength(1);
+    expect(logLines()[0]).toContain('Approved an account');
+  });
+
+  it('clears a page’s failure once an action reads everything back', async () => {
+    const scripted = paged();
+    await open(scripted);
+    scripted.held.moreReadable = false;
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await settle();
+    expect(text(section('Moderation log'))).toContain(MORE_UNREADABLE_TEXT);
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    expect(text(section('Moderation log'))).not.toContain(MORE_UNREADABLE_TEXT);
+  });
+
   it('passes the accessibility audit with both lists paged', async () => {
     const scripted = paged();
     scripted.held.suspended.set('rider-carys', 1_790_020_000);
