@@ -8,6 +8,8 @@ import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
+import { createServer } from 'node:net';
+
 import { listen, type Listening } from './node-listener.ts';
 
 /**
@@ -16,6 +18,30 @@ import { listen, type Listening } from './node-listener.ts';
  *
  * Test support, never shipped: nothing under `src/` but a test imports it.
  */
+
+/**
+ * A free loopback port, chosen by the operating system and let go, for a test
+ * that must know its instance's origin before the instance listens (a device
+ * signs the origin, so it has to name the port).
+ *
+ * ⚠️ Never a port drawn at random (#954): one drawn from 30 000–50 000 lands
+ * in Linux's ephemeral range (32 768–60 999), where every other test worker's
+ * outbound sockets take their ports, and on a busy runner it was taken —
+ * `listen EADDRINUSE`. The operating system hands out a port nothing holds.
+ */
+export async function freeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => {
+        resolve(port);
+      });
+    });
+  });
+}
 
 export const TEST_COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
