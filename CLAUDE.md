@@ -16,6 +16,12 @@ authority as this file. A reference elsewhere in the repository to "CLAUDE.md" w
 beside it means this index and those topic files together; a section number (§4c, §4f …) is
 found through the topic map's second column.
 
+> ⚠️ **HARD RULE — do not add detail to this file.** New rules, gotchas, measurements and history
+> go in the matching `docs/agents/` topic file. Only a genuinely new topic gets a one-line entry
+> in the topic map below. This file has a **48 KB budget** (49 152 bytes), enforced by `AGENT002`
+> in `pnpm run check:repo`: it is loaded into every agent session on every turn, and it grew from
+> 97 KB to 659 KB in a month because detail kept being appended here.
+
 ### Topic map
 
 | File | Sections | Read it when |

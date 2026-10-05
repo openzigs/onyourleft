@@ -2085,7 +2085,7 @@ fi
 if [ -f "${ROOT}/${AGENT_INDEX}" ]; then
   index_bytes="$(wc -c < "${ROOT}/${AGENT_INDEX}" | tr -d ' ')"
   if [ "${index_bytes}" -gt "${AGENT_INDEX_MAX_BYTES}" ]; then
-    report AGENT002 "${AGENT_INDEX}: ${index_bytes} bytes, over the ${AGENT_INDEX_MAX_BYTES}-byte ceiling for the index every agent session loads; move the new text into the topic file under ${AGENT_DIR}/ whose area it is, and leave a pointer"
+    report AGENT002 "${AGENT_INDEX}: ${index_bytes} bytes, over the ${AGENT_INDEX_MAX_BYTES}-byte (48 KB) budget for the index every agent session loads; put the detail in the relevant topic file under ${AGENT_DIR}/ and add at most a one-line pointer to the index"
   fi
 fi
 
