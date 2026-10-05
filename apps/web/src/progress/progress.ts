@@ -252,7 +252,9 @@ export function deriveProgress(summaries: readonly ActivitySummary[], now: UnixS
  *
  * - **The current streak comes from the newest window.** It is about now.
  *   It is short only if one run of weeks is longer than the whole window,
- *   which at the bound is 5,000 counted rides.
+ *   which at the bound is 5,000 RECORDINGS, not 5,000 counted rides: a
+ *   recording under {@link RIDE_MINIMUM_MOVING_SECONDS}' five minutes takes a
+ *   slot in the window without adding a week to any streak.
  * - **The badges, and what holds a best back, come from the oldest window**,
  *   exactly as they did before #1107. Every badge is a claim about the whole
  *   history: worked out from the newest window alone, its first ride would be

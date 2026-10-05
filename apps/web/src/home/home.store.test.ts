@@ -16,6 +16,7 @@ import { unixSeconds } from '@onyourleft/domain';
 import { activityId } from '@onyourleft/store';
 import {
   ATHLETE_A,
+  ATHLETE_B,
   createStoreHarness,
   rideFor,
   seedAthletes,
@@ -74,14 +75,19 @@ const WEEK = 7 * 86_400;
 /** Weeks of riding at the recent end, one ride each, the newest this week. */
 const RECENT_WEEKS = 12;
 /**
- * 1.8 s of case time locally (5,012 puts to fake-indexeddb). Coverage slows a
- * loop like this about three times on CI, which would pass Vitest's 5 s.
+ * About 5,020 puts to fake-indexeddb. Slowest figures: 8.9 s under coverage on
+ * CI (run 37244354955, the case before athlete B's rides were added) and
+ * 12.6–14.4 s locally on #1126's review. 45 s is about three times the
+ * slowest, §4c's convention; 30 s was only twice it.
  */
-const SEEDING_TIMEOUT_MILLISECONDS = 30_000;
+const SEEDING_TIMEOUT_MILLISECONDS = 45_000;
+/** Athlete B's rides: older than all of A's, and newer than all of A's. */
+const B_OLDER = ['b-older-0', 'b-older-1', 'b-older-2'];
+const B_NEWER = ['b-newer-0', 'b-newer-1', 'b-newer-2'];
 
 describe('#1107 — past the read budget, Home reads the NEWEST rides, through the real store', () => {
   it(
-    'keeps the current streak and the last ride past 5,000 rides, and takes the badges from the oldest',
+    'keeps the current streak and the last ride past 5,000 rides, takes the badges from the oldest, and reads no other athlete’s rides',
     async () => {
       const open = createStoreHarness();
       harness = open;
@@ -91,6 +97,30 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
       const old = HISTORY_ACTIVITY_LIMIT;
       const OLD_FROM = 1_500_000_000;
       await open.write(async (store) => {
+        // Athlete B either side of every ride of A's (CLAUDE.md §6), so a read
+        // of either window that dropped the owner would take B's first: the
+        // oldest read would start with B's older rides, the newest with B's
+        // newer ones.
+        for (const [index, id] of B_OLDER.entries()) {
+          await store.putActivity(
+            rideFor(ATHLETE_B, {
+              id: activityId(id),
+              name: `B ${id}`,
+              startedAt: unixSeconds(OLD_FROM - 86_400 * (index + 1)),
+              startedAtTimeZone: 'UTC',
+            }),
+          );
+        }
+        for (const [index, id] of B_NEWER.entries()) {
+          await store.putActivity(
+            rideFor(ATHLETE_B, {
+              id: activityId(id),
+              name: `B ${id}`,
+              startedAt: unixSeconds(NOW - 60 * (index + 1)),
+              startedAtTimeZone: 'UTC',
+            }),
+          );
+        }
         for (let index = 0; index < old; index += 1) {
           await store.putActivity(
             rideFor(ATHLETE_A, {
@@ -127,6 +157,15 @@ describe('#1107 — past the read budget, Home reads the NEWEST rides, through t
       );
       expect(first?.activityId).toBe(activityId('old-00000'));
       expect(home.summaries[0]?.id).toBe(activityId('old-00000'));
+
+      // Nothing of athlete B's, in either window or anything derived from them.
+      const theirs = new Set<string>([...B_OLDER, ...B_NEWER]);
+      expect(home.summaries.filter((summary) => theirs.has(summary.id))).toEqual([]);
+      expect(home.summaries.every((summary) => summary.athleteId === ATHLETE_A)).toBe(true);
+      expect(home.progress.badges.filter((badge) => theirs.has(badge.activityId))).toEqual([]);
+      expect(home.lastRide?.name).toBe('Recent 0');
+      expect(home.week.rides).toBe(1);
+      expect(home.progress.streak.current).toBe(RECENT_WEEKS);
     },
     SEEDING_TIMEOUT_MILLISECONDS,
   );

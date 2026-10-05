@@ -3,20 +3,21 @@
 /**
  * What the home screen reads, and the bound on it — #428.
  *
- * ## One store read, and not one sample decoded
+ * ## One list read below the bound, two above it, and not one sample decoded
  *
- * The app opens here, so this is the read EVERY launch pays for. It is one
- * `listActivitySummaries` — the same bounded read `analysis/history.ts` makes
- * for the fitness chart, with the same {@link HISTORY_ACTIVITY_LIMIT} — plus
- * the athlete row the thresholds come from, and then arithmetic. Every block
- * on the screen is derived from those rows:
+ * The app opens here, so this is the read EVERY launch pays for. Below
+ * {@link HISTORY_ACTIVITY_LIMIT} it is one `listActivitySummaries` — the same
+ * bound `analysis/history.ts` puts on the fitness chart's read — plus the
+ * athlete row the thresholds come from, and then arithmetic. Past the bound
+ * there is a second list read, for the badges alone (§"The read budget"
+ * below). Every block on the screen is derived from those rows:
  *
  * | block | from |
  * |---|---|
  * | the last ride | the newest summary |
  * | this week | the summaries started today or on the six calendar days before it |
  * | fitness, fatigue, freshness | `fitnessSeries` over every summary's load, carried to today |
- * | streaks and badges (#947) | `deriveProgress` over every summary and its `rideFacts` |
+ * | streaks and badges (#947) | `deriveProgress` over every summary and its `rideFacts`; past the bound, the current streak from the newest read and the badges from the oldest (`deriveProgressAcross`) |
  *
  * ## The read budget, and which end of the history it keeps — #1107
  *
@@ -163,8 +164,9 @@ export interface HomeData {
   /** True when {@link HISTORY_ACTIVITY_LIMIT} cut the history short. */
   readonly truncated: boolean;
   /**
-   * Streaks and badges — #947, `progress/progress.ts` — derived from the same
-   * rows, as of `now`. No read of its own.
+   * Streaks and badges — #947, `progress/progress.ts` — as of `now`. Below the
+   * bound, derived from the same rows with no read of its own; past it, the
+   * badges come from the second, OLDEST read (§"The read budget", #1107).
    */
   readonly progress: Progress;
   /**
@@ -175,7 +177,8 @@ export interface HomeData {
 }
 
 /**
- * Everything the home screen shows, from one list read.
+ * Everything the home screen shows: one list read below
+ * {@link HISTORY_ACTIVITY_LIMIT}, and a second for the badges past it.
  *
  * @param now the instant "this week" and "today" are measured from. A
  * parameter, so a test can hold the clock.
