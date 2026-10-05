@@ -58,6 +58,7 @@ import { THEMES, type Theme } from '../src/design/tokens';
 import { ALL_ROUTES, hrefFor, type RouteDefinition } from '../src/shell/routes';
 
 import { NIGHTLY } from './nightly';
+import { LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST, reflowFaults, reflowMargin } from './reflow-faults';
 import type { ReflowMeasurement } from './reflow-harness';
 
 /** The three viewports #660 names: SC 1.4.10's 320×256, and a phone both ways up. */
@@ -68,9 +69,6 @@ const VIEWPORTS = [
 ] as const;
 
 const DATASETS = ['empty', 'populated'] as const;
-
-/** Sub-pixel rounding in `scrollWidth`; a whole pixel is a real overflow. */
-const SUBPIXEL_TOLERANCE = 0;
 
 /** SC 2.5.5's 44 × 44 — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`, for its reason. */
 const TOUCH_TARGET_PIXELS = 44;
@@ -110,61 +108,6 @@ async function visit(page: Page, hash: string): Promise<ReflowMeasurement> {
   return measured;
 }
 
-/**
- * Everything wrong with one route's measurement, as sentences. Empty is a pass.
- * The controls call this too, which is what makes them controls.
- */
-function reflowFaults(
-  route: RouteDefinition,
-  seen: ReflowMeasurement,
-  populated: boolean,
-): string[] {
-  const faults: string[] = [];
-  const where = `${route.id} at ${String(seen.viewport.width)}×${String(seen.viewport.height)}`;
-  if (seen.routeId !== route.id) {
-    faults.push(`${where}: opened ${seen.hash} and got the ${seen.routeId} route`);
-  }
-  if (seen.h1 !== route.title) {
-    faults.push(`${where}: the h1 is "${seen.h1}", not "${route.title}"`);
-  }
-  if (!seen.settledWithinPatience) {
-    faults.push(`${where}: the page did not settle`);
-  }
-  if (seen.documentOverflow > SUBPIXEL_TOLERANCE) {
-    faults.push(
-      `${where}: the document scrolls sideways by ${String(seen.documentOverflow)} px — widest is ${seen.widest}`,
-    );
-  }
-  const expected = seen.expectation;
-  if (expected === undefined) {
-    faults.push(
-      `${where}: reflow-harness.tsx §POPULATED says nothing about this route — name what its ` +
-        'fixture puts on the page, or why nothing on it comes from one',
-    );
-  } else if (expected.kind === 'fixture' && seen.markerPresent !== populated) {
-    faults.push(
-      populated
-        ? `${where}: the populated fixture did not reach the view (no ${expected.marker})`
-        : `${where}: ${expected.marker} is on the EMPTY page, so it cannot tell the two walks apart`,
-    );
-  } else if (expected.kind === 'constant' && seen.markerPresent !== true) {
-    faults.push(`${where}: ${expected.marker} is missing, and it does not depend on the fixtures`);
-  }
-  for (const error of seen.errors) {
-    faults.push(`${where}: the page raised "${error}"`);
-  }
-  for (const box of seen.scrollBoxes) {
-    if (!box.focusable || box.role !== 'region' || box.name === '') {
-      faults.push(
-        `${where}: ${box.description} scrolls sideways by ${String(box.overflow)} px and is not a ` +
-          `focusable, named region (focusable ${String(box.focusable)}, role ${String(box.role)}, ` +
-          `name "${box.name}")`,
-      );
-    }
-  }
-  return faults;
-}
-
 /*
  * #672: the walk runs under a light device and a dark one, at every viewport
  * in both. Colour moves no box, so what the dark walk can find is a route that
@@ -190,6 +133,13 @@ function reflowFaults(
  * only, and that is found the next morning rather than before the merge. The
  * dark palette's COLOURS stay required: `theme.browser.spec.ts`, and the dark
  * reads in `links`, `button-hierarchy` and `controls-first`.
+ *
+ * ⚠️ **Since #1128 the light walk at 390×844 is run by
+ * `controls-first.browser.spec.ts`**, whose light phone walk opened the same
+ * page with the same query in the same palette: it hands every route's
+ * measurement to `reflow-faults.ts` §`reflowFaults` as well as to #666's rules,
+ * and its two cases are named `… and every route reflows (#660)`. The light
+ * walk here runs 320×256 and 844×390; the dark walk still runs all three.
  */
 
 // The two describes below name the palettes, so a third palette would be
@@ -218,6 +168,15 @@ test.describe('the dark palette — #672, nightly since #1076', { tag: NIGHTLY }
 function reflowWalks(theme: Theme): void {
   for (const data of DATASETS) {
     for (const [width, height] of VIEWPORTS) {
+      if (
+        theme === 'light' &&
+        width === LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.width &&
+        height === LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.height
+      ) {
+        // #1128: `controls-first.browser.spec.ts` walks this page and judges
+        // every route with `reflowFaults` — see `reflow-faults.ts`.
+        continue;
+      }
       test(`every route in the route table reflows at ${String(width)}×${String(height)}, ${data}, ${theme}`, async ({
         page,
       }) => {
@@ -235,12 +194,7 @@ function reflowWalks(theme: Theme): void {
           }
           const seen = await visit(page, hash);
           faults.push(...reflowFaults(route, seen, data === 'populated'));
-          margins.push(
-            `${route.id}: ${seen.spare.toFixed(1)} px spare` +
-              (seen.scrollBoxes.length === 0
-                ? ''
-                : ` (scroll boxes: ${seen.scrollBoxes.map((box) => `${box.description} +${String(box.overflow)}`).join(', ')})`),
-          );
+          margins.push(reflowMargin(route, seen));
         }
         // Asked of the PAGE, which reads `ALL_ROUTES` for itself: a walk over a
         // hand list, or one that dropped a route, leaves the page holding a

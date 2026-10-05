@@ -114,6 +114,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST, reflowFaults, reflowMargin } from './reflow-faults';
 import type { ReflowMeasurement } from './reflow-harness';
 
 /** SC 2.5.5 (AAA) — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`. */
@@ -302,15 +303,47 @@ async function hashFor(page: Page, route: RouteDefinition): Promise<string> {
   return hrefFor(route, parameter);
 }
 
-async function visit(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
+/** One route's measurement, with no judgment made of it. */
+async function measure(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
   const hash = await hashFor(page, route);
   const seen = await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
   if (seen === undefined) {
     throw new Error('the reflow harness published no measurement');
   }
+  return seen;
+}
+
+async function visit(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
+  const seen = await measure(page, route);
   expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
   expect(seen.settledWithinPatience, `${route.id} did not settle`).toBe(true);
   return seen;
+}
+
+/**
+ * #660's judgment of the walk, carried by the light phone walk — #1128,
+ * `reflow-faults.ts`: that walk opens the same page `reflow.browser.spec.ts`'s
+ * light walk did at 390×844, so each route's one measurement is judged by both
+ * specs' rules rather than taken twice.
+ */
+interface ReflowJudgment {
+  readonly populated: boolean;
+  readonly faults: string[];
+  readonly margins: string[];
+}
+
+// The light phone walk below stands in for `reflow.browser.spec.ts`'s at this
+// viewport, so it must BE that viewport: fail at load rather than leave it
+// walked by neither spec.
+if (
+  PHONE.width !== LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.width ||
+  PHONE.height !== LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.height
+) {
+  throw new Error(
+    `controls-first's phone is ${String(PHONE.width)}×${String(PHONE.height)}, and reflow-faults.ts ` +
+      'says the light reflow walk it carries is at ' +
+      `${String(LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.width)}×${String(LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.height)}`,
+  );
 }
 
 /**
@@ -462,6 +495,7 @@ function judge(
 async function walk(
   page: Page,
   viewport: Viewport,
+  reflow?: ReflowJudgment,
 ): Promise<{
   readonly lines: string[];
   readonly faults: Map<string, readonly string[]>;
@@ -477,7 +511,18 @@ async function walk(
   const emptyFaults = new Map<string, readonly string[]>();
   const empty = await page.evaluate(() => window.__oylReflow?.data === 'empty');
   for (const route of ALL_ROUTES) {
-    const seen = await visit(page, route);
+    let seen: ReflowMeasurement;
+    if (reflow === undefined) {
+      seen = await visit(page, route);
+    } else {
+      // Judged for #660 first, and #666's own two checks made soft, so a route
+      // that fails both is reported by both rather than by whichever ran first.
+      seen = await measure(page, route);
+      reflow.faults.push(...reflowFaults(route, seen, reflow.populated));
+      reflow.margins.push(reflowMargin(route, seen));
+      expect.soft(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expect.soft(seen.settledWithinPatience, `${route.id} did not settle`).toBe(true);
+    }
     const verdict = judge(route, seen, viewport, !empty);
     lines.push(verdict.line);
     if (verdict.faults.length > 0) {
@@ -567,11 +612,42 @@ test.describe('#666 — the first control is above the fold on every route', () 
       test.use({ colorScheme: theme });
 
       for (const data of ['empty', 'populated'] as const) {
-        test(`at a ${PHONE.name}, ${data}`, async ({ page }) => {
+        // #1128: in the light palette this is ALSO #660's reflow walk at the
+        // phone — `reflow-faults.ts` — so the case says so in its name.
+        const reflows = theme === 'light' ? ', and every route reflows (#660)' : '';
+        test(`at a ${PHONE.name}, ${data}${reflows}`, async ({ page }) => {
           test.setTimeout(180_000);
           await open(page, PHONE, `data=${data}`);
           expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
-          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(page, PHONE);
+          const reflow: ReflowJudgment | undefined =
+            theme === 'light'
+              ? { populated: data === 'populated', faults: [], margins: [] }
+              : undefined;
+          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(
+            page,
+            PHONE,
+            reflow,
+          );
+          if (reflow !== undefined) {
+            console.log(
+              `reflow ${data} ${String(PHONE.width)}×${String(PHONE.height)}\n  ${reflow.margins.join('\n  ')}`,
+            );
+            // Soft, so a #666 fault below is reported beside it, not instead.
+            expect
+              .soft(
+                reflow.faults,
+                'reflow (#660, reflow-faults.ts): a route at the phone in the light palette',
+              )
+              .toEqual([]);
+            // Per route above, which names the route; this catches one raised
+            // after the last route was measured — the reflow walk's last check.
+            expect
+              .soft(
+                await page.evaluate(() => window.__oylReflow?.errors),
+                'reflow (#660): errors the page raised during the walk',
+              )
+              .toEqual([]);
+          }
           console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
           expect([...faults.values()].flat()).toEqual([]);
           if (data === 'empty') {
