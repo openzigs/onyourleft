@@ -2745,13 +2745,18 @@ a.oyl-button {
 }
 
 /*
- * 9rem tracks, sized as `.oyl-home__facts`' were before #1052 — from a Mac's
- * `10:23:45` at `xxl` (137 px). Linux draws it about 153 px; nothing measures
- * this card's facts at a ten-hour ride yet.
+ * 10rem tracks since #1083, as `.oyl-home__facts`' since #1052. They were 9rem
+ * (144 px), sized from a Mac's `10:23:45` at `xxl` (137 px); the CI runner's
+ * Linux font draws it 153 px, so any card whose two tracks came out between
+ * 144 and 153 px — a phone about 375 px wide — ran the elapsed time 5.5 px
+ * past its fact, and nothing measured a ten-hour ride. At 10rem (160 px) no
+ * track is narrower than the numerals. `rideview.browser.spec.ts` §"#1083"
+ * holds a `10:23:45` to one line inside its fact at every phone and tablet;
+ * at 9rem it spills at 375 px, and at 7rem on the 4:3 tablet in the shell.
  */
 .oyl-result__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--oyl-space-sm) var(--oyl-space-md);
   margin: 0;
 }
