@@ -735,11 +735,19 @@ function anchoredOnStage(): number {
   }).length;
 }
 
-/** Every rule's text in every stylesheet, for "was it put back exactly". */
-function stylesheetText(): string {
-  return [...document.styleSheets]
-    .map((sheet) => [...sheet.cssRules].map((rule) => rule.cssText).join('\n'))
-    .join('\n');
+/**
+ * Where every anchor block is and what it says, and how many rules each
+ * stylesheet or group holding one has — for "was it put back exactly". Not
+ * the whole stylesheet's text: `theme.css` serialised is most of a call's
+ * cost, and this is called twice a case at every overlay viewport. A rule put
+ * back at the wrong index, or not at all, moves an index or a count here.
+ */
+function anchorLayout(blocks: readonly AnchorBlock[]): string {
+  const parents = [...new Set(blocks.map((block) => block.parent))];
+  return JSON.stringify([
+    blocks.map((block) => [block.index, block.rule.cssText]),
+    parents.map((parent) => parent.cssRules.length),
+  ]);
 }
 
 /**
@@ -762,9 +770,9 @@ function stylesheetText(): string {
  * be more than zero.
  */
 function withoutAnchors(fallback: AnchorFallback): WithoutAnchors {
-  const before = stylesheetText();
   const anchoredBefore = anchoredOnStage();
   const blocks = anchorBlocks();
+  const before = anchorLayout(blocks);
   // Last first, so an index taken out does not move the next one's.
   const reversed = [...blocks].reverse();
   let removed = 0;
@@ -802,7 +810,7 @@ function withoutAnchors(fallback: AnchorFallback): WithoutAnchors {
     dropped,
     anchoredBefore,
     anchoredAfter,
-    restored: stylesheetText() === before,
+    restored: anchorLayout(anchorBlocks()) === before,
   };
 }
 
