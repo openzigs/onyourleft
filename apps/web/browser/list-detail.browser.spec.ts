@@ -122,15 +122,22 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   name and *Save workout* ahead of the block form (below it, the button was
  *   72 px under the landscape fold). On a phone, after the one-pane list —
  *   headed since #670's review by *Build a workout*, which moves focus to the
- *   builder — it is above the fold, by too little to hold: re-taken for
- *   #982, whose 48 px card drawings moved it down 32 px, it ends 45.9 px above
- *   the fold in this Chromium on a Mac (77.9 before) and 21.1 px on
+ *   builder — it was above the fold by too little to hold: re-taken for
+ *   #982, whose 48 px card drawings moved it down 32 px, it ended 45.9 px
+ *   above the fold in this Chromium on a Mac (77.9 before) and 21.1 px on
  *   the CI runner (53.1 before, run 36881810211; after, run 36887027370).
+ *   ⚠️ **Held on a phone since #1087**: the figures above had gone stale —
+ *   on `main` before #1087 it ended 84 px above the fold on DejaVu Sans, the
+ *   runner's face (84.0 on CI, run 37168523170) — and #1087 put the name and
+ *   *Save workout* ahead of the builder's "This workout" heading and block
+ *   list: 173 px. With no blocks this hold passes either way round; what
+ *   fails without #1087 is `controls-first.browser.spec.ts` §"#1050, #1087",
+ *   with blocks.
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
   routes: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
-  workouts: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
+  workouts: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
 };
 
 /**
