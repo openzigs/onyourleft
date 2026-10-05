@@ -23,6 +23,8 @@ import {
 } from './fields';
 import { atStartLine } from '../simulation';
 import {
+  MAX_SIMULATED_GRADE_PERCENT,
+  SIMULATION_SETPOINT_INTERVAL_SECONDS,
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
@@ -862,6 +864,49 @@ describe('the trainer status line — #373', () => {
    */
   it('does not claim the trainer is holding the gradient', () => {
     expect(trainerLine({ gradePercent: 7.5, writes: 3 })).not.toContain('olding');
+  });
+
+  /**
+   * #1120. Without anchor positioning the upright layout gives up 7 rem of the
+   * trainer line's width (`theme.css` §"#1111 UPRIGHT, WITHOUT ANCHOR
+   * POSITIONING"), so at 360 px the line has 214 px of the actions panel's 326,
+   * and its 6–7 px margin over the leaning rider (360×752, sounds and a side
+   * camera, the CI runner's fonts) rests on the line wrapping to TWO lines: a
+   * third puts the actions panel about 19 px into the rider's box.
+   *
+   * ⚠️ **An estimate, not a measurement** — no Vitest suite here lays out text.
+   * The width per character is the one the CI runner measured for
+   * `Trainer: simulating 0.9% (1 sent)`, 262 px over 33 characters, and the
+   * wrap is greedy at word boundaries as a browser's is. The browser gate
+   * (`ride.browser.spec.ts`, `withoutAnchors`) is the measurement; this is what
+   * fails on save when somebody lengthens the sentence.
+   *
+   * The longest sentence is the steepest grade a trainer is sent, negative, and
+   * 99 999 writes — over 27 hours at one write a second.
+   */
+  it('wraps to at most two lines in the space the upright layout leaves it without anchors — #1120', () => {
+    const PIXELS_PER_CHARACTER = 262 / 33;
+    const LINE_PIXELS = 326 - 7 * 16;
+    const MOST_WRITES = 99_999;
+    expect(MOST_WRITES * SIMULATION_SETPOINT_INTERVAL_SECONDS).toBeGreaterThan(24 * 60 * 60);
+
+    const longest = trainerLine({
+      gradePercent: -MAX_SIMULATED_GRADE_PERCENT,
+      writes: MOST_WRITES,
+    });
+    const lines: string[] = [];
+    for (const word of longest.split(' ')) {
+      const last = lines.at(-1);
+      const joined = last === undefined ? word : `${last} ${word}`;
+      if (last !== undefined && joined.length * PIXELS_PER_CHARACTER <= LINE_PIXELS) {
+        lines[lines.length - 1] = joined;
+      } else {
+        lines.push(word);
+      }
+    }
+
+    expect(longest.length * PIXELS_PER_CHARACTER).toBeLessThan(2 * LINE_PIXELS);
+    expect(lines.length).toBeLessThanOrEqual(2);
   });
 });
 

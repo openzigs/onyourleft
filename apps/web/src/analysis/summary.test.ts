@@ -13,7 +13,15 @@ import { describe, expect, it } from 'vitest';
 
 import { stubActivity } from '../detail/testing';
 
-import { isPowerBasis, loadFromSummary, loadSummaryOf, needsLoadSummary } from './summary';
+import {
+  hasNoLoadToWorkOut,
+  isPowerBasis,
+  loadFromSummary,
+  loadSummaryOf,
+  loadSummaryToStore,
+  NO_LOAD_TO_WORK_OUT,
+  needsLoadSummary,
+} from './summary';
 import { thresholdsFor } from './thresholds';
 
 const INTERVAL = seconds(1);
@@ -70,5 +78,54 @@ describe('reading a ride stored before #1070 with effortWeightedPower: 0', () =>
     });
     expect(loadFromSummary(row, thresholds)?.basis).toBe('heartRate');
     expect(needsLoadSummary(row)).toBe(false);
+  });
+});
+
+describe('#1084 — a ride with nothing to work a load out from', () => {
+  const thresholds = thresholdsFor(undefined);
+
+  it('is stored as the marker at save, never as nothing', () => {
+    expect(loadSummaryToStore({ power: zeros }, INTERVAL)).toEqual({ loadCoveredTime: 0 });
+    expect(loadSummaryToStore({}, INTERVAL)).toBe(NO_LOAD_TO_WORK_OUT);
+    // A ride that has a load stores the load, unchanged.
+    expect(loadSummaryToStore({ heartRate: strap }, INTERVAL)).toEqual(
+      loadSummaryOf({ heartRate: strap }, INTERVAL),
+    );
+  });
+
+  it('reads as no load, not load 0, and not as a ride to work out', () => {
+    const row = stubActivity({ loadCoveredTime: seconds(0) });
+    expect(hasNoLoadToWorkOut(row)).toBe(true);
+    expect(needsLoadSummary(row)).toBe(false);
+    expect(loadFromSummary(row, thresholds)).toBeUndefined();
+  });
+
+  it('reads a stale 0 W row the backfill marked as no load', () => {
+    const row = stubActivity({ effortWeightedPower: watts(0), loadCoveredTime: seconds(0) });
+    expect(hasNoLoadToWorkOut(row)).toBe(true);
+    expect(needsLoadSummary(row)).toBe(false);
+  });
+
+  it('is not said of a 0 s row that keeps a heart-rate basis beside a stale 0 W', () => {
+    // "No load" is 0 s covered AND no basis: the stale 0 W reads as absent, but
+    // the heart-rate figure is a basis, so this ride is not marked.
+    const row = stubActivity({
+      effortWeightedPower: watts(0),
+      effortWeightedHeartRate: beatsPerMinute(150),
+      loadCoveredTime: seconds(0),
+    });
+    expect(hasNoLoadToWorkOut(row)).toBe(false);
+  });
+
+  it('is not said of a ride nobody has worked out, nor of one with a load', () => {
+    const bare = stubActivity({});
+    expect(hasNoLoadToWorkOut(bare)).toBe(false);
+    expect(needsLoadSummary(bare)).toBe(true);
+    const loaded = stubActivity({ effortWeightedPower: watts(200), loadCoveredTime: seconds(600) });
+    expect(hasNoLoadToWorkOut(loaded)).toBe(false);
+    // The stale 0 W row before the backfill marks it is still to work out.
+    const stale = stubActivity({ effortWeightedPower: watts(0), loadCoveredTime: seconds(600) });
+    expect(hasNoLoadToWorkOut(stale)).toBe(false);
+    expect(needsLoadSummary(stale)).toBe(true);
   });
 });

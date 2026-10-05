@@ -660,4 +660,100 @@ describe('AnalysisView — fitness and fatigue (#77)', () => {
     expect(port.summaryWrites).toEqual(['old']);
     expect(mounted.container.textContent).toContain('Measured 1 more ride');
   });
+
+  it('says what it found with nothing to measure, and stops offering it — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('zero'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+        }),
+        power: Array.from({ length: 600 }, () => watts(0)),
+      },
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    const measure = queryAll(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Measure'),
+    );
+    expect(measure).toBeDefined();
+    await activateWithKeyboard(measure as HTMLElement);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(
+      'Measured 0 more rides, and found 1 with nothing to work a load out from — too short, or no usable power or heart rate.',
+    );
+    expect(text).toContain('1 ride has no load: nothing on it was enough to work one out from.');
+    // No offer left: no pass could measure it.
+    expect(
+      queryAll(mounted.container, 'button').some((button) =>
+        (button.textContent ?? '').startsWith('Measure'),
+      ),
+    ).toBe(false);
+    expect(text).not.toContain('imported before this device');
+  });
+
+  it('says a ride with no recording stored yet is looked at again, and does not call it no load — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('saving'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+        }),
+      },
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    const measure = queryAll(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Measure'),
+    );
+    await activateWithKeyboard(measure as HTMLElement);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(
+      'Measured 0 more rides. 1 ride has no recording stored yet, so it was left to look at again next time.',
+    );
+    expect(text).not.toContain('has no load');
+    expect(port.summaryWrites).toEqual([]);
+  });
+
+  it('names the rides with no load beside a chart — #1084', async () => {
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('loaded'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+          effortWeightedPower: watts(200),
+          loadCoveredTime: seconds(3600),
+        }),
+      },
+      ...['a', 'b'].map((id, index) => ({
+        activity: stubActivity({
+          id: activityId(id),
+          startedAt: unixSeconds(START + (index + 1) * 86_400),
+          startedAtTimeZone: 'UTC',
+          loadCoveredTime: seconds(0),
+        }),
+      })),
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain(
+      'Built from 1 measured ride, all measured from power. 2 rides have no load: nothing on them was enough to work one out from.',
+    );
+  });
 });
