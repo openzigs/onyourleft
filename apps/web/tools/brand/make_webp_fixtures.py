@@ -71,18 +71,31 @@ def gradient(width: int, height: int) -> Image.Image:
 
 
 def chunk_types(data: bytes) -> list[bytes]:
-    """The RIFF chunk types of a WebP file, in order."""
+    """The RIFF chunk types of a WebP file, in order, or a ValueError for a file
+    that is not a `RIFF`/`WEBP` form, whose RIFF size is not the file's, or whose
+    last chunk does not end exactly at the end (#1178's review)."""
+    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise ValueError("not a WebP")
+    if int.from_bytes(data[4:8], "little") != len(data) - 8:
+        raise ValueError("the RIFF size is not the file's")
     types, offset = [], 12
-    while offset + 8 <= len(data):
+    while offset < len(data):
+        if offset + 8 > len(data):
+            raise ValueError("stray bytes after the last chunk")
         length = int.from_bytes(data[offset + 4 : offset + 8], "little")
         types.append(data[offset : offset + 4])
         offset += 8 + length + (length & 1)
+    if offset != len(data):
+        raise ValueError("a chunk runs past the end of the file")
     return types
 
 
 def same(path: str, made: bytes, committed: bytes) -> bool:
     if "lossy" in Path(path).name:
-        return chunk_types(made) == chunk_types(committed)
+        try:
+            return chunk_types(made) == chunk_types(committed)
+        except ValueError:
+            return False
     return made == committed
 
 

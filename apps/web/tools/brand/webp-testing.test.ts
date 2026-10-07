@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { decodeWebp, webpDimensions } from './webp-testing';
+import { decodeWebp, webpChunkTypes, webpDimensions } from './webp-testing';
 
 const REPOSITORY = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -130,5 +130,43 @@ describe('the lossless WebP reader — #972', () => {
     expect(() =>
       decodeWebp(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0, 0, 0, 0])),
     ).toThrow(/not a WebP/);
+  });
+});
+
+describe('the WebP chunk list the brand gate reads — #1178', () => {
+  const LOGO = 'apps/web/src/brand/logo-dark.webp';
+
+  /** `bytes` with its RIFF size made the file's again, so only one thing is wrong. */
+  function resized(bytes: Uint8Array): Uint8Array {
+    const copy = bytes.slice();
+    new DataView(copy.buffer).setUint32(4, copy.length - 8, true);
+    return copy;
+  }
+
+  it('reads the logo as one VP8L chunk', () => {
+    expect(webpChunkTypes(bytesOf(LOGO))).toEqual(['VP8L']);
+  });
+
+  it('refuses a RIFF form that is not WEBP', () => {
+    const other = bytesOf(LOGO).slice();
+    other.set([0x41, 0x56, 0x49, 0x20], 8);
+    expect(() => webpChunkTypes(other)).toThrow(/not a WebP/);
+  });
+
+  it("refuses a RIFF size that is not the file's", () => {
+    expect(() => webpChunkTypes(new Uint8Array([...bytesOf(LOGO), 0, 0]))).toThrow(/RIFF size/);
+  });
+
+  it('refuses stray bytes after the VP8L chunk', () => {
+    expect(() => webpChunkTypes(resized(new Uint8Array([...bytesOf(LOGO), 0, 0])))).toThrow(
+      /stray bytes/,
+    );
+  });
+
+  it('refuses a VP8L chunk whose length runs past the end of the file', () => {
+    const longer = bytesOf(LOGO).slice();
+    const view = new DataView(longer.buffer);
+    view.setUint32(16, view.getUint32(16, true) + 64, true);
+    expect(() => webpChunkTypes(longer)).toThrow(/past the end/);
   });
 });
