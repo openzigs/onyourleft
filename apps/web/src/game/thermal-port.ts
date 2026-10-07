@@ -11,7 +11,7 @@
  * `HEADROOM_RESTORE_BELOW` could not fire on any device
  * (`docs/validation/0002-android-shell-and-game.md` Part E).
  *
- * The shape is CLAUDE.md §4h's: a port here, the Capacitor half in
+ * The shape is docs/agents/game.md §4h's: a port here, the Capacitor half in
  * `apps/mobile/src/thermal/`, composed in `main.tsx` behind `isNativeShell` so
  * a browser downloads no line of it.
  *

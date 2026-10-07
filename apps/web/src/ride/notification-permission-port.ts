@@ -17,7 +17,7 @@
  *
  * ## Why this is a `*-port.ts`
  *
- * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets, so a
+ * docs/agents/wiring-gate.md §4j: the suffix makes both methods `WIRE003` targets, so a
  * controller that stopped asking — or stopped checking before it asked, which
  * would ask on every ride — is a red gate. ⚠️ The provider half is the §Limits
  * case, exactly as `keep-alive-port.ts` records: `main.tsx` passes it as an

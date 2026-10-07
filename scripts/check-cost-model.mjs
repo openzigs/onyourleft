@@ -14,7 +14,7 @@
  * 103 MB in the four days before this was written, Verisign has announced a
  * `.com` rise for 1 November 2026 — and when an input is edited, every figure
  * derived from it silently becomes a number that was once true. That is the
- * same shape as CLAUDE.md §4a's "a documented command nobody has run", one
+ * same shape as docs/agents/commands.md §4a's "a documented command nobody has run", one
  * artefact over.
  *
  * So the document holds the **inputs** and the **outputs**, and this script
@@ -346,7 +346,7 @@ export function project(inputs, actives) {
  *
  * Read rather than assumed so a mislabelled column is caught, and then
  * asserted against `REQUIRED_SCALES` so a dropped one is too. Either alone
- * fails open in one direction — CLAUDE.md §4j makes the same argument about a
+ * fails open in one direction — docs/agents/wiring-gate.md §4j makes the same argument about a
  * watched set that is written down instead of discovered, and §4e about the
  * accessibility selector that matched a directory.
  */
@@ -579,7 +579,7 @@ if (isEntryPoint) {
     for (const problem of problems) console.error(`  - ${problem}`);
     console.error(
       '\nRun `node scripts/check-cost-model.mjs --print` for the tables the model computes.' +
-        '\nSee CLAUDE.md §4l and scripts/check-cost-model.mjs.',
+        '\nSee docs/agents/generated-and-cost-gates.md §4l and scripts/check-cost-model.mjs.',
     );
     process.exit(1);
   }

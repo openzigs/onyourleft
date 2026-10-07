@@ -112,7 +112,7 @@ import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from '
  * nothing must still be able to render with the network off.
  *
  * ⚠️ Each specifier is a LITERAL, and must stay one: `check:wiring` follows a
- * literal `import()` and nothing else (CLAUDE.md §4j), and
+ * literal `import()` and nothing else (docs/agents/wiring-gate.md §4j), and
  * `tools/bundle/entry-graph.ts` reads `shell/lazy/` to know which views must
  * not be reachable from the entry chunk.
  */
@@ -309,7 +309,7 @@ export interface AppShellProps {
    * reason every narrow store port in `main.tsx` is separate: this is the one
    * seam in the client through which a *game* can apply physical resistance to
    * somebody, and it carries the `-port.ts` suffix so `check:wiring`'s
-   * `WIRE003` watches it (CLAUDE.md §4j). `undefined` in every browser with no
+   * `WIRE003` watches it (docs/agents/wiring-gate.md §4j). `undefined` in every browser with no
    * ride controller, and in the accessibility suite.
    */
   readonly gameTrainer?: import('../game/trainer-port').GameTrainerPort | undefined;
@@ -733,7 +733,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
    *
    * ⚠️ **State here rather than a class the stylesheet reads with `:has()`.**
    * That would be less code, and it would hide the header with CSS — which is
-   * the one thing CLAUDE.md §4e says makes the accessibility suite wrong rather
+   * the one thing docs/agents/accessibility.md §4e says makes the accessibility suite wrong rather
    * than the control safe.
    *
    * ⚠️ Declared at the top of this component since #945 (the router asks it),

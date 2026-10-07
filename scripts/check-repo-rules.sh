@@ -58,6 +58,11 @@
 #   ASSET008 every vector or animation file under apps/ or packages/ -- an
 #           `.svg`, `.lottie` or `.riv`, or a Lottie `.json` -- is named in
 #           ASSETS.toml, text or not (#937)
+#   AGENT001 every topic file under docs/agents/ is named in the root
+#           CLAUDE.md, so no agent instruction sits where the index cannot
+#           send anybody
+#   AGENT002 the root CLAUDE.md stays an index: at most 48 KiB, because every
+#           agent session loads it whole on every turn
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -941,14 +946,14 @@ check_no_key_material
 #
 # ⚠️ Checked here rather than in Gradle, and that is the point of the criterion.
 # A Gradle assertion fails for whoever runs a build -- and CI does not build
-# Android at all (CLAUDE.md section 4c). A rule that only fires inside a build
+# Android at all (docs/agents/ci.md section 4c). A rule that only fires inside a build
 # nobody runs is a rule that never fires. This one runs on a bare clone, in the
 # same CI step as every other repository rule.
 #
 # ⚠️ It reads every Gradle file under the Android project, not variables.gradle
 # alone, and #95 is where that changed. The rule used to open ONE file, take the
 # FIRST `targetSdkVersion` in it, and `return 0` the moment that file was
-# absent -- which is the #142 shape (CLAUDE.md section 4e): a selector ASSERTED
+# absent -- which is the #142 shape (docs/agents/accessibility.md section 4e): a selector ASSERTED
 # to exist rather than discovered, failing closed against editing the value it
 # names and open against every other way the number reaches the build. Three
 # regressions were green under it, and each is now a fixture:
@@ -1102,7 +1107,7 @@ check_android_target_sdk
 # amount of state machinery can tell that apart from a section somebody meant.
 # What #229 removes is the case where the region never ends and the file reports
 # clean regardless. Full validation needs `xmllint`, which is a tool rather than
-# coreutils, and this is the bare-clone gate -- CLAUDE.md section 4a: *bash and
+# coreutils, and this is the bare-clone gate -- docs/agents/commands.md section 4a: *bash and
 # coreutils only, no install, no network*. A narrow rule that always runs is
 # worth more than a broad one that is skipped wherever the tool is missing.
 # Whether to ALSO add `xmllint` as a CI step, on the `shellcheck` precedent, is
@@ -1530,7 +1535,7 @@ ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 ASSET_LICENCES_FONT="OFL-1.1"
 ASSET_FONT_FILES="woff2 woff ttf otf"
 
-# `shasum` is what CLAUDE.md §4a documents and what macOS ships; `sha256sum` is
+# `shasum` is what docs/agents/commands.md §4a documents and what macOS ships; `sha256sum` is
 # what the GNU coreutils on the CI runner ship. The same pair, and the same
 # order, as check-licence-hashes.sh -- a second spelling of "take a digest"
 # would be a second thing to keep in step.
@@ -2044,6 +2049,45 @@ check_assets() {
 
 ASSET_NAMED_COUNT=0
 check_assets
+
+# --- AGENT001 / AGENT002: the root CLAUDE.md is an index ----------------------
+#
+# CLAUDE.md was one file of about 650 KB until 2026-10-05, and every agent
+# session -- and every subagent it dispatched -- loaded all of it, on every
+# turn. It is now an index of the rules every task needs, with everything else
+# MOVED into topic files under docs/agents/ that an agent reads when its work
+# reaches that area. Two things keep that true, and both are checkable by path:
+#
+#   AGENT001  a topic file the index does not name is an instruction no agent
+#             will be sent to read -- worse than a long index, because it looks
+#             written down and is never read
+#   AGENT002  an index that grows back is the old cost arriving one paragraph at
+#             a time; 48 KiB is the ceiling, about 12 000 tokens. New text goes
+#             in the topic file whose area it is, and the index gets a line
+#
+# Both are skipped where there is nothing to check: a tree with no
+# docs/agents/ has no topic files, and one with no CLAUDE.md has no index.
+AGENT_INDEX="CLAUDE.md"
+AGENT_DIR="docs/agents"
+AGENT_INDEX_MAX_BYTES=49152
+
+if [ -d "${ROOT}/${AGENT_DIR}" ]; then
+  while IFS= read -r topic_file; do
+    topic_rel="${topic_file#"${ROOT}"/}"
+    if [ ! -f "${ROOT}/${AGENT_INDEX}" ]; then
+      report AGENT001 "${topic_rel}: there is no ${AGENT_INDEX} to name it, so no agent is sent to read it"
+    elif ! grep -qF -- "](${topic_rel})" "${ROOT}/${AGENT_INDEX}"; then
+      report AGENT001 "${topic_rel}: not linked from ${AGENT_INDEX}; add it to the topic map there with a line saying when to read it, or no agent will"
+    fi
+  done < <(find "${ROOT}/${AGENT_DIR}" -type f -name '*.md' | LC_ALL=C sort)
+fi
+
+if [ -f "${ROOT}/${AGENT_INDEX}" ]; then
+  index_bytes="$(wc -c < "${ROOT}/${AGENT_INDEX}" | tr -d ' ')"
+  if [ "${index_bytes}" -gt "${AGENT_INDEX_MAX_BYTES}" ]; then
+    report AGENT002 "${AGENT_INDEX}: ${index_bytes} bytes, over the ${AGENT_INDEX_MAX_BYTES}-byte (48 KB) budget for the index every agent session loads; put the detail in the relevant topic file under ${AGENT_DIR}/ and add at most a one-line pointer to the index"
+  fi
+fi
 
 # --- Result -------------------------------------------------------------------
 

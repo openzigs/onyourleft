@@ -59,7 +59,7 @@ const PORT = 4319;
  * server does not serve. So there are two `webServer` entries, not two
  * Playwright projects and emphatically not two CI jobs: `main` requires a
  * status check whose context is exactly `Repository rules`, and a second job
- * reports under a different context and could not block a merge (CLAUDE.md
+ * reports under a different context and could not block a merge (docs/agents/ci.md
  * §4c).
  *
  * ⚠️ **The product server serves a single-page app**, with Vite's default
@@ -375,7 +375,7 @@ export default defineConfig({
   // whenever any other spec failed, which a gate must not do.
   //
   // Not a second browser and not a second job — one `playwright test`, one
-  // Chromium, the one `Repository rules` check (CLAUDE.md §4c).
+  // Chromium, the one `Repository rules` check (docs/agents/ci.md §4c).
   //
   // ⚠️ **A third project since #866, `nightly`, and it is NOT part of the
   // gate.** Every test tagged `@nightly` (`browser/nightly.ts`, a reviewed

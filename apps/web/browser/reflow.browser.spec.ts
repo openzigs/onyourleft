@@ -12,7 +12,7 @@
  *
  * ## Why this is a browser gate
  *
- * jsdom performs no layout (CLAUDE.md §4e), so nothing in the Vitest suite can
+ * jsdom performs no layout (docs/agents/accessibility.md §4e), so nothing in the Vitest suite can
  * say how wide a table lays out. The Activities screen was 447 px wide in a
  * 320 px phone and Credits 595 px, through every gate green — the one 320 px
  * check here measured the shell harness, whose views render no table at all.
@@ -122,7 +122,7 @@ async function visit(page: Page, hash: string): Promise<ReflowMeasurement> {
  * came back. What it costs is six cases here and in `controls-first` (every
  * viewport but 320×256 and the phone): about 5.7 s each and 17 s of wall time
  * over two workers locally, and 38.7 s summed on the runner (run 36427026037).
- * CLAUDE.md §4f records the job and gate times it was measured at.
+ * docs/agents/browser-gate.md §4f records the job and gate times it was measured at.
  *
  * ⚠️ **Since #1076 the DARK walk runs NIGHTLY, and the light walk stays in the
  * required gate** — the owner's ruling of 2026-10-03, for about 22 s of the

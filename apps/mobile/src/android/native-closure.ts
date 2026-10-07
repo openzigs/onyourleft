@@ -12,7 +12,7 @@
  *
  * ## A reviewed list, because CI cannot ask Gradle
  *
- * CI does not build Android (CLAUDE.md §4c), so nothing a pull request runs
+ * CI does not build Android (docs/agents/ci.md §4c), so nothing a pull request runs
  * can say what `:app` links. The list is therefore **reviewed and committed**
  * — `apps/mobile/native-closure.json` — and `scripts/check-third-party-notices.mjs`
  * renders it into the notices document the app ships. What this module adds

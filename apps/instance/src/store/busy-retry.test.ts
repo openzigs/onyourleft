@@ -216,7 +216,7 @@ const ATHLETE = {
  * (Node 24.21, 2026-10-01) and about 0.1 s idle. On CI under coverage they took
  * 379, 349 and 309 ms (run 36891647825, an AMD EPYC 9V74), so 20 s is fifty
  * times the CI figure and ten times the loaded one — kept that wide because
- * these cases exist for the loaded runner (CLAUDE.md §4c).
+ * these cases exist for the loaded runner (docs/agents/ci.md §4c).
  */
 const LOADED = { timeout: 20_000 };
 

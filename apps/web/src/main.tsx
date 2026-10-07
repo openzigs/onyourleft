@@ -244,7 +244,7 @@ interface ClientPlatform {
  * rather than left, because a comment describing the opposite of the code
  * beneath it is worse than no comment.
  *
- * What is still true is the bound CLAUDE.md §4h states: the Android
+ * What is still true is the bound docs/agents/game.md §4h states: the Android
  * trainer-control path is **written and has never driven a trainer**.
  * `docs/validation/0002-android-shell-and-game.md` Parts B–D and L are where
  * that is settled, and their result tables are empty.

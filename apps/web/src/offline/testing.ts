@@ -9,7 +9,7 @@
  * it. So the worker's decisions are tested against this, and the browser gate
  * says the whole thing works end to end. Neither is the other's superset,
  * which is the same relationship `styleOrigins` has with `map.browser.spec.ts`
- * (CLAUDE.md §4f).
+ * (docs/agents/browser-gate.md §4f).
  *
  * ⚠️ **This file is deliberately NOT a `*.test.ts`.** It is test support, and
  * `scripts/check-wiring.mjs` §`isTestSupport` already treats a file called

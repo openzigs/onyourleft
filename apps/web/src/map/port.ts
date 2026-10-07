@@ -12,14 +12,14 @@
  *
  * MapLibre GL JS renders through **WebGL**, and jsdom implements none — no
  * layout, no canvas context, no GL. Every test in this repository runs under
- * jsdom (CLAUDE.md §4e says so of the accessibility gate, and the rest follows
+ * jsdom (docs/agents/accessibility.md §4e says so of the accessibility gate, and the rest follows
  * it), so `new maplibregl.Map(...)` cannot be constructed in this suite at all.
  *
  * The alternative would be a headless-browser job. ⚠️ **It was taken, after
  * this paragraph was written** — a reviewer who remembers this file saying the
  * option *"was not taken here"* is reading the old one. #176 added
  * `apps/web/browser/`, inside the existing `Repository rules` job rather than
- * beside it, for exactly the reason the old paragraph gave: CLAUDE.md §4c
+ * beside it, for exactly the reason the old paragraph gave: docs/agents/ci.md §4c
  * records that a second job reports under a different context and could not
  * block a merge. §4f is what that gate is and is not.
  *

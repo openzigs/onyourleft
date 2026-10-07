@@ -14,7 +14,7 @@
  * So {@link PairingPanel} is that block, MOVED rather than copied: it drives
  * the same {@link RideController} — `pair`, `unpair` — that the Ride screen
  * drove, through the same transport `main.tsx` §`buildPlatform` chose (Web
- * Bluetooth in a browser, the Capacitor transport in the shell, CLAUDE.md
+ * Bluetooth in a browser, the Capacitor transport in the shell, docs/agents/game.md
  * §4h). The controller is mounted above the router (`ride/RideSession.tsx`),
  * so a device paired here is the device the Ride screen shows. The Ride screen
  * renders {@link ConnectedSensors}, which is read-only and links here: there

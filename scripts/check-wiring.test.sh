@@ -585,7 +585,7 @@ export interface RideStore {
    * The unacknowledged sibling.
    *
    * @unwired declared so that nothing calls it; a test asserts it stays
-   * uncalled, which is CLAUDE.md §4h's `writeWithoutResponse`.
+   * uncalled, which is docs/agents/game.md §4h's `writeWithoutResponse`.
    */
   writeWithoutResponse(): Promise<void>;
 }
@@ -1090,7 +1090,7 @@ assert_silent_about 'and it says nothing about the seam' 'TRAINER_COMMAND_SEAM'
 # --- Nothing else under packages/ is watched ---------------------------------
 #
 # ⚠️ The measurement that keeps #363 honest. Watching `packages/` wholesale
-# reports 171 findings on the real tree -- CLAUDE.md §4b records most of them as
+# reports 171 findings on the real tree -- docs/agents/project-state.md §4b records most of them as
 # deliberate -- so the seam has to be the five paths and not the directory they
 # are in. A sibling of a watched file, unimported and unexported-from, must be
 # invisible here.

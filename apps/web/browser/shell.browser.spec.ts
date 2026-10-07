@@ -10,7 +10,7 @@
  * 320×256, a header covering **70% of the viewport** and a "Skip to main
  * content" that landed the `<h1>` **entirely behind it**. The review's durable
  * finding was that this repository's accessibility gate is structurally blind
- * to *layout*: jsdom performs no layout (CLAUDE.md §4e), `theme.a11y.test.ts`
+ * to *layout*: jsdom performs no layout (docs/agents/accessibility.md §4e), `theme.a11y.test.ts`
  * reads the stylesheet as a file, and the browser gate rendered a map, a 3D
  * scene and a HUD panel — never the chrome.
  *
@@ -969,7 +969,7 @@ for (const viewport of HEADER_VIEWPORTS) {
  *
  * ## Why here and not in the fast suite
  *
- * jsdom performs no layout and resolves no custom property (CLAUDE.md §4e), so
+ * jsdom performs no layout and resolves no custom property (docs/agents/accessibility.md §4e), so
  * nothing in `pnpm run test` can measure a button. `theme.a11y.test.ts` reads
  * the stylesheet as a file: it can see a declaration, never what the
  * declaration does — which is the same blindness that let #307 ship a header
@@ -1664,7 +1664,7 @@ for (const viewport of [
 
 /**
  * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
- * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and CLAUDE.md
+ * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and docs/agents/browser-gate.md
  * §4f records this repository getting the two the wrong way round once.
  */
 const MINIMUM_TARGET_PIXELS = 24;

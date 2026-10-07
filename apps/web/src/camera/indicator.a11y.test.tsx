@@ -4,7 +4,7 @@
 /**
  * The live-camera indicator, in the accessibility gate (#382, ADR 0029 D-5).
  *
- * Named `*.a11y.test.tsx` because **the filename is the gate** — CLAUDE.md §4e:
+ * Named `*.a11y.test.tsx` because **the filename is the gate** — docs/agents/accessibility.md §4e:
  * `test:a11y` is `vitest run --project web .a11y.test.`, and #142 is what
  * happens when a gate selects on a directory instead.
  *

@@ -17,7 +17,7 @@
  *
  * ## Why this is a `*-port.ts`, and why that is the load-bearing part
  *
- * The suffix is what puts `readTrainer` under `WIRE003` (CLAUDE.md §4j), so a
+ * The suffix is what puts `readTrainer` under `WIRE003` (docs/agents/wiring-gate.md §4j), so a
  * later edit that stops the game asking for a trainer is a red gate rather than
  * a silent return to #362. That matters more here than anywhere else this
  * repository has put a port: the wiring gate's own §Limits say a **prop
@@ -233,7 +233,7 @@ export interface GameTrainerPort {
    * granted, so there is one source of truth for the ride's trainer state.
    *
    * ⚠️ On the port rather than on {@link GradientTrainer} so that `WIRE003`
-   * (CLAUDE.md §4j) goes red if the game stops calling it, and so that the
+   * (docs/agents/wiring-gate.md §4j) goes red if the game stops calling it, and so that the
    * component driving gradients still cannot ask.
    *
    * ⚠️ **Not called `requestControl`, and that is measured rather than a

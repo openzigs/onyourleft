@@ -10,7 +10,7 @@
  * port and the room id as OPTIONAL props, and deleting that hand-over
  * (`AppShell.tsx`, the `room` and `roomId` spreads) left every gate green —
  * `room-wiring.test.tsx` mounts `GameView` itself, and the browser gate drives
- * `createRoomPort` directly. CLAUDE.md §4j §Limits names the shape.
+ * `createRoomPort` directly. docs/agents/wiring-gate.md §4j §Limits names the shape.
  *
  * So this renders the real `AppShell` at the real game route, handed a port
  * built by `createRoomPort` over `localStorage` as `main.tsx`

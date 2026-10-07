@@ -38,7 +38,7 @@
  * That shipped, and passed every gate this repository has:
  *
  * - `test:a11y` renders the panel into **jsdom**, which performs no layout and
- *   resolves no custom property (CLAUDE.md §4e). It cannot measure a pixel.
+ *   resolves no custom property (docs/agents/accessibility.md §4e). It cannot measure a pixel.
  * - `hud-value-size.test.ts` reads `theme.css` as a **file** and compares type
  *   sizes against constants copied out of a measurement somebody took by hand.
  *   That is a comparison against a previous reading, not against a browser.
@@ -95,7 +95,7 @@
  * ## The live region — #401
  *
  * ⚠️ **The fast suite cannot see the one thing most likely to make the whole
- * announcement epic say nothing.** jsdom loads no stylesheet (CLAUDE.md §4e),
+ * announcement epic say nothing.** jsdom loads no stylesheet (docs/agents/accessibility.md §4e),
  * and no live region announces while it is hidden (Roselli, 2026-01-14) — so
  * a region that `display: none` reached from a stylesheet, a media query or a
  * utility class would pass every `.a11y.test` there is while the rider heard

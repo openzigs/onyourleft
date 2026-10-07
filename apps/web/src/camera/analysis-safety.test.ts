@@ -235,7 +235,7 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
   // It reads every source file in the client, so it grows with the tree. Its time
   // under coverage on green `main` runs: 4 045, 4 499 and 4 552 ms (runs 36709354619,
   // 36705496259, 36700515225), 91 % of Vitest's 5 s default, and 5 133 ms on #917's
-  // run 36711705363. So about three times the slowest green figure, as CLAUDE.md §4c
+  // run 36711705363. So about three times the slowest green figure, as docs/agents/ci.md §4c
   // asks. It is a timeout, not a performance claim.
   it('is imported only by the modules listed, and they are the ones that exist', () => {
     const importers = sources()

@@ -88,7 +88,7 @@ const spdxHeader = (content) => ({
  * bare specifier**, never a relative one, so `./x` and `../x` cannot be a
  * builtin under any resolution. A bare `import 'constants'` is still an error,
  * and so is `node:constants` through the group above — checked with a probe
- * file, both spellings, which is the rule CLAUDE.md §4d states for anything
+ * file, both spellings, which is the rule docs/agents/lint-boundaries.md §4d states for anything
  * touching these gates.
  *
  * ⚠️ The slashless negations alone were **one axis short** (#163): gitignore
@@ -478,7 +478,7 @@ export default tseslint.config(
   // paragraph replaces asked for. `vitest.config.ts` is named explicitly
   // because it is part of the platform-free program's neighbourhood and a
   // `defineConfig` import there is precisely how the closure was broken once
-  // before (CLAUDE.md section 4d).
+  // before (docs/agents/lint-boundaries.md section 4d).
   {
     files: ['packages/sensors/src/**/*.{ts,tsx}', 'packages/sensors/vitest.config.ts'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
