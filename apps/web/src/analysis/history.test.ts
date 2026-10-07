@@ -9,7 +9,7 @@
  * on the counters rather than on how long anything took.
  */
 
-import { beatsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
+import { beatsPerMinute, localDay, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
@@ -82,14 +82,23 @@ describe('loadFitnessHistory — the read budget', () => {
     expect(port.listReads[0]?.limit).toBe(4);
   });
 
-  it('reads oldest first, so a truncation drops old history and not recent form', async () => {
+  it('keeps the NEWEST rides, so a truncation drops old history and not recent form — #1130', async () => {
     // The averages build forward from the first ride, so the recent end is the
-    // part that must survive.
-    const port = stubAnalysis(OWNER, [summarised('old', 0), summarised('new', 30)]);
+    // part that must survive. Until #1130 this asserted the read was
+    // ascending, which kept the OLDEST rides and dropped the recent form.
+    const port = stubAnalysis(OWNER, [
+      summarised('old', 0),
+      summarised('middle', 10),
+      summarised('new', 30),
+    ]);
 
-    await loadFitnessHistory(port);
+    const history = await loadFitnessHistory(port, 2);
 
-    expect(port.listReads[0]?.direction).toBe('ascending');
+    expect(history.truncated).toBe(true);
+    expect(history.ridesCounted).toBe(2);
+    // Drawn in start order, from the middle ride to the newest.
+    expect(history.points[0]?.day).toBe(localDay(unixSeconds(START + 10 * DAY), 'UTC'));
+    expect(history.points.at(-1)?.day).toBe(localDay(unixSeconds(START + 30 * DAY), 'UTC'));
   });
 
   it('defaults to the stated bound', async () => {
@@ -200,6 +209,24 @@ describe('backfillLoadSummaries — the explicit act', () => {
     expect(outcome.computed).toBe(2);
     expect(outcome.remaining).toBe(3);
     expect(port.summaryWrites).toHaveLength(2);
+  });
+
+  it('works out the oldest first OF THE RIDES THE CHART READS — the newest window — #1130', async () => {
+    const rides = Array.from({ length: 5 }, (_unused, index) =>
+      unsummarised(`ride-${String(index)}`, index),
+    );
+    const port = stubAnalysis(OWNER, rides);
+
+    await backfillLoadSummaries(port, 2);
+
+    // The chart's own window, so a rider past the bound can fill it in…
+    expect(port.listReads[0]).toMatchObject({
+      orderBy: 'startedAt',
+      direction: 'descending',
+      limit: HISTORY_ACTIVITY_LIMIT,
+    });
+    // …and, inside it, oldest first.
+    expect(port.summaryWrites).toEqual([activityId('ride-0'), activityId('ride-1')]);
   });
 
   it('counts a ride it cannot summarise as having nothing to work out, so the remainder can reach zero', async () => {
