@@ -22,11 +22,6 @@ Claude Code loads this file whenever a session works on files under `apps/mobile
 
 ## The Capacitor trees that are pruned, not exempted
 
-⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
-`android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
-`android/capacitor-cordova-android-plugins/`. `cap sync` regenerates all three and Capacitor's own
-nested `.gitignore` keeps them out of the repository, so they are absent from a clean clone and an
-`.spdx-exempt` entry naming one would be a `LIC006` violation. `.prettierignore` carries the same
-three plus two generated JSON assets, because **Prettier reads only the root `.gitignore`, not a
-nested one** — without it `format:check` reports a minified bundle on any machine where a sync has
-run, which is a local-only red with no fix a contributor can apply.
+`cap sync` writes three trees that are pruned from every rule rather than listed in `.spdx-exempt`,
+and `.prettierignore` names them too. Which three, and why an exemption naming one would fail, is
+[`docs/agents/licence-boundary.md`](../../docs/agents/licence-boundary.md) §3a.

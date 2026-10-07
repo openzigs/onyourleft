@@ -183,6 +183,25 @@ put new/apps/web/node_modules/pkg/CLAUDE.md $'Area rule.'
 expect_tree 'a CLAUDE.md inside node_modules is not part of the new set' 1 'missing .*Area rule.'
 
 old_tree
+put new/CLAUDE.md $'# CLAUDE.md\n\nAlways on.\n\n---\n\nSee [x](docs/x.md).'
+put new/docs/agents/topic.md "${OLD_TOPIC}"
+put new/scripts/CLAUDE.md $'Area rule.'
+expect_tree 'an area file OUTSIDE apps/ and packages/ is part of the new set' 0 'all 8 non-blank lines of the old set' --exact
+
+old_tree
+put old/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.\n>\n> Quote two.'
+put new/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.'
+put new/apps/web/CLAUDE.md $'> Quote two.'
+put new/docs/agents/topic.md "${OLD_TOPIC}"
+expect_tree 'a bare `>` joining two quoted paragraphs is a blank line, not a lost line' 0 'are in the new set exactly as often' --exact
+
+old_tree
+put old/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.\n>\n> Quote two.'
+put new/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.\n>'
+put new/docs/agents/topic.md "${OLD_TOPIC}"
+expect_tree 'but the quoted text beside it is still a line' 1 'missing .*> Quote two.' --exact
+
+old_tree
 put new/CLAUDE.md "${OLD_ROOT}"
 put new/docs/agents/topic.md $'# Topic\n\n---'
 expect_tree 'a tree: a line lost from a TOPIC file is a finding too' 1 'docs/agents/topic.md:5 missing .*Topic rule.'

@@ -109,9 +109,11 @@ Never open a public issue with vulnerability details — use GitHub private vuln
 - **A closing keyword is fixed when the pull request is OPENED.** Editing the body later does not
   unlink the issue, and it still closes on merge. If a PR must not close an issue, **write `Refs #N`
   in the body you open with**; a closing verb mentioned in prose beside a number counts too.
+- **Quote a command in a PR body as run only if you ran it**, with what it printed; say what was skipped.
+- There is **no `CHANGELOG.md`** and no changelog convention: do not add one.
 - **Versions**: do not bump any version unless the issue asks for it.
 - **Do not reformat files you did not come to change.** A drive-by format buries the real diff.
-- Branches, ADR numbering and the next free ADR number, spikes and the changelog are in
+- Branches, ADR numbering and the next free ADR number, and spikes are in
   [`docs/agents/conventions.md`](docs/agents/conventions.md) §7.
 
 ### Protected paths — do not edit without an ADR
@@ -146,6 +148,11 @@ public repository where anyone can propose a workflow change. **Enforced, not me
 gate. Prose may name it in order to ban it; the rule is scoped to workflow files for that reason.
 
 **Pin every third-party action to a full commit SHA**, never a tag. A tag is mutable.
+
+**Keep pnpm's supply-chain controls on.** A release under a day old is refused: pin an older version,
+never add a `minimumReleaseAgeExclude`, which turns the check off for that package for good.
+`allowBuilds` in `pnpm-workspace.yaml` is security-relevant: answer each install script deliberately,
+and never set one to `true` to make an install pass ([`toolchain.md`](docs/agents/toolchain.md) §8).
 
 **Read the issue's revision block first.** Most issue bodies in this repository predate owner
 decisions D2, D5 and D6 (D6 itself since superseded by ADR 0036), and several state things that are

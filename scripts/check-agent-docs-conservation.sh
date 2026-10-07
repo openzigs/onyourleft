@@ -10,9 +10,13 @@
 # (the root CLAUDE.md plus every docs/agents/*.md) at least as many times as it
 # appeared in the old one.
 #
-# Two normalisations, and only two:
+# Three normalisations, and only three:
 #
 #   - trailing whitespace is ignored;
+#   - a line that is nothing but `>` is a blank line inside a blockquote, and is
+#     skipped as a blank line is (#1170's review): splitting a two-paragraph
+#     quote between two files leaves the `>` that joined them meaning nothing,
+#     and keeping it opened the moved half with an empty quote line;
 #   - a Markdown link's TARGET is ignored, `[text](target)` comparing as
 #     `[text]()`, because a relative link moved from the root into docs/agents/
 #     must change its target to keep pointing at the same file. The link text is
@@ -27,15 +31,15 @@
 #
 #   - The OLD side may be a DIRECTORY holding a previous state of the agent
 #     instructions (its CLAUDE.md, its docs/agents/*.md and any area CLAUDE.md
-#     under its apps/ or packages/) rather than one file. #1170 moved text out
+#     below its root) rather than one file. #1170 moved text out
 #     of the root AND between files, so the old set is the whole of the
 #     instructions, not the root alone. Make one with:
 #
 #       mkdir /tmp/old && git archive <commit> CLAUDE.md docs/agents | tar -x -C /tmp/old
 #
-#   - The NEW set always includes every area CLAUDE.md under apps/ and
-#     packages/ (node_modules, dist and coverage pruned), which Claude Code
-#     loads when a session works beneath it.
+#   - The NEW set always includes every area CLAUDE.md below the root, in any
+#     directory (node_modules, dist, coverage, .git and .claude pruned), which
+#     Claude Code loads when a session works beneath it.
 #
 #   - `--exact` also fails a line that the new set holds MORE often than the old
 #     set did: text that was copied rather than moved, so one rule now sits in
@@ -84,18 +88,20 @@ if [ ! -f "${root}/CLAUDE.md" ]; then
 fi
 
 # instruction_files <tree>: the root CLAUDE.md, every docs/agents/*.md and
-# every area CLAUDE.md under apps/ and packages/, in a stable order.
+# every area CLAUDE.md anywhere else below the root, in a stable order. The
+# area walk is the whole tree, as AGENT003's is, so a rule moved into
+# scripts/CLAUDE.md is conserved rather than reported lost; docs/agents/ is left
+# out of it because its *.md are already listed, and the trees nobody authors
+# are pruned.
 instruction_files() {
-  local tree="$1" dir
+  local tree="$1"
   printf '%s\n' "${tree}/CLAUDE.md"
   if [ -d "${tree}/docs/agents" ]; then
     find "${tree}/docs/agents" -type f -name '*.md' | LC_ALL=C sort
   fi
-  for dir in apps packages; do
-    [ -d "${tree}/${dir}" ] || continue
-    find "${tree}/${dir}" \( -name node_modules -o -name dist -o -name coverage \) -prune \
-      -o -type f -name CLAUDE.md -print | LC_ALL=C sort
-  done
+  find "${tree}" -mindepth 1 \( -name node_modules -o -name dist -o -name coverage -o -name .git \
+    -o -name .claude -o -path "${tree}/docs/agents" -o -path "${tree}/CLAUDE.md" \) -prune \
+    -o -type f -name CLAUDE.md -print | LC_ALL=C sort
 }
 
 old_files=()
@@ -128,6 +134,7 @@ status=0
 awk -v exact="${exact}" -v nold="${#old_files[@]}" -v nnew="${#new_files[@]}" -F '\t' '
   function norm(s) {
     sub(/[ \t\r]+$/, "", s)
+    if (s ~ /^>$/) return ""
     gsub(/\]\([^)]*\)/, "]()", s)
     return s
   }

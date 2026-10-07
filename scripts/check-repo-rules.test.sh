@@ -2994,7 +2994,7 @@ assert_violation "an index one byte over 15 KiB is AGENT002" AGENT002 \
   "CLAUDE.md: 15361 bytes"
 
 # AGENT003 (#1170): an area CLAUDE.md is loaded whenever a session works
-# beneath it, so each has a budget of its own -- under apps/ and packages/, at
+# beneath it, so each has a budget of its own -- anywhere below the root, at
 # any depth, and not inside node_modules, which is not ours to keep short.
 new_fixture
 mkdir -p "${fixture_root}/apps/web" "${fixture_root}/packages"
@@ -3018,6 +3018,12 @@ new_fixture
 mkdir -p "${fixture_root}/apps/web/node_modules/somebody"
 head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/apps/web/node_modules/somebody/CLAUDE.md"
 assert_clean "a CLAUDE.md inside node_modules is not an area file"
+
+new_fixture
+mkdir -p "${fixture_root}/scripts/fixtures"
+head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/scripts/fixtures/CLAUDE.md"
+assert_violation "a CLAUDE.md outside apps/ and packages/ is held to 8 KiB too" AGENT003 \
+  "scripts/fixtures/CLAUDE.md: 8193 bytes"
 
 # --- The real repository is NOT checked here (#1076) ---------------------------
 #

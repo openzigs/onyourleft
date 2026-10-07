@@ -92,3 +92,12 @@ header is awkward here" is not a reason: a file this repository authors *or edit
 header, which is why five of the twenty `cap add` wrote are deliberately absent from the list —
 `res/values/styles.xml` since #672, which paints the launch window and the window behind the
 WebView in the page's canvas colour.
+
+⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
+`android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
+`android/capacitor-cordova-android-plugins/`. `cap sync` regenerates all three and Capacitor's own
+nested `.gitignore` keeps them out of the repository, so they are absent from a clean clone and an
+`.spdx-exempt` entry naming one would be a `LIC006` violation. `.prettierignore` carries the same
+three plus two generated JSON assets, because **Prettier reads only the root `.gitignore`, not a
+nested one** — without it `format:check` reports a minified bundle on any machine where a sync has
+run, which is a local-only red with no fix a contributor can apply.

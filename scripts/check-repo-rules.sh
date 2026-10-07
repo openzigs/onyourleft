@@ -63,7 +63,7 @@
 #           send anybody
 #   AGENT002 the root CLAUDE.md stays an index: at most 15 KiB, because every
 #           agent session loads it whole on every turn (48 KiB until #1170)
-#   AGENT003 an area CLAUDE.md under apps/ or packages/ stays short: at most
+#   AGENT003 an area CLAUDE.md anywhere below the root stays short: at most
 #           8 KiB, because Claude Code loads it whenever a session works
 #           beneath it (#1170)
 #
@@ -2070,10 +2070,13 @@ check_assets
 #             ⚠️ 15 KiB since #1170 (about 3 800 tokens), when the root became
 #             the always-on rules and a map, and everything else moved out
 #   AGENT003  an area CLAUDE.md (apps/web/, apps/instance/, apps/mobile/,
-#             packages/, or any narrower one under apps/ or packages/) is loaded
-#             by Claude Code whenever a session works beneath it, so it is the
-#             same cost one directory down: 8 KiB each, and the detail goes in
-#             the topic file it points at
+#             packages/, or any other CLAUDE.md below the root, at any depth and
+#             in any directory -- scripts/, docs/, .github/ as much as apps/) is
+#             loaded by Claude Code whenever a session works beneath it, so it
+#             is the same cost one directory down: 8 KiB each, and the detail
+#             goes in the topic file it points at. The walk is every other
+#             rule's (GENERATED pruned), not apps/ and packages/ alone: an area
+#             file anywhere else used to be held to no budget at all
 #
 # Both are skipped where there is nothing to check: a tree with no
 # docs/agents/ has no topic files, and one with no CLAUDE.md has no index.
@@ -2100,16 +2103,13 @@ if [ -f "${ROOT}/${AGENT_INDEX}" ]; then
   fi
 fi
 
-for area_tree in apps packages; do
-  [ -d "${ROOT}/${area_tree}" ] || continue
-  while IFS= read -r area_file; do
-    area_bytes="$(wc -c < "${area_file}" | tr -d ' ')"
-    if [ "${area_bytes}" -gt "${AGENT_AREA_MAX_BYTES}" ]; then
-      report AGENT003 "${area_file#"${ROOT}"/}: ${area_bytes} bytes, over the ${AGENT_AREA_MAX_BYTES}-byte (8 KB) budget for an area CLAUDE.md, which every session working beneath it loads; move the detail into a topic file under ${AGENT_DIR}/ and point at it"
-    fi
-  done < <(find "${ROOT}/${area_tree}" \( -name node_modules -o -name dist -o -name coverage \) -prune \
-    -o -type f -name CLAUDE.md -print | LC_ALL=C sort)
-done
+while IFS= read -r area_file; do
+  [ "${area_file}" = "${ROOT}/${AGENT_INDEX}" ] && continue
+  area_bytes="$(wc -c < "${area_file}" | tr -d ' ')"
+  if [ "${area_bytes}" -gt "${AGENT_AREA_MAX_BYTES}" ]; then
+    report AGENT003 "${area_file#"${ROOT}"/}: ${area_bytes} bytes, over the ${AGENT_AREA_MAX_BYTES}-byte (8 KB) budget for an area CLAUDE.md, which every session working beneath it loads; move the detail into a topic file under ${AGENT_DIR}/ and point at it"
+  fi
+done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name CLAUDE.md -print | LC_ALL=C sort)
 
 # --- Result -------------------------------------------------------------------
 

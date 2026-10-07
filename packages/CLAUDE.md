@@ -25,6 +25,7 @@ Claude Code loads this file whenever a session works on files under `packages/`,
 ## §2, the packages table
 
 Which packages exist, and when each was created, is in [`docs/agents/packages.md`](../docs/agents/packages.md).
+`apps/instance`'s row is in [`apps/instance/CLAUDE.md`](../apps/instance/CLAUDE.md).
 
 | Package | Purpose | Must not depend on |
 |---|---|---|
@@ -34,7 +35,6 @@ Which packages exist, and when each was created, is in [`docs/agents/packages.md
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
 | `packages/protocol` | The race-room wire format: messages, a bounded decoder, the version handshake (#768) | **Any platform API at all**, as `packages/domain` — and any production dependency |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
-| `apps/instance` | The instance server: HTTP now, rooms later. AGPL-3.0-or-later by path | `apps/web` and `apps/mobile` — and the client must not import it either. Any runtime dependency outside ADR 0037 D-9's table without a row like it |
 
 ## §5, migrations
 

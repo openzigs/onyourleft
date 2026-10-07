@@ -21,9 +21,14 @@ Claude Code loads this file whenever a session works on files under `apps/instan
 - [`docs/agents/commands.md`](../../docs/agents/commands.md) §4a — the instance's commands (tests, `test:workerd`, the operator CLI, the image).
 - [`docs/agents/ci.md`](../../docs/agents/ci.md) §4c — what CI runs of the instance, and why `test:workerd` is local only.
 
+## Its row of the packages table
+
+| Package | What it is | Must not depend on |
+| --- | --- | --- |
+| `apps/instance` | The instance server: HTTP now, rooms later. AGPL-3.0-or-later by path | `apps/web` and `apps/mobile` — and the client must not import it either. Any runtime dependency outside ADR 0037 D-9's table without a row like it |
+
 ## The server is `apps/instance`, not `apps/api`
 
->
 > ⚠️ **This section used to forbid a server.** It said *"There is no server in Phase 1. Do not add
 > one, do not scaffold `apps/api`"* — owner decision D6, which ADR 0036 supersedes. A reviewer who
 > remembers that sentence is reading the old file, and an issue body that repeats it predates the
