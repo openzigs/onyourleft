@@ -8,7 +8,11 @@ export default defineConfig({
     // package gets to choose its own environment, and `pnpm --filter <pkg> test`
     // and `pnpm test` then run the same thing. Vitest 4 removed the separate
     // workspace file in favour of this field.
-    projects: ['packages/*', 'apps/*'],
+    //
+    // ⚠️ `packages/*` also matches FILES, and Vitest refuses a matched file that
+    // is not a Vitest config: `packages/CLAUDE.md`, the area instructions
+    // Claude Code loads for work under `packages/` (#1170), is excluded by name.
+    projects: ['packages/*', 'apps/*', '!packages/CLAUDE.md'],
     coverage: {
       provider: 'v8',
       // `json-summary` is what the CI step renders into the run summary; `html`
