@@ -1159,8 +1159,9 @@ tool = "Node.js 24 (.nvmrc), no other tool"
 #
 # CC-BY-4.0, credited on the Credits screen (ADR 0023). The two source sheets are
 # committed as the owner supplied them; every other file here is made from one of
-# them by apps/web/tools/brand/derive_brand.py, which `--check` re-runs byte for
-# byte, and apps/web/tools/brand/provenance.test.ts holds these rows to
+# them by apps/web/tools/brand/derive_brand.py, whose `--check` compares the two WebP
+# logos byte for byte and the PNGs pixel for pixel with no rendering metadata
+# (#1167), and apps/web/tools/brand/provenance.test.ts holds these rows to
 # apps/web/tools/brand/brand.json. The name and the logo are also trademarks:
 # TRADEMARKS.md, because CC BY 4.0 §2(b)(2) licenses no trademark.
 
@@ -1206,7 +1207,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/icon-512.png"
@@ -1220,7 +1221,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/icon-maskable-512.png"
@@ -1234,7 +1235,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/public/favicon.png"
@@ -1248,7 +1249,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/wordmark-light.png"
@@ -1262,7 +1263,7 @@ modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the ch
 input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
 inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/wordmark-dark.png"
@@ -1276,7 +1277,7 @@ modified = "the ON YOUR LEFT wordmark cut out of the sheet by colour from the ch
 input = "apps/web/tools/brand/sources/gemini-assets-v2.jpeg"
 inputsha256 = "bbaa0b5e46b67fa81873ba91034bea3c3022d162e29f62183e2d163b18c398d6"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/logo-light.webp"
@@ -1286,11 +1287,11 @@ read = "2026-10-01"
 sha256 = "e3f0b8835d9c541c5f95aef154a51cdb67e11cd5309696cb30bb6bd2e07ab452"
 creator = "Matthew Cronin"
 url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
-modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized"
+modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized and written as lossless WebP (libwebp 1.6.0, exact, with no metadata)"
 input = "apps/web/tools/brand/sources/gemini-logo-green.jpeg"
 inputsha256 = "37fb98f704f257c497d4cf4fcda32febc6129ae5f0ea30f7a526c723f09ce2ba"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/web/src/brand/logo-dark.webp"
@@ -1300,11 +1301,11 @@ read = "2026-10-01"
 sha256 = "e64cdd174b90fc0f6a3be94619cfaa12975a6ad47f78bff46f84467cc883115f"
 creator = "Matthew Cronin"
 url = "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand"
-modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized"
+modified = "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized and written as lossless WebP (libwebp 1.6.0, exact, with no metadata)"
 input = "apps/web/tools/brand/sources/gemini-logo-green.jpeg"
 inputsha256 = "37fb98f704f257c497d4cf4fcda32febc6129ae5f0ea30f7a526c723f09ce2ba"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"
@@ -1318,7 +1319,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png"
@@ -1332,7 +1333,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
@@ -1346,7 +1347,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
@@ -1360,7 +1361,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
@@ -1374,7 +1375,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png"
@@ -1388,7 +1389,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png"
@@ -1402,7 +1403,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png"
@@ -1416,7 +1417,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png"
@@ -1430,7 +1431,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"
@@ -1444,7 +1445,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png"
@@ -1458,7 +1459,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png"
@@ -1472,7 +1473,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"
@@ -1486,7 +1487,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"
@@ -1500,7 +1501,7 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
 
 [[asset]]
 path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"
@@ -1514,7 +1515,79 @@ modified = "the icon mark (the shield with the rider and the arrow) cut out of t
 input = "apps/web/tools/brand/sources/gemini-assets-v3.jpeg"
 inputsha256 = "2906e8f7840494b28c989cc4e31c24ecceec653c4e8cbf60d3ad1da717464d03"
 script = "apps/web/tools/brand/derive_brand.py"
-tool = "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1"
+tool = "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1"
+
+# ---------------------------------------------------------------------------
+# #1167: the lossless WebP reader's own fixtures. Pictures drawn from arithmetic
+# (nothing read or downloaded) and written by Pillow 12.3.0 with the libwebp
+# 1.6.0 its wheel bundles, by apps/web/tools/brand/make_webp_fixtures.py, whose
+# `--check` re-makes them. Test support only: nothing ships them, and
+# apps/web/tools/brand/webp-testing.test.ts holds the reader to Pillow's
+# decoding of each. Dedicated CC0-1.0, like this repository's other drawings.
+# ---------------------------------------------------------------------------
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/one-pixel.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "7fc06b3d06ea3dee1de2ad8e210e88b7573da55d65e7432c9c4f347d50d72275"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/two-colours.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "96e5f8ab44dbca7b9b14b218fe86f0f6f3cfee71b8a4eccf6eb78e3d19e32d40"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/four-colours.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "2704447b6a146eba69402f7c155021f677e19a534296d048599ff1f733bc36db"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/sixteen-colours-alpha.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "654dc3a8c1cf7448a1c397369a01fff42a812ed90985203a9e0126ec63471a10"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/many-colours.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "18f9ce722dfca11beef0fa7519468945aa9f8a06aa41e93634345ec49d06f560"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/gradient.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "d793ae25aaf35fc4c637e447863c1aaa75dd963c724aef106a4666dc949e382e"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/with-exif.webp"
+source = "This repository, #1167 — a lossless picture, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "739377612d371825f69968d54d2ae3dece8d39d5a8ccb07c9e4a89386cc163c7"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/lossy.webp"
+source = "This repository, #1167 — a lossy picture the reader must refuse, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "021295d9e6465e7154b694721a11b67f171419f162f4cea2f29fa7ed7ad896c1"
+
+[[asset]]
+path = "apps/web/tools/brand/fixtures/lossy-alpha.webp"
+source = "This repository, #1167 — a lossy picture the reader must refuse, drawn from arithmetic and written by Pillow 12.3.0 (libwebp 1.6.0) by `apps/web/tools/brand/make_webp_fixtures.py`"
+licence = "CC0-1.0"
+read = "2026-10-07"
+sha256 = "3dba043332210461c65f265537fc70e135a9b03c05fcb76ffca061716db37f15"
 
 # ---------------------------------------------------------------------------
 # #966: the trainer game's wordmark — the starting gate and the billboards.
