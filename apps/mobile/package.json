@@ -18,7 +18,7 @@
     "@onyourleft/sensors": "workspace:*"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.5.1",
+    "@capacitor/cli": "8.5.2",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   },
