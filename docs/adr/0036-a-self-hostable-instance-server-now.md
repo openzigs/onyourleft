@@ -314,3 +314,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that **writes** a write-up is still the rider's computer or a hosted service they chose; what the
   instance adds is the history it retrieves from. Nothing is built by this entry; #835 builds the
   index, #836 the places a rider writes.
+
+- **2026-10-07** — **D-3(a) no longer holds for AI analysis: a model's write-up of a ride runs only
+  on the rider's instance.** [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of 2026-10-04
+  and 2026-10-07, supersedes **D-3(a)** for asking for a ride analysis alone — every other feature
+  (a) lists still works with no instance, and `no-network.test.ts` still admits one module for
+  instance traffic — and **D-3(d)**'s clause *"the rider's own analysis endpoint (ADR 0035) is the
+  rider's computer, not this instance"*. The rest of (d) stands, and ADR 0046 D-14 reconciles (b),
+  (c) and (d) in turn: the device copy of a write-up is the copy of record, the instance's copy is
+  a copy, and a hosted job runs only for a rider whose own recorded consent names the endpoint (the
+  owner's Q10 ruling). **Two sentences of the 2026-09-29 entry above are no longer true**: *"a rider
+  with no instance gets the write-up without history and loses nothing, which keeps (a)"* — a rider
+  with no instance now has no write-up, and keeps every other feature; and *"The analysis endpoint
+  that **writes** a write-up is still the rider's computer or a hosted service they chose"* — the
+  endpoint is the instance's, an Ollama on the operator's box or a hosted service on a key the
+  instance holds. The body above, and that entry, are not edited.

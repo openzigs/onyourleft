@@ -78,10 +78,12 @@ bill is implied**, and no issue may take a paid service as a prerequisite (ADR 0
 > rider's data is (#776); (d) nothing the client refuses to send leaves through the instance
 > (#777). A change that makes any of the four false is a change to an ADR, not a review note.
 >
-> ⚠️ **[ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) is
-> PROPOSED and would make (a) false for AI analysis alone**: a model's write-up of a ride would run
-> only on the rider's instance (the owner's rulings of 2026-10-04, #1092). Until the owner approves
-> it on #1093, (a) holds unchanged.
+> ⚠️ **[ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md),
+> accepted 2026-10-07, makes (a) false for AI analysis alone**: a model's write-up of a ride runs
+> only on the rider's instance (the owner's rulings of 2026-10-04 and 2026-10-07, #1092, #1093), so
+> a rider with no instance loses the write-up and nothing else. Every other feature (a) covers still
+> works with no instance, and (b), (c) and (d) hold (ADR 0046 D-14). A reviewer who remembers this
+> sentence calling ADR 0046 proposed is reading the old file.
 >
 > ⚠️ **This section used to forbid a server.** It said *"There is no server in Phase 1. Do not add
 > one, do not scaffold `apps/api`"* — owner decision D6, which ADR 0036 supersedes. A reviewer who

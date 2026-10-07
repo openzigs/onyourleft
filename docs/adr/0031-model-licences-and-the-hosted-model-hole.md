@@ -489,3 +489,22 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   path and for everything the client ships, and D-2, D-3 and D-5 are unchanged. ADR 0040 D-5 adds
   one rule beside D-2: a model this project's documentation names as an example must be admissible
   under D-2, so `embeddinggemma` (`gemma`, non-OSI and use-restricted) is never named.
+
+- **2026-10-07** — **D-4's *"they chose, on their key"* now has a second reading, a shared key the
+  operator typed, and the owner ruled condition 2 met for a dependency's unused vendor default.**
+  [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of 2026-10-04 and 2026-10-07, runs AI
+  analysis only on the rider's instance, through the Vercel AI SDK (`ai`), with two key modes. Three
+  statements here need reading against it. **D-4's** *"A rider may point this client at a model
+  endpoint **they** chose, on **their** key"* and *"it takes a URL and a key the rider typed"*: a
+  bring-your-own key keeps both, on a new path through the instance; a **shared** key is one the
+  operator typed for an endpoint the operator chose, and *"they chose"* is met for every other rider
+  by the owner's Q10 ruling — a hosted job runs only for an athlete whose own recorded consent names
+  the endpoint, and changing the shared endpoint withdraws it. **Condition 1's** *"`.env.example`
+  gains nothing"*: the instance reads an operator secret from its environment (Q6) and
+  `.env.example` lists it. It is a secret that protects keys, not a key of this project's, which
+  condition 1's first sentence still forbids. **Condition 2**, against a dependency: `ai` depends on
+  `@ai-sdk/gateway`, a vendor default, and ADR 0046 D-8 sets a global provider that throws on any
+  call so it is never reached, with a test and a red control. The owner ruled (Q7) that this meets
+  condition 2: *"Nothing in this repository names, defaults to or suggests the dependency's guarded
+  vendor default."* There is still one code path, taking a URL and a key. The 2026-09-29 entry (the
+  embedding default) is unchanged, and so are D-1, D-2, D-3 and D-5. The body above is not edited.

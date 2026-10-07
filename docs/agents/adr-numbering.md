@@ -12,6 +12,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0046 is [ADR 0046](../adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)**,
+  taken by [#1093](https://github.com/openzigs/onyourleft/issues/1093) on 2026-10-04 for AI analysis
+  on the rider's instance as a tool-calling agent, and **accepted by the owner on 2026-10-07**. It
+  took 0046 rather than 0044 because 0044 and 0045 were already claimed by the epic
+  [#1055](https://github.com/openzigs/onyourleft/issues/1055). A reviewer who remembers this sentence
+  offering 0046 is reading the old file.
   ⚠️ **0045 is [ADR 0045](../adr/0045-fit-from-one-side-camera.md)**, taken by
   [#1059](https://github.com/openzigs/onyourleft/issues/1059) on 2026-10-04 for fit from one side
   camera, and **0044 is [ADR 0044](../adr/0044-side-camera-live-view-and-snapshot.md)**, taken by
