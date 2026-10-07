@@ -130,8 +130,9 @@
  * (CI run 37356795884: *"picture 0: the phone said no-link"*, every `control`
  * step green). On 2026-10-05 a page with none of this code in it — two bare
  * peer connections, the offerer making `control` and `frames` the way the
- * tablet did — was run 3 000 times in the pinned Playwright's Chromium on a
- * loaded machine, and six times one of the ANSWERING end's handed-over
+ * tablet did — was run 3 000 times in Playwright's Chromium 141 (headless
+ * shell revision 1194, NOT the pinned 153, revision 1243) on a loaded
+ * machine, and six times one of the ANSWERING end's handed-over
  * channels was still `connecting` five seconds after the connection opened,
  * with `send` throwing `InvalidStateError`: four `control` (the stranding
  * above, now caught) and two `frames` — which the phone, `connected` and
@@ -1309,7 +1310,11 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#countdownChanged();
   }
 
-  /** `control` has opened: the tablet has read the answer and the connection is up. */
+  /**
+   * `control` has opened, or the tablet has been heard on it: the tablet has
+   * read the answer and the connection is up. Whichever comes first; the
+   * other does nothing.
+   */
   #open(): void {
     if (this.#condition !== 'connecting' || this.#opened) {
       return;
@@ -1363,6 +1368,10 @@ export class PhoneSideLink implements SideCameraLinkPort {
       this.endSideLink();
       return;
     }
+    // Hearing the tablet proves it read the answer, as `control` opening does:
+    // a `control` the engine leaves `connecting` never fires `open`, and the
+    // read countdown would go on ticking while the phone hears pings (#568).
+    this.#open();
     if (this.#channel.readyState !== 'open') {
       this.#unanswerable();
       if (!this.#greeted) {
@@ -1380,7 +1389,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
       // Between its secret and the welcome the phone has no silence check of
       // its own: these pings are dropped before `#heard()` and its heartbeat
       // has not started. What ends a phone that is never welcomed is the
-      // CONNECT_LIMIT_MILLISECONDS set when `control` arrived, or the tablet closing
+      // CONNECT_LIMIT_MILLISECONDS set when `control` opened or the tablet was
+      // first heard, or the tablet closing
       // `control` (its three-second `unanswered` does, for a lost secret).
       if (message.t === 'ping') {
         // One of the opening pings, sent before the tablet had the secret.

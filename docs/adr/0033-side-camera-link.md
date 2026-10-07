@@ -776,8 +776,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   band ends the pairing. D-3's two channels, their delivery and direction, and D-4 are unchanged.**
   The 2026-09-27 entry's stranding, which it recorded as *"a reading of the source … and not caught
   in the real engine"*, has now been caught. On 2026-10-05, two bare peer connections in one page
-  of the pinned Playwright's Chromium, the offerer making `control` and `frames` as the tablet did,
-  were run 3 000 times on a machine under full CPU load. Six times one of the answering end's
+  of Playwright's Chromium 141 (headless shell revision 1194, **not** the pinned 153, revision
+  1243), the offerer making `control` and `frames` as the tablet did, were run 3 000 times on a
+  machine under full CPU load. Six times one of the answering end's
   handed-over channels was still `connecting` five seconds after the connection opened, and its
   `send` threw `InvalidStateError`. Four were `control` (the 2026-09-27 mode). Two were `frames`,
   on which a connected, filming phone could never send a picture, with nothing to notice. That is

@@ -679,6 +679,10 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
   for (const channel of [...offerer.channels]) {
     const losesNext = network.losesAnsweringEndsFirstControlMessage && channel.label === 'control';
     if (channel.init?.negotiated === true) {
+      // Neither `strandsHandedChannels` nor `losesSendsInDataChannelEvent` is
+      // applied here, so a test passing over this branch shows the link no
+      // longer DEPENDS on a handed channel — not that the engine cannot strand
+      // a negotiated one (only `strandsAnsweringChannels` models that).
       // A negotiated channel is made on BOTH ends with the same id, and each
       // end's own opens when the connection does — nothing is handed over,
       // and an id the other end did not make carries nothing (#568).

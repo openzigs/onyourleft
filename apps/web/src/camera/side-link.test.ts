@@ -181,9 +181,10 @@ describe('pairing, through both codes', () => {
 
   it('pairs, commands and sends pictures however the engine treats a channel it hands over — #568, and PR #1145’s CI', async () => {
     // A channel the other end opened in band is handed over in `datachannel`,
-    // and the pinned Chromium was caught doing two things to one: losing a
-    // send made inside the event (#568's first mode), and leaving the channel
-    // `connecting` for good while it still hears the other end — under load,
+    // and Chromium was caught doing two things to one: losing a send made
+    // inside the event (#568's first mode, on the pinned 153 in CI, #570), and
+    // leaving the channel `connecting` for good while it still hears the other
+    // end — on Chromium 141 (revision 1194, not the pinned 1243) under load,
     // about one loaded loopback pairing in 500 on 2026-10-05, `control` or
     // `frames` alike. A stranded `control` is #568's second mode; a stranded
     // `frames` is `sidelink.browser.spec.ts` failing with "picture 0: the
@@ -249,6 +250,31 @@ describe('pairing, through both codes', () => {
     Object.assign(phoneControl ?? {}, { stranded: true, readyState: 'connecting' });
     await context.pass(HEARTBEAT_MILLISECONDS + SILENCE_IS_LOST_MILLISECONDS);
     expect(phone.link.sideLinkCondition()).toBe('ended');
+  });
+
+  it('stops the read countdown on the first ping heard, even while its own control says connecting — #568', async () => {
+    // `control` opening is one sign the tablet read the code; hearing the
+    // tablet is the other. A `control` the engine leaves `connecting` never
+    // fires `open`, and the countdown used to keep ticking while pings arrived.
+    const context = setUp({ strandsAnsweringChannels: true });
+    const tablet = await offer(context.port);
+    const phone = await answer(context.port, tablet.offerCode);
+    let told = 0;
+    const unsubscribe = phone.onTabletReadCountdown(() => {
+      told += 1;
+    });
+    expect(phone.secondsForTabletToRead()).toBe(TABLET_READ_LIMIT_MILLISECONDS / 1000);
+    await tablet.acceptSidePhoneCode(phone.answerCode);
+    await flushSideLink();
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    expect(phoneControl?.readyState).toBe('connecting');
+    expect(phone.secondsForTabletToRead()).toBeUndefined();
+    const after = told;
+    context.time.advance(2000);
+    expect(told).toBe(after);
+    unsubscribe();
   });
 
   it('does not sit unproved when the phone’s channel never comes right — CI run 36252687970, reproduced (#568)', async () => {
