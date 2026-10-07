@@ -210,7 +210,7 @@ fi
 #
 # ⚠️ The mutation this case exists for: reading `--filter @onyourleft/web`
 # alone. `dexie` is in the store's closure and nowhere in the web's, exactly as
-# it is in the real tree (CLAUDE.md §4g).
+# it is in the real tree (docs/agents/licence-gates.md §4g).
 
 new_fixture
 generate

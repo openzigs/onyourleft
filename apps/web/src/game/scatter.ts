@@ -40,7 +40,7 @@
  *    looks for — which is why the paragraph reads the way it does.
  *
  * ⚠️ **This file must not import `three`, including `three/addons`.** `three` is
- * confined to `three-renderer.ts` (CLAUDE.md §4h, `port.ts`), and a second
+ * confined to `three-renderer.ts` (docs/agents/game.md §4h, `port.ts`), and a second
  * importer would defeat ADR 0008 D-2's recorded React Native fallback and fold
  * ~600 kB toward the entry chunk. `three/addons/math/SimplexNoise.js` would have
  * been the obvious source of a noise field; the integer hash below is written

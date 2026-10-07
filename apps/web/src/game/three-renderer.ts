@@ -1820,7 +1820,7 @@ export const LIT_COLOURS: readonly number[] = [
  * ⚠️ It is **version-specific**, and three moved it once already: before r155
  * the ambient path multiplied by π in the shader and this factor would have
  * been 1 for one of the two lamps and not the other. `three` is pinned at
- * 0.185.1 (CLAUDE.md §4b) and the browser gate reads the result back off a
+ * 0.185.1 (docs/agents/project-state.md §4b) and the browser gate reads the result back off a
  * real drawing buffer, which is what would catch a bump that moved it again.
  */
 const LAMBERT_IRRADIANCE_SCALE = Math.PI;

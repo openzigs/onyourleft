@@ -18,7 +18,7 @@
  *
  * ## Why a `*-port.ts`
  *
- * CLAUDE.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
  * that no production declaration calls is a red `WIRE003`. The runner calls
  * {@link ModelStepPort.runModelStep}; a runner that stopped calling it — and so
  * wrote every write-up from nothing — would go red there as well as in its own

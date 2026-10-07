@@ -5,7 +5,7 @@
  * ([#95](https://github.com/openzigs/onyourleft/issues/95)).
  *
  * ⚠️ **`release.yml` is not a required check and cannot block a merge**, which
- * is right for a tag-triggered job and is exactly why it rots: CLAUDE.md §4c
+ * is right for a tag-triggered job and is exactly why it rots: docs/agents/ci.md §4c
  * records that its action pins had already drifted behind `rules.yml`'s with
  * nothing noticing. A workflow that only runs on a tag gets reviewed once and
  * then read by nobody until the day somebody needs a release.

@@ -25,7 +25,7 @@
  * `boundaries/dependencies` block forbids any import from `packages/*` into
  * `apps/*`, in both the relative and the workspace spelling, so a Valhalla type
  * reaching this file is a lint error and not a review note. The second half is
- * `packages/domain`'s own closure (CLAUDE.md §4d): with `lib: ["ES2024"]` and
+ * `packages/domain`'s own closure (docs/agents/lint-boundaries.md §4d): with `lib: ["ES2024"]` and
  * `types: []` this file could not name `fetch`, `Response` or `URL` even if
  * somebody wanted it to.
  *

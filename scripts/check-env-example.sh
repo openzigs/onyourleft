@@ -84,7 +84,7 @@ used_names_in() {
 
 if [ ! -f "${ENV_EXAMPLE}" ]; then
   report ".env.example: not found; it is the template that documents every variable the code reads"
-  printf '\n1 environment-template violation(s). See CONTRIBUTING.md and CLAUDE.md section 4a.\n' >&2
+  printf '\n1 environment-template violation(s). See CONTRIBUTING.md and docs/agents/commands.md section 4a.\n' >&2
   exit 1
 fi
 

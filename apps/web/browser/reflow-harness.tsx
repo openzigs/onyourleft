@@ -18,7 +18,7 @@
  *
  * #654's first pass found the Activities screen laid out 447 px wide inside a
  * 320 px phone and Credits 595 px wide, and **no gate looked**: jsdom performs
- * no layout (CLAUDE.md §4e), and the only 320 px check in the browser gate
+ * no layout (docs/agents/accessibility.md §4e), and the only 320 px check in the browser gate
  * measured the shell harness, whose views are handed no ports and so render
  * no table at all. This page is where every route is laid out by a real engine,
  * with the data that makes a route wide.

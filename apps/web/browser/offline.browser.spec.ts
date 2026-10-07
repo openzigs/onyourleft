@@ -5,7 +5,7 @@
  *
  * ## Why this belongs here and nowhere else
  *
- * CLAUDE.md §4f: `apps/web/browser/` is the only place in this repository where
+ * docs/agents/browser-gate.md §4f: `apps/web/browser/` is the only place in this repository where
  * a real browser runs, and jsdom cannot test this **at all** — no service
  * worker, no Cache Storage, and no network stack to switch off.
  * `BrowserContext.setOffline(true)` is the tool, and before this file

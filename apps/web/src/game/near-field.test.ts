@@ -724,7 +724,7 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
   // 2026-09-28 (36370135206 to 36405580515), 'a level road through villages' took 37.9 s to
   // 75.2 s — 63 % of 120 s, the slowest on 36371441351, the slower of the two runners (a job over
   // 1 000 s) — and 'a 300 m right-hand circuit' up to 42.1 s. Coverage instruments the cull's
-  // hot loop about three times over (CLAUDE.md §4c). 230 s is about three times the slowest ride,
+  // hot loop about three times over (docs/agents/ci.md §4c). 230 s is about three times the slowest ride,
   // so a ride that slows past it is red. ⚠️ It is NOT a hang guard, and it bounds nothing about
   // the file: each ride is synchronous, and Vitest cannot interrupt a synchronous case — its timer
   // is only read once the case returns — so a ride that never returns is caught only by the job's

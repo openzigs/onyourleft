@@ -12,7 +12,7 @@
  *
  * ## Why a `*-port.ts`
  *
- * CLAUDE.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
  * nothing in production calls is a red `WIRE003`. ⚠️ **That half is not the
  * whole of it**: the page is handed this port as an OPTIONAL prop, and a
  * `main.tsx` that stopped passing it would be green there (§4j §Limits' third

@@ -7,7 +7,7 @@
  * `apps/web/third-party-notices.json` §`copiedIntoBuild` is a reviewed list, and
  * `scripts/check-third-party-notices.mjs` notices what it names (Part 3 of the
  * document). What that checker cannot see is a file the list does NOT name:
- * it deliberately does not depend on a build (CLAUDE.md §4g), and a new
+ * it deliberately does not depend on a build (docs/agents/licence-gates.md §4g), and a new
  * `import url from 'some-package/thing.wasm?url'`, or a plugin that emits a
  * package's binary the way `tools/pose/pose-runtime-plugin.ts` does, would put
  * somebody else's bytes in `dist` with the list unchanged and every gate green.

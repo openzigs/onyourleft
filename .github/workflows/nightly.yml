@@ -3,7 +3,7 @@
 # The heaviest checks that are NOT safety gates, run once a night -- #866.
 #
 # ⚠️ THIS IS NOT A REQUIRED CHECK AND CANNOT BLOCK A MERGE. `main` requires one
-# status check, `Repository rules` (rules.yml, CLAUDE.md section 4c), and this
+# status check, `Repository rules` (rules.yml, docs/agents/ci.md section 4c), and this
 # workflow reports under a different name on purpose: renaming it to that would
 # make the required check report twice. A break in anything here is found the
 # next morning -- by the issue the `Report a red run` job opens -- and not
@@ -153,7 +153,7 @@ jobs:
           title='Nightly heavy checks failed'
           body="The nightly run failed on ${HEAD_SHA}: ${RUN_URL}
 
-          These checks are not required and cannot block a merge (CLAUDE.md section 4c, #866), so this issue is how a break in them is seen. Close it once a nightly run is green again."
+          These checks are not required and cannot block a merge (docs/agents/ci.md section 4c, #866), so this issue is how a break in them is seen. Close it once a nightly run is green again."
           existing=$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \
             --jq ".[] | select(.title == \"${title}\") | .number" | head -n 1)
           if [ -n "${existing}" ]; then

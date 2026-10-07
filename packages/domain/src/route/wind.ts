@@ -101,7 +101,7 @@ export interface Wind {
    * is bit-for-bit the ride it was before #326 — and an exported, tested
    * constant no production declaration names is the #237 / #259 shape this
    * repository keeps finding, which `check:wiring` cannot see here because
-   * `packages/domain` is outside its watched set (CLAUDE.md §4j).
+   * `packages/domain` is outside its watched set (docs/agents/wiring-gate.md §4j).
    * `wind(0, …)` is the same value for a caller that wants one.
    */
   readonly fromBearing: DegreesBearing;

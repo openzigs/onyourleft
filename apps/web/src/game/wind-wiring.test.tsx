@@ -406,7 +406,7 @@ describe("the wind box is read in the RIDER's own units (#238, #326)", () => {
  * physics; it left the rider with nothing on screen saying a wind was in
  * effect, how strong it was, or which way it blew. A number carried out on
  * `GameState` that no panel renders is exactly the *"correct, unit-tested,
- * typechecked unit wired to nothing"* CLAUDE.md §4j is about, and neither
+ * typechecked unit wired to nothing"* docs/agents/wiring-gate.md §4j is about, and neither
  * `check:wiring` nor the typechecker can see it: `GameState.headwind‑
  * MetresPerSecond` is optional, and an optional property nobody reads is
  * perfectly well typed.

@@ -6,7 +6,7 @@
  * The **real** `shell/AppShell.tsx` at the **real** `/`, under the **real**
  * `design/theme.css`, handed the repository's own analysis double holding a
  * full history and a stub ride controller — so every card the screen can
- * draw is on it. jsdom performs no layout (CLAUDE.md §4e): "uses the full
+ * draw is on it. jsdom performs no layout (docs/agents/accessibility.md §4e): "uses the full
  * width of a landscape tablet" and "does not overflow at 320 px" are
  * measurements, and this is where they are taken.
  *

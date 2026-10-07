@@ -6,7 +6,7 @@
 #
 # The `Repository rules` job is one job on purpose: `main` requires a status
 # check whose context is exactly that string, and a second job reports under a
-# different context and cannot block a merge (CLAUDE.md §4c). So the only way to
+# different context and cannot block a merge (docs/agents/ci.md §4c). So the only way to
 # use more than one of the runner's four CPUs is to run commands concurrently
 # INSIDE a step, and this is the one place that is done.
 #

@@ -10,7 +10,7 @@
  * indicator that is always on is indistinguishable from one that works."*
  *
  * ⚠️ **What this file cannot do is measure anything**, because jsdom performs
- * no layout and resolves no custom property (CLAUDE.md §4e). The `position`,
+ * no layout and resolves no custom property (docs/agents/accessibility.md §4e). The `position`,
  * the stacking and the hit test are `browser/shell.browser.spec.ts`'s, and the
  * one property of the stylesheet that can be checked without a browser — that
  * no other rule declares a higher `z-index` — is `indicator-style.test.ts`'s.

@@ -15,7 +15,7 @@
  * ⚠️ **It is the whole of #362, and the defect was that nobody had written
  * it.** Both halves shipped in #90, both were unit-tested, both were green, and
  * `grep -rn createSimulationWriter apps/` returned nothing. The gate that
- * should have said so could not: CLAUDE.md §4j's watched set is the client's
+ * should have said so could not: docs/agents/wiring-gate.md §4j's watched set is the client's
  * own seams, and these two live in `packages/`. #363 is that gate.
  *
  * ## What a sample does
