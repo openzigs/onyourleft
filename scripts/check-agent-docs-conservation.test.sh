@@ -193,7 +193,7 @@ put old/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.\n>\n> Quote two.'
 put new/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.'
 put new/apps/web/CLAUDE.md $'> Quote two.'
 put new/docs/agents/topic.md "${OLD_TOPIC}"
-expect_tree 'a bare `>` joining two quoted paragraphs is a blank line, not a lost line' 0 'are in the new set exactly as often' --exact
+expect_tree 'a bare > joining two quoted paragraphs is a blank line, not a lost line' 0 'are in the new set exactly as often' --exact
 
 old_tree
 put old/CLAUDE.md $'# CLAUDE.md\n\n> Quote one.\n>\n> Quote two.'
