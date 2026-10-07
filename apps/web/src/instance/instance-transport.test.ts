@@ -94,6 +94,31 @@ describe('the one transport to an instance — #777', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('appends a query only as encoded names and values, which cannot reach the path — #961', async () => {
+    const send = answering(200, '{}');
+    const http = instanceHttp(ORIGIN, send);
+    await http.call('GET', '/v1/moderation/log', {
+      query: { limit: '25', cursor: '../../auth/session?x=1#y%2F/..' },
+    });
+    const [url] = send.mock.calls[0] as [string, RequestInit];
+    const sent = new URL(url);
+    expect(sent.origin).toBe(ORIGIN);
+    expect(sent.pathname).toBe('/v1/moderation/log');
+    expect(sent.hash).toBe('');
+    expect([...sent.searchParams]).toEqual([
+      ['limit', '25'],
+      ['cursor', '../../auth/session?x=1#y%2F/..'],
+    ]);
+    // No query is no `?` at all.
+    await http.call('GET', '/v1/moderation/log', { query: {} });
+    expect((send.mock.calls[1] as [string])[0]).toBe(`${ORIGIN}/v1/moderation/log`);
+    // And a path with a query of its own is still refused, query option or not.
+    await expect(
+      http.call('GET', '/v1/moderation/log?limit=1', { query: { cursor: 'c' } }),
+    ).rejects.toMatchObject({ why: 'refused-path' });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it('builds both of a room’s paths from one checked id — #782 review (B1)', () => {
     expect(roomPath('room-1', 'ticket')).toBe('/v1/rooms/room-1/ticket');
     expect(roomPath('room-1', 'socket')).toBe('/v1/rooms/room-1/socket');
