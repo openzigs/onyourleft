@@ -174,6 +174,7 @@ import { createSidePeer, type SideChannel, type SidePeer } from './side-link-tra
 import { browserAfter, browserEvery } from './side-camera';
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
+import { liveViewOf } from './side-live-view-port';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from '../game/hud/wake-lock';
 import type {
   PhoneReport,
@@ -539,11 +540,14 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
     .filter(candidateAccepted)
     .every((candidate) => candidate.address.endsWith('.local'));
   const control = new TabletSideLink(peer, channel, frames, base64Url(secret), timers);
+  const analysis = timers.analyse?.(control);
   return {
     offerCode: made.text,
     acceptSidePhoneCode: async (answerCode) => control.accept(answerCode, offerOnlyNames),
     control,
-    analysis: timers.analyse?.(control),
+    analysis,
+    // #1061: the same object, when it can show its pictures (`SideAnalysis` can).
+    liveView: liveViewOf(analysis),
   };
 }
 

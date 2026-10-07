@@ -27,7 +27,8 @@
  * CLAUDE.md §8's rule for a Web Bluetooth promise, applied to a worker.
  */
 
-import type { SidePoseEstimator, SidePoseOutcome } from './side-analysis-port';
+import type { SidePoseOutcome } from './side-analysis-port';
+import type { SideLiveEstimator, SideShownLook } from './side-live-view-port';
 import { poseOutcomeOf, poseReplyFrom } from './pose-runtime';
 
 /** The slice of a `Worker` the estimator uses, so a test can supply one. */
@@ -87,20 +88,25 @@ const realTimers: PoseEstimatorTimers = {
 export function workerPoseEstimator(
   makeWorker: () => PoseWorkerLike = poseWorker,
   timers: PoseEstimatorTimers = realTimers,
-): SidePoseEstimator {
+): SideLiveEstimator {
   let worker: PoseWorkerLike | undefined;
   let dead = false;
   let next = 0;
   const waiting = new Map<
     number,
-    { readonly settle: (outcome: SidePoseOutcome) => void; readonly cancel: () => void }
+    {
+      readonly settle: (look: SideShownLook) => void;
+      readonly cancel: () => void;
+      /** Whether this picture was asked for back (#1061). */
+      readonly show: boolean;
+    }
   >();
 
   /** Settle everything waiting as `unavailable`, and cancel each deadline. */
   const release = (): void => {
     for (const { settle, cancel } of waiting.values()) {
       cancel();
-      settle({ kind: 'unavailable' });
+      settle({ outcome: { kind: 'unavailable' }, pixels: undefined });
     }
     waiting.clear();
   };
@@ -125,6 +131,14 @@ export function workerPoseEstimator(
       }
       worker.onmessage = (event) => {
         const reply = poseReplyFrom(event.data);
+        const pixels = reply?.kind === 'landmarks' ? reply.pixels : undefined;
+        // A picture the checked reply does not carry on — a malformed reply,
+        // or one whose kind has no picture — is closed here, not dropped for
+        // the collector (D-1; #1123's review, N7).
+        const sent = pictureIn(event.data);
+        if (sent !== undefined && sent !== pixels) {
+          sent.close();
+        }
         if (reply === undefined) {
           fail();
           return;
@@ -132,7 +146,14 @@ export function workerPoseEstimator(
         const entry = waiting.get(reply.id);
         waiting.delete(reply.id);
         entry?.cancel();
-        entry?.settle(poseOutcomeOf(reply));
+        if (entry?.show !== true) {
+          // A picture nobody asked for back, or for a request nobody is
+          // waiting on any more, is closed here rather than held (D-1).
+          pixels?.close();
+          entry?.settle({ outcome: poseOutcomeOf(reply), pixels: undefined });
+          return;
+        }
+        entry.settle({ outcome: poseOutcomeOf(reply), pixels });
       };
       worker.onerror = () => {
         fail();
@@ -141,33 +162,43 @@ export function workerPoseEstimator(
     return worker;
   };
 
+  const ask = (picture: Uint8Array, show: boolean): Promise<SideShownLook> => {
+    const target = started();
+    if (target === undefined) {
+      return Promise.resolve({ outcome: { kind: 'unavailable' }, pixels: undefined });
+    }
+    // Exactly the picture's bytes, in a buffer of their own, so the transfer
+    // moves nothing else and leaves the caller nothing to read.
+    const buffer =
+      picture.byteOffset === 0 && picture.byteLength === picture.buffer.byteLength
+        ? (picture.buffer as ArrayBuffer)
+        : picture.slice().buffer;
+    const id = next;
+    next += 1;
+    return new Promise<SideShownLook>((resolve) => {
+      waiting.set(id, {
+        settle: resolve,
+        // A worker that has not answered this picture in time is a failed
+        // worker: every picture waiting on it is settled, and it is gone.
+        cancel: timers.after(fail, POSE_REPLY_DEADLINE_MILLISECONDS),
+        show,
+      });
+      try {
+        target.postMessage(show ? { id, picture: buffer, show } : { id, picture: buffer }, [
+          buffer,
+        ]);
+      } catch {
+        fail();
+      }
+    });
+  };
+
   return {
     async estimateSidePose(picture: Uint8Array): Promise<SidePoseOutcome> {
-      const target = started();
-      if (target === undefined) {
-        return { kind: 'unavailable' };
-      }
-      // Exactly the picture's bytes, in a buffer of their own, so the transfer
-      // moves nothing else and leaves the caller nothing to read.
-      const buffer =
-        picture.byteOffset === 0 && picture.byteLength === picture.buffer.byteLength
-          ? (picture.buffer as ArrayBuffer)
-          : picture.slice().buffer;
-      const id = next;
-      next += 1;
-      return new Promise<SidePoseOutcome>((resolve) => {
-        waiting.set(id, {
-          settle: resolve,
-          // A worker that has not answered this picture in time is a failed
-          // worker: every picture waiting on it is settled, and it is gone.
-          cancel: timers.after(fail, POSE_REPLY_DEADLINE_MILLISECONDS),
-        });
-        try {
-          target.postMessage({ id, picture: buffer }, [buffer]);
-        } catch {
-          fail();
-        }
-      });
+      return (await ask(picture, false)).outcome;
+    },
+    estimateSidePoseShowingPicture(picture: Uint8Array): Promise<SideShownLook> {
+      return ask(picture, true);
     },
     closeSidePoseModel(): void {
       if (dead) {
@@ -182,4 +213,22 @@ export function workerPoseEstimator(
       release();
     },
   };
+}
+
+/**
+ * Whatever a worker's message carries as `pixels` that could be closed — read
+ * by its shape, before the reply is checked, so that a picture inside a reply
+ * that does not pass the check is still let go.
+ */
+function pictureIn(data: unknown): { close(): void } | undefined {
+  if (typeof data !== 'object' || data === null || !('pixels' in data)) {
+    return undefined;
+  }
+  const { pixels } = data as { readonly pixels: unknown };
+  return typeof pixels === 'object' &&
+    pixels !== null &&
+    'close' in pixels &&
+    typeof pixels.close === 'function'
+    ? (pixels as { close(): void })
+    : undefined;
 }

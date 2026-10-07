@@ -200,6 +200,12 @@ describe('no production path pre-empts with an alert — #394', () => {
    * it, associated by `aria-describedby`. Neither is a ride-state message and
    * neither is there to interrupt one. A THIRD is a decision, and this is
    * where it is seen.
+   *
+   * The third is #959's, which asked for it by name: `design/ConfirmDialog.tsx`
+   * says inside an open modal that a confirmed action FAILED (a ride that was
+   * not deleted). It is not a ride-state message either — the dialog is never
+   * on a ride-time screen (its header says so) — and while it is open the page
+   * behind is inert, so there is nothing else for it to interrupt.
    */
   const SOURCE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
   const sources = (directory: string): string[] =>
@@ -209,7 +215,7 @@ describe('no production path pre-empts with an alert — #394', () => {
       return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
     });
 
-  it('has exactly the two form refusals #255 placed, and nothing assertive', () => {
+  it('has exactly the two form refusals #255 placed, #959’s failed confirmation, and nothing assertive', () => {
     const found: string[] = [];
     for (const file of sources(SOURCE_ROOT)) {
       const text = readFileSync(file, 'utf8');
@@ -222,6 +228,10 @@ describe('no production path pre-empts with an alert — #394', () => {
       );
     }
     // #940 moved both, with the picker, into the chooser's own module.
-    expect(found.sort()).toEqual(['game/StageChooser.tsx', 'game/StageChooser.tsx']);
+    expect(found.sort()).toEqual([
+      'design/ConfirmDialog.tsx',
+      'game/StageChooser.tsx',
+      'game/StageChooser.tsx',
+    ]);
   });
 });

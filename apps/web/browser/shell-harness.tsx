@@ -78,6 +78,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { browserSecureWindow } from '../src/camera/secure-window-testing';
 
 /**
  * A browser with no Bluetooth, which is what a headless Chromium is.
@@ -757,6 +758,7 @@ async function probeTheAnalysis(address: string | null): Promise<unknown> {
       ? undefined
       : endpointDecision({ address, model: 'harness-model', switchedOn: true }).endpoint;
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: browserCameraPort({
       devices,
       grabber: canvasFrameGrabber(),
@@ -794,6 +796,7 @@ function main(): void {
   const wantsLinkSpecimens =
     new URLSearchParams(globalThis.location.search).get('links') === LINK_SPECIMENS;
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     // A port that never opens anything: what this page measures is where the
     // INDICATOR is drawn, and a real camera would be a media device in the
     // middle of a layout gate. `probeTheRealCamera` below is where a real one

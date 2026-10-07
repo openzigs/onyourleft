@@ -22,6 +22,8 @@ import {
   CONSENT_REFUSAL_TEXT,
   CONSENT_STATEMENT,
   NO_CONSENT,
+  SCREENSHOT_SENTENCE,
+  SHOWN_ON_TABLET_SENTENCE,
   consentDecision,
 } from './consent';
 
@@ -92,6 +94,33 @@ describe('what the consent screen states', () => {
     expect(all).toContain('a computer of your own');
     expect(all).toContain('only when you press the button');
     expect(all).not.toContain('there is no code in it that can');
+  });
+
+  it('says a side camera’s picture is shown on this tablet, to anyone who can see it — #1061, ADR 0044 D-7', () => {
+    // ADR 0044 D-1 superseded ADR 0033 D-6's "no picture is ever displayed on
+    // the tablet"; D-7 asks the consent for this sentence, and D-6 for the
+    // shared-device half: no sign-in, so whoever sees the screen sees it.
+    expect(CONSENT_STATEMENT).toContain(SHOWN_ON_TABLET_SENTENCE);
+    const all = CONSENT_STATEMENT.join(' ');
+    expect(all).toContain('shown on this tablet while you set it up');
+    expect(all).toContain('Anyone who can see this tablet’s screen can see it');
+    expect(all).toContain('anyone else in the picture is shown too');
+  });
+
+  it('says nothing yet of a picture during a ride or of a snapshot, which this build does not have — #1062, #1063', () => {
+    // ADR 0044 D-10: the words land with the build that does what they say.
+    const all = CONSENT_STATEMENT.join(' ');
+    expect(all).not.toContain('during a ride');
+    expect(all).not.toContain('Save snapshot');
+  });
+
+  it('says a screenshot is blocked in the Android app and that a browser cannot block one — ADR 0044 D-12', () => {
+    expect(CONSENT_STATEMENT).toContain(SCREENSHOT_SENTENCE);
+    expect(SCREENSHOT_SENTENCE).toContain('In the Android app');
+    expect(SCREENSHOT_SENTENCE).toContain('screenshots and the app-switcher preview are blocked');
+    // The honest half: a web page cannot stop a screenshot, and saying
+    // nothing would let a browser rider assume it could.
+    expect(SCREENSHOT_SENTENCE).toContain('A browser cannot block them');
   });
 
   it('promises no expiry timer, which ADR 0029 D-2 refuses', () => {
