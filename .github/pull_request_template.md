@@ -30,7 +30,7 @@ Closes #
 ## Mutations
 
 <!--
-⚠️ THIS IS THE GATE. CLAUDE.md §5: there is no coverage percentage in this
+⚠️ THIS IS THE GATE. docs/agents/quality-gate.md §5: there is no coverage percentage in this
 repository and you must not add one — the mutation list is what stands in for
 it. For each meaningful test: break the implementation, watch the test go red,
 restore it, and record what went red here.

@@ -9,7 +9,7 @@
  * Narrowed to three methods rather than taking `ActivityStore`, for
  * `transfer/store-port.ts`'s reason: a test then hands the same code the
  * round-trip harness's store, so an assertion reads back on **a connection this
- * process never wrote through**. CLAUDE.md §5 calls that the fourth cause of a
+ * process never wrote through**. docs/agents/quality-gate.md §5 calls that the fourth cause of a
  * write that reports success while the read cannot see it, and it is the one a
  * naive test cannot detect.
  *

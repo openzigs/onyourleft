@@ -206,7 +206,7 @@ export function distanceAlongTrack(points: readonly TrackPoint[]): Metres {
     // speed to satisfy both halves rejects it. That is why there is no separate
     // guard on `elapsed` above: one that rejected a non-positive interval would
     // duplicate this line for every case that can actually reach it, and
-    // CLAUDE.md §5 calls a branch no test can distinguish a guard in appearance
+    // docs/agents/quality-gate.md §5 calls a branch no test can distinguish a guard in appearance
     // only.
     if (!(
       speed >= STATIONARY_SPEED_METRES_PER_SECOND && speed <= IMPLAUSIBLE_SPEED_METRES_PER_SECOND

@@ -57,7 +57,7 @@ describe('every position in every committed fixture', () => {
       // point. `entry.positionCount` is `built.positionOffsets.length` and
       // `positionsInFitBytes` maps those same offsets, so it reduces to
       // `offsets.length === offsets.length`. It was previously commented as
-      // though it closed a gap it cannot close. CLAUDE.md §5: a test that cannot
+      // though it closed a gap it cannot close. docs/agents/quality-gate.md §5: a test that cannot
       // fail is not a test.
       //
       // The property IS anchored, just not here — `MANIFEST.json` and the README

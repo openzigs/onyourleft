@@ -19,7 +19,7 @@
  *
  * One passage for the whole ride and one per section, each far under the
  * instance's 900 characters. Words are this project's own: no registered
- * load-metric name (CLAUDE.md §6).
+ * load-metric name (docs/agents/scope-and-ip.md §6).
  */
 
 import type { ActivityId, AthleteId, StoredActivityRecord } from '@onyourleft/store';

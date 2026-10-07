@@ -515,7 +515,7 @@ const VENDOR_NAMES = [
   'copilot',
 ];
 
-/** CLAUDE.md §6: the registered load-metric names, and FTP, which could not be cleared. */
+/** docs/agents/scope-and-ip.md §6: the registered load-metric names, and FTP, which could not be cleared. */
 const REGISTERED_METRIC_NAMES_ANY_CASE = [
   'normali[sz]ed power',
   'training stress score',
@@ -545,7 +545,7 @@ describe('what every prompt says', () => {
   });
 
   it.each(prompts)(
-    '%s uses none of the registered metric names (CLAUDE.md §6)',
+    '%s uses none of the registered metric names (docs/agents/scope-and-ip.md §6)',
     (_label, prompt) => {
       const text = textOf(prompt);
       for (const name of REGISTERED_METRIC_NAMES_ANY_CASE) {

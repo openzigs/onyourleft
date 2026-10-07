@@ -14,7 +14,7 @@
  * ## What every prompt says, and does not say
  *
  * - The numbers are from ONE ride.
- * - Metrics are named by this project's own names (CLAUDE.md §6), which are
+ * - Metrics are named by this project's own names (docs/agents/scope-and-ip.md §6), which are
  *   the input's keys. No registered load-metric name appears, and nothing asks
  *   the model for one (ADR 0035 D-8).
  * - Gradients are percentages. No joint angle and no unit of angle is asked

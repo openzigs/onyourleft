@@ -16,7 +16,7 @@
  * per consumer, which is exactly what #28 exists to prevent. It ships as a
  * separate entry point so nothing in the product bundle can import a fake.
  *
- * `CLAUDE.md` section 5 documents how to use it.
+ * `docs/agents/quality-gate.md` section 5 documents how to use it.
  */
 
 export { createStoreHarness, indexedDbStoreFactory } from './harness';

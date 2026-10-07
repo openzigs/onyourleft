@@ -23,7 +23,7 @@
  *
  * A change is written through the store's narrow write and then **read back**
  * through `getActivity`; the box shows what the read says, never what was
- * asked for. A write that reported success and did not land (CLAUDE.md §5)
+ * asked for. A write that reported success and did not land (docs/agents/quality-gate.md §5)
  * leaves the box where the disk is, and says so.
  *
  * ## The privacy-zone refusal, beside it

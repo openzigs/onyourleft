@@ -27,7 +27,7 @@
  * sensors reconnect on their own. `ANDROID_TRAITS.canReconnectWithoutUserGesture`
  * is `true` about the platform, and nothing in this client seeds the transport's
  * `seen` set from storage, so there is no automatic reconnection to promise.
- * CLAUDE.md §8 says not to build one; saying we had would be worse.
+ * docs/agents/web-bluetooth.md §8 says not to build one; saying we had would be worse.
  */
 
 import type { JSX } from 'react';
@@ -98,7 +98,7 @@ function RecheckButton({ onRecheck }: { readonly onRecheck: () => void }): JSX.E
  * and mount another. It is not: wrapping the first branch in a fragment to
  * match changed nothing, because the reconciler matches a lone child against
  * index 0 of a child array by type. The wrapper was therefore a line no
- * mutation could turn red, which CLAUDE.md §5 treats as worse than absent, and
+ * mutation could turn red, which docs/agents/quality-gate.md §5 treats as worse than absent, and
  * it is not here. What stands in its place is
  * `DevicesView.shell.a11y.test.tsx`, which asserts the node's **identity**
  * across the transition rather than reading `role` off whatever is on screen at

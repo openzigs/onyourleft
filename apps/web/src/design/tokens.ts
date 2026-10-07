@@ -581,7 +581,7 @@ export const TYPE_SCALE_STEPS = {
  * ⚠️ **Written out rather than computed**, and `tokens.test.ts` re-derives them
  * from {@link TYPE_SCALE_RATIO} and requires them to agree. A ladder generated
  * from its own ratio agrees by construction and the test proving it could never
- * fail — which is the shape CLAUDE.md §5 spends a section on.
+ * fail — which is the shape docs/agents/quality-gate.md §5 spends a section on.
  */
 export const FONT_SIZE_TOKENS = {
   /** Step −1. Captions, helper text, a field label above a number. */

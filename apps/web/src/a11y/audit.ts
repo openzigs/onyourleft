@@ -12,7 +12,7 @@
  *
  * Three reasons, in the order they decided it:
  *
- * 1. **The obvious library is MPL-2.0.** CLAUDE.md §3 records that MPL-2.0 is
+ * 1. **The obvious library is MPL-2.0.** docs/agents/licence-boundary.md §3 records that MPL-2.0 is
  *    *not ruled on yet* in this repository and is
  *    [#24](https://github.com/openzigs/onyourleft/issues/24)'s to decide.
  *    Writing a gate against an API whose licence has not been ruled on means
