@@ -23,6 +23,7 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { SideCameraView } from './SideCameraView';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -66,6 +67,7 @@ async function pagedWithLink(): Promise<{
 }> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
@@ -85,6 +87,7 @@ describe('the side-camera screen', () => {
   it('passes the audit before the camera is on, in the shell', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -98,6 +101,7 @@ describe('the side-camera screen', () => {
   it('passes the audit while framing, unpaired, in the shell', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });

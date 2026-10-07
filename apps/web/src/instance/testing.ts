@@ -19,12 +19,14 @@ import type {
 } from './instance-port';
 import {
   NOTHING_CHANGED_TEXT,
+  type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
   type ModerationPort,
   type ModerationStanding,
   type OpenReport,
   type PendingRegistration,
+  type SuspendedAccount,
 } from './moderation-port';
 
 export interface ScriptedInstance {
@@ -142,8 +144,14 @@ export interface ScriptedModeration {
     log: ModerationLogEntry[];
     /** `false` to answer a read as the port does when the log alone could not be read. */
     logReadable: boolean;
-    /** Accounts suspended, by id. */
-    suspended: Set<string>;
+    /** `false` to answer a read as the port does when the suspended accounts alone could not be read. */
+    suspendedReadable: boolean;
+    /** `false` to answer every *Show more* as the port does when a page could not be read (#961). */
+    moreReadable: boolean;
+    /** How many rows a page of the log or of the suspended accounts holds (#961). */
+    pageSize: number;
+    /** Accounts suspended: id to when, in Unix seconds. */
+    suspended: Map<string, number>;
     /** Accounts that exist, by id: the pending ones, the reported and this one. */
     accounts: Set<string>;
   };
@@ -206,7 +214,12 @@ export function scriptedModerationQueues(): Pick<
 }
 
 export function scriptedModeration(
-  options: { readonly standing?: ModerationStanding; readonly empty?: boolean } = {},
+  options: {
+    readonly standing?: ModerationStanding;
+    readonly empty?: boolean;
+    /** Accounts suspended from the start: id to when, in Unix seconds (#961). */
+    readonly suspended?: Readonly<Record<string, number>>;
+  } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
   const queues =
@@ -220,7 +233,10 @@ export function scriptedModeration(
     reports: [...queues.reports],
     log: [...queues.log],
     logReadable: true,
-    suspended: new Set(),
+    suspendedReadable: true,
+    moreReadable: true,
+    pageSize: 100,
+    suspended: new Map(Object.entries(options.suspended ?? {})),
     accounts: new Set([
       SCRIPTED_MODERATOR,
       'rider-carys',
@@ -260,6 +276,26 @@ export function scriptedModeration(
     const outcome = logged(`refused_${action}`, targetAthleteId, reportId, reason);
     return Promise.resolve(outcome.kind === 'done' ? nothing : outcome);
   };
+  /** A page of `rows` from `cursor`, which is an offset as text — opaque to the screen. */
+  function pageFrom<T>(rows: readonly T[], cursor: string | undefined): ModerationList<T> {
+    const start = cursor === undefined ? 0 : Number(cursor);
+    const end = start + held.pageSize;
+    return { items: rows.slice(start, end), next: end < rows.length ? String(end) : null };
+  }
+  const nameOf = (id: string): string =>
+    held.registrations.find((each) => each.athleteId === id)?.displayName ?? id;
+  /** Newest first, as the instance pages them (#961). */
+  const logRows = (): ModerationLogEntry[] => [...held.log].reverse();
+  const suspendedRows = (): SuspendedAccount[] =>
+    [...held.suspended.entries()]
+      .map(([athleteId, suspendedAt]) => ({
+        athleteId,
+        displayName: nameOf(athleteId),
+        suspendedAt,
+      }))
+      .sort((left, right) => right.suspendedAt - left.suspendedAt);
+  let suspendedClock = 1_790_020_000;
+
   const port: ModerationPort = {
     standing: () => {
       calls.push('standing');
@@ -273,8 +309,17 @@ export function scriptedModeration(
         me: held.me,
         registrations: [...held.registrations],
         reports: [...held.reports],
-        log: held.logReadable ? [...held.log] : undefined,
+        suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
+        log: held.logReadable ? pageFrom(logRows(), undefined) : undefined,
       });
+    },
+    moreLog: (cursor) => {
+      calls.push(`more log ${cursor}`);
+      return Promise.resolve(held.moreReadable ? pageFrom(logRows(), cursor) : undefined);
+    },
+    moreSuspended: (cursor) => {
+      calls.push(`more suspended ${cursor}`);
+      return Promise.resolve(held.moreReadable ? pageFrom(suspendedRows(), cursor) : undefined);
     },
     decideRegistration: (athleteId, decision, reason) => {
       calls.push(`${decision} ${athleteId}`);
@@ -310,7 +355,10 @@ export function scriptedModeration(
       if (action === 'unsuspend' && !held.suspended.has(id)) return Promise.resolve(nothing);
       const outcome = logged(action, id, reportId ?? null, reason);
       if (outcome.kind !== 'done') return Promise.resolve(outcome);
-      if (action === 'suspend') held.suspended.add(id);
+      if (action === 'suspend') {
+        suspendedClock += 60;
+        held.suspended.set(id, suspendedClock);
+      }
       if (action === 'unsuspend') held.suspended.delete(id);
       if (reportId !== undefined) {
         held.reports = held.reports.filter((each) => each.reportId !== reportId);

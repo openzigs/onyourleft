@@ -32,6 +32,7 @@ import { keepThisRide, keptSummarySentence } from './keep';
 import { CameraController } from './session';
 import type { CameraStorePort } from './store-port';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 
@@ -81,6 +82,7 @@ async function controllerWithKeep(): Promise<{
 }> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
     keep: keepThisRide(portFor()),
@@ -150,6 +152,7 @@ describe('the default is that nothing is kept', () => {
     // starting, which reads to a rider as a control that does not work.
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       keep: keepThisRide(portFor()),
@@ -217,6 +220,7 @@ describe('the rider can get rid of them', () => {
   it('counts nothing on a controller with no keep at all', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });

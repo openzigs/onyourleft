@@ -570,6 +570,10 @@ h3:first-child {
  * the accessibility tree as well as off the screen, which is safe because both
  * are `alt=""`: the name is a visually hidden span beside them.
  *
+ * ⚠️ The full logo on About is NOT switched here since #972: it is one picture
+ * whose source `Brand.tsx` §`FullLogo` picks from the same `data-theme`, so a
+ * visit fetches one file rather than both.
+ *
  * ⚠️ The wordmark is INLINE, in the paragraph's own line box, and 1.5 rem tall —
  * shorter than the line `.oyl-wordmark`'s type sets, so the paragraph is the
  * height it was as text and the header's measured height did not move
@@ -590,6 +594,8 @@ h3:first-child {
   display: block;
   width: 100%;
   max-width: 16rem;
+  /* With the picture's own `width` and `height` attributes, `auto` keeps its
+     box at the picture's ratio before it has loaded (#1136). */
   height: auto;
 }
 
@@ -603,10 +609,6 @@ h3:first-child {
 
 :root[data-theme='dark'] .oyl-wordmark__image.oyl-brand--dark {
   display: inline-block;
-}
-
-:root[data-theme='dark'] .oyl-brand-logo__image.oyl-brand--dark {
-  display: block;
 }
 
 /*
@@ -2034,6 +2036,22 @@ h3:first-child {
 
   .oyl-main {
     scroll-margin-top: 7rem;
+  }
+
+  /*
+   * #990: what a sticky header costs KEYBOARD focus. Chromium scrolls a
+   * control that Tab or Shift+Tab reaches off the screen just far enough to
+   * put it at the edge, and the top edge is where the header is — on
+   * Settings a control reached backwards was focused up to 44 px under it
+   * (WCAG 2.2 SC 2.4.11). So the whole document's scroll area starts below
+   * the header: its declared height (#671) and the band it sticks under, the
+   * same two numbers its `top` and its box are made of, so they cannot come
+   * apart. #983 did this for the game's chooser alone; this replaces it.
+   * `browser/sticky-header.browser.spec.ts` walks Settings backwards, with
+   * the padding taken off as its control.
+   */
+  :root {
+    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
   }
 }
 
@@ -4370,11 +4388,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The two `scroll-padding` rules left are not this chooser's pin — it has none
+ * The `scroll-padding` rule left here is not this chooser's pin — it has none
  * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * and the header (sticky, `--oyl-header-height`, on a large one) would
- * otherwise sit over a control Tab scrolls to the edge. They are scoped to
- * the chooser; the app-wide gap is a follow-up.
+ * would otherwise sit over a control Tab scrolls to the bottom edge. It is
+ * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
+ * large window) was too until #990, which made it the whole document's —
+ * see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -4604,13 +4623,6 @@ select.oyl-input {
 @media (max-width: 37.49rem) and (min-height: 30rem) {
   :root:has(.oyl-chooser) {
     scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
-  }
-}
-
-/* The sticky HEADER — the shell's own query and height, restated. */
-@media (min-width: 64rem) and (min-height: 40rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
   }
 }
 
@@ -6885,6 +6897,31 @@ select.oyl-input {
 .oyl-framing__ghost * {
   stroke: var(--oyl-color-accent);
   stroke-dasharray: 8 6;
+}
+
+/* The live view's outline of where the model found the rider (#1061, ADR 0044
+   D-9): DOTTED, with a dot at each point, so it is told from the SOLID guide
+   and the DASHED ghost by its pattern, not its colour (#48). Drawn over the
+   camera's picture, so in HUD ink in both palettes (#672). */
+.oyl-framing__outline * {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
+}
+
+.oyl-framing__overlay .oyl-framing__joint {
+  fill: var(--oyl-color-hud-ink);
+  stroke: none;
+}
+
+/* The tablet's live view sits in the Camera screen's column, under its
+   controls and words; bounded so a landscape picture does not fill the page. */
+.oyl-side-live {
+  max-inline-size: 40rem;
+}
+
+.oyl-side-live .oyl-framing__picture {
+  max-block-size: 50vh;
 }
 
 /* =============================================================================

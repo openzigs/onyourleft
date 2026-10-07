@@ -79,6 +79,17 @@ test.describe('the pose model, in a real engine', () => {
     expect(rider.pose.aspect).toBeCloseTo(500 / 314, 2);
   });
 
+  // #1061, from #1123's review: the worker's `show` branch in a real engine. A picture closed
+  // before it was posted throws `DataCloneError` and no reply goes; this would read `unavailable`.
+  test('hands back the very picture it looked at when asked to show it', () => {
+    expect(measurement.shown).toEqual({
+      outcome: 'pose',
+      bitmap: true,
+      width: 500,
+      height: 314,
+    });
+  });
+
   test('finds nobody in a blank picture — the control for the one above', () => {
     expect(measurement.blank).toEqual({ kind: 'no-rider', cause: 'said-nobody' });
   });

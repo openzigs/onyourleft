@@ -64,6 +64,19 @@
  * {@link REFERENCE_MOVES_ON} is the rule, and `side-analysis.test.ts` holds
  * each of the four outcomes to it.
  *
+ * ## What it shows, while the rider is setting up (#1061)
+ *
+ * ⚠️ **Since #1061 a picture IS shown on the tablet**, and a reader who
+ * remembers point 3 above as "never a picture, anywhere" is reading the old
+ * file: [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-1 superseded ADR 0033 D-6 on this path. While the Camera screen's live
+ * view watches ({@link SideAnalysis.onSideLiveView}), the tablet's model hands
+ * back the decoded picture it looked at, and this holds **that one picture**,
+ * with the pose found in it, until the next replaces it — then closes it.
+ * Nothing watching, nothing held. The picture goes the moment the link is lost
+ * or the session ends. It is never stored, cached, made into a URL or put in an
+ * error (ADR 0029 D-8, D-10), and the model still runs in the worker.
+ *
  * ## What it hands the post-ride report (#388)
  *
  * When the session ends, the pose numbers are reduced by `side-report.ts` to
@@ -89,9 +102,15 @@ import type {
   SidePoseOutcome,
 } from './side-analysis-port';
 import type { SidePicture } from './side-link-pictures';
+import {
+  canShowPicture,
+  type SideLiveView,
+  type SideLiveViewPort,
+  type SideShownLook,
+} from './side-live-view-port';
 import { sideSessionFrom } from './side-report';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
-import type { SideCameraControlPort } from './side-pairing-port';
+import type { SideCameraControlPort, SidePhoneState } from './side-pairing-port';
 
 /**
  * How many pictures with a rider in them the framing check waits for: ten,
@@ -231,11 +250,13 @@ export interface SideAnalysisOptions {
 }
 
 /** The analysis of one pairing's pictures. */
-export class SideAnalysis implements SideAnalysisPort {
+export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
   readonly #control: SideCameraControlPort;
   readonly #makeEstimator: () => SidePoseEstimator;
   readonly #references: FramingReferenceKeeping | undefined;
   readonly #listeners = new Set<() => void>();
+  /** Who is watching the live view (#1061). Nobody, and no picture is held. */
+  readonly #viewers = new Set<() => void>();
   readonly #unsubscribe: (() => void)[] = [];
   readonly #poses = new PoseSamples();
   readonly #report: SideReportSession | undefined;
@@ -246,6 +267,8 @@ export class SideAnalysis implements SideAnalysisPort {
   #waiting: SidePicture | undefined;
   #reference: FramingReference | undefined;
   #referenceAsked = false;
+  /** The live view: at most ONE picture, the one on screen (ADR 0044 D-1). */
+  #live: SideLiveView = { picture: undefined, reference: undefined };
   #state: SideAnalysisState = {
     place: 'tablet',
     model: 'waiting',
@@ -288,6 +311,21 @@ export class SideAnalysis implements SideAnalysisPort {
     };
   }
 
+  sideLiveView(): SideLiveView {
+    return this.#live;
+  }
+
+  onSideLiveView(listener: () => void): () => void {
+    this.#viewers.add(listener);
+    return () => {
+      this.#viewers.delete(listener);
+      if (this.#viewers.size === 0) {
+        // Nobody is looking: the picture on screen is not kept for later.
+        this.#dropPicture();
+      }
+    };
+  }
+
   /**
    * Every pose kept this session, in the order the model finished them — the
    * post-ride report's input (#388). Numbers only; see {@link SidePoseSample}.
@@ -305,6 +343,12 @@ export class SideAnalysis implements SideAnalysisPort {
     }
     if (ended !== undefined || phone === 'stopped') {
       this.#finish();
+      return;
+    }
+    if (!showsPictures(phone)) {
+      // #1061: a lost link removes the picture at once (ADR 0044 D-8's rule,
+      // which is the setup view's too); the words #551 shows say why.
+      this.#dropPicture();
     }
   }
 
@@ -333,6 +377,7 @@ export class SideAnalysis implements SideAnalysisPort {
       return;
     }
     this.#reference = reference;
+    this.#setLive({ ...this.#live, reference });
     this.#control.shareFramingReference(reference);
     this.#check();
   }
@@ -357,12 +402,22 @@ export class SideAnalysis implements SideAnalysisPort {
     if (this.#state.model === 'waiting') {
       this.#set({ model: 'loading' });
     }
-    const outcome = await this.#estimator.estimateSidePose(picture.bytes);
+    const estimator = this.#estimator;
+    // #1061: the picture back from the model only while somebody is watching
+    // the live view, and only from a model that can give it (the tablet's own;
+    // the rider's computer cannot, so its pictures are not shown).
+    const look: SideShownLook =
+      this.#viewers.size > 0 && canShowPicture(estimator)
+        ? await estimator.estimateSidePoseShowingPicture(picture.bytes)
+        : { outcome: await estimator.estimateSidePose(picture.bytes), pixels: undefined };
+    const { outcome } = look;
     if (this.#state.finished) {
+      look.pixels?.close();
       this.#busy = false;
       return;
     }
     this.#record(picture, outcome);
+    this.#show(picture.sequence, look);
     const next = this.#waiting;
     this.#waiting = undefined;
     if (next !== undefined && this.#state.model !== 'unavailable') {
@@ -399,7 +454,56 @@ export class SideAnalysis implements SideAnalysisPort {
       case 'unavailable':
         this.#waiting = undefined;
         this.#set({ model: 'unavailable' });
+        // Nothing will be shown again (`#arrive` takes no picture now), so the
+        // one on screen goes at once rather than at the end of the session —
+        // the setup view says pictures are not being looked at (#1123, N2).
+        this.#dropPicture();
         return;
+    }
+  }
+
+  /**
+   * Put one picture on the live view, with the pose found in IT and no other —
+   * #1061's *"the outline is of the frame it is drawn on"*. A picture the
+   * model found nobody in is shown with no outline, never with the last
+   * picture's (ADR 0044 D-11: a refused answer draws none).
+   */
+  #show(sequence: number, look: SideShownLook): void {
+    const { pixels, outcome } = look;
+    if (pixels === undefined) {
+      return;
+    }
+    if (this.#viewers.size === 0 || !showsPictures(this.#control.sideControlState().phone)) {
+      pixels.close();
+      return;
+    }
+    const before = this.#live.picture;
+    this.#setLive({
+      ...this.#live,
+      picture: {
+        sequence,
+        pixels,
+        pose: outcome.kind === 'pose' ? outcome.pose : undefined,
+      },
+    });
+    // The one it replaced goes now (D-1: never a second).
+    before?.pixels.close();
+  }
+
+  /** Take the picture off the live view and let it go. */
+  #dropPicture(): void {
+    const before = this.#live.picture;
+    if (before === undefined) {
+      return;
+    }
+    this.#setLive({ ...this.#live, picture: undefined });
+    before.pixels.close();
+  }
+
+  #setLive(live: SideLiveView): void {
+    this.#live = live;
+    for (const viewer of [...this.#viewers]) {
+      viewer();
     }
   }
 
@@ -428,6 +532,7 @@ export class SideAnalysis implements SideAnalysisPort {
       unsubscribe();
     }
     this.#estimator?.closeSidePoseModel();
+    this.#dropPicture();
     const framing = this.#state.framing === 'checking' ? 'not-checked' : this.#state.framing;
     this.#set({ finished: true, framing });
     this.#keepReference(framing);
@@ -480,6 +585,11 @@ export class SideAnalysis implements SideAnalysisPort {
       listener();
     }
   }
+}
+
+/** Whether the phone is in a state whose pictures the live view may show: framing or filming. */
+function showsPictures(phone: SidePhoneState): boolean {
+  return phone === 'framing' || phone === 'filming';
 }
 
 /**

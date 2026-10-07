@@ -80,6 +80,7 @@ import {
 import { largestArrayIn, PICTURE_NAME, pictureBodyFaults } from './no-picture-testing';
 import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
 import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
+import { browserSecureWindow } from './secure-window-testing';
 
 /** The modules #799 names as picture modules whatever their code says. */
 const MINIMUM_PICTURE_MODULES = [
@@ -400,6 +401,7 @@ describe('the body carries no picture (#799)', () => {
       key: 'fixture-hosted-key',
     }).model;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () =>

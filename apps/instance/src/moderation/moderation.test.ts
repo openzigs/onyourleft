@@ -470,6 +470,166 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
   });
 });
 
+describe('the suspended accounts and the log, a page at a time (#961)', () => {
+  interface SuspendedPage {
+    items: { athleteId: string; displayName: string; suspendedAt: number }[];
+    next: string | null;
+  }
+  interface LogPage {
+    entries: { logId: number; action: string; targetAthleteId: string | null }[];
+    next: string | null;
+  }
+
+  async function suspend(w: ModerationWorld, athleteId: string): Promise<void> {
+    w.clock.ms += 1000;
+    const done = await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
+      reason: 'Cheating',
+    });
+    expect(done.status).toBe(200);
+  }
+
+  it('lists every suspended account, most recently suspended first, and no other', async () => {
+    const w = await start();
+    const anna = await w.rider('Anna');
+    const bea = await w.rider('Bea');
+    const cara = await w.rider('Cara');
+    await suspend(w, anna.athleteId);
+    await suspend(w, cara.athleteId);
+    const listed = await w.as(w.deputy, 'GET', '/v1/moderation/suspended');
+    expect(listed.status).toBe(200);
+    expect(listed.body).toEqual({
+      items: [
+        { athleteId: cara.athleteId, displayName: 'Cara', suspendedAt: seconds(w) },
+        { athleteId: anna.athleteId, displayName: 'Anna', suspendedAt: seconds(w) - 1 },
+      ],
+      next: null,
+    });
+    // A lifted suspension leaves the list.
+    await w.as(w.owner, 'POST', `/v1/moderation/athletes/${cara.athleteId}/unsuspend`, {
+      reason: 'Appeal upheld',
+    });
+    const after = (await w.as(w.owner, 'GET', '/v1/moderation/suspended')).body as SuspendedPage;
+    expect(after.items.map((each) => each.athleteId)).toEqual([anna.athleteId]);
+    expect(after.items.map((each) => each.athleteId)).not.toContain(bea.athleteId);
+  });
+
+  it('pages the suspended accounts: every one exactly once, ties on the second broken by id', async () => {
+    const w = await start();
+    const riders = [];
+    for (let index = 0; index < 5; index += 1) riders.push(await w.rider(`Rider ${String(index)}`));
+    // Two suspended in the same second, so the cursor's id half is what separates them.
+    await suspend(w, riders[0]!.athleteId);
+    await suspend(w, riders[1]!.athleteId);
+    await w.as(w.owner, 'POST', `/v1/moderation/athletes/${riders[2]!.athleteId}/suspend`, {
+      reason: 'Cheating',
+    });
+    await suspend(w, riders[3]!.athleteId);
+    await suspend(w, riders[4]!.athleteId);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const query: string = cursor === null ? '?limit=2' : `?limit=2&cursor=${cursor}`;
+      const page = await w.as(w.owner, 'GET', `/v1/moderation/suspended${query}`);
+      expect(page.status).toBe(200);
+      const body = page.body as SuspendedPage;
+      expect(body.items.length).toBeLessThanOrEqual(2);
+      seen.push(...body.items.map((each) => each.athleteId));
+      cursor = body.next;
+      pages += 1;
+    } while (cursor !== null);
+    expect(pages).toBe(3);
+    expect([...seen].sort()).toEqual(riders.map((each) => each.athleteId).sort());
+    expect(new Set(seen).size).toBe(5);
+    // The order is suspendedAt, then id, both descending.
+    const all = (await w.as(w.owner, 'GET', '/v1/moderation/suspended')).body as SuspendedPage;
+    expect(all.items.map((each) => each.athleteId)).toEqual(seen);
+    // A page that ends exactly at the end says there is no next one.
+    const exact = (await w.as(w.owner, 'GET', '/v1/moderation/suspended?limit=5'))
+      .body as SuspendedPage;
+    expect(exact.items).toHaveLength(5);
+    expect(exact.next).toBeNull();
+  });
+
+  it('pages the log newest first, and a cursor reaches further back without repeating', async () => {
+    const w = await start();
+    const anna = await w.rider('Anna');
+    const bea = await w.rider('Bea');
+    await suspend(w, anna.athleteId);
+    await suspend(w, bea.athleteId);
+    await w.as(w.owner, 'POST', `/v1/moderation/athletes/${anna.athleteId}/unsuspend`, {
+      reason: 'Appeal upheld',
+    });
+    const first = await w.as(w.owner, 'GET', '/v1/moderation/log?limit=2');
+    expect(first.status).toBe(200);
+    const one = first.body as LogPage;
+    expect(one.entries.map((each) => [each.action, each.targetAthleteId])).toEqual([
+      ['unsuspend', anna.athleteId],
+      ['suspend', bea.athleteId],
+    ]);
+    expect(one.next).not.toBeNull();
+    const two = (await w.as(w.owner, 'GET', `/v1/moderation/log?limit=2&cursor=${one.next!}`))
+      .body as LogPage;
+    expect(two.entries.map((each) => [each.action, each.targetAthleteId])).toEqual([
+      ['suspend', anna.athleteId],
+    ]);
+    expect(two.next).toBeNull();
+    // An action logged while the moderator pages does not move what comes after the cursor.
+    await suspend(w, anna.athleteId);
+    const again = (await w.as(w.owner, 'GET', `/v1/moderation/log?limit=2&cursor=${one.next!}`))
+      .body as LogPage;
+    expect(again).toEqual(two);
+    // The whole log, as the store keeps it, is the pages put together, reversed.
+    const stored = await w.freshRead((store) => store.listModerationLog());
+    const whole = (await w.as(w.owner, 'GET', '/v1/moderation/log')).body as LogPage;
+    expect(whole.entries.map((each) => each.logId)).toEqual(
+      stored.map((each) => each.id).reverse(),
+    );
+  });
+
+  it('refuses a bad limit or a cursor it did not write, by name and never by value', async () => {
+    const w = await start();
+    for (const path of ['/v1/moderation/log', '/v1/moderation/suspended']) {
+      for (const query of [
+        '?limit=0',
+        '?limit=201',
+        '?limit=two',
+        '?cursor=nonsense!',
+        // A cursor shaped as the OTHER list writes one; for the log, its id is a
+        // well-formed log id, so only the key refuses it.
+        path.endsWith('log')
+          ? `?cursor=${encodeURIComponent(btoa(JSON.stringify(['1', '2'])).replace(/=+$/, ''))}`
+          : `?cursor=${encodeURIComponent(btoa(JSON.stringify(['log', '1'])).replace(/=+$/, ''))}`,
+      ]) {
+        const answer = await w.as(w.owner, 'GET', `${path}${query}`);
+        expect(answer.status, `${path}${query}`).toBe(400);
+        expect(codeOf(answer.body), `${path}${query}`).toBe('validation_failed');
+        expect(JSON.stringify(answer.body)).not.toContain('nonsense');
+      }
+    }
+  });
+
+  it('answers an ordinary rider — suspended accounts or not, cursor or not — as though there were no such route', async () => {
+    const w = await start();
+    const anna = await w.rider('Anna');
+    const bea = await w.rider('Bea');
+    const nobody = await w.as(anna, 'GET', '/v1/moderation/suspended');
+    await suspend(w, bea.athleteId);
+    for (const path of [
+      '/v1/moderation/suspended',
+      '/v1/moderation/suspended?limit=0',
+      '/v1/moderation/log',
+      '/v1/moderation/log?cursor=nonsense!',
+    ]) {
+      const answer = await w.as(anna, 'GET', path);
+      expect(answer.status, path).toBe(404);
+      expect(answer.body, path).toEqual(nobody.body);
+      expect(JSON.stringify(answer.body)).not.toContain(bea.athleteId);
+    }
+  });
+});
+
 /** How many rows `athleteId` owns in every table with a foreign key to `athlete`, from the file. */
 function athleteRows(path: string, athleteId: string): Record<string, number> {
   const database = openDatabase(path);

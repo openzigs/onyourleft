@@ -44,7 +44,7 @@ import {
 } from '../testing/mount';
 import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 
-import { ActivitiesView } from './ActivitiesView';
+import { ActivitiesView, DELETE_FAILED_TEXT } from './ActivitiesView';
 
 const OWNER = athleteId('athlete-a');
 
@@ -256,6 +256,91 @@ describe('#62 — the local activity library', () => {
     await settle();
 
     expect(library.deleted).toHaveLength(1);
+    expect(document.activeElement).toBe(sortControl());
+  });
+
+  it('keeps the dialog open and busy until the delete settles, and says so in it when it fails — #959', async () => {
+    const stub = stubLibrary(OWNER, [
+      summary('a', { name: 'Tuesday hills' }),
+      summary('b', { name: 'Sunday long' }),
+    ]);
+    let refuse: (error: Error) => void = () => undefined;
+    const deleteActivity = vi.fn(
+      async (): Promise<boolean> =>
+        new Promise<boolean>((_resolve, reject) => {
+          refuse = reject;
+        }),
+    );
+    const library = { ...stub, store: { ...stub.store, deleteActivity } };
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    const confirm = buttonNamed('Delete the ride') as HTMLElement;
+    await activateWithKeyboard(confirm);
+    await settle();
+
+    // Under way: still open, saying it is busy, both answers unavailable, and
+    // neither a second press nor *Keep the ride* does anything yet.
+    const dialog = (): HTMLElement | null => document.querySelector('[role="alertdialog"]');
+    expect(dialog()).not.toBeNull();
+    expect(dialog()?.getAttribute('aria-busy')).toBe('true');
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    expect(buttonNamed('Keep the ride')?.getAttribute('aria-disabled')).toBe('true');
+    await activateWithKeyboard(confirm);
+    await activateWithKeyboard(buttonNamed('Keep the ride') as HTMLElement);
+    await settle();
+    expect(dialog()).not.toBeNull();
+    expect(deleteActivity).toHaveBeenCalledTimes(1);
+
+    refuse(new Error('QuotaExceededError'));
+    await settle();
+
+    // Refused: the dialog stays, says why in an alert inside it, and focus
+    // has not left it — nor gone to the sort control as if the ride were gone.
+    expect(dialog()).not.toBeNull();
+    expect(dialog()?.getAttribute('aria-busy')).toBeNull();
+    const alert = dialog()?.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(DELETE_FAILED_TEXT);
+    expect(alert?.textContent).not.toContain('QuotaExceededError');
+    expect(dialog()?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(sortControl());
+    expect(confirm.getAttribute('aria-disabled')).toBeNull();
+
+    // The ride is still in the list behind it, and the rider can still keep it.
+    await activateWithKeyboard(buttonNamed('Keep the ride') as HTMLElement);
+    await settle();
+    expect(dialog()).toBeNull();
+    expect(rowText().some((text) => text.includes('Tuesday hills'))).toBe(true);
+  });
+
+  it('closes, and only then moves focus to the sort control, once a slow delete works — #959', async () => {
+    const stub = stubLibrary(OWNER, [
+      summary('a', { name: 'Tuesday hills' }),
+      summary('b', { name: 'Sunday long' }),
+    ]);
+    let done: (deleted: boolean) => void = () => undefined;
+    const deleteActivity = vi.fn(
+      async (): Promise<boolean> =>
+        new Promise<boolean>((resolve) => {
+          done = resolve;
+        }),
+    );
+    const library = { ...stub, store: { ...stub.store, deleteActivity } };
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(document.activeElement).not.toBe(sortControl());
+
+    done(true);
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(document.activeElement).toBe(sortControl());
   });
 

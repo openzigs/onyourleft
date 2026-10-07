@@ -837,6 +837,23 @@ export interface SqlStore {
   logRefusedAction(action: ModerationAction): Promise<number>;
   /** The moderation log, oldest first. */
   listModerationLog(): Promise<readonly ModerationLogEntry[]>;
+  /**
+   * One page of the moderation log, NEWEST first (#961): at most `limit`
+   * entries whose id is below `beforeId`, or the newest when it is `undefined`.
+   */
+  listModerationLogPage(
+    beforeId: number | undefined,
+    limit: number,
+  ): Promise<readonly ModerationLogEntry[]>;
+  /**
+   * One page of the suspended accounts, most recently suspended first (#961):
+   * at most `limit` of them after the (suspendedAt, id) position `after`, in
+   * that order, or the first when it is `undefined`.
+   */
+  listSuspendedAthletes(
+    after: { readonly suspendedAt: number; readonly id: string } | undefined,
+    limit: number,
+  ): Promise<readonly AthleteRecord[]>;
 
   /** Record that the athlete confirmed they are 18 or over (#775). The first date is kept. */
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
@@ -2620,6 +2637,29 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           moderationLogFrom,
         ),
       ),
+
+    listModerationLogPage: (beforeId, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('moderation_log').selectAll();
+        if (beforeId !== undefined) query = query.where('id', '<', beforeId);
+        return (await query.orderBy('id', 'desc').limit(limit).execute()).map(moderationLogFrom);
+      }),
+
+    listSuspendedAthletes: (after, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
+        if (after !== undefined) {
+          query = query.where((row) =>
+            row.or([
+              row('suspended_at', '<', after.suspendedAt),
+              row.and([row('suspended_at', '=', after.suspendedAt), row('id', '<', after.id)]),
+            ]),
+          );
+        }
+        return (
+          await query.orderBy('suspended_at', 'desc').orderBy('id', 'desc').limit(limit).execute()
+        ).map(athleteFrom);
+      }),
 
     confirmAdult: (athleteId, at) =>
       exclusive(async () => {

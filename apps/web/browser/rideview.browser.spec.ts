@@ -481,6 +481,11 @@ for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
         // rather than one made the upright page SHORTER than the screen, so
         // #439's rule binds here now: the page fits, and the old rule puts
         // the insets' 68 px back as scroll.
+        //
+        // ⚠️ #1021: if content grows and the upright page is taller than the
+        // screen again, move this viewport back to the `else` branch below —
+        // the shell height has stopped binding, which is that branch's claim.
+        // Do NOT loosen these two assertions to make it pass.
         const insets = insetsOf(viewport);
         expect(fixed.pageOverflow).toBeLessThanOrEqual(0);
         expect(reverted.pageOverflow).toBeCloseTo(insets.top + insets.bottom, 0);
@@ -1312,7 +1317,7 @@ for (const viewport of [
   TABLET_IN_THE_SHELL,
   TABLET_UPRIGHT_IN_THE_SHELL,
 ] as const) {
-  test(`#1012 — nothing paired: ONE banner and one Pair, on the screen — ${viewport.name}`, async ({
+  test(`#1012 — nothing paired: ONE banner and one Pair a sensor, on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, '?sensors=none');
@@ -1321,7 +1326,8 @@ for (const viewport of [
     expect(banner, 'no sensor banner').toBeDefined();
     expect(seen.readings, 'the four tiles are still there').toEqual([]);
     expect(banner?.links).toBe(1);
-    expect(banner?.link.name).toBe('Pair');
+    // #1021: named for what it pairs (WCAG 2.4.4).
+    expect(banner?.link.name).toBe('Pair a sensor');
     expect(banner?.link.onTop, 'Pair is covered').toBe(true);
     expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
     // After every ride control in its column (#692): it stands where the

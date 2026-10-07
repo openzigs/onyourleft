@@ -15,6 +15,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
 import { usePairingScan } from './usePairingScan';
+import { browserSecureWindow } from './secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -47,6 +48,7 @@ describe('usePairingScan', () => {
     const camera = scriptedCamera();
     let loads = 0;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       loadCodeReader: async () => {

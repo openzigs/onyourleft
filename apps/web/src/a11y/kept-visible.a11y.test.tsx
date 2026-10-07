@@ -103,6 +103,7 @@ import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
 import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 interface Kept {
   /** Checked on the walk over BOTH fixtures. */
@@ -684,6 +685,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
 
   it('Camera, agreed to: what is sent to the rider’s own computer stays out of any disclosure', async () => {
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
     });
