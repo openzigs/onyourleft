@@ -26,7 +26,7 @@
  * it and why it is acceptable. Adding one is a review decision with a diff.
  *
  * ⚠️ **It cannot run on a clean clone and must not pretend to.** CI does not
- * build Android at all ([`CLAUDE.md`](../../../../CLAUDE.md) §4c) and a clone
+ * build Android at all ([`docs/agents/ci.md`](../../../../docs/agents/ci.md) §4c) and a clone
  * has never run Gradle, so the artefact is simply absent — `app/build/` is
  * generated and git-ignored. `mergedManifests` returns an empty array there and
  * `mergedManifestAbsence` is the sentence the test prints before it skips. A

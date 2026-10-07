@@ -16,7 +16,8 @@
  *    make. `ASSET003` already pins each file's bytes; this pins what the row
  *    says about them.
  * 2. **The pictures are the shapes a launcher needs.** Read back from the
- *    committed PNGs: a square icon is opaque, a maskable one keeps the mark
+ *    committed pictures — PNG, and since #972 the full logo's lossless WebP,
+ *    read by `webp-testing.ts` so the logo's checks below still run in CI: a square icon is opaque, a maskable one keeps the mark
  *    inside the middle 80 % a browser may crop to, an Android foreground keeps
  *    it inside the 66 dp circle of its 108 dp layer, a round icon is a disc, and
  *    a wordmark or a logo is cut out — its corners transparent, not the
@@ -28,6 +29,12 @@
  *    fringe here); the light variant's white sticker has a visible edge on the
  *    white canvas; and no text the app ships carries the tagline the owner
  *    dropped on 2026-10-01.
+ * 5. **No picture carries rendering metadata — #1167.** A colour profile, a
+ *    gamma, a rendering intent or an EXIF block changes how a browser draws a
+ *    picture and changes none of the pixels the checks above read, so a PNG
+ *    may carry only the chunks Pillow writes for a picture with none (the list
+ *    `derive_brand.py` §`PNG_CHUNKS` holds `--check` to), and a WebP logo only
+ *    its one `VP8L` chunk.
  */
 
 import { createHash } from 'node:crypto';
@@ -40,7 +47,8 @@ import { describe, expect, it } from 'vitest';
 import { parseAssetManifest } from '../../src/credits/manifest';
 import { DARK_COLOUR_TOKENS } from '../../src/design/tokens';
 
-import { decodePng, type DecodedPng } from './png-testing';
+import { decodePng, pngChunkTypes, type DecodedPng } from './png-testing';
+import { decodeWebp, webpChunkTypes } from './webp-testing';
 
 interface BrandOutput {
   readonly path: string;
@@ -78,8 +86,11 @@ function entryFor(path: string) {
   return entry;
 }
 
+/** A committed output, decoded: the full logo is lossless WebP since #972, the rest PNG. */
 function picture(path: string): DecodedPng {
-  return decodePng(bytesOf(path));
+  if (path.endsWith('.webp')) return decodeWebp(bytesOf(path));
+  if (path.endsWith('.png')) return decodePng(bytesOf(path));
+  throw new Error(`${path} is neither a .png nor a .webp`);
 }
 
 function pixel(image: DecodedPng, x: number, y: number): readonly number[] {
@@ -363,5 +374,54 @@ describe('the full logo, off its green screen — #965', () => {
       readFileSync(join(REPOSITORY, path), 'utf8').toLowerCase().includes(tagline),
     );
     expect(carrying).toEqual([]);
+  });
+});
+
+describe('the brand pictures carry no rendering metadata — #1167', () => {
+  // `derive_brand.py` §`PNG_CHUNKS`, which `--check` holds the made and the
+  // committed PNGs to. Written out in both because CI runs no Python.
+  const PNG_CHUNKS = new Set(['IHDR', 'PLTE', 'tRNS', 'IDAT', 'IEND']);
+
+  it.each(table.outputs.filter((output) => output.path.endsWith('.png')))(
+    '$path carries only the chunks Pillow writes for a picture with no metadata',
+    (output) => {
+      const chunks = pngChunkTypes(bytesOf(output.path));
+      expect(chunks).toContain('IDAT');
+      expect(chunks.filter((chunk) => !PNG_CHUNKS.has(chunk))).toEqual([]);
+    },
+  );
+
+  it.each(table.outputs.filter((output) => output.path.endsWith('.webp')))(
+    '$path is one VP8L chunk, with no colour profile, EXIF or XMP',
+    (output) => {
+      expect(webpChunkTypes(bytesOf(output.path))).toEqual(['VP8L']);
+    },
+  );
+
+  // The controls: the same reads over pictures that DO carry metadata, so a
+  // reader that returned nothing would turn these red rather than pass above.
+  it.each(['iCCP', 'gAMA', 'sRGB', 'eXIf'])('would find a %s chunk put into a PNG', (kind) => {
+    const png = bytesOf('apps/web/src/brand/wordmark-light.png');
+    const afterHeader = 8 + 8 + 13 + 4;
+    const extra = new Uint8Array(12);
+    new DataView(extra.buffer).setUint32(0, 0);
+    extra.set(
+      [...kind].map((letter) => letter.charCodeAt(0)),
+      4,
+    );
+    const carrying = new Uint8Array([
+      ...png.subarray(0, afterHeader),
+      ...extra,
+      ...png.subarray(afterHeader),
+    ]);
+    expect(pngChunkTypes(carrying).filter((chunk) => !PNG_CHUNKS.has(chunk))).toEqual([kind]);
+  });
+
+  it('would find the EXIF chunk in a WebP that carries one', () => {
+    expect(webpChunkTypes(bytesOf('apps/web/tools/brand/fixtures/with-exif.webp'))).toEqual([
+      'VP8X',
+      'VP8L',
+      'EXIF',
+    ]);
   });
 });

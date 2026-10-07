@@ -155,7 +155,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         an edit makes stale, undo over whole drafts, the draft
                         kept across a reload, and the elevation profile. The
                         INTERFACE is in packages/domain; there is no engine
-                        adapter — CLAUDE.md section 4i says why
+                        adapter — docs/agents/route-planning.md section 4i says why
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
@@ -561,7 +561,7 @@ in one file:
   `tokens.ts` in both directions, which is what makes the token-level contrast check a statement
   about what the browser paints.
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
-  in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
+  in docs/agents/accessibility.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
 **Views load per navigation group since [#674](https://github.com/openzigs/onyourleft/issues/674).**
 Home, the shell, the route table and the not-found page are in the entry chunk; every other view is
@@ -708,7 +708,7 @@ expanded window — `theme.css` §`--oyl-list-detail-from`, 52.5rem, the one pla
 written — the list sits in a 22.5rem pane and the detail takes the rest; below it there is one pane.
 `shell/ListDetail.tsx` decides the panes by reading that property back and asking `matchMedia`, and
 writes `hidden` on the pane that is not shown rather than styling it away, because the audit loads no
-stylesheet (§4e of CLAUDE.md). A selection lives in the URL — `#/<list>/selected/<id>`, a route's
+stylesheet (§4e of docs/agents/accessibility.md). A selection lives in the URL — `#/<list>/selected/<id>`, a route's
 `selection` path, which `matchHash` matches to the LIST route with the id as its parameter — so the
 view stays mounted, and back, reload and a shared link land on the same item; `#/activities/<id>`
 is still a ride's own full page. An id the list did not read is read on its own (`getActivity`,
@@ -756,7 +756,7 @@ So the header now sticks only where it is cheap — `@media (min-width: 64rem) a
 whose worst admitted case is a 97 px header on a 640 px viewport — and `apps/web/browser/shell.html`
 measures it. The general rule that falls out is worth more than the fix: **`position`, `z-index`,
 `scroll-margin` and the size of persistent chrome are reviewed by measuring them in the pinned
-Chromium, never by reading the CSS.** CLAUDE.md §4f is the record.
+Chromium, never by reading the CSS.** docs/agents/browser-gate.md §4f is the record.
 
 **The unsupported-browser experience is a feature of this component, not an error path.**
 `src/support/bluetooth-support.ts` classifies the browser into six states —
@@ -774,7 +774,7 @@ then that screen said *"Not built yet"* while Home and the More tab sent a new r
 pairing buttons were on the Ride screen. `ride/SensorPairing.tsx` §`PairingPanel` is that block,
 moved rather than copied: it drives the one ride controller `main.tsx` builds — mounted above the
 router, so a device paired on Devices is the device Ride and Home show — through whichever
-transport §4h of CLAUDE.md chose. The Ride screen says what is connected, in words, and links to
+transport §4h of docs/agents/game.md chose. The Ride screen says what is connected, in words, and links to
 Devices. The controls come first and what the platform cannot do is beneath them in a closed
 `<details>`, with *"one user gesture per device"* kept outside it. *Forget* is
 `SensorTransport.forget`: `BluetoothDevice.forget()` in a browser that has it, which gives the
@@ -1121,11 +1121,11 @@ alternatives are there.
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Map rendering | **MapLibre GL JS 6.11.2** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
 | Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. ⚠️ **Since #534 every build draws it by default** — `apps/web/src/map/basemap.ts` §`PUBLISHED_BASEMAP_URL`, a committed constant because `.gitignore` refuses a committed `.env.production`; `VITE_BASEMAP_PMTILES_URL` overrides it and `none` turns the map off. ⚠️ **Since the owner's decision of 2026-09-25 a rider can turn the tiles off too**: Settings' *Ride map* switch, on by default and kept on the device (`apps/web/src/map/tiles-preference.ts`), which builds a style with no source at all, so the tile host is contacted by nothing while the ride's line and the OpenStreetMap credit still render. ⚠️ **A published archive object must never be deleted or renamed while any shipped build names it.** The URL is baked into every web bundle and every APK, dated object name included, and an installed APK is not updated when #53 publishes a newer build — so deleting `basemap-us-20260914.pmtiles` would take the map away from every old client, silently (one request, two console errors, no message: #535's review measured it). A newer build is published beside it under a new name, and the old one is removed only once no build in use can name it. A reviewer who remembers "it is not in `.env.example`" is reading the old row: the template now documents it as the default. Coverage is the contiguous US at z0–15; outside it the map is the ride's line on a plain background and no tile is requested (`map.browser.spec.ts` §"a ride outside the archive’s coverage"). Its host is named in `docs/privacy-policy.md` and the Data Safety declaration, and `privacy/no-network.test.ts` fails when it moves without them. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data. ⚠️ **Since #578 the map carries place and road names**, set in Roboto v2.138 (Apache-2.0, the last release before Roboto moved to OFL) from signed-distance glyph ranges `apps/web/tools/glyphs/` generates from the committed font into `apps/web/public/glyphs/Roboto-Regular/`, with the font's own licence beside them. The style names them at the relative `./glyphs/{fontstack}/{range}.pbf`, so no request leaves the app's origin for a label and the privacy policy is unchanged; they are precached (586 KiB). ⚠️ MapLibre (6.10, and 6.11 since #756) draws a glyph from the device's own font whenever a range cannot be fetched, so a missing range degrades the typeface rather than blanking the label — `map.browser.spec.ts` §"place names" measures that and asserts on the requests rather than the ink |
-| Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; CLAUDE.md §4g "Admitted is not the same as noticed" is the rest |
+| Third-party licence notices | **Generated and committed, then gated** ([#664](https://github.com/openzigs/onyourleft/issues/664)). `scripts/check-third-party-notices.mjs` reads the union of every workspace package's `--prod` closure through the same `discoverPackages`/`readClosure` `check:licences` uses, copies each package's own `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` text verbatim, adds the APK's native libraries from the reviewed `apps/mobile/native-closure.json` (held to Gradle by `apps/mobile/src/android/native-closure.test.ts` where Gradle has run) and writes `apps/web/public/licences/third-party.txt` — served from `dist`, precached, in the APK — and its contents to `apps/web/src/credits/third-party-contents.txt`, which the Credits screen inlines. `check:notices` regenerates both after its own frozen install and fails on any difference; docs/agents/licence-gates.md §4g "Admitted is not the same as noticed" is the rest |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
 Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.3.0. Everything
-else in the table is a decision that no `package.json` has acted on yet. `CLAUDE.md` section 4b
+else in the table is a decision that no `package.json` has acted on yet. `docs/agents/project-state.md` section 4b
 keeps that list; the commands are in section 4a.
 
 ### The map dependencies, recorded because #63's definition of done asks for it
@@ -1446,7 +1446,7 @@ once its Local Network Access permission is granted, and the transport annotates
 plain-`http:` LAN address at all has not been measured. `docs/analysis-on-your-own-computer.md` says
 so to the rider.
 
-⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
+⚠️ **The interface and both implementations are in `apps/web`, and that is docs/agents/game.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture
 pipeline under `apps/mobile/src` would typecheck, test green and never be copied into the APK — and
 `apps/web` already depends on `@onyourleft/mobile`, so the reverse dependency would be a workspace
@@ -1540,7 +1540,7 @@ socket through the Hibernation API, the tick as a storage alarm that is not re-s
 running, and a lobby that survives eviction by replaying a log of the core's own calls. Whether the
 managed platform hosts rooms only or the whole instance is left to #790 (ADR 0037 D-2), so nothing
 routes HTTP to it and there is no production Worker entry. It is **deployed nowhere**; it runs under
-a local `workerd` in `test:workerd` (`CLAUDE.md` §4a). `src/room/conformance.test.ts` drives the
+a local `workerd` in `test:workerd` (`docs/agents/commands.md` §4a). `src/room/conformance.test.ts` drives the
 core directly and every adapter with one script and requires byte-identical text on every socket —
 #780's Node adapter, over real `ws` sockets, is in that file since #780.
 
@@ -1603,7 +1603,7 @@ nothing but Node, this repository's own packages, `kysely` (since #769, in `src/
 `ws` (since #780, in `src/room/node/`) — both ADR 0037 D-9's rows — which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
-of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
+of the app's notices (`docs/agents/licence-gates.md` §4g), because a rider's device carries none of it.
 
 **The source offer is an endpoint** (ADR 0036 D-6). `GET /source` answers with this repository's tree
 at the build's commit, or with the URL an operator who modified their instance configured. The
@@ -1812,7 +1812,7 @@ or `\`; and `RoomSession` refuses such an id for good before a ticket is asked f
 review the ticket's path was built from the id unchecked and could steer the rider's bearer-token
 POST. ⚠️ **No ticket without a declared weight**: a rider who has set none is told to, and is not raced
 at a default (ADR 0028 D-1). ⚠️ `check:wiring` watches this directory since that review, for exports
-and port methods only (CLAUDE.md §4j).
+and port methods only (docs/agents/wiring-gate.md §4j).
 
 ### The realistic world: what is built, and how a rider chooses it
 
@@ -2097,6 +2097,7 @@ share one.
 | [0042](adr/0042-tailwind-and-radix-over-the-tokens.md) | **Tailwind CSS v4 and Radix Primitives, over the tokens**: Tailwind's theme cleared and rebuilt from `tokens.ts` as `var(--oyl-…)`, every utility `tw:`-prefixed, unlayered and after `theme.css`, no preflight; a gate that compiles what the source writes and fails anything that is not a token; Radix one primitive at a time for behaviour only, never in the entry chunk; the audit reads an open `aria-modal` dialog as the page | #950 |
 | [0043](adr/0043-ofl-display-typeface.md) | **The SIL Open Font License 1.1, for a bundled display face — and the face is Barlow**: `ASSET004` admits `OFL-1.1` for a font file under `apps/` only (not `packages/`, not a dependency, not `OFL-1.1-RFN`); the copyright notice and the licence travel in each WOFF2's `name` table, on Credits and in the third-party notices' Part 5; the face is committed as WOFF2 subsets made by a pinned fontTools (`fonts:subset`) and served from the app's own origin, never a CDN. Barlow at 700 and 800, chosen over Barlow Condensed, Saira, Archivo, Exo 2 and Rajdhani on figures, `tnum` and size (#991) |
 | [0044](adr/0044-side-camera-live-view-and-snapshot.md) | **Proposed. A live view and a pressed snapshot on the side-camera path**, superseding ADR 0033 D-6 on the owner's rulings of 2026-10-03: the picture with the pose outline, during setup and during the ride (remembering the rider's last choice on the device), clear of every ride-time control, standing notice and the leaning rider; one still per press of *Save snapshot*, tied to its ride (a departure from ADR 0033 D-3's join rule for snapshots only), in `cameraFrames` with its outline as numbers, owner-scoped, exported, erased and deleted with its ride; a snapshot may be taken during setup and joins the next ride saved, or is discarded; the section on a ride's page is closed by default; never on a list, a thumbnail or a notification, and in the Android app the window is `FLAG_SECURE` while a picture is shown. The owner answered the draft's seven questions on 2026-10-04 and none remain. The transport (still frames or a video track) is left to spike 0021, with each outcome's consequences decided | #1058 |
+| [0045](adr/0045-fit-from-one-side-camera.md) | **Fit from one side camera**: four rough-estimate sagittal angles (knee at bottom dead centre, hip at top dead centre, elbow, and trunk against the phone's own reported gravity, blocked until an accepted ADR adds the tilt message to ADR 0033 D-3's list), scale-free and length-free by checkable rules P1–P8 from spike 0020, shown only in the Fit check section of a saved ride's page with R8's caveat in each sentence; ADR 0030 D-3 superseded for those four on that surface, D-5 for its product boundary (no verdict; no equipment in anything the app writes, and since the owner's ruling of 2026-10-04 equipment and position advice allowed in a model's write-up only, which puts '571's element (g) in play there and leaves the claims outside on (d), (e), (f) and (h)), D-4 and D-6 kept; `no-absolute-angles` narrowed to one wording module by exact path, never deleted; not offered until a sufficient picture rate is measured (#1112 measured 0.3 a second); the FDA condition-6 risk accepted by the owner, framed. **Approved by the owner on 2026-10-04** | #1059 |
 | [0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) | **AI analysis runs only on the rider's instance, as a tool-calling agent** — **Proposed, awaiting the owner's approval**. Carries the owner's rulings of 2026-10-04 verbatim: a write-up runs on the instance and nowhere else (superseding ADR 0036 D-3(a) for analysis and D-3(d)'s endpoint clause), the model chooses read-only, one-athlete tools inside step, time and token budgets (superseding ADR 0035 D-7 on the instance), results stream over SSE and are screened on the instance and again on the device, the core moves to an Apache-2.0 `@onyourleft/analysis` with the owner's consent as sole copyright holder, the Vercel AI SDK on the instance only behind a guard that makes any gateway call throw, a shared or a bring-your-own key, other riders' analysis off by default, masking data synced and masking run on the instance, and no phone models, ever. ⚠️ It **appends no amendment**: the seven it owes are listed in it, for the day it is approved | #1093 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
@@ -2178,10 +2179,10 @@ still a proposal.
 | 0042 | #950 — Tailwind CSS v4 and Radix Primitives over the tokens | [Written](adr/0042-tailwind-and-radix-over-the-tokens.md), 2026-09-30. ADR 0005 gained an appended amendment in the same pull request. |
 | 0043 | #991 — the SIL Open Font License for a bundled display face, and the face | [Written](adr/0043-ofl-display-typeface.md), 2026-10-02. Phase 2 of #935, on the owner's ruling to record an ADR. |
 | 0044 | #1058 — a live view and a pressed snapshot on the side-camera path, superseding ADR 0033 D-6 | [Written](adr/0044-side-camera-live-view-and-snapshot.md), 2026-10-04, **Proposed** until the owner accepts it. Reserved by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055) with 0045. ADR 0033 gained an appended amendment in the same pull request. |
-| 0045 | #1059 — fit from one side camera, superseding ADR 0030 D-3 and D-5 inside the patent and wellness limits | **Reserved**, not written. Reserved by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055) on 2026-10-03, and recorded here by #1058, the first of the two to land. |
+| 0045 | #1059 — fit from one side camera, superseding ADR 0030 D-3 and D-5 inside the patent and wellness limits | [Written](adr/0045-fit-from-one-side-camera.md), 2026-10-04, **approved by the owner the same day** (*"Approve"*). Reserved by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055) with 0044. ADR 0030 gained an appended amendment in the same pull request. |
 | 0046 | #1093 — AI analysis runs only on the rider's instance, as a tool-calling agent | [Written](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md), 2026-10-04, **Proposed**: it does not merge until the owner approves it on #1093. It took 0046 rather than 0044 because 0044 and 0045 were already claimed by #1058 and #1059 (the epic #1055). |
 
-**The next free number is 0047.** 0046 was taken by [#1093](https://github.com/openzigs/onyourleft/issues/1093) on 2026-10-04, **Proposed** until the owner approves it, and ⚠️ this sentence said *"the next free number is 0046"* until then. 0044 was taken by [#1058](https://github.com/openzigs/onyourleft/issues/1058) on 2026-10-04 and **0045 is reserved for [#1059](https://github.com/openzigs/onyourleft/issues/1059)**, both by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055), and ⚠️ this sentence said *"the next free number is 0044"* until then. 0043 was taken by [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02, and ⚠️ this sentence said *"the next free number is 0043"* until then. 0042 was taken by [#950](https://github.com/openzigs/onyourleft/issues/950) on 2026-09-30, and ⚠️ this sentence said *"the next free number is 0042"* until then. 0041 was taken by [#936](https://github.com/openzigs/onyourleft/issues/936) on 2026-09-30, and ⚠️ this sentence said *"the next free number is 0041"* until then. 0040 was taken by [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29, and ⚠️ this sentence said *"the next free number is 0040"* until then. 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 was reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and is written since 2026-09-29 ([ADR 0034](adr/0034-lucide-icons.md), bundle [#857](https://github.com/openzigs/onyourleft/issues/857)) — a reviewer who remembers this sentence calling it *"not written"* is reading the old file. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
+**The next free number is 0047.** 0046 was taken by [#1093](https://github.com/openzigs/onyourleft/issues/1093) on 2026-10-04 and accepted by the owner on 2026-10-07, and ⚠️ this sentence said *"the next free number is 0046"* until then. 0044 was taken by [#1058](https://github.com/openzigs/onyourleft/issues/1058) and 0045 by [#1059](https://github.com/openzigs/onyourleft/issues/1059), both on 2026-10-04 and both reserved by the epic [#1055](https://github.com/openzigs/onyourleft/issues/1055) on 2026-10-03, and ⚠️ this sentence said *"the next free number is 0044"* until then. 0043 was taken by [#991](https://github.com/openzigs/onyourleft/issues/991) on 2026-10-02, and ⚠️ this sentence said *"the next free number is 0043"* until then. 0042 was taken by [#950](https://github.com/openzigs/onyourleft/issues/950) on 2026-09-30, and ⚠️ this sentence said *"the next free number is 0042"* until then. 0041 was taken by [#936](https://github.com/openzigs/onyourleft/issues/936) on 2026-09-30, and ⚠️ this sentence said *"the next free number is 0041"* until then. 0040 was taken by [#834](https://github.com/openzigs/onyourleft/issues/834) on 2026-09-29, and ⚠️ this sentence said *"the next free number is 0040"* until then. 0036 to 0039 were taken together by [#825](https://github.com/openzigs/onyourleft/issues/825) on 2026-09-29, one pull request for four decisions, and ⚠️ this sentence said *"the next free number is 0036"* until then. 0035 was taken by [#796](https://github.com/openzigs/onyourleft/issues/796) on 2026-09-28, and **0034 was reserved for [#673](https://github.com/openzigs/onyourleft/issues/673)** and is written since 2026-09-29 ([ADR 0034](adr/0034-lucide-icons.md), bundle [#857](https://github.com/openzigs/onyourleft/issues/857)) — a reviewer who remembers this sentence calling it *"not written"* is reading the old file. ⚠️ This sentence said *"the next free number is 0034"* until then. 0033 was taken by [#527](https://github.com/openzigs/onyourleft/issues/527) on 2026-09-25. Every number from 0001 to 0028 is written — **0021 included, since
 2026-09-22** — 0029, 0030 and 0031 were taken by the camera-decision work ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381))
 in a pull request opened the same day as #248's and #330's, and 0032 was taken by #248. ⚠️ **This sentence said *"the next free
 number is 0029"* and that 0021 was a live reservation, and both stopped being true on 2026-09-22**;

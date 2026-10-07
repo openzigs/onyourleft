@@ -174,6 +174,10 @@ export const ACTIVITIES_KEPT_VISIBLE: readonly string[] = [
   'clearing this browser’s site data deletes them',
 ];
 
+/** Said inside the confirmation when the store refused the delete — #959. */
+export const DELETE_FAILED_TEXT =
+  'The ride could not be deleted, and it is still on this device. Try again, or keep the ride.';
+
 export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.Element {
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
   const [direction, setDirection] = useState<SortDirection>('descending');
@@ -449,11 +453,17 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         title={`Delete “${confirming?.name ?? ''}”?`}
         confirmLabel="Delete the ride"
         cancelLabel="Keep the ride"
-        onConfirm={() => {
-          if (confirming !== undefined) {
-            deletedOne.current = true;
-            void remove(confirming.id);
+        failureText={DELETE_FAILED_TEXT}
+        onConfirm={async () => {
+          if (confirming === undefined) {
+            return;
           }
+          // #959: the dialog stays open, its answers busy, until the delete
+          // settles. Only a delete that WORKED closes it and moves focus off
+          // the row; one that failed leaves the dialog open saying so, with
+          // the ride still in the list behind it.
+          await remove(confirming.id);
+          deletedOne.current = true;
         }}
         onClosed={() => {
           // The Delete button that opened it goes with its ride, so focus

@@ -7,7 +7,7 @@
  * ⚠️ **The static-import assertion at the bottom is the half that matters.**
  * The wording is a nicety; a browser downloading Capacitor is a regression
  * every visitor pays for. `main.tsx` reaches `@onyourleft/mobile` only through
- * an `import()` behind `isNativeShell`, and CLAUDE.md §4h records how that was
+ * an `import()` behind `isNativeShell`, and docs/agents/game.md §4h records how that was
  * measured (`grep -c BleClient` over the entry chunk returns 0) — a hand
  * measurement, which is exactly the kind that stops being run. This is the
  * durable half of it: no module the browser build renders may name

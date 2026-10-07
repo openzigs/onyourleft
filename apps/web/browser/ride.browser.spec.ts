@@ -52,6 +52,22 @@
  * fold again, which is #419's own finding. `ride-harness.tsx` says why React
  * does not put the class back.
  *
+ * ## Both ways: with anchor positioning and without it — #1120
+ *
+ * Three rules on a phone draw a thing somewhere other than where the document
+ * puts it — #576's side-camera row on its side, #1111's moving time below
+ * 802 px on its side and upright — and each does it by CSS anchor positioning,
+ * which is Android System WebView / Chrome 125 or later. An older WebView takes
+ * the `@supports not (anchor-name: …)` fallbacks instead. So every case below
+ * that holds a floor on the stage at an overlay viewport holds it TWICE, on
+ * the same load: as the page is, and as an engine without anchor positioning
+ * lays it out (§`withoutAnchors`, `ride-harness.tsx` §`withoutAnchors` — the
+ * anchor blocks taken out through the CSSOM, the fallbacks put in force, and
+ * the stylesheet put back, in one synchronous call). A failure says which
+ * (`test.step`). ⚠️ The instrument cannot pass over a page where nothing was
+ * taken out (§"the instrument"), and the controls take the fallbacks out as
+ * well — `main` before #1120 — and require the floors to FAIL.
+ *
  * ⚠️ **Read `ride-harness.tsx`'s header before reading a number here**, and in
  * particular what the page does not prove.
  */
@@ -67,7 +83,7 @@ import { riderFrameBox } from '../src/game/camera';
 import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
 import { workoutRescueText } from '../src/workout/rescue-text';
 
-import type { Box, StageItem, StageMeasurement } from './ride-harness';
+import type { AnchorFallback, Box, StageItem, StageMeasurement } from './ride-harness';
 
 /**
  * How far past an edge a box may measure and still count as inside it.
@@ -294,6 +310,100 @@ function named(items: readonly StageItem[], name: string): StageItem {
   return found;
 }
 
+/**
+ * #1120 — how many `@supports (anchor-name: …)` blocks `theme.css` has, and
+ * how many `@supports not (anchor-name: …)` fallbacks. One each for #576's
+ * side-camera row on a phone on its side, #1111's moving time below 802 px on
+ * its side, and #1111's moving time upright. A block added or taken away
+ * changes these, and the case that reads them says which.
+ */
+const ANCHOR_BLOCKS = 3;
+const ANCHOR_FALLBACK_BLOCKS = 3;
+
+/**
+ * #1120 — the stage measured as an engine with NO anchor positioning lays it
+ * out: Android System WebView older than Chrome 125. `ride-harness.tsx`
+ * §`withoutAnchors` takes every `@supports (anchor-name: …)` block out of the
+ * live stylesheet, puts every `@supports not (anchor-name: …)` block in force
+ * (or, for the control, takes those out too — `main` before #1120), measures,
+ * and puts the stylesheet back, in one synchronous call on the page as it is:
+ * no load of its own, and a shared page is left as it was.
+ *
+ * ⚠️ **It cannot pass over a page where nothing was taken out.** Every call is
+ * required to have taken out every anchor block, put every fallback in force
+ * (or taken them out), left NOTHING on the stage with an `anchor-name` or a
+ * `position-anchor` as the engine computes them, and put every rule back
+ * exactly. §"the instrument" also holds that the same count was MORE than
+ * zero, before, wherever the layout uses anchors at all.
+ */
+async function withoutAnchors(
+  page: Page,
+  fallback: AnchorFallback = 'shipped',
+): Promise<StageMeasurement & { readonly anchoredBefore: number }> {
+  const found = await page.evaluate((which) => window.__oylRide?.withoutAnchors(which), fallback);
+  if (found === undefined) {
+    throw new Error('the ride harness published no withoutAnchors');
+  }
+  expect(found.removed, 'every @supports (anchor-name: …) block taken out').toBe(ANCHOR_BLOCKS);
+  expect(found.forced, 'every @supports not (anchor-name: …) block put in force').toBe(
+    fallback === 'shipped' ? ANCHOR_FALLBACK_BLOCKS : 0,
+  );
+  expect(found.dropped, 'the fallbacks taken out too, for the control').toBe(
+    fallback === 'shipped' ? 0 : ANCHOR_FALLBACK_BLOCKS,
+  );
+  expect(found.anchoredAfter, 'nothing on the stage laid out by anchor positioning').toBe(0);
+  expect(found.restored, 'the stylesheet put back exactly').toBe(true);
+  return { ...found.measurement, anchoredBefore: found.anchoredBefore };
+}
+
+/**
+ * Whether the layout at this viewport uses anchor positioning at all
+ * (`theme.css`): the short corners layout — 46 rem wide or more, 22.5 to 30 rem
+ * tall — and the column layout, under 46 rem wide and 47 rem tall or more.
+ */
+function usesAnchorPositioning(viewport: Viewport): boolean {
+  const short = viewport.width >= 736 && viewport.height >= 360 && viewport.height <= 480;
+  const column = viewport.width >= 360 && viewport.width < 736 && viewport.height >= 752;
+  return short || column;
+}
+
+/**
+ * #1120 — where the layout `main` gave an engine without anchor positioning
+ * put a panel over the leaning rider on the widest ride: the moving time a
+ * third secondary row (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
+ * SIDE" and §"THE MOVING TIME ON AN UPRIGHT PHONE"). Measured on this
+ * repository's CI fonts. At 360×800, 736×480 and 844×390 the widest ride had
+ * the room, so this cannot fail there and is not run there; what failed at
+ * 360×800 was a standing notice beside it, which §"a ride with a standing
+ * notice" holds both ways.
+ */
+const MAIN_FALLBACK_OVER_THE_RIDER = new Set(['736×360', '390×844', '360×752']);
+
+/** The two ways a stage is laid out (#1120), each with the words a failure carries. */
+const ANCHORED = 'with anchor positioning';
+const UNANCHORED = 'without anchor positioning (#1120)';
+
+/** One measurement of the page as it is, and one as an engine without anchors lays it out. */
+async function bothWays(page: Page): Promise<(readonly [string, StageMeasurement])[]> {
+  return [
+    [ANCHORED, await measure(page)],
+    [UNANCHORED, await withoutAnchors(page)],
+  ];
+}
+
+/**
+ * #1124: the least room `9:59:59` may have in its field, in CSS pixels — at
+ * every overlay viewport, both ways (with anchor positioning and without).
+ * Until #1124 the field was a fixed track or a fixed 6 rem and the time was
+ * measured into what was left: 1.0 px at 844×390 and both landscape tablets
+ * on the CI runner's DejaVu Sans, which a font change would have turned red
+ * with nothing wrong in the product. The field is sized from its value's
+ * own digits now (`theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124"), and
+ * the spare width is published at every viewport and held to this, as the
+ * fold checks hold 50 px.
+ */
+const MOVING_TIME_SPARE_PIXELS = 4;
+
 for (const viewport of OVERLAY_VIEWPORTS) {
   test.describe(viewport.name, () => {
     /**
@@ -312,11 +422,20 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
-      // A pacer, a ghost AND a wind — six, where an ordinary ride has four.
-      expect(seen.secondary).toEqual(['Speed', 'Gradient', 'To go', 'Pacer', 'Your best', 'Wind']);
+      // A pacer, a ghost AND a wind — seven, where an ordinary ride has five;
+      // and since #1111 the moving time, beside the distance to go.
+      expect(seen.secondary).toEqual([
+        'Speed',
+        'Gradient',
+        'To go',
+        'Moving',
+        'Pacer',
+        'Your best',
+        'Wind',
+      ]);
       expect(seen.panels).toHaveLength(4);
-      // Nine readings, the strip, the plan view, the trainer line, two controls.
-      expect(seen.items).toHaveLength(14);
+      // Ten readings, the strip, the plan view, the trainer line, two controls.
+      expect(seen.items).toHaveLength(15);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -352,13 +471,14 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      */
     test('every reading and every control is on screen with no scrolling', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
-      const seen = await measure(page);
-
-      expect(seen.scrollY).toBe(0);
-      expect(seen.stageScrollTop).toBe(0);
-      expect(seen.pageOverflow).toBeLessThanOrEqual(0);
-      const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
-      expect(lost.map(describeItem)).toEqual([]);
+      // #1120: and as an engine without anchor positioning lays it out.
+      for (const [how, seen] of await bothWays(page)) {
+        expect(seen.scrollY, how).toBe(0);
+        expect(seen.stageScrollTop, how).toBe(0);
+        expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
+        const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
+        expect(lost.map(describeItem), how).toEqual([]);
+      }
     });
 
     /**
@@ -368,20 +488,21 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      */
     test('every panel is whole, and no panel is laid over another', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
-      const seen = await measure(page);
-
-      expect(seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
-        [],
-      );
-      const collisions: string[] = [];
-      seen.panels.forEach((a, index) => {
-        for (const b of seen.panels.slice(index + 1)) {
-          if (overlap(a.box, b.box)) {
-            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+      for (const [how, seen] of await bothWays(page)) {
+        expect(
+          seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+          how,
+        ).toEqual([]);
+        const collisions: string[] = [];
+        seen.panels.forEach((a, index) => {
+          for (const b of seen.panels.slice(index + 1)) {
+            if (overlap(a.box, b.box)) {
+              collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
           }
-        }
-      });
-      expect(collisions).toEqual([]);
+        });
+        expect(collisions, how).toEqual([]);
+      }
     });
 
     /**
@@ -396,10 +517,12 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      */
     test('no panel is laid over the rider', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
-      const seen = await measure(page);
-
       const box = riderBox(viewport);
-      expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem)).toEqual([]);
+      for (const [how, seen] of await bothWays(page)) {
+        expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem), how).toEqual(
+          [],
+        );
+      }
     });
 
     /**
@@ -412,27 +535,142 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       browser,
     }, testInfo) => {
       const page = await sharedRide(browser, viewport);
-      const seen = await measure(page);
-
       const upright = riderBox(viewport, 0);
       const leaning = riderBox(viewport);
       expect(leaning.width).toBeGreaterThan(upright.width * 2);
-      // How much room the bottom row leaves, either side: the panels that share
-      // the box's rows, and their horizontal clearance from it.
-      const nearest = Math.min(
-        ...seen.panels
-          .filter((each) => each.box.bottom > leaning.top && each.box.top < leaning.bottom)
-          .map((each) => Math.max(leaning.left - each.box.right, each.box.left - leaning.right)),
-      );
-      const clearance = Number.isFinite(nearest)
-        ? `nearest panel edge on its rows ${nearest.toFixed(0)} px clear`
-        : 'no panel on its rows';
-      const measured = `leaning box ${leaning.left.toFixed(0)}–${leaning.right.toFixed(0)} px (upright ${upright.left.toFixed(0)}–${upright.right.toFixed(0)}); ${clearance}`;
-      testInfo.annotations.push({ type: '#512', description: measured });
-      console.log(`#512 — ${viewport.name} — ${measured}`);
-      expect(seen.panels.filter((each) => overlap(each.box, upright)).map(describeItem)).toEqual(
-        [],
-      );
+      for (const [how, seen] of await bothWays(page)) {
+        // How much room the bottom row leaves, either side: the panels that
+        // share the box's rows, and their horizontal clearance from it.
+        const nearest = Math.min(
+          ...seen.panels
+            .filter((each) => each.box.bottom > leaning.top && each.box.top < leaning.bottom)
+            .map((each) => Math.max(leaning.left - each.box.right, each.box.left - leaning.right)),
+        );
+        const clearance = Number.isFinite(nearest)
+          ? `nearest panel edge on its rows ${nearest.toFixed(0)} px clear`
+          : 'no panel on its rows';
+        const measured = `leaning box ${leaning.left.toFixed(0)}–${leaning.right.toFixed(0)} px (upright ${upright.left.toFixed(0)}–${upright.right.toFixed(0)}); ${clearance}`;
+        testInfo.annotations.push({ type: '#512', description: `${how}: ${measured}` });
+        console.log(`#512 — ${viewport.name} — ${how} — ${measured}`);
+        expect(
+          seen.panels.filter((each) => overlap(each.box, upright)).map(describeItem),
+          how,
+        ).toEqual([]);
+      }
+    });
+
+    /**
+     * #1111: the moving time, at its widest (`ride-harness.tsx`
+     * §`MOVING_SECONDS`, 9:59:59), on the stage and clear of the LEANING
+     * rider and of every ride control — its margins published. The cases
+     * above already hold it inside the viewport, uncovered, with no panel
+     * over another or over the rider; this one names it, so the numbers a
+     * reviewer asks for are in the run.
+     */
+    test('the moving time is on the stage, clear of the rider and of every control — #1111', async ({
+      browser,
+    }, testInfo) => {
+      const page = await sharedRide(browser, viewport);
+      // And `10:00:00` at the word size (`fields.ts` §`movingTimeReading`),
+      // set on the live element for one synchronous read and put back: no
+      // fixture rides for ten hours. With anchor positioning only: the field
+      // is the same width without it (6 rem upright, the primary panel's
+      // inner width on its side), which the 9:59:59 fit below reads both ways.
+      const atTen = await page.evaluate(() => {
+        const row = [...document.querySelectorAll<HTMLElement>('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Moving',
+        );
+        const value = row?.querySelector<HTMLElement>('dd');
+        const text = value?.firstChild;
+        if (row === undefined || value === undefined || value === null || !(text instanceof Text)) {
+          return undefined;
+        }
+        const before = text.data;
+        text.data = '10:00:00';
+        value.classList.add('oyl-hud__value--word');
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const measured = {
+          width: range.getBoundingClientRect().width,
+          lines: range.getClientRects().length,
+          field: row.getBoundingClientRect().width,
+        };
+        text.data = before;
+        value.classList.remove('oyl-hud__value--word');
+        return measured;
+      });
+      const ten = atTen ?? { width: Infinity, lines: 0, field: 0 };
+      const leaning = riderBox(viewport);
+
+      for (const [how, seen] of await bothWays(page)) {
+        const shown = seen.moving;
+        expect(shown.text, how).toBe('9:59:59');
+        // #1111's review: one line, and inside its own field, read off this
+        // engine's fonts. A time broken at a colon reads as two numbers, and on
+        // the CI runner's fonts `9:59:59` did break in an 89 px track (run
+        // 37229623180) — `theme.css` §"THE MOVING TIME ON A NARROW PHONE ON ITS
+        // SIDE" draws it across the primary panel there now. It is never
+        // broken, so a time too wide would spill rather than wrap; the width is
+        // what catches that.
+        expect(shown.lines, how).toBe(1);
+        expect(shown.width, how).toBeLessThanOrEqual(shown.field + SUBPIXEL_TOLERANCE);
+        // #1124: and with room to spare, published below.
+        const spare = shown.field - shown.width;
+        expect(spare, `${how}: ${spare.toFixed(1)} px to spare`).toBeGreaterThanOrEqual(
+          MOVING_TIME_SPARE_PIXELS,
+        );
+        expect(
+          shown.secondaryOverflow,
+          `${how}: the secondary tier past its panel`,
+        ).toBeLessThanOrEqual(0);
+        let fits =
+          `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+          `(${(shown.field - shown.width).toFixed(1)} px to spare)`;
+        if (how === ANCHORED) {
+          fits +=
+            `; 10:00:00 at the word size ${ten.width.toFixed(1)} px in ${ten.field.toFixed(1)} px ` +
+            `(${(ten.field - ten.width).toFixed(1)} px to spare)`;
+          expect(ten.lines, fits).toBe(1);
+          expect(ten.width, fits).toBeLessThanOrEqual(ten.field + SUBPIXEL_TOLERANCE);
+        }
+        console.log(`#1111 fit — ${viewport.name} — ${how} — ${fits}`);
+
+        const field = named(seen.items, 'reading: Moving');
+        expect(inside(field.box, viewport), how).toBe(true);
+        expect(field.onTop, how).toBe(true);
+        expect(overlap(field.box, leaning), how).toBe(false);
+        const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+        expect(controls.length).toBeGreaterThanOrEqual(2);
+        expect(
+          controls.filter((each) => overlap(each.box, field.box)).map(describeItem),
+          how,
+        ).toEqual([]);
+        // Nor over any other reading: below 802 px on its side it is drawn
+        // INSIDE the primary panel, under the three numbers, which pads itself
+        // to make the room (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+        // ITS SIDE") — so the panel checks cannot see it land on them.
+        expect(
+          seen.items
+            .filter((each) => each !== field && overlap(each.box, field.box))
+            .map(describeItem),
+          how,
+        ).toEqual([]);
+
+        // Edge-to-edge clearance between two boxes: the larger of the two axis
+        // gaps, which is positive exactly when they do not overlap.
+        const clear = (a: Box, b: Box): number =>
+          Math.max(a.left - b.right, b.left - a.right, a.top - b.bottom, b.top - a.bottom);
+        const toRider = clear(field.box, leaning);
+        const toControl = Math.min(...controls.map((each) => clear(each.box, field.box)));
+        const toBottom = viewport.height - field.box.bottom;
+        const measured =
+          `moving time ${describeItem(field)}; ${toRider.toFixed(1)} px clear of the leaning ` +
+          `rider, ${toControl.toFixed(1)} px of the nearest control, ` +
+          `${toBottom.toFixed(1)} px above the bottom of the stage`;
+        testInfo.annotations.push({ type: '#1111', description: `${how}: ${measured}` });
+        console.log(`#1111 — ${viewport.name} — ${how} — ${measured}`);
+        expect(toRider, how).toBeGreaterThan(0);
+      }
     });
 
     test('a primary reading is visibly larger than a secondary one', async ({ browser }) => {
@@ -451,18 +689,65 @@ for (const viewport of OVERLAY_VIEWPORTS) {
      */
     test('the trainer line is above the ride controls, in their panel', async ({ browser }) => {
       const page = await sharedRide(browser, viewport);
-      const seen = await measure(page);
-
-      const line = named(seen.items, 'the trainer line').box;
-      const pause = named(seen.items, 'control: Pause').box;
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
-      expect(actions).toBeDefined();
-      expect(line.bottom).toBeLessThanOrEqual(pause.top);
-      for (const box of [line, pause]) {
-        expect(box.top).toBeGreaterThanOrEqual(actions?.top ?? Number.POSITIVE_INFINITY);
-        expect(box.bottom).toBeLessThanOrEqual(actions?.bottom ?? 0);
+      for (const [how, seen] of await bothWays(page)) {
+        const line = named(seen.items, 'the trainer line').box;
+        const pause = named(seen.items, 'control: Pause').box;
+        const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
+        expect(actions, how).toBeDefined();
+        expect(line.bottom, how).toBeLessThanOrEqual(pause.top);
+        for (const box of [line, pause]) {
+          expect(box.top, how).toBeGreaterThanOrEqual(actions?.top ?? Number.POSITIVE_INFINITY);
+          expect(box.bottom, how).toBeLessThanOrEqual(actions?.bottom ?? 0);
+        }
       }
     });
+
+    /**
+     * #1120 — the instrument every "without anchor positioning" measurement in
+     * this file is taken with. Where the layout uses anchors at all — a phone
+     * on its side in the short corners layout, and the column layout — the
+     * stage had something laid out by them BEFORE the blocks were taken out,
+     * and nothing after; where it does not (a tablet, 800×1280), nothing
+     * before either. So "it holds without anchors" is never a statement about
+     * a page that did not use them, and never about a page they were left on.
+     */
+    test('the instrument — anchors in use exactly where the layout uses them, and none once taken out — #1120', async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport);
+      const bare = await withoutAnchors(page);
+      const usesAnchors = usesAnchorPositioning(viewport);
+      console.log(
+        `#1120 instrument — ${viewport.name} — ${String(bare.anchoredBefore)} element(s) laid ` +
+          `out by anchor positioning, 0 once the blocks are out`,
+      );
+      expect(bare.anchoredBefore > 0).toBe(usesAnchors);
+    });
+
+    /**
+     * #1120's control. The layout `main` gave an engine without anchor
+     * positioning — the anchor blocks gone and no fallback in their place —
+     * must put a panel over the leaning rider here, which is what #1111's
+     * review and #1120 measured (13 cases at 360×752 and 360×800; 16 at
+     * 736×360): the moving time a third secondary row. Without this, every
+     * "without anchor positioning" pass above is as true of a fallback that
+     * was never needed, or never applied.
+     */
+    if (MAIN_FALLBACK_OVER_THE_RIDER.has(`${String(viewport.width)}×${String(viewport.height)}`)) {
+      test('the control — without anchors and without the fallback, a panel is over the rider — #1120', async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport);
+        const leaning = riderBox(viewport);
+        const before = await withoutAnchors(page, 'none');
+        const over = before.panels.filter((each) => overlap(each.box, leaning)).map(describeItem);
+        console.log(
+          `#1120 control — ${viewport.name} — as main laid it out without anchors: ` +
+            `${over.length === 0 ? 'nothing over the rider' : over.join('; ')}`,
+        );
+        expect(over).not.toEqual([]);
+      });
+    }
 
     /**
      * ⚠️ **The control.** See this file's header. Same DOM, same stylesheet,
@@ -495,6 +780,55 @@ for (const viewport of OVERLAY_VIEWPORTS) {
  * to; that is the cost, it is `theme.css` §`.oyl-game--riding`'s to argue, and
  * it is why this block does not assert what the overlay blocks assert.
  */
+/**
+ * #1124 — a phone on its side from 802 px to the first overlay viewport
+ * (844×390), which no case above measures. From 802 px four EQUAL secondary
+ * tracks fitted, 88 to 93.5 px, and `9:59:59` is 92.5 px on the CI runner's
+ * fonts: measured for #1124, the time ran up to 4.5 px past its field at
+ * 802×390 with every gate green. Here the time draws in the primary panel up
+ * to 51 rem and in a content-sized fourth track from there; each viewport is
+ * held to one line, {@link MOVING_TIME_SPARE_PIXELS} to spare and no overlap
+ * with any other reading or control, both ways. A tall one (802×600, a
+ * corners layout outside the short band) has three tracks.
+ */
+const MOVING_TIME_BAND_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a phone on its side — 802×390', width: 802, height: 390, unstagedFails: true },
+  { name: 'a phone on its side — 816×390', width: 816, height: 390, unstagedFails: true },
+  { name: 'a phone on its side — 820×390', width: 820, height: 390, unstagedFails: true },
+  { name: 'a short tablet window — 802×600', width: 802, height: 600, unstagedFails: true },
+];
+
+for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
+  test(`#1124 — the moving time fits its field with room to spare — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await openRide(page, viewport);
+    for (const [how, seen] of await bothWays(page)) {
+      const shown = seen.moving;
+      const spare = shown.field - shown.width;
+      const field = named(seen.items, 'reading: Moving');
+      const note =
+        `${how}: 9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+        `(${spare.toFixed(1)} px to spare); secondary tier ${String(shown.secondaryOverflow)} px ` +
+        `past its panel; ${describeItem(field)}`;
+      testInfo.annotations.push({ type: '#1124', description: note });
+      console.log(`#1124 — ${viewport.name} — ${note}`);
+      expect(shown.text, note).toBe('9:59:59');
+      expect(shown.lines, note).toBe(1);
+      expect(spare, note).toBeGreaterThanOrEqual(MOVING_TIME_SPARE_PIXELS);
+      // The room is not taken by running the grid past its panel.
+      expect(shown.secondaryOverflow, note).toBeLessThanOrEqual(0);
+      expect(inside(field.box, viewport), note).toBe(true);
+      expect(
+        seen.items
+          .filter((each) => each !== field && overlap(each.box, field.box))
+          .map(describeItem),
+        note,
+      ).toEqual([]);
+    }
+  });
+}
+
 for (const viewport of STACKED_VIEWPORTS) {
   test.describe(viewport.name, () => {
     test('the harness is on the stage, stacked', async ({ browser }) => {
@@ -502,7 +836,8 @@ for (const viewport of STACKED_VIEWPORTS) {
       const seen = await measure(page);
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
-      expect(seen.items).toHaveLength(14);
+      // Ten readings since #1111's moving time, and the rest as above.
+      expect(seen.items).toHaveLength(15);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -573,38 +908,149 @@ test.describe('a ride with a standing notice', () => {
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height !== 752)) {
     test(`is whole, over no panel and not over the rider — ${viewport.name}`, async ({ page }) => {
       await openRide(page, viewport, QUERY);
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          // The apparatus: the notice is laid out, and it is a sentence.
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice?.box.height ?? 0).toBeGreaterThan(40);
+          const laidOut = seen.panels.filter((each) => each.box.height > 0);
+          // `theme.css`'s short corners layout is `max-height: 30rem`, which is
+          // 480 px INCLUSIVE — #512's 736×480 is on it.
+          const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
+          expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
 
-      // The apparatus: the notice is laid out, and it is a sentence.
-      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-      expect(notice?.box.height ?? 0).toBeGreaterThan(40);
-      const laidOut = seen.panels.filter((each) => each.box.height > 0);
-      // `theme.css`'s short corners layout is `max-height: 30rem`, which is
-      // 480 px INCLUSIVE — #512's 736×480 is on it.
-      const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-      expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
-
-      expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
-      const collisions: string[] = [];
-      laidOut.forEach((a, index) => {
-        for (const b of laidOut.slice(index + 1)) {
-          if (overlap(a.box, b.box)) {
-            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+          expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
+            [],
+          );
+          const collisions: string[] = [];
+          laidOut.forEach((a, index) => {
+            for (const b of laidOut.slice(index + 1)) {
+              if (overlap(a.box, b.box)) {
+                collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+              }
+            }
+          });
+          expect(collisions).toEqual([]);
+          expect(
+            laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+          ).toEqual([]);
+          // And the controls are still where a rider can press them.
+          for (const name of ['control: Pause', 'control: End ride']) {
+            const item = named(seen.items, name);
+            expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
           }
-        }
-      });
-      expect(collisions).toEqual([]);
-      expect(
-        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-      ).toEqual([]);
-      // And the controls are still where a rider can press them.
-      for (const name of ['control: Pause', 'control: End ride']) {
-        const item = named(seen.items, name);
-        expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
+          // #1111: with a third control (*Trainer notice*) there is no width
+          // beside the controls on an upright phone, and the moving time is set
+          // ABOVE the actions panel on a surface of its own (`theme.css` §"THE
+          // MOVING TIME ON AN UPRIGHT PHONE") — over the world, inside no panel,
+          // so the panel checks above cannot see it. Held here, on this load.
+          const moving = named(seen.items, 'reading: Moving');
+          expect(inside(moving.box, viewport) && moving.onTop, describeItem(moving)).toBe(true);
+          const leaning = riderBox(viewport);
+          expect(overlap(moving.box, leaning), describeItem(moving)).toBe(false);
+          const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+          expect(controls).toHaveLength(3);
+          expect(
+            controls.filter((each) => overlap(each.box, moving.box)).map(describeItem),
+          ).toEqual([]);
+          // #1111's review: and over no other laid-out panel. A panel is excused
+          // only where the field is drawn wholly INSIDE it: the secondary panel
+          // on a tablet and a wide phone on its side, where it is in the
+          // document, and the primary panel below 802 px on its side, which
+          // makes room for it (`theme.css` §"THE MOVING TIME ON A NARROW PHONE ON
+          // ITS SIDE"). Upright it is inside none.
+          const within = (inner: Box, outer: Box): boolean =>
+            inner.left >= outer.left &&
+            inner.right <= outer.right &&
+            inner.top >= outer.top &&
+            inner.bottom <= outer.bottom;
+          expect(
+            laidOut
+              .filter(
+                (each) =>
+                  !(
+                    (each.name.includes('oyl-hud__fields--secondary') ||
+                      each.name.includes('oyl-hud__fields--primary')) &&
+                    within(moving.box, each.box)
+                  ),
+              )
+              .filter((each) => overlap(each.box, moving.box))
+              .map(describeItem),
+            describeItem(moving),
+          ).toEqual([]);
+          const clearOfRider = Math.max(
+            moving.box.left - leaning.right,
+            leaning.left - moving.box.right,
+            moving.box.top - leaning.bottom,
+            leaning.top - moving.box.bottom,
+          );
+          console.log(
+            `#1111 with Trainer notice — ${viewport.name} — ${how} — ${describeItem(moving)}; ` +
+              `${clearOfRider.toFixed(1)} px clear of the leaning rider`,
+          );
+        });
+      }
+
+      // #1120's control for this fixture, on the same load: at 360×800 the
+      // plain ride had room without the fallback, and what failed on `main`
+      // was this one — the notice beside the moving time as a third row. The
+      // anchor blocks out and no fallback in their place must give a finding
+      // here, or the "without anchor positioning" pass above is as true of a
+      // fallback that was never needed.
+      if (viewport.width === 360 && viewport.height === 800) {
+        await test.step('the control — without anchors and without the fallback (#1120)', async () => {
+          const bare = await withoutAnchors(page, 'none');
+          const found = standingNoticeFindings(bare, viewport);
+          console.log(
+            `#1120 control with Trainer notice — ${viewport.name} — as main laid it out ` +
+              `without anchors: ${found.length === 0 ? 'nothing found' : found.join('; ')}`,
+          );
+          expect(found).not.toEqual([]);
+        });
       }
     });
   }
 });
+
+/**
+ * What §"a ride with a standing notice" holds, as findings rather than
+ * assertions, for #1120's control: a laid-out panel outside the viewport, over
+ * another, or over the leaning rider; *Pause* or *End ride* off the screen or
+ * covered; and the moving time over the rider, a control or a panel it is not
+ * drawn wholly inside.
+ */
+function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): string[] {
+  const leaning = riderBox(viewport);
+  const laidOut = seen.panels.filter((each) => each.box.height > 0);
+  const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+  laidOut.forEach((a, index) => {
+    for (const b of laidOut.slice(index + 1)) {
+      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  found.push(...laidOut.filter((each) => overlap(each.box, leaning)).map(describeItem));
+  for (const name of ['control: Pause', 'control: End ride']) {
+    const item = named(seen.items, name);
+    if (!inside(item.box, viewport) || !item.onTop) found.push(describeItem(item));
+  }
+  const moving = named(seen.items, 'reading: Moving');
+  const within = (inner: Box, outer: Box): boolean =>
+    inner.left >= outer.left &&
+    inner.right <= outer.right &&
+    inner.top >= outer.top &&
+    inner.bottom <= outer.bottom;
+  if (overlap(moving.box, leaning)) found.push(`${describeItem(moving)} over the rider`);
+  for (const each of seen.items.filter((item) => item.name.startsWith('control: '))) {
+    if (overlap(each.box, moving.box))
+      found.push(`${describeItem(moving)} × ${describeItem(each)}`);
+  }
+  for (const each of laidOut) {
+    if (overlap(each.box, moving.box) && !within(moving.box, each.box)) {
+      found.push(`${describeItem(moving)} × ${describeItem(each)}`);
+    }
+  }
+  return found;
+}
 
 /**
  * #585 — a running workout's stall rescue, on the game's HUD (PR #599's
@@ -687,52 +1133,54 @@ test.describe('a ride with a workout eased — #585', () => {
   for (const viewport of OVERLAY_VIEWPORTS) {
     test(`the Eased notice, whole and over nothing — ${viewport.name}`, async ({ page }) => {
       await openRide(page, viewport, QUERY);
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, async () => {
+          // The apparatus: the Eased notice was laid out, with the floor's
+          // sentence in it. Without this every assertion below is true of a ride
+          // with no rescue at all.
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice?.box.height ?? 0).toBeGreaterThan(40);
+          const text = await noticeText(page);
+          expect(text).toContain('Eased');
+          expect(text).toContain('Pedalling has stopped');
+          // The road notice gives way to it, control and all — `GameView`
+          // §`roadNotice`.
+          expect(text).not.toContain('workout is driving your trainer');
+          expect(seen.items.some((each) => each.name === 'control: Trainer notice')).toBe(false);
 
-      // The apparatus: the Eased notice was laid out, with the floor's
-      // sentence in it. Without this every assertion below is true of a ride
-      // with no rescue at all.
-      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-      expect(notice?.box.height ?? 0).toBeGreaterThan(40);
-      const text = await noticeText(page);
-      expect(text).toContain('Eased');
-      expect(text).toContain('Pedalling has stopped');
-      // The road notice gives way to it, control and all — `GameView`
-      // §`roadNotice`.
-      expect(text).not.toContain('workout is driving your trainer');
-      expect(seen.items.some((each) => each.name === 'control: Trainer notice')).toBe(false);
+          // On a phone the notice takes the route panel's cell (declared in
+          // `theme.css` §"WHERE THERE IS NO FREE CELL"); on a tablet nothing
+          // gives way. Both are asserted, so neither is true by accident.
+          const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
+          const laidOut = seen.panels.filter((each) => each.box.height > 1);
+          expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
+          const plan = named(seen.items, 'the plan view');
+          expect(inside(plan.box, viewport) && plan.onTop).toBe(!onAPhone);
 
-      // On a phone the notice takes the route panel's cell (declared in
-      // `theme.css` §"WHERE THERE IS NO FREE CELL"); on a tablet nothing
-      // gives way. Both are asserted, so neither is true by accident.
-      const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
-      const laidOut = seen.panels.filter((each) => each.box.height > 1);
-      expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
-      const plan = named(seen.items, 'the plan view');
-      expect(inside(plan.box, viewport) && plan.onTop).toBe(!onAPhone);
+          // Published rather than bounded, for #512's reason: the runner's fonts
+          // are not a Mac's, and these are the margins a longer line eats first.
+          const above = laidOut
+            .filter((each) => each !== notice && each.box.bottom <= (notice?.box.top ?? 0) + 1)
+            .map((each) => (notice?.box.top ?? 0) - each.box.bottom);
+          const rider = riderBox(viewport);
+          console.log(
+            `workout eased — ${viewport.name} — ${how} — notice ${(notice?.box.height ?? 0).toFixed(0)} px ` +
+              `tall; ${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
+              (viewport.height > viewport.width
+                ? `; ${(rider.top - (notice?.box.bottom ?? 0)).toFixed(0)} px above the rider's box`
+                : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+          );
 
-      // Published rather than bounded, for #512's reason: the runner's fonts
-      // are not a Mac's, and these are the margins a longer line eats first.
-      const above = laidOut
-        .filter((each) => each !== notice && each.box.bottom <= (notice?.box.top ?? 0) + 1)
-        .map((each) => (notice?.box.top ?? 0) - each.box.bottom);
-      const rider = riderBox(viewport);
-      console.log(
-        `workout eased — ${viewport.name} — notice ${(notice?.box.height ?? 0).toFixed(0)} px ` +
-          `tall; ${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
-          (viewport.height > viewport.width
-            ? `; ${(rider.top - (notice?.box.bottom ?? 0)).toFixed(0)} px above the rider's box`
-            : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
-      );
-
-      expect(easedCollisions(seen, viewport)).toEqual([]);
-      // #605: the ONE sentence, and upright a margin above the rider rather
-      // than a pass. @see EASED_RIDER_CLEARANCE_PIXELS
-      expect(text).not.toContain('comes back by itself');
-      if (viewport.height > viewport.width) {
-        expect(rider.top - (notice?.box.bottom ?? Infinity)).toBeGreaterThanOrEqual(
-          EASED_RIDER_CLEARANCE_PIXELS,
-        );
+          expect(easedCollisions(seen, viewport)).toEqual([]);
+          // #605: the ONE sentence, and upright a margin above the rider rather
+          // than a pass. @see EASED_RIDER_CLEARANCE_PIXELS
+          expect(text).not.toContain('comes back by itself');
+          if (viewport.height > viewport.width) {
+            expect(rider.top - (notice?.box.bottom ?? Infinity)).toBeGreaterThanOrEqual(
+              EASED_RIDER_CLEARANCE_PIXELS,
+            );
+          }
+        });
       }
     });
   }
@@ -818,49 +1266,56 @@ test.describe('a ride with sounds on', () => {
       page,
     }) => {
       await openRide(page, viewport, '?sounds=on');
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
+          // The apparatus: both controls were rendered. Without this every
+          // assertion below is true of a ride where sounds stayed off.
+          expect(sound.map((each) => each.name)).toEqual([
+            'sound: Mute sounds',
+            'sound: Sound volume',
+          ]);
+          // #512: the mute is ONE line tall, and the room the actions panel has
+          // above it is published — because the first CI run of the 16 rem panel
+          // found the label wrapped on the runner's fonts, the panel taller than
+          // its row, and its bottom 10 px past a 736×360 stage, green on a Mac.
+          // The panel is anchored to the stage's bottom, so what a taller panel
+          // eats is the gap to whatever is above it. Read it off the run rather
+          // than assuming a desktop's fonts are the runner's.
+          const mute = named(seen.items, 'sound: Mute sounds').box;
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
+          const above = seen.panels
+            .filter((each) => each.box !== actions && each.box.bottom <= (actions?.top ?? 0) + 1)
+            .map((each) => (actions?.top ?? 0) - each.box.bottom);
+          const headroom = above.length === 0 ? Number.NaN : Math.min(...above);
+          console.log(
+            `sounds on — ${viewport.name} — ${how} — mute ${mute.height.toFixed(0)} px tall; actions panel ` +
+              `${(actions?.height ?? 0).toFixed(0)} px tall with ${Number.isNaN(headroom) ? 'nothing above it' : `${headroom.toFixed(0)} px to the panel above`}`,
+          );
+          expect(mute.height).toBeLessThan(60);
+          const lost = [
+            ...sound,
+            named(seen.items, 'control: Pause'),
+            named(seen.items, 'control: End ride'),
+          ].filter((each) => !inside(each.box, viewport) || !each.onTop);
+          expect(lost.map(describeItem)).toEqual([]);
 
-      const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
-      // The apparatus: both controls were rendered. Without this every
-      // assertion below is true of a ride where sounds stayed off.
-      expect(sound.map((each) => each.name)).toEqual(['sound: Mute sounds', 'sound: Sound volume']);
-      // #512: the mute is ONE line tall, and the room the actions panel has
-      // above it is published — because the first CI run of the 16 rem panel
-      // found the label wrapped on the runner's fonts, the panel taller than
-      // its row, and its bottom 10 px past a 736×360 stage, green on a Mac.
-      // The panel is anchored to the stage's bottom, so what a taller panel
-      // eats is the gap to whatever is above it. Read it off the run rather
-      // than assuming a desktop's fonts are the runner's.
-      const mute = named(seen.items, 'sound: Mute sounds').box;
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
-      const above = seen.panels
-        .filter((each) => each.box !== actions && each.box.bottom <= (actions?.top ?? 0) + 1)
-        .map((each) => (actions?.top ?? 0) - each.box.bottom);
-      const headroom = above.length === 0 ? Number.NaN : Math.min(...above);
-      console.log(
-        `sounds on — ${viewport.name} — mute ${mute.height.toFixed(0)} px tall; actions panel ` +
-          `${(actions?.height ?? 0).toFixed(0)} px tall with ${Number.isNaN(headroom) ? 'nothing above it' : `${headroom.toFixed(0)} px to the panel above`}`,
-      );
-      expect(mute.height).toBeLessThan(60);
-      const lost = [
-        ...sound,
-        named(seen.items, 'control: Pause'),
-        named(seen.items, 'control: End ride'),
-      ].filter((each) => !inside(each.box, viewport) || !each.onTop);
-      expect(lost.map(describeItem)).toEqual([]);
-
-      const laidOut = seen.panels.filter((each) => each.box.height > 0);
-      expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
-      const collisions: string[] = [];
-      laidOut.forEach((a, index) => {
-        for (const b of laidOut.slice(index + 1)) {
-          if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
-        }
-      });
-      expect(collisions).toEqual([]);
-      expect(
-        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-      ).toEqual([]);
+          const laidOut = seen.panels.filter((each) => each.box.height > 0);
+          expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
+            [],
+          );
+          const collisions: string[] = [];
+          laidOut.forEach((a, index) => {
+            for (const b of laidOut.slice(index + 1)) {
+              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          expect(collisions).toEqual([]);
+          expect(
+            laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+          ).toEqual([]);
+        });
+      }
     });
   }
 });
@@ -904,46 +1359,50 @@ test.describe('a ride with a side camera paired — #551', () => {
       page,
     }) => {
       await openRide(page, viewport, '?side=filming');
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          // The apparatus: the line was rendered, in the actions panel, and has a
+          // box. Without this every assertion below is true of a ride with no
+          // pairing at all.
+          const line = named(seen.items, 'the side camera line');
+          expect(line.box.height, describeItem(line)).toBeGreaterThan(0);
+          expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
+          // Published rather than bounded, for #512's reason (§"a ride with sounds
+          // on"): the runner's fonts are not a Mac's, and the room above the
+          // panel is what a taller line would eat first.
+          const above = seen.panels
+            .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
+            .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
+          const rider = riderBox(viewport);
+          console.log(
+            `side camera filming — ${viewport.name} — ${how} — actions panel ` +
+              `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
+              `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}; ` +
+              `rider box ends at y = ${rider.bottom.toFixed(0)}, x ${rider.left.toFixed(0)}–${rider.right.toFixed(0)}; ` +
+              `panel from x = ${(actions?.box.left ?? 0).toFixed(0)}, y = ${(actions?.box.top ?? 0).toFixed(0)}`,
+          );
 
-      // The apparatus: the line was rendered, in the actions panel, and has a
-      // box. Without this every assertion below is true of a ride with no
-      // pairing at all.
-      const line = named(seen.items, 'the side camera line');
-      expect(line.box.height, describeItem(line)).toBeGreaterThan(0);
-      expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-      expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
-      // Published rather than bounded, for #512's reason (§"a ride with sounds
-      // on"): the runner's fonts are not a Mac's, and the room above the
-      // panel is what a taller line would eat first.
-      const above = seen.panels
-        .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
-        .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
-      const rider = riderBox(viewport);
-      console.log(
-        `side camera filming — ${viewport.name} — actions panel ` +
-          `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
-          `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}; ` +
-          `rider box ends at y = ${rider.bottom.toFixed(0)}, x ${rider.left.toFixed(0)}–${rider.right.toFixed(0)}; ` +
-          `panel from x = ${(actions?.box.left ?? 0).toFixed(0)}, y = ${(actions?.box.top ?? 0).toFixed(0)}`,
-      );
-
-      expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+          expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+        });
+      }
     });
 
     test(`lost: the notice and the stop, over nothing — ${viewport.name}`, async ({ page }) => {
       await openRide(page, viewport, '?side=lost');
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, async () => {
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice?.box.height ?? 0).toBeGreaterThan(20);
+          const text = await page.evaluate(
+            () => document.querySelector('.oyl-hud__notices')?.textContent ?? '',
+          );
+          expect(text).toContain('link lost');
 
-      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-      expect(notice?.box.height ?? 0).toBeGreaterThan(20);
-      const text = await page.evaluate(
-        () => document.querySelector('.oyl-hud__notices')?.textContent ?? '',
-      );
-      expect(text).toContain('link lost');
-
-      expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+          expect(sideCameraCollisions(seen, viewport)).toEqual([]);
+        });
+      }
     });
   }
 
@@ -961,34 +1420,62 @@ test.describe('a ride with a side camera paired — #551', () => {
         page,
       }) => {
         await openRide(page, viewport, `?side=${side}&sounds=on`);
-        const seen = await measure(page);
-        const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
-        // The apparatus: both halves were rendered.
-        expect(sound.map((each) => each.name)).toEqual([
-          'sound: Mute sounds',
-          'sound: Sound volume',
-        ]);
-        named(seen.items, 'the side camera stop');
-        const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-        const above = seen.panels
-          .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
-          .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
-        // Published rather than bounded, for #512's reason: the runner's fonts
-        // are not a Mac's. Upright, the room that runs out is the room above
-        // the rider's box, so that margin is printed too.
-        const rider = riderBox(viewport);
-        console.log(
-          `side camera ${side} + sounds on — ${viewport.name} — actions panel ` +
-            `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
-            `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
-            (viewport.height > viewport.width
-              ? `; ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box`
-              : ''),
-        );
-        expect([
-          ...sideCameraCollisions(seen, viewport),
-          ...sound.filter((each) => !inside(each.box, viewport) || !each.onTop).map(describeItem),
-        ]).toEqual([]);
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(how, () => {
+            const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
+            // The apparatus: both halves were rendered.
+            expect(sound.map((each) => each.name)).toEqual([
+              'sound: Mute sounds',
+              'sound: Sound volume',
+            ]);
+            named(seen.items, 'the side camera stop');
+            const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+            const above = seen.panels
+              .filter((each) => each !== actions && each.box.bottom <= (actions?.box.top ?? 0) + 1)
+              .map((each) => (actions?.box.top ?? 0) - each.box.bottom);
+            // Published rather than bounded, for #512's reason: the runner's fonts
+            // are not a Mac's. Upright, the room that runs out is the room above
+            // the rider's box, so that margin is printed too.
+            const rider = riderBox(viewport);
+            console.log(
+              `side camera ${side} + sounds on — ${viewport.name} — ${how} — actions panel ` +
+                `${(actions?.box.height ?? 0).toFixed(0)} px tall; ` +
+                `${above.length === 0 ? 'nothing above it' : `${Math.min(...above).toFixed(0)} px to the panel above`}` +
+                (viewport.height > viewport.width
+                  ? `; ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box`
+                  : ''),
+            );
+            // #576, and #1120's fallback for it: on a phone on its side the
+            // row is a panel of its own in the left column, between the top
+            // panels and the bottom-start cell. The room either side of it,
+            // published, because that strip is all the room there is.
+            const row = seen.panels.find((each) => each.name.includes('side-camera-row'));
+            if (row !== undefined) {
+              const column = seen.panels.filter(
+                (each) =>
+                  each !== row && each.box.left < row.box.right && row.box.left < each.box.right,
+              );
+              const over = column
+                .filter((each) => each.box.bottom <= row.box.top + 1)
+                .map((each) => row.box.top - each.box.bottom);
+              const under = column
+                .filter((each) => each.box.top >= row.box.bottom - 1)
+                .map((each) => each.box.top - row.box.bottom);
+              console.log(
+                `side camera ${side} + sounds on — ${viewport.name} — ${how} — the side ` +
+                  `camera's row ${describeItem(row)}; ` +
+                  `${over.length === 0 ? 'nothing above it' : `${Math.min(...over).toFixed(0)} px under the panel above`}; ` +
+                  `${under.length === 0 ? 'nothing below it' : `${Math.min(...under).toFixed(0)} px above the panel below`}`,
+              );
+            }
+            expect([
+              ...sideCameraCollisions(seen, viewport),
+              ...sound
+                .filter((each) => !inside(each.box, viewport) || !each.onTop)
+                .map(describeItem),
+            ]).toEqual([]);
+          });
+        }
       });
     }
   }
@@ -1025,6 +1512,36 @@ test.describe('a ride with a side camera paired — #551', () => {
   }
 
   /**
+   * #1120's control for #576's fallback. On a phone on its side the row is
+   * lifted out of the actions panel by anchor positioning, or — without it —
+   * by grid placement (`theme.css` §"#576 WITHOUT ANCHOR POSITIONING"). With
+   * neither, as `main` had it, the actions panel holds both rows and runs off
+   * the stage: the same measurement must fail at 736×360 and at 844×390 —
+   * where the moving time is not lifted at all, so it is this fallback and no
+   * other that the cases above hold there. Not at 736×480, where `main`'s
+   * panels ended within a pixel of the stage's edge: a control that passes or
+   * fails on a sub-pixel is no control.
+   */
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => each.width >= 736 && each.height <= 390,
+  )) {
+    test(`the control — without anchors and without the fallback, the rows do not fit — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?side=filming&sounds=on');
+      const before = await withoutAnchors(page, 'none');
+      // The apparatus: the row is back inside the panel, not a panel of its own.
+      expect(before.panels.some((each) => each.name.includes('side-camera-row'))).toBe(false);
+      const found = sideCameraCollisions(before, viewport);
+      console.log(
+        `#1120 control, #576 — ${viewport.name} — as main laid it out without anchors: ` +
+          `${found.length === 0 ? 'nothing' : found.join('; ')}`,
+      );
+      expect(found).not.toEqual([]);
+    });
+  }
+
+  /**
    * #577's review, finding 1 — a lost link that ENDED the pairing. It is
    * terminal, so it is the actions panel's line and the notice slot is left
    * free: on a phone that slot is the route panel's cell (#437), and a notice
@@ -1036,30 +1553,32 @@ test.describe('a ride with a side camera paired — #551', () => {
   for (const viewport of OVERLAY_VIEWPORTS) {
     test(`ended: the line, and the route panel back — ${viewport.name}`, async ({ page }) => {
       await openRide(page, viewport, '?side=ended');
-      const seen = await measure(page);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const line = named(seen.items, 'the side camera line');
+          expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
+          expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
+          expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
+          for (const name of ['the elevation strip', 'the plan view']) {
+            const item = named(seen.items, name);
+            expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
+          }
 
-      const line = named(seen.items, 'the side camera line');
-      expect(inside(line.box, viewport) && line.onTop, describeItem(line)).toBe(true);
-      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
-      expect(actions === undefined ? false : overlap(line.box, actions.box)).toBe(true);
-      expect(seen.panels.some((each) => each.name.includes('oyl-hud__notices'))).toBe(false);
-      expect(seen.items.some((each) => each.name === 'the side camera stop')).toBe(false);
-      for (const name of ['the elevation strip', 'the plan view']) {
-        const item = named(seen.items, name);
-        expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
+          const laidOut = seen.panels.filter((each) => each.box.height > 1);
+          const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
+          laidOut.forEach((a, index) => {
+            for (const b of laidOut.slice(index + 1)) {
+              if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          found.push(
+            ...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+          );
+          expect(found).toEqual([]);
+        });
       }
-
-      const laidOut = seen.panels.filter((each) => each.box.height > 1);
-      const found = laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem);
-      laidOut.forEach((a, index) => {
-        for (const b of laidOut.slice(index + 1)) {
-          if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
-        }
-      });
-      found.push(
-        ...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-      );
-      expect(found).toEqual([]);
     });
   }
 
@@ -1121,40 +1640,42 @@ test.describe('a ride with a standing notice, once it is put away — #437', () 
       );
 
       await page.getByRole('button', { name: 'Trainer notice' }).click();
-      const put = await measure(page);
-
-      for (const name of ['the elevation strip', 'the plan view']) {
-        const item = named(put.items, name);
-        expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
-        expect(inside(item.box, viewport), describeItem(item)).toBe(true);
-      }
-      const laidOut = put.panels.filter((each) => each.box.height > 1);
-      expect(laidOut).toHaveLength(4);
-      const collisions: string[] = [];
-      laidOut.forEach((a, index) => {
-        for (const b of laidOut.slice(index + 1)) {
-          if (overlap(a.box, b.box)) {
-            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+      for (const [how, put] of await bothWays(page)) {
+        await test.step(how, async () => {
+          for (const name of ['the elevation strip', 'the plan view']) {
+            const item = named(put.items, name);
+            expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
+            expect(inside(item.box, viewport), describeItem(item)).toBe(true);
           }
-        }
-      });
-      expect(collisions).toEqual([]);
-      expect(
-        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
-      ).toEqual([]);
-      // The sentence is still there for a screen reader, clipped rather than
-      // removed — `display: none` would take it out of the accessibility tree.
-      const hidden = await page.evaluate(() => {
-        const wrapper = document.querySelector('.oyl-hud__notices');
-        return {
-          text: wrapper?.textContent ?? '',
-          display: wrapper === null ? '' : window.getComputedStyle(wrapper).display,
-          visibility: wrapper === null ? '' : window.getComputedStyle(wrapper).visibility,
-        };
-      });
-      expect(hidden.text).toContain('workout is driving your trainer');
-      expect(hidden.display).not.toBe('none');
-      expect(hidden.visibility).not.toBe('hidden');
+          const laidOut = put.panels.filter((each) => each.box.height > 1);
+          expect(laidOut).toHaveLength(4);
+          const collisions: string[] = [];
+          laidOut.forEach((a, index) => {
+            for (const b of laidOut.slice(index + 1)) {
+              if (overlap(a.box, b.box)) {
+                collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+              }
+            }
+          });
+          expect(collisions).toEqual([]);
+          expect(
+            laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+          ).toEqual([]);
+          // The sentence is still there for a screen reader, clipped rather than
+          // removed — `display: none` would take it out of the accessibility tree.
+          const hidden = await page.evaluate(() => {
+            const wrapper = document.querySelector('.oyl-hud__notices');
+            return {
+              text: wrapper?.textContent ?? '',
+              display: wrapper === null ? '' : window.getComputedStyle(wrapper).display,
+              visibility: wrapper === null ? '' : window.getComputedStyle(wrapper).visibility,
+            };
+          });
+          expect(hidden.text).toContain('workout is driving your trainer');
+          expect(hidden.display).not.toBe('none');
+          expect(hidden.visibility).not.toBe('hidden');
+        });
+      }
     });
 
     test(`the control — the old rule hides the route even when the notice is put away — ${viewport.name}`, async ({
@@ -1323,12 +1844,11 @@ async function keepScreenOnNotice(page: Page): Promise<{
 }
 
 /** The keep-the-screen-on notice laid out on the stage, over nothing. */
-async function keepScreenOnLaidOut(
-  page: Page,
+function keepScreenOnLaidOut(
+  seen: StageMeasurement,
   viewport: Viewport,
   what: string,
-): Promise<{ readonly collisions: string[]; readonly clearance: number }> {
-  const seen = await measure(page);
+): { readonly collisions: string[]; readonly clearance: number } {
   const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
   const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
   const laidOut = seen.panels.filter((each) => each.box.height > 1);
@@ -1377,10 +1897,19 @@ test.describe('a ride that may stop with the screen off — #647', () => {
           ).toBe(false);
         }
         const described = withRoad && oneNoticeOnly(viewport) ? 'road notice off the HUD' : what;
-        const { collisions, clearance } = await keepScreenOnLaidOut(page, viewport, described);
-        expect(collisions).toEqual([]);
-        if (viewport.height > viewport.width) {
-          expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+        // #1120: and as an engine without anchor positioning lays it out.
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(how, () => {
+            const { collisions, clearance } = keepScreenOnLaidOut(
+              seen,
+              viewport,
+              `${described}, ${how}`,
+            );
+            expect(collisions).toEqual([]);
+            if (viewport.height > viewport.width) {
+              expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+            }
+          });
         }
       });
     }
@@ -1408,8 +1937,8 @@ test.describe('a ride that may stop with the screen off — #647', () => {
       // ends 26 px (360×800) and 1 px (360×752) ABOVE the rider's box on a
       // Mac, where the longer one ran 27 px into it — under the clearance
       // still, and so still the rule's reason.
-      const { clearance } = await keepScreenOnLaidOut(
-        page,
+      const { clearance } = keepScreenOnLaidOut(
+        await measure(page),
         viewport,
         'without the rule, the road notice open',
       );
@@ -1491,20 +2020,32 @@ test.describe('keep the screen on, beside every notice that stays — #647', () 
     for (const viewport of OVERLAY_VIEWPORTS) {
       test(`beside ${beside}, over nothing — ${viewport.name}`, async ({ page }) => {
         await openRide(page, viewport, `?keepalive=failed${query}`);
-        const seen = await measureWithBoth(page, words);
-        const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
-        const rider = riderBox(viewport);
-        const clearance = rider.top - (notice?.box.bottom ?? Infinity);
-        console.log(
-          `keep the screen on beside ${beside} — ${viewport.name} — notice cell ` +
-            `${(notice?.box.height ?? 0).toFixed(0)} px tall` +
-            (viewport.height > viewport.width
-              ? `; ${clearance.toFixed(0)} px above the rider's box`
-              : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+        const settled = await measureWithBoth(page, words);
+        // #1120: and the same settled frame as an engine without anchor
+        // positioning lays it out — read straight after, with both notices
+        // still in the cell (asserted).
+        const bare = await withoutAnchors(page);
+        expect(bare.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box).toEqual(
+          settled.panels.find((each) => each.name.includes('oyl-hud__notices'))?.box,
         );
-        expect(easedCollisions(seen, viewport)).toEqual([]);
-        if (viewport.height > viewport.width) {
-          expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+        for (const [how, seen] of [
+          [ANCHORED, settled],
+          [UNANCHORED, bare],
+        ] as const) {
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          const rider = riderBox(viewport);
+          const clearance = rider.top - (notice?.box.bottom ?? Infinity);
+          console.log(
+            `keep the screen on beside ${beside} — ${viewport.name} — ${how} — notice cell ` +
+              `${(notice?.box.height ?? 0).toFixed(0)} px tall` +
+              (viewport.height > viewport.width
+                ? `; ${clearance.toFixed(0)} px above the rider's box`
+                : `; ends at x = ${(notice?.box.right ?? 0).toFixed(0)}, rider from x = ${rider.left.toFixed(0)}`),
+          );
+          expect(easedCollisions(seen, viewport), how).toEqual([]);
+          if (viewport.height > viewport.width) {
+            expect(clearance, how).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+          }
         }
       });
     }

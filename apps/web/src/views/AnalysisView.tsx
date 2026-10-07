@@ -196,10 +196,13 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       const outcome = await backfillLoadSummaries(port);
       setBackfillNote(
         `Measured ${String(outcome.computed)} more ${outcome.computed === 1 ? 'ride' : 'rides'}` +
-          (outcome.skipped === 0
+          // #1084: these are marked as they are found, so no later pass counts them again.
+          (outcome.nothingToWorkOut === 0
             ? ''
-            : `, and could not measure ${String(outcome.skipped)} — too short, or no usable trace`) +
-          (outcome.remaining === 0 ? '.' : `. ${String(outcome.remaining)} still to go.`),
+            : `, and found ${String(outcome.nothingToWorkOut)} with nothing to work a load out from — too short, or no usable power or heart rate`) +
+          (outcome.remaining === 0 ? '.' : `. ${String(outcome.remaining)} still to go.`) +
+          // #1084's review: left unmarked, so this is said on every pass that finds them.
+          (outcome.noStreamsYet === 0 ? '' : ` ${noStreamsSentence(outcome.noStreamsYet)}`),
       );
       setHistory(await loadFitnessHistory(port));
     } finally {
@@ -660,7 +663,10 @@ function FitnessPanel({ history, backfilling, note, onBackfill }: FitnessPanelPr
       <>
         <p className="oyl-muted">
           {history.ridesWithoutSummary === 0
-            ? 'Nothing to chart yet. This fills in as you record or import rides.'
+            ? history.ridesWithNoLoad === 0
+              ? 'Nothing to chart yet. This fills in as you record or import rides.'
+              : // #1084: rides are here, and none of them could ever give a load.
+                `Nothing to chart yet. ${noLoadSentence(history.ridesWithNoLoad)} This fills in as you record or import rides with power or heart rate.`
             : `None of the ${String(history.ridesWithoutSummary)} rides on this device has been measured for load yet.`}
         </p>
         {history.ridesWithoutSummary === 0 ? undefined : (
@@ -758,6 +764,35 @@ function BackfillNote({ note }: { readonly note: string | undefined }): JSX.Elem
  * them.
  */
 function basisNote(history: FitnessHistory): string {
+  // #1084: a ride with nothing to work a load out from is said, not hidden.
+  const without =
+    history.ridesWithNoLoad === 0 ? '' : ` ${noLoadSentence(history.ridesWithNoLoad)}`;
+  return `${basisOf(history)}${without}`;
+}
+
+/**
+ * How many rides have no load at all — #1084. Worded to be true of every
+ * marked ride, including one stored before #1084 that the backfill marked:
+ * the streams it read held nothing a load could come from.
+ */
+function noLoadSentence(count: number): string {
+  return count === 1
+    ? '1 ride has no load: nothing on it was enough to work one out from.'
+    : `${String(count)} rides have no load: nothing on them was enough to work one out from.`;
+}
+
+/**
+ * Rides a pass found with no recording stored — #1084's review. They may be a
+ * save another tab has not finished, so they are looked at again next time
+ * rather than called rides with no load.
+ */
+function noStreamsSentence(count: number): string {
+  return count === 1
+    ? '1 ride has no recording stored yet, so it was left to look at again next time.'
+    : `${String(count)} rides have no recording stored yet, so they were left to look at again next time.`;
+}
+
+function basisOf(history: FitnessHistory): string {
   const from = `Built from ${String(history.ridesCounted)} measured ${history.ridesCounted === 1 ? 'ride' : 'rides'}`;
   if (history.bases.length === 0) {
     return `${from}.`;

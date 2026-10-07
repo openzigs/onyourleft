@@ -21,9 +21,11 @@
  * - **`binary`** — it decodes, but holds a control character other than a
  *   tab, a newline or a carriage return: what a binary file renamed `.txt`
  *   looks like.
- * - **`picture`** — it holds a `data:` URL, the way Markdown embeds an image.
- *   The instance would index none of it (`apps/instance/src/history/passages.ts`),
- *   so it is refused here, where the rider can take the image out.
+ * - **`picture`** — it holds a `data:` URL, the way Markdown embeds an image,
+ *   `data:;base64,…` (no media type) included. The instance would index none
+ *   of it (`apps/instance/src/history/passages.ts`), so it is refused here,
+ *   where the rider can take the image out. Found by `data-url.ts`
+ *   §`holdsDataUrl`, a linear scan the instance shares (#933).
  *
  * and three about its size: `empty`, `too-long` (over
  * `MAXIMUM_DOCUMENT_CHARACTERS`, in characters), and a name too long to keep
@@ -36,6 +38,8 @@ import {
   tidyRiderText,
   withoutBidiControls,
 } from '@onyourleft/store';
+
+import { holdsDataUrl } from './data-url';
 
 /** Why a file was not added. */
 export type DocumentRefusal =
@@ -68,18 +72,6 @@ export const DOCUMENT_REFUSAL_TEXT: Readonly<Record<DocumentRefusal, string>> = 
 export type DocumentReading =
   | { readonly kind: 'document'; readonly name: string; readonly text: string }
   | { readonly kind: 'refused'; readonly refusal: DocumentRefusal };
-
-/**
- * A `data:` URL: a type, a slash, anything but a comma or a space, a comma.
- *
- * ⚠️ ONE quantifier after the slash, and it must stay one: `[a-z0-9.+-]*`
- * followed by `[^,\s]*` both match a letter, so a run with no comma was retried
- * at every split — quadratic, 6.7 s for 100 000 characters on the main thread
- * (#920's review). This pattern matches the same URLs in linear time.
- * `apps/instance/src/history/passages.ts` no longer has the old form: since
- * #918 it is §`holdsDataUrl`, a scan (#921, #924 item 7).
- */
-const DATA_URL = /\bdata:[a-z0-9.+-]*\/[^,\s]*,/iu;
 
 /** Every control character but a tab, a newline and a carriage return. */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
@@ -115,11 +107,11 @@ export function readDocument(chosenName: string, bytes: Uint8Array): DocumentRea
     return { kind: 'refused', refusal: 'not-utf8' };
   }
   const text = tidyRiderText(decoded);
-  // The length first, so no regular expression below ever runs over more than
+  // The length first, so neither check below ever runs over more than
   // MAXIMUM_DOCUMENT_CHARACTERS: the byte gate alone admits three times that.
   if (text.length > MAXIMUM_DOCUMENT_CHARACTERS) return { kind: 'refused', refusal: 'too-long' };
   if (NOT_TEXT.test(text)) return { kind: 'refused', refusal: 'binary' };
-  if (DATA_URL.test(text)) return { kind: 'refused', refusal: 'picture' };
+  if (holdsDataUrl(text)) return { kind: 'refused', refusal: 'picture' };
   if (text === '') return { kind: 'refused', refusal: 'empty' };
   return { kind: 'document', name: name.trim(), text };
 }

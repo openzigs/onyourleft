@@ -10,12 +10,14 @@
  * with no ICE server of any kind (`side-link-transport.ts`) — and a clock.
  *
  * 1. **The tablet offers.** It opens a peer connection, makes the `control`
- *    channel (reliable, ordered: D-3), gathers its host candidates, and shows
+ *    channel (reliable, ordered: D-3) and `frames` beside it, each negotiated
+ *    on an agreed stream, gathers its host candidates, and shows
  *    an offer code carrying the ICE credentials, its DTLS fingerprint, its
  *    candidates and a fresh 32-byte one-time secret.
- * 2. **The phone answers.** It reads the offer, builds the tablet's
- *    description from the code's checked fields (`side-link-sdp.ts`), answers,
- *    and shows the answer code.
+ * 2. **The phone answers.** It makes the same two channels on the same
+ *    streams, reads the offer, builds the tablet's description from the
+ *    code's checked fields (`side-link-sdp.ts`), answers, and shows the answer
+ *    code.
  * 3. **The tablet reads the answer** — once — and the two connect directly.
  * 4. **The tablet speaks first**: a `ping` as soon as `control` opens, again
  *    every {@link HEARTBEAT_MILLISECONDS} until the phone has proved itself.
@@ -99,11 +101,10 @@
  * so already) and then `connecting`, and nothing ever changes it back. The
  * page's channel says `connecting` for the rest of the pairing; Blink hands
  * up every message regardless of its own state; and a channel that is not
- * `open` refuses every send. ⚠️ **This is read from the source and made
- * deterministic in `testing.ts` §`strandsHandedChannels`; it has not been
- * caught in the real engine**, where the window it needs is narrower than the
- * one above. What the product does about it is two rules, neither of which
- * touches D-4:
+ * `open` refuses every send. ⚠️ **This was read from the source first and has
+ * since been caught in the real engine** (§"Why each end makes its own
+ * channels", which also removes it). What the product did about it is two
+ * rules, neither of which touches D-4, and both stay as a backstop:
  *
  * - **The phone does not spend its secret on a channel that says it cannot
  *   carry it.** A ping heard on one is not answered, and the next heard on a
@@ -118,10 +119,39 @@
  *   lost after. It used to wait out {@link CONNECT_LIMIT_MILLISECONDS} and then
  *   say the devices could not reach each other, which they had.
  *
- * The pairing still fails and the rider pairs again. Recovering inside it
+ * The pairing still failed and the rider paired again. Recovering inside it
  * would take a channel the PHONE makes — one this bug cannot strand, because
- * Blink asks the engine about a channel it made itself — which D-3 does not
- * list and the tablet does not accept.
+ * Blink asks the engine about a channel it made itself — which is what the
+ * next section does.
+ *
+ * ## Why each end makes its own channels
+ *
+ * #568 a fourth time, and the flaky `sidelink.browser.spec.ts` on PR #1145
+ * (CI run 37356795884: *"picture 0: the phone said no-link"*, every `control`
+ * step green). On 2026-10-05 a page with none of this code in it — two bare
+ * peer connections, the offerer making `control` and `frames` the way the
+ * tablet did — was run 3 000 times in Playwright's Chromium 141 (headless
+ * shell revision 1194, NOT the pinned 153, revision 1243) on a loaded
+ * machine, and six times one of the ANSWERING end's handed-over
+ * channels was still `connecting` five seconds after the connection opened,
+ * with `send` throwing `InvalidStateError`: four `control` (the stranding
+ * above, now caught) and two `frames` — which the phone, `connected` and
+ * filming, could then never send a picture on, and which nothing noticed.
+ * The same 3 000 pairings with both channels **negotiated** — each end
+ * making `control` on stream 0 and `frames` on stream 2 itself, so nothing
+ * is handed over in `datachannel` — stranded none.
+ *
+ * So both ends make both channels ({@link CONTROL_CHANNEL_INIT},
+ * {@link FRAMES_CHANNEL_INIT}), and a channel opened in band by the other end
+ * is one D-3 does not list: the phone ends the link. It closes both of the
+ * windows above at their cause — no send can be made inside a `datachannel`
+ * event, and no channel is opened without the page asking the engine — and
+ * D-3's two channels, their delivery and D-4 are unchanged. The ping, the
+ * secret in answer to it, the welcome and the backstops stay: nothing here
+ * shows a channel an end made itself can never be lost, and the protocol
+ * does not lean on that. `testing.ts` §`strandsHandedChannels` and
+ * §`losesSendsInDataChannelEvent` still model the engine's two faults, and
+ * `side-link.test.ts` pairs, commands and sends pictures with both on.
  *
  * ## Why neither end waits for the connection to say it is gone
  *
@@ -138,7 +168,7 @@
  * `start` and `stop` are numbered and acknowledged. One that is not
  * acknowledged within {@link COMMAND_ACK_MILLISECONDS} is reported as
  * `unacknowledged` — **never assumed to have arrived**, which is the trainer
- * control point's posture (`CLAUDE.md` §4h) applied to a camera.
+ * control point's posture (`docs/agents/game.md` §4h) applied to a camera.
  *
  * ## What neither end keeps
  *
@@ -170,10 +200,16 @@ import {
   type SidePicture,
 } from './side-link-pictures';
 import { sdpFromSidePeerParameters, sidePeerParametersFrom, SideSdpError } from './side-link-sdp';
-import { createSidePeer, type SideChannel, type SidePeer } from './side-link-transport';
+import {
+  createSidePeer,
+  type SideChannel,
+  type SideChannelInit,
+  type SidePeer,
+} from './side-link-transport';
 import { browserAfter, browserEvery } from './side-camera';
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
+import { liveViewOf } from './side-live-view-port';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from '../game/hud/wake-lock';
 import type {
   PhoneReport,
@@ -200,10 +236,35 @@ export const CONTROL_CHANNEL = 'control';
 /**
  * The channel for pictures, phone → tablet only — #530, ADR 0033 D-3:
  * *"unordered, no retransmission. A late picture is worth nothing to a pose
- * model and would only queue behind newer ones."* The tablet makes it beside
- * `control`, so both are in the one offer the QR code carries.
+ * model and would only queue behind newer ones."* Each end makes it beside
+ * `control` (§"Why each end makes its own channels").
  */
 export const FRAMES_CHANNEL = 'frames';
+
+/**
+ * How each end makes `control`: reliable, ordered, and NEGOTIATED on stream 0
+ * — both ends make it themselves, so neither is handed it in a `datachannel`
+ * event (#568, §"Why each end makes its own channels").
+ *
+ * ⚠️ **The ids are even on purpose.** The phone answers `active`, so it is the
+ * DTLS client, and a channel the tablet opened in band would take an ODD
+ * stream (RFC 8832 §6). An older tablet's in-band `control` therefore arrives
+ * on this phone as a `datachannel` event, which ends the link (D-3 lists no
+ * channel opened that way), rather than colliding with this one.
+ */
+export const CONTROL_CHANNEL_INIT: SideChannelInit = Object.freeze({
+  ordered: true,
+  negotiated: true,
+  id: 0,
+});
+
+/** How each end makes `frames`: unordered, no retransmission, negotiated on stream 2. */
+export const FRAMES_CHANNEL_INIT: SideChannelInit = Object.freeze({
+  ordered: false,
+  maxRetransmits: 0,
+  negotiated: true,
+  id: 2,
+});
 
 /**
  * How often each end says it is still there: once a second. Spike 0012 measured
@@ -265,8 +326,8 @@ export const CONNECT_LIMIT_MILLISECONDS = 15_000;
  * attempts at aiming; it is well under {@link OFFER_LIFETIME_MILLISECONDS}, so
  * the offer the phone answered can still be live when it runs out; and it is
  * short enough that a code left on a phone nobody is holding up stops being
- * answerable. Once the tablet has the answer — the phone hears its `control`
- * channel arrive — the wait is the machine handshake's again,
+ * answerable. Once the tablet has the answer — the phone's `control` channel
+ * opens — the wait is the machine handshake's again,
  * {@link CONNECT_LIMIT_MILLISECONDS}.
  */
 export const TABLET_READ_LIMIT_MILLISECONDS = 2 * 60 * 1000;
@@ -513,8 +574,8 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
   if (peer === undefined) {
     return 'unavailable';
   }
-  const channel = peer.createDataChannel(CONTROL_CHANNEL, { ordered: true });
-  const frames = peer.createDataChannel(FRAMES_CHANNEL, { ordered: false, maxRetransmits: 0 });
+  const channel = peer.createDataChannel(CONTROL_CHANNEL, CONTROL_CHANNEL_INIT);
+  const frames = peer.createDataChannel(FRAMES_CHANNEL, FRAMES_CHANNEL_INIT);
   frames.binaryType = 'arraybuffer';
   try {
     await peer.setLocalDescription(await peer.createOffer());
@@ -539,11 +600,14 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
     .filter(candidateAccepted)
     .every((candidate) => candidate.address.endsWith('.local'));
   const control = new TabletSideLink(peer, channel, frames, base64Url(secret), timers);
+  const analysis = timers.analyse?.(control);
   return {
     offerCode: made.text,
     acceptSidePhoneCode: async (answerCode) => control.accept(answerCode, offerOnlyNames),
     control,
-    analysis: timers.analyse?.(control),
+    analysis,
+    // #1061: the same object, when it can show its pictures (`SideAnalysis` can).
+    liveView: liveViewOf(analysis),
   };
 }
 
@@ -1044,9 +1108,12 @@ export class PhoneSideLink implements SideCameraLinkPort {
   #readDeadline: number | undefined;
   #cancelReadTick: () => void = () => undefined;
 
-  #channel: SideChannel | undefined;
+  /** `control`, made by this phone itself (§"Why each end makes its own channels"). */
+  readonly #channel: SideChannel;
   /** The `frames` channel, which this phone only ever sends on. */
-  #frames: SideChannel | undefined;
+  readonly #frames: SideChannel;
+  /** Whether `control` has opened: the tablet has read the answer (#1108). */
+  #opened = false;
   #condition: SideLinkCondition = 'connecting';
   #lastHeard = 0;
   /** The last command number obeyed, so a repeated one is not obeyed twice. */
@@ -1070,8 +1137,36 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#secret = secret;
     this.#timers = timers;
     this.#waitFor(CONNECT_LIMIT_MILLISECONDS);
+    // #568: both channels are this phone's own, made on the streams the
+    // tablet makes them on, so neither is handed over in `datachannel` —
+    // where the engine was caught leaving a channel `connecting` for good.
+    const channel = peer.createDataChannel(CONTROL_CHANNEL, CONTROL_CHANNEL_INIT);
+    const frames = peer.createDataChannel(FRAMES_CHANNEL, FRAMES_CHANNEL_INIT);
+    this.#channel = channel;
+    this.#frames = frames;
+    frames.binaryType = 'arraybuffer';
+    // Phone → tablet only: the tablet never sends a picture, or anything
+    // else, on `frames`, so anything that arrives on it is not the tablet.
+    frames.onmessage = () => {
+      this.endSideLink();
+    };
+    channel.onopen = () => {
+      this.#open();
+    };
+    // #568: nothing is sent on `open` either. The phone waits for the
+    // tablet's opening ping and sends its secret in answer (§`#greet`).
+    channel.onmessage = (event) => {
+      this.#hear(event.data);
+    };
+    channel.onclose = () => {
+      this.endSideLink();
+    };
+    // D-3 lists two channels, and each end makes both. A channel opened in
+    // band by the other end — an older tablet's, or a third of anybody's — is
+    // not one of them, and the pairing ends (D-4).
     peer.ondatachannel = (event) => {
-      this.#adopt(event.channel);
+      event.channel.close();
+      this.endSideLink();
     };
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState;
@@ -1093,7 +1188,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
    * {@link answerFrom}.
    */
   waitForTabletRead(): void {
-    if (this.#condition !== 'connecting' || this.#channel !== undefined) {
+    if (this.#condition !== 'connecting' || this.#opened) {
       return;
     }
     this.#readDeadline = this.#timers.clock() + TABLET_READ_LIMIT_MILLISECONDS;
@@ -1160,7 +1255,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
 
   sendPictureToTablet(picture: SidePicture): SidePictureSent {
     const frames = this.#frames;
-    if (this.#condition !== 'connected' || frames?.readyState !== 'open') {
+    if (this.#condition !== 'connected' || frames.readyState !== 'open') {
       return 'no-link';
     }
     // ⚠️ **One picture in memory, not a queue** — ADR 0033 D-6's rule, on
@@ -1206,54 +1301,31 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#stopCountdown();
     this.#peer.ondatachannel = null;
     this.#peer.onconnectionstatechange = null;
-    if (this.#channel !== undefined) {
-      this.#channel.onmessage = null;
-      this.#channel.onclose = null;
-      this.#channel.onopen = null;
-    }
-    if (this.#frames !== undefined) {
-      this.#frames.onmessage = null;
-    }
+    this.#channel.onmessage = null;
+    this.#channel.onclose = null;
+    this.#channel.onopen = null;
+    this.#frames.onmessage = null;
     letGo(this.#peer, this.#channel, this.#timers);
     this.#setCondition('ended');
     this.#countdownChanged();
   }
 
-  #adopt(channel: SideChannel): void {
-    // Two channels, each named, each once (D-3). A third, a second of either,
-    // or one by another name is not something D-3 lists, and the pairing ends
-    // (D-4). They may arrive in either order.
-    if (channel.label === FRAMES_CHANNEL && this.#frames === undefined) {
-      this.#frames = channel;
-      channel.binaryType = 'arraybuffer';
-      // Phone → tablet only: the tablet never sends a picture, or anything
-      // else, on `frames`, so anything that arrives on it is not the tablet.
-      channel.onmessage = () => {
-        this.endSideLink();
-      };
+  /**
+   * `control` has opened, or the tablet has been heard on it: the tablet has
+   * read the answer and the connection is up. Whichever comes first; the
+   * other does nothing.
+   */
+  #open(): void {
+    if (this.#condition !== 'connecting' || this.#opened) {
       return;
     }
-    if (this.#channel !== undefined || channel.label !== CONTROL_CHANNEL) {
-      channel.close();
-      this.endSideLink();
-      return;
-    }
-    this.#channel = channel;
+    this.#opened = true;
     // #1108: the tablet has read the answer, so the person's wait is over and
     // the rest is the machine handshake's.
     this.#readDeadline = undefined;
     this.#stopCountdown();
     this.#waitFor(CONNECT_LIMIT_MILLISECONDS);
     this.#countdownChanged();
-    // #568: nothing is sent from here. A message sent inside `ondatachannel`
-    // can be dropped by the engine with no error, so the phone waits for the
-    // tablet's opening ping and sends its secret in answer (§`#greet`).
-    channel.onmessage = (event) => {
-      this.#hear(event.data);
-    };
-    channel.onclose = () => {
-      this.endSideLink();
-    };
   }
 
   /**
@@ -1296,7 +1368,11 @@ export class PhoneSideLink implements SideCameraLinkPort {
       this.endSideLink();
       return;
     }
-    if (this.#channel?.readyState !== 'open') {
+    // Hearing the tablet proves it read the answer, as `control` opening does:
+    // a `control` the engine leaves `connecting` never fires `open`, and the
+    // read countdown would go on ticking while the phone hears pings (#568).
+    this.#open();
+    if (this.#channel.readyState !== 'open') {
       this.#unanswerable();
       if (!this.#greeted) {
         // The secret is not spent on a channel that would drop it: the tablet
@@ -1313,7 +1389,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
       // Between its secret and the welcome the phone has no silence check of
       // its own: these pings are dropped before `#heard()` and its heartbeat
       // has not started. What ends a phone that is never welcomed is the
-      // CONNECT_LIMIT_MILLISECONDS set when `control` arrived, or the tablet closing
+      // CONNECT_LIMIT_MILLISECONDS set when `control` opened or the tablet was
+      // first heard, or the tablet closing
       // `control` (its three-second `unanswered` does, for a lost secret).
       if (message.t === 'ping') {
         // One of the opening pings, sent before the tablet had the secret.
@@ -1361,7 +1438,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
     this.#cancels.push(
       this.#timers.after(() => {
         this.#unanswerableTimed = false;
-        if (this.#channel?.readyState !== 'open') {
+        if (this.#channel.readyState !== 'open') {
           this.endSideLink();
         }
       }, SILENCE_IS_LOST_MILLISECONDS),
@@ -1400,7 +1477,7 @@ export class PhoneSideLink implements SideCameraLinkPort {
     // has welcomed this phone (#568): a report made before then is dropped, as
     // one made before the channel opens always was, and `side-camera.ts`
     // reports again on `connected`.
-    if (channel?.readyState !== 'open' || (!this.#welcomed && message.t !== 'hello')) {
+    if (channel.readyState !== 'open' || (!this.#welcomed && message.t !== 'hello')) {
       return;
     }
     try {

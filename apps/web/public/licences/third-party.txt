@@ -63,7 +63,7 @@ Part 1 — in the app (73 packages)
   json-stringify-pretty-compact 4.0.0 — MIT
   jsqr 1.4.0 — Apache-2.0
   kdbush 4.1.0 — ISC
-  lucide-react 1.48.0 — ISC
+  lucide-react 1.52.0 — ISC
   maplibre-gl 6.11.2 — BSD-3-Clause
   minimist 1.2.8 — MIT
   motion 13.5.1 — MIT
@@ -157,8 +157,8 @@ Part 3 — files copied out of a package into the build
   examples/jsm/libs/zstddec.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is zstddec 0.0.2, vendored there — MIT AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
-  vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
-  rolldown 1.2.6 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
+  vite 8.3.2 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
+  rolldown 1.2.12 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
 
 Part 5 — fonts committed in the source repository and served by the app
   Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)
@@ -2286,7 +2286,7 @@ THIS SOFTWARE.
 
 ========================================================================
 Name: lucide-react
-Version: 1.48.0
+Version: 1.52.0
 Licence: ISC
 Part: app
 
@@ -3327,7 +3327,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
 Name: vite
-Version: 8.3.0
+Version: 8.3.2
 Licence: MIT
 Part: bundler
 
@@ -3364,7 +3364,7 @@ SOFTWARE.
 
 ========================================================================
 Name: rolldown
-Version: 1.2.6
+Version: 1.2.12
 Licence: MIT
 Part: bundler
 

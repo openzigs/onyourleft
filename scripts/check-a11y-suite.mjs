@@ -257,7 +257,7 @@ if (isEntryPoint) {
   if (found.length > 0) {
     console.error('check-a11y-suite: the accessibility gate does not cover what it claims to.\n');
     for (const problem of found) console.error(`  - ${problem}`);
-    console.error('\nSee CLAUDE.md §4e and scripts/check-a11y-suite.mjs.');
+    console.error('\nSee docs/agents/accessibility.md §4e and scripts/check-a11y-suite.mjs.');
     process.exit(1);
   }
   console.log(

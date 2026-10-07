@@ -48,6 +48,7 @@
  * `privacy/no-network.test.ts` is the gate that keeps it the only one.
  */
 
+import type { SecureWindow } from './secure-window';
 import type {
   CameraFacing,
   CameraNotice,
@@ -315,6 +316,19 @@ export interface CameraControllerOptions {
    */
   readonly notices?: ((kind: CameraProblemKind) => CameraNotice) | undefined;
   /**
+   * The owner of Android's secure window flag — #1061, ADR 0044 D-12. Every
+   * camera picture this controller puts on a screen ({@link showPreview}, and
+   * the side camera's live view through {@link holdSecureWindow}) holds it
+   * while it is there. `main.tsx` builds it over the shell's plugin, and over
+   * `secure-window-port.ts` §`NO_SECURE_WINDOW` in a browser.
+   *
+   * ⚠️ **Required** since #1123's review: it is all of D-12 on Android, and an
+   * optional field the shell forgot to pass was green under every gate,
+   * `check:wiring` included (docs/agents/wiring-gate.md §4j §Limits). Tests and harnesses pass
+   * `secure-window-testing.ts` §`browserSecureWindow`, or a double.
+   */
+  readonly secureWindow: SecureWindow;
+  /**
    * The per-ride keep — #384, ADR 0029 D-2.
    *
    * ⚠️ **Optional, and its absence is the default rather than a degraded
@@ -456,6 +470,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    */
   #presenceGeneration = 0;
   #cancelPresence: (() => void) | undefined;
+  readonly #secureWindow: SecureWindow;
 
   constructor(options: CameraControllerOptions) {
     this.#port = options.port;
@@ -471,6 +486,16 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     this.#analysis = options.analysis;
     this.#hosted = options.hosted;
     this.#loadCodeReader = options.loadCodeReader ?? loadPairingCodeReader;
+    this.#secureWindow = options.secureWindow;
+  }
+
+  /**
+   * A camera picture is on a screen: hold Android's secure window flag until
+   * the returned give-back is called — #1061, ADR 0044 D-12. In a browser the
+   * {@link CameraControllerOptions.secureWindow} asks the platform for nothing.
+   */
+  holdSecureWindow(): () => void {
+    return this.#secureWindow.hold();
   }
 
   /** The current answer. Cheap; call it in a render. */
@@ -697,7 +722,14 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     if (session === undefined || !session.live) {
       return noPreview;
     }
-    return session.attachCameraPreview(surface);
+    const detach = session.attachCameraPreview(surface);
+    // #1061, ADR 0044 D-12: a camera's picture is on the screen now, so the
+    // window is secure until the element goes away.
+    const giveBack = this.holdSecureWindow();
+    return () => {
+      detach();
+      giveBack();
+    };
   }
 
   /**

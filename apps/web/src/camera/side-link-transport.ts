@@ -61,16 +61,28 @@ export interface SideChannel {
   onmessage: ((event: { readonly data: unknown }) => void) | null;
 }
 
+/**
+ * How a channel is made: the slice of the platform's `RTCDataChannelInit` the
+ * link uses. Both of the side link's channels are `negotiated` with an agreed
+ * `id` since #568's fourth fix, so neither end is handed a channel in a
+ * `datachannel` event.
+ */
+export interface SideChannelInit {
+  readonly ordered: boolean;
+  readonly maxRetransmits?: number;
+  readonly negotiated?: boolean;
+  readonly id?: number;
+}
+
 /** The slice of a peer connection the link uses. */
 export interface SidePeer {
   /**
    * `maxRetransmits: 0` with `ordered: false` is the `frames` channel (#530,
    * ADR 0033 D-3): a late picture is worth nothing to a pose model.
+   * `negotiated` with an `id` is how both ends make each channel themselves
+   * (#568, `side-link.ts` §"Why each end makes its own channels").
    */
-  createDataChannel(
-    label: string,
-    init: { readonly ordered: boolean; readonly maxRetransmits?: number },
-  ): SideChannel;
+  createDataChannel(label: string, init: SideChannelInit): SideChannel;
   createOffer(): Promise<SideDescription>;
   createAnswer(): Promise<SideDescription>;
   setLocalDescription(description: SideDescription): Promise<void>;

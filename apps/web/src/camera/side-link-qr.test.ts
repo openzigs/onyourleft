@@ -11,6 +11,7 @@ import { CameraController, PAIRING_READER_UNAVAILABLE } from './session';
 import { pairingCodeText } from './side-link-code';
 import { pairingCodeFromPixels, pairingCodeModules } from './side-link-qr';
 import { photographedCode as photographed, scriptedCamera } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 /** A realistic offer: two candidates and a secret, as `side-link.ts` makes one. */
 const OFFER = (() => {
@@ -66,6 +67,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
   function controllerOn(pixels: () => CodePixels) {
     const camera = scriptedCamera({ codePixels: pixels });
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: () => () => undefined,
     });
@@ -125,6 +127,7 @@ describe('reading a code with the camera — CameraController.readPairingCode', 
   it('says the reader is unavailable, distinctly, when its chunk will not load — #550’s second review', async () => {
     const camera = scriptedCamera({ codePixels: () => photographed(pairingCodeModules(OFFER)) });
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: () => () => undefined,
       loadCodeReader: async () => Promise.reject(new Error('the chunk would not load')),

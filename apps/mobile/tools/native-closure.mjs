@@ -14,7 +14,7 @@
  * directory is gitignored with the rest of `build/`, so the report is a local
  * artefact exactly as the merged manifest `merged-manifest.test.ts` reads is.
  *
- * ⚠️ **It needs a JDK and an Android SDK**, and CI has neither (CLAUDE.md §4c),
+ * ⚠️ **It needs a JDK and an Android SDK**, and CI has neither (docs/agents/ci.md §4c),
  * which is why this is a tool somebody runs and the test beside the module
  * skips loudly without its output. It decides nothing: which libraries are
  * acceptable is `apps/mobile/native-closure.json`, reviewed by a person.
@@ -49,7 +49,7 @@ if (result.error !== undefined || result.status !== 0) {
       'On a fresh clone Gradle needs the directories `cap sync` writes first — measured on ' +
       'this tool’s own first run, which failed on a missing capacitor-cordova-android-plugins/. ' +
       '`pnpm --filter @onyourleft/mobile exec cap update android` writes them without a web ' +
-      'build, provided android/app/src/main/assets/public exists (CLAUDE.md §4k).',
+      'build, provided android/app/src/main/assets/public exists (docs/agents/generated-and-cost-gates.md §4k).',
   );
   process.exit(1);
 }

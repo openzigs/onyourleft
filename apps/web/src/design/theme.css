@@ -570,6 +570,10 @@ h3:first-child {
  * the accessibility tree as well as off the screen, which is safe because both
  * are `alt=""`: the name is a visually hidden span beside them.
  *
+ * ⚠️ The full logo on About is NOT switched here since #972: it is one picture
+ * whose source `Brand.tsx` §`FullLogo` picks from the same `data-theme`, so a
+ * visit fetches one file rather than both.
+ *
  * ⚠️ The wordmark is INLINE, in the paragraph's own line box, and 1.5 rem tall —
  * shorter than the line `.oyl-wordmark`'s type sets, so the paragraph is the
  * height it was as text and the header's measured height did not move
@@ -590,6 +594,8 @@ h3:first-child {
   display: block;
   width: 100%;
   max-width: 16rem;
+  /* With the picture's own `width` and `height` attributes, `auto` keeps its
+     box at the picture's ratio before it has loaded (#1136). */
   height: auto;
 }
 
@@ -603,10 +609,6 @@ h3:first-child {
 
 :root[data-theme='dark'] .oyl-wordmark__image.oyl-brand--dark {
   display: inline-block;
-}
-
-:root[data-theme='dark'] .oyl-brand-logo__image.oyl-brand--dark {
-  display: block;
 }
 
 /*
@@ -648,7 +650,7 @@ h3:first-child {
  * is a `banner` landmark labelled "On Your Left" (`AppShell.tsx`). The
  * wordmark is taken off the SCREEN only — the visually-hidden pattern this
  * stylesheet already uses, which is safe for a paragraph because it is not a
- * control and so cannot mislead the tab-order model (CLAUDE.md §4e). The
+ * control and so cannot mislead the tab-order model (docs/agents/accessibility.md §4e). The
  * header's box is then zero tall: its band above still paints the inset.
  */
 @media (max-width: 37.49rem) {
@@ -678,7 +680,7 @@ h3:first-child {
  * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
  * decides which it is, on the window's size.
  *
- * ⚠️ **Persistent chrome, so measured rather than read** — CLAUDE.md §4f.
+ * ⚠️ **Persistent chrome, so measured rather than read** — docs/agents/browser-gate.md §4f.
  * `shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET` now counts the bar and
  * the rail as well as the header, and the one place a pinned bar would not fit
  * is the one #307 failed at: at 320×256 a 64 px bar is 25 % of the screen. So
@@ -2035,6 +2037,22 @@ h3:first-child {
   .oyl-main {
     scroll-margin-top: 7rem;
   }
+
+  /*
+   * #990: what a sticky header costs KEYBOARD focus. Chromium scrolls a
+   * control that Tab or Shift+Tab reaches off the screen just far enough to
+   * put it at the edge, and the top edge is where the header is — on
+   * Settings a control reached backwards was focused up to 44 px under it
+   * (WCAG 2.2 SC 2.4.11). So the whole document's scroll area starts below
+   * the header: its declared height (#671) and the band it sticks under, the
+   * same two numbers its `top` and its box are made of, so they cannot come
+   * apart. #983 did this for the game's chooser alone; this replaces it.
+   * `browser/sticky-header.browser.spec.ts` walks Settings backwards, with
+   * the padding taken off as its control.
+   */
+  :root {
+    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
+  }
 }
 
 .oyl-footer {
@@ -2745,13 +2763,18 @@ a.oyl-button {
 }
 
 /*
- * 9rem tracks, sized as `.oyl-home__facts`' were before #1052 — from a Mac's
- * `10:23:45` at `xxl` (137 px). Linux draws it about 153 px; nothing measures
- * this card's facts at a ten-hour ride yet.
+ * 10rem tracks since #1083, as `.oyl-home__facts`' since #1052. They were 9rem
+ * (144 px), sized from a Mac's `10:23:45` at `xxl` (137 px); the CI runner's
+ * Linux font draws it 153 px, so any card whose two tracks came out between
+ * 144 and 153 px — a phone about 375 px wide — ran the elapsed time 5.5 px
+ * past its fact, and nothing measured a ten-hour ride. At 10rem (160 px) no
+ * track is narrower than the numerals. `rideview.browser.spec.ts` §"#1083"
+ * holds a `10:23:45` to one line inside its fact at every phone and tablet;
+ * at 9rem it spills at 375 px, and at 7rem on the 4:3 tablet in the shell.
  */
 .oyl-result__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--oyl-space-sm) var(--oyl-space-md);
   margin: 0;
 }
@@ -4242,7 +4265,7 @@ select.oyl-input {
  *
  * ## `position: fixed`, and what §4f requires of that
  *
- * CLAUDE.md §4f: a change to `position` or `z-index` *"is reviewed by measuring
+ * docs/agents/browser-gate.md §4f: a change to `position` or `z-index` *"is reviewed by measuring
  * it in the pinned Chromium, not by reading the CSS."*
  * `browser/ride.browser.spec.ts` is that measurement — the stage's box against
  * the viewport, every control inside it with `scrollY === 0`, at a phone in
@@ -4365,11 +4388,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The two `scroll-padding` rules left are not this chooser's pin — it has none
+ * The `scroll-padding` rule left here is not this chooser's pin — it has none
  * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * and the header (sticky, `--oyl-header-height`, on a large one) would
- * otherwise sit over a control Tab scrolls to the edge. They are scoped to
- * the chooser; the app-wide gap is a follow-up.
+ * would otherwise sit over a control Tab scrolls to the bottom edge. It is
+ * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
+ * large window) was too until #990, which made it the whole document's —
+ * see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -4599,13 +4623,6 @@ select.oyl-input {
 @media (max-width: 37.49rem) and (min-height: 30rem) {
   :root:has(.oyl-chooser) {
     scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
-  }
-}
-
-/* The sticky HEADER — the shell's own query and height, restated. */
-@media (min-width: 64rem) and (min-height: 40rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
   }
 }
 
@@ -5863,7 +5880,7 @@ select.oyl-input {
  * reader reaches it, and the control reopens it. The rule below hides the
  * route only for a notice that is standing OPEN.
  *
- * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
+ * ⚠️ `display: none`, which docs/agents/accessibility.md §4e warns about — for CONTROLS. The
  * accessibility suite loads no stylesheet, so an element hidden here still
  * looks focusable to `tabbableElements`; this panel holds an `svg` with a text
  * equivalent and no control at all, so there is nothing for that to be wrong
@@ -5974,7 +5991,7 @@ select.oyl-input {
  * 365 / 0.52 is 702 px. On the runner they are **373 px at 320 px wide**: a
  * different `system-ui`, wider glyphs, and a label that wraps in a 90 px track.
  * The pull request's first CI run put the route panel 8 px over the rider's
- * helmet at 320×704 while the same spec was green locally — CLAUDE.md §4f's
+ * helmet at 320×704 while the same spec was green locally — docs/agents/browser-gate.md §4f's
  * *"a green browser gate on a developer's machine says nothing about…"*, this
  * time about fonts. So: 373 / 0.52 is 717 px, 47 rem is 752, and a phone
  * narrower than 360 px — where the tracks are narrow enough to wrap a label —
@@ -6038,10 +6055,11 @@ select.oyl-input {
  *   measured with 16 px to spare. Anchored rather than placed by the grid,
  *   because the row is INSIDE the actions panel in the document — beside
  *   Pause and End ride, where a keyboard and a screen reader meet it — and a
- *   grid cannot lift a grandchild into another column. ⚠️ Where the engine
- *   has no anchor positioning (a WebView older than Chrome 125) the rule does
- *   not apply and the panel is what it was before #576; `@supports` says so
- *   rather than leaving a half-applied rule.
+ *   grid cannot lift a grandchild into another column as an in-flow item.
+ *   ⚠️ Where the engine has no anchor positioning (a WebView older than
+ *   Chrome 125) this rule does not apply, and since #1120 the block after it
+ *   lifts the row by grid placement instead; a reviewer who remembers "the
+ *   panel is what it was before #576" there is reading the old file.
  *
  * - **Column (a phone upright): the side camera's row and the sound row
  *   SHARE one row**, because width is what an upright phone has and height is
@@ -6080,6 +6098,53 @@ select.oyl-input {
   }
 }
 
+/*
+ * #576 WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * An engine with no anchor positioning (Android System WebView older than
+ * Chrome 125) skips the block above, and until #1120 that left the side
+ * camera's row stacked inside the actions panel — which ran off a 736×360 and
+ * an 844×390 stage, exactly #576's defect. So it is lifted here too, by a
+ * placement every engine with CSS grid has: the row is `position: absolute`,
+ * its containing block is the HUD's grid (nothing between them is
+ * positioned), and its grid placement names the cell it is drawn against.
+ * An absolutely positioned DESCENDANT of a grid is placed by its own
+ * `grid-area` — measured in Chromium 124, which has no anchor positioning.
+ *
+ * ⚠️ **Hung from the TOP of the free strip in the left column, where the
+ * anchored rule hangs it from the bottom** — the top of the route panel, or of
+ * the notice in its cell. Grid placement has no edge of a sibling's content to
+ * hang from, only grid lines, and the line under the first row is the one that
+ * is the same place on every ride: `top: 100%` of row one is the bottom of the
+ * taller of the two top panels. Both forms need the same room — the strip
+ * between the primary panel and the bottom-start cell. On the CI runner's
+ * fonts at 736×360 (run 37250318689) the row is drawn from y = 141 to 201: 4 px
+ * under the primary panel and 10 px above the route panel, where the anchored
+ * row is 1 px and 8 px (`ride.browser.spec.ts` §"with sounds on" publishes both
+ * ways). The row's vertical padding is the extra-small step for that room.
+ *
+ * ⚠️ **Explicit lines, both ends.** For an absolutely positioned item an
+ * `auto` grid line is the grid's padding EDGE, not one track on: `grid-row: 2`
+ * alone put this row at the bottom of the stage on the first try.
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound) > .oyl-hud__side-camera-row {
+      position: absolute;
+      grid-area: 1 / 1 / 2 / 2;
+      top: calc(100% + var(--oyl-space-xs));
+      left: 0;
+      width: min(100%, 16rem);
+      box-sizing: border-box;
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      color: var(--oyl-color-hud-ink);
+      padding: var(--oyl-space-xs) var(--oyl-space-sm);
+    }
+  }
+}
+
 @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound):has(> .oyl-hud__side-camera-row) {
     flex-flow: row wrap;
@@ -6114,6 +6179,376 @@ select.oyl-input {
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
+  }
+}
+
+/*
+ * THE MOVING TIME ON A NARROW PHONE ON ITS SIDE — #1111.
+ *
+ * The moving time is a seventh secondary reading on the widest ride a rider
+ * can start (a pacer, a ghost and a wind), and at 736 px the secondary panel
+ * is 328 px: three 5.5 rem tracks, so the seventh is a third row — measured in
+ * the pinned Chromium, the panel went from 129 to 196 px and its third row
+ * came down onto the leaning rider (x = 299 to 437, from y = 189) at 736×360.
+ *
+ * ⚠️ **A fourth track is not to be had here, and that is measured on the CI
+ * runner rather than argued.** The first version narrowed the primary panel to
+ * 19.5 rem so the secondary panel took four 89 px tracks. On a Mac every
+ * reading fitted. On the runner, whose system face has wider digits, `9:59:59`
+ * at 1.5 rem is 92.5 px and `36.2 km/h` wraps as well, so the first row grew
+ * from 45 to 70 px and the bottom row went off a 736×360 stage (run
+ * 37229623180, and 37232559179 with the time spanning two tracks). Four tracks
+ * that hold the secondary tier on those fonts and three primary tracks that
+ * hold a four-digit power do not fit in 736 px together.
+ *
+ * So below 802 px the primary panel keeps its 24 rem and the secondary tier
+ * keeps the six readings it had, and the moving time is DRAWN in the primary
+ * panel, on one line of its own under the three numbers — its label BESIDE
+ * its value, so the line is one value high: the panel gives itself the room
+ * with padding, and the field is placed in it by anchor positioning, as on an
+ * upright phone (below). The primary units go under their numbers, as they do
+ * below 24 rem. Measured on the runner's fonts, that panel is then 134 px
+ * against the secondary panel's 137, so the top row of the stage, and every
+ * panel under it, does not move: with sounds on and a side camera paired at
+ * 736×360 both columns are full to within 16 px, and #576 lifts the side
+ * camera's row into the left one, under this panel. The field spans the
+ * panel's inner width, so the time has 360 px where it needs 93. It stays in
+ * the secondary list in the document, where a screen reader and #94's order
+ * meet it. From 816 px (51 rem) the time is the fourth track's reading on the
+ * first row, in a track sized from its own content (§"THE MOVING TIME'S OWN
+ * WIDTH — #1124" below). ⚠️ That was 802 px until #1124, where four EQUAL
+ * tracks first fit (4 × 88 + 3 × 8 + 18 = 394 px of panel) — and an equal
+ * 88 px track is narrower than `9:59:59` on the runner's fonts (92.5 px), so
+ * from 802 to 819 px the time ran past its field, at no viewport any gate
+ * measured.
+ *
+ * ⚠️ Without anchor positioning this does not apply, and since #1120 the block
+ * after it draws the time in the same place by grid placement; until then it
+ * was a third secondary row over the rider at 736×360.
+ * `ride.browser.spec.ts` §"#1111" publishes the margins at every viewport,
+ * and how much room the time has in its field.
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      anchor-name: --oyl-hud-primary;
+      /* The moving time's one line (a 1.5 rem value at line-height 1.05), and
+         half a gap above it. */
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    /* The unit under the number, on a line of its own size. Beside it, on the
+       runner's fonts, `168 bpm` is 117 px in a 117 px track and wraps — onto
+       a second 42 px VALUE line, which made the panel 129 px before the time
+       was added. Under it is about 17 px, on every machine, for every value
+       including a four-digit power. */
+    .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+      display: block;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      position-anchor: --oyl-hud-primary;
+      left: calc(anchor(left) + var(--oyl-space-sm));
+      right: calc(anchor(right) + var(--oyl-space-sm));
+      bottom: calc(anchor(bottom) + var(--oyl-space-sm));
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+  }
+}
+
+/*
+ * #1111 ON ITS SIDE, WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * The block above, for an engine with no anchor positioning: the moving time
+ * is drawn across the bottom of the primary panel by grid placement instead —
+ * `position: absolute` in the HUD's own `primary` area, which is the primary
+ * panel's box once the panel is stretched to its row (`align-self: stretch`
+ * here, where the corners layout starts it). The panel is then as tall as the
+ * secondary panel beside it, a few pixels on the runner's fonts, and the
+ * secondary tier keeps its six readings in two rows, as with anchors. Without
+ * this the time was a third secondary row over the leaning rider at 736×360
+ * (#1120: 16 cases of `ride.browser.spec.ts`; 14 of the states a ride can be
+ * in, measured in Chromium 124).
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+    .oyl-game--riding .oyl-hud__fields--primary {
+      align-self: stretch;
+      padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
+    }
+
+    .oyl-game--riding .oyl-hud__fields--primary .oyl-hud__unit {
+      display: block;
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      grid-area: primary;
+      left: var(--oyl-space-sm);
+      right: var(--oyl-space-sm);
+      bottom: var(--oyl-space-sm);
+      flex-direction: row;
+      align-items: baseline;
+      gap: var(--oyl-space-sm);
+    }
+  }
+}
+
+/* #1111. A time is one token: `9:59:59` broken at a colon reads as two
+   numbers, and the second line makes its row taller on a HUD with no height to
+   spare. So it is never broken, and what holds it inside its field instead is
+   a measurement: `ride.browser.spec.ts` §"#1111" and `hud.browser.spec.ts`'s
+   no-overflow check, on the CI runner's fonts. Past ten hours it is set at the
+   word size (`fields.ts` §`movingTimeReading`), for #259's reason. */
+.oyl-hud__field--moving .oyl-hud__value {
+  white-space: nowrap;
+}
+
+/*
+ * THE MOVING TIME'S OWN WIDTH — #1124.
+ *
+ * `9:59:59` is never broken (above), so what keeps it inside its field is the
+ * field's width — and until #1124 that was a fixed track or a fixed 6 rem,
+ * with the time measured into whatever was left: 1.0 px to spare on the CI
+ * runner's DejaVu Sans at 844×390 and both landscape tablets (a 93.5 px track
+ * for a 92.5 px time), 3.5 px upright (6 rem), and NONE from 802 to 819 px on
+ * its side, where four equal tracks are 88 to 92.5 px. A change to the
+ * runner's fonts, the secondary value size or the 5.5 rem floor would have
+ * turned `main` red with nothing wrong in the product, or spilled the time
+ * where no gate looks.
+ *
+ * So the field is sized from what it holds: `--oyl-hud-moving-width` is
+ * 6.5 `ch` AT THE VALUE'S SIZE — six and a half of the face's own `0`, the
+ * width of one tabular digit — for five digits and two colons. A colon is
+ * narrower than a digit in every face measured (DejaVu Sans about half one;
+ * Roboto, Android's, under half), so the floor follows the face: 99.3 px for
+ * a 92.5 px time on DejaVu, about 87.6 px for about 79 px in Roboto (reasoned
+ * from the font's metrics, not measured: #733). It is written in the HUD's
+ * own `ch` times the value's 1.5, so the controls that make room for the
+ * field upright can reserve the same width (`ch` is the font of the element
+ * that uses it, and the controls and the field are both in the HUD's).
+ * `ride.browser.spec.ts` §"#1124" publishes the spare width at every viewport
+ * and holds it to `MOVING_TIME_SPARE_PIXELS`.
+ *
+ * On its side from 51 rem the time is the fourth secondary track's reading on
+ * the first row (its index is fixed, `fields.ts` §`hudReadings`), and that
+ * track is `minmax(max-content, 1fr)`: never narrower than the field's floor,
+ * an equal share when there is room. ⚠️ **Where the HUD stacks rather than
+ * standing in corners (`STACKED_VIEWPORTS`, and a phone such as 320×568 or
+ * 412×700) the time is still an `auto-fit` track's reading**, as narrow as
+ * 88 px, and measured for #1124 it runs 2.5 to 4.2 px past its field there on
+ * the runner's fonts; no gate measures those layouts' fit yet (#1124's
+ * follow-up). Below 51 rem a corners layout has three
+ * tracks, written out rather than `auto-fit`, because from 802 px `auto-fit`
+ * made a fourth that could not hold the time: 51 rem is where three 5.5 rem
+ * tracks and the time's 99.3 px fit (3 × 88 + 99.3 + 3 × 8 + 18 = 405.3 px of
+ * panel, at 813 px), with 3 px left for a face a little wider than DejaVu.
+ */
+.oyl-game--riding .oyl-hud {
+  --oyl-hud-moving-width: calc(6.5ch * 1.5);
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(3, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(3, minmax(5.5rem, 1fr)) minmax(max-content, 1fr);
+  }
+
+  /* Here only: in a layout of `auto-fit` 5.5 rem tracks the floor would push
+     the field past its track rather than widen it (below). */
+  .oyl-game--riding .oyl-hud__field--moving .oyl-hud__value {
+    min-inline-size: 6.5ch;
+  }
+}
+
+/*
+ * THE MOVING TIME ON AN UPRIGHT PHONE — #1111.
+ *
+ * Upright there is no fourth track to be had (a 344 px panel holds three), so
+ * on the widest ride the seventh secondary reading is a third row — and the
+ * column layout has no height for one: the top stack ended 41 px above the
+ * leaning rider's helmet at 360×752, and a standing Eased notice beside *Keep
+ * the screen on* ended 69 px above it against a 50 px floor
+ * (`ride.browser.spec.ts` §"#585", §"#647"). A row is 53 px.
+ *
+ * So upright, the moving time is lifted out of the grid and set beside *Pause*
+ * and *End ride*, which are stretched across the actions panel and give up
+ * 7 rem of their width for it: 99 px each at 360 px, against their 72 px
+ * floor (`HudPanel.tsx` §`CONTROL_MINIMUM_PIXELS`). That costs the panel no
+ * height at all, which is what every combination of sounds, side camera and
+ * notice at the bottom of the screen needs — with sounds on, the actions
+ * panel began 32 px under the rider. It is the same reading in the same
+ * place in the document; only where it is DRAWN moves, by anchor positioning,
+ * as #576 moved the side camera's row.
+ *
+ * ⚠️ **With a third control — *Trainer notice* (#437) — there is no width to
+ * give**: three controls at 72 px and their gaps are 248 of 326 px. Then it is
+ * set on its own surface just ABOVE the actions panel instead: a ride with
+ * that control has no trainer line, and its actions panel began 121 px under
+ * the rider at 360×752.
+ *
+ * ⚠️ **Anchor positioning is Android System WebView / Chrome 125 or later,
+ * and since #1120 this layout no longer assumes it** — a reviewer who
+ * remembers "this layout ASSUMES anchor positioning" is reading the old file.
+ * Where the engine has none, the block after this one places the reading by
+ * grid placement. Before it, the reading stayed a third row in the grid and
+ * did not hold the upright layout's floors: measured for #1111's review with
+ * this block deleted, 13 cases of `ride.browser.spec.ts` failed at 360×752 and
+ * 360×800 (a panel over the leaning rider, #585's and #647's 50 px floors, the
+ * sounds and the side camera). `ride.browser.spec.ts` now measures every
+ * overlay case both ways, through the CSSOM (§`withoutAnchors`).
+ */
+@supports (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__actions {
+      anchor-name: --oyl-hud-actions;
+    }
+
+    .oyl-game--riding .oyl-hud__controls {
+      anchor-name: --oyl-hud-controls;
+      /* The moving time's own width (#1124), and the controls' own gap. */
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      position-anchor: --oyl-hud-controls;
+      top: anchor(top);
+      bottom: anchor(bottom);
+      right: anchor(right);
+      /* #1124: the field is as wide as its value's own floor
+         (§"THE MOVING TIME'S OWN WIDTH"), which the controls reserve above.
+         It was 6 rem, 96 px, where `9:59:59` is 92.5 px on the runner's fonts.
+         "MOVING" at the label size is under 60. */
+      width: var(--oyl-hud-moving-width);
+      justify-content: center;
+    }
+
+    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+      padding-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__fields--secondary
+      > .oyl-hud__field--moving {
+      position-anchor: --oyl-hud-actions;
+      top: auto;
+      bottom: anchor(top);
+      right: anchor(right);
+      width: auto;
+      margin-bottom: var(--oyl-space-sm);
+      box-sizing: border-box;
+      /* A panel of its own here, over the world, so it carries the panel's
+         surface: the colour pair `contrast.a11y.test.ts` checks is the pair a
+         rider sees. */
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      padding: var(--oyl-space-sm);
+    }
+  }
+}
+
+/*
+ * #1111 UPRIGHT, WITHOUT ANCHOR POSITIONING — #1120.
+ *
+ * The block above, for an engine with no anchor positioning: the moving time
+ * is placed in the HUD's `actions` area by grid placement — `position:
+ * absolute`, its containing block the HUD's grid — at the TOP-END corner of
+ * the actions panel, 6 rem wide. The controls give up the same width they give
+ * up with anchors, so the field is beside *Pause* and *End ride* when they are
+ * the panel's first row.
+ *
+ * ⚠️ **What it costs, which #419 asks to have written down: the trainer line
+ * gives up the same 7 rem**, because grid placement has no edge of the
+ * controls to hang from — only the panel's own top — and the trainer line is
+ * above the controls (#373). On the CI runner's fonts `Trainer: simulating
+ * 0.9% (1 sent)` is 262 px in 326, so it takes a second line, and the actions
+ * panel is one line (25 px) taller than with anchors. The field is shorter
+ * than that line and the controls together, so it never reaches below them.
+ * At 360×752 with sounds on and a side camera paired the panel then begins
+ * 6 px under the leaning rider's box, where it begins 30 px under it with
+ * anchors (the CI runner's fonts, run 37250318689); `ride.browser.spec.ts`
+ * publishes both, and holds both to no overlap. Measured in Chromium 124 on a Mac, nothing on the stage overlaps
+ * anything at any of the nine overlay viewports in fourteen states.
+ *
+ * ⚠️ **That 6 px rests on the trainer line wrapping to at most TWO lines.**
+ * Here the line has 326 px less 7 rem, 214 px at 360 px, so two lines are
+ * about 428 px; the longest sentence `fields.ts` §`trainerLine` can produce
+ * (`Trainer: simulating -40.0% (99999 sent)`, the steepest grade a trainer is
+ * sent and over 27 hours of writes) is about 310 px. A third line would put the
+ * actions panel about 19 px INTO the leaning rider's box. `fields.test.ts`
+ * §"wraps to at most two lines" holds the sentence to that budget on save, by
+ * estimate; the browser gate is the measurement.
+ *
+ * ⚠️ With *Trainer notice* (#437) it is set above the actions panel, on its
+ * own surface, as with anchors — in the empty row over the controls
+ * (`grid-area: 4 / 1 / 5 / 2`, every line named: an `auto` line is the grid's
+ * padding edge for an absolutely positioned item).
+ *
+ * The `calc(var(--oyl-space-sm) + 1px)` insets are the actions panel's own
+ * padding and border (`.oyl-hud__panel`): grid placement's containing block is
+ * the grid area's outer edge, so the field is moved in by both to sit where the
+ * panel's content begins, as `anchor()` against the controls puts it. And there
+ * is no `justify-content: center` here, unlike the anchored rule: there the
+ * field is stretched to the controls' height (`top` and `bottom` both set) and
+ * centred in it; here only `top` is set, the field is its own content's height,
+ * and centring has no space to act on — the controls are not an edge grid
+ * placement can reach.
+ */
+@supports not (anchor-name: --oyl-probe) {
+  @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+    .oyl-game--riding .oyl-hud__controls {
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__actions > .oyl-hud__trainer {
+      margin-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
+    }
+
+    .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
+      position: absolute;
+      grid-area: actions;
+      top: calc(var(--oyl-space-sm) + 1px);
+      right: calc(var(--oyl-space-sm) + 1px);
+      width: var(--oyl-hud-moving-width);
+    }
+
+    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+      padding-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__actions
+      > .oyl-hud__trainer {
+      margin-inline-end: 0;
+    }
+
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud__fields--secondary
+      > .oyl-hud__field--moving {
+      grid-area: 4 / 1 / 5 / 2;
+      top: auto;
+      bottom: 0;
+      right: 0;
+      width: auto;
+      box-sizing: border-box;
+      background: var(--oyl-color-hud-surface);
+      border: 1px solid var(--oyl-color-hud-border);
+      border-radius: var(--oyl-radius);
+      padding: var(--oyl-space-sm);
+    }
   }
 }
 
@@ -6294,7 +6729,7 @@ select.oyl-input {
  * THE LIVE CAMERA INDICATOR — #382, ADR 0029 D-5.
  *
  * `camera/indicator.tsx` is the component and the argument; this is the half
- * CLAUDE.md §4f says must be *"reviewed by measuring it in the pinned Chromium,
+ * docs/agents/browser-gate.md §4f says must be *"reviewed by measuring it in the pinned Chromium,
  * not by reading the CSS"*, and `browser/shell.browser.spec.ts` §"the live
  * camera indicator" is that measurement.
  *
@@ -6372,7 +6807,7 @@ select.oyl-input {
  *
  * `views/SideCameraView.tsx` is the component. Two things are drawn here: the
  * framing picture a rider lines the bike up by, and the full-screen sign the
- * tripod phone shows while it films. The sign is the half CLAUDE.md §4f says is
+ * tripod phone shows while it films. The sign is the half docs/agents/browser-gate.md §4f says is
  * *"reviewed by measuring it in the pinned Chromium, not by reading the CSS"*,
  * and `browser/sidecamera.browser.spec.ts` is that measurement.
  *
@@ -6530,6 +6965,31 @@ select.oyl-input {
 .oyl-framing__ghost * {
   stroke: var(--oyl-color-accent);
   stroke-dasharray: 8 6;
+}
+
+/* The live view's outline of where the model found the rider (#1061, ADR 0044
+   D-9): DOTTED, with a dot at each point, so it is told from the SOLID guide
+   and the DASHED ghost by its pattern, not its colour (#48). Drawn over the
+   camera's picture, so in HUD ink in both palettes (#672). */
+.oyl-framing__outline * {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
+}
+
+.oyl-framing__overlay .oyl-framing__joint {
+  fill: var(--oyl-color-hud-ink);
+  stroke: none;
+}
+
+/* The tablet's live view sits in the Camera screen's column, under its
+   controls and words; bounded so a landscape picture does not fill the page. */
+.oyl-side-live {
+  max-inline-size: 40rem;
+}
+
+.oyl-side-live .oyl-framing__picture {
+  max-block-size: 50vh;
 }
 
 /* =============================================================================

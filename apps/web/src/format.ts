@@ -35,16 +35,30 @@ export const POWER_UNIT = 'W';
  * caller *does* hold a `Seconds` — a stored ride's `elapsedTime` — it is
  * assignable, so nothing is lost at the stricter call site.
  */
-export function formatDuration(totalSeconds: number): string {
+export function formatDuration(totalSeconds: number, hours: DurationHours = 'when-some'): string {
   const whole = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(whole / 3600);
+  const wholeHours = Math.floor(whole / 3600);
   const minutes = Math.floor((whole % 3600) / 60);
   const secs = whole % 60;
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return hours > 0
-    ? `${String(hours)}:${pad(minutes)}:${pad(secs)}`
+  return wholeHours > 0 || hours === 'always'
+    ? `${String(wholeHours)}:${pad(minutes)}:${pad(secs)}`
     : `${String(minutes)}:${pad(secs)}`;
 }
+
+/**
+ * Whether {@link formatDuration} writes the hour when there is none — #1111.
+ *
+ * `when-some` (`2:05`) is every screen that reads a duration once: a library
+ * row, the Ride screen's clock, a result card. `always` (`0:02:05`) is the
+ * ride HUD's moving time, which a rider glances at for a second at a time over
+ * an hour (#94: found by position, not by reading) — so it keeps ONE shape for
+ * the whole ride rather than growing a field at the hour, and its layout was
+ * measured at that shape (`browser/ride.browser.spec.ts`). An argument here
+ * rather than a second function, so there is still one place that decides how
+ * a duration reads.
+ */
+export type DurationHours = 'when-some' | 'always';
 
 /** An average power as whole watts. A fractional watt is not a thing a rider reads. */
 export function formatPowerValue(power: Watts): string {

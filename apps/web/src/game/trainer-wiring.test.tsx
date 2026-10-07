@@ -193,6 +193,7 @@ function trainerPort(
       return Promise.resolve();
     },
     noteGameRideEnded: () => undefined,
+    subscribe: () => () => undefined,
   });
 }
 
@@ -579,6 +580,8 @@ describe('the Ride press asks the trainer for control — #503', () => {
       workoutRescue: () => undefined,
       recordingMayStop: () => false,
       gameRideEnded: () => undefined,
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
     };
   }
 
@@ -1004,6 +1007,8 @@ describe('a press on Ride while the trainer is being asked — #509', () => {
         workoutRescue: () => undefined,
         recordingMayStop: () => false,
         gameRideEnded: () => undefined,
+        rideMovingSeconds: () => undefined,
+        watchRide: () => () => undefined,
       },
       grant: () => {
         granted = true;

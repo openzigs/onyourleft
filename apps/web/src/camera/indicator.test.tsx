@@ -10,7 +10,7 @@
  * indicator that is always on is indistinguishable from one that works."*
  *
  * ⚠️ **What this file cannot do is measure anything**, because jsdom performs
- * no layout and resolves no custom property (CLAUDE.md §4e). The `position`,
+ * no layout and resolves no custom property (docs/agents/accessibility.md §4e). The `position`,
  * the stacking and the hit test are `browser/shell.browser.spec.ts`'s, and the
  * one property of the stylesheet that can be checked without a browser — that
  * no other rule declares a higher `z-index` — is `indicator-style.test.ts`'s.
@@ -28,6 +28,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 import { CameraIndicator } from './indicator';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -51,6 +52,7 @@ describe('the indicator follows the camera', () => {
   it('is absent when a camera exists and is not running', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -62,6 +64,7 @@ describe('the indicator follows the camera', () => {
   it('appears when the camera starts and goes when it stops', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -81,7 +84,11 @@ describe('the indicator follows the camera', () => {
   it('goes out when the camera is taken away from outside this app', async () => {
     const camera = scriptedCamera();
     const timers = manualSchedule();
-    const controller = new CameraController({ port: camera.port, schedule: timers.schedule });
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: camera.port,
+      schedule: timers.schedule,
+    });
     controller.agree(AGREED);
     mounted = await mount(<CameraIndicator controller={controller} />);
     await controller.turnOn();

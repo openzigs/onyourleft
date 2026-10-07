@@ -48,6 +48,7 @@ import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
 import { specifiersIn } from './import-walk-testing';
 import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -86,6 +87,7 @@ describe('1. at runtime, an answer changes nothing the ride reads', () => {
     const schedule = manualSchedule();
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: schedule.schedule,
       analysis: hostilePort,
@@ -233,7 +235,7 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
   // It reads every source file in the client, so it grows with the tree. Its time
   // under coverage on green `main` runs: 4 045, 4 499 and 4 552 ms (runs 36709354619,
   // 36705496259, 36700515225), 91 % of Vitest's 5 s default, and 5 133 ms on #917's
-  // run 36711705363. So about three times the slowest green figure, as CLAUDE.md §4c
+  // run 36711705363. So about three times the slowest green figure, as docs/agents/ci.md §4c
   // asks. It is a timeout, not a performance claim.
   it('is imported only by the modules listed, and they are the ones that exist', () => {
     const importers = sources()
@@ -470,6 +472,7 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
       key: 'fixture-hosted-key',
     }).model;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () =>

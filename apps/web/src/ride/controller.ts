@@ -1127,7 +1127,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * A trainer re-paired, put under control and given an ERG target in that
    * window would lose its link with the target on it, and the trainer this
    * program was measured on keeps its target through a Stop and a Reset alike
-   * (CLAUDE.md §4h) — with no link, not even a Stop can be sent. So pairing
+   * (docs/agents/game.md §4h) — with no link, not even a Stop can be sent. So pairing
    * goes on (#716), and control waits for the call to land, either way.
    *
    * ⚠️ **A set of calls, not a set of device ids.** On Web Bluetooth a device
@@ -1176,7 +1176,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * own on a `0xFF` (`mayReacquireControl`, handed to `openTrainer`) — and no
    * setpoint goes to a client the rider did not ask for (@see
    * mustWaitForForget). ⚠️ A release is never held back: a Stop that is not
-   * sent is resistance left on (CLAUDE.md §4h, §6).
+   * sent is resistance left on (docs/agents/game.md §4h, §6).
    */
   const holdsTrainerControlBack = (): boolean =>
     trainerForgetsInProgress.size > 0 || lateTrainerForgets.size > 0;
@@ -1231,7 +1231,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * detach → forget). The late call drops that device's link, not this one's.
    * Releasing it pre-emptively would end the rider's workout or game ride for
    * a hazard it does not face — and on the trainer measured a Stop keeps its
-   * target anyway (CLAUDE.md §4h), so it would buy nothing where it is needed.
+   * target anyway (docs/agents/game.md §4h), so it would buy nothing where it is needed.
    *
    * A WeakSet because a client is dropped with its pairing; one re-paired is a
    * new client, which has to be asked for again.
@@ -2097,7 +2097,7 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /**
    * Let a trainer about to be forgotten go, through the ONE release — #659's
-   * review, and CLAUDE.md §4h (#372). Resolves `true` when it may be
+   * review, and docs/agents/game.md §4h (#372). Resolves `true` when it may be
    * forgotten: it holds nothing of this app's, or the Stop landed, or control
    * has gone anyway. `false` only when the Stop did not land and control is
    * still held — the machine may be holding resistance, and this app is the

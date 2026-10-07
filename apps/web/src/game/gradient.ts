@@ -15,7 +15,7 @@
  * ⚠️ **It is the whole of #362, and the defect was that nobody had written
  * it.** Both halves shipped in #90, both were unit-tested, both were green, and
  * `grep -rn createSimulationWriter apps/` returned nothing. The gate that
- * should have said so could not: CLAUDE.md §4j's watched set is the client's
+ * should have said so could not: docs/agents/wiring-gate.md §4j's watched set is the client's
  * own seams, and these two live in `packages/`. #363 is that gate.
  *
  * ## What a sample does
@@ -109,7 +109,11 @@ import {
   type Seconds,
   type SimulationDriver,
 } from '@onyourleft/domain';
-import { createSimulationWriter, type SimulationWriter } from '@onyourleft/sensors/protocol';
+import {
+  createSimulationWriter,
+  type SimulationSink,
+  type SimulationWriter,
+} from '@onyourleft/sensors/protocol';
 
 import type { GradientTrainer } from './trainer-port';
 import { TargetHeldBack } from '../ride/held-back';
@@ -200,8 +204,31 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
   let sent: { readonly grade: number; readonly at: number } | undefined;
   /** A bounded write left the trainer short of the road. @see GradientSession.sample */
   let owed = false;
+  /**
+   * The grade the trainer last CONFIRMED (#932), apart from {@link sent}, which
+   * is only what it was last asked for. After a refused or unanswered write it
+   * is the one grade this client knows the machine is on, so a correction
+   * walks on from here rather than from nothing.
+   */
+  let acknowledged: number | undefined;
+  /** Every offer made, so the writer's waiting slot can be told apart. */
+  let offers = 0;
 
-  const writer: SimulationWriter = createSimulationWriter(control, {
+  // Writes are one at a time (the writer keeps one in flight), so the last to
+  // resolve is the newest the trainer holds.
+  const sink: SimulationSink = {
+    setSimulationParameters: async (parameters) => {
+      await control.setSimulationParameters(parameters);
+      acknowledged = parameters.grade;
+    },
+  };
+
+  const offer = (grade: GradePercent): void => {
+    offers += 1;
+    writer.offer({ grade });
+  };
+
+  const writer: SimulationWriter = createSimulationWriter(sink, {
     onError: (error: unknown) => {
       fault = faultText(error);
       // ⚠️ **The half that is easy to leave out, and the one that matters.**
@@ -213,8 +240,28 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       driver.restart();
       // #782: and the bounded path's own memory of what was written, for the
       // same reason — the next write is a fresh one.
-      sent = undefined;
-      owed = false;
+      //
+      // ⚠️ #932: but NOT its bound. Until #932 this cleared `sent` and `owed`
+      // outright, so the write after a fault went through the driver and put
+      // the road's own grade on the trainer at once — up to the whole ±8 %
+      // swing a room correction (#782) is bounded to walk. The trainer is on
+      // the grade it last confirmed, so the walk goes on from THAT, at the
+      // same rate, whether or not a correction was owed when the fault came.
+      if (acknowledged === undefined || stopped) {
+        // Nothing confirmed: nothing known to walk from, as before #932.
+        sent = undefined;
+        owed = false;
+      } else {
+        const at = sent?.at ?? Number.NEGATIVE_INFINITY;
+        sent = { grade: acknowledged, at };
+        // A write already waiting behind the refused one was walked from the
+        // REFUSED grade, so it may be a step and more from the trainer's. While
+        // a correction is owed it is replaced with the confirmed grade itself:
+        // the trainer is asked for nothing it does not already hold, and the
+        // walk resumes from there on the next sample.
+        const waiting = offers > writer.attempted() + writer.coalesced();
+        if (owed && waiting) offer(gradePercent(acknowledged));
+      }
       changed();
     },
   });
@@ -269,7 +316,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
         if (Math.abs(grade - sent.grade) < SIMULATION_GRADE_DEADBAND_PERCENT) return;
         sent = { grade, at };
         fault = undefined;
-        writer.offer({ grade: gradePercent(grade) });
+        offer(gradePercent(grade));
         changed();
         return;
       }
@@ -285,7 +332,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       }
       fault = undefined;
       sent = { grade: setpoint.grade, at };
-      writer.offer({ grade: setpoint.grade });
+      offer(setpoint.grade);
       changed();
     },
 

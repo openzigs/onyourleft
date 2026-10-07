@@ -8,7 +8,7 @@
  *
  * **Not in CI**, and not in `pnpm run test`: it spawns a runtime and spends
  * about half a minute waiting for alarms and for an eviction, which the one
- * required job cannot afford (CLAUDE.md §4c). `vitest.config.ts` excludes the
+ * required job cannot afford (docs/agents/ci.md §4c). `vitest.config.ts` excludes the
  * `*.workerd.test.ts` files for that reason.
  *
  * Imports nothing, for `vitest.config.ts`' reason.

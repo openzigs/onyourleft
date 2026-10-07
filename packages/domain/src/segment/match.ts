@@ -15,7 +15,7 @@
  * difference of two recorded timestamps that arrive as parameters.
  * `packages/domain`'s `tsconfig.json` narrows `lib` to `ES2024` with
  * `types: []`, so `fetch`, `performance` and `process` are compile errors here,
- * and `eslint.config.js` bars them again in the editor (CLAUDE.md §4d). #66's
+ * and `eslint.config.js` bars them again in the editor (docs/agents/lint-boundaries.md §4d). #66's
  * ninth criterion is that this imports and runs in a bare environment; both
  * gates say it does, and `match.test.ts` adds the behavioural half.
  *

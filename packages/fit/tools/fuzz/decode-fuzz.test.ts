@@ -8,7 +8,7 @@
  * never committed, so nothing stopped the next change to `src/decode/` from
  * reintroducing what it had ruled out. This is that run, committed, seeded, and
  * inside the ordinary `pnpm run test` gate — no new CI job, because
- * `CLAUDE.md` §4c requires every gate to report under the one status check that
+ * `docs/agents/ci.md` §4c requires every gate to report under the one status check that
  * `main` protects.
  *
  * ## What it asserts
@@ -20,7 +20,7 @@
  * assertion. A genuine hang is not caught by either: a wedged loop never
  * reaches an assertion, and the fuzz cases are synchronous, which Vitest
  * cannot interrupt — its timer is only read once the case returns — so a hang
- * here is caught only by the CI job's own stop (CLAUDE.md §4c).
+ * here is caught only by the CI job's own stop (docs/agents/ci.md §4c).
  *
  * ## Budget
  *

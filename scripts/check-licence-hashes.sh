@@ -54,7 +54,7 @@ report() {
   findings=$((findings + 1))
 }
 
-# shasum is what CLAUDE.md section 4a documents and what macOS ships; sha256sum
+# shasum is what docs/agents/commands.md section 4a documents and what macOS ships; sha256sum
 # is what a minimal Linux image ships. Either satisfies "runs on a bare clone".
 if command -v shasum >/dev/null 2>&1; then
   digest_of() { shasum -a 256 "$1" | cut -d' ' -f1; }

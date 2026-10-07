@@ -5,7 +5,7 @@
  *
  * #528's first criterion: *"A browser-gate measurement at a phone viewport
  * shows it is the dominant element."* jsdom performs no layout and resolves no
- * custom property (CLAUDE.md §4e), so nothing in the Vitest suite can say how
+ * custom property (docs/agents/accessibility.md §4e), so nothing in the Vitest suite can say how
  * big the sign is, whether anything is drawn over it, or whether the stop
  * control is 44 × 44 and uncovered. This page renders the **real** `AppShell`
  * at the **real** side-camera route under the **real** `theme.css`, drives it
@@ -37,11 +37,13 @@ import { CameraController } from '../src/camera/session';
 import { scriptedLink, scriptedSidePairing } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
+import { failLiveTablet, runLiveTablet } from './sidelive-harness';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { browserSecureWindow } from '../src/camera/secure-window-testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -53,6 +55,13 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
  * tall as the screen.
  */
 const PAIRING_SCAN = new URLSearchParams(location.search).get('pairing') === 'scan';
+
+/**
+ * `?live=tablet` — #1061: the TABLET's live view of the side camera, which
+ * `sidelive-harness.tsx` draws and measures. Here rather than a page of its
+ * own, so it adds no build entry.
+ */
+const LIVE_TABLET = new URLSearchParams(location.search).get('live') === 'tablet';
 
 /** An upright phone's camera picture, as a stream a `<video>` can play. */
 function uprightPicture(): MediaStream {
@@ -290,6 +299,7 @@ function measurePairing(): PairingMeasurement {
 async function runPairingScan(host: Element): Promise<void> {
   globalThis.location.hash = '#/camera/side';
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),
@@ -374,9 +384,14 @@ async function run(): Promise<void> {
     await runPairingScan(host);
     return;
   }
+  if (LIVE_TABLET) {
+    await runLiveTablet(host).catch(failLiveTablet);
+    return;
+  }
   globalThis.location.hash = '#/camera/side';
 
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),

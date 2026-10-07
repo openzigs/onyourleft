@@ -235,6 +235,7 @@ describe('the HUD is four panels (#423)', () => {
       'Speed',
       'Gradient',
       'To go',
+      'Moving',
       'Pacer',
     ]);
     // Document order is the order a screen reader meets them in, and it is

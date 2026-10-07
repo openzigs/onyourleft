@@ -400,7 +400,7 @@ the service holds a ride overnight on a powered device, and nothing about a batt
 
 This is the Android counterpart of 0001's Part B. Everything that decides *what may be written* —
 `createTrainerControl`, the bounding, the quantisation, the feature gating — is the same
-platform-free code on both transports (CLAUDE.md §4h). **What is different is only the write**, so
+platform-free code on both transports (docs/agents/game.md §4h). **What is different is only the write**, so
 these steps target that.
 
 | Step | What to do | What should happen |
@@ -444,7 +444,7 @@ Two consequences, both of which shape this part:
 - In the shipped app `thermalHeadroom` is always `undefined`, so `nextQuality` degrades on **frame
   timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`, `SUSTAINED_SAMPLES = 30`). The
   `HEADROOM_REDUCE_ABOVE`/`HEADROOM_RESTORE_BELOW` hysteresis **cannot fire at all**.
-- ⚠️ CLAUDE.md §4h describes the thermal port as having "Capacitor implementations in
+- ⚠️ docs/agents/game.md §4h describes the thermal port as having "Capacitor implementations in
   `apps/mobile`". For the foreground service that has been true since
   [#524](https://github.com/openzigs/onyourleft/issues/524) — before it the service existed and
   nothing started it; **for thermal headroom it describes the
@@ -1438,7 +1438,7 @@ what it returned. ⚠️ **It asks nothing** — the questions are the expressio
 the tool has no opinion to go stale.
 
 ⚠️ **It is not under `scripts/`, deliberately.** That directory is the bare-clone set — bash and
-coreutils, no install, no network, no device (CLAUDE.md §2, §4a) — and this needs `adb`, a phone
+coreutils, no install, no network, no device (CLAUDE.md §2, docs/agents/commands.md §4a) — and this needs `adb`, a phone
 with developer options on and a **debug** build. It could never be a repository check, and
 `check:repo` does not call it. It lives beside the Android project whose WebView it talks to.
 
@@ -1567,7 +1567,7 @@ invisible from a table that only said "pass".
    locally-served asset**, so resource timing cannot measure bytes inside the shell and a reader
    cannot tell a served file from a cached one that way. The evidence that a file arrived is
    `responseStatus === 200` plus Capacitor's own `Handling local request` line. This is the same
-   shape as the opaque cross-origin timing recorded in CLAUDE.md §4f, arriving from the other
+   shape as the opaque cross-origin timing recorded in docs/agents/browser-gate.md §4f, arriving from the other
    direction.
 5. ⚠️ **`E Capacitor/Console: Error injecting safe area CSS: TypeError: Cannot read properties of
    null (reading 'style')`**, intermittently at startup — once in four offline launches and once in
@@ -2401,7 +2401,7 @@ the display's rate**; its rows at a stylised rung below the top are not comparab
 
 ### Build and install
 
-On the developer machine (macOS paths; Node 24 and pnpm 11 as CLAUDE.md §4a):
+On the developer machine (macOS paths; Node 24 and pnpm 11 as docs/agents/commands.md §4a):
 
 ```bash
 ADB=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
