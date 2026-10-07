@@ -65,6 +65,22 @@ METADATA = {
 }
 
 
+# The article each chunk's name takes in the message (#1178's review: "a eXIf").
+ARTICLES = {b"iCCP": "an", b"gAMA": "a", b"sRGB": "a", b"cHRM": "a", b"cICP": "a", b"eXIf": "an"}
+
+
+def with_corrupt_idat(png: bytes) -> bytes:
+    """`png` with one byte inside its first IDAT's data flipped and the CRC made
+    right again: the chunk framing reads cleanly and only the decoder can tell."""
+    offset = len(derive_brand.PNG_SIGNATURE)
+    while png[offset + 4 : offset + 8] != b"IDAT":
+        offset += 12 + int.from_bytes(png[offset : offset + 4], "big")
+    length = int.from_bytes(png[offset : offset + 4], "big")
+    body = bytearray(png[offset + 8 : offset + 8 + length])
+    body[length // 2] ^= 0xFF
+    return png[:offset] + chunk(b"IDAT", bytes(body)) + png[offset + 12 + length :]
+
+
 class WebpIsComparedByBytes(unittest.TestCase):
     def test_the_same_bytes_pass(self) -> None:
         made = derive_brand.webp(picture())
@@ -129,7 +145,7 @@ class PngIsComparedByPixelsAndCarriesNoMetadata(unittest.TestCase):
                 reason = derive_brand.why_not_made(WORDMARK, self.made, committed)
                 self.assertIsNotNone(reason)
                 self.assertIn("the committed file", reason or "")
-                self.assertIn(f"a {kind.decode()} chunk", reason or "")
+                self.assertIn(f"{ARTICLES[kind]} {kind.decode()} chunk", reason or "")
 
     def test_rendering_metadata_in_the_made_file_fails_by_name(self) -> None:
         made = with_chunk(self.made, b"iCCP", METADATA[b"iCCP"])
@@ -142,8 +158,38 @@ class PngIsComparedByPixelsAndCarriesNoMetadata(unittest.TestCase):
         committed = with_chunk(self.made, b"tEXt", b"Raw profile type exif\x00ff")
         self.assertIn("a tEXt chunk", derive_brand.why_not_made(WORDMARK, self.made, committed) or "")
 
-    def test_a_truncated_png_is_refused(self) -> None:
-        self.assertIsNotNone(derive_brand.why_not_made(WORDMARK, self.made, self.made[:-3]))
+    def test_a_truncated_png_is_refused_in_words(self) -> None:
+        self.assertEqual(
+            derive_brand.why_not_made(WORDMARK, self.made, self.made[:-3]),
+            "the committed file is not a readable PNG: a chunk runs past the end of the file",
+        )
+
+    def test_a_file_that_is_not_a_png_is_refused_in_words(self) -> None:
+        self.assertEqual(
+            derive_brand.why_not_made(WORDMARK, b"GIF89a" + self.made[6:], self.made),
+            "the file this script makes is not a readable PNG: it does not begin with the PNG signature",
+        )
+
+    def test_a_chunk_takes_its_article(self) -> None:
+        for kind, body in METADATA.items():
+            with self.subTest(chunk=kind):
+                self.assertEqual(
+                    derive_brand.png_metadata(with_chunk(self.made, kind, body)),
+                    f"{ARTICLES[kind]} {kind.decode()} chunk ({derive_brand.RENDERING_CHUNKS[kind]})",
+                )
+
+    def test_a_corrupt_data_stream_is_a_reason_not_a_traceback(self) -> None:
+        broken = with_corrupt_idat(self.made)
+        # The control: the framing reads, so only the decoder can find it.
+        self.assertIsNone(derive_brand.png_metadata(broken))
+        for made, committed, which in (
+            (self.made, broken, "the committed file"),
+            (broken, self.made, "the file this script makes"),
+        ):
+            with self.subTest(which=which):
+                reason = derive_brand.why_not_made(WORDMARK, made, committed)
+                self.assertIsNotNone(reason)
+                self.assertTrue((reason or "").startswith(f"{which} does not decode ("), reason)
 
 
 class TheCommittedOutputsPass(unittest.TestCase):

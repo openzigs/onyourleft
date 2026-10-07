@@ -319,15 +319,19 @@ pnpm --filter @onyourleft/web run test
 # DECODED PIXELS (Pillow's zlib differs between macOS and Linux, #972) AND with
 # no chunk but IHDR/PLTE/tRNS/IDAT/IEND in the made or the committed file, so a
 # colour profile, gamma or EXIF block (iCCP, gAMA, sRGB, cHRM, cICP, eXIf) is
-# refused by name. `--records` prints the ASSETS.toml rows. CI holds the
+# refused by name, and a file it cannot read or decode at all (a broken chunk
+# frame, a damaged IDAT stream) is a printed reason, never a traceback (#1178's
+# review). `--records` prints the ASSETS.toml rows. CI holds the
 # committed pictures to the same chunk lists (`provenance.test.ts`). ⚠️
 # `icons:generate` is gone: it drew the icons until #965. Run on 2026-10-07 on
 # macOS, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # Its own tests (#1167), with the same interpreter: what `--check` refuses, each
-# with a control. NOT in CI, which has no Python with Pillow. 11 cases on
-# 2026-10-07 — the count is what the run prints.
+# with a control, and (`test_make_webp_fixtures.py`) the lossy fixtures' chunk
+# reader refusing a file that only looks like a WebP. NOT in CI, which has no
+# Python with Pillow. 20 cases on 2026-10-07 (11 before #1178's review) — the
+# count is what the run prints.
 <venv>/bin/python -m unittest discover -s apps/web/tools/brand -p 'test_*.py'
 
 # The WebP reader's fixtures (#1167): pictures drawn from arithmetic under

@@ -405,43 +405,67 @@ RENDERING_CHUNKS = {
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
+class Unreadable(Exception):
+    """A file `--check` could not read at all, said in words for the message --
+    as distinct from a readable PNG that carries a chunk it refuses."""
+
+
 def png_chunks(data: bytes) -> list[bytes]:
-    """The chunk types of a PNG, in order, or a ValueError for one that is not."""
+    """The chunk types of a PNG, in order, or `Unreadable` for one whose framing
+    is broken."""
     if not data.startswith(PNG_SIGNATURE):
-        raise ValueError("not a PNG")
+        raise Unreadable("it does not begin with the PNG signature")
     types, offset = [], len(PNG_SIGNATURE)
     while offset + 8 <= len(data):
         length = int.from_bytes(data[offset : offset + 4], "big")
         types.append(data[offset + 4 : offset + 8])
         offset += 12 + length
     if offset != len(data):
-        raise ValueError("a PNG chunk runs past the end of the file")
+        raise Unreadable("a chunk runs past the end of the file")
     return types
 
 
+def article(word: str) -> str:
+    """`an iCCP`, `an eXIf`, `a gAMA`: by the first letter's vowel."""
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
 def png_metadata(data: bytes) -> str | None:
-    """The first chunk outside `PNG_CHUNKS`, said in words, or None."""
-    try:
-        chunks = png_chunks(data)
-    except ValueError as error:
-        return str(error)
-    for chunk in chunks:
+    """The first chunk outside `PNG_CHUNKS`, said in words, or None. Raises
+    `Unreadable` for a file whose chunks cannot be read."""
+    for chunk in png_chunks(data):
         if chunk not in PNG_CHUNKS:
             name = chunk.decode("latin-1")
             what = RENDERING_CHUNKS.get(chunk, "a chunk Pillow does not write here")
-            return f"a {name} chunk ({what})"
+            return f"{article(name)} {name} chunk ({what})"
     return None
 
 
+def decoded(which: str, data: bytes, expected: str) -> Image.Image:
+    """`data` decoded in full, or `Unreadable` naming `which` and why.
+
+    Pillow says a broken file in more than one way -- `OSError` for a damaged
+    data stream, `SyntaxError` for a bad header, `zlib.error`, `EOFError`,
+    `struct.error`, a decompression-bomb error -- and a chunk layout that reads
+    cleanly says nothing about the bytes inside `IDAT`. So every one of them is
+    a reason, never a traceback.
+    """
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except Exception as error:  # noqa: BLE001 -- see above: the decoder's errors are not one class
+        raise Unreadable(f"{which} does not decode ({type(error).__name__}: {error})") from error
+    if image.format != expected:
+        raise Unreadable(f"{which} decodes as {image.format}, not {expected}")
+    return image
+
+
 def same_pixels(path: str, made: bytes, committed: bytes) -> bool:
-    """Whether the committed file is the picture this script makes, decoded."""
+    """Whether the committed file is the picture this script makes, decoded.
+    Raises `Unreadable` for either file that does not decode."""
     expected = FORMATS[Path(path).suffix]
-    a = Image.open(io.BytesIO(made))
-    b = Image.open(io.BytesIO(committed))
-    if a.format != expected or b.format != expected:
-        return False
-    a.load()
-    b.load()
+    a = decoded("the file this script makes", made, expected)
+    b = decoded("the committed file", committed, expected)
     return a.mode == b.mode and a.size == b.size and a.tobytes() == b.tobytes()
 
 
@@ -452,12 +476,17 @@ def why_not_made(path: str, made: bytes, committed: bytes) -> str | None:
         return None if made == committed else "its bytes are not the bytes this script makes"
     if suffix == ".png":
         for which, data in (("the committed file", committed), ("the file this script makes", made)):
-            found = png_metadata(data)
+            try:
+                found = png_metadata(data)
+            except Unreadable as error:
+                return f"{which} is not a readable PNG: {error}"
             if found is not None:
                 return f"{which} carries {found}"
-        if not same_pixels(path, made, committed):
-            return "it does not decode to the pixels this script makes"
-        return None
+        try:
+            same = same_pixels(path, made, committed)
+        except Unreadable as error:
+            return str(error)
+        return None if same else "it does not decode to the pixels this script makes"
     return f"{path} is neither a .png nor a .webp"
 
 
