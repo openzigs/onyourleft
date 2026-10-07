@@ -199,7 +199,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         `provenance.test.ts` holds `ASSETS.toml` to that table
                         and reads the pictures back (safe zones, cut-outs, no
                         green fringe, no tagline); CI cannot run the script, so
-                        `--check` is run by hand. ⚠️ The full logo is the
+                        `--check` is run by hand (WebP logos by bytes, PNGs by
+                        pixels with no rendering metadata, #1167; its tests are
+                        `test_derive_brand.py`). `fixtures/` holds the WebP
+                        reader's own pictures, made by `make_webp_fixtures.py`.
+                        ⚠️ The full logo is the
                         owner's green-screen picture of 2026-10-01, cut by a
                         chroma key, with NO tagline; a reviewer who remembers
                         it cut from the v3 sheet by a rembg model is reading

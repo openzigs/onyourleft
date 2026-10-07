@@ -570,6 +570,24 @@ function vp8lChunk(bytes: Uint8Array): Uint8Array {
   throw new Error('a WebP with no VP8L chunk');
 }
 
+/**
+ * The RIFF chunk types of a WebP, in order — #1167. An `ICCP`, `EXIF` or `XMP `
+ * chunk changes nothing this reader decodes, so the brand gate reads the
+ * chunks themselves to hold the logos to carrying none.
+ */
+export function webpChunkTypes(bytes: Uint8Array): readonly string[] {
+  if (String.fromCharCode(...bytes.subarray(0, 4)) !== 'RIFF') throw new Error('not a WebP');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const types: string[] = [];
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    types.push(String.fromCharCode(...bytes.subarray(offset, offset + 4)));
+    const length = view.getUint32(offset + 4, true);
+    offset += 8 + length + (length & 1);
+  }
+  return types;
+}
+
 /** The picture's size, read from its VP8L header alone. */
 export function webpDimensions(bytes: Uint8Array): { width: number; height: number } {
   const reader = new BitReader(vp8lChunk(bytes));

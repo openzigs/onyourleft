@@ -312,12 +312,31 @@ pnpm --filter @onyourleft/web run test
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
 # installed (any other version is refused); it fetches nothing. `--check`
-# writes nothing and fails unless every committed output DECODES to the pixels
-# it makes (since #972; bytes until then, which Pillow's zlib differs on between
-# macOS and Linux); `--records` prints the ASSETS.toml rows. The full logo is
-# lossless WebP since #972. ⚠️ `icons:generate` is gone: it drew the icons until
-# #965. Run on 2026-10-05 on Linux, `--check` green.
+# writes nothing and compares by KIND of file (the owner's ruling of
+# 2026-10-07, #1167): the two lossless WebP logos BYTE FOR BYTE (libwebp 1.6.0
+# writes the same bytes on macOS and Linux, so a Pillow bump that moves them is
+# meant to go red: re-derive, read the diff, move the digests); the PNGs by
+# DECODED PIXELS (Pillow's zlib differs between macOS and Linux, #972) AND with
+# no chunk but IHDR/PLTE/tRNS/IDAT/IEND in the made or the committed file, so a
+# colour profile, gamma or EXIF block (iCCP, gAMA, sRGB, cHRM, cICP, eXIf) is
+# refused by name. `--records` prints the ASSETS.toml rows. CI holds the
+# committed pictures to the same chunk lists (`provenance.test.ts`). ⚠️
+# `icons:generate` is gone: it drew the icons until #965. Run on 2026-10-07 on
+# macOS, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
+
+# Its own tests (#1167), with the same interpreter: what `--check` refuses, each
+# with a control. NOT in CI, which has no Python with Pillow. 11 cases on
+# 2026-10-07 — the count is what the run prints.
+<venv>/bin/python -m unittest discover -s apps/web/tools/brand -p 'test_*.py'
+
+# The WebP reader's fixtures (#1167): pictures drawn from arithmetic under
+# apps/web/tools/brand/fixtures/, written by the same pinned Pillow. `--check`
+# compares the lossless ones' bytes (the two lossy ones exist to be refused,
+# and libwebp's lossy encoder promises no bytes across CPUs, so only their chunk
+# layout); `--digests` prints Pillow's RGBA digests, which
+# `webp-testing.test.ts` records.
+<venv>/bin/python apps/web/tools/brand/make_webp_fixtures.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
 # in CI: it needs the network and Blender 4.4.3 (set BLENDER to its path; the
