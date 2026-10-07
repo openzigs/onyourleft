@@ -79,13 +79,13 @@
       "size": 64
     },
     {
-      "path": "apps/web/src/brand/logo-light.png",
+      "path": "apps/web/src/brand/logo-light.webp",
       "family": "logo",
       "kind": "logo-light",
       "size": 512
     },
     {
-      "path": "apps/web/src/brand/logo-dark.png",
+      "path": "apps/web/src/brand/logo-dark.webp",
       "family": "logo",
       "kind": "logo-dark",
       "size": 512

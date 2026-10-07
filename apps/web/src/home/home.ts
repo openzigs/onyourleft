@@ -3,23 +3,24 @@
 /**
  * What the home screen reads, and the bound on it — #428.
  *
- * ## One list read below the bound, two above it, and not one sample decoded
+ * ## One list read below the bound, a bounded walk above it, and not one sample decoded
  *
  * The app opens here, so this is the read EVERY launch pays for. Below
  * {@link HISTORY_ACTIVITY_LIMIT} it is one `listActivitySummaries` — the same
  * bound `analysis/history.ts` puts on the fitness chart's read — plus the
  * athlete row the thresholds come from, and then arithmetic. Past the bound
- * there is a second list read, for the badges alone (§"The read budget"
- * below). Every block on the screen is derived from those rows:
+ * the badges need the rest of the history, read forward a page at a time
+ * (§"The read budget" below). Every block on the screen is derived from those
+ * rows:
  *
  * | block | from |
  * |---|---|
  * | the last ride | the newest summary |
  * | this week | the summaries started today or on the six calendar days before it |
  * | fitness, fatigue, freshness | `fitnessSeries` over every summary's load, carried to today |
- * | streaks and badges (#947) | `deriveProgress` over every summary and its `rideFacts`; past the bound, the current streak from the newest read and the badges from the oldest (`deriveProgressAcross`) |
+ * | streaks and badges (#947) | `deriveProgress` over every summary and its `rideFacts`; past the bound, over every ride the walk read as well (#1130), and `deriveProgressAcross` only past {@link PROGRESS_PAGE_LIMIT} pages |
  *
- * ## The read budget, and which end of the history it keeps — #1107
+ * ## The read budget, and which end of the history it keeps — #1107, #1130
  *
  * The bound is {@link HISTORY_ACTIVITY_LIMIT} summaries, and the read takes
  * the NEWEST of them (`direction: 'descending'`). Every figure on this screen
@@ -28,14 +29,21 @@
  * recordings was shown a "last ride" from years ago, an empty week, and a
  * current streak of nought however much they rode.
  *
- * ⚠️ **A second read, and only past the bound.** The badges are claims about
- * the WHOLE history (a first, a total crossed, a best beaten), so badges
- * worked out from the newest 5,000 alone would be false: the 5,000th-newest
- * ride would be called the first. So when the newest read is cut short, Home
- * makes ONE more list read of at most {@link HISTORY_ACTIVITY_LIMIT}
- * summaries, the OLDEST, and the badges come from that window as they did
- * before #1107 (`progress.ts` §`deriveProgressAcross`). The whole budget is
- * therefore: one list read below the bound, and at most two of
+ * ⚠️ **Past the bound, the badges read the rest of the history, and only
+ * past it.** The badges are claims about the WHOLE history (a first, a total
+ * crossed, a best beaten). #1107 took them from the OLDEST 5,000 alone, which
+ * kept every claim true and stopped the badges moving at the 5,000th
+ * recording: a 10,000 km crossed by a recent ride was never shown (#1130). So
+ * when the newest read is cut short, Home walks the history FORWARD from the
+ * oldest ride, {@link HISTORY_ACTIVITY_LIMIT} summaries a read, with the
+ * store's resume cursor (`startedAfter` and `afterActivityId`, #293), until
+ * it reaches the newest window it already holds — so every ride is read once
+ * — and the badges are worked out over all of them. The walk stops after
+ * {@link PROGRESS_PAGE_LIMIT} reads; a history longer than that (fifty
+ * thousand recordings) falls back to #1107's two windows
+ * (`progress.ts` §`deriveProgressAcross`), whose badges are true and stop
+ * moving. The whole budget is therefore: one list read below the bound, and
+ * at most 1 + {@link PROGRESS_PAGE_LIMIT} reads of at most
  * {@link HISTORY_ACTIVITY_LIMIT} + 1 rows above it. No stream is ever read.
  *
  * ⚠️ **No stream is read, and `home.test.ts` counts that with the analysis
@@ -178,20 +186,73 @@ export interface HomeData {
   readonly truncated: boolean;
   /**
    * Streaks and badges — #947, `progress/progress.ts` — as of `now`. Below the
-   * bound, derived from the same rows with no read of its own; past it, the
-   * badges come from the second, OLDEST read (§"The read budget", #1107).
+   * bound, derived from the same rows with no read of its own; past it, from
+   * every ride the forward walk read as well (§"The read budget", #1130).
    */
   readonly progress: Progress;
   /**
    * The rows the badges were derived from, for *Look at older rides* (#947):
-   * every row read below the bound, and the OLDEST window above it (#1107).
+   * every row read, oldest first — past the bound, the forward walk's as well
+   * (#1130), or its pages alone past {@link PROGRESS_PAGE_LIMIT}.
    */
   readonly summaries: readonly ActivitySummary[];
 }
 
 /**
+ * How many forward reads of {@link HISTORY_ACTIVITY_LIMIT} summaries Home makes
+ * for the badges past the bound — #1130. Ten: fifty thousand recordings, a
+ * ride a day for over a century, before the badges fall back to #1107's two
+ * windows. A stated bound rather than an unbounded walk, because this is the
+ * read every launch pays for.
+ */
+export const PROGRESS_PAGE_LIMIT = 10;
+
+/** Whether `left` comes before `right` in the store's `[startedAt, id]` order. */
+function startsBefore(left: ActivitySummary, right: ActivitySummary): boolean {
+  return (
+    left.startedAt < right.startedAt || (left.startedAt === right.startedAt && left.id < right.id)
+  );
+}
+
+/**
+ * Every ride OLDER than `newest`'s first, read forward a page at a time — #1130.
+ *
+ * `reached` is false when {@link PROGRESS_PAGE_LIMIT} pages ran out first.
+ */
+async function readOlderThan(
+  port: AnalysisPort,
+  newest: ActivitySummary,
+  limit: number,
+): Promise<{ readonly older: ActivitySummary[]; readonly reached: boolean }> {
+  const older: ActivitySummary[] = [];
+  let cursor: ActivitySummary | undefined;
+  for (let page = 0; page < PROGRESS_PAGE_LIMIT; page += 1) {
+    const rows: ActivitySummary[] = await port.store.listActivitySummaries(port.athleteId, {
+      orderBy: 'startedAt',
+      direction: 'ascending',
+      limit,
+      ...(cursor === undefined
+        ? {}
+        : { startedAfter: cursor.startedAt, afterActivityId: cursor.id }),
+    });
+    for (const row of rows) {
+      if (!startsBefore(row, newest)) {
+        return { older, reached: true };
+      }
+      older.push(row);
+    }
+    cursor = rows.at(-1);
+    if (rows.length < limit || cursor === undefined) {
+      return { older, reached: true };
+    }
+  }
+  return { older, reached: false };
+}
+
+/**
  * Everything the home screen shows: one list read below
- * {@link HISTORY_ACTIVITY_LIMIT}, and a second for the badges past it.
+ * {@link HISTORY_ACTIVITY_LIMIT}, and a bounded forward walk for the badges
+ * past it (§"The read budget").
  *
  * @param now the instant "this week" and "today" are measured from. A
  * parameter, so a test can hold the clock.
@@ -209,15 +270,12 @@ export async function loadHome(
   });
   const truncated = summaries.length > limit;
   const considered = summaries.slice(0, limit).reverse();
-  // Past the bound only: the OLDEST `limit`, which the badges are worked out
-  // from, because they are claims about the whole history (§"The read budget").
-  const oldest: ActivitySummary[] | undefined = truncated
-    ? await port.store.listActivitySummaries(port.athleteId, {
-        orderBy: 'startedAt',
-        direction: 'ascending',
-        limit,
-      })
-    : undefined;
+  // Past the bound only: every ride older than the newest window, read forward
+  // (§"The read budget", #1130), because the badges are claims about the whole
+  // history.
+  const first = considered[0];
+  const walk =
+    truncated && first !== undefined ? await readOlderThan(port, first, limit) : undefined;
   const thresholds = thresholdsFor(await port.store.getAthlete(port.athleteId));
 
   const entries: LoadEntry[] = [];
@@ -290,12 +348,15 @@ export async function loadHome(
     loadsToWorkOut,
     truncated,
     progress:
-      oldest === undefined
+      walk === undefined
         ? deriveProgress(considered, now)
-        : deriveProgressAcross(oldest, considered, now),
+        : walk.reached
+          ? deriveProgress([...walk.older, ...considered], now)
+          : deriveProgressAcross(walk.older, considered, now),
     // The rides the badges were worked out from, so *Look at older rides*
     // reads the ones that hold a badge back.
-    summaries: oldest ?? considered,
+    summaries:
+      walk === undefined ? considered : walk.reached ? [...walk.older, ...considered] : walk.older,
   };
 }
 

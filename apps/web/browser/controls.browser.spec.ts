@@ -450,6 +450,42 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
     });
   }
 
+  test('#1038 — the engine names the input with its label and the words on its button (SC 2.5.3)', async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await visit(page, 'routes');
+    // The name Chromium itself computes — what a screen reader and speech
+    // input are handed — rather than `a11y/audit.ts`' model of it.
+    const session = await page.context().newCDPSession(page);
+    await session.send('DOM.enable');
+    await session.send('Accessibility.enable');
+    const { root } = await session.send('DOM.getDocument');
+    const { nodeId } = await session.send('DOM.querySelector', {
+      nodeId: root.nodeId,
+      selector: 'main #route-file',
+    });
+    const { nodes } = await session.send('Accessibility.getPartialAXTree', {
+      nodeId,
+      fetchRelatives: false,
+    });
+    const name: unknown = nodes.find((node) => node.ignored !== true)?.name?.value;
+    expect(name).toBe('GPX file Choose file');
+    // The control: without the name's second half, the words on the button
+    // are not in it.
+    await page.evaluate(() => {
+      const input = document.querySelector('main #route-file');
+      const label = input?.getAttribute('aria-labelledby')?.split(' ')[0] ?? '';
+      input?.setAttribute('aria-labelledby', label);
+    });
+    const { nodes: without } = await session.send('Accessibility.getPartialAXTree', {
+      nodeId,
+      fetchRelatives: false,
+    });
+    const nameWithout: unknown = without.find((node) => node.ignored !== true)?.name?.value;
+    expect(nameWithout).toBe('GPX file');
+  });
+
   test('is a 44 px target that the floor holds up, the #316 three ways', async ({ page }) => {
     await open(page, PHONE);
     await visit(page, 'routes');

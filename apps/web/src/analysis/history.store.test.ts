@@ -16,10 +16,11 @@
  * (CLAUDE.md §5, "The round-trip harness").
  */
 
-import { beatsPerMinute, seconds, watts } from '@onyourleft/domain';
-import type { NewStreamSet } from '@onyourleft/store';
+import { beatsPerMinute, localDay, seconds, unixSeconds, watts } from '@onyourleft/domain';
+import { activityId, type NewStreamSet } from '@onyourleft/store';
 import {
   ATHLETE_A,
+  ATHLETE_B,
   createStoreHarness,
   rideFor,
   seedAthletes,
@@ -27,7 +28,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { backfillLoadSummaries, loadFitnessHistory } from './history';
+import { backfillLoadSummaries, HISTORY_ACTIVITY_LIMIT, loadFitnessHistory } from './history';
 import { hasNoLoadToWorkOut } from './summary';
 
 let harness: StoreHarness | undefined;
@@ -135,4 +136,81 @@ describe('#1084 — a ride with nothing to work out is marked once, through the 
     expect(history.ridesWithoutSummary).toBe(0);
     expect(history.ridesWithNoLoad).toBe(1);
   });
+});
+
+/** 2027-01-15T08:00:00Z. */
+const NOW = 1_800_000_000;
+const DAY = 86_400;
+/** Weeks of riding at the recent end, one ride each, the newest an hour ago. */
+const RECENT_WEEKS = 12;
+/** About 5,020 puts, as `home/home.store.test.ts`'s #1107 case: 45 s, §4c's three times. */
+const SEEDING_TIMEOUT_MILLISECONDS = 45_000;
+
+describe('#1130 — past the read budget, the fitness history reads the NEWEST rides, through the real store', () => {
+  it(
+    'draws the line to the newest ride past 5,000 rides, and reads no other athlete’s',
+    async () => {
+      const open = createStoreHarness();
+      harness = open;
+      await seedAthletes(open);
+      const OLD_FROM = 1_500_000_000;
+      const loaded = { effortWeightedPower: watts(200), loadCoveredTime: seconds(3600) };
+      await open.write(async (store) => {
+        // Athlete B either side of every ride of A's, each a day apart from
+        // anything of A's: a read that dropped the owner would draw B's days.
+        for (const offset of [1, 2, 3]) {
+          await store.putActivity(
+            rideFor(ATHLETE_B, {
+              id: activityId(`b-older-${String(offset)}`),
+              startedAt: unixSeconds(OLD_FROM - offset * DAY),
+              startedAtTimeZone: 'UTC',
+              ...loaded,
+            }),
+          );
+          await store.putActivity(
+            rideFor(ATHLETE_B, {
+              id: activityId(`b-newer-${String(offset)}`),
+              startedAt: unixSeconds(NOW + offset * DAY),
+              startedAtTimeZone: 'UTC',
+              ...loaded,
+            }),
+          );
+        }
+        for (let index = 0; index < HISTORY_ACTIVITY_LIMIT; index += 1) {
+          await store.putActivity(
+            rideFor(ATHLETE_A, {
+              id: activityId(`old-${String(index).padStart(5, '0')}`),
+              startedAt: unixSeconds(OLD_FROM + index * 60),
+              startedAtTimeZone: 'UTC',
+              ...loaded,
+            }),
+          );
+        }
+        for (let week = RECENT_WEEKS - 1; week >= 0; week -= 1) {
+          await store.putActivity(
+            rideFor(ATHLETE_A, {
+              id: activityId(`recent-${String(week).padStart(2, '0')}`),
+              startedAt: unixSeconds(NOW - 3_600 - week * 7 * DAY),
+              startedAtTimeZone: 'UTC',
+              ...loaded,
+            }),
+          );
+        }
+      });
+
+      const history = await open.read((store) =>
+        loadFitnessHistory({ athleteId: ATHLETE_A, store }),
+      );
+
+      expect(history.truncated).toBe(true);
+      expect(history.ridesCounted).toBe(HISTORY_ACTIVITY_LIMIT);
+      // Read oldest-first, the line stopped at the 5,000th-oldest ride, years
+      // before the rider's last twelve weeks.
+      expect(history.points.at(-1)?.day).toBe(localDay(unixSeconds(NOW - 3_600), 'UTC'));
+      // It starts on A's old rides' day, not on a day of B's older rides.
+      expect(history.points[0]?.day).toBe(localDay(unixSeconds(OLD_FROM + 12 * 60), 'UTC'));
+      expect(history.points.at(-1)?.load).toBeGreaterThan(0);
+    },
+    SEEDING_TIMEOUT_MILLISECONDS,
+  );
 });

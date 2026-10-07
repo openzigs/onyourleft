@@ -55,6 +55,7 @@
  */
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import { encodeCursor, parsePageRequest } from '../pagination.ts';
 import type {
   AthleteRecord,
   ModerationActionKind,
@@ -110,6 +111,17 @@ export type AthleteAction = Exclude<
   'dismiss_report' | 'activate_moderator_key'
 >;
 
+/** One page of a moderators' list (#961), in `pagination.ts`'s wire form. */
+export interface ModerationPage<T> {
+  readonly items: readonly T[];
+  readonly next: string | null;
+}
+
+/** What a cursor this instance did not write is refused with, by name and never by value. */
+const NOT_OUR_CURSOR: readonly FieldProblem[] = [
+  { field: 'cursor', problem: 'must be a cursor this instance returned' },
+];
+
 export interface Moderation {
   /** THE choke point: may `viewerId` see, or act on, `subjectId`? */
   canSee(viewerId: string, subjectId: string): Promise<boolean>;
@@ -124,7 +136,17 @@ export interface Moderation {
   openReports(): Promise<readonly Report[]>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
   pendingRegistrations(): Promise<readonly AthleteRecord[]>;
-  log(): Promise<readonly ModerationLogEntry[]>;
+  /**
+   * The log a page at a time, NEWEST first (#961): `?limit=` and `?cursor=`,
+   * `pagination.ts`'s. A moderator reads the latest first and asks for older.
+   */
+  logPage(query: URLSearchParams): Promise<ModerationResult<ModerationPage<ModerationLogEntry>>>;
+  /**
+   * Every suspended account, most recently suspended first, a page at a time
+   * (#961) — so a moderator lifting a suspension does not have to find the id
+   * in the log.
+   */
+  suspended(query: URLSearchParams): Promise<ModerationResult<ModerationPage<AthleteRecord>>>;
   act(
     moderatorId: string,
     action: AthleteAction,
@@ -281,7 +303,58 @@ export function createModeration(options: ModerationOptions): Moderation {
 
     openReports: () => store.listOpenReports(),
     pendingRegistrations: () => store.listPendingAthletes(),
-    log: () => store.listModerationLog(),
+    async logPage(query) {
+      const request = parsePageRequest(query);
+      if (!request.ok) return refuse('validation_failed', request.fields);
+      const { limit, after } = request.request;
+      let beforeId: number | undefined;
+      if (after !== undefined) {
+        beforeId = Number(after.id);
+        if (after.key !== 'log' || !/^[1-9][0-9]{0,15}$/.test(after.id)) {
+          return refuse('validation_failed', NOT_OUR_CURSOR);
+        }
+      }
+      // One row more than the page says whether there is a next one.
+      const rows = await store.listModerationLogPage(beforeId, limit + 1);
+      const items = rows.slice(0, limit);
+      const last = items.at(-1);
+      return {
+        ok: true,
+        value: {
+          items,
+          next:
+            rows.length > limit && last !== undefined
+              ? encodeCursor({ key: 'log', id: String(last.id) })
+              : null,
+        },
+      };
+    },
+
+    async suspended(query) {
+      const request = parsePageRequest(query);
+      if (!request.ok) return refuse('validation_failed', request.fields);
+      const { limit, after } = request.request;
+      let position: { suspendedAt: number; id: string } | undefined;
+      if (after !== undefined) {
+        if (!/^(0|[1-9][0-9]{0,15})$/.test(after.key) || !ATHLETE_ID.test(after.id)) {
+          return refuse('validation_failed', NOT_OUR_CURSOR);
+        }
+        position = { suspendedAt: Number(after.key), id: after.id };
+      }
+      const rows = await store.listSuspendedAthletes(position, limit + 1);
+      const items = rows.slice(0, limit);
+      const last = items.at(-1);
+      return {
+        ok: true,
+        value: {
+          items,
+          next:
+            rows.length > limit && last !== undefined && last.suspendedAt !== null
+              ? encodeCursor({ key: String(last.suspendedAt), id: last.id })
+              : null,
+        },
+      };
+    },
 
     async act(moderatorId, action, target, fields) {
       const checked = checkReason(fields.reason);
