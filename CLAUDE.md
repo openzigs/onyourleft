@@ -2401,9 +2401,11 @@ pnpm --filter @onyourleft/web run test
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
 # installed (any other version is refused); it fetches nothing. `--check`
-# writes nothing and fails unless every committed output is reproduced byte for
-# byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
-# it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.
+# writes nothing and fails unless every committed output DECODES to the pixels
+# it makes (since #972; bytes until then, which Pillow's zlib differs on between
+# macOS and Linux); `--records` prints the ASSETS.toml rows. The full logo is
+# lossless WebP since #972. ⚠️ `icons:generate` is gone: it drew the icons until
+# #965. Run on 2026-10-05 on Linux, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
@@ -5478,7 +5480,10 @@ major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every
 nothing on purpose** (§4d) and would be the first thing a config migration breaks. Take it as
 its own issue with the suite, the coverage reporter and both platform-free typechecks re-run,
 never as part of a grouped bump. Dependabot's #273 proposed it alongside TypeScript 7 and was
-closed for the TypeScript half.
+closed for the TypeScript half. ⚠️ Since [#916](https://github.com/openzigs/onyourleft/issues/916)
+`.github/dependabot.yml` **ignores semver-major updates** of `typescript`, `vitest` and
+`@vitest/*` (minor and patch still come in the `toolchain` group), so neither major arrives in a
+grouped bump again; the pull request that takes either major on purpose removes its entry.
 
 **pnpm 11 refuses a lockfile entry published in the last 24 hours.** `minimumReleaseAge` is a
 default, not something this repository configured, and it is a supply-chain control worth keeping:
@@ -5934,6 +5939,7 @@ top of an issue **supersedes its body**.
 | Why the HUD's panels are opaque and the frosted-glass look is not on offer | `apps/web/src/design/tokens.ts` §`hudSurface`, `apps/web/src/design/theme.css` §`.oyl-hud__panel`, `apps/web/src/game/hud/hud-surface.a11y.test.ts` |
 | Which readings are drawn large, and why that says nothing about which are spoken | `apps/web/src/game/hud/fields.ts` §`ReadingTier`, [#395](https://github.com/openzigs/onyourleft/issues/395) |
 | Where the game HUD's moving time comes from (the recorder's, never a second clock), why it is not spoken, and where it is drawn on a narrow phone | `apps/web/src/game/trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`, `apps/web/src/game/hud/fields.ts` §`HudInput.movingSeconds`, `apps/web/src/game/hud/announce.ts` §`ANNOUNCEABLE_READINGS`, `apps/web/src/design/theme.css` §"THE MOVING TIME ON AN UPRIGHT PHONE", [#1111](https://github.com/openzigs/onyourleft/issues/1111) |
+| How wide the game HUD's moving-time field is, why it is sized in `ch` from its own digits rather than by a track, and the room `9:59:59` is held to | `apps/web/src/design/theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124", `apps/web/browser/ride.browser.spec.ts` §`MOVING_TIME_SPARE_PIXELS`, [#1124](https://github.com/openzigs/onyourleft/issues/1124) |
 | How a rider leaves a ride mid-way, and why the stage has no navigation on it | `apps/web/src/game/GameView.tsx` §`GameViewProps.onImmersive` |
 | Why the page chrome is ABSENT during a ride rather than hidden, and what is deliberately still rendered | `apps/web/src/shell/AppShell.tsx` §`immersive`, `apps/web/src/shell/immersive.test.tsx` |
 | What a phone gives up while a standing notice is on the stage, why "while" is the whole ride, and who owns the remedy | `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL", [#437](https://github.com/openzigs/onyourleft/issues/437) |

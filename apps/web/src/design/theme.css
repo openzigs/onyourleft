@@ -2037,6 +2037,22 @@ h3:first-child {
   .oyl-main {
     scroll-margin-top: 7rem;
   }
+
+  /*
+   * #990: what a sticky header costs KEYBOARD focus. Chromium scrolls a
+   * control that Tab or Shift+Tab reaches off the screen just far enough to
+   * put it at the edge, and the top edge is where the header is — on
+   * Settings a control reached backwards was focused up to 44 px under it
+   * (WCAG 2.2 SC 2.4.11). So the whole document's scroll area starts below
+   * the header: its declared height (#671) and the band it sticks under, the
+   * same two numbers its `top` and its box are made of, so they cannot come
+   * apart. #983 did this for the game's chooser alone; this replaces it.
+   * `browser/sticky-header.browser.spec.ts` walks Settings backwards, with
+   * the padding taken off as its control.
+   */
+  :root {
+    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
+  }
 }
 
 .oyl-footer {
@@ -2747,13 +2763,18 @@ a.oyl-button {
 }
 
 /*
- * 9rem tracks, sized as `.oyl-home__facts`' were before #1052 — from a Mac's
- * `10:23:45` at `xxl` (137 px). Linux draws it about 153 px; nothing measures
- * this card's facts at a ten-hour ride yet.
+ * 10rem tracks since #1083, as `.oyl-home__facts`' since #1052. They were 9rem
+ * (144 px), sized from a Mac's `10:23:45` at `xxl` (137 px); the CI runner's
+ * Linux font draws it 153 px, so any card whose two tracks came out between
+ * 144 and 153 px — a phone about 375 px wide — ran the elapsed time 5.5 px
+ * past its fact, and nothing measured a ten-hour ride. At 10rem (160 px) no
+ * track is narrower than the numerals. `rideview.browser.spec.ts` §"#1083"
+ * holds a `10:23:45` to one line inside its fact at every phone and tablet;
+ * at 9rem it spills at 375 px, and at 7rem on the 4:3 tablet in the shell.
  */
 .oyl-result__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--oyl-space-sm) var(--oyl-space-md);
   margin: 0;
 }
@@ -4367,11 +4388,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The two `scroll-padding` rules left are not this chooser's pin — it has none
+ * The `scroll-padding` rule left here is not this chooser's pin — it has none
  * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * and the header (sticky, `--oyl-header-height`, on a large one) would
- * otherwise sit over a control Tab scrolls to the edge. They are scoped to
- * the chooser; the app-wide gap is a follow-up.
+ * would otherwise sit over a control Tab scrolls to the bottom edge. It is
+ * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
+ * large window) was too until #990, which made it the whole document's —
+ * see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -4601,13 +4623,6 @@ select.oyl-input {
 @media (max-width: 37.49rem) and (min-height: 30rem) {
   :root:has(.oyl-chooser) {
     scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
-  }
-}
-
-/* The sticky HEADER — the shell's own query and height, restated. */
-@media (min-width: 64rem) and (min-height: 40rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-top: calc(var(--oyl-header-height) + var(--oyl-safe-top));
   }
 }
 
@@ -6199,9 +6214,13 @@ select.oyl-input {
  * camera's row into the left one, under this panel. The field spans the
  * panel's inner width, so the time has 360 px where it needs 93. It stays in
  * the secondary list in the document, where a screen reader and #94's order
- * meet it. 802 px is where four secondary tracks fit beside a 24 rem primary panel
- * (4 × 88 + 3 × 8 + 18 = 394 px of panel); from there the time is a fourth
- * track's reading on the second row.
+ * meet it. From 816 px (51 rem) the time is the fourth track's reading on the
+ * first row, in a track sized from its own content (§"THE MOVING TIME'S OWN
+ * WIDTH — #1124" below). ⚠️ That was 802 px until #1124, where four EQUAL
+ * tracks first fit (4 × 88 + 3 × 8 + 18 = 394 px of panel) — and an equal
+ * 88 px track is narrower than `9:59:59` on the runner's fonts (92.5 px), so
+ * from 802 to 819 px the time ran past its field, at no viewport any gate
+ * measured.
  *
  * ⚠️ Without anchor positioning this does not apply, and since #1120 the block
  * after it draws the time in the same place by grid placement; until then it
@@ -6210,7 +6229,7 @@ select.oyl-input {
  * and how much room the time has in its field.
  */
 @supports (anchor-name: --oyl-probe) {
-  @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
     .oyl-game--riding .oyl-hud__fields--primary {
       anchor-name: --oyl-hud-primary;
       /* The moving time's one line (a 1.5 rem value at line-height 1.05), and
@@ -6255,7 +6274,7 @@ select.oyl-input {
  * in, measured in Chromium 124).
  */
 @supports not (anchor-name: --oyl-probe) {
-  @media (min-width: 46rem) and (width < 50.125rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) and (max-height: 30rem) {
     .oyl-game--riding .oyl-hud__fields--primary {
       align-self: stretch;
       padding-block-end: calc(var(--oyl-space-sm) * 1.5 + 1.6rem);
@@ -6286,6 +6305,68 @@ select.oyl-input {
    word size (`fields.ts` §`movingTimeReading`), for #259's reason. */
 .oyl-hud__field--moving .oyl-hud__value {
   white-space: nowrap;
+}
+
+/*
+ * THE MOVING TIME'S OWN WIDTH — #1124.
+ *
+ * `9:59:59` is never broken (above), so what keeps it inside its field is the
+ * field's width — and until #1124 that was a fixed track or a fixed 6 rem,
+ * with the time measured into whatever was left: 1.0 px to spare on the CI
+ * runner's DejaVu Sans at 844×390 and both landscape tablets (a 93.5 px track
+ * for a 92.5 px time), 3.5 px upright (6 rem), and NONE from 802 to 819 px on
+ * its side, where four equal tracks are 88 to 92.5 px. A change to the
+ * runner's fonts, the secondary value size or the 5.5 rem floor would have
+ * turned `main` red with nothing wrong in the product, or spilled the time
+ * where no gate looks.
+ *
+ * So the field is sized from what it holds: `--oyl-hud-moving-width` is
+ * 6.5 `ch` AT THE VALUE'S SIZE — six and a half of the face's own `0`, the
+ * width of one tabular digit — for five digits and two colons. A colon is
+ * narrower than a digit in every face measured (DejaVu Sans about half one;
+ * Roboto, Android's, under half), so the floor follows the face: 99.3 px for
+ * a 92.5 px time on DejaVu, about 87.6 px for about 79 px in Roboto (reasoned
+ * from the font's metrics, not measured: #733). It is written in the HUD's
+ * own `ch` times the value's 1.5, so the controls that make room for the
+ * field upright can reserve the same width (`ch` is the font of the element
+ * that uses it, and the controls and the field are both in the HUD's).
+ * `ride.browser.spec.ts` §"#1124" publishes the spare width at every viewport
+ * and holds it to `MOVING_TIME_SPARE_PIXELS`.
+ *
+ * On its side from 51 rem the time is the fourth secondary track's reading on
+ * the first row (its index is fixed, `fields.ts` §`hudReadings`), and that
+ * track is `minmax(max-content, 1fr)`: never narrower than the field's floor,
+ * an equal share when there is room. ⚠️ **Where the HUD stacks rather than
+ * standing in corners (`STACKED_VIEWPORTS`, and a phone such as 320×568 or
+ * 412×700) the time is still an `auto-fit` track's reading**, as narrow as
+ * 88 px, and measured for #1124 it runs 2.5 to 4.2 px past its field there on
+ * the runner's fonts; no gate measures those layouts' fit yet (#1124's
+ * follow-up). Below 51 rem a corners layout has three
+ * tracks, written out rather than `auto-fit`, because from 802 px `auto-fit`
+ * made a fourth that could not hold the time: 51 rem is where three 5.5 rem
+ * tracks and the time's 99.3 px fit (3 × 88 + 99.3 + 3 × 8 + 18 = 405.3 px of
+ * panel, at 813 px), with 3 px left for a face a little wider than DejaVu.
+ */
+.oyl-game--riding .oyl-hud {
+  --oyl-hud-moving-width: calc(6.5ch * 1.5);
+}
+
+@media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(3, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (min-width: 51rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(3, minmax(5.5rem, 1fr)) minmax(max-content, 1fr);
+  }
+
+  /* Here only: in a layout of `auto-fit` 5.5 rem tracks the floor would push
+     the field past its track rather than widen it (below). */
+  .oyl-game--riding .oyl-hud__field--moving .oyl-hud__value {
+    min-inline-size: 6.5ch;
+  }
 }
 
 /*
@@ -6333,8 +6414,8 @@ select.oyl-input {
 
     .oyl-game--riding .oyl-hud__controls {
       anchor-name: --oyl-hud-controls;
-      /* The moving time's 6 rem, and the controls' own gap. */
-      padding-inline-end: calc(6rem + var(--oyl-space-md));
+      /* The moving time's own width (#1124), and the controls' own gap. */
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
     }
 
     .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
@@ -6343,9 +6424,11 @@ select.oyl-input {
       top: anchor(top);
       bottom: anchor(bottom);
       right: anchor(right);
-      /* "9:59:59" at the secondary value size is 85 px in the pinned Chromium;
+      /* #1124: the field is as wide as its value's own floor
+         (§"THE MOVING TIME'S OWN WIDTH"), which the controls reserve above.
+         It was 6 rem, 96 px, where `9:59:59` is 92.5 px on the runner's fonts.
          "MOVING" at the label size is under 60. */
-      width: 6rem;
+      width: var(--oyl-hud-moving-width);
       justify-content: center;
     }
 
@@ -6425,11 +6508,11 @@ select.oyl-input {
 @supports not (anchor-name: --oyl-probe) {
   @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
     .oyl-game--riding .oyl-hud__controls {
-      padding-inline-end: calc(6rem + var(--oyl-space-md));
+      padding-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
     }
 
     .oyl-game--riding .oyl-hud__actions > .oyl-hud__trainer {
-      margin-inline-end: calc(6rem + var(--oyl-space-md));
+      margin-inline-end: calc(var(--oyl-hud-moving-width) + var(--oyl-space-md));
     }
 
     .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--moving {
@@ -6437,7 +6520,7 @@ select.oyl-input {
       grid-area: actions;
       top: calc(var(--oyl-space-sm) + 1px);
       right: calc(var(--oyl-space-sm) + 1px);
-      width: 6rem;
+      width: var(--oyl-hud-moving-width);
     }
 
     .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
