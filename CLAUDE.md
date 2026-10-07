@@ -5471,7 +5471,10 @@ major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every
 nothing on purpose** (§4d) and would be the first thing a config migration breaks. Take it as
 its own issue with the suite, the coverage reporter and both platform-free typechecks re-run,
 never as part of a grouped bump. Dependabot's #273 proposed it alongside TypeScript 7 and was
-closed for the TypeScript half.
+closed for the TypeScript half. ⚠️ Since [#916](https://github.com/openzigs/onyourleft/issues/916)
+`.github/dependabot.yml` **ignores semver-major updates** of `typescript`, `vitest` and
+`@vitest/*` (minor and patch still come in the `toolchain` group), so neither major arrives in a
+grouped bump again; the pull request that takes either major on purpose removes its entry.
 
 **pnpm 11 refuses a lockfile entry published in the last 24 hours.** `minimumReleaseAge` is a
 default, not something this repository configured, and it is a supply-chain control worth keeping:

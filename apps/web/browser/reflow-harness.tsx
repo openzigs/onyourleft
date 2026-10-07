@@ -540,14 +540,25 @@ async function buildOnWorkouts(): Promise<void> {
   if (chart === null || chart === undefined) {
     throw new Error('the builder holds blocks and drew no block chart');
   }
-  // `&chart=above` — #1050's control: the chart put back between the block
-  // list and the Save form, where #1043 drew it.
-  if (new URLSearchParams(window.location.search).get('chart') === 'above') {
+  const query = new URLSearchParams(window.location.search);
+  // `&save=below` — #1087's control: the Save form put back after the block
+  // list, between it and the chart, where #1050 left it.
+  if (query.get('save') === 'below') {
     const save = document.querySelector('form[aria-label="Save this workout"]');
-    if (save === null) {
-      throw new Error('the builder has no Save form to put the chart above');
+    const list = form.closest('.oyl-sections')?.querySelector('ol');
+    if (save === null || list === null || list === undefined) {
+      throw new Error('the builder has no Save form or block list to put it after');
     }
-    save.before(chart);
+    list.after(save);
+  }
+  // `&blocks=nowrap` — #1087's reflow control: every block's line kept on one
+  // line, which the reflow walk must find scrolling the page sideways at
+  // 320×256, or the walk never laid the block list out.
+  if (query.get('blocks') === 'nowrap') {
+    for (const item of form.closest('.oyl-sections')?.querySelectorAll<HTMLElement>('ol > li') ??
+      []) {
+      item.style.whiteSpace = 'nowrap';
+    }
   }
 }
 

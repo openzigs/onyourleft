@@ -2858,7 +2858,7 @@
     "/v1/moderation/log": {
       "get": {
         "operationId": "getModerationLog",
-        "summary": "Every moderator action, oldest first. Append-only.",
+        "summary": "Every moderator action, NEWEST first, a page at a time (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. Append-only.",
         "security": [
           {
             "session": []
@@ -2916,15 +2916,25 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "entries"
+                    "entries",
+                    "next"
                   ],
                   "additionalProperties": false
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
@@ -3365,6 +3375,89 @@
           },
           "409": {
             "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/suspended": {
+      "get": {
+        "operationId": "listSuspendedAthletes",
+        "summary": "Every suspended account, most recently suspended first (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "athleteId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "suspendedAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "athleteId",
+                          "displayName",
+                          "suspendedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
