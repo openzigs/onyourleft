@@ -716,7 +716,13 @@ export function PopulatedShell({
       maskedWords={maskedWordsPort(populated)}
       riderText={riderTextPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
-      moderation={scriptedModeration({ standing: populated ? 'moderator' : 'not-moderator' }).port}
+      moderation={
+        scriptedModeration({
+          standing: populated ? 'moderator' : 'not-moderator',
+          // #961: a suspended account, so the walks lay out its row and its control.
+          suspended: { 'rider-erin': 1_790_020_000 },
+        }).port
+      }
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}

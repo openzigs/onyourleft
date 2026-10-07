@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useId, useState, type JSX } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
@@ -10,12 +10,14 @@ import {
   isConflict,
   MAXIMUM_MODERATION_REASON,
   type AccountAction,
+  type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
   type ModerationPort,
   type ModerationRead,
   type OpenReport,
   type PendingRegistration,
+  type SuspendedAccount,
 } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
 
@@ -47,6 +49,13 @@ import { hrefFor, routeById } from '../shell/routes';
  *
  * Every action that changes nothing says {@link NOTHING_CHANGED_TEXT}'s one
  * sentence (`instance/moderation-port.ts`), whatever the instance's reason.
+ *
+ * ## Two lists a page at a time — #961
+ *
+ * The suspended accounts and the log are shown a page at a time, newest first,
+ * each with a *Show more* control while the instance says there is more. A
+ * page is appended to what is shown; an action reads everything back from the
+ * first page again.
  *
  * ## A report about you — #905
  *
@@ -93,6 +102,15 @@ export const ACTION_DONE_TEXT = 'Done, and written to the moderation log.';
 export const MODERATION_LOG_UNREADABLE_TEXT =
   'The moderation log could not be read from the instance, so it is not shown here. The ' +
   'queues above are as the instance gave them.';
+
+/** Said in place of the suspended accounts when the instance gave the queues and not them (#961). */
+export const SUSPENDED_UNREADABLE_TEXT =
+  'The suspended accounts could not be read from the instance, so they are not shown here. You ' +
+  'can still lift a suspension by the account’s id, below.';
+
+/** Said under a list when its next page could not be read (#961). */
+export const MORE_UNREADABLE_TEXT =
+  'The next page could not be read from the instance. What is shown above is unchanged.';
 
 /** What each logged action is called on this screen. */
 const ACTION_LABEL: Readonly<Record<string, string>> = {
@@ -376,6 +394,102 @@ function Reports({
   );
 }
 
+/** *Show more* under a paged list (#961), and what it says when the page did not come. */
+function More({
+  label,
+  next,
+  failed,
+  onMore,
+}: {
+  readonly label: string;
+  readonly next: string | null;
+  readonly failed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false);
+  if (next === null) return null;
+  return (
+    <>
+      {failed ? (
+        <StatusMessage tone="warning" label="Not read" live>
+          {MORE_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : null}
+      <p>
+        <Button
+          variant="secondary"
+          unavailable={busy}
+          onClick={() => {
+            if (busy) return;
+            setBusy(true);
+            void onMore(next).finally(() => {
+              setBusy(false);
+            });
+          }}
+        >
+          {label}
+        </Button>
+      </p>
+    </>
+  );
+}
+
+function Suspended({
+  port,
+  suspended,
+  moreFailed,
+  onMore,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly suspended: ModerationList<SuspendedAccount> | undefined;
+  readonly moreFailed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
+  readonly onDone: Done;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-suspended">
+      <h2 id="oyl-moderation-suspended">Suspended accounts</h2>
+      {suspended === undefined ? (
+        <StatusMessage tone="warning" label="Not read">
+          {SUSPENDED_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : suspended.items.length === 0 ? (
+        <p className="oyl-muted">No account is suspended.</p>
+      ) : (
+        <>
+          <ul className="oyl-moderation__list oyl-moderation__suspended">
+            {suspended.items.map((each) => (
+              <li key={each.athleteId}>
+                <h3>{each.displayName}</h3>
+                <p>
+                  Account <code>{each.athleteId}</code>, suspended {when(each.suspendedAt)}.
+                </p>
+                <Decide
+                  label={`Reason for lifting the suspension of ${each.displayName}`}
+                  onDone={onDone}
+                  choices={[
+                    {
+                      label: 'Lift the suspension',
+                      run: async (reason) => port.actOnAccount(each.athleteId, 'unsuspend', reason),
+                    },
+                  ]}
+                />
+              </li>
+            ))}
+          </ul>
+          <More
+            label="Show more suspended accounts"
+            next={suspended.next}
+            failed={moreFailed}
+            onMore={onMore}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
 function AnAccount({
   port,
   onDone,
@@ -426,13 +540,17 @@ function AnAccount({
 
 function Log({
   me,
-  entries,
+  log,
+  moreFailed,
+  onMore,
 }: {
   readonly me: string;
-  readonly entries: readonly ModerationLogEntry[] | undefined;
+  readonly log: ModerationList<ModerationLogEntry> | undefined;
+  readonly moreFailed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
 }): JSX.Element {
-  // Newest first: the instance keeps it oldest first.
-  const newestFirst = entries === undefined ? undefined : [...entries].reverse();
+  // Newest first, as the instance pages it (#961).
+  const newestFirst = log?.items;
   const who = (id: string): JSX.Element => (id === me ? <>you</> : <code>{id}</code>);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-log">
@@ -445,7 +563,7 @@ function Log({
       ) : newestFirst.length === 0 ? (
         <p className="oyl-muted">Nothing has been logged yet.</p>
       ) : (
-        <ol className="oyl-moderation__list oyl-moderation__log" reversed>
+        <ol className="oyl-moderation__list oyl-moderation__log">
           {newestFirst.map((entry) => (
             <li key={entry.logId}>
               <strong>{actionLabel(entry.action)}</strong>, {when(entry.at)}, by{' '}
@@ -456,6 +574,9 @@ function Log({
             </li>
           ))}
         </ol>
+      )}
+      {log === undefined || log.items.length === 0 ? null : (
+        <More label="Show older entries" next={log.next} failed={moreFailed} onMore={onMore} />
       )}
     </section>
   );
@@ -469,11 +590,51 @@ export function ModerationView({
   const [state, setState] = useState<ModerationRead | undefined>(undefined);
   /** What the last action on this page came to, until the next one starts. */
   const [last, setLast] = useState<ModerationOutcome | undefined>(undefined);
+  /** Whether the last *Show more* on each list failed (#961). */
+  const [moreFailed, setMoreFailed] = useState({ log: false, suspended: false });
+  /**
+   * Counts the reads begun: a page asked for under one read is dropped when
+   * another has begun since, because it is the next page of a list no longer
+   * shown — the read-back after an action starts both lists again.
+   */
+  const generation = useRef(0);
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
-    setState(await port.read());
+    generation.current += 1;
+    const read = await port.read();
+    setMoreFailed({ log: false, suspended: false });
+    setState(read);
   }, [port]);
+
+  /** Append the next page of one list to what is shown, or say it did not come. */
+  async function more(list: 'log' | 'suspended', cursor: string): Promise<void> {
+    if (port === undefined) return;
+    const askedUnder = generation.current;
+    const next = list === 'log' ? await port.moreLog(cursor) : await port.moreSuspended(cursor);
+    if (generation.current !== askedUnder) return;
+    setMoreFailed((failed) => ({ ...failed, [list]: next === undefined }));
+    if (next === undefined) return;
+    setState((current) => {
+      if (current?.kind !== 'moderator') return current;
+      if (current[list]?.next !== cursor) return current;
+      return list === 'log'
+        ? {
+            ...current,
+            log: {
+              items: [...(current.log?.items ?? []), ...(next.items as ModerationLogEntry[])],
+              next: next.next,
+            },
+          }
+        : {
+            ...current,
+            suspended: {
+              items: [...(current.suspended?.items ?? []), ...(next.items as SuspendedAccount[])],
+              next: next.next,
+            },
+          };
+    });
+  }
 
   useEffect(() => {
     void read();
@@ -544,8 +705,20 @@ export function ModerationView({
       </KeptVisible>
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <Suspended
+        port={port}
+        suspended={state.suspended}
+        moreFailed={moreFailed.suspended}
+        onMore={async (cursor) => more('suspended', cursor)}
+        onDone={onDone}
+      />
       <AnAccount port={port} onDone={onDone} />
-      <Log me={state.me} entries={state.log} />
+      <Log
+        me={state.me}
+        log={state.log}
+        moreFailed={moreFailed.log}
+        onMore={async (cursor) => more('log', cursor)}
+      />
     </div>
   );
 }

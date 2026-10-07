@@ -92,9 +92,13 @@ export interface FitnessHistory {
 /**
  * The whole chart, from one list read.
  *
- * Rides are read oldest-first so the series is built in the order it is drawn,
- * and so a truncation drops the *oldest* history rather than the recent form
- * the averages actually depend on.
+ * ⚠️ **The NEWEST {@link HISTORY_ACTIVITY_LIMIT} rides, then put in start
+ * order** (#1130), so a truncation drops the *oldest* history rather than the
+ * recent form the averages actually depend on. This comment said that from
+ * #77 while the read took `direction: 'ascending'` — the OLDEST 5,000 — so a
+ * rider past 5,000 rides saw a fitness line that stopped years ago. The
+ * series is built in the order it is drawn, which is why the rows are
+ * reversed rather than read ascending.
  */
 export async function loadFitnessHistory(
   port: AnalysisPort,
@@ -102,10 +106,10 @@ export async function loadFitnessHistory(
 ): Promise<FitnessHistory> {
   const summaries: ActivitySummary[] = await port.store.listActivitySummaries(port.athleteId, {
     orderBy: 'startedAt',
-    direction: 'ascending',
+    direction: 'descending',
     limit: limit + 1,
   });
-  const considered = summaries.slice(0, limit);
+  const considered = summaries.slice(0, limit).reverse();
   const athlete = await port.store.getAthlete(port.athleteId);
   const thresholds = thresholdsFor(athlete);
 
@@ -186,16 +190,23 @@ export const BACKFILL_BATCH = 50;
  * their history the averages need earliest — the chart builds forward from the
  * first ride, so a hole at the start affects every later point and a hole at
  * the end affects only itself.
+ *
+ * ⚠️ **Oldest first WITHIN the rides the chart reads** — the newest
+ * {@link HISTORY_ACTIVITY_LIMIT} (#1130). Read from the oldest 5,000, as it
+ * was, a rider past the bound could never have a ride the chart shows worked
+ * out, and was offered the control for ever.
  */
 export async function backfillLoadSummaries(
   port: AnalysisPort,
   batch: number = BACKFILL_BATCH,
 ): Promise<BackfillOutcome> {
-  const summaries = await port.store.listActivitySummaries(port.athleteId, {
-    orderBy: 'startedAt',
-    direction: 'ascending',
-    limit: HISTORY_ACTIVITY_LIMIT,
-  });
+  const summaries = (
+    await port.store.listActivitySummaries(port.athleteId, {
+      orderBy: 'startedAt',
+      direction: 'descending',
+      limit: HISTORY_ACTIVITY_LIMIT,
+    })
+  ).reverse();
   const missing = summaries.filter((summary) => needsLoadSummary(summary));
 
   let computed = 0;

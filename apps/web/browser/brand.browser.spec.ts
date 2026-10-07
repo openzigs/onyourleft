@@ -84,7 +84,7 @@ test.describe('#965 — the owner’s wordmark and logo, in both palettes', () =
     test(`About draws the ${scheme} logo, and fetches only it — #972`, async ({ page }) => {
       const requested: string[] = [];
       page.on('request', (request) => {
-        if (/\/logo-(light|dark)-[^/]+\.png$/.test(request.url())) requested.push(request.url());
+        if (/\/logo-(light|dark)-[^/]+\.webp$/.test(request.url())) requested.push(request.url());
       });
       await open(page, scheme, '#/about');
       await page.waitForSelector('.oyl-brand-logo__image', { state: 'attached' });
@@ -97,9 +97,9 @@ test.describe('#965 — the owner’s wordmark and logo, in both palettes', () =
       // service worker's precache is a different client and is not counted:
       // `page.on('request')` hears this page's requests only.
       expect(requested).toEqual([
-        expect.stringMatching(new RegExp(`/logo-${scheme}-[^/]+\\.png$`)),
+        expect.stringMatching(new RegExp(`/logo-${scheme}-[^/]+\\.webp$`)),
       ]);
-      expect(seen.sources[0]).toMatch(new RegExp(`/logo-${scheme}-[^/]+\\.png$`));
+      expect(seen.sources[0]).toMatch(new RegExp(`/logo-${scheme}-[^/]+\\.webp$`));
       expect(seen.decoded).toBe(true);
       expect(seen.width).toBeGreaterThan(100);
       expect(seen.width).toBeLessThanOrEqual(256);

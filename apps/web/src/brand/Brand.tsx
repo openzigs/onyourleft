@@ -60,8 +60,8 @@ import { useSyncExternalStore, type JSX } from 'react';
 import { documentTheme, watchDocumentTheme } from '../design/theme-selection';
 import type { Theme } from '../design/tokens';
 
-import logoDark from './logo-dark.png';
-import logoLight from './logo-light.png';
+import logoDark from './logo-dark.webp';
+import logoLight from './logo-light.webp';
 import wordmarkDark from './wordmark-dark.png';
 import wordmarkLight from './wordmark-light.png';
 
@@ -117,7 +117,15 @@ export interface LogoPicture {
 
 /**
  * The full logo's picture for each palette. The sizes are the files' own,
- * which `Brand.test.tsx` reads back out of each PNG's header.
+ * which `Brand.test.tsx` reads back out of each file's VP8L header.
+ *
+ * Both are LOSSLESS WebP since #972 — about a third smaller than the PNGs
+ * they replaced, and the same pixels. Every browser this app supports decodes
+ * WebP: Chrome and the Android System WebView since well before anything here
+ * runs (Web Bluetooth needs Chrome 56; WebP is in Chrome 32), Safari 14 (on
+ * macOS 11 and iOS 14 and later) and
+ * Firefox 65. An engine that could not would show nothing where the logo is,
+ * and lose no words: the name is the visually hidden text beside it.
  */
 export const FULL_LOGO_PICTURES: Readonly<Record<Theme, LogoPicture>> = {
   light: { src: logoLight, width: 512, height: 412 },
