@@ -22,6 +22,8 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, type Mounted } from '../testing/mount';
 import { AboutView } from '../views/AboutView';
 
+import { webpDimensions } from '../../tools/brand/webp-testing';
+
 import { FULL_LOGO_PICTURES, FULL_LOGO_TEXT } from './Brand';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +78,7 @@ describe('the full logo on About', () => {
       expect(hidden).toEqual([FULL_LOGO_TEXT]);
       expect(images).toHaveLength(1);
       expect(images[0]?.getAttribute('alt')).toBe('');
-      expect(images[0]?.getAttribute('src')).toMatch(new RegExp(`logo-${theme}\\.png$`));
+      expect(images[0]?.getAttribute('src')).toMatch(new RegExp(`logo-${theme}\\.webp$`));
     });
   }
 
@@ -84,13 +86,13 @@ describe('the full logo on About', () => {
     document.documentElement.setAttribute('data-theme', 'light');
     mounted = await mount(<AboutView />);
     const image = () => mounted?.container.querySelector('img.oyl-brand-logo__image');
-    expect(image()?.getAttribute('src')).toMatch(/logo-light\.png$/);
+    expect(image()?.getAttribute('src')).toMatch(/logo-light\.webp$/);
     await act(async () => {
       document.documentElement.setAttribute('data-theme', 'dark');
       // The MutationObserver reports in a microtask.
       await Promise.resolve();
     });
-    expect(image()?.getAttribute('src')).toMatch(/logo-dark\.png$/);
+    expect(image()?.getAttribute('src')).toMatch(/logo-dark\.webp$/);
     expect(mounted.container.querySelectorAll('img.oyl-brand-logo__image')).toHaveLength(1);
   });
 
@@ -108,13 +110,9 @@ describe('the full logo on About', () => {
   it.each(['light', 'dark'] as const)(
     'gives the %s picture its own size, read from the file',
     (theme) => {
-      const bytes = readFileSync(join(HERE, `logo-${theme}.png`));
-      // The PNG signature, then IHDR: width and height, big-endian, at 16 and 20.
-      expect(bytes.subarray(12, 16).toString('latin1')).toBe('IHDR');
-      expect(FULL_LOGO_PICTURES[theme]).toMatchObject({
-        width: bytes.readUInt32BE(16),
-        height: bytes.readUInt32BE(20),
-      });
+      // Lossless WebP since #972: the size is in the VP8L header.
+      const bytes = new Uint8Array(readFileSync(join(HERE, `logo-${theme}.webp`)));
+      expect(FULL_LOGO_PICTURES[theme]).toMatchObject(webpDimensions(bytes));
     },
   );
 });

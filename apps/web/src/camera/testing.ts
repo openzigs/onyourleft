@@ -48,7 +48,12 @@ import type {
 } from './side-pairing-port';
 import type { SidePicture } from './side-link-pictures';
 import { sidePeerParametersFrom, type SidePeerParameters } from './side-link-sdp';
-import type { SideChannel, SideDescription, SidePeer } from './side-link-transport';
+import type {
+  SideChannel,
+  SideChannelInit,
+  SideDescription,
+  SidePeer,
+} from './side-link-transport';
 import { cameraProblemMessage } from './notice';
 
 /** What the scripted camera should do. Every member has a usable default. */
@@ -463,6 +468,13 @@ export interface SidePeerNetworkOptions {
    */
   readonly losesSendsInDataChannelEvent?: boolean | undefined;
   /**
+   * ⚠️ **Since #568's fourth fix neither end of the side link is handed a
+   * channel**: each makes both itself, negotiated on agreed streams. This and
+   * {@link SidePeerNetworkOptions.losesSendsInDataChannelEvent} still model
+   * what the engine does to a HANDED channel, so a test can show the link no
+   * longer depends on one; {@link SidePeerNetworkOptions.strandsAnsweringChannels}
+   * strands the answering end's channels however they were made.
+   *
    * Whether every channel handed to the ANSWERING end is left saying
    * `connecting` straight after its `ondatachannel`, while the other end's
    * messages still reach it — #568's second mode, and Blink's: it forces a
@@ -473,6 +485,15 @@ export interface SidePeerNetworkOptions {
    * the engine's next state change putting it right. Default `false`.
    */
   readonly strandsHandedChannels?: boolean | undefined;
+  /**
+   * Whether every channel on the ANSWERING end — handed over or made there,
+   * negotiated — is left saying `connecting` once the connection opens, while
+   * the other end's messages still reach it, until {@link sidePeerNetwork}'s
+   * `reopen`. Not seen in the real engine for a channel an end made itself
+   * (#568); it is how the phone's backstop against a channel that hears and
+   * cannot answer is still driven. Default `false`.
+   */
+  readonly strandsAnsweringChannels?: boolean | undefined;
   /**
    * Whether the FIRST message the ANSWERING end sends on `control` is lost,
    * wherever it is sent from, with no error and the channel still `open`, while
@@ -502,7 +523,7 @@ export interface ScriptedSideChannel extends SideChannel {
   /** Every binary message this end sent, in order — the side camera's pictures (#530). */
   readonly sentBinary: readonly ArrayBuffer[];
   /** What the channel was made with, on the end that made it. */
-  readonly init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined;
+  readonly init: SideChannelInit | undefined;
   /** Set by a test to stand for a stalled link: what `send` would still have queued. */
   bufferedAmount: number;
   /** Deliver `data` to this end as if the other end had sent it — a hostile peer (#530). */
@@ -544,6 +565,7 @@ export function sidePeerNetwork(options: SidePeerNetworkOptions = {}): {
     maxMessageSize: options.maxMessageSize ?? 262_144,
     losesSendsInDataChannelEvent: options.losesSendsInDataChannelEvent ?? false,
     strandsHandedChannels: options.strandsHandedChannels ?? false,
+    strandsAnsweringChannels: options.strandsAnsweringChannels ?? false,
     losesAnsweringEndsFirstControlMessage: options.losesAnsweringEndsFirstControlMessage ?? false,
     connects: options.connects ?? true,
     gathers: options.gathers ?? true,
@@ -631,6 +653,7 @@ interface FakeNetwork {
   readonly maxMessageSize: number;
   readonly losesSendsInDataChannelEvent: boolean;
   readonly strandsHandedChannels: boolean;
+  readonly strandsAnsweringChannels: boolean;
   readonly losesAnsweringEndsFirstControlMessage: boolean;
   readonly gathers: boolean;
   readonly addresses: (index: number) => readonly string[];
@@ -652,18 +675,48 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
   }
   offerer.setConnection('connected');
   answerer.setConnection('connected');
+  const network = offerer.network;
   for (const channel of [...offerer.channels]) {
+    const losesNext = network.losesAnsweringEndsFirstControlMessage && channel.label === 'control';
+    if (channel.init?.negotiated === true) {
+      // Neither `strandsHandedChannels` nor `losesSendsInDataChannelEvent` is
+      // applied here, so a test passing over this branch shows the link no
+      // longer DEPENDS on a handed channel — not that the engine cannot strand
+      // a negotiated one (only `strandsAnsweringChannels` models that).
+      // A negotiated channel is made on BOTH ends with the same id, and each
+      // end's own opens when the connection does — nothing is handed over,
+      // and an id the other end did not make carries nothing (#568).
+      const twin = answerer.channels.find(
+        (each) => each.init?.negotiated === true && each.init.id === channel.init?.id,
+      );
+      if (twin === undefined || twin.twin !== undefined) {
+        continue;
+      }
+      twin.twin = channel;
+      channel.twin = twin;
+      twin.losesNext = losesNext;
+      channel.readyState = 'open';
+      if (network.strandsAnsweringChannels) {
+        twin.stranded = true;
+      } else {
+        twin.readyState = 'open';
+      }
+      channel.onopen?.();
+      if (!twin.stranded) {
+        twin.onopen?.();
+      }
+      continue;
+    }
     const twin = new FakeSideChannel(channel.label, channel.network, undefined);
     twin.twin = channel;
     channel.twin = twin;
     twin.readyState = 'open';
-    twin.losesNext =
-      offerer.network.losesAnsweringEndsFirstControlMessage && channel.label === 'control';
+    twin.losesNext = losesNext;
     answerer.channels.push(twin);
-    twin.handedOver = offerer.network.losesSendsInDataChannelEvent;
+    twin.handedOver = network.losesSendsInDataChannelEvent;
     answerer.ondatachannel?.({ channel: twin });
     twin.handedOver = false;
-    if (offerer.network.strandsHandedChannels) {
+    if (network.strandsHandedChannels || network.strandsAnsweringChannels) {
       twin.stranded = true;
       twin.readyState = 'connecting';
     }
@@ -675,7 +728,7 @@ function connect(offerer: FakeSidePeer, answerer: FakeSidePeer): void {
 class FakeSideChannel implements ScriptedSideChannel {
   readonly label: string;
   readonly network: FakeNetwork;
-  readonly init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined;
+  readonly init: SideChannelInit | undefined;
   readonly sent: string[] = [];
   readonly sentBinary: ArrayBuffer[] = [];
   bufferedAmount = 0;
@@ -692,11 +745,7 @@ class FakeSideChannel implements ScriptedSideChannel {
   onclose: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
 
-  constructor(
-    label: string,
-    network: FakeNetwork,
-    init: { readonly ordered: boolean; readonly maxRetransmits?: number } | undefined,
-  ) {
+  constructor(label: string, network: FakeNetwork, init: SideChannelInit | undefined) {
     this.label = label;
     this.network = network;
     this.init = init;
@@ -808,10 +857,7 @@ class FakeSidePeer implements ScriptedSidePeer {
     return this.local ?? null;
   }
 
-  createDataChannel(
-    label: string,
-    init: { readonly ordered: boolean; readonly maxRetransmits?: number },
-  ): SideChannel {
+  createDataChannel(label: string, init: SideChannelInit): SideChannel {
     const channel = new FakeSideChannel(label, this.network, init);
     this.channels.push(channel);
     return channel;

@@ -1603,7 +1603,7 @@ nothing but Node, this repository's own packages, `kysely` (since #769, in `src/
 `ws` (since #780, in `src/room/node/`) — both ADR 0037 D-9's rows — which
 `apps/instance/third-party.txt` states and `check:notices` holds —
 and that document is **the instance's own**, served at `GET /licences/third-party.txt` and kept out
-of the app's notices (§4g of `CLAUDE.md`), because a rider's device carries none of it.
+of the app's notices (`docs/agents/licence-gates.md` §4g), because a rider's device carries none of it.
 
 **The source offer is an endpoint** (ADR 0036 D-6). `GET /source` answers with this repository's tree
 at the build's commit, or with the URL an operator who modified their instance configured. The

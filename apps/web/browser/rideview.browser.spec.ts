@@ -481,6 +481,11 @@ for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
         // rather than one made the upright page SHORTER than the screen, so
         // #439's rule binds here now: the page fits, and the old rule puts
         // the insets' 68 px back as scroll.
+        //
+        // ⚠️ #1021: if content grows and the upright page is taller than the
+        // screen again, move this viewport back to the `else` branch below —
+        // the shell height has stopped binding, which is that branch's claim.
+        // Do NOT loosen these two assertions to make it pass.
         const insets = insetsOf(viewport);
         expect(fixed.pageOverflow).toBeLessThanOrEqual(0);
         expect(reverted.pageOverflow).toBeCloseTo(insets.top + insets.bottom, 0);
@@ -1312,7 +1317,7 @@ for (const viewport of [
   TABLET_IN_THE_SHELL,
   TABLET_UPRIGHT_IN_THE_SHELL,
 ] as const) {
-  test(`#1012 — nothing paired: ONE banner and one Pair, on the screen — ${viewport.name}`, async ({
+  test(`#1012 — nothing paired: ONE banner and one Pair a sensor, on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, '?sensors=none');
@@ -1321,7 +1326,8 @@ for (const viewport of [
     expect(banner, 'no sensor banner').toBeDefined();
     expect(seen.readings, 'the four tiles are still there').toEqual([]);
     expect(banner?.links).toBe(1);
-    expect(banner?.link.name).toBe('Pair');
+    // #1021: named for what it pairs (WCAG 2.4.4).
+    expect(banner?.link.name).toBe('Pair a sensor');
     expect(banner?.link.onTop, 'Pair is covered').toBe(true);
     expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
     // After every ride control in its column (#692): it stands where the
@@ -1521,6 +1527,65 @@ for (const viewport of SAVED_CARD_VIEWPORTS) {
     });
   });
 }
+
+/**
+ * #1083 — the result card's readings fit their facts at a ten-hour ride.
+ *
+ * The card's facts are `repeat(auto-fit, minmax(…, 1fr))` tracks, and a
+ * reading is `xxl` tabular numerals that do not break: a track narrower than
+ * `10:23:45` wraps it or runs it onto the fact beside it (#259's failure, and
+ * #1046's and #1052's on the Activities cards and Home). The fixture's
+ * elapsed time is `10:23:45` since #1083, and every reading is held to ONE
+ * line and at most {@link READING_SPILL_PIXELS} past its own `dd`, at every
+ * phone and tablet the card can stand on. The figures are published.
+ */
+const READING_SPILL_PIXELS = 0.5;
+
+const RESULT_CARD_FIT_VIEWPORTS: readonly Viewport[] = [
+  // Where 9rem tracks came out between 144 and 153 px: two tracks narrower
+  // than the CI runner's `10:23:45`, which is what #1083 was filed for.
+  { name: 'a phone — 375×667', width: 375, height: 667 },
+  ...READING_VIEWPORTS.filter((viewport) => !SAVED_CARD_VIEWPORTS.includes(viewport)),
+  ...SAVED_CARD_VIEWPORTS,
+];
+
+for (const viewport of RESULT_CARD_FIT_VIEWPORTS) {
+  test(`#1083 — the result card’s readings fit at 10:23:45 — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?ride=saved');
+    const card = (await measure(page)).resultCard;
+    expect(card, 'the result card did not render').toBeDefined();
+    const note =
+      `${card!.readings.join(', ')}: at most ${String(card!.mostReadingLines)} line(s), ` +
+      `spill ${card!.readingSpill.toFixed(1)} px`;
+    testInfo.annotations.push({ type: '#1083', description: note });
+    console.log(`#1083 — ${viewport.name} — ${note}`);
+    // The fixture really is a ten-hour ride, or nothing here was measured.
+    expect(card!.readings, note).toContain('10:23:45');
+    expect(card!.mostReadingLines, note).toBe(1);
+    expect(card!.readingSpill, note).toBeLessThanOrEqual(READING_SPILL_PIXELS);
+  });
+}
+
+// At 7rem the 4:3 tablet's card takes three tracks of about 123 px; at the
+// landscape tablet all four facts fit whatever the floor, so it is no control.
+test(`#1083 — the control — 7rem tracks wrap or spill a 10:23:45 — ${SMALL_TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  await open(page, SMALL_TABLET_IN_THE_SHELL, '?ride=saved');
+  await page.evaluate(() => {
+    window.__oylRideView?.narrowResultFacts();
+  });
+  const card = (await measure(page)).resultCard;
+  expect(card, 'the result card did not render').toBeDefined();
+  const note =
+    `7rem tracks: at most ${String(card!.mostReadingLines)} line(s), ` +
+    `spill ${card!.readingSpill.toFixed(1)} px`;
+  testInfo.annotations.push({ type: '#1083 control', description: note });
+  console.log(`#1083 — the control — ${note}`);
+  expect(card!.mostReadingLines > 1 || card!.readingSpill > READING_SPILL_PIXELS, note).toBe(true);
+});
 
 test(`#1042 — the control — the card after the readings puts Done under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
   page,

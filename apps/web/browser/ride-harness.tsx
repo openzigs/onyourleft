@@ -181,7 +181,21 @@ export interface StageMeasurement {
     readonly width: number;
     readonly field: number;
     readonly lines: number;
+    /**
+     * #1124: how far the secondary tier's grid runs past its own panel —
+     * `scrollWidth − clientWidth` of `.oyl-hud__fields--secondary`. A track
+     * sized from the time's content can only take its room from the others,
+     * so a layout with too little room overflows here rather than squeezing
+     * the time.
+     */
+    readonly secondaryOverflow: number;
   };
+}
+
+/** @see StageMeasurement.moving */
+function secondaryOverflowOf(): number {
+  const secondary = document.querySelector('.oyl-hud__fields--secondary');
+  return secondary === null ? 0 : secondary.scrollWidth - secondary.clientWidth;
 }
 
 /**
@@ -687,6 +701,7 @@ function measure(): StageMeasurement {
           ? 0
           : movingRange.getBoundingClientRect().width,
       field: movingRow?.getBoundingClientRect().width ?? 0,
+      secondaryOverflow: secondaryOverflowOf(),
       lines:
         movingText === null || movingText === undefined ? 0 : movingRange.getClientRects().length,
     },

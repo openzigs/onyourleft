@@ -60,6 +60,25 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - infra
+    # ⚠️ No MAJOR version of TypeScript or Vitest is proposed (#916).
+    # docs/agents/toolchain.md §8 holds both back on purpose: TypeScript stays on 6.x while
+    # typescript-eslint's peer range excludes 7.x (`npm view typescript-eslint
+    # peerDependencies.typescript`), and Vitest 5 is its own issue, never part
+    # of a grouped bump. Without these lines every toolchain pull request
+    # arrived carrying both majors and had to be narrowed by hand, as #753 was.
+    # Minor and patch updates still come, inside the `toolchain` group below.
+    # Remove an entry in the pull request that takes that major on purpose,
+    # when §8's condition for it no longer holds.
+    ignore:
+      - dependency-name: 'typescript'
+        update-types:
+          - 'version-update:semver-major'
+      - dependency-name: 'vitest'
+        update-types:
+          - 'version-update:semver-major'
+      - dependency-name: '@vitest/*'
+        update-types:
+          - 'version-update:semver-major'
     groups:
       # Grouped so a toolchain bump is one review with one licence check rather
       # than eight. They move together in practice anyway.

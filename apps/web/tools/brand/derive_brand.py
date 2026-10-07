@@ -5,8 +5,8 @@ Every brand image the app ships, made from the owner's three source pictures -- 
     python3 apps/web/tools/brand/derive_brand.py            # write the outputs
     python3 apps/web/tools/brand/derive_brand.py --check    # write nothing; fail
                                                             # unless every committed
-                                                            # output is reproduced
-                                                            # byte for byte
+                                                            # output decodes to the
+                                                            # pixels this makes
 
 Run it with the interpreter of a virtual environment holding exactly the
 packages `brand.json` pins (`pip install -r apps/web/tools/brand/requirements.txt`);
@@ -52,7 +52,24 @@ committed sources and fetches nothing.
 
 Every step is integer or float arithmetic on NumPy arrays, SciPy's filters and
 Pillow's resampler. PNGs are written with no metadata at a fixed compression
-level. `--check` re-makes everything in memory and compares bytes.
+level; the full logo is written as LOSSLESS WebP (#972), with no metadata.
+
+## What `--check` compares, and why it is not bytes -- #972
+
+`--check` re-makes everything in memory and compares DECODED PIXELS: the
+same format (the extension says which), the same mode, the same size, and the
+same RGBA bytes. It compared the files' bytes until #972, and that was a
+promise the pinned packages cannot keep: Pillow's wheels bundle their own
+zlib, which on Linux (zlib-ng) compresses the very same pixels into different
+bytes than on the Mac where the outputs were made. Measured on 2026-10-05 with
+the pinned Python and packages on Linux: every one of the 23 outputs failed a
+byte comparison, and every one decoded to exactly the pixels the script makes.
+The pixels are the art and are what this script decides; the compressor's
+bytes are not. `ASSET003` still pins the committed bytes, so a file cannot
+change unseen -- what changes is that a contributor on another platform can
+re-run `--check` and get an answer about the art. Both encoders here are
+lossless, so a pixel comparison is the whole of what a byte comparison could
+promise about the picture.
 """
 
 from __future__ import annotations
@@ -344,6 +361,39 @@ def png(picture: Image.Image) -> bytes:
     return out.getvalue()
 
 
+def webp(picture: Image.Image) -> bytes:
+    """Lossless WebP -- #972. `exact` keeps the colour of a fully transparent
+    pixel, so the file decodes to exactly the RGBA the pipeline made; quality
+    100 and method 6 are libwebp's slowest, smallest lossless setting."""
+    out = io.BytesIO()
+    picture.save(out, format="WEBP", lossless=True, quality=100, method=6, exact=True)
+    return out.getvalue()
+
+
+def encode(path: str, picture: Image.Image) -> bytes:
+    if path.endswith(".png"):
+        return png(picture)
+    if path.endswith(".webp"):
+        return webp(picture)
+    refuse(f"{path} is neither a .png nor a .webp")
+    raise AssertionError  # unreachable
+
+
+FORMATS = {".png": "PNG", ".webp": "WEBP"}
+
+
+def same_pixels(path: str, made: bytes, committed: bytes) -> bool:
+    """Whether the committed file is the picture this script makes, decoded."""
+    expected = FORMATS[Path(path).suffix]
+    a = Image.open(io.BytesIO(made))
+    b = Image.open(io.BytesIO(committed))
+    if a.format != expected or b.format != expected:
+        return False
+    a.load()
+    b.load()
+    return a.mode == b.mode and a.size == b.size and a.tobytes() == b.tobytes()
+
+
 def derive() -> dict[str, bytes]:
     sheets = {
         source["path"]: Image.open(io.BytesIO(read_source(source["path"]))).convert("RGB")
@@ -363,7 +413,7 @@ def derive() -> dict[str, bytes]:
             picture = logo(sheet, kind, size)
         else:
             refuse(f"unknown family {family}")
-        made[output["path"]] = png(picture)
+        made[output["path"]] = encode(output["path"], picture)
     return made
 
 
@@ -420,12 +470,17 @@ def main() -> None:
     check_tools()
     made = derive()
     if arguments.check:
-        differ = [path for path, data in made.items() if not inside_root(path).exists() or inside_root(path).read_bytes() != data]
+        differ = [
+            path
+            for path, data in made.items()
+            if not inside_root(path).exists()
+            or not same_pixels(path, data, inside_root(path).read_bytes())
+        ]
         for path in differ:
-            print(f"derive_brand: {path} is not what this script makes", file=sys.stderr)
+            print(f"derive_brand: {path} is not the picture this script makes", file=sys.stderr)
         if differ:
             raise SystemExit(1)
-        print(f"derive_brand: all {len(made)} outputs reproduced byte for byte")
+        print(f"derive_brand: all {len(made)} outputs decode to the pixels this script makes")
         return
     for path, data in made.items():
         target = inside_root(path)

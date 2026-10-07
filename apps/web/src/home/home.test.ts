@@ -30,7 +30,7 @@ import { stubActivity } from '../detail/testing';
 import type { RoutePort } from '../routes/store-port';
 import { routeStub, stubRouteId } from '../routes/testing';
 
-import { loadHome, loadNextUp, WEEK_DAYS, type HomeLastRide } from './home';
+import { loadHome, loadNextUp, PROGRESS_PAGE_LIMIT, WEEK_DAYS, type HomeLastRide } from './home';
 
 const OWNER = toAthleteId('athlete-a');
 const DAY = 86_400;
@@ -100,9 +100,10 @@ describe('the read budget — #428', () => {
     expect(home.week.rides).toBe(2);
   });
 
-  it('past the bound, makes ONE more read — the oldest, bounded — for the badges, and no more — #1107', async () => {
+  it('past the bound, walks forward from the oldest ride to the newest window, reading each ride once — #1107, #1130', async () => {
     const port = stubAnalysis(OWNER, [ride('a', 30), ride('b', 2), ride('c', 1)]);
     const home = await loadHome(port, NOW, 2);
+    // The newest window [b, c], then one forward page [a, b] that reaches it.
     expect(port.listReads).toHaveLength(2);
     expect(port.listReads[1]).toMatchObject({
       orderBy: 'startedAt',
@@ -114,7 +115,81 @@ describe('the read budget — #428', () => {
       (badge) => badge.kind === 'first' && badge.first === 'ride',
     );
     expect(first?.activityId).toBe(activityId('a'));
-    expect(home.summaries.map((summary) => summary.id)).toEqual([activityId('a'), activityId('b')]);
+    expect(home.progress.rides).toBe(3);
+    expect(home.summaries.map((summary) => summary.id)).toEqual([
+      activityId('a'),
+      activityId('b'),
+      activityId('c'),
+    ]);
+  });
+
+  it('keeps the badges moving past the bound: a total crossed in the newest window is earned — #1130', async () => {
+    // 30 km a ride, so the fourth crosses 100 km — and with a bound of two,
+    // the fourth is in neither the oldest window nor any ride #1107 read for
+    // the badges.
+    const port = stubAnalysis(OWNER, [ride('a', 40), ride('b', 30), ride('c', 2), ride('d', 1)]);
+    const home = await loadHome(port, NOW, 2);
+
+    const hundred = home.progress.badges.find(
+      (badge) => badge.kind === 'distance' && badge.metres === 100_000,
+    );
+    expect(hundred?.activityId).toBe(activityId('d'));
+    expect(home.progress.rides).toBe(4);
+    // The newest window, then two forward pages: [a, b], and [c, d] reaching it.
+    expect(port.listReads).toHaveLength(3);
+    expect(port.listReads[2]).toMatchObject({
+      direction: 'ascending',
+      startedAfter: NOW - 30 * DAY,
+      afterActivityId: activityId('b'),
+      limit: 2,
+    });
+  });
+
+  it('stops the walk at PROGRESS_PAGE_LIMIT reads, and falls back to the two windows — #1130', async () => {
+    // 30 km a ride, except the two the walk never reads (r10, r11: 100 km
+    // each) and the newest (r12: 200 km). The true total crosses 500 km in
+    // that unread stretch, at r11; the walked pages plus the newest window
+    // (300 + 200 km) cross it at r12. Only `deriveProgressAcross` keeps that
+    // false crossing off r12 — `deriveProgress` over the gapped rows awards
+    // it (#1154's review).
+    const metresOf = (index: number): number =>
+      index === PROGRESS_PAGE_LIMIT + 2 ? 200_000 : index >= PROGRESS_PAGE_LIMIT ? 100_000 : 30_000;
+    const rides = Array.from({ length: PROGRESS_PAGE_LIMIT + 3 }, (_unused, index) =>
+      ride(`r${String(index).padStart(2, '0')}`, 100 - index, {
+        distance: metres(metresOf(index)),
+      }),
+    );
+    const port = stubAnalysis(OWNER, rides);
+    const home = await loadHome(port, NOW, 1);
+
+    expect(port.listReads).toHaveLength(1 + PROGRESS_PAGE_LIMIT);
+    // The badges from the pages the walk read, as #1107's oldest window.
+    expect(home.summaries).toHaveLength(PROGRESS_PAGE_LIMIT);
+    expect(home.summaries[0]?.id).toBe(activityId('r00'));
+    const first = home.progress.badges.find(
+      (badge) => badge.kind === 'first' && badge.first === 'ride',
+    );
+    expect(first?.activityId).toBe(activityId('r00'));
+    // No total is claimed across the unread stretch.
+    expect(
+      home.progress.badges.find((badge) => badge.kind === 'distance' && badge.metres === 500_000),
+    ).toBeUndefined();
+    expect(home.progress.badges.filter((badge) => badge.activityId === activityId('r12'))).toEqual(
+      [],
+    );
+  });
+
+  it('counts a ride that starts in the same second as the newest window, by its smaller id — #1130', async () => {
+    // `same-a` and `same-b` start together; the newest window of one holds
+    // `same-b`, the larger id, so the walk must still read `same-a`.
+    const port = stubAnalysis(OWNER, [ride('early', 5), ride('same-a', 1), ride('same-b', 1)]);
+    const home = await loadHome(port, NOW, 1);
+    expect(home.summaries.map((summary) => summary.id)).toEqual([
+      activityId('early'),
+      activityId('same-a'),
+      activityId('same-b'),
+    ]);
+    expect(home.progress.rides).toBe(3);
   });
 
   it('makes no second read inside the bound (the control)', async () => {

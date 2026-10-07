@@ -213,6 +213,51 @@ function reflowWalks(theme: Theme): void {
 }
 
 /**
+ * #1087 — the workout builder WITH blocks reflows at 320×256 and 844×390.
+ *
+ * The walks above render the builder with no blocks, so its block list and
+ * block chart (#1043, #1050) — drawn only once a block exists — were never
+ * reflow-checked. `?builder=blocks` adds one block of each kind through the
+ * builder's own *Add block* form (`reflow-harness.tsx` §`buildOnWorkouts`),
+ * and the Workouts route is judged by the same `reflowFaults` as every route
+ * in the walk. Its control keeps each block's line on one line
+ * (`&blocks=nowrap`), which must scroll the page sideways at 320×256 — so a
+ * green case here laid the block list out.
+ */
+test.describe('the workout builder with blocks reflows — #1087', () => {
+  const route = ALL_ROUTES.find((each) => each.id === 'workouts');
+  if (route === undefined) {
+    throw new Error('ALL_ROUTES has no workouts route');
+  }
+  for (const [width, height] of VIEWPORTS.filter(([w]) => w !== 390)) {
+    test(`at ${String(width)}×${String(height)}`, async ({ page }) => {
+      await open(page, width, height, 'data=populated&builder=blocks');
+      const seen = await visit(page, hrefFor(route));
+      const builder = page.locator('.oyl-main .oyl-sections').first();
+      // The fixture is what it says, or this walked the empty builder again.
+      expect(await builder.locator('ol > li').count()).toBe(4);
+      expect(await builder.locator('svg.oyl-block-chart').count()).toBe(1);
+      console.log(
+        `reflow builder=blocks ${String(width)}×${String(height)}: ${reflowMargin(route, seen)}`,
+      );
+      expect(reflowFaults(route, seen, true)).toEqual([]);
+    });
+  }
+
+  test('the control — a block line that cannot wrap scrolls the page sideways at 320×256', async ({
+    page,
+  }) => {
+    await open(page, 320, 256, 'data=populated&builder=blocks&blocks=nowrap');
+    const seen = await visit(page, hrefFor(route));
+    const faults = reflowFaults(route, seen, true);
+    expect(
+      faults.some((fault) => fault.includes('the document scrolls sideways')),
+      faults.join('\n'),
+    ).toBe(true);
+  });
+});
+
+/**
  * #1041, measured: the activity library is a card per ride at EVERY width —
  * one column on a phone and in #670's list pane beside a ride, and more than
  * one where one pane is wide enough for two cards (the tablet upright) — and
