@@ -9,10 +9,19 @@ export default defineConfig({
     // and `pnpm test` then run the same thing. Vitest 4 removed the separate
     // workspace file in favour of this field.
     //
-    // ⚠️ `packages/*` also matches FILES, and Vitest refuses a matched file that
-    // is not a Vitest config: `packages/CLAUDE.md`, the area instructions
-    // Claude Code loads for work under `packages/` (#1170), is excluded by name.
-    projects: ['packages/*', 'apps/*', '!packages/CLAUDE.md'],
+    // ⚠️ The globs name each package's CONFIG FILE, never `packages/*` (#1170).
+    // That also matched FILES, and Vitest refuses a matched file that is not a
+    // Vitest config, so `packages/CLAUDE.md` (the area instructions Claude Code
+    // loads for work under `packages/`) killed every run before it selected a
+    // test. Excluding it by name left `apps/CLAUDE.md`, a
+    // `packages/sensors/CLAUDE.md` or any other file beside the packages to
+    // fail the same way, and a trailing slash (`packages/*/`) does not help:
+    // Vitest's glob still returns files for it. `vitest.config.ts` is the file a
+    // directory glob resolved to anyway (`vitest.config.*` wins over
+    // `vite.config.*`, and over `apps/instance`'s `vitest.workerd.config.ts`),
+    // so the selection is unchanged; a package with no `vitest.config.ts` has no
+    // tests in this run, which `check:test-split` is what notices.
+    projects: ['packages/*/vitest.config.ts', 'apps/*/vitest.config.ts'],
     coverage: {
       provider: 'v8',
       // `json-summary` is what the CI step renders into the run summary; `html`
