@@ -1590,7 +1590,8 @@ function rgbOf(hex: string): string {
 /**
  * #1072 — a card carried into its detail, with Motion (ADR 0041).
  *
- * Each frame for 0.7 s after the press, the detail's wrapper
+ * Each frame from just before the press until it has settled (#1163: a set
+ * number of frames AND 0.7 s after it, below), the detail's wrapper
  * (`ListDetail.tsx` §"Carrying a card into its detail") is read for its
  * computed transform: a card carried shows frames that are not at rest, and
  * ends at rest. ⚠️ **The control is the same selection by ADDRESS**: the hash
@@ -1605,25 +1606,74 @@ function rgbOf(hex: string): string {
  * the required job; the helpers below are shared by both.
  */
 
-/** Frames whose transform was off rest, read for 0.7 s around `act`. */
+/*
+ * How the detail is read (#1163). It used to be every animation frame for a
+ * fixed 0.7 s of wall clock, which counts what the runner can draw rather than
+ * what the page did: a loaded CI runner read 9 frames, and 3 workers on a Mac
+ * under load read 2 to 7. So the window is no longer a duration alone. It
+ * opens before `act` and closes once BOTH hold — at least
+ * `CARRY_FRAMES_AFTER_ACT` frames have been read after `act` returned, and at
+ * least `CARRY_SETTLE_MS` has passed since then — or at `CARRY_CEILING_MS`,
+ * which only a stalled page reaches and which then fails on the frame count
+ * rather than hanging. The carry itself is `MOTION_FOR_SCRIPT.medium`, 200 ms,
+ * so 700 ms after the press still covers it three times over, now from the
+ * press rather than from before it.
+ */
+const CARRY_FRAMES_AFTER_ACT = 20;
+const CARRY_SETTLE_MS = 700;
+const CARRY_CEILING_MS = 15_000;
+
+/** Frames whose transform was off rest, read around `act` (#1163: by count and time). */
 async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
-  await page.evaluate(() => {
-    const held = window as unknown as { oylCarry?: string[] };
-    held.oylCarry = [];
-    const until = performance.now() + 700;
-    const sample = (): void => {
-      const wrapper = document.querySelector('[data-oyl-pane="detail"] .oyl-list-detail__carried');
-      if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
-      if (performance.now() < until) requestAnimationFrame(sample);
-    };
-    requestAnimationFrame(sample);
-  });
+  await page.evaluate(
+    ({ frames, settle, ceiling }) => {
+      const held = window as unknown as {
+        oylCarry?: string[];
+        oylCarryAct?: () => void;
+        oylCarryDone?: boolean;
+      };
+      held.oylCarry = [];
+      held.oylCarryDone = false;
+      const giveUp = performance.now() + ceiling;
+      // Unknown until `act` returns: until then the window cannot close.
+      let actedAt: number | undefined;
+      let readAtAct = 0;
+      held.oylCarryAct = () => {
+        actedAt = performance.now();
+        readAtAct = held.oylCarry?.length ?? 0;
+      };
+      const sample = (): void => {
+        const wrapper = document.querySelector(
+          '[data-oyl-pane="detail"] .oyl-list-detail__carried',
+        );
+        if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
+        const now = performance.now();
+        const closed =
+          actedAt !== undefined &&
+          now - actedAt >= settle &&
+          (held.oylCarry?.length ?? 0) - readAtAct >= frames;
+        if (closed || now >= giveUp) held.oylCarryDone = true;
+        else requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    },
+    { frames: CARRY_FRAMES_AFTER_ACT, settle: CARRY_SETTLE_MS, ceiling: CARRY_CEILING_MS },
+  );
   await act();
-  await page.waitForTimeout(750);
+  await page.evaluate(() => {
+    (window as unknown as { oylCarryAct?: () => void }).oylCarryAct?.();
+  });
+  await page.waitForFunction(
+    () => (window as unknown as { oylCarryDone?: boolean }).oylCarryDone === true,
+    undefined,
+    { timeout: CARRY_CEILING_MS + 5_000 },
+  );
   const frames = await page.evaluate(
     () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
   );
-  expect(frames.length, 'no frame of the detail was read').toBeGreaterThan(10);
+  expect(frames.length, 'no frame of the detail was read').toBeGreaterThanOrEqual(
+    CARRY_FRAMES_AFTER_ACT,
+  );
   // It ends where it belongs, whatever happened on the way.
   expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
   return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');

@@ -882,8 +882,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
               </p>
               <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
                 <p>
-                  <label htmlFor="workout-file">Workout file</label>
-                  <FileDrop hint="Or drop a workout file here">
+                  <label htmlFor="workout-file" id="workout-file-label">
+                    Workout file
+                  </label>
+                  <FileDrop hint="Or drop a workout file here" labelId="workout-file-label">
                     <input
                       id="workout-file"
                       name="file"
