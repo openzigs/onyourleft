@@ -49,6 +49,7 @@ import {
   virtualTime,
   type SidePeerNetworkOptions,
 } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const SECRET = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
@@ -109,7 +110,11 @@ async function paired(options: SidePeerNetworkOptions = {}, screenLock?: ScreenL
 /** A phone's side-camera session on a scripted camera, framing. */
 async function framingPhone(time: ReturnType<typeof virtualTime>) {
   const camera = scriptedCamera();
-  const controller = new CameraController({ port: camera.port, schedule: () => () => undefined });
+  const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
+    port: camera.port,
+    schedule: () => () => undefined,
+  });
   controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
   const session = new SideCameraSession({
     camera: controller,

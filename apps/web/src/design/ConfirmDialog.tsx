@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
-import { useRef, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { Button } from './Button';
+import { StatusMessage } from './StatusMessage';
+
+/** Said in the dialog when an asynchronous confirmation fails and the caller gave no sentence. */
+export const CONFIRM_FAILED_TEXT = 'That did not work. Try again, or close this.';
 
 /**
  * A question that has to be answered before something that cannot be undone —
@@ -50,7 +54,21 @@ export interface ConfirmDialogProps {
   readonly confirmLabel: string;
   /** The way out — "Keep the ride", never "Cancel" alone where it can be said. */
   readonly cancelLabel: string;
-  readonly onConfirm: () => void;
+  /**
+   * The confirmation. A caller that returns nothing has the dialog close at
+   * once, as it always did. A caller that returns a PROMISE keeps it open,
+   * both answers busy, until the promise settles (#959): it closes when the
+   * promise resolves, and when it rejects it stays open, focus where it was,
+   * and says {@link failureText} in a `role="alert"` inside it — because
+   * closing would tell the rider it was done.
+   */
+  readonly onConfirm: () => void | Promise<void>;
+  /**
+   * The rider-facing sentence for a confirmation whose promise rejected — what
+   * did not happen, and what is still as it was. Never the error's own text.
+   * {@link CONFIRM_FAILED_TEXT} when left out.
+   */
+  readonly failureText?: string;
   /**
    * Where focus goes when the dialog closes. By default it goes back to the
    * control that was focused when it opened; a caller whose confirmation
@@ -68,8 +86,50 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   onConfirm,
+  failureText = CONFIRM_FAILED_TEXT,
   onClosed,
 }: ConfirmDialogProps): JSX.Element {
+  /** An asynchronous confirmation under way: neither answer acts, and Escape does nothing. */
+  const [pending, setPending] = useState(false);
+  /** The last asynchronous confirmation failed, and the dialog says so. */
+  const [failed, setFailed] = useState(false);
+  // A dialog opened again starts clean: last time's failure is not this time's.
+  useEffect(() => {
+    if (open) {
+      setFailed(false);
+      setPending(false);
+    }
+  }, [open]);
+  const changeOpen = (next: boolean): void => {
+    // While a confirmation is under way the dialog is not closed by a cancel
+    // or by Escape: the rider would be told nothing of how it ended.
+    if (!next && pending) {
+      return;
+    }
+    onOpenChange(next);
+  };
+  const confirm = (): void => {
+    if (pending) {
+      return;
+    }
+    const result = onConfirm();
+    if (!(result instanceof Promise)) {
+      onOpenChange(false);
+      return;
+    }
+    setPending(true);
+    setFailed(false);
+    result.then(
+      () => {
+        setPending(false);
+        onOpenChange(false);
+      },
+      () => {
+        setPending(false);
+        setFailed(true);
+      },
+    );
+  };
   /*
    * ⚠️ Radix's dialog hands focus back to its `Trigger` on close, and to
    * nothing at all without one — measured: an Escape left focus on the page's
@@ -78,7 +138,7 @@ export function ConfirmDialog({
    */
   const opener = useRef<HTMLElement | null>(null);
   return (
-    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+    <AlertDialog.Root open={open} onOpenChange={changeOpen}>
       <AlertDialog.Portal>
         {/*
           The overlay is OPAQUE, `surface-overlay`: a scrim of a token at an
@@ -97,7 +157,13 @@ export function ConfirmDialog({
           */}
           <AlertDialog.Content
             aria-modal="true"
+            aria-busy={pending ? true : undefined}
             className="oyl-confirm tw:w-full tw:max-w-(--oyl-measure) tw:rounded tw:border-2 tw:border-border tw:p-lg tw:bg-canvas tw:text-ink"
+            onEscapeKeyDown={(event) => {
+              if (pending) {
+                event.preventDefault();
+              }
+            }}
             onOpenAutoFocus={() => {
               // Before Radix moves focus in, so this is still the control that
               // opened it.
@@ -120,6 +186,13 @@ export function ConfirmDialog({
             <AlertDialog.Description asChild>
               <div className="tw:mb-lg">{children}</div>
             </AlertDialog.Description>
+            {failed ? (
+              <div role="alert" className="tw:mb-lg">
+                <StatusMessage tone="danger" label="Not done">
+                  {failureText}
+                </StatusMessage>
+              </div>
+            ) : null}
             <div className="tw:flex tw:flex-wrap tw:gap-sm">
               {/*
                 #1002, the owner's ruling of 2026-10-02: the SAFE answer is the
@@ -128,14 +201,20 @@ export function ConfirmDialog({
                 them the other way round, and the irreversible answer was the
                 heaviest thing on the screen.
               */}
+              {/*
+                Busy is `unavailable` (`aria-disabled`), never `disabled`: the
+                confirm button the rider just pressed keeps focus, where a
+                disabled one would drop it to the page behind the trap.
+                ⚠️ The confirm is NOT Radix's `Action`, which closes the dialog
+                on every press — an asynchronous one closes only once it has
+                worked (#959).
+              */}
               <AlertDialog.Cancel asChild>
-                <Button>{cancelLabel}</Button>
+                <Button unavailable={pending}>{cancelLabel}</Button>
               </AlertDialog.Cancel>
-              <AlertDialog.Action asChild>
-                <Button variant="danger" onClick={onConfirm}>
-                  {confirmLabel}
-                </Button>
-              </AlertDialog.Action>
+              <Button variant="danger" unavailable={pending} onClick={confirm}>
+                {confirmLabel}
+              </Button>
             </div>
           </AlertDialog.Content>
         </AlertDialog.Overlay>

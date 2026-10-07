@@ -48,6 +48,7 @@ import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
 import { specifiersIn } from './import-walk-testing';
 import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -86,6 +87,7 @@ describe('1. at runtime, an answer changes nothing the ride reads', () => {
     const schedule = manualSchedule();
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: schedule.schedule,
       analysis: hostilePort,
@@ -470,6 +472,7 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
       key: 'fixture-hosted-key',
     }).model;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () =>

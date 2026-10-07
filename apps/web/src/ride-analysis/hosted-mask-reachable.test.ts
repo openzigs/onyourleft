@@ -66,6 +66,7 @@ import {
 import { createRideAnalysis, PREVIEW_FAILURE_TEXT } from './ride-analysis';
 import { runAnalysis } from './runner';
 import { CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 type Body = Readonly<Record<string, unknown>>;
 
@@ -120,6 +121,7 @@ function hostedOver(send: (url: string, init: RequestInit) => Promise<Response>)
     key: 'fixture-hosted-key',
   }).model;
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     hosted: () =>

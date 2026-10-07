@@ -58,6 +58,20 @@ export interface PoseMeasurement {
   readonly pacedMilliseconds: readonly number[];
   /** Whether the close was asked for and waited out. */
   readonly closed: boolean;
+  /**
+   * The rider once more, asked for BACK — #1061's live view, from #1123's
+   * review: what came back, on the worker already loaded. A worker that closed
+   * the picture before posting it would throw `DataCloneError` and send no
+   * reply, so this would come back `unavailable` with no picture.
+   */
+  readonly shown:
+    | {
+        readonly outcome: SidePoseOutcome['kind'];
+        readonly bitmap: boolean;
+        readonly width: number | undefined;
+        readonly height: number | undefined;
+      }
+    | undefined;
 }
 
 declare global {
@@ -97,6 +111,14 @@ async function run(): Promise<PoseMeasurement> {
     await estimator.estimateSidePose(rider.slice());
     pacedMilliseconds.push(performance.now() - at);
   }
+  const look = await estimator.estimateSidePoseShowingPicture(rider.slice());
+  const shown = {
+    outcome: look.outcome.kind,
+    bitmap: look.pixels instanceof ImageBitmap,
+    width: look.pixels?.width,
+    height: look.pixels?.height,
+  };
+  look.pixels?.close();
   const blank = await estimator.estimateSidePose(await blankJpeg(256, 144));
   const noise = await estimator.estimateSidePose(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]));
   estimator.closeSidePoseModel();
@@ -134,6 +156,7 @@ async function run(): Promise<PoseMeasurement> {
     firstMilliseconds,
     pacedMilliseconds,
     closed,
+    shown,
   };
 }
 
@@ -150,6 +173,7 @@ run().then(
       firstMilliseconds: undefined,
       pacedMilliseconds: [],
       closed: false,
+      shown: undefined,
     };
   },
 );

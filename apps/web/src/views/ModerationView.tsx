@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import {
@@ -126,9 +127,51 @@ interface Done {
   readonly finished: (outcome: ModerationOutcome) => Promise<void>;
 }
 
+/**
+ * The question a choice asks before it acts — #962. Suspending an account and
+ * hiding a display name are asked in `ConfirmDialog`, as Activities' delete is.
+ */
+interface Confirmation {
+  readonly title: string;
+  readonly body: string;
+  readonly confirmLabel: string;
+}
+
 interface Choice {
   readonly label: string;
   readonly run: (reason: string) => Promise<ModerationOutcome>;
+  /** Asked first when present; the action runs only once it is confirmed. */
+  readonly confirm?: Confirmation;
+}
+
+/** The way out of every moderation confirmation. */
+export const MODERATION_CANCEL_LABEL = 'Change nothing';
+
+/** That the confirmed action is logged — the last sentence of every confirmation. */
+const LOGGED_SENTENCE =
+  'It is written to the moderation log with your account and the reason you gave.';
+
+/** #962: what suspending `athleteId` is confirmed with. */
+export function suspendConfirmation(athleteId: string): Confirmation {
+  return {
+    title: athleteId.trim() === '' ? 'Suspend this account?' : `Suspend account ${athleteId}?`,
+    body:
+      'Until you lift the suspension, the account cannot use this instance except to take its ' +
+      `data out or delete itself. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Suspend it',
+  };
+}
+
+/** #962: what hiding `athleteId`'s display name is confirmed with. */
+export function hideNameConfirmation(athleteId: string): Confirmation {
+  return {
+    title:
+      athleteId.trim() === ''
+        ? 'Hide this account’s display name?'
+        : `Hide the display name of account ${athleteId}?`,
+    body: `Other riders will no longer see the name this account chose. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Hide the name',
+  };
 }
 
 /** A reason box and the actions it goes with, and what the last one did. */
@@ -144,19 +187,18 @@ function Decide({
   const reasonId = useId();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<ModerationOutcome | undefined>(undefined);
+  /** The choice whose confirmation is open — #962. */
+  const [confirming, setConfirming] = useState<Choice | undefined>(undefined);
 
   async function run(choice: Choice): Promise<void> {
     setBusy(true);
-    setOutcome(undefined);
     onDone.starting();
     const answer = await choice.run(reason);
     setBusy(false);
-    // A success is said by the page rather than here: the row this was pressed
-    // on may leave the screen once the queue is read again. A refusal is said
-    // here, beside what was pressed.
+    // What it came to — done OR refused — is said by the page rather than
+    // here (#960): the row this was pressed on may leave the screen once the
+    // queue is read again, and a refusal said inside it would go with it.
     if (answer.kind === 'done') setReason('');
-    else setOutcome(answer);
     // Read back either way: a refused action can be logged too.
     await onDone.finished(answer);
   }
@@ -172,7 +214,6 @@ function Decide({
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
-            setOutcome(undefined);
           }}
         />
       </p>
@@ -181,20 +222,34 @@ function Decide({
           <Button
             key={choice.label}
             variant="secondary"
-            disabled={busy}
+            // `aria-disabled` rather than `disabled` while an action runs, so
+            // focus handed back by a closing confirmation lands on it rather
+            // than falling to the page; `run` refuses the press.
+            unavailable={busy}
             onClick={() => {
-              void run(choice);
+              if (busy) return;
+              if (choice.confirm === undefined) void run(choice);
+              else setConfirming(choice);
             }}
           >
             {choice.label}
           </Button>
         ))}
       </p>
-      {outcome === undefined || outcome.kind === 'done' ? null : (
-        <StatusMessage tone="warning" label="Not done" live>
-          {outcome.text}
-        </StatusMessage>
-      )}
+      <ConfirmDialog
+        open={confirming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(undefined);
+        }}
+        title={confirming?.confirm?.title ?? ''}
+        confirmLabel={confirming?.confirm?.confirmLabel ?? ''}
+        cancelLabel={MODERATION_CANCEL_LABEL}
+        onConfirm={() => {
+          if (confirming !== undefined) void run(confirming);
+        }}
+      >
+        <p>{confirming?.confirm?.body}</p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -290,6 +345,7 @@ function Reports({
                     },
                     {
                       label: 'Suspend the account',
+                      confirm: suspendConfirmation(report.targetAthleteId),
                       run: async (reason) =>
                         port.actOnAccount(
                           report.targetAthleteId,
@@ -300,6 +356,7 @@ function Reports({
                     },
                     {
                       label: 'Hide its display name',
+                      confirm: hideNameConfirmation(report.targetAthleteId),
                       run: async (reason) =>
                         port.actOnAccount(
                           report.targetAthleteId,
@@ -354,9 +411,13 @@ function AnAccount({
         label="Reason for the log"
         onDone={onDone}
         choices={[
-          { label: 'Suspend', run: act('suspend') },
+          { label: 'Suspend', run: act('suspend'), confirm: suspendConfirmation(athleteId) },
           { label: 'Lift the suspension', run: act('unsuspend') },
-          { label: 'Hide the display name', run: act('hide_display_name') },
+          {
+            label: 'Hide the display name',
+            run: act('hide_display_name'),
+            confirm: hideNameConfirmation(athleteId),
+          },
         ]}
       />
     </section>
@@ -461,11 +522,18 @@ export function ModerationView({
   }
   return (
     <div className="oyl-moderation">
-      {last?.kind === 'done' ? (
+      {/* #960: a refusal is said HERE, outside the row it was pressed on, as
+          a success is — the read-back may remove that row, and a sentence
+          inside it would leave with it, unseen. */}
+      {last === undefined ? null : last.kind === 'done' ? (
         <StatusMessage tone="success" live>
           {ACTION_DONE_TEXT}
         </StatusMessage>
-      ) : null}
+      ) : (
+        <StatusMessage tone="warning" label="Not done" live>
+          {last.text}
+        </StatusMessage>
+      )}
       {/* #1009, the owner's ruling: that every action is logged, names the
           moderator and outlives an erased account is read BEFORE acting, as
           consent text is, so it stands above the actions — not below them,

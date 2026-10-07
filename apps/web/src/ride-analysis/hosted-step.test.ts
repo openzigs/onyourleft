@@ -20,6 +20,7 @@ import type { ModelStepPort, StepRequest } from './model-step-port';
 import { runAnalysis } from './runner';
 import { sealStep } from './sealed-step';
 import { patternsOnlyGuard } from './personal-details-testing';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -69,6 +70,7 @@ function counted(server: ModelServer = modelServer()): {
 /** A camera controller with the hosted model turned on, or not. */
 function controller(send: HostedSend, hostedOn = true): CameraController {
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),

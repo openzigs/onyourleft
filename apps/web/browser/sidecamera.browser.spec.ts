@@ -37,6 +37,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import type { PairingMeasurement, SideCameraMeasurement } from './sidecamera-harness';
+import type { LiveCaseMeasurement } from './sidelive-harness';
 
 /** The touch target, SC 2.5.5. */
 const TOUCH_TARGET_PIXELS = 44;
@@ -295,3 +296,67 @@ test.describe('#1108 — the phone’s pairing instruction, above its camera pic
     expect(status.bottom).toBeGreaterThan(measured.fold - FOLD_MARGIN_PIXELS);
   });
 });
+
+/**
+ * **The tablet's live view: the outline lands on the picture it is of** —
+ * #1061, ADR 0044 D-1. `sidecamera.html?live=tablet` draws a picture made from
+ * arithmetic (no photograph of anybody) with a coloured square at each
+ * landmark, through the real `SideLiveView` under the real `theme.css`. Each
+ * square is found by reading the canvas's own pixels and mapped to the screen;
+ * each joint of the drawn outline must sit on its square.
+ *
+ * ⚠️ **The control**: the same picture with every landmark moved a twentieth
+ * of its width to the right. It must FAIL the same measurement, or the
+ * measurement is not looking at where the outline is.
+ *
+ * Run in both palettes: the picture and its lines are drawn in HUD ink, which
+ * does not change with the page's palette (#672).
+ */
+const LIVE_VIEW_VIEWPORT = { width: 1280, height: 800 };
+
+/** How far a joint may sit from its square's centre, in CSS pixels. */
+const JOINT_ON_SQUARE_PIXELS = 3;
+
+/** HUD ink, `tokens.ts` §`hudInk` #f5f8fa, as the engine resolves it. */
+const HUD_INK = 'rgb(245, 248, 250)';
+
+function furthestMiss(measured: LiveCaseMeasurement): number {
+  let furthest = 0;
+  for (const square of measured.squares) {
+    const joint = measured.joints.find((each) => each.name === square.name);
+    if (joint === undefined || !Number.isFinite(square.x)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    furthest = Math.max(furthest, Math.hypot(joint.x - square.x, joint.y - square.y));
+  }
+  return furthest;
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test.describe(`the tablet’s live view of the side camera, ${colorScheme} — #1061`, () => {
+    test.use({ colorScheme });
+
+    test('draws each joint of the outline on the landmark it is of, and the control misses', async ({
+      page,
+    }) => {
+      await page.setViewportSize(LIVE_VIEW_VIEWPORT);
+      const response = await page.goto('/sidecamera.html?live=tablet');
+      expect(response?.status()).toBe(200);
+      await page.waitForFunction(() => window.__oylSideLive !== undefined);
+      expect(await page.evaluate(() => window.__oylSideLive?.errors)).toEqual([]);
+      const cases = await page.evaluate(() => window.__oylSideLive?.measure() ?? []);
+      const truth = cases.find((each) => each.name === 'true');
+      const control = cases.find((each) => each.name === 'offset');
+      expect(truth?.theme).toBe(colorScheme);
+      expect(truth?.squares.length).toBe(6);
+      expect(truth?.joints.length).toBe(6);
+      const miss = truth === undefined ? Number.POSITIVE_INFINITY : furthestMiss(truth);
+      console.log(`#1061 ${colorScheme}: furthest joint from its landmark ${miss.toFixed(2)} px`);
+      expect(miss).toBeLessThanOrEqual(JOINT_ON_SQUARE_PIXELS);
+      const controlMiss = control === undefined ? 0 : furthestMiss(control);
+      console.log(`#1061 ${colorScheme}: the control misses by ${controlMiss.toFixed(2)} px`);
+      expect(controlMiss).toBeGreaterThan(JOINT_ON_SQUARE_PIXELS * 3);
+      expect(truth?.outlineStroke).toBe(HUD_INK);
+    });
+  });
+}
