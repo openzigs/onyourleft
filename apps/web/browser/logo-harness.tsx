@@ -31,7 +31,7 @@
 import { startTransition, StrictMode, Suspense, useState, ViewTransition, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import logoLight from '../src/brand/logo-light.png';
+import logoLight from '../src/brand/logo-light.webp';
 import '../src/design/theme.css';
 // After `theme.css`, as on every page (`a11y/tailwind.a11y.test.ts`).
 import '../src/design/tailwind.css';

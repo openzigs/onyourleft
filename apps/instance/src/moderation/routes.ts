@@ -316,28 +316,64 @@ export const MODERATION_ROUTES: readonly Route[] = [
   },
   {
     method: 'GET',
+    path: '/v1/moderation/suspended',
+    operationId: 'listSuspendedAthletes',
+    reaches: 'moderation',
+    summary:
+      'Every suspended account, most recently suspended first (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        items: {
+          type: 'array',
+          items: object({ athleteId: string, displayName: string, suspendedAt: integer }),
+        },
+        next: nullableString,
+      }),
+    },
+    handle: async (context) =>
+      answer(await moderationOf(context).suspended(context.url.searchParams), (page) =>
+        json({
+          items: page.items.map((athlete) => ({
+            athleteId: athlete.id,
+            displayName: athlete.displayName,
+            suspendedAt: athlete.suspendedAt ?? 0,
+          })),
+          next: page.next,
+        }),
+      ),
+  },
+  {
+    method: 'GET',
     path: '/v1/moderation/log',
     operationId: 'getModerationLog',
     reaches: 'moderation',
-    summary: 'Every moderator action, oldest first. Append-only.',
+    summary:
+      'Every moderator action, NEWEST first, a page at a time (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. Append-only.',
     identity: true,
     auth: 'session',
-    errors: ['unauthenticated'],
+    errors: ['unauthenticated', 'validation_failed'],
     response: {
       contentType: 'application/json',
-      schema: object({ entries: { type: 'array', items: logEntrySchema } }),
+      schema: object({ entries: { type: 'array', items: logEntrySchema }, next: nullableString }),
     },
     handle: async (context) =>
-      json({
-        entries: (await moderationOf(context).log()).map((entry) => ({
-          logId: entry.id,
-          action: entry.action,
-          actorAthleteId: entry.actorAthleteId,
-          targetAthleteId: entry.targetAthleteId,
-          reportId: entry.reportId,
-          reason: entry.reason,
-          at: entry.at,
-        })),
-      }),
+      answer(await moderationOf(context).logPage(context.url.searchParams), (page) =>
+        json({
+          entries: page.items.map((entry) => ({
+            logId: entry.id,
+            action: entry.action,
+            actorAthleteId: entry.actorAthleteId,
+            targetAthleteId: entry.targetAthleteId,
+            reportId: entry.reportId,
+            reason: entry.reason,
+            at: entry.at,
+          })),
+          next: page.next,
+        }),
+      ),
   },
 ];

@@ -262,6 +262,12 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
+  listModerationLogPage: {
+    notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
+  },
+  listSuspendedAthletes: {
+    notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
+  },
   putBlock: { notAScopedRead: 'a write' },
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
   putReport: { notAScopedRead: 'a write' },

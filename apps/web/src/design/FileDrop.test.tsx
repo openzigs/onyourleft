@@ -11,7 +11,7 @@
 import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { accessibleName, auditAccessibility, formatViolations } from '../a11y/audit';
 import { mount, type Mounted } from '../testing/mount';
 
 import { chosenText, FileDrop, FilePicker, handOver } from './FileDrop';
@@ -62,8 +62,10 @@ function Screen({ onFiles }: { readonly onFiles: (names: string[]) => void }): J
   return (
     <main>
       <h1>Import</h1>
-      <label htmlFor="file">GPX file</label>
-      <FileDrop hint="Or drop a GPX file here">
+      <label htmlFor="file" id="file-label">
+        GPX file
+      </label>
+      <FileDrop hint="Or drop a GPX file here" labelId="file-label">
         <input
           id="file"
           type="file"
@@ -218,8 +220,10 @@ describe('FilePicker — #1030', () => {
       return (
         <main>
           <h1>Documents</h1>
-          <label htmlFor="file">Add a document</label>
-          <FilePicker>
+          <label htmlFor="file" id="file-label">
+            Add a document
+          </label>
+          <FilePicker labelId="file-label">
             <input
               id="file"
               type="file"
@@ -241,8 +245,10 @@ describe('FilePicker — #1030', () => {
       <main>
         <h1>Import</h1>
         <form aria-label="Import">
-          <label htmlFor="file">GPX file</label>
-          <FilePicker>
+          <label htmlFor="file" id="file-label">
+            GPX file
+          </label>
+          <FilePicker labelId="file-label">
             <input id="file" type="file" />
           </FilePicker>
           <button type="reset">Reset</button>
@@ -262,8 +268,10 @@ describe('FilePicker — #1030', () => {
     mounted = await mount(
       <main>
         <h1>Files</h1>
-        <label htmlFor="file">Activity files</label>
-        <FilePicker>
+        <label htmlFor="file" id="file-label">
+          Activity files
+        </label>
+        <FilePicker labelId="file-label">
           <input id="file" type="file" multiple className="oyl-input" />
         </FilePicker>
       </main>,
@@ -278,14 +286,48 @@ describe('FilePicker — #1030', () => {
     mounted = await mount(
       <main>
         <h1>Files</h1>
-        <label htmlFor="file">A folder</label>
-        <FilePicker choose="Choose a folder">
+        <label htmlFor="file" id="file-label">
+          A folder
+        </label>
+        <FilePicker choose="Choose a folder" labelId="file-label">
           <input id="file" type="file" multiple />
         </FilePicker>
       </main>,
     );
     expect(document.querySelector('.oyl-file__button')?.textContent).toBe('Choose a folder');
   });
+
+  // #1038, WCAG 2.2 SC 2.5.3: a speech-input user says the words they SEE on
+  // the control, so the input's name holds the button's words as well as the
+  // screen's label — and the words are still hidden from a screen reader as
+  // text of their own, so they are not heard twice.
+  for (const [choose, multiple, words] of [
+    [undefined, false, 'Choose file'],
+    [undefined, true, 'Choose files'],
+    ['Choose a folder', true, 'Choose a folder'],
+  ] as const) {
+    it(`names the input with its label AND "${words}", the words on the button`, async () => {
+      mounted = await mount(
+        <main>
+          <h1>Files</h1>
+          <label htmlFor="file" id="file-label">
+            Activity files
+          </label>
+          <FilePicker choose={choose} labelId="file-label">
+            <input id="file" type="file" multiple={multiple} />
+          </FilePicker>
+        </main>,
+      );
+      const input = choosable();
+      const button = document.querySelector('.oyl-file__button');
+      expect(button?.textContent).toBe(words);
+      expect(button?.getAttribute('aria-hidden')).toBe('true');
+      expect(accessibleName(input)).toBe(`Activity files ${words}`);
+      // The label still points at the input, so a press on it opens the picker.
+      expect(input.labels?.[0]?.id).toBe('file-label');
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+    });
+  }
 
   it('says nothing for an empty choice', () => {
     expect(chosenText(null)).toBeUndefined();
