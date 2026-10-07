@@ -444,7 +444,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         that route through `#/game?route=…`, the one query
                         this shell reads (`shell/routes.ts`
                         §`gameRouteFromHash`). "The last workout used" is
-                        not offered: no ride records which workout it was
+                        not offered: no ride records which workout it was.
+                        ⚠️ **"One bounded store read" holds only up to 5,000
+                        rides** (#1130), and a reviewer who remembers it on
+                        every launch is reading the old file: past
+                        `HISTORY_ACTIVITY_LIMIT` Home also walks every older
+                        ride forward for the badges, at most
+                        `PROGRESS_PAGE_LIMIT` (10) more reads of 5,000, and
+                        then falls back to two windows (`home.ts`
+                        §`loadHome`). Its cost on the tablet is unmeasured
+                        (#1168)
     src/instance/       connecting this app to an instance (#777) — which
                         addresses it will talk to (`https:`, and `http:` only
                         to this machine's loopback, refused before any
@@ -2392,9 +2401,11 @@ pnpm --filter @onyourleft/web run test
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
 # installed (any other version is refused); it fetches nothing. `--check`
-# writes nothing and fails unless every committed output is reproduced byte for
-# byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
-# it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.
+# writes nothing and fails unless every committed output DECODES to the pixels
+# it makes (since #972; bytes until then, which Pillow's zlib differs on between
+# macOS and Linux); `--records` prints the ASSETS.toml rows. The full logo is
+# lossless WebP since #972. ⚠️ `icons:generate` is gone: it drew the icons until
+# #965. Run on 2026-10-05 on Linux, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
@@ -5928,6 +5939,7 @@ top of an issue **supersedes its body**.
 | Why the HUD's panels are opaque and the frosted-glass look is not on offer | `apps/web/src/design/tokens.ts` §`hudSurface`, `apps/web/src/design/theme.css` §`.oyl-hud__panel`, `apps/web/src/game/hud/hud-surface.a11y.test.ts` |
 | Which readings are drawn large, and why that says nothing about which are spoken | `apps/web/src/game/hud/fields.ts` §`ReadingTier`, [#395](https://github.com/openzigs/onyourleft/issues/395) |
 | Where the game HUD's moving time comes from (the recorder's, never a second clock), why it is not spoken, and where it is drawn on a narrow phone | `apps/web/src/game/trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`, `apps/web/src/game/hud/fields.ts` §`HudInput.movingSeconds`, `apps/web/src/game/hud/announce.ts` §`ANNOUNCEABLE_READINGS`, `apps/web/src/design/theme.css` §"THE MOVING TIME ON AN UPRIGHT PHONE", [#1111](https://github.com/openzigs/onyourleft/issues/1111) |
+| How wide the game HUD's moving-time field is, why it is sized in `ch` from its own digits rather than by a track, and the room `9:59:59` is held to | `apps/web/src/design/theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124", `apps/web/browser/ride.browser.spec.ts` §`MOVING_TIME_SPARE_PIXELS`, [#1124](https://github.com/openzigs/onyourleft/issues/1124) |
 | How a rider leaves a ride mid-way, and why the stage has no navigation on it | `apps/web/src/game/GameView.tsx` §`GameViewProps.onImmersive` |
 | Why the page chrome is ABSENT during a ride rather than hidden, and what is deliberately still rendered | `apps/web/src/shell/AppShell.tsx` §`immersive`, `apps/web/src/shell/immersive.test.tsx` |
 | What a phone gives up while a standing notice is on the stage, why "while" is the whole ride, and who owns the remedy | `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL", [#437](https://github.com/openzigs/onyourleft/issues/437) |
@@ -6115,6 +6127,7 @@ top of an issue **supersedes its body**.
 | How the tablet and the side-camera phone pair with no server, and what a pairing code may carry | `apps/web/src/camera/side-link-code.ts`, `apps/web/src/camera/side-link-sdp.ts`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-1, D-4, [#529](https://github.com/openzigs/onyourleft/issues/529) |
 | Why the side link calls itself lost after three seconds, and why a deliberate end waits for the channel to close | `apps/web/src/camera/side-link.ts` §`SILENCE_IS_LOST_MILLISECONDS`, §`CLOSE_GRACE_MILLISECONDS` |
 | Why the phone never speaks first on the side link, why it keeps its secret on a channel that says it cannot send, and why an unanswered pairing ends in three seconds as `unanswered` rather than as no path | `apps/web/src/camera/side-link.ts` §"Why the phone waits to be spoken to", §"A channel that hears and cannot answer", `apps/web/src/camera/testing.ts` §`strandsHandedChannels`, [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-09-27, [#568](https://github.com/openzigs/onyourleft/issues/568) |
+| Why both ends of the side link make both of its channels themselves (negotiated, streams 0 and 2), why a channel handed over in `datachannel` ends the pairing, and how often Chromium 141 (not the pinned 153) stranded a handed one | `apps/web/src/camera/side-link.ts` §"Why each end makes its own channels", §`CONTROL_CHANNEL_INIT`, [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-10-05, [#568](https://github.com/openzigs/onyourleft/issues/568) |
 | Why the phone says nothing after its secret until the tablet's `welcome`, and why a lost secret ends a pairing as `unanswered` rather than `not-our-phone` | `apps/web/src/camera/side-link.ts` §"Why the phone says nothing more until it is welcomed", `apps/web/src/camera/testing.ts` §`losesAnsweringEndsFirstControlMessage`, [ADR 0033](docs/adr/0033-side-camera-link.md) §Amendments 2026-09-30, [#568](https://github.com/openzigs/onyourleft/issues/568) |
 | The one place the client names a WebRTC peer connection, and what the no-network gate can and cannot see of it | `apps/web/src/camera/side-link-transport.ts`, `apps/web/src/privacy/no-network.test.ts` §`PERMITTED_NETWORK_CALLS`, [ADR 0033](docs/adr/0033-side-camera-link.md) D-9 |
 | Why the side camera's pose model runs behind a network fence, and what it would send without one | `apps/web/src/camera/pose-runtime.ts` §`fenceWorkerNetwork`, `apps/web/browser/pose.browser.spec.ts`, [#530](https://github.com/openzigs/onyourleft/issues/530) |

@@ -227,10 +227,14 @@ const WIDEST_READINGS = QUERY.get('readings') === 'widest';
  * result card at its fullest — a heart rate as well as power, hours of
  * elapsed time, and the longest of the game's outcome sentences — so "the
  * card fits above the fold" is about the tallest card there is.
+ *
+ * ⚠️ The elapsed time is `10:23:45` since #1083, the widest duration a fact
+ * shows short of a day: it was `3:25:45` (12 345 s), and the card's facts
+ * were sized from a Mac's `10:23:45` that nothing here had ever drawn.
  */
 const SAVED_RIDE = {
   activityId: activityId('harness-ride'),
-  elapsedTime: seconds(12_345),
+  elapsedTime: seconds(37_425),
   distance: metres(123_456),
   averagePower: watts(1_234),
   averageHeartRate: beatsPerMinute(188),
@@ -408,6 +412,15 @@ export interface RideViewMeasurement {
         readonly box: Box;
         readonly link: { readonly name: string; readonly box: Box; readonly onTop: boolean };
         readonly spill: number;
+        /** #1083: each fact's reading, as drawn — `10:23:45` among them. */
+        readonly readings: readonly string[];
+        /** #1083: the most lines any fact's reading is laid out on. */
+        readonly mostReadingLines: number;
+        /**
+         * #1083: how far the furthest reading's right edge passes its own
+         * fact's `dd` — `reflow-harness.tsx` §`readingFit`'s measure.
+         */
+        readonly readingSpill: number;
       }
     | undefined;
   /** #1012: the sensor banner, if one stands, and its one link. */
@@ -461,6 +474,8 @@ declare global {
       readonly crammedReadings: () => void;
       /** #1042's control: the card after the clock. @see cardAfterTheReadings */
       readonly cardAfterTheReadings: () => void;
+      /** #1083's control: the card's facts on 7rem tracks. @see narrowResultFacts */
+      readonly narrowResultFacts: () => void;
     };
   }
 }
@@ -574,10 +589,21 @@ function resultCardOf(): RideViewMeasurement['resultCard'] {
       (fact) => fact.scrollWidth - fact.clientWidth,
     ),
   );
+  const values = [...card.querySelectorAll('.oyl-result__facts .oyl-reading__value')];
+  const lines = values.map((value) => value.getClientRects().length);
+  const spills = values.map((value) => {
+    const fact = value.closest('dd');
+    return fact === null
+      ? 0
+      : value.getBoundingClientRect().right - fact.getBoundingClientRect().right;
+  });
   return {
     box: boxOf(card),
     link: { name: textOf(link), box, onTop: hit !== null && (hit === link || link.contains(hit)) },
     spill,
+    readings: values.map((value) => (value.textContent ?? '').trim()),
+    mostReadingLines: lines.length === 0 ? 0 : Math.max(...lines),
+    readingSpill: spills.length === 0 ? 0 : Math.max(...spills),
   };
 }
 
@@ -596,6 +622,20 @@ function cardAfterTheReadings(): void {
     throw new Error('rideview harness: ?ride=saved did not render its result card and clock');
   }
   clock.after(card);
+}
+
+/**
+ * #1083's control: the result card's facts on 7rem tracks, narrower than a
+ * `10:23:45` in the reading's `xxl` on any font measured — which the spec
+ * requires to wrap or spill. Without it, "the card's readings fit" is as true
+ * of a card whose facts were never measured at a ten-hour ride.
+ */
+function narrowResultFacts(): void {
+  const facts = document.querySelector<HTMLElement>('[data-oyl-result-card] .oyl-result__facts');
+  if (facts === null) {
+    throw new Error('rideview harness: ?ride=saved did not render its result card’s facts');
+  }
+  facts.style.gridTemplateColumns = 'repeat(auto-fit, minmax(7rem, 1fr))';
 }
 
 /** @see RideViewMeasurement.readings */
@@ -966,6 +1006,7 @@ async function run(): Promise<void> {
     heldAboveTheForm,
     crammedReadings,
     cardAfterTheReadings,
+    narrowResultFacts,
   };
 }
 
@@ -983,5 +1024,6 @@ run().catch((error: unknown) => {
     heldAboveTheForm,
     crammedReadings,
     cardAfterTheReadings,
+    narrowResultFacts,
   };
 });

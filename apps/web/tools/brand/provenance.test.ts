@@ -16,7 +16,8 @@
  *    make. `ASSET003` already pins each file's bytes; this pins what the row
  *    says about them.
  * 2. **The pictures are the shapes a launcher needs.** Read back from the
- *    committed PNGs: a square icon is opaque, a maskable one keeps the mark
+ *    committed pictures — PNG, and since #972 the full logo's lossless WebP,
+ *    read by `webp-testing.ts` so the logo's checks below still run in CI: a square icon is opaque, a maskable one keeps the mark
  *    inside the middle 80 % a browser may crop to, an Android foreground keeps
  *    it inside the 66 dp circle of its 108 dp layer, a round icon is a disc, and
  *    a wordmark or a logo is cut out — its corners transparent, not the
@@ -41,6 +42,7 @@ import { parseAssetManifest } from '../../src/credits/manifest';
 import { DARK_COLOUR_TOKENS } from '../../src/design/tokens';
 
 import { decodePng, type DecodedPng } from './png-testing';
+import { decodeWebp } from './webp-testing';
 
 interface BrandOutput {
   readonly path: string;
@@ -78,8 +80,11 @@ function entryFor(path: string) {
   return entry;
 }
 
+/** A committed output, decoded: the full logo is lossless WebP since #972, the rest PNG. */
 function picture(path: string): DecodedPng {
-  return decodePng(bytesOf(path));
+  if (path.endsWith('.webp')) return decodeWebp(bytesOf(path));
+  if (path.endsWith('.png')) return decodePng(bytesOf(path));
+  throw new Error(`${path} is neither a .png nor a .webp`);
 }
 
 function pixel(image: DecodedPng, x: number, y: number): readonly number[] {
