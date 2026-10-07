@@ -207,8 +207,10 @@ export function DocumentsPanel({
       ) : (
         <>
           <p className="oyl-rider-text__form">
-            <label htmlFor={inputId}>{DOCUMENT_ADD_LABEL}</label>
-            <FileDrop hint="Or drop a document here">
+            <label htmlFor={inputId} id={`${inputId}-label`}>
+              {DOCUMENT_ADD_LABEL}
+            </label>
+            <FileDrop hint="Or drop a document here" labelId={`${inputId}-label`}>
               <input
                 id={inputId}
                 className="oyl-input oyl-input--file"

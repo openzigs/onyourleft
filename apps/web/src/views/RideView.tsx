@@ -810,8 +810,11 @@ function NoSensorsBanner(): JSX.Element {
       <p className="oyl-sensor-banner__sentence">
         <strong>No sensors:</strong> A ride with no sensors records elapsed time and nothing else.
       </p>
+      {/* #1021: named for what it pairs. "Pair" alone, beside the sentence
+          rather than inside it, was announced as "Pair, link" in a link list
+          or on Tab (WCAG 2.4.4). */}
       <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
-        Pair
+        Pair a sensor
       </ButtonLink>
     </div>
   );

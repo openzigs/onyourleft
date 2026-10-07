@@ -516,8 +516,10 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
                 {/* Named: #670's audit of a populated screen found two unnamed forms. */}
                 <form aria-label="Import a route" onSubmit={(event) => void onImport(event)}>
                   <p>
-                    <label htmlFor="route-file">GPX file</label>
-                    <FileDrop hint="Or drop a GPX file here">
+                    <label htmlFor="route-file" id="route-file-label">
+                      GPX file
+                    </label>
+                    <FileDrop hint="Or drop a GPX file here" labelId="route-file-label">
                       <input id="route-file" name={FILE_FIELD} type="file" />
                     </FileDrop>
                   </p>
