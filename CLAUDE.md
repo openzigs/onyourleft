@@ -444,7 +444,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         that route through `#/game?route=…`, the one query
                         this shell reads (`shell/routes.ts`
                         §`gameRouteFromHash`). "The last workout used" is
-                        not offered: no ride records which workout it was
+                        not offered: no ride records which workout it was.
+                        ⚠️ **"One bounded store read" holds only up to 5,000
+                        rides** (#1130), and a reviewer who remembers it on
+                        every launch is reading the old file: past
+                        `HISTORY_ACTIVITY_LIMIT` Home also walks every older
+                        ride forward for the badges, at most
+                        `PROGRESS_PAGE_LIMIT` (10) more reads of 5,000, and
+                        then falls back to two windows (`home.ts`
+                        §`loadHome`). Its cost on the tablet is unmeasured
+                        (#1168)
     src/instance/       connecting this app to an instance (#777) — which
                         addresses it will talk to (`https:`, and `http:` only
                         to this machine's loopback, refused before any

@@ -146,8 +146,18 @@ describe('the read budget — #428', () => {
   });
 
   it('stops the walk at PROGRESS_PAGE_LIMIT reads, and falls back to the two windows — #1130', async () => {
+    // 30 km a ride, except the two the walk never reads (r10, r11: 100 km
+    // each) and the newest (r12: 200 km). The true total crosses 500 km in
+    // that unread stretch, at r11; the walked pages plus the newest window
+    // (300 + 200 km) cross it at r12. Only `deriveProgressAcross` keeps that
+    // false crossing off r12 — `deriveProgress` over the gapped rows awards
+    // it (#1154's review).
+    const metresOf = (index: number): number =>
+      index === PROGRESS_PAGE_LIMIT + 2 ? 200_000 : index >= PROGRESS_PAGE_LIMIT ? 100_000 : 30_000;
     const rides = Array.from({ length: PROGRESS_PAGE_LIMIT + 3 }, (_unused, index) =>
-      ride(`r${String(index).padStart(2, '0')}`, 100 - index),
+      ride(`r${String(index).padStart(2, '0')}`, 100 - index, {
+        distance: metres(metresOf(index)),
+      }),
     );
     const port = stubAnalysis(OWNER, rides);
     const home = await loadHome(port, NOW, 1);
@@ -160,6 +170,26 @@ describe('the read budget — #428', () => {
       (badge) => badge.kind === 'first' && badge.first === 'ride',
     );
     expect(first?.activityId).toBe(activityId('r00'));
+    // No total is claimed across the unread stretch.
+    expect(
+      home.progress.badges.find((badge) => badge.kind === 'distance' && badge.metres === 500_000),
+    ).toBeUndefined();
+    expect(home.progress.badges.filter((badge) => badge.activityId === activityId('r12'))).toEqual(
+      [],
+    );
+  });
+
+  it('counts a ride that starts in the same second as the newest window, by its smaller id — #1130', async () => {
+    // `same-a` and `same-b` start together; the newest window of one holds
+    // `same-b`, the larger id, so the walk must still read `same-a`.
+    const port = stubAnalysis(OWNER, [ride('early', 5), ride('same-a', 1), ride('same-b', 1)]);
+    const home = await loadHome(port, NOW, 1);
+    expect(home.summaries.map((summary) => summary.id)).toEqual([
+      activityId('early'),
+      activityId('same-a'),
+      activityId('same-b'),
+    ]);
+    expect(home.progress.rides).toBe(3);
   });
 
   it('makes no second read inside the bound (the control)', async () => {

@@ -75,17 +75,18 @@ const WEEK = 7 * 86_400;
 /** Weeks of riding at the recent end, one ride each, the newest this week. */
 const RECENT_WEEKS = 12;
 /**
- * About 5,020 puts to fake-indexeddb. Slowest figures: 11.2 s under coverage
- * on CI (#1130's measurement, with athlete B's rides) and 12.6–14.4 s locally
- * on #1126's review. 45 s is about three times the slowest, §4c's convention;
- * 30 s was only twice it.
+ * About 5,020 puts to fake-indexeddb. Slowest figures: 10 972 ms under
+ * coverage on CI (run 37365629277, AMD EPYC 7763, with athlete B's rides —
+ * the 11.2 s this note quoted before #1154's review had no run behind it) and
+ * 12.6–14.4 s locally on #1126's review. 45 s is about three times the
+ * slowest, §4c's convention; 30 s was only twice it.
  */
 const SEEDING_TIMEOUT_MILLISECONDS = 45_000;
-/** Athlete B's rides: older than all of A's, and newer than all of A's. */
 /** An old ride's distance: the 5,000 of them total exactly 5,000 km. */
 const OLD_RIDE_METRES = 1_000;
 /** A recent ride's: the tenth, oldest first, takes the total to 10,000 km. */
 const RECENT_RIDE_METRES = 500_000;
+/** Athlete B's rides: older than all of A's, and newer than all of A's. */
 const B_OLDER = ['b-older-0', 'b-older-1', 'b-older-2'];
 const B_NEWER = ['b-newer-0', 'b-newer-1', 'b-newer-2'];
 
