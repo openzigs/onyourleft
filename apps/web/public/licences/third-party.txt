@@ -157,8 +157,8 @@ Part 3 — files copied out of a package into the build
   examples/jsm/libs/zstddec.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is zstddec 0.0.2, vendored there — MIT AND BSD-3-Clause
 
 Part 4 — code the build tools write into the app
-  vite 8.3.0 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
-  rolldown 1.2.6 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
+  vite 8.3.2 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
+  rolldown 1.2.12 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
 
 Part 5 — fonts committed in the source repository and served by the app
   Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)
@@ -3327,7 +3327,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
 Name: vite
-Version: 8.3.0
+Version: 8.3.2
 Licence: MIT
 Part: bundler
 
@@ -3364,7 +3364,7 @@ SOFTWARE.
 
 ========================================================================
 Name: rolldown
-Version: 1.2.6
+Version: 1.2.12
 Licence: MIT
 Part: bundler
 
