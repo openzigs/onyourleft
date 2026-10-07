@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import {
   cloneElement,
   useEffect,
+  useId,
   useRef,
   useState,
   type DragEvent,
@@ -41,6 +42,8 @@ export interface FileDropProps {
   readonly children: ReactElement<InputHTMLAttributes<HTMLInputElement>>;
   /** The styled button's words; `FilePicker`'s default when absent. */
   readonly choose?: string;
+  /** The `id` of the screen's own `<label>` for the input — see `FilePicker`. */
+  readonly labelId: string;
 }
 
 export function FileDrop(props: FileDropProps): JSX.Element {
@@ -86,7 +89,9 @@ export function FileDrop(props: FileDropProps): JSX.Element {
         handOver(input, event.dataTransfer.files);
       }}
     >
-      <FilePicker choose={props.choose}>{props.children}</FilePicker>
+      <FilePicker choose={props.choose} labelId={props.labelId}>
+        {props.children}
+      </FilePicker>
       <span className="oyl-drop__hint">{props.hint}</span>
     </span>
   );
@@ -103,8 +108,16 @@ export function FileDrop(props: FileDropProps): JSX.Element {
  * input and the platform opens its picker, with no `click()` from script. Its
  * keyboard focus is drawn on the button by a sibling selector.
  *
- * The button's words are hidden from a screen reader, which already hears the
- * input's own name and role; that is how the platform's own button was too.
+ * The button's words are `aria-hidden`, so a screen reader does not hear them
+ * twice, but they ARE in the input's name — #1038, WCAG 2.2 SC 2.5.3 (Label
+ * in Name): a speech-input user says the words they see on the control,
+ * "click Choose file", and the name has to contain them. The input is named
+ * by `aria-labelledby` over the screen's own label and then the button —
+ * "Activity files Choose files" — which is why {@link FilePickerProps.labelId}
+ * is required: a picker cannot be added without naming its label, and the
+ * label keeps its `htmlFor`, so a press on it still reaches the input. The
+ * platform's own button had the same gap (its words were never in the
+ * label); now that the words are ours, so is closing it.
  *
  * Once something is chosen its name — or how many, for several — is shown as
  * a chip with a remove button, which empties the input, tells the screen
@@ -128,10 +141,16 @@ export interface FilePickerProps {
   readonly children: ReactElement<InputHTMLAttributes<HTMLInputElement>>;
   /** The button's words: "Choose file", or "Choose files" for a `multiple` input. */
   readonly choose?: string | undefined;
+  /**
+   * The `id` of the screen's own `<label>` for the input (#1038). The input's
+   * name is that label's words and then the button's.
+   */
+  readonly labelId: string;
 }
 
 export function FilePicker(props: FilePickerProps): JSX.Element {
   const holder = useRef<HTMLSpanElement>(null);
+  const buttonId = useId();
   const [chosen, setChosen] = useState<string | undefined>(undefined);
   const input = (): HTMLInputElement | null =>
     holder.current?.querySelector<HTMLInputElement>('input[type="file"]') ?? null;
@@ -161,8 +180,9 @@ export function FilePicker(props: FilePickerProps): JSX.Element {
       <span className="oyl-file" ref={holder} onChange={read}>
         {cloneElement(child, {
           className: ['oyl-file__input', child.props.className].filter(Boolean).join(' '),
+          'aria-labelledby': `${props.labelId} ${buttonId}`,
         })}
-        <span className="oyl-file__button" aria-hidden="true">
+        <span className="oyl-file__button" id={buttonId} aria-hidden="true">
           {words}
         </span>
       </span>
