@@ -31,7 +31,7 @@ exists to avoid.
 
 ### Nothing here was copied from prior art
 
-[CLAUDE.md §6](../../CLAUDE.md) draws the line and this is the package where it bites:
+[docs/agents/scope-and-ip.md §6](../../docs/agents/scope-and-ip.md) draws the line and this is the package where it bites:
 
 > Facts are not copyrightable: a physical constant or an equation from a published paper carries no
 > such restriction. **An implementation of it does.**

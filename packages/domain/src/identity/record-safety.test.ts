@@ -7,7 +7,7 @@
  * Every `@ts-expect-error` below is a guarantee that fails the build the moment
  * it stops being true — if the type is widened, the directive becomes an
  * *unused* directive and `tsc` reports `TS2578`. That is the mechanism
- * CLAUDE.md section 5 asks for, and the mutation that proves it is written
+ * docs/agents/quality-gate.md section 5 asks for, and the mutation that proves it is written
  * beside each one.
  */
 

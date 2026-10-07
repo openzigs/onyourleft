@@ -2,7 +2,7 @@
 
 /**
  * A rider's room (#784, migration 0013), each claim read back on a fresh
- * connection (`CLAUDE.md` §5): the room, its course, its code's digest and its
+ * connection (`docs/agents/quality-gate.md` §5): the room, its course, its code's digest and its
  * creator are written together or not at all; membership is per (room,
  * athlete); a room is over once.
  */

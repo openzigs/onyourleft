@@ -389,7 +389,7 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
     expect(leaksIn({ ...input, at: rounded }, located).numbers).toStrictEqual([rounded]);
   });
 
-  it('never uses a registered metric name in any key (CLAUDE.md §6)', async () => {
+  it('never uses a registered metric name in any key (docs/agents/scope-and-ip.md §6)', async () => {
     const ride = rideFor(ATHLETE_A);
     const from = await saved(ride, streamSetFor(ride, { sampleCount: 3600 }), {
       athlete: { mass: kilograms(70), thresholdPower: watts(250) },

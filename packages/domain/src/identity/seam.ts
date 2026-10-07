@@ -6,7 +6,7 @@
  *
  * ## Why there is a seam at all
  *
- * CLAUDE.md section 2 puts signing and verification in this package "because
+ * packages/CLAUDE.md section 2 puts signing and verification in this package "because
  * those must run identically on the device and on an instance". Section 2 also
  * forbids this package **any platform API at all**. Both hold, and together
  * they decide the shape:

@@ -202,7 +202,7 @@ describe('the list is stored on the athlete (#839)', () => {
 });
 
 /**
- * The harness's own calibration for this write path — CLAUDE.md §5. A pair:
+ * The harness's own calibration for this write path — docs/agents/store-harness.md §5. A pair:
  * the same assertion passes against the real store and fails against one that
  * drops the last word on its way in.
  */

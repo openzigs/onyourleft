@@ -15,7 +15,7 @@
  * | its average heart rate, where there is one | {@link statedAverageHeartRate} — the figure the ride's page states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`), computed by the page's OWN two steps over the samples the save wrote |
  * | how the race against the rider's own best ended, in the trainer game | `game/ghost-outcome.ts`, LATCHED — carried here, never re-derived |
  *
- * ⚠️ **No score, no grade, no load, and no trademarked name** (CLAUDE.md §6):
+ * ⚠️ **No score, no grade, no load, and no trademarked name** (docs/agents/scope-and-ip.md §6):
  * nothing here is weighted, ranked or compared with anybody. And nothing here
  * is about the rider's body (ADR 0030): a heart rate is a sensor reading,
  * reported as one.

@@ -27,7 +27,7 @@
  * native `<details>`. Three things stay visible outside it, one line each,
  * because ADR 0003 D-7 rule 5 says the working path's constraints are not to
  * be hidden: **one user gesture per device** — which is also what explains why
- * there are four buttons rather than one (CLAUDE.md §8) — and, where the
+ * there are four buttons rather than one (docs/agents/web-bluetooth.md §8) — and, where the
  * platform has them, **no silent reconnect** and **no background recording**
  * ({@link PairingPanelProps.limits}). The longer prose stays inside.
  *
@@ -113,7 +113,7 @@ export const NOT_PAIRED = 'Not paired';
 
 /**
  * Web Bluetooth's one-gesture-per-device rule, as the pairing list says it —
- * CLAUDE.md §8, ADR 0003 D-7 rule 5. Never inside the disclosure beneath the
+ * docs/agents/web-bluetooth.md §8, ADR 0003 D-7 rule 5. Never inside the disclosure beneath the
  * list (#659), and held there by `a11y/kept-visible.a11y.test.tsx` (#666).
  */
 export const ONE_GESTURE_PER_DEVICE =
@@ -124,7 +124,7 @@ export const ONE_GESTURE_PER_DEVICE =
  * What a connection state means to somebody on a bike, in words — SC 1.4.1.
  *
  * `disconnected` says what to do, because on Web Bluetooth there is no silent
- * reconnect (CLAUDE.md §8): the rider forgets it and pairs it again.
+ * reconnect (docs/agents/web-bluetooth.md §8): the rider forgets it and pairs it again.
  */
 export function connectionWords(state: ConnectionState): string {
   switch (state) {

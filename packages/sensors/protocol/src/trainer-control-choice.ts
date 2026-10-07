@@ -35,7 +35,7 @@
  *
  * Wahoo publishes no specification for it. {@link WAHOO_TRAINER_CONTROL_POINT}
  * was corroborated from community documentation and open-source
- * implementations — **read, never copied**, per CLAUDE.md §6 — and it has not
+ * implementations — **read, never copied**, per docs/agents/scope-and-ip.md §6 — and it has not
  * been checked against hardware or against any primary source, unlike every
  * SIG-assigned number in this directory (`index.ts` records where those were
  * read from and when).

@@ -28,7 +28,7 @@
  * | elapsed time | a `Seconds` the caller supplies, the same way the recording engine takes one |
  *
  * That table is the review criterion #92 asks for, and it is **checked rather
- * than asserted** in three places, which is the standard CLAUDE.md §5 sets:
+ * than asserted** in three places, which is the standard docs/agents/quality-gate.md §5 sets:
  *
  * 1. {@link BotPacerPlan} is constrained at compile time to hold nothing but
  *    scalars — see `SyntheticInput` below. A field typed as a sample series, an
@@ -222,7 +222,7 @@ type AssertSynthetic<T extends SyntheticInput<T>> = T;
  * Exported so that it is *used* — an unused local type alias is a lint error,
  * and a guarantee deleted by a linter is worse than no guarantee. `pacing.test.ts`
  * names it as the thing that would have failed, and holds the `@ts-expect-error`
- * cases that make its absence visible (CLAUDE.md §5, "Verifying a compile-time
+ * cases that make its absence visible (docs/agents/quality-gate.md §5, "Verifying a compile-time
  * guarantee").
  */
 export type BotPacerPlanIsSynthetic = AssertSynthetic<BotPacerPlan>;

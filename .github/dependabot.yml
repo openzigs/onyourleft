@@ -23,7 +23,7 @@
 # ## The one that will bite, and what to do about it
 #
 # ⚠️ **pnpm 11 refuses a lockfile entry published in the last 24 hours**
-# (`minimumReleaseAge`, CLAUDE.md §8). Dependabot proposes a release as soon as
+# (`minimumReleaseAge`, docs/agents/toolchain.md §8). Dependabot proposes a release as soon as
 # it appears, so a pull request opened against a same-day release fails
 # `pnpm install --frozen-lockfile` on the runner with
 # `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`.

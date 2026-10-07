@@ -36,7 +36,7 @@
  *    because the earlier negative one tested a spelling: it fired on an em dash
  *    and let an empty or vague anchor through.
  * 3. **The body still says what the amendment quotes back at it.** ADR 0013
- *    forbids editing an accepted ADR's body, and `CLAUDE.md` §7 says a reviewer
+ *    forbids editing an accepted ADR's body, and `docs/agents/conventions.md` §7 says a reviewer
  *    asking *"does any hunk touch a line that already existed?"* is the
  *    mechanism. That is a property of a diff and not of a file — but the
  *    particular lines this amendment is written **against** can be pinned, so

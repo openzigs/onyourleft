@@ -11,7 +11,7 @@
  * produce exactly that: `deleteCameraFrames` returns a **true** count and
  * removes nothing. Every cheap assertion passes against it. Only a round trip
  * that discards the writer and opens a fresh connection notices, which is
- * CLAUDE.md §5's *wrong time* and *wrong layer* causes in one store.
+ * docs/agents/quality-gate.md §5's *wrong time* and *wrong layer* causes in one store.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -150,7 +150,7 @@ describe('erasing the pictures', () => {
 
     // ⚠️ **The assertion.** `harness.read` discards every open handle and opens
     // a new one, so this cannot be served by the connection that did the
-    // delete — CLAUDE.md §5's fourth cause, and the one a naive test cannot
+    // delete — docs/agents/quality-gate.md §5's fourth cause, and the one a naive test cannot
     // detect.
     await expect(
       harness.read(async (store) => store.listCameraFrames(ATHLETE_A)),

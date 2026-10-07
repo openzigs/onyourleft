@@ -225,7 +225,7 @@ describe('the bot is synthetic, and that is checked rather than assumed', () => 
   });
 
   it('will not compile if the plan gains a field that could carry one', () => {
-    // The compile-time half, per CLAUDE.md §5 "Verifying a compile-time
+    // The compile-time half, per docs/agents/quality-gate.md §5 "Verifying a compile-time
     // guarantee". `BotPacerPlanIsSynthetic` applies `SyntheticInput` as a
     // CONSTRAINT, so a `readonly samples: readonly number[]` on `BotPacerPlan`
     // makes `pacing.ts` itself fail with:

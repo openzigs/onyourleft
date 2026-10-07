@@ -14,7 +14,7 @@
  *
  * `CTL`, `ATL` and `TSB` are **reported registered trademarks** of Peaksware /
  * TrainingPeaks, passed to Garmin on 2026-07-22 — established while checking
- * #76's metrics, and recorded in CLAUDE.md §6. #77 does not flag this; #76 did
+ * #76's metrics, and recorded in docs/agents/scope-and-ip.md §6. #77 does not flag this; #76 did
  * not flag it either, since it names *its* metrics rather than these.
  *
  * The same limitation applies as there: the primary registers are unreachable

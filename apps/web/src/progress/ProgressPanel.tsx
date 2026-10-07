@@ -11,7 +11,7 @@
  *
  * Plain and encouraging. Nothing about weight or the body (ADR 0030; the
  * whole-tree gate `camera/no-absolute-angles.test.ts` reads this file), and no
- * trademarked metric name (CLAUDE.md §6): a best is "best 1 min power". A
+ * trademarked metric name (docs/agents/scope-and-ip.md §6): a best is "best 1 min power". A
  * streak that has ended is never called lost: the current streak reads nought
  * and the next ride starts a new one (the owner's ruling).
  *
