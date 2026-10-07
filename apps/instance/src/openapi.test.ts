@@ -254,6 +254,14 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
   },
   hideDisplayName: (world) => moderatorAction(world, 'hide-display-name'),
+  listSuspendedAthletes: async (world) => {
+    const target = await anotherAthlete(world);
+    const token = await moderatorToken(world);
+    await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
+      reason: 'Cheating',
+    });
+    return send(world, 'GET', '/v1/moderation/suspended', token);
+  },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
 

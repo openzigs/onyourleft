@@ -2392,9 +2392,11 @@ pnpm --filter @onyourleft/web run test
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
 # installed (any other version is refused); it fetches nothing. `--check`
-# writes nothing and fails unless every committed output is reproduced byte for
-# byte; `--records` prints the ASSETS.toml rows. ⚠️ `icons:generate` is gone:
-# it drew the icons until #965. Run on 2026-10-01, `--check` twice, green.
+# writes nothing and fails unless every committed output DECODES to the pixels
+# it makes (since #972; bytes until then, which Pillow's zlib differs on between
+# macOS and Linux); `--records` prints the ASSETS.toml rows. The full logo is
+# lossless WebP since #972. ⚠️ `icons:generate` is gone: it drew the icons until
+# #965. Run on 2026-10-05 on Linux, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
@@ -5469,7 +5471,10 @@ major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every
 nothing on purpose** (§4d) and would be the first thing a config migration breaks. Take it as
 its own issue with the suite, the coverage reporter and both platform-free typechecks re-run,
 never as part of a grouped bump. Dependabot's #273 proposed it alongside TypeScript 7 and was
-closed for the TypeScript half.
+closed for the TypeScript half. ⚠️ Since [#916](https://github.com/openzigs/onyourleft/issues/916)
+`.github/dependabot.yml` **ignores semver-major updates** of `typescript`, `vitest` and
+`@vitest/*` (minor and patch still come in the `toolchain` group), so neither major arrives in a
+grouped bump again; the pull request that takes either major on purpose removes its entry.
 
 **pnpm 11 refuses a lockfile entry published in the last 24 hours.** `minimumReleaseAge` is a
 default, not something this repository configured, and it is a supply-chain control worth keeping:
