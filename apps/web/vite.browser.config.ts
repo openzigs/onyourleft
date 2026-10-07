@@ -185,6 +185,10 @@ export default defineConfig({
         // spec starts, in one room, each seeing the other move — through the
         // production room port and the one instance module's WebSocket.
         room: 'browser/room.html',
+        // #1136: About's logo, held back, must not hold the page — the shell's
+        // own ViewTransition and Suspense around the real AboutView, with the
+        // old markup as the control. `logo-harness.tsx` says what it proves.
+        logo: 'browser/logo.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

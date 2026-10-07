@@ -618,6 +618,10 @@ async function untilHeading(title: string): Promise<boolean> {
  * {@link untilQuiet} called the fallback settled: `sections.browser.spec.ts`
  * then counted no sections at all. A still DOM is not a shown view.
  *
+ * ⚠️ Since #1136 the logo is `loading="lazy"`, which React does not wait for,
+ * so About no longer suspends on it; the wait stays, because a still DOM is
+ * still not a shown view whatever a future view suspends on.
+ *
  * ⚠️ It sees the shell's top-level fallback only: a view's own nested
  * `Suspense` boundary (AnalysisView's lazy `FitnessChart`, whose fallback is
  * `null`) leaves no mark, so `shown` does not mean every boundary resolved.
