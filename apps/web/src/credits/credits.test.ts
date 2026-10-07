@@ -12,7 +12,7 @@
  *   `check-repo-rules.sh` §`ASSET_LICENCES_ATTRIBUTED` decides which entries
  *   `ASSET006` demands the keys on; {@link ATTRIBUTION_LICENCES} decides which
  *   ones the screen credits. If the two disagree the build stays green and the
- *   obligation goes unmet, which is exactly the hazard `CLAUDE.md` §4g records
+ *   obligation goes unmet, which is exactly the hazard `docs/agents/licence-gates.md` §4g records
  *   between ADR 0015's tables and `POLICY`. The last case in this file is the
  *   assertion rather than the description.
  */

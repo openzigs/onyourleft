@@ -21,7 +21,7 @@
   // The closure is conditional on nothing in this program pulling a
   // `/// <reference types="node" />` back in through a `.d.ts` — which is why
   // `vitest.config.ts`, which is in the program, imports nothing. Its own
-  // header records why at length (CLAUDE.md §4d).
+  // header records why at length (docs/agents/lint-boundaries.md §4d).
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2024"],

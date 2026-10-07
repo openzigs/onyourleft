@@ -138,7 +138,7 @@
  * declaration: on the tree #438 was measured on, it found three.
  *
  * The success line counts the two populations apart. The options #438 weighed,
- * and why a sibling module outside `WATCHED_PREFIXES` lost, are CLAUDE.md §4j.
+ * and why a sibling module outside `WATCHED_PREFIXES` lost, are docs/agents/wiring-gate.md §4j.
  *
  * Usage: node scripts/check-wiring.mjs [--root <dir>]
  */
@@ -151,7 +151,7 @@ import ts from 'typescript';
  * Where the defects of #278 were, and where a new one would be.
  *
  * The client's own seams, not the libraries underneath. A library export with
- * no consumer is a much larger and much noisier question — CLAUDE.md §4b
+ * no consumer is a much larger and much noisier question — docs/agents/project-state.md §4b
  * records that `packages/physics` has no production consumer for most of what
  * it exports, by design — and a rule reporting those would be the
  * allowlist-that-grows this one exists to avoid. ⚠️ The cost is stated rather
@@ -206,7 +206,7 @@ const WATCHED_SUFFIX = /-port\.ts$/;
  * WIRE002 to every non-test source under `packages/` reports **171 findings**
  * over 180 files — 39 modules nothing imports (the whole of
  * `packages/fit/tools/`, the #44 simulator, seven `vitest.config.ts`) and 132
- * exports nothing names. That is the noise CLAUDE.md §4b records as *by
+ * exports nothing names. That is the noise docs/agents/project-state.md §4b records as *by
  * design*, it is not a population anybody can clear, and a rule nobody can
  * clear gets an allowlist — which is how a rule stops firing.
  *
@@ -700,7 +700,7 @@ function hasPortMethods(relativePath) {
  * `riding/` and the walk below simply finds nothing under the old prefix: every
  * rule then passes over an empty population and the success line says every
  * watched seam is reachable, having read none. That is #142's shape exactly
- * (CLAUDE.md §4e, where a directory-name filter silently dropped a third of the
+ * (docs/agents/accessibility.md §4e, where a directory-name filter silently dropped a third of the
  * accessibility suite), one gate later — so a prefix whose directory is not
  * there is a failure, and moving a watched directory means editing this file in
  * the same commit.
@@ -1180,7 +1180,7 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
   if (result.problems.length > 0) {
     console.error('check-wiring: something is built, tested, and wired to nothing.\n');
     for (const problem of result.problems) console.error(`  - ${problem}`);
-    console.error('\nSee CLAUDE.md §4j and scripts/check-wiring.mjs §Limits.');
+    console.error('\nSee docs/agents/wiring-gate.md §4j and scripts/check-wiring.mjs §Limits.');
     process.exit(1);
   }
   // ⚠️ Both counts, and the watched one first. A success line naming only the

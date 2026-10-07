@@ -19,7 +19,7 @@
  * Every gate this repository has was green throughout:
  *
  * - `test:a11y` renders every route into **jsdom**, which performs no layout
- *   and resolves no custom property (CLAUDE.md §4e). It cannot measure a pixel,
+ *   and resolves no custom property (docs/agents/accessibility.md §4e). It cannot measure a pixel,
  *   so `position`, `z-index` and `scroll-margin-top` are invisible to it.
  * - `theme.a11y.test.ts` reads `theme.css` as a **file**. It can see that a
  *   declaration is present; it cannot see what the declaration does.

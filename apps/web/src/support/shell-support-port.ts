@@ -42,7 +42,7 @@
  * production caller and the #278 wiring gate could not see it —
  * `availability()` is declared in `packages/sensors`, outside the watched set,
  * and `permission/notice.ts` is in neither watched directory nor named
- * `*-port.ts` (CLAUDE.md §4j). The suffix puts **half** of the new wiring
+ * `*-port.ts` (docs/agents/wiring-gate.md §4j). The suffix puts **half** of the new wiring
  * inside the gate, and it is worth knowing which half:
  *
  * - **Caught.** Delete the `ShellDevices` branch from `DevicesView`, so the

@@ -348,7 +348,7 @@ if (isEntryPoint) {
   if (found.length > 0) {
     console.error('check-test-split: the three Vitest runs are not the whole suite, once each.\n');
     for (const problem of found) console.error(`  - ${problem}`);
-    console.error('\nSee CLAUDE.md §4c and scripts/check-test-split.mjs.');
+    console.error('\nSee docs/agents/ci.md §4c and scripts/check-test-split.mjs.');
     process.exit(1);
   }
   console.log(

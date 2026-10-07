@@ -1080,7 +1080,7 @@ describe('the inside pedal never touches the road — #546', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36383955618 (the slower of the two
   // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
   // slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot interrupt
-  // one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
+  // one, so a genuine hang is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('keeps every pedal off the road at every crank angle and every lean to 45°, either way', () => {
     for (let degrees = -45; degrees <= 45; degrees += 0.25) {
       const lean = degrees * DEGREE;

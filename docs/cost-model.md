@@ -4,7 +4,7 @@
   [#17](https://github.com/openzigs/onyourleft/issues/17)
 - **Inputs last read**: 2026-09-15. Each one carries its own date and provenance below
 - **Checked by**: `pnpm run check:cost-model`, which recomputes every figure here from the inputs
-  here and fails the build when the two disagree. CLAUDE.md §4l
+  here and fails the build when the two disagree. docs/agents/generated-and-cost-gates.md §4l
 
 "Free to the end user" is a promise that somebody else pays. This document makes the size of that
 somebody's bill known, per athlete, before it is a surprise — and says, line by line, which of its

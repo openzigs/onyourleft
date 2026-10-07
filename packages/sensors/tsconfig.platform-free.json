@@ -28,7 +28,7 @@
   // that directory's own documented rule and review; it is not a compile error
   // and must not be believed to be one.
   //
-  // CLAUDE.md section 4d: that closure is conditional on nothing in the program
+  // docs/agents/lint-boundaries.md section 4d: that closure is conditional on nothing in the program
   // pulling a `/// <reference types="node" />` back in through a `.d.ts`.
   // `vitest.config.ts` is deliberately excluded here and imports nothing, for
   // the reason its own header records at length.

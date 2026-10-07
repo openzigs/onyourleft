@@ -224,7 +224,7 @@ describe('the game — #400', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36405580515 (the slower of the two
   // runners, a job over 1 000 s) — 54 % of that default. 9 s is about three times the slowest, so a
   // slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('makes no call at all for a rider who did not turn sounds on, and shows no control', async () => {
     chooseDistanceTicks();
     await openGame();
@@ -239,7 +239,7 @@ describe('the game — #400', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36383955618 (the slower of the two
   // runners, a job over 1 000 s) — 69 % of that default. 11 s is about three times the slowest, so
   // a slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('plays the distance sound on the frame its sentence is said, and on no other', async () => {
     chooseSounds();
     chooseDistanceTicks();
@@ -266,7 +266,7 @@ describe('the game — #400', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36374954481 (the slower of the two
   // runners, a job over 1 000 s) — 77 % of that default. 12 s is about three times the slowest, so
   // a slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('puts Mute sounds and the volume on the ride’s own screen, and the mute silences', async () => {
     chooseSounds();
     chooseDistanceTicks();

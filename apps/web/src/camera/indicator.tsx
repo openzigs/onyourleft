@@ -36,7 +36,7 @@
  *
  * #382 asks for that to be **decided and measured** rather than asserted, and
  * jsdom cannot measure any of it — it performs no layout and resolves no custom
- * property (CLAUDE.md §4e). So the decision is written here, the stylesheet
+ * property (docs/agents/accessibility.md §4e). So the decision is written here, the stylesheet
  * implements it in `theme.css` §"THE LIVE CAMERA INDICATOR", and
  * `browser/shell.browser.spec.ts` measures it in the pinned Chromium:
  *

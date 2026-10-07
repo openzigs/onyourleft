@@ -13,7 +13,7 @@
  * endpoint to a self-hosted instance"* — cannot be met without one.
  *
  * ⚠️ **So no HTTP adapter is shipped here, deliberately.** Writing one against
- * an API nobody in the loop can call would be the shape CLAUDE.md §4a warns
+ * an API nobody in the loop can call would be the shape docs/agents/commands.md §4a warns
  * about — *"a documented command nobody has run is the most expensive kind of
  * wrong"* — and it would be worse than absent, because a reviewer would read
  * request-shaping code as evidence the engine had been talked to. What is real

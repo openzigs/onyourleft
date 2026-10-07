@@ -176,7 +176,7 @@ describe('one input stream, one set of FIT bytes', () => {
 
 describe('the mobile shell ships this build, which is why the bytes match', () => {
   it('points webDir at apps/web’s build output', () => {
-    // ⚠️ The load-bearing fact. `apps/mobile/README.md` §4 and CLAUDE.md §4h
+    // ⚠️ The load-bearing fact. `apps/mobile/README.md` §4 and docs/agents/game.md §4h
     // both rest on it: an encoder under `apps/mobile/src` would typecheck, test
     // green, and never be copied into the APK.
     expect(mobileFile('capacitor.config.ts')).toMatch(/webDir:\s*['"]\.\.\/web\/dist['"]/);

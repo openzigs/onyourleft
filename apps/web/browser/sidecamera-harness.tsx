@@ -5,7 +5,7 @@
  *
  * #528's first criterion: *"A browser-gate measurement at a phone viewport
  * shows it is the dominant element."* jsdom performs no layout and resolves no
- * custom property (CLAUDE.md §4e), so nothing in the Vitest suite can say how
+ * custom property (docs/agents/accessibility.md §4e), so nothing in the Vitest suite can say how
  * big the sign is, whether anything is drawn over it, or whether the stop
  * control is 44 × 44 and uncovered. This page renders the **real** `AppShell`
  * at the **real** side-camera route under the **real** `theme.css`, drives it

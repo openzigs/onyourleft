@@ -16,7 +16,7 @@
  * paragraph above by naming the tag, in the doc comment, in backticks — and
  * Vitest read it, ran the suite in a DOM, and failed with `TypeError: The URL
  * must be of scheme file` before a single case collected. It is exactly the
- * shape CLAUDE.md §4j records for `@unwired`: *"a paragraph saying the
+ * shape docs/agents/wiring-gate.md §4j records for `@unwired`: *"a paragraph saying the
  * exemption had been removed parsed as a live one"*. So the tag is not spelled
  * out anywhere in this file, and a future edit that explains it by quoting it
  * will break this suite again.

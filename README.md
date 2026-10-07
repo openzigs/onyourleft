@@ -209,8 +209,10 @@ template — are checked by scripts that need no toolchain at all:
 pnpm run check:repo           # or run each script under scripts/ directly with bash
 ```
 
-`CLAUDE.md` section 4 is the complete and current list of commands, including which ones do not
-exist yet and why.
+[`docs/agents/commands.md`](docs/agents/commands.md) (section 4a of the agent instructions, whose
+index is `CLAUDE.md`) is the complete and current list of commands, and
+[`docs/agents/project-state.md`](docs/agents/project-state.md) (section 4b) says which do not exist
+yet and why.
 
 ## Licence
 
