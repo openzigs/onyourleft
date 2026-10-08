@@ -119,4 +119,13 @@ export interface SideSnapshotPort {
    * Nothing held was ever written, so nothing else has to go.
    */
   forget(): void;
+  /**
+   * How many snapshots this tab held for a ride that was saved and then could
+   * not write (#1063's review): a full device, or a ride the store refused.
+   * A count and nothing else — no picture, and nothing of the store's error
+   * (ADR 0029 D-8). Back to nought on {@link forget}.
+   */
+  snapshotsNotKept(): number;
+  /** Called whenever {@link snapshotsNotKept} changes. Returns the unsubscribe. */
+  onSnapshotsNotKept(listener: () => void): () => void;
 }

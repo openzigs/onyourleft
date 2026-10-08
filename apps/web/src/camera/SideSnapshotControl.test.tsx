@@ -12,7 +12,7 @@
 
 import { act } from 'react';
 import { unixSeconds } from '@onyourleft/domain';
-import { openActivityStore, type ActivityStore } from '@onyourleft/store';
+import { activityId, openActivityStore, type ActivityStore } from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -31,7 +31,9 @@ import {
   SAVE_SNAPSHOT_LABEL,
   SNAPSHOT_WHERE_IT_GOES,
   SideSnapshotControl,
+  SnapshotsNotKept,
   snapshotHeldText,
+  snapshotsNotKeptText,
 } from './SideSnapshotControl';
 import { sideSnapshotKeeper } from './snapshot-keeper';
 import { cleanFrameBytes, scriptedLiveView } from './testing';
@@ -166,5 +168,50 @@ describe('Save snapshot', () => {
     await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
       1,
     );
+  });
+});
+
+describe('a snapshot a saved ride could not keep — #1063’s review', () => {
+  it('is counted and said in words, naming no picture and nothing of the store’s error', async () => {
+    const rides = ridesUnderWay();
+    let ids = 0;
+    const keeper = sideSnapshotKeeper({
+      rides: rides.source,
+      store: writer,
+      athleteId: ATHLETE_A,
+      newFrameId: () => {
+        ids += 1;
+        return `unkept-${String(ids)}`;
+      },
+      now: () => unixSeconds(1_760_000_000),
+    });
+    mounted = await mount(<SnapshotsNotKept snapshots={keeper} />);
+    expect(document.body.textContent).toBe('');
+    const picture = { bytes: cleanFrameBytes(), width: 256, height: 144, outline: undefined };
+    expect(keeper.holdSideSnapshot(picture).kind).toBe('held');
+    expect(keeper.holdSideSnapshot(picture).kind).toBe('held');
+    // A ride the store does not hold: `putCameraFrame` refuses each snapshot,
+    // which is the store's own refusal rather than a double's.
+    rides.set({ phase: 'stopped' });
+    rides.set({ saveState: 'saving' });
+    rides.set({ saveState: 'saved', savedActivityId: activityId('a-ride-never-written') });
+    await vi.waitFor(() => {
+      expect(keeper.snapshotsNotKept()).toBe(2);
+    });
+    await settle();
+    expect(document.body.textContent).toContain(snapshotsNotKeptText(2));
+    expect(document.body.textContent).not.toMatch(/ride-never|unkept|blob:|data:|Error/u);
+    await act(async () => {
+      keeper.forget();
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toBe('');
+  });
+
+  it('says one snapshot in the singular', () => {
+    expect(snapshotsNotKeptText(1)).toBe(
+      'A snapshot could not be kept with its ride: it was not saved on this device.',
+    );
+    expect(snapshotsNotKeptText(3)).toContain('3 snapshots could not be kept');
   });
 });

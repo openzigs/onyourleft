@@ -52,7 +52,7 @@ import {
   TABLET_SCAN_NEEDS_CONSENT,
 } from './SideCameraControl';
 import { browserSecureWindow } from '../camera/secure-window-testing';
-import { SAVE_SNAPSHOT_LABEL } from '../camera/SideSnapshotControl';
+import { SAVE_SNAPSHOT_LABEL, snapshotsNotKeptText } from '../camera/SideSnapshotControl';
 import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import { sideSnapshotKeeper } from '../camera/snapshot-keeper';
 import type { RideProgress } from '../camera/side-report-keeper';
@@ -1160,3 +1160,16 @@ async function storedPictureBytes(): Promise<string[]> {
   }
   return found;
 }
+
+describe('snapshots a saved ride could not keep — #1063’s review', () => {
+  it('are said on this screen with no phone paired', async () => {
+    const snapshots: SideSnapshotPort = {
+      holdSideSnapshot: () => ({ kind: 'refused', reason: 'none-on-screen' }),
+      forget: () => undefined,
+      snapshotsNotKept: () => 2,
+      onSnapshotsNotKept: () => () => undefined,
+    };
+    await tablet({ snapshots });
+    expect(document.body.textContent).toContain(snapshotsNotKeptText(2));
+  });
+});

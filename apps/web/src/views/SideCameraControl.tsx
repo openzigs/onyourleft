@@ -48,7 +48,7 @@ import type { CameraFacing } from '../camera/camera-port';
 import type { CameraController } from '../camera/session';
 import { ScanViewfinder } from '../camera/ScanViewfinder';
 import { SideLiveView } from '../camera/SideLiveView';
-import { SideSnapshotControl } from '../camera/SideSnapshotControl';
+import { SideSnapshotControl, SnapshotsNotKept } from '../camera/SideSnapshotControl';
 import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import {
@@ -160,6 +160,11 @@ export function SideCameraControl({
         A side camera on a tripod
       </SectionHeading>
       <p>Both devices must be on the same Wi-Fi.</p>
+      {/*
+        #1063's review: snapshots a saved ride could not write, counted, and
+        said whether or not a phone is paired now.
+      */}
+      {snapshots === undefined ? null : <SnapshotsNotKept snapshots={snapshots} />}
       {current === undefined ? (
         <>
           <Button variant="secondary" onClick={pair} disabled={busy}>

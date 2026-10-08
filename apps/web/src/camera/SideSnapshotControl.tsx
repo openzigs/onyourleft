@@ -64,6 +64,36 @@ export function snapshotHeldText(outcome: SnapshotHeld): string {
   }
 }
 
+/**
+ * What the rider is told when snapshots held for a saved ride could not be
+ * written (#1063's review). A count: no picture, no ride, and nothing of the
+ * store's error (ADR 0029 D-8).
+ */
+export function snapshotsNotKeptText(count: number): string {
+  return count === 1
+    ? 'A snapshot could not be kept with its ride: it was not saved on this device.'
+    : `${String(count)} snapshots could not be kept with their rides: they were not saved on this device.`;
+}
+
+/** {@link snapshotsNotKeptText}, while the count is above nought. */
+export function SnapshotsNotKept({
+  snapshots,
+}: {
+  readonly snapshots: SideSnapshotPort;
+}): JSX.Element | null {
+  const subscribe = useCallback(
+    (listener: () => void) => snapshots.onSnapshotsNotKept(listener),
+    [snapshots],
+  );
+  const read = useCallback(() => snapshots.snapshotsNotKept(), [snapshots]);
+  const count = useSyncExternalStore(subscribe, read, read);
+  return count === 0 ? null : (
+    <StatusMessage tone="warning" live>
+      {snapshotsNotKeptText(count)}
+    </StatusMessage>
+  );
+}
+
 export interface SideSnapshotControlProps {
   /** Whether a picture is on screen — the control is absent without one. */
   readonly view: SideLiveViewPort;

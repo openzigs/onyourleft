@@ -127,6 +127,12 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
   let claimed: Held[] = [];
   /** Snapshots taken during the ride under way (rule 1). */
   let during: Held[] = [];
+  /** Snapshots a saved ride could not write, and who is told when that moves. */
+  let notKept = 0;
+  const notKeptListeners = new Set<() => void>();
+  const notKeptChanged = (): void => {
+    for (const listener of notKeptListeners) listener();
+  };
 
   const finish = (savedAs: ActivityId | undefined): void => {
     const joining = [...claimed, ...during];
@@ -149,7 +155,11 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
         await options.store.putCameraFrame(recordOf(held, ride));
       } catch {
         // Nothing of the error is read (ADR 0029 D-8). The ride is saved; this
-        // one snapshot is not, and nothing retries it.
+        // one snapshot is not, and nothing retries it — but the rider was told
+        // it would be kept, so it is COUNTED, and the count is said
+        // (`SideSnapshotControl.tsx` §`SnapshotsNotKept`, #1063's review).
+        notKept += 1;
+        notKeptChanged();
       }
     }
   };
@@ -251,6 +261,19 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
       setup = [];
       claimed = [];
       during = [];
+      if (notKept !== 0) {
+        notKept = 0;
+        notKeptChanged();
+      }
+    },
+    snapshotsNotKept(): number {
+      return notKept;
+    },
+    onSnapshotsNotKept(listener: () => void): () => void {
+      notKeptListeners.add(listener);
+      return () => {
+        notKeptListeners.delete(listener);
+      };
     },
   };
 }
