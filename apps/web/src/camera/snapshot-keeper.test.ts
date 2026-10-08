@@ -11,9 +11,11 @@
 
 import { unixSeconds } from '@onyourleft/domain';
 import {
+  activityId,
   openActivityStore,
   type ActivityId,
   type ActivityStore,
+  type CameraFrameId,
   type CameraFrameRecord,
 } from '@onyourleft/store';
 import {
@@ -273,6 +275,76 @@ describe('a snapshot taken during setup (D-3 rules 2 to 4)', () => {
     rides.stopAndSave(ride.id);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(await cameraFramesOnDevice()).toBe(0);
+  });
+
+  it('does not count a write the erase overtook, and writes nothing after it — #1063’s review, round 2', async () => {
+    // A write in flight when Erase runs: `forget()` resets the count to nought,
+    // and a failure that lands afterwards belongs to the erased generation.
+    const rides = scriptedRides();
+    let fail: (() => void) | undefined;
+    let puts = 0;
+    const keeper = sideSnapshotKeeper({
+      rides: rides.source,
+      store: {
+        putCameraFrame: async () => {
+          puts += 1;
+          return new Promise<CameraFrameId>((_resolve, reject) => {
+            fail = () => {
+              reject(new Error('refused'));
+            };
+          });
+        },
+      },
+      athleteId: ATHLETE_A,
+      newFrameId: () => 'snapshot-overtaken',
+      now: () => unixSeconds(1_760_000_000),
+    });
+    keeper.holdSideSnapshot(taken(1));
+    keeper.holdSideSnapshot(taken(2));
+    rides.start();
+    rides.stopAndSave(activityId('a-ride-being-saved'));
+    await vi.waitFor(() => {
+      expect(puts).toBe(1);
+    });
+    keeper.forget();
+    fail?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(keeper.snapshotsNotKept()).toBe(0);
+    // The second held snapshot is not written after the erase.
+    expect(puts).toBe(1);
+  });
+
+  it('writes no further snapshot once the erase has run, even when the write in flight lands', async () => {
+    const rides = scriptedRides();
+    let land: (() => void) | undefined;
+    let puts = 0;
+    const keeper = sideSnapshotKeeper({
+      rides: rides.source,
+      store: {
+        putCameraFrame: async (record: CameraFrameRecord) => {
+          puts += 1;
+          return new Promise<CameraFrameId>((resolve) => {
+            land = () => {
+              resolve(record.id);
+            };
+          });
+        },
+      },
+      athleteId: ATHLETE_A,
+      newFrameId: () => 'snapshot-landing',
+      now: () => unixSeconds(1_760_000_000),
+    });
+    keeper.holdSideSnapshot(taken(1));
+    keeper.holdSideSnapshot(taken(2));
+    rides.start();
+    rides.stopAndSave(activityId('a-ride-being-saved'));
+    await vi.waitFor(() => {
+      expect(puts).toBe(1);
+    });
+    keeper.forget();
+    land?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(puts).toBe(1);
   });
 
   it('is not consumed by saving a leftover ride, and still joins the next ride started', async () => {

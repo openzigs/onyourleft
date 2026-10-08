@@ -44,8 +44,8 @@
  * producer of image bytes, the thing `frame.ts` says there must not be. What
  * it does is refuse — {@link snapshotProblem} — bytes that are not a whole
  * JPEG or that carry a metadata segment or marker (`frame.ts`
- * §`carriesNoMetadata`: a walk of every segment before the scan, and the
- * signature scan), so
+ * §`carriesNoMetadata`: a walk of the whole file against an allowlist of what
+ * a canvas encoder writes, and the signature scan), so
  * a picture that reaches here carrying an Exif block, from a phone that is not
  * running this client, is never kept. `side-link-pictures.ts` refuses the
  * same picture at the link; this is the tripwire on the save path itself.
@@ -129,6 +129,13 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
   let during: Held[] = [];
   /** Snapshots a saved ride could not write, and who is told when that moves. */
   let notKept = 0;
+  /**
+   * Bumped by `forget()`. A write started before an erase belongs to the
+   * generation it started in: once that has passed it writes no further
+   * snapshot and a failure it meets is not counted, because the count the
+   * erase reset to nought is the NEW generation's (#1063's review, round 2).
+   */
+  let generation = 0;
   const notKeptListeners = new Set<() => void>();
   const notKeptChanged = (): void => {
     for (const listener of notKeptListeners) listener();
@@ -150,7 +157,11 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
   };
 
   const write = async (joining: readonly Held[], ride: ActivityId): Promise<void> => {
+    const mine = generation;
     for (const held of joining) {
+      if (generation !== mine) {
+        return;
+      }
       try {
         await options.store.putCameraFrame(recordOf(held, ride));
       } catch {
@@ -158,6 +169,9 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
         // one snapshot is not, and nothing retries it — but the rider was told
         // it would be kept, so it is COUNTED, and the count is said
         // (`SideSnapshotControl.tsx` §`SnapshotsNotKept`, #1063's review).
+        if (generation !== mine) {
+          return;
+        }
         notKept += 1;
         notKeptChanged();
       }
@@ -258,6 +272,7 @@ export function sideSnapshotKeeper(options: SnapshotKeeperOptions): SideSnapshot
       return { kind: 'held', joins: 'this-ride', held: held + 1 };
     },
     forget(): void {
+      generation += 1;
       setup = [];
       claimed = [];
       during = [];
