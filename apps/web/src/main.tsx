@@ -688,11 +688,14 @@ function buildTransferPort(heldSnapshots: SideSnapshotPort | undefined): Transfe
  * A ride's side-camera snapshots, for its page — #1063, ADR 0044 D-5, D-6 and
  * D-12. The same connection as every other port; the object URLs are the
  * platform's own, made only once the rider opens the section; and the secure
- * window is the camera controller's one count, so a snapshot and a live view
- * on screen together never clear the flag early. With no camera controller
- * there is no flag to hold, and holding it does nothing.
+ * window is THE one {@link buildSecureWindow} makes, which the camera
+ * controller holds too, so a snapshot and a live view on screen together never
+ * clear the flag early. ⚠️ It is handed in directly rather than reached through
+ * the camera controller (#1063's review): a snapshot needs no camera, and a
+ * tab with no `mediaDevices` builds no controller, which used to leave a
+ * snapshot on an Android screen without `FLAG_SECURE`.
  */
-function buildRideSnapshotsPort(camera: CameraController | undefined): RideSnapshotsPort {
+function buildRideSnapshotsPort(secureWindow: SecureWindow): RideSnapshotsPort {
   return {
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
@@ -706,7 +709,7 @@ function buildRideSnapshotsPort(camera: CameraController | undefined): RideSnaps
             },
           }
         : undefined,
-    holdSecureWindow: () => camera?.holdSecureWindow() ?? (() => undefined),
+    holdSecureWindow: () => secureWindow.hold(),
   };
 }
 
@@ -975,8 +978,35 @@ async function buildRideAnalysis(camera: CameraController | undefined): Promise<
  * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
  * one of them.
  */
+/**
+ * The one owner of Android's secure window flag in this tab — #1061, ADR 0044
+ * D-12 — built once and handed to the camera controller AND to a ride's
+ * snapshots (#1063's review), so the two share one count.
+ *
+ * Inside the shell, `FLAG_SECURE` through `SecureWindowPlugin.java`, registered
+ * in `MainActivity`; in a browser, over nothing, because a browser cannot stop
+ * a screenshot — and the consent says so. Behind the same `import()` as every
+ * other reach for `@onyourleft/mobile`, so a browser downloads no line of
+ * Capacitor.
+ */
+async function buildSecureWindow(): Promise<SecureWindow> {
+  if (!isNativeShell(platformCapacitor())) {
+    return new SecureWindow(NO_SECURE_WINDOW, documentForeground());
+  }
+  const mobile = await import('@onyourleft/mobile');
+  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
+  return new SecureWindow(
+    {
+      setSecureWindow: async (secure) =>
+        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
+    },
+    documentForeground(),
+  );
+}
+
 async function buildCameraController(
   analysis: () => ReturnType<typeof riderAnalysisPort>,
+  secureWindow: SecureWindow,
 ): Promise<CameraController | undefined> {
   // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
   // outside `apps/web/src/camera/`, and a local variable is a name — the scan
@@ -1020,9 +1050,8 @@ async function buildCameraController(
       guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
     });
   if (!isNativeShell(platformCapacitor())) {
-    // #1061, ADR 0044 D-12: a browser cannot stop a screenshot, so the flag's
-    // owner is built over nothing — and the consent says so.
-    const secureWindow = new SecureWindow(NO_SECURE_WINDOW, documentForeground());
+    // #1061, ADR 0044 D-12: the flag's owner, built over nothing in a browser
+    // by `buildSecureWindow`.
     return new CameraController({ port, keep, analysis, hosted, secureWindow });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
@@ -1036,15 +1065,7 @@ async function buildCameraController(
   // so a browser downloads no line of Capacitor.
   const mobile = await import('@onyourleft/mobile');
   // #1061, ADR 0044 D-12: Android's FLAG_SECURE while a camera picture is on
-  // screen, through `SecureWindowPlugin.java`, registered in `MainActivity`.
-  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
-  const secureWindow = new SecureWindow(
-    {
-      setSecureWindow: async (secure) =>
-        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
-    },
-    documentForeground(),
-  );
+  // screen — `buildSecureWindow`'s, shared with a ride's snapshots.
   return new CameraController({
     port,
     keep,
@@ -1059,7 +1080,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
-  const camera = await buildCameraController(riderAnalysis);
+  // #1063's review: one secure window for the tab, shared by the camera and a
+  // ride's snapshots, so the snapshots hold it with no camera at all.
+  const secureWindow = await buildSecureWindow();
+  const camera = await buildCameraController(riderAnalysis, secureWindow);
   const rideAnalysis = await buildRideAnalysis(camera);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
@@ -1156,7 +1180,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
-          rideSnapshots={buildRideSnapshotsPort(camera)}
+          rideSnapshots={buildRideSnapshotsPort(secureWindow)}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
