@@ -64,6 +64,11 @@ services:
       OYL_INSTANCE_EMBEDDING_MODEL: ${OYL_INSTANCE_EMBEDDING_MODEL:-}
       OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX: ${OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX:-}
       OYL_INSTANCE_EMBEDDING_QUERY_PREFIX: ${OYL_INSTANCE_EMBEDDING_QUERY_PREFIX:-}
+      # The analysis model (#1096, ADR 0046 D-9): http://ollama:11434/v1 with
+      # the `ollama` service below running and a model pulled into it; empty,
+      # and analysis is off. No model is named here, or anywhere (ADR 0031 D-4).
+      OYL_INSTANCE_ANALYSIS_MODEL_URL: ${OYL_INSTANCE_ANALYSIS_MODEL_URL:-}
+      OYL_INSTANCE_ANALYSIS_MODEL: ${OYL_INSTANCE_ANALYSIS_MODEL:-}
     volumes:
       - data:/data
     # Docker waits this long after SIGTERM before it kills the instance: the
@@ -110,7 +115,9 @@ services:
   # `driver: nvidia` and `capabilities: [gpu]` (docs/self-hosting/home-machine.md).
   ollama:
     image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
-    profiles: ['history']
+    # `history` for the index (#835), `analysis` for the agent's model (#1096):
+    # one Ollama serves both.
+    profiles: ['history', 'analysis']
     restart: unless-stopped
     volumes:
       - models:/root/.ollama

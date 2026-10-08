@@ -253,6 +253,20 @@ const platformIsolation = (extraPatterns = []) => ({
 });
 
 /**
+ * The AI SDK, by name (#1096, ADR 0046 D-8): `apps/instance/src/analysis/model.ts`
+ * is the ONE module in the repository that may import it — and its own test,
+ * which can show the gateway guard holds only by calling the SDK. See the
+ * block that uses this.
+ */
+const AI_SDK_IMPORT_PATTERNS = [
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*'],
+    message:
+      'Only apps/instance/src/analysis/model.ts may import the AI SDK (#1096, ADR 0046 D-8). Write against the ModelConnection port in model-turn.ts.',
+  },
+];
+
+/**
  * The instance's SQL driver and query builder, by name (#769). Only
  * `apps/instance/src/store/` may import them — see the block that uses this.
  */
@@ -272,6 +286,8 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
  */
 const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/main.ts',
+  // The AI SDK's one module (#1096, ADR 0046 D-8): the SDK is a Node package.
+  'apps/instance/src/analysis/model.ts',
   'apps/instance/src/serve.ts',
   'apps/instance/src/node-listener.ts',
   'apps/instance/src/operator/cli.ts',
@@ -459,6 +475,22 @@ export default tseslint.config(
     },
   },
 
+  // --- The AI SDK is named in ONE module (#1096, ADR 0046 D-8) --------------
+  // The core `no-restricted-imports`, not typescript-eslint's, because the
+  // blocks below set that one per directory and flat config keeps the last
+  // setting of a rule: on the core rule this block is the only setting except
+  // `packages/sensors/protocol`'s, which carries these patterns in its own list.
+  // Everywhere — `packages/`, `apps/web`, `apps/mobile`, the rest of
+  // `apps/instance`, the scripts — but the one module and its test. Probed: an
+  // `import { generateText } from 'ai'` in `analysis/agent.ts` is an error.
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+
   // --- packages/domain depends on no platform API at all ---------------------
   // `.tsx` is included even though a package that renders is already a design
   // error: the header block above already covers `packages/**/*.{ts,tsx}`, and
@@ -538,6 +570,9 @@ export default tseslint.config(
         'error',
         {
           patterns: [
+            // #1096: this block replaces the AI SDK block above for these
+            // files, so it carries its patterns.
+            ...AI_SDK_IMPORT_PATTERNS,
             {
               group: ['**/web-bluetooth/**', '../web-bluetooth/*', '../../web-bluetooth/*'],
               message:

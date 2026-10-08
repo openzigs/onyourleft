@@ -669,6 +669,12 @@ export interface SqlStore {
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
   /**
+   * #1098: this athlete's LIVE items of one kind, newest first — what the
+   * analysis agent's read-only tools read (`analysis/tools/`). Tombstones are
+   * never returned; at most `limit` rows.
+   */
+  listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
+  /**
    * Replace a live item with its tombstone — an activity's record goes with
    * it. `false` when the athlete holds no such live item.
    */
@@ -2062,6 +2068,21 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('item_key', '=', key)
           .executeTakeFirst();
         return row === undefined ? undefined : syncItemFrom(row);
+      }),
+
+    listLiveSyncItems: (athleteId, kind, limit) =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('sync_item')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('kind', '=', kind)
+          .where('deleted_at', 'is', null)
+          .orderBy('received_at', 'desc')
+          .orderBy('seq', 'desc')
+          .limit(Math.max(0, Math.floor(limit)))
+          .execute();
+        return rows.map(syncItemFrom);
       }),
 
     deleteSyncItem: (athleteId, kind, key, now) =>

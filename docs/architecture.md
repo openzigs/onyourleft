@@ -1780,6 +1780,47 @@ the API's version, not the package's.
 produce `unauthenticated`, `rate_limited` and `validation_failed` and take JSON bodies; since #881
 the pagination parser has its first callers, the sync manifest and the activity list.
 
+### The analysis agent on the instance
+
+[ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-7 and D-8;
+[#1096](https://github.com/openzigs/onyourleft/issues/1096) (the model connection) and
+[#1098](https://github.com/openzigs/onyourleft/issues/1098) (the agent). It lives in
+`apps/instance/src/analysis/`. ⚠️ **It has no caller yet**: the job engine that starts it, streams
+its events and keeps its result is [#1095](https://github.com/openzigs/onyourleft/issues/1095).
+
+```mermaid
+flowchart TD
+    A[job claimed: device-built input + the job's athlete] --> B[system prompt from the package template<br/>+ the ride's sections as the first user message]
+    B --> C{model step}
+    C -- tool call --> D[validate args against the tool's schema]
+    D -- invalid --> E[tool error result, counted against the budgets]
+    D -- valid --> F[run the read-only tool for job.athleteId<br/>result fenced as data, bounded in characters]
+    E --> C
+    F --> C
+    C -- text --> G[screen with @onyourleft/analysis]
+    G -- fails --> H{one rewrite left?}
+    H -- yes --> C
+    H -- no --> I[withheld: nothing kept]
+    G -- passes --> J[stream screened sections; return the write-up]
+    C -- budget spent / abort --> K[failed or cancelled: nothing kept]
+```
+
+| Module | What it is |
+|---|---|
+| `model-turn.ts` | the port: one model turn, its request and its **closed** failures. The agent is written against it, never against the SDK |
+| `model.ts` | the **one** module in the repository that imports `ai` and `@ai-sdk/*` (`eslint.config.js` §`AI_SDK_IMPORT_PATTERNS`). It sets the SDK's global default provider to one that throws, so a string model id never reaches the Vercel AI Gateway; checks the configured name's address on every turn (`history/address.ts`, reused) and connects to the checked address; refuses any URL but the configured base; and maps every error to a closed failure, never the server's words |
+| `agent.ts` | the loop: tools chosen by the model, the budgets (24 turns, 16 tool calls, 10 minutes, 40 000 tokens counted as sent and answered), the screen with one rewrite, streaming a section only once it has passed, `withdrawn` on a later failure, and cancel within one step |
+| `tools/` | `ride_sections`, `recent_rides` (at most 8) and `goals` (at most 4 000 characters), each validated against its own schema and reading through `reads.ts`' one method — read-only by type, and unable to spell the side-camera report's kind |
+| `fake-model-server-testing.ts` | an OpenAI-compatible server on loopback for tests: plain replies, tool calls, a malformed call, the "does not support tools" 400, a 5xx, a slow reply and a reply cut off by `length` |
+
+What holds it, test by test: `agent-safety.test.ts` walks every module's imports (no store write,
+sync path, socket, `fetch`, trainer or picture, each with a red control); `agent.test.ts` runs the
+loop over a three-athlete store and through the fake server. The prompt is
+`@onyourleft/analysis` §`ANALYSIS_AGENT_TEMPLATE_V1`, frozen by a digest. ⚠️ **What is not
+claimed** (ADR 0040 D-8): that a model ignores an instruction planted in a goal. The fence makes the
+boundary unambiguous; what holds whatever the model does is that the budgets end the run, no tool
+takes an athlete, and nothing unscreened is streamed or kept.
+
 ### A room, from the client: `apps/web/src/net/`
 
 [#782](https://github.com/openzigs/onyourleft/issues/782) and

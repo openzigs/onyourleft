@@ -30,6 +30,12 @@ export * from './screen/model-answer';
 export * from './screen/write-up-screen';
 export { isSealedStep, type SealedStep } from './sealed-step';
 export * from './template/template';
+export {
+  agentSectionFigures,
+  ANALYSIS_AGENT_TEMPLATE_V1,
+  fenceData,
+  type AgentTemplate,
+} from './template/agent-v1';
 export { ANALYSIS_TEMPLATE_V1 } from './template/template-v1';
 export {
   ANALYSIS_TEMPLATE_V2,

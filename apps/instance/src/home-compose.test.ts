@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { clientAddress } from './client-address.ts';
-import { readConfig, readHistorySettings } from './config.ts';
+import { readAnalysisModelSettings, readConfig, readHistorySettings } from './config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
 
@@ -66,8 +66,8 @@ function service(name: string): string {
 describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)', () => {
   const ollama = service('ollama');
 
-  it('runs Ollama only with the history profile, pinned by digest', () => {
-    expect(ollama).toMatch(/profiles: \['history'\]/);
+  it('runs Ollama only with the history or the analysis profile, pinned by digest', () => {
+    expect(ollama).toMatch(/profiles: \['history', 'analysis'\]/);
     expect(ollama).toMatch(/image: ollama\/ollama:[0-9.]+@sha256:[0-9a-f]{64}/);
   });
 
@@ -93,5 +93,27 @@ describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)'
       'utf8',
     );
     for (const text of [COMPOSE, env]) expect(text).not.toMatch(/gemma/i);
+  });
+});
+
+describe('deploy/home/compose.yaml — the analysis model (#1096, ADR 0046 D-9)', () => {
+  it('is reached by a service name the instance accepts as local, at its OpenAI-compatible path', () => {
+    const settings = readAnalysisModelSettings({
+      analysisModelUrl: 'http://ollama:11434/v1',
+      analysisModel: 'any',
+    });
+    expect(settings.kind).toBe('on');
+    expect(COMPOSE).toMatch(
+      /OYL_INSTANCE_ANALYSIS_MODEL_URL: \$\{OYL_INSTANCE_ANALYSIS_MODEL_URL:-\}/,
+    );
+  });
+
+  it('names no model: the setting defaults to nothing, in the file and its template (ADR 0031 D-4)', () => {
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_ANALYSIS_MODEL: \$\{OYL_INSTANCE_ANALYSIS_MODEL:-\}$/m);
+    const env = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    expect(env).toMatch(/^OYL_INSTANCE_ANALYSIS_MODEL=$/m);
   });
 });

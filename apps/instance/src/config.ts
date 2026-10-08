@@ -104,6 +104,8 @@ export interface RawConfig {
   readonly embeddingModel?: string | undefined;
   readonly embeddingDocumentPrefix?: string | undefined;
   readonly embeddingQueryPrefix?: string | undefined;
+  readonly analysisModelUrl?: string | undefined;
+  readonly analysisModel?: string | undefined;
   readonly name?: string | undefined;
 }
 
@@ -127,6 +129,29 @@ export type HistorySettings =
 export type HistoryOffCode =
   'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'bad-model' | 'bad-prefix';
 
+/**
+ * The analysis model (#1096, ADR 0046 D-9 source 1): an OpenAI-compatible
+ * server at a LOCAL address, and the model the operator pulled — or off, and
+ * why. Like the history index, off is never a refusal to start.
+ */
+export type AnalysisModelSettings =
+  | {
+      readonly kind: 'on';
+      /** The OpenAI-compatible base URL: `http://ollama:11434/v1`. */
+      readonly baseUrl: URL;
+      /** The model the operator pulled. There is no default (ADR 0031 D-4). */
+      readonly model: string;
+    }
+  | {
+      readonly kind: 'off';
+      readonly code: AnalysisModelOffCode;
+      readonly reason: string;
+    };
+
+/** Why the analysis model is off. */
+export type AnalysisModelOffCode =
+  'not-set' | 'not-a-url' | 'not-base-url' | 'not-local' | 'no-model' | 'bad-model';
+
 /** A configuration the instance can start with. */
 export interface Config {
   readonly host: string;
@@ -149,6 +174,8 @@ export interface Config {
   readonly trustedProxies: readonly string[];
   /** The history index's embedding model, or why there is none (#835). */
   readonly history: HistorySettings;
+  /** The analysis agent's model, or why there is none (#1096). */
+  readonly analysis: AnalysisModelSettings;
   /**
    * What the operator calls this instance, which a rider's app shows once it
    * is connected (#777) — or `null`, and the app then names the instance by
@@ -310,6 +337,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
     return { ok: false, problems };
   }
   const history = readHistorySettings(raw);
+  const analysis = readAnalysisModelSettings(raw);
   return {
     ok: true,
     config: {
@@ -324,6 +352,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       clientAddressHeader,
       trustedProxies,
       history,
+      analysis,
       name: instanceName,
     },
   };
@@ -426,6 +455,73 @@ export function readHistorySettings(raw: RawConfig): HistorySettings {
     kind: 'on',
     embedding: { endpoint: new URL(url.origin), model, documentPrefix, queryPrefix },
   };
+}
+
+/**
+ * The analysis model's settings (#1096, ADR 0046 D-9 source 1), read from
+ * `OYL_INSTANCE_ANALYSIS_MODEL_URL` and `OYL_INSTANCE_ANALYSIS_MODEL`.
+ *
+ * - **No address, no analysis.** Nothing is defaulted.
+ * - **The address is local or refused**, by the history index's own rule
+ *   (`history/address.ts` §`configuredHostProblem`, ADR 0040 D-6): loopback,
+ *   a private, link-local, shared or unique-local literal, or a single-label
+ *   (Compose) name. A public name and `.local` are refused here; where a name
+ *   resolves to is checked again on every request (`analysis/model.ts`).
+ * - **It is a base URL**: `http:` or `https:`, no credentials, query or
+ *   fragment. A path is kept (`/v1`), because an OpenAI-compatible server is
+ *   addressed by one.
+ * - **The model has NO default**, and no model is named in source or the
+ *   documentation (ADR 0031 D-4): an address with no model is off, saying so.
+ */
+export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings {
+  const off = (code: AnalysisModelOffCode, reason: string): AnalysisModelSettings => ({
+    kind: 'off',
+    code,
+    reason,
+  });
+  if (!present(raw.analysisModelUrl)) {
+    return off(
+      'not-set',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw.analysisModelUrl.trim());
+  } catch {
+    return off('not-a-url', 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not a URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return off('not-a-url', 'OYL_INSTANCE_ANALYSIS_MODEL_URL must be an http: or https: URL.');
+  }
+  if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
+    return off(
+      'not-base-url',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL must be the server’s base URL alone, with no credentials, query or fragment.',
+    );
+  }
+  const hostProblem = configuredHostProblem(url.hostname);
+  if (hostProblem !== undefined) {
+    return off(
+      'not-local',
+      `OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because ${hostProblem}: the analysis model must be on this machine or its private network (ADR 0046 D-9, ADR 0040 D-6).`,
+    );
+  }
+  if (!present(raw.analysisModel)) {
+    return off(
+      'no-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL is not set: name the model you pulled. There is no default.',
+    );
+  }
+  const model = raw.analysisModel.trim();
+  if (!MODEL_NAME.test(model)) {
+    return off(
+      'bad-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL must be a model name, such as name or name:tag.',
+    );
+  }
+  const baseUrl = new URL(url.href.replace(/\/+$/, ''));
+  return { kind: 'on', baseUrl, model };
 }
 
 /**

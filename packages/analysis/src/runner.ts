@@ -305,8 +305,13 @@ function ruleFor(reason: ScreenReason): ScreenRule | undefined {
 
 /** Why a run stopped before it could finish. */
 class Stopped extends Error {
-  constructor(readonly why: RunFailure) {
+  // A declared field rather than a parameter property: the instance runs this
+  // package under Node's type stripping (#1098), which has no parameter
+  // properties (`erasableSyntaxOnly`).
+  readonly why: RunFailure;
+  constructor(why: RunFailure) {
     super(why);
+    this.why = why;
   }
 }
 

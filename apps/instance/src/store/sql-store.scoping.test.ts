@@ -97,6 +97,17 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       return found;
     },
   },
+  listLiveSyncItems: {
+    // Every kind the fixtures carry, asked as the caller (#1098's tool reads).
+    probe: async (store, athleteId) =>
+      (
+        await Promise.all(
+          syncItemFixtures(athleteId).map((item) =>
+            store.listLiveSyncItems(athleteId, item.kind, 1000),
+          ),
+        )
+      ).flat(),
+  },
   listActivityRecords: { probe: (store, athleteId) => store.listActivityRecords(athleteId) },
   // #835, ADR 0040 D-3 and OWASP LLM08:2025's partitioning: the history index.
   // Each passage is labelled with its source's key, which names its owner, so

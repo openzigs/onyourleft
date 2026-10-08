@@ -118,6 +118,52 @@ stopped instance's database — loses nothing: the next start makes it again fro
 ⚠️ **Nothing is measured on the owner's box yet**: the ingest rate (passages a second) and one
 query's time, CPU-only and on a GPU if present, are owed by #835.
 
+## Analysis model
+
+With `OYL_INSTANCE_ANALYSIS_MODEL_URL` and `OYL_INSTANCE_ANALYSIS_MODEL` set, the instance can
+reach a model for the post-ride write-up's agent
+([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-8, D-9;
+#1096). ⚠️ **Nothing starts a job yet**: the agent runs from the job engine, #1095, which is not
+built, so today the setting only checks the address and makes the connection ready.
+
+**Running Ollama beside the instance, in Compose.** The home deployment's `ollama` service serves
+the history index and the analysis model both. Set `COMPOSE_PROFILES=analysis` (or
+`history,analysis`) in `.env`, start it once with `docker compose up -d ollama`, pull the model you
+chose with `docker compose exec ollama ollama pull <model>`, and set:
+
+```
+OYL_INSTANCE_ANALYSIS_MODEL_URL=http://ollama:11434/v1
+OYL_INSTANCE_ANALYSIS_MODEL=<the model you pulled>
+```
+
+**No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
+default, and an address with no model name leaves analysis off and says so. Two things to check of
+the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
+and a model whose server answers *"does not support tools"* fails every job with a sentence saying
+so — there is no fallback (ADR 0046 D-7). **Its licence must be one ADR 0031 D-2 admits**, as
+ADR 0040 D-5 requires of any model these documents would name. And give Ollama a context window
+larger than its default of 4 096 tokens (its `OLLAMA_CONTEXT_LENGTH`): a tool-calling run re-sends
+the whole conversation every turn, and Ollama cuts an over-long prompt silently, from the front,
+where the instructions are.
+
+**The address rule** is the history index's (ADR 0040 D-6, `history/address.ts`): loopback,
+`localhost`, a private, link-local, shared or unique-local address, or a single-label name such as a
+Compose service. A public name and a `.local` name are refused when the configuration is read, and
+analysis stays off. Where a name resolves to is checked again on **every** request, and the request
+goes to the address that was checked. ⚠️ **Never publish Ollama's port, or point the tunnel at
+it**: its API has no authentication.
+
+| You see | It means |
+|---|---|
+| `"event":"analysis-model","state":"on"` at start | the model connection is ready. The model's name is not logged |
+| `"event":"analysis-model","state":"off","code":"not-set"` | no address is set: analysis is off, and nothing else changes |
+| `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
+| `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"` | the setting is malformed; standard error says which |
+
+What the agent sends the model and what it may read is in
+[`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),
