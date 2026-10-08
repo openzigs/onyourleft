@@ -57,7 +57,7 @@ Part 1 — in the app (73 packages)
   dexie 4.4.6 — Apache-2.0
   earcut 3.2.4 — ISC
   fflate 0.8.3 — MIT
-  framer-motion 13.5.1 — MIT
+  framer-motion 14.0.0 — MIT
   get-nonce 1.0.1 — MIT
   gl-matrix 3.4.4 — MIT
   json-stringify-pretty-compact 4.0.0 — MIT
@@ -66,9 +66,9 @@ Part 1 — in the app (73 packages)
   lucide-react 1.52.0 — ISC
   maplibre-gl 6.12.0 — BSD-3-Clause
   minimist 1.2.8 — MIT
-  motion 13.5.1 — MIT
-  motion-dom 13.5.1 — MIT
-  motion-utils 13.5.0 — MIT
+  motion 14.0.0 — MIT
+  motion-dom 14.0.0 — MIT
+  motion-utils 14.0.0 — MIT
   murmurhash-js 1.0.0 — MIT
   pbf 5.1.2 — BSD-3-Clause
   pmtiles 4.5.0 — BSD-3-Clause
