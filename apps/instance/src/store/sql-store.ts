@@ -318,6 +318,40 @@ export class InviteRefusedError extends Error {
   }
 }
 
+/**
+ * A registration refused because the instance holds a hosted model key
+ * (#1097, the owner's ruling on #1092's question 3): a key is held only on a
+ * single-rider instance, so a second athlete is not admitted until the
+ * operator clears it (`operator model-key clear`).
+ */
+export class HostedKeyHeldError extends Error {
+  override readonly name = 'HostedKeyHeldError';
+  constructor() {
+    super('This instance holds a hosted model key, so it admits one rider.');
+  }
+}
+
+/** The hosted model key as the store holds it: ciphertext, never the key (#1097). */
+export interface SealedHostedModelKey {
+  /** The hosted service's base URL, `https:` only (`analysis/hosted-key.ts` checks it). */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly setAt: number;
+}
+
+/** The held key, and the one rider it is held for. */
+export interface HeldHostedModelKey extends SealedHostedModelKey {
+  readonly athleteId: string;
+}
+
+/** What {@link SqlStore.putHostedModelKey} did. */
+export type HostedKeyPut =
+  | { readonly outcome: 'stored'; readonly athleteId: string }
+  /** Not exactly one athlete on the instance: how many there are, whatever their state. */
+  | { readonly outcome: 'not-single-rider'; readonly athletes: number };
+
 /** One athlete blocking another (#83). */
 export interface Block {
   /** The blocker. */
@@ -567,8 +601,24 @@ export interface SqlStore {
     at: number,
     recoveryCodeSha256: string | null,
   ): Promise<RevokeOutcome>;
-  /** A new athlete with their first key and recovery codes, in one transaction (#772). */
+  /**
+   * A new athlete with their first key and recovery codes, in one transaction
+   * (#772). Throws {@link HostedKeyHeldError} — and writes nothing — while the
+   * instance holds a hosted model key (#1097).
+   */
   registerAthlete(registration: Registration): Promise<void>;
+
+  /**
+   * Hold the instance's ONE hosted model key (#1097), sealed, for its one
+   * athlete. In ONE statement that counts the athletes — every athlete row,
+   * whatever its registration state — so it is `not-single-rider` and writes
+   * nothing unless there is exactly one. Replaces a key already held.
+   */
+  putHostedModelKey(key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** The held key, sealed, or `undefined`. The instance's one, so no athlete is asked for. */
+  getHostedModelKey(): Promise<HeldHostedModelKey | undefined>;
+  /** Clear the held key: `true` if there was one. */
+  clearHostedModelKey(): Promise<boolean>;
 
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
@@ -1422,6 +1472,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (key.athleteId !== athlete.id) {
             throw new OwnershipConflictError('A first key must be its own athlete’s.');
           }
+          // A hosted key is held only on a single-rider instance (#1097): the
+          // owner's ruling is to refuse the second rider, in this transaction,
+          // before anything is written — an invitation included.
+          const hostedKey = await trx
+            .selectFrom('hosted_model_key')
+            .select('slot')
+            .executeTakeFirst();
+          if (hostedKey !== undefined) throw new HostedKeyHeldError();
           if (registration.inviteCodeSha256 !== undefined) {
             const invite = await trx
               .selectFrom('invite_code')
@@ -2927,6 +2985,48 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           return held.map((row) => row.content_sha256);
         }),
       ),
+
+    putHostedModelKey: (key) =>
+      exclusive(async () => {
+        // ONE statement: the count and the write cannot be split by another
+        // connection registering a rider in between (#1097).
+        const written = await sql<{ athlete_id: string }>`
+          insert into hosted_model_key (slot, athlete_id, url, model, iv, ciphertext, set_at)
+          select 1, id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+          from athlete where (select count(*) from athlete) = 1
+          on conflict (slot) do update set
+            athlete_id = excluded.athlete_id, url = excluded.url, model = excluded.model,
+            iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+          returning athlete_id`.execute(db);
+        const stored = written.rows[0];
+        if (stored !== undefined) return { outcome: 'stored', athleteId: stored.athlete_id };
+        const counted = await db
+          .selectFrom('athlete')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .executeTakeFirstOrThrow();
+        return { outcome: 'not-single-rider', athletes: Number(counted.n) };
+      }),
+
+    getHostedModelKey: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('hosted_model_key').selectAll().executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+            };
+      }),
+
+    clearHostedModelKey: () =>
+      exclusive(async () => {
+        const result = await db.deleteFrom('hosted_model_key').executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      }),
 
     close: () => exclusive(() => db.destroy()),
   };

@@ -307,6 +307,28 @@ export interface HistoryPassageTable {
   readonly vector: Uint8Array;
 }
 
+/**
+ * The instance's ONE hosted model key (#1097, ADR 0046's ruling 3), on a
+ * single-rider instance only. Added by migration 0014. `slot` is always 1, so
+ * the table holds one row at most; `athlete_id` is the one rider it is held
+ * for, so erasing them takes it (`eraseAthlete` derives its tables from the
+ * foreign keys). The key itself is AES-256-GCM ciphertext under the operator's
+ * `OYL_INSTANCE_SECRET_KEY` (`analysis/hosted-key.ts`); its plaintext is
+ * never a column.
+ */
+export interface HostedModelKeyTable {
+  readonly slot: number;
+  readonly athlete_id: string;
+  /** The hosted service's OpenAI-compatible base URL, `https:` only. */
+  readonly url: string;
+  readonly model: string;
+  /** The 12-byte nonce of this one encryption: fresh on every write. */
+  readonly iv: Uint8Array;
+  /** The key, encrypted, with GCM's tag on the end. */
+  readonly ciphertext: Uint8Array;
+  readonly set_at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -332,4 +354,5 @@ export interface InstanceDatabase {
   readonly sync_item: SyncItemTable;
   readonly history_source: HistorySourceTable;
   readonly history_passage: HistoryPassageTable;
+  readonly hosted_model_key: HostedModelKeyTable;
 }

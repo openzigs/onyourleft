@@ -71,6 +71,9 @@ export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
   'model',
   'indexed',
   'stopped',
+  // A fixed sentence the instance wrote about itself (#1097: a hosted key it
+  // cannot read) — never a value from a request, a row or the environment.
+  'reason',
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

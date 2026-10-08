@@ -125,6 +125,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       ...STATEMENT_ERRORS,
       'key_revoked',
       'registration_closed',
+      'single_rider_instance',
       'registration_refused',
       'account_suspended',
       'code_unknown',

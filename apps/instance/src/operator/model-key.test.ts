@@ -1,0 +1,436 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The hosted model key, end to end (#1097): set, read and cleared by the
+ * operator's own command (`node src/operator/cli.ts model-key …`, in a child
+ * process, the key on standard input), backed up and restored by the
+ * operator's own backup, and read by a running instance — which refuses a
+ * second rider over HTTP, exports only that a key is held, and erases it with
+ * the account.
+ *
+ * Every place the key must NOT be is searched for {@link MARKER}: the
+ * database's bytes, a snapshot's bytes, the command's output and errors,
+ * every log line, `/metrics`, an error response and the account export.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  HOSTED_KEY_UNREADABLE,
+  hostedKeyState,
+  importSecretKey,
+  readSecretKey,
+} from '../analysis/hosted-key.ts';
+import { MARKER, MARKER_KEY, secretText } from '../analysis/hosted-key-testing.ts';
+import { TEST_ORIGIN, testDevice, type IdentityInstance } from '../auth/identity-testing.ts';
+import { authorised, syncWorld } from '../sync/sync-testing.ts';
+import { startInstance, type StartedInstance } from '../instance.ts';
+import { testConfig } from '../instance-testing.ts';
+import { readServerConfig } from '../server-config.ts';
+import { migrateForDeploy, openServingStore } from '../store/serving.ts';
+import { ATHLETE_A, ATHLETE_B, registrationFixture } from '../store/testing/index.ts';
+
+const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
+const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+const URL_TEXT = 'https://models.example/v1';
+const SECRET = secretText(11);
+const OTHER_SECRET = secretText(12);
+
+let directory: string | undefined;
+let running: StartedInstance | undefined;
+afterEach(async () => {
+  await running?.stop();
+  running = undefined;
+  if (directory !== undefined) await rm(directory, { recursive: true, force: true });
+  directory = undefined;
+});
+
+interface Data {
+  readonly database: string;
+  readonly blobs: string;
+}
+
+/** A migrated database holding `athletes` athletes. */
+async function instanceWith(...athletes: string[]): Promise<Data> {
+  directory = await mkdtemp(join(tmpdir(), 'oyl-instance-model-key-'));
+  const data = {
+    database: join(directory, 'live', 'instance.sqlite'),
+    blobs: join(directory, 'live', 'blobs'),
+  };
+  await mkdir(join(directory, 'live'), { recursive: true });
+  await migrateForDeploy(data.database);
+  const store = openServingStore(data.database);
+  try {
+    for (const athlete of athletes) await store.registerAthlete(registrationFixture(athlete));
+  } finally {
+    await store.close();
+  }
+  return data;
+}
+
+function cli(
+  data: Data,
+  args: readonly string[],
+  options: { readonly secret?: string; readonly input?: string } = {},
+) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    OYL_INSTANCE_DATABASE: data.database,
+    OYL_INSTANCE_BLOBS: data.blobs,
+  };
+  delete env.OYL_INSTANCE_SECRET_KEY;
+  if (options.secret !== undefined) env.OYL_INSTANCE_SECRET_KEY = options.secret;
+  const result = spawnSync(process.execPath, [CLI, ...args], {
+    cwd: INSTANCE,
+    encoding: 'utf8',
+    env,
+    input: options.input ?? '',
+    timeout: 30_000,
+  });
+  const report =
+    result.status === 0
+      ? (JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}') as Record<string, unknown>)
+      : {};
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, report };
+}
+
+const SET = ['model-key', 'set', '--url', URL_TEXT, '--model', 'a-model'] as const;
+
+function setKey(data: Data) {
+  return cli(data, SET, { secret: SECRET, input: `${MARKER_KEY}\n` });
+}
+
+/** Every file under `root`, as Latin-1, so an ASCII secret anywhere in them is found. */
+async function bytesUnder(root: string): Promise<string> {
+  let all = '';
+  for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile())
+      all += (await readFile(join(entry.parentPath, entry.name))).toString('latin1');
+  }
+  return all;
+}
+
+/** The database's file, write-ahead log and shared-memory index, as Latin-1. */
+async function databaseBytes(path: string): Promise<string> {
+  let all = '';
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (existsSync(`${path}${suffix}`))
+      all += (await readFile(`${path}${suffix}`)).toString('latin1');
+  }
+  return all;
+}
+
+async function secretKeyOf(text: string) {
+  const read = readSecretKey(text);
+  if (read.kind !== 'ok') throw new Error('fixture secret');
+  return importSecretKey(read.bytes);
+}
+
+describe('model-key set — encrypted at rest, read back (#1097)', () => {
+  it('holds the key from standard input as ciphertext, and opens it again on a fresh connection', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    const set = setKey(data);
+    expect(set.status, set.stderr).toBe(0);
+    expect(set.report).toEqual({
+      command: 'model-key set',
+      key: 'a key is held',
+      url: URL_TEXT,
+      model: 'a-model',
+    });
+    expect(set.stdout + set.stderr).not.toContain(MARKER);
+
+    // The store is closed (the command's process has ended): the raw bytes.
+    const bytes = await databaseBytes(data.database);
+    expect(bytes).toContain(URL_TEXT);
+    expect(bytes).not.toContain(MARKER);
+
+    const store = openServingStore(data.database);
+    try {
+      const state = await hostedKeyState(store, await secretKeyOf(SECRET));
+      expect(state).toEqual({
+        kind: 'held',
+        url: URL_TEXT,
+        model: 'a-model',
+        athleteId: ATHLETE_A,
+        key: MARKER_KEY,
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('status prints the URL, the model and that a key is held — never the key', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    const status = cli(data, ['model-key', 'status'], { secret: SECRET });
+    expect(status.status, status.stderr).toBe(0);
+    expect(status.report).toEqual({
+      command: 'model-key status',
+      key: 'a key is held',
+      url: URL_TEXT,
+      model: 'a-model',
+      readable: true,
+    });
+    expect(status.stdout + status.stderr).not.toContain(MARKER);
+  });
+});
+
+describe('never on argv (#1097)', () => {
+  it.each([
+    ['as a trailing argument', [...SET, MARKER_KEY]],
+    ['as a --key flag', [...SET, '--key', MARKER_KEY]],
+  ])('refuses a key passed %s, without echoing it, and holds nothing', async (_how, args) => {
+    const data = await instanceWith(ATHLETE_A);
+    const refused = cli(data, args, { secret: SECRET, input: `${MARKER_KEY}\n` });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('standard input, never from the command line');
+    expect(refused.stdout + refused.stderr).not.toContain(MARKER);
+    expect(cli(data, ['model-key', 'status'], { secret: SECRET }).report).toEqual({
+      command: 'model-key status',
+      key: 'no key is held',
+    });
+  });
+
+  it('refuses empty standard input', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    const refused = cli(data, SET, { secret: SECRET, input: '' });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('Standard input must hold the key');
+  });
+});
+
+describe('the refusals of set (#1097)', () => {
+  it('refuses an http: URL', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    const args = ['model-key', 'set', '--url', 'http://models.example/v1', '--model', 'a-model'];
+    const refused = cli(data, args, { secret: SECRET, input: MARKER_KEY });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('https:');
+    expect(refused.stderr).not.toContain(MARKER);
+  });
+
+  it('refuses with no secret, and with a secret that is not 32 bytes — never echoing it', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(cli(data, SET, { input: MARKER_KEY }).stderr).toContain(
+      'OYL_INSTANCE_SECRET_KEY is not set',
+    );
+    const short = btoa(`${MARKER}x`);
+    const malformed = cli(data, SET, { secret: short, input: MARKER_KEY });
+    expect(malformed.status).toBe(1);
+    expect(malformed.stderr).toContain('32 bytes');
+    expect(malformed.stderr).not.toContain(short);
+  });
+
+  it('refuses on an instance with two athletes, saying why, and holds nothing', async () => {
+    const data = await instanceWith(ATHLETE_A, ATHLETE_B);
+    const refused = setKey(data);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('exactly one rider, and this one has 2');
+    expect(refused.stderr).not.toContain(MARKER);
+    expect(await databaseBytes(data.database)).not.toContain(URL_TEXT);
+  });
+});
+
+describe('backups hold ciphertext only (#1097)', () => {
+  it('backs up no plaintext, and a restore under another secret reads the key as unreadable', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    const backups = join(directory!, 'backups');
+    const taken = cli(data, ['backup', backups]);
+    expect(taken.status, taken.stderr).toBe(0);
+    expect((taken.report.rows as Record<string, number>).hosted_model_key).toBe(1);
+    const snapshot = taken.report.snapshot as string;
+    const held = await bytesUnder(snapshot);
+    expect(held).toContain(URL_TEXT);
+    expect(held).not.toContain(MARKER);
+
+    const elsewhere = {
+      database: join(directory!, 'elsewhere', 'instance.sqlite'),
+      blobs: join(directory!, 'elsewhere', 'blobs'),
+    };
+    expect(cli(elsewhere, ['restore', snapshot]).status).toBe(0);
+    const other = cli(elsewhere, ['model-key', 'status'], { secret: OTHER_SECRET });
+    expect(other.status, other.stderr).toBe(0);
+    expect(other.report).toMatchObject({
+      key: 'a key is held',
+      readable: false,
+      problem: HOSTED_KEY_UNREADABLE,
+    });
+    expect(cli(elsewhere, ['model-key', 'status'], { secret: SECRET }).report).toMatchObject({
+      readable: true,
+    });
+  });
+});
+
+describe('model-key clear (#1097)', () => {
+  it('clears the key, and says whether there was one', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    expect(cli(data, ['model-key', 'clear']).report).toEqual({
+      command: 'model-key clear',
+      cleared: true,
+    });
+    expect(cli(data, ['model-key', 'clear']).report).toEqual({
+      command: 'model-key clear',
+      cleared: false,
+    });
+    expect(await databaseBytes(data.database)).not.toContain(MARKER);
+  });
+});
+
+/** A running instance over `data`, with `secret`, every log line kept. */
+async function serve(data: Data, secret: string | undefined, metricsToken?: string) {
+  const read = readServerConfig(
+    {
+      database: data.database,
+      blobs: data.blobs,
+      origin: TEST_ORIGIN,
+      roomWorkers: '1',
+      secretKey: secret,
+      ...(metricsToken === undefined ? {} : { metrics: 'on', metricsToken }),
+    },
+    1,
+  );
+  if (!read.ok) throw new Error(read.problems.join(' '));
+  const lines: string[] = [];
+  running = await startInstance({
+    config: testConfig({ registration: 'open' }),
+    server: read.config,
+    version: '9.8.7',
+    notices: 'notices',
+    log: (line) => lines.push(line),
+    migrationPollMs: 50,
+  });
+  await running.opened;
+  await running.hostedKeyReported;
+  return { instance: running, lines };
+}
+
+async function post(url: string, path: string, body: unknown) {
+  const response = await fetch(`${url}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, text: await response.text() };
+}
+
+/** Challenge, sign, sign in — a registration when the key is new. */
+async function signIn(url: string) {
+  const device = await testDevice();
+  const challenge = JSON.parse(
+    (await post(url, '/v1/auth/challenge', { publicKey: device.publicKey })).text,
+  ) as {
+    nonce: string;
+  };
+  return post(url, '/v1/auth/session', await device.statement(challenge.nonce));
+}
+
+describe('a running instance holding a key (#1097)', () => {
+  it('logs that a key restored under another secret cannot be read, and does not crash — no key in any log line or /metrics', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    const token = 'm'.repeat(40);
+    const { instance, lines } = await serve(data, OTHER_SECRET, token);
+    const report = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((line) => line.event === 'hosted-model-key');
+    expect(report).toEqual({
+      event: 'hosted-model-key',
+      state: 'unreadable',
+      reason: HOSTED_KEY_UNREADABLE,
+    });
+    expect((await instance.hostedModelKey()).kind).toBe('unreadable');
+    const metrics = await (
+      await fetch(`${instance.url}/metrics`, { headers: { authorization: `Bearer ${token}` } })
+    ).text();
+    expect(metrics.length).toBeGreaterThan(0);
+    expect(metrics).not.toContain(MARKER);
+    expect(lines.join('\n')).not.toContain(MARKER);
+    expect((await fetch(`${instance.url}/ready`)).status).toBe(200);
+  });
+
+  it('opens the key with the secret it was sealed under, and logs only that it is held', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    const { instance, lines } = await serve(data, SECRET);
+    expect(lines.map((line) => JSON.parse(line) as Record<string, unknown>)).toContainEqual({
+      event: 'hosted-model-key',
+      state: 'held',
+    });
+    expect(await instance.hostedModelKey()).toMatchObject({ kind: 'held', key: MARKER_KEY });
+    expect(lines.join('\n')).not.toContain(MARKER);
+  });
+
+  it('refuses a second rider’s registration over HTTP with a stated reason, then admits one once the key is cleared', async () => {
+    const data = await instanceWith();
+    const { instance, lines } = await serve(data, SECRET);
+    const first = await signIn(instance.url);
+    expect(first.status, first.text).toBe(200);
+    expect(setKey(data).status).toBe(0);
+
+    const second = await signIn(instance.url);
+    expect(second.status).toBe(403);
+    const error = (JSON.parse(second.text) as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('single_rider_instance');
+    expect(error.message).toContain('clear the key');
+    expect(second.text).not.toContain(MARKER);
+
+    expect(cli(data, ['model-key', 'clear']).status).toBe(0);
+    expect((await signIn(instance.url)).status).toBe(200);
+    expect(lines.join('\n')).not.toContain(MARKER);
+  });
+});
+
+/**
+ * Sync — the account export and erasure (#35) — is served by a handler handed
+ * one, which the running instance is not yet (`docs/agents/instance.md`); the
+ * sync world is that handler over a real database file.
+ */
+describe('the account export and erasure (#1097, #35)', () => {
+  let world: IdentityInstance | undefined;
+  afterEach(async () => {
+    await world?.close();
+    world = undefined;
+  });
+
+  it('exports only that a key is held, and DELETE /v1/account erases it with the account', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const rider = synced.riders[0]!;
+    const data = { database: world.path, blobs: join(world.path, '..', 'blobs') };
+    expect(setKey(data).status).toBe(0);
+
+    const exported = await authorised(world, rider.token, 'GET', '/v1/account/export');
+    const text = await exported.text();
+    expect(exported.status, text).toBe(200);
+    const body = JSON.parse(text) as { hostedModelKey: unknown; notIncluded: string[] };
+    expect(body.hostedModelKey).toBe('a hosted model key is held');
+    expect(body.notIncluded.some((line) => line.startsWith('A hosted model key'))).toBe(true);
+    expect(text).not.toContain(MARKER);
+    expect(text).not.toContain(URL_TEXT);
+
+    const erased = await authorised(world, rider.token, 'DELETE', '/v1/account', {
+      recoveryCode: rider.recoveryCodes[0],
+    });
+    expect(erased.status, await erased.clone().text()).toBeLessThan(300);
+    expect(cli(data, ['model-key', 'status'], { secret: SECRET }).report).toEqual({
+      command: 'model-key status',
+      key: 'no key is held',
+    });
+  });
+
+  it('exports null for an athlete with no key held', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const exported = await authorised(world, synced.riders[0]!.token, 'GET', '/v1/account/export');
+    expect(((await exported.json()) as { hostedModelKey: unknown }).hostedModelKey).toBeNull();
+  });
+});

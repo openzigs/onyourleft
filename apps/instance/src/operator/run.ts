@@ -5,6 +5,9 @@ import {
   backup,
   CommandError,
   migrate,
+  modelKeyClear,
+  modelKeySet,
+  modelKeyStatus,
   restore,
   roomOpen,
   verify,
@@ -17,6 +20,9 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   restore <snapshot directory> [--force]
   verify
   room-open <roomId> --kind ride|race --length <metres> [--grade <percent>] [--position hoods|drops|upright] [--countdown <ms>]
+  model-key set --url https://… --model <name>   (the key on standard input)
+  model-key status
+  model-key clear
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -37,7 +43,14 @@ function has(args: string[], name: string): boolean {
 /** Runs one command, prints its JSON report, and answers the exit code. */
 export async function runCommand(
   argv: readonly string[],
-  env: { readonly database?: string | undefined; readonly blobs?: string | undefined },
+  env: {
+    readonly database?: string | undefined;
+    readonly blobs?: string | undefined;
+    /** `OYL_INSTANCE_SECRET_KEY`, for `model-key` (#1097). */
+    readonly secret?: string | undefined;
+    /** Standard input, read whole: where `model-key set` takes the key from. */
+    readonly readStandardInput?: () => Promise<string>;
+  },
 ): Promise<number> {
   const paths: DataPaths = {
     database: env.database?.trim() || DEFAULT_DATABASE_PATH,
@@ -87,6 +100,34 @@ export async function runCommand(
           ...(position === undefined ? {} : { position }),
           ...(countdown === undefined ? {} : { countdownMs: Number(countdown) }),
         });
+        break;
+      }
+      case 'model-key': {
+        const action = args.shift();
+        if (action === 'set') {
+          const url = flag(args, '--url');
+          const model = flag(args, '--model');
+          // Anything else on the line is refused, and never echoed: it may be
+          // the key itself, which belongs on standard input (#1097).
+          if (args.length > 0) {
+            throw new CommandError(
+              'model-key set reads the key from standard input, never from the command line. Nothing was written.',
+            );
+          }
+          if (url === undefined || model === undefined) throw new CommandError(USAGE);
+          report = await modelKeySet(paths, {
+            url,
+            model,
+            input: await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+            secret: env.secret,
+          });
+        } else if (action === 'status' && args.length === 0) {
+          report = await modelKeyStatus(paths, env.secret);
+        } else if (action === 'clear' && args.length === 0) {
+          report = await modelKeyClear(paths);
+        } else {
+          throw new CommandError(USAGE);
+        }
         break;
       }
       default:

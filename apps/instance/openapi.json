@@ -428,7 +428,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
                 }
               }
             }
@@ -2114,7 +2114,7 @@
             }
           },
           "403": {
-            "description": "One of `registration_closed`, `account_suspended`, `registration_refused`, in the one error shape.",
+            "description": "One of `registration_closed`, `single_rider_instance`, `account_suspended`, `registration_refused`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4803,6 +4803,7 @@
                   "code_used",
                   "code_expired",
                   "registration_closed",
+                  "single_rider_instance",
                   "account_suspended",
                   "step_up_required",
                   "registration_pending",
@@ -4988,6 +4989,16 @@
       },
       "registration_closed": {
         "description": "`registration_closed` (403), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "single_rider_instance": {
+        "description": "`single_rider_instance` (403), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

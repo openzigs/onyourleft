@@ -26,6 +26,7 @@ import {
   ATHLETE_B,
   ATHLETE_C,
   createStoreHarness,
+  registrationFixture,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -135,11 +136,24 @@ function namedWithoutForeignKey(path: string): string[] {
   }
 }
 
+/**
+ * An athlete-scoped table that can hold a row only on an instance with ONE
+ * athlete, so the three-athlete world cannot seed it for all three — and the
+ * case of its own that erases it instead. A table named here without that
+ * case is a test that never runs; the last case below holds the two together.
+ */
+const ONE_ATHLETE_TABLES: Readonly<Record<string, string>> = {
+  hosted_model_key:
+    'a hosted model key is held only on a single-rider instance (#1097): “takes the hosted model key with the one athlete it is held for”',
+};
+
 describe('erasing an athlete (#769, #35)', () => {
   it('empties every athlete-scoped table the schema has of that athlete, and only that athlete', async () => {
     harness = await createStoreHarness();
     await harness.write(seedWorld);
-    const tables = athleteScopedTables(harness.path);
+    const tables = athleteScopedTables(harness.path).filter(
+      (table) => !(table in ONE_ATHLETE_TABLES),
+    );
     expect(tables.length).toBeGreaterThan(0);
 
     for (const table of tables) {
@@ -277,5 +291,33 @@ describe('erasing an athlete (#769, #35)', () => {
     const erased = await harness.write((store) => store.eraseAthlete(ATHLETE_B));
     expect([...erased].sort()).toEqual(held);
     expect(await harness.write((store) => store.eraseAthlete(ATHLETE_B)), 'idempotent').toEqual([]);
+  });
+
+  it('takes the hosted model key with the one athlete it is held for (#1097)', async () => {
+    harness = await createStoreHarness();
+    await harness.write(async (store) => {
+      await store.registerAthlete(registrationFixture(ATHLETE_A));
+      const put = await store.putHostedModelKey({
+        url: 'https://models.example/v1',
+        model: 'a-model',
+        iv: new Uint8Array(12),
+        ciphertext: new Uint8Array([1, 2, 3]),
+        setAt: 1_790_000_000,
+      });
+      expect(put).toEqual({ outcome: 'stored', athleteId: ATHLETE_A });
+    });
+    expect(rowsOf(harness.path, 'hosted_model_key', 'athlete_id', ATHLETE_A)).toBe(1);
+
+    await harness.write((store) => store.eraseAthlete(ATHLETE_A));
+
+    expect(rowsOf(harness.path, 'hosted_model_key', 'athlete_id', ATHLETE_A)).toBe(0);
+    expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
+  });
+
+  it('exempts from the three-athlete case only athlete-scoped tables, each with a case of its own', async () => {
+    harness = await createStoreHarness();
+    await harness.write(() => Promise.resolve());
+    const scoped = athleteScopedTables(harness.path);
+    for (const table of Object.keys(ONE_ATHLETE_TABLES)) expect(scoped).toContain(table);
   });
 });

@@ -164,6 +164,62 @@ it**: its API has no authentication.
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
 
+## A hosted model key
+
+Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
+service (#1097, ADR 0046's ruling 3). ⚠️ **Nothing uses it yet**: a hosted request must be masked
+first (#1101), so until that lands a job that asks for the hosted source fails
+`hosted_unavailable` and sends nothing. And it is used only for a job whose rider's device asked
+for it — the consent is per job, never the instance's.
+
+**Single rider only.** A key is held only on an instance with exactly one athlete — every account
+counts, pending, refused or suspended — because the operator of a multi-rider instance could read
+every rider's key and history; on a one-person box the operator and the rider are the same person.
+`model-key set` is refused on an instance with any other number of athletes, and while a key is
+held **a second rider's registration is refused** (`single_rider_instance`) until you clear it.
+Erasing the account (`DELETE /v1/account`) erases the key with it. The account export says only
+`"hostedModelKey": "a hosted model key is held"`.
+
+**The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
+bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
+
+```
+openssl rand -base64 32
+```
+
+Every write draws a fresh nonce, and the URL and model are bound into the encryption, so an edited
+URL in the database makes the key unreadable rather than sending it somewhere new. The server and
+the operator's commands both read the variable; a value that is not 32 bytes of base64 stops the
+server starting.
+
+```
+printf '%s' "$KEY" | node src/operator/cli.ts model-key set --url https://… --model <name>
+node src/operator/cli.ts model-key status    # url, model, "a key is held", whether this secret opens it
+node src/operator/cli.ts model-key clear
+```
+
+`set` reads the key from **standard input and nowhere else**: a key given as an argument is refused,
+because `ps` and a shell's history would show it. The URL must be `https:`, with no user name,
+query or fragment; it is the only host the hosted model may reach. The key is never logged, never
+in `/metrics`, never in an error and never in `status`.
+
+**What a backup holds.** `operator backup` copies the database with `VACUUM INTO`, so a snapshot
+holds the key's **ciphertext only**. Keep the secret out of the backup's destination: a snapshot and
+its secret together are the key. A snapshot restored onto a box with a different secret — or none —
+leaves the key unreadable, and the instance says so and carries on with its local model, or none:
+
+| You see | It means |
+|---|---|
+| `"event":"hosted-model-key","state":"none"` | no key is held |
+| `…"state":"held"` | a key is held and this secret opens it |
+| `…"state":"unreadable","reason":"the hosted key cannot be read with this secret"` | restored under another secret: set the key again, or put the old secret back |
+| `…"state":"no-secret"` | a key is held and `OYL_INSTANCE_SECRET_KEY` is not set |
+
+**Rotating the secret.** There is no re-encryption command, because the key itself is the thing to
+re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with
+the key (which seals it under the new secret), and start the instance. Snapshots taken before then
+need the old secret to read their key; the rest of a snapshot needs no secret at all.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),

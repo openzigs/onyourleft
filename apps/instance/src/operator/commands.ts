@@ -7,6 +7,17 @@ import { dirname, join } from 'node:path';
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
 
+import {
+  HOSTED_KEY_UNREADABLE,
+  hostedKeyFrom,
+  hostedKeyState,
+  hostedUrlFrom,
+  importSecretKey,
+  readSecretKey,
+  sealHostedKey,
+  SECRET_KEY_MALFORMED,
+  type SecretKey,
+} from '../analysis/hosted-key.ts';
 import { integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 
@@ -21,6 +32,9 @@ import { migrateForDeploy, openServingStore } from '../store/serving.ts';
  * | `restore <snapshot directory> [--force]` | the snapshot back into place, checked: SQLite's integrity check, every row count and blob count against the manifest, every blob's content against its name |
  * | `verify` | the row counts and the blob count of the data in place — what a restore on another machine is compared with |
  * | `room-open <roomId> --kind ride\|race --length <metres> [--grade <percent>] [--position hoods\|drops\|upright] [--countdown <ms>]` | a room and its course, until #784 and #785 let a rider make one |
+ * | `model-key set --url https://… --model <name>` | the instance's one hosted model key, read from standard input, sealed under `OYL_INSTANCE_SECRET_KEY`, on a single-rider instance only (#1097) |
+ * | `model-key status` | the hosted key's URL and model, that a key is held, and whether this secret opens it — never the key |
+ * | `model-key clear` | the hosted key gone, so a second rider may register again |
  *
  * ⚠️ `restore` writes where the instance keeps its data: **stop the
  * instance first** (`docs/operating-an-instance.md`). It refuses to write over
@@ -217,6 +231,108 @@ export async function restore(
     blobs: blobs.length,
     ms: Math.round(performance.now() - started),
   };
+}
+
+/** The operator's secret, imported, or a refusal naming the variable and never its value. */
+async function secretKey(text: string | undefined): Promise<SecretKey | undefined> {
+  const read = readSecretKey(text);
+  if (read.kind === 'malformed') throw new CommandError(SECRET_KEY_MALFORMED);
+  return read.kind === 'ok' ? importSecretKey(read.bytes) : undefined;
+}
+
+/** What `model-key status` and `set` say of a held key: that it is held, never what it is. */
+const KEY_HELD = 'a key is held';
+
+/** The longest model name accepted. */
+const MAXIMUM_MODEL_NAME = 200;
+
+/**
+ * `model-key set --url https://… --model <name>` (#1097): seal the key read
+ * from STANDARD INPUT — never from the command line, where `ps` and a shell's
+ * history would show it — under `OYL_INSTANCE_SECRET_KEY`, and hold it for
+ * the instance's one rider. Refused, writing nothing, unless there is exactly
+ * one athlete.
+ */
+export async function modelKeySet(
+  paths: DataPaths,
+  options: {
+    readonly url: string;
+    readonly model: string;
+    /** Standard input, exactly as read. */
+    readonly input: string;
+    readonly secret: string | undefined;
+    readonly now?: () => Date;
+  },
+) {
+  const url = hostedUrlFrom(options.url);
+  if (!url.ok) throw new CommandError(url.problem);
+  const model = options.model.trim();
+  if (model === '' || model.length > MAXIMUM_MODEL_NAME || !/^[\x21-\x7e]+$/.test(model)) {
+    throw new CommandError('--model is the model’s name: printable characters, no spaces.');
+  }
+  const key = hostedKeyFrom(options.input);
+  if (key === undefined) {
+    throw new CommandError(
+      'Standard input must hold the key and nothing else: one line of printable characters, no spaces.',
+    );
+  }
+  const secret = await secretKey(options.secret);
+  if (secret === undefined) {
+    throw new CommandError(
+      'OYL_INSTANCE_SECRET_KEY is not set: the key is encrypted under it, so it is needed to hold one.',
+    );
+  }
+  const sealed = await sealHostedKey(secret, { url: url.url.href, model, key });
+  const store = openServingStore(paths.database);
+  try {
+    const put = await store.putHostedModelKey({
+      url: url.url.href,
+      model,
+      ...sealed,
+      setAt: Math.floor((options.now ?? (() => new Date()))().getTime() / 1000),
+    });
+    if (put.outcome === 'not-single-rider') {
+      throw new CommandError(
+        `A hosted model key is held only on an instance with exactly one rider, and this one has ${String(put.athletes)}. Nothing was written.`,
+      );
+    }
+  } finally {
+    await store.close();
+  }
+  return { command: 'model-key set', key: KEY_HELD, url: url.url.href, model };
+}
+
+/** `model-key status`: the URL, the model and that a key is held — never the key. */
+export async function modelKeyStatus(paths: DataPaths, secretText: string | undefined) {
+  const secret = await secretKey(secretText);
+  const store = openServingStore(paths.database);
+  try {
+    const state = await hostedKeyState(store, secret);
+    if (state.kind === 'none') return { command: 'model-key status', key: 'no key is held' };
+    return {
+      command: 'model-key status',
+      key: KEY_HELD,
+      url: state.url,
+      model: state.model,
+      readable: state.kind === 'held',
+      ...(state.kind === 'unreadable' ? { problem: HOSTED_KEY_UNREADABLE } : {}),
+      ...(state.kind === 'no-secret'
+        ? { problem: 'OYL_INSTANCE_SECRET_KEY is not set, so the key cannot be read.' }
+        : {}),
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/** `model-key clear`: the key gone, and a second rider admitted again. */
+export async function modelKeyClear(paths: DataPaths) {
+  const store = openServingStore(paths.database);
+  try {
+    return { command: 'model-key clear', cleared: await store.clearHostedModelKey() };
+  } finally {
+    await store.close();
+  }
 }
 
 const POSITIONS: readonly RidingPosition[] = ['upright', 'hoods', 'drops'];

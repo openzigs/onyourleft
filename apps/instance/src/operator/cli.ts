@@ -16,8 +16,17 @@ import { resolveExtensionless } from '../node-imports.ts';
 
 registerHooks({ resolve: resolveExtensionless });
 
+/** Standard input, whole: `model-key set` reads the key from it and from nowhere else. */
+async function readStandardInput(): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Uint8Array);
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 const { runCommand } = await import('./run.ts');
 process.exitCode = await runCommand(process.argv.slice(2), {
   database: process.env.OYL_INSTANCE_DATABASE,
   blobs: process.env.OYL_INSTANCE_BLOBS,
+  secret: process.env.OYL_INSTANCE_SECRET_KEY,
+  readStandardInput,
 });
