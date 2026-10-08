@@ -1,0 +1,26 @@
+{
+  "name": "@onyourleft/analysis",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "The platform-free core of a model-written ride write-up: the runner, the templates, the input builder, the history passages, the write-up screen and its angle matchers, and the hosted mask (ADR 0046 D-4, D-5). No platform API, no store, no model SDK.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.platform-free.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@onyourleft/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

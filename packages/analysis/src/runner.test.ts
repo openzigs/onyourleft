@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * The analysis runner (#811), driven against a scripted {@link ModelStepPort}
@@ -6,10 +6,9 @@
  * reached exactly rather than waited for.
  */
 
-import { ANALYSIS_READ_TIMEOUT_MILLISECONDS } from '@onyourleft/mobile';
 import { describe, expect, it } from 'vitest';
 
-import type { UntrustedText } from '../camera/model-answer';
+import type { UntrustedText } from './screen/model-answer';
 import type { RideAnalysisInput, SectionSummary } from './input';
 import type { ModelStepPort, StepReply, StepRequest } from './model-step-port';
 import {
@@ -25,7 +24,11 @@ import {
   type RunOutcome,
 } from './runner';
 import { acceptHistoryAnswer } from './history';
-import { ANALYSIS_TEMPLATES, CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
+import {
+  ANALYSIS_TEMPLATES,
+  CURRENT_ANALYSIS_TEMPLATE,
+  type AnalysisTemplate,
+} from './template/template';
 
 // --- Fixtures -----------------------------------------------------------------
 
@@ -706,19 +709,9 @@ describe('the deadlines', () => {
     expect(failedAs(outcome)).toBe('out-of-time');
   });
 
-  it('sets every step’s deadline within the native transport’s read timeout, and the run’s beyond any one step', () => {
-    for (const template of ANALYSIS_TEMPLATES) {
-      for (const step of template.steps) {
-        expect(step.bounds.deadlineMilliseconds).toBeGreaterThan(0);
-        // ⚠️ Equal, for the summary and the rewrite (#810 set 120 s against
-        // this very timeout). Either one ending first is a failed step.
-        expect(step.bounds.deadlineMilliseconds).toBeLessThanOrEqual(
-          ANALYSIS_READ_TIMEOUT_MILLISECONDS,
-        );
-        expect(step.bounds.deadlineMilliseconds).toBeLessThan(RUN_BUDGET_MILLISECONDS);
-      }
-    }
-  });
+  // The case that holds every step's deadline within the native transport's
+  // read timeout reads `@onyourleft/mobile`, which a package may not import:
+  // it is `apps/web/src/ride-analysis/runner-native.test.ts` since #1094.
 });
 
 // --- Cancellation ---------------------------------------------------------------------------

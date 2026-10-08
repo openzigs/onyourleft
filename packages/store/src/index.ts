@@ -109,7 +109,7 @@ export {
   MAXIMUM_MASKED_WORDS,
   parseMaskedWords,
   tidyMaskedWord,
-} from './masked-words';
+} from '@onyourleft/analysis';
 
 // --- The rider's goals, ride notes and documents (#836) ---------------------
 

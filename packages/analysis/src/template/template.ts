@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * The analysis template: an app-defined, **versioned** outline of the steps a
@@ -50,11 +50,11 @@
  * shown; handing it back to a builder would be the one place it survived.
  */
 
-import { MAXIMUM_WRITE_UP_CHARACTERS } from '@onyourleft/store';
+import { MAXIMUM_WRITE_UP_CHARACTERS } from '../screen/write-up-screen';
 
-import { passedScreen, screenSavedWriteUp } from '../camera/write-up-screen';
-import type { HistoryPassage } from './history';
-import type { RideAnalysisInput } from './input';
+import { passedScreen, screenSavedWriteUp } from '../screen/write-up-screen';
+import type { HistoryPassage } from '../history';
+import type { RideAnalysisInput } from '../input';
 import { ANALYSIS_TEMPLATE_V1 } from './template-v1';
 import { ANALYSIS_TEMPLATE_V2 } from './template-v2';
 

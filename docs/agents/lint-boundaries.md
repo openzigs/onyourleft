@@ -89,3 +89,11 @@ would be missed.
 `packages/sensors/src` stayed platform-free. #41 and #42's protocol clients arrived on the same
 terms in `packages/sensors/protocol` — a third entry, and `platformIsolation` verbatim, because they
 name a wire format but no platform. The routing work (#70) goes in the same file when it lands.
+
+**`packages/analysis`** ([#1094](https://github.com/openzigs/onyourleft/issues/1094), ADR 0046 D-5) takes
+`platformIsolation` too, over every file but its tests, plus a denylist of its own: `@onyourleft/store`
+and any model SDK or schema library (`ai`, `@ai-sdk/*`, `zod`, …), which its tests are held to as well.
+Like `packages/fit` it has two tsconfigs, and **`tsconfig.platform-free.json` is the one that enforces**
+(`lib: ["ES2024"]`, `types: []`, everything under `src/` but `*.test.ts`); the wide `tsconfig.json`
+admits `@types/node` because a few tests read files. Its one declared global is `AbortController`, in
+`src/abort.d.ts`, which only the runner uses — every runtime the core targets has it.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * The run-time screen on a model's write-up — #798. Every #564 case the source
@@ -12,8 +12,6 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { UntrustedText } from './model-answer';
@@ -174,14 +172,9 @@ describe('screenWriteUp — plain text only', () => {
     expect(shown(text)).toBe(text);
   });
 
-  it('is a string React renders as text: no element, no link, whatever it says', () => {
-    const text = '<b>bold</b> <script>x()</script> [a](javascript:alert(1)) https://example.org';
-    const markup = renderToStaticMarkup(createElement('p', null, shown(text)));
-    expect(markup).toBe(
-      '<p>&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x()&lt;/script&gt; [a](javascript:alert(1)) https://example.org</p>',
-    );
-    expect(markup).not.toMatch(/<(?!\/?p>)/);
-  });
+  // That React renders the text as text, no element and no link, is
+  // `apps/web/src/camera/write-up-screen-app.test.ts`: this package renders
+  // nothing (#1094).
 
   it('keeps a newline, writes a CRLF or a carriage return as one, and a tab as a space', () => {
     expect(shown('one\r\ntwo\rthree\nfour\tfive')).toBe('one\ntwo\nthree\nfour five');
@@ -250,6 +243,8 @@ describe('ScreenedWriteUp — made only by the screen', () => {
     }
   });
 
+  // `apps/web/src/camera/write-up-screen-app.test.ts` holds the same of every
+  // shipped file in the app, which imports this package (#1094).
   it('is only ever made in write-up-screen.ts — no other shipped file casts to it', () => {
     const root = fileURLToPath(new URL('..', import.meta.url));
     const casts: string[] = [];
@@ -267,6 +262,6 @@ describe('ScreenedWriteUp — made only by the screen', () => {
       }
     };
     walk(root);
-    expect(casts).toEqual([join('camera', 'write-up-screen.ts')]);
+    expect(casts).toEqual([join('screen', 'write-up-screen.ts')]);
   });
 });

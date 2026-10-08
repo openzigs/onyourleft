@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * **The run-time screen a model's write-up passes before anybody is shown it
@@ -38,8 +38,8 @@
  *   surrogate, which is no character and renders as a replacement mark);
  * - **withholds** a write-up that still holds any other control character
  *   (C0, DEL, C1), is empty, or is longer than
- *   {@link MAXIMUM_WRITE_UP_CHARACTERS} — the store's own bound, imported
- *   rather than restated, so what is shown and what is kept cannot disagree.
+ *   {@link MAXIMUM_WRITE_UP_CHARACTERS} — the store's own bound, which the
+ *   store imports from here, so what is shown and what is kept cannot disagree.
  *
  * Markdown and HTML are left exactly as written: they are characters, and a
  * text node shows them as characters.
@@ -67,8 +67,6 @@
  * write-up that passes has been shown to break the two rules, and no more.
  */
 
-import { MAXIMUM_WRITE_UP_CHARACTERS } from '@onyourleft/store';
-
 import type { UntrustedText } from './model-answer';
 import {
   type AngleClaimKind,
@@ -77,7 +75,17 @@ import {
   INVISIBLE,
 } from './angle-claims';
 
-export { MAXIMUM_WRITE_UP_CHARACTERS };
+/**
+ * The longest write-up this screen shows and `packages/store` keeps, in UTF-16
+ * code units — #800, and the bound #798's runtime screen holds a write-up to.
+ *
+ * ⚠️ **Here, so there is one number.** It was declared in `packages/store`
+ * until #1094; the store now imports it from this package, and this package
+ * imports nothing from the store (ADR 0046 D-5). At most eight sections, a
+ * position section and a summary (epic #795) at a generous paragraph each is
+ * well under it; a page of a book is about 2 000.
+ */
+export const MAXIMUM_WRITE_UP_CHARACTERS = 16_000;
 
 declare const screened: unique symbol;
 

@@ -32,6 +32,16 @@ import {
 } from './no-absolute-angles';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+/**
+ * `@onyourleft/analysis`'s `src` (#1094): the templates whose prompts a model
+ * is sent, and the write-up screen, moved there out of this tree. They are
+ * text this client ships, so the scan reads them as it read them here.
+ */
+const ANALYSIS_SOURCE_ROOT = fileURLToPath(
+  new URL('../../../../packages/analysis/src/', import.meta.url),
+);
+/** Every tree the scan walks. A finding's file is named relative to `apps/web/src`. */
+const SCAN_ROOTS = [SOURCE_ROOT, ANALYSIS_SOURCE_ROOT] as const;
 /** The one file the walk leaves out: the rule itself. */
 const RULE_MODULE = fileURLToPath(new URL('./no-absolute-angles.ts', import.meta.url));
 
@@ -58,7 +68,9 @@ function scannable(): readonly string[] {
       found.push(path);
     }
   };
-  walk(SOURCE_ROOT);
+  for (const root of SCAN_ROOTS) {
+    walk(root);
+  }
   return found;
 }
 
@@ -470,6 +482,25 @@ describe('no string in this client renders an absolute angle or the frontal plan
     },
     TREE_WALK_TIMEOUT_MILLISECONDS,
   );
+
+  it('scans the templates in @onyourleft/analysis, and goes red on a degree sign planted in one (#1094)', () => {
+    const template = join(ANALYSIS_SOURCE_ROOT, 'template', 'template-v2.ts');
+    // Deleting the package's root from SCAN_ROOTS takes the file out of the walk.
+    expect(scannable()).toContain(template);
+    const planted = (file: string): string => {
+      const source = readFileSync(file, 'utf8');
+      return file === template
+        ? `${source}\nexport const PLANTED = 'Your knee reached 142\u00b0 at the bottom.';\n`
+        : source;
+    };
+    const findings = scannable()
+      .filter((file) => file.startsWith(ANALYSIS_SOURCE_ROOT))
+      .flatMap((file) => angleClaimsIn(relative(SOURCE_ROOT, file), planted(file)))
+      .filter((finding) => !isExempt(finding));
+    expect(findings.map((finding) => finding.file)).toStrictEqual([
+      relative(SOURCE_ROOT, template),
+    ]);
+  });
 
   it('exempts nothing in the side camera, whose report is what this gate is for', () => {
     expect(EXEMPT.filter((entry) => entry.file.startsWith('camera/'))).toEqual([]);

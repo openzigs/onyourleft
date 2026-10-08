@@ -62,14 +62,14 @@ import type {
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
 import type { HostedCall, HostedFailure, HostedPort, HostedQuestion } from './hosted-port';
-import type { SealedStep } from '../ride-analysis/sealed-step';
+import type { SealedStep } from '@onyourleft/analysis';
 import type { AnalysisPort } from './analysis-port';
 import type {
   AnalysisCall,
   AnalysisFailure,
   AnalysisOutcome,
   AnalysisQuestion,
-} from './model-answer';
+} from '@onyourleft/analysis';
 import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
 import {
