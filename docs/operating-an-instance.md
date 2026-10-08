@@ -256,6 +256,79 @@ re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-k
 the key (which seals it under the new secret), and start the instance. Snapshots taken before then
 need the old secret to read their key; the rest of a snapshot needs no secret at all.
 
+## The instance's keys
+
+An instance holds two long-term keys of its own (#1189,
+[ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-4, D-5): an
+**identity** key (Ed25519), which riders' devices pin and which only signs, and an **encryption**
+key (X25519), which devices seal requests to. The encryption key is published only inside a
+statement the identity key signs, at `GET /v1/instance/keys`. Nothing seals to it yet: `/v1/sealed`
+is #1191 and the app's pin is #1190.
+
+**They need `OYL_INSTANCE_SECRET_KEY`**, the same secret a hosted model key uses (above) — never a
+second one — and `OYL_INSTANCE_ORIGIN`, which they are bound to. Both private halves are stored in
+the database wrapped with AES-256-GCM under a key derived from the secret, so a backup holds them as
+ciphertext only, and a restore keeps every device's pin. **With no secret the instance makes no
+keys**: `/v1/instance/keys` and every sealed route answer `unavailable`, naming the variable, and
+everything else is served as before. With a secret, the keys are made on the first start.
+
+**The numbers, ruled by the owner (ADR 0047 D-14 Q3)**, all on the box's own clock:
+
+| | |
+|---|---|
+| a new encryption key | every **30 days**, made by the running server |
+| a statement for the current key | lives **48 hours**, and is signed again once fewer than 24 hours are left — about daily |
+| an old key's private half | kept **7 days** after its successor is made, then **deleted** — gone from the database and from every backup taken afterwards |
+| a key's serial | `max(now, the highest serial ever issued + 1)` |
+
+At start, before it serves its keys, the instance rotates if the current key is past its 30 days and
+signs a fresh statement if none is in date — so a box that was off for days comes back serving
+statements that verify. It logs what it did:
+
+| You see | It means |
+|---|---|
+| `"event":"instance-keys","state":"ready",…` | the keys are in date; `made`, `rotated`, `signed` and `deleted` say what this pass did |
+| `…"state":"no-secret"` | `OYL_INSTANCE_SECRET_KEY` is not set: no keys, no sealed routes |
+| `…"state":"no-origin"` | `OYL_INSTANCE_ORIGIN` is not set |
+| `…"state":"unreadable"` | this secret does not open the keys held — restored under another secret, or the origin changed |
+
+⚠️ **The box's clock must be set by NTP** (ADR 0047 D-9). A statement's `notAfter` is the box's
+time, so a clock running ahead lengthens how long a superseded key's statement is still believed. A
+home machine running Docker already keeps its clock this way; check it does.
+
+**The commands**, run where the secret and the origin are set (on the home deployment, in the
+`instance` service, as for `model-key`):
+
+```
+node src/operator/cli.ts instance-key init                     # make the keys now, if there are none
+node src/operator/cli.ts instance-key show                     # the fingerprint and the instance card
+node src/operator/cli.ts instance-key rotate [--drop-old] [--serial-above <n>]
+node src/operator/cli.ts instance-key rotate-identity [--compromised]
+node src/operator/cli.ts instance-key reset
+```
+
+- `show` prints the identity key's full fingerprint and the **instance card**,
+  `oyl-instance:<origin>#<52 characters>` — what the first device pins from (ADR 0047 D-6). It holds
+  nothing secret, and is never truncated.
+- `rotate` makes a new encryption key now. `--drop-old` also deletes every older one at once: the
+  answer to a suspected leak of the encryption key. `--serial-above <n>` issues a key whose serial is
+  above `n` — the number a rider's app names when it was offered an older key than it has seen (a
+  restore from before a key the box made while its clock ran ahead).
+- `rotate-identity` makes a new identity key and deletes the old one. Planned, the old key signs an
+  endorsement of the new one; `--compromised`, nothing does. **Either way every device pins again
+  from the new card** (D-14 Q8).
+- `reset` deletes every key and makes new ones. **Every device pins again.**
+
+⚠️ **A lost operator secret loses the keys.** Without it neither private half can be unwrapped: the
+instance logs `unreadable` and serves no keys. The remedy is a new secret and `instance-key reset`,
+after which **every device must pin again from the new card**, and every hosted model key must be
+set again. Keep the secret somewhere other than the backups, and somewhere you will not lose it.
+
+**A restore rotates the encryption key** as its last step, once the data is checked and in place:
+a snapshot from before the latest rotation would otherwise bring back a key older than one every
+device has already seen. The identity key comes back unchanged, so every pin holds. `restore`
+reports what it did under `keys`; with no secret set it says so and restores the data all the same.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),
@@ -305,6 +378,10 @@ whose database is not the one its manifest describes. After copying it **checks 
 — SQLite's integrity check, every table's row count and the blob count against the manifest, and
 every blob's content against its name — and fails loudly if anything differs. `verify` prints the
 same counts for the data in place, which is what to compare on a second machine.
+
+It then **rotates the instance's encryption key** ("The instance's keys", above), which needs
+`OYL_INSTANCE_SECRET_KEY` and `OYL_INSTANCE_ORIGIN`. `deploy.sh`'s rollback restores in the
+`backup` service, which holds no secret, and so rotates afterwards in the `instance` service.
 
 A restore has been **performed** in a test, not only written: `apps/instance/src/operator/commands.test.ts`
 backs up a populated instance while it is open and writing, restores the snapshot into an empty

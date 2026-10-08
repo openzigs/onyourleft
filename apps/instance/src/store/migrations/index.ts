@@ -30,6 +30,7 @@ import * as raceConsent from './0011-race-consent.ts';
 import * as sessionScope from './0012-session-scope.ts';
 import * as privateRooms from './0013-private-rooms.ts';
 import * as hostedModelKey from './0014-hosted-model-key.ts';
+import * as instanceKeys from './0015-instance-keys.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -52,4 +53,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0012-session-scope': sessionScope,
   '0013-private-rooms': privateRooms,
   '0014-hosted-model-key': hostedModelKey,
+  '0015-instance-keys': instanceKeys,
 };

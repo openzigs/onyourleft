@@ -150,14 +150,25 @@ export const JSON_TYPE = 'application/json; charset=utf-8';
 export interface ErrorOptions {
   readonly fields?: readonly FieldProblem[];
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * A fixed sentence of the caller's own module in place of the code's, for an
+   * `unavailable` that has to name what is missing — the instance's keys name
+   * `OYL_INSTANCE_SECRET_KEY` (#1189). ⚠️ Never a value from the request:
+   * "What a message may say" above binds it as it binds every message here.
+   */
+  readonly message?: string;
 }
 
 /** The body for a code. Exported so the specification and the tests read the same shape. */
-export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): ErrorBody {
+export function errorBody(
+  code: ErrorCode,
+  fields?: readonly FieldProblem[],
+  message?: string,
+): ErrorBody {
   return {
     error: {
       code,
-      message: MESSAGES[code],
+      message: message ?? MESSAGES[code],
       ...(code === 'validation_failed' ? { fields: fields ?? [] } : {}),
     },
   };
@@ -165,7 +176,7 @@ export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): Er
 
 /** An error response in the one shape, with the status its code is sent with. */
 export function errorResponse(code: ErrorCode, options: ErrorOptions = {}): Response {
-  return new Response(JSON.stringify(errorBody(code, options.fields)), {
+  return new Response(JSON.stringify(errorBody(code, options.fields, options.message)), {
     status: ERROR_STATUS[code],
     headers: { 'content-type': JSON_TYPE, ...options.headers },
   });

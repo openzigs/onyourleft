@@ -7,14 +7,23 @@
  * so nothing here names `node:crypto` and the Durable Object adapter (#781)
  * mounts it unchanged. Node's WebCrypto marks Ed25519 stable since v23.5.0.
  *
- * ⚠️ **The instance holds no long-term private key yet.** It verifies
- * signatures a device made with a key that never left the device (ADR 0014
- * D-3), and the only secrets it keeps — nonces, session tokens, tickets, link,
- * recovery and email-recovery codes — are random bytes, of which it keeps
- * the SHA-256 wherever it keeps anything. {@link instanceHpkePrimitives}
- * (#1188) can generate an X25519 key pair, non-extractable; nothing stores
- * one until #1189 adds the instance's keys (ADR 0047 D-4, D-5), and that pull
- * request rewrites this paragraph.
+ * ## The instance's own private keys (#1189, ADR 0047 D-4, D-5)
+ *
+ * ⚠️ **The instance holds long-term private keys**, and this paragraph used
+ * to say it never did — a reviewer who remembers *"the instance never holds
+ * a private key"* is reading the old file. Since #1189 it holds two: an
+ * Ed25519 **identity** key that devices pin and that signs, and a rotating
+ * X25519 **encryption** key, the HPKE recipient. Both live in `instance_key`,
+ * wrapped with AES-256-GCM under a key derived from the operator's secret
+ * (`keys/wrap.ts`), and are unwrapped only into memory as non-extractable
+ * `CryptoKey`s (`keys/instance-keys.ts`); no secret, no keys.
+ *
+ * Beyond those, it verifies signatures a device made with a key that never
+ * left the device (ADR 0014 D-3), and the other secrets it keeps — nonces,
+ * session tokens, tickets, link, recovery and email-recovery codes — are
+ * random bytes, of which it keeps the SHA-256 wherever it keeps anything.
+ * {@link instanceHpkePrimitives} (#1188) is the HPKE port `/v1/sealed`
+ * (#1191) opens requests with.
  */
 
 import {

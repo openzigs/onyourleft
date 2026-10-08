@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { IDENTITY_ROUTES } from './auth/routes.ts';
+import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
@@ -193,6 +194,7 @@ export const ROUTES: readonly Route[] = [
       });
     },
   },
+  ...INSTANCE_KEY_ROUTES,
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,

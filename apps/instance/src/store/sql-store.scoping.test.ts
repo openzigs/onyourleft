@@ -297,6 +297,20 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
   },
   clearHostedModelKey: { notAScopedRead: 'a write: the operator’s, not a rider’s' },
+  listInstanceKeys: {
+    notAScopedRead:
+      'the instance’s own keys (#1189), wrapped; read by the instance and the operator command, never served to a rider, and naming no athlete',
+  },
+  listInstanceKeyStatements: {
+    notAScopedRead:
+      'what the instance signed about its own keys (#1189): public, the same for every caller, naming no athlete',
+  },
+  putInstanceKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  addEncryptionKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  putInstanceKeyStatement: { notAScopedRead: 'a write: a public statement, naming no athlete' },
+  deleteInstanceKeys: { notAScopedRead: 'a write: the instance’s own keys' },
+  replaceIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  clearInstanceKeys: { notAScopedRead: 'a write: the operator’s reset' },
   close: { notAScopedRead: 'not a read' },
 };
 

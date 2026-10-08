@@ -10,6 +10,7 @@ import type { Readiness } from './readiness.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
@@ -95,6 +96,11 @@ export interface RouteContext {
   readonly history: History | undefined;
   /** Riders' rooms (#784, #785). Present for every route that declares `rooms`; the handler sees to it. */
   readonly rooms: Rooms | undefined;
+  /**
+   * The instance's own keys (#1189). Absent until the store is open, and on
+   * a test's handler that was handed none.
+   */
+  readonly instanceKeys: InstanceKeys | undefined;
   readonly probes: InstanceProbes | undefined;
 }
 

@@ -329,6 +329,44 @@ export interface HostedModelKeyTable {
   readonly set_at: number;
 }
 
+/**
+ * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
+ * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
+ * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
+ * is never a column.
+ */
+export interface InstanceKeyTable {
+  /** The first 8 bytes of SHA-256 over the public key, lowercase hex. */
+  readonly key_id: string;
+  readonly role: 'identity' | 'encryption';
+  /** The raw 32-byte public key. */
+  readonly public_key: Uint8Array;
+  /** The 12-byte nonce of this one wrap: fresh for every key. */
+  readonly iv: Uint8Array;
+  /** The private half, wrapped, with GCM's tag on the end. */
+  readonly wrapped: Uint8Array;
+  /** An encryption key's serial; `null` for the identity key. */
+  readonly serial: number | null;
+  /** When the key was made, by the box's clock: an encryption key's `notBefore`. */
+  readonly created_at: number;
+  /** When an encryption key's successor was made, or `null`. */
+  readonly superseded_at: number | null;
+}
+
+/** What the identity key signed (#1189): a key statement or an identity endorsement. */
+export interface InstanceKeyStatementTable {
+  /** The encryption key the statement names, or the NEW identity key an endorsement names. */
+  readonly key_id: string;
+  readonly kind: 'key' | 'identity-rotation';
+  readonly issued_at: number;
+  /** A key statement's `notAfter`; `null` for an endorsement. */
+  readonly not_after: number | null;
+  /** The signed RFC 8785 text. */
+  readonly body: string;
+  /** The Ed25519 signature over `body`'s UTF-8 bytes, lowercase hex. */
+  readonly signature: string;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -355,4 +393,6 @@ export interface InstanceDatabase {
   readonly history_source: HistorySourceTable;
   readonly history_passage: HistoryPassageTable;
   readonly hosted_model_key: HostedModelKeyTable;
+  readonly instance_key: InstanceKeyTable;
+  readonly instance_key_statement: InstanceKeyStatementTable;
 }
