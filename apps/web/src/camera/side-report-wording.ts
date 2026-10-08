@@ -39,10 +39,12 @@
  * what the code writes.
  */
 
-/** The five things the report may observe — the owner's list of 2026-09-26, sagittal only. */
-export const SIDE_OBSERVATION_KINDS = ['torso', 'knee', 'elbow', 'head', 'saddle'] as const;
+// The five kinds are declared in `@onyourleft/analysis` §`pose-summary.ts`
+// since #1094, beside the summary the ride-analysis input reads; the
+// sentences about them stay here, as app text under ADR 0030.
+import { SIDE_OBSERVATION_KINDS, type SideObservationKind } from '@onyourleft/analysis';
 
-export type SideObservationKind = (typeof SIDE_OBSERVATION_KINDS)[number];
+export { SIDE_OBSERVATION_KINDS, type SideObservationKind };
 
 /**
  * Which way an observed change went. The meaning of each is the kind's own and

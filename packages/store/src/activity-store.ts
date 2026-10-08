@@ -149,7 +149,7 @@ import type {
   WorkoutRecord,
 } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
-import { parseMaskedWords } from './masked-words';
+import { parseMaskedWords } from '@onyourleft/analysis';
 import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
 import type { UnitSystem } from './unit-system';
 import type {

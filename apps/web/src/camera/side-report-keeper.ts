@@ -91,7 +91,7 @@ import {
 
 import type { SideReport } from './side-report';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
-import type { SideSessionSummary } from './side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
 
 /** The part of the ride controller's snapshot this reads. */
 export interface RideProgress {

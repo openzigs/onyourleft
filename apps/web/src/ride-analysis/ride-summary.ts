@@ -24,7 +24,12 @@
 
 import type { ActivityId, AthleteId, StoredActivityRecord } from '@onyourleft/store';
 
-import type { ChannelSummary, MetricSummary, RideAnalysisInput, SectionSummary } from './input';
+import type {
+  ChannelSummary,
+  MetricSummary,
+  RideAnalysisInput,
+  SectionSummary,
+} from '@onyourleft/analysis';
 import { readRideInput, type RideInputStore } from './read-input';
 
 /** The body's own name and version, which the instance's `history/passages.ts` reads. */

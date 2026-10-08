@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * What one side-camera session came to as NUMBERS — the shape
@@ -7,9 +7,10 @@
  * `packages/store` §`SideSessionSummaryRecord`) and the ride-analysis input
  * (#809) reads.
  *
- * Declared here, beside `side-report.ts`, because that is where it is
- * computed: `side-report.ts` §`sideSessionFrom`, from the same pass and the
- * same statistics as the report's sentences, so the two cannot disagree.
+ * Computed in `apps/web` by `camera/side-report.ts` §`sideSessionFrom`, from
+ * the same pass and the same statistics as the report's sentences, so the two
+ * cannot disagree. Declared in this package since #1094 (it was
+ * `apps/web/src/camera/side-session-summary.ts`), because the input reads it.
  *
  * ⚠️ **Only from plausible poses** (#761, ADR 0035 D-6). A pose from the
  * rider's computer that fails `pose-plausibility.ts` is counted as `noRider`
@@ -39,7 +40,15 @@
  * "nothing changed" about something nobody compared.
  */
 
-import type { SideObservationKind } from './side-report-wording';
+/**
+ * The five things the side camera's report may observe — the owner's list of
+ * 2026-09-26, sagittal only. Moved here from `apps/web`'s
+ * `camera/side-report-wording.ts` by #1094; the sentences about each stay
+ * there, as app text under ADR 0030.
+ */
+export const SIDE_OBSERVATION_KINDS = ['torso', 'knee', 'elbow', 'head', 'saddle'] as const;
+
+export type SideObservationKind = (typeof SIDE_OBSERVATION_KINDS)[number];
 
 /** Where the session's poses were estimated: on the tablet, or on the rider's own computer. */
 export type SidePoseSource = 'tablet' | 'computer';

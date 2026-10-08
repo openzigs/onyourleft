@@ -187,6 +187,18 @@ const WATCHED_PREFIXES = [
 const WATCHED_SUFFIX = /-port\.ts$/;
 
 /**
+ * Where a `*-port.ts` is watched: under `apps/`, and — since #1094 moved the
+ * ride analysis's `model-step-port.ts` out of `apps/web` — in
+ * `packages/analysis`, so the move took nothing out of this gate's sight.
+ * Not `packages/` at large, for the reason `TRAINER_COMMAND_SEAM` gives.
+ *
+ * ⚠️ **Asserted to exist**, as `WATCHED_PREFIXES` is ({@link missingPortRoots},
+ * #1184's review): renaming `packages/analysis` would otherwise take its ports
+ * out of the watched set with the success line none the wiser.
+ */
+const PORT_ROOTS = ['apps/', 'packages/analysis/'];
+
+/**
  * The trainer-command seam: the one place this gate reaches into `packages/`.
  *
  * ## Why the limit above could not simply stand — #363
@@ -673,7 +685,8 @@ export function isWatched(relativePath) {
   if (!/\.tsx?$/.test(relativePath) || isTestSupport(relativePath)) return false;
   return (
     WATCHED_PREFIXES.some((prefix) => relativePath.startsWith(prefix)) ||
-    (relativePath.startsWith('apps/') && WATCHED_SUFFIX.test(relativePath)) ||
+    (PORT_ROOTS.some((root) => relativePath.startsWith(root)) &&
+      WATCHED_SUFFIX.test(relativePath)) ||
     TRAINER_COMMAND_SEAM.includes(relativePath)
   );
 }
@@ -682,7 +695,8 @@ export function isWatched(relativePath) {
  * Whether a watched file's **interface methods** are checked as well as its
  * exports — WIRE003.
  *
- * A `*-port.ts` under `apps/`, and every module of the trainer-command seam.
+ * A `*-port.ts` under `apps/` or `packages/analysis/`, and every module of the
+ * trainer-command seam.
  * The second is what makes #362 reportable at all: both of #90's halves were
  * *imported* by production code through the protocol barrel, so WIRE001 was
  * silent and WIRE002 was silent, and the only rule that could see it was the
@@ -707,6 +721,19 @@ function hasPortMethods(relativePath) {
  */
 export function missingPrefixes(root) {
   return WATCHED_PREFIXES.filter((prefix) => {
+    const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
+    return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
+/**
+ * The entries of {@link PORT_ROOTS} that name no directory in `root` — a
+ * hard failure for {@link missingPrefixes}' reason (#1184's review): a root
+ * renamed away leaves every `*-port.ts` under it unwatched, and the gate
+ * green over a population it never read.
+ */
+export function missingPortRoots(root) {
+  return PORT_ROOTS.filter((prefix) => {
     const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
     return !existsSync(dir) || !statSync(dir).isDirectory();
   });
@@ -975,6 +1002,14 @@ export function wiringProblems(root) {
       `watched directory missing: ${missing.join(', ')}. WATCHED_PREFIXES names it and nothing ` +
         'on disk does, so every rule below would pass over an empty population — the failure ' +
         'mode #142 shipped. Move the prefix with the directory.',
+    );
+  }
+  const missingRoots = missingPortRoots(root);
+  if (missingRoots.length > 0) {
+    throw new Error(
+      `port root missing: ${missingRoots.join(', ')}. PORT_ROOTS names it and nothing on disk ` +
+        'does, so every *-port.ts that moved with it would go unwatched — the failure mode #142 ' +
+        'shipped. Move the root with the directory.',
     );
   }
   const missingSeam = missingSeamFiles(root);

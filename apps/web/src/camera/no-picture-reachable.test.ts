@@ -56,12 +56,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { stripComments } from '../units/no-inline-units';
-import type { RideAnalysisInput } from '../ride-analysis/input';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 
 import { analysisRequestBody, riderModelStepPort } from './analysis-transport';
 import { endpointDecision } from './analysis-endpoint';
-import { acceptHistoryAnswer } from '../ride-analysis/history';
-import { runAnalysis } from '../ride-analysis/runner';
+import { acceptHistoryAnswer } from '@onyourleft/analysis';
+import { runAnalysis } from '@onyourleft/analysis';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
 import { hostedModelPort, hostedRequestBody } from './hosted-transport';
@@ -71,6 +71,8 @@ import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { modelServer, STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import {
+  analysisModules,
+  ANALYSIS_ROOT,
   importWalk,
   readFromDisk,
   SOURCE_ROOT,
@@ -78,8 +80,8 @@ import {
   type ReadSource,
 } from './import-walk-testing';
 import { largestArrayIn, PICTURE_NAME, pictureBodyFaults } from './no-picture-testing';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
-import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { PATTERNS_ONLY } from '@onyourleft/analysis';
 import { browserSecureWindow } from './secure-window-testing';
 
 /** The modules #799 names as picture modules whatever their code says. */
@@ -116,8 +118,17 @@ function modulesUnder(directory: string): string[] {
  */
 const HISTORY_ENTRIES = ['instance/sync.ts'] as const;
 
-/** Every module a model request is built from, or history is indexed from. */
-const ENTRIES = [...HOSTED_ENTRIES, ...HISTORY_ENTRIES, ...modulesUnder('ride-analysis')] as const;
+/**
+ * Every module a model request is built from, or history is indexed from —
+ * since #1094 every module of `@onyourleft/analysis` too, where the runner, the
+ * templates, the input builder and the history's retrieval moved.
+ */
+const ENTRIES = [
+  ...HOSTED_ENTRIES,
+  ...HISTORY_ENTRIES,
+  ...modulesUnder('ride-analysis'),
+  ...analysisModules(),
+] as const;
 
 /** Every module under `camera/` whose code names a picture. */
 function derivedPictureModules(paths: readonly string[], read: ReadSource): string[] {
@@ -133,16 +144,16 @@ function picturesReached(walked: ImportClosure, forbidden: ReadonlySet<string>):
 
 const FORBIDDEN = new Set<string>([
   ...MINIMUM_PICTURE_MODULES,
-  ...derivedPictureModules(modulesUnder('camera'), readFromDisk),
+  ...derivedPictureModules([...modulesUnder('camera'), ...analysisModules()], readFromDisk),
 ]);
 
 describe('the module graph (#799)', () => {
   const walk = importWalk();
 
   it('walks the entries it names, so it is not a walk over nothing', () => {
-    expect(ENTRIES).toContain('ride-analysis/input.ts');
+    expect(ENTRIES).toContain(`${ANALYSIS_ROOT}/input.ts`);
     // #835: the history's retrieval, its summary builder, and the sync that pushes it.
-    expect(ENTRIES).toContain('ride-analysis/history.ts');
+    expect(ENTRIES).toContain(`${ANALYSIS_ROOT}/history.ts`);
     expect(ENTRIES).toContain('ride-analysis/ride-summary.ts');
     expect(ENTRIES).toContain('instance/sync.ts');
     // #802: the step port to the rider's own computer, and what it imports.
@@ -152,7 +163,7 @@ describe('the module graph (#799)', () => {
       expect(walked.modules, entry).toContain(entry);
     }
     // And past them: the input builder reaches the side camera's summary.
-    expect(walked.modules).toContain('camera/side-session-summary.ts');
+    expect(walked.modules).toContain(`${ANALYSIS_ROOT}/pose-summary.ts`);
   });
 
   it('has every picture module it names', () => {

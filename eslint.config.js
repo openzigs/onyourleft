@@ -170,6 +170,25 @@ const BLE_LIBRARY_IMPORT_PATTERNS = [
 ];
 
 /**
+ * What `packages/analysis` may not name on top of the shared list (ADR 0046
+ * D-5, #1094): the store, which carries Dexie and the DOM lib, and any model
+ * SDK or schema library — the package holds the rules, the instance holds the
+ * engine that calls a model.
+ */
+const ANALYSIS_IMPORT_PATTERNS = [
+  {
+    group: ['@onyourleft/store', '@onyourleft/store/*'],
+    message:
+      'packages/analysis does not depend on the store (ADR 0046 D-5): restate the fields it reads as a structural type, as input.ts and hosted-mask.ts do.',
+  },
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*', 'zod', 'zod/*', 'openai', '@anthropic-ai/*'],
+    message:
+      'No model SDK or schema library enters packages/analysis (ADR 0046 D-5): the package holds the rules, the instance holds the engine.',
+  },
+];
+
+/**
  * Globals a platform-isolated package may not name.
  *
  * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
@@ -575,6 +594,27 @@ export default tseslint.config(
   {
     files: ['packages/protocol/**/*.{ts,tsx}'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- packages/analysis is the write-up's core, and platform-free -----------
+  // #1094, ADR 0046 D-5. The runner, the templates, the screen and the mask run
+  // on a rider's device and on their instance, so they take packages/domain's
+  // isolation; `packages/analysis/tsconfig.platform-free.json` is the closure
+  // and this is the fast duplicate. On top of it: the store (Dexie and the DOM
+  // lib — the shapes the core reads are restated structurally) and any model
+  // SDK, which belongs to the instance's engine and never to the rules (D-5).
+  // The tests run under Node and read files, so they take only the second
+  // half, as the Durable Object adapter's tests do above.
+  {
+    files: ['packages/analysis/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...ANALYSIS_IMPORT_PATTERNS]),
+  },
+  {
+    files: ['packages/analysis/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
+    },
   },
 
   // --- packages/physics is pure computation, and pure means deterministic -----

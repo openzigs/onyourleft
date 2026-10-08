@@ -25,10 +25,11 @@ import {
   type HostedSend,
 } from './hosted-transport';
 import { cleanFrameBytes } from './testing';
-import type { StepRequest } from '../ride-analysis/model-step-port';
-import { sealStep, type SealedStep } from '../ride-analysis/sealed-step';
-import { PLANTED_GUARD, patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
-import { PATTERNS_ONLY, type MaskingGuard } from '../ride-analysis/hosted-mask';
+import type { StepRequest } from '@onyourleft/analysis';
+import type { SealedStep } from '@onyourleft/analysis';
+import { sealStep } from '@onyourleft/analysis/testing';
+import { PLANTED_GUARD, patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { PATTERNS_ONLY, type MaskingGuard } from '@onyourleft/analysis';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
