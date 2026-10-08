@@ -387,10 +387,12 @@ error, `/metrics` or an export.
   statement's `notAfter` is its `issuedAt` plus 48 hours**, and once a day the instance signs a
   fresh statement for its **current** encryption key. It stops re-signing a key the moment that
   key has a successor. So a statement for a superseded key stops verifying at most 48 hours after
-  the successor exists, whether the rotation was scheduled or on demand, and the old key's private
+  the successor exists, **plus however far the box's clock runs ahead** (its `notAfter` is the
+  box's time; below), whether the rotation was scheduled or on demand, and the old key's private
   half, kept 7 days (below), outlives every statement that was ever signed for it. Statement
   validity and key deletion are therefore two separate bounds, and the one that limits an active
-  edge is the 48 hours (D-10). The cost is one Ed25519 signature a day, and that a device must
+  edge is the 48 hours plus the box's clock error, which the NTP requirement on the box (D-9)
+  keeps to seconds (D-10). The cost is one Ed25519 signature a day, and that a device must
   re-read `/v1/instance/keys` before sealing if the statement it holds is past its `notAfter`.
   Devices re-read at sign-in and at least daily anyway. *Rejected*: one statement per key valid for
   the key's whole 37-day life, which an earlier draft of this ADR chose: against an edge holding a
@@ -412,11 +414,16 @@ error, `/metrics` or an export.
   `notBefore` up to the whole correction ahead of every correctly set phone, and the device refused
   it as from the future, blaming the phone, for as long as the correction (review G2).
 - **A device never compares `serial` or `notBefore` with its own clock, and accepts an `issuedAt`
-  in its own future**: ordering is the serial's job and validity is `notAfter`'s. What keeps the
-  48-hour bound of the next bullet honest against a box whose clock runs ahead (whose `notAfter`
-  would be ahead too) is the device's own clock: **a device trusts a statement until its `notAfter`
-  or 48 hours after the device first verified it, whichever is earlier**, and re-reads
-  `/v1/instance/keys` before sealing to one past either.
+  in its own future**: ordering is the serial's job and validity is `notAfter`'s. **A device
+  trusts a statement until its `notAfter` or 48 hours after the device first verified it,
+  whichever is earlier**, and re-reads `/v1/instance/keys` before sealing to one past either.
+  ⚠️ **That cap does not bound an active edge against a box whose clock runs ahead** (review H2):
+  the edge chooses when a device first sees a statement, so it can show one whose `notAfter` is A
+  ahead of the real time just before that real time arrives, and the device's 48 hours from then
+  end at the same moment. What the cap limits is a statement replayed long after the device first
+  saw it. Against the edge, the bound after a rotation is **48 hours plus however far the box's
+  clock runs ahead**, and what keeps that second term to seconds is the NTP requirement on the box
+  (D-9), not anything the device does.
 - **What a device says when it refuses a key statement** names the cause rather than a generic
   error, *draft wording, approved in the build's pull request (D-14 Q6)*: a statement past its
   `notAfter` with nothing newer served — *"Your instance's keys have expired. It may have been off
@@ -448,8 +455,8 @@ error, `/metrics` or an export.
   to it.** The old key's last statement still verifies under the identity key until its
   `notAfter`, and an edge that holds the leaked private key can keep serving it — and forge the
   plaintext `instance_key_unknown` — to a device that has **not yet** seen the successor. Against
-  an active edge, statement validity, not deletion, bounds the exposure: **at most 48 hours** from
-  the rotation for such a device, because the instance signs nothing for the old key after it
+  an active edge, statement validity, not deletion, bounds the exposure: **at most 48 hours, plus
+  however far the box's clock runs ahead,** from the rotation for such a device, because the instance signs nothing for the old key after it
   (above), unless the edge also holds the identity key (D-10).
 - ⚠️ **Why deletion matters all the same**: `base` mode has no forward secrecy against the
   recipient's key. Anyone who recorded ciphertext and later obtains an encryption private key reads
@@ -553,10 +560,11 @@ route** (below).
 | **The account export** (#35), because from #1101 on it carries the masking data (ADR 0046 D-10) | `GET /v1/account/export` | reply |
 | **Minting a link code** (#773) | `POST /v1/auth/link-codes` | both: the code is in the reply |
 | **Linking a device** with that code | `POST /v1/auth/link` | request (no session yet: D-8, D-9) |
-| **Recovering** with a recovery code or a mailed token, and **asking for** a mailed token | `POST /v1/auth/recover`, `POST /v1/auth/recover/email` | request (no session yet) |
+| **Recovering** with a recovery code or a mailed token, optionally with the full reset and revoking every other key (D-8), and **asking for** a mailed token | `POST /v1/auth/recover`, `POST /v1/auth/recover/email` | request (no session yet); reply too when it resets, the new codes being in it |
 | **Registering** a new athlete: the recovery codes and any recovery address | `POST /v1/auth/session` **when the key is new** | both |
 | **Giving and confirming a recovery address** | `POST /v1/auth/recovery-email`, `POST /v1/auth/recovery-email/confirm` | request |
 | **Revoking a device key** (any key, not only the last) | `POST /v1/auth/devices/{publicKey}/revoke` | request |
+| **The full reset**: new recovery codes and every address cleared, behind a recovery-code or mailed-token step-up (D-8); a new route #1179 adds | `POST /v1/auth/recovery/reset` | both: the new codes are in the reply |
 | **Deleting the account**, whose step-up carries a recovery code (`identity.ts` §`stepUp`) | `DELETE /v1/account` | request |
 | **Minting an invite** (a moderator's) | `POST /v1/moderation/invites` | both: the code is in the reply |
 | **Every other moderator action**: suspending and lifting a suspension, hiding a display name, approving and refusing a registration, dismissing a report | `POST /v1/moderation/athletes/{athleteId}/suspend`, `…/unsuspend`, `…/hide-display-name`, `POST /v1/moderation/registrations/{athleteId}/approve`, `…/refuse`, `POST /v1/moderation/reports/{reportId}/dismiss` | both: each request carries the moderator's reason, and the reply its log id |
@@ -749,9 +757,9 @@ invite that crossed in plaintext (registration's answer, a plaintext recovery or
 **added a device key of its own**, through the bearer-only link-code mint and a plaintext
 `/v1/auth/link` signed by its own key (`identity.ts` §`mintLinkCode`, §`link` → §`addKey`); and (c)
 **bound a recovery address of its own**, through the bearer-only `POST /v1/auth/recovery-email` and
-`/confirm`, whose confirmation token is mailed to the address the edge gave. New codes undo only
-(a). A key from (b) signs sealed requests as a genuine device key, which D-8 cannot tell from the
-rider's own; an address from (c) is enough for a sealed `recover/email` and `recover` after phase 1.
+`/confirm`, whose confirmation token is mailed to the address the edge gave. The full reset below
+undoes (a) and (c), and needs a recovery secret to do it. A key from (b) signs sealed requests as
+a genuine device key, which D-8 cannot tell from the rider's own; an address from (c) is enough for a sealed `recover/email` and `recover` after phase 1.
 ⚠️ **A key from (b) cannot be told apart from the rider's own cryptographically**: it was added
 by the instance's own link route, it signs with a real device key, and nothing in it records that
 the edge rather than the rider minted the code. No check on the instance can find it. **The
@@ -788,19 +796,60 @@ seen on the rider's behalf. A device that has not acknowledged keeps being shown
 *"a new key was added to your account"* notice reaches every other device from phase 1 on, which
 also covers a `recover` after the pin (a key added through an address or codes the edge holds).
 
-**Revoking a key the notice named** — and, so that the answer to a notice cannot be done halfway,
-revoking **any** key, through the sealed, device-signed revoke route (D-7) — does more than today's
-revoke (`identity.ts` §`revokeDevice`), *the author's choice*: in one transaction it
+**Revoking a key**, through the sealed, device-signed revoke route (D-7), undoes **what that key
+itself did and nothing else**, *the author's choice* (review H1). The instance cannot tell a rider
+revoking a key the edge added from a thief, holding the rider's unlocked phone, revoking the rider's
+other device: both are a live device key revoking another. So a revoke never takes away anything
+another key set up, and **never takes away the rider's recovery** — the recovery codes in force and
+an established recovery address — whoever asks. In one transaction it
 
 1. **revokes** that key, ending its sessions;
-2. **replaces the recovery codes** (the new codes go to the device that asked, sealed);
-3. **clears any recovery address that key bound**, and any confirmation it has pending;
-4. **voids every unredeemed link code that key minted**;
+2. **voids every unredeemed link code that key minted**;
+3. **cancels any recovery-address confirmation that key has pending**, and **clears a recovery
+   address that key bound only while that address is still inside its hold** (below). An address
+   past its hold is established, may be the rider's only way back, and is left alone;
 
-and then **shows the device list again**, with every key added since the revoked key's first
-sealed use marked — and, specially, any key added with a link code it minted or by a `recover`
-through an address it bound — and asks the rider to revoke any they do not recognise, the same way.
-Each of those changes is itself logged and so shown on the rider's other devices.
+and it **never replaces the recovery codes**. Then it **shows the device list again**, with every
+key added since the revoked key's first sealed use marked — and, specially, any key added with a
+link code it minted or by a `recover` through an address it bound — and asks the rider to revoke
+any they do not recognise, the same way. If the log shows that the recovery codes in force were
+issued to the revoked key, or that it bound an established address, the app says so and offers the
+**full reset** below; it does not do it. Each of those changes is itself logged and so shown on the
+rider's other devices.
+
+*Rejected*, an earlier draft of this ADR (review G1's fix): a revoke that also replaced the codes
+(the new ones going to the device that asked) and cleared any address the revoked key bound. A thief
+with an unlocked phone, or a key the edge added, revoked the rider's own key first, received fresh
+codes and cleared the address the rider had bound from that key. The rider was left with no device,
+no codes and no address: a permanent lock-out (review H1). *Also rejected*: replacing the codes
+only when they were last issued to the revoked key. That is the same lock-out whenever the rider
+has two devices: the rider's printed codes were issued to device A, the thief holds device B, and
+revoking A replaces them. And it buys nothing against a key that holds the codes in force: from
+phase 1 a key receives new codes only through the full reset, whose step-up already needs a
+recovery secret.
+
+**The hold on a new recovery address**, *the author's choice*. An address confirmed (`/confirm`)
+after phase 1 ships is **held for 7 days**. Until then it recovers nothing (`recover`,
+`recover/email`) and steps nothing up (the full reset), and revoking the key that bound it clears
+it. The rider's other devices are shown the *"bound a recovery address"* notice at once. So a key
+that binds an address of its own — a key the edge added, or a thief's on a stolen phone — gains no
+recovery secret for a week, and a rider who sees the notice and revokes that key takes the address
+with it. An address already bound when phase 1 ships is past its hold, and the review (below) asks
+the rider whether it is theirs. The cost is that a rider who binds an address cannot recover by it
+for a week, which the app says where the address is given.
+
+**The full reset**, *the author's choice*. It **replaces the recovery codes**: the new codes go,
+sealed, to the device that asked, which shows them once and never stores them. It also **clears
+every recovery address** and every pending confirmation. It is one transaction, logged, and shown
+on every other device as a notice naming the key. It is **never the side effect of anything
+else**: it is its own sealed, device-signed request (D-7), with a **step-up** — a recovery code in
+force, or a token mailed to an established address (past its hold). A device key alone cannot
+reset, and a device key is all that a thief with an unlocked phone, or a key the edge added, holds.
+**`recover`** offers the same reset, because it already carries a code or a mailed token, and one
+more option with it: **revoke every other key** in the same transaction. That is what makes a
+printed code the rider's way back from a thief. The rider recovers on a new device with a code,
+resets, and revokes the stolen phone's key and every other key in one request. The thief cannot
+race that request, because afterwards the thief has no key left to sign with.
 
 **The one-off review**, offered **per device, not per athlete**: every device of an athlete whose
 account predates the pin is asked at its own first sealed use, **whether or not another of the
@@ -808,35 +857,57 @@ athlete's keys has already done the review** — so a key the edge added cannot 
 quietly, and have it counted as done for the rider. It covers what happened **before** the log
 existed, which no notice can name. The review:
 
-1. **replaces the athlete's recovery codes**, so the old ones stop working;
-2. **clears the bound recovery address** in the same request, so an address the edge bound recovers
-   nothing; the rider gives and confirms one again, sealed (D-7), if they want email recovery;
-3. **shows the device list, always** — read sealed, as part of the review, though the plain device
+1. **shows the device list, always** — read sealed, as part of the review, though the plain device
    list is phase 2 — with each key's `addedAt` and when it was **last used** (a sealed request or a
    sign-in it signed; the instance records the time per key from phase 1, a column #1179 adds), and
    the keys added before the pin marked, and **asks the rider to revoke any key they do not
-   recognise**, through the revoke above.
+   recognise**, through the revoke above;
+2. **shows the bound recovery address**, if there is one, and asks whether it is the rider's;
+3. **offers the full reset** above, and recommends it: on an account that predates the pin, the
+   codes may have crossed the edge in plaintext, and the address may be the edge's. It carries the
+   full reset's step-up. The review does not replace the codes or clear the address by itself.
 
-The first device to do the review replaces the codes and clears the address; a later device's
-review does not replace them again unless the rider asks, but it is still shown the device list,
-and the replacement and the clearing are entries in the log, so **the later device is also shown
-them as account-change notices naming the key that made them**. So the silent variant reviewer G1
-traced — an edge-added key takes the review first, **then binds an address of its own or mints a
-link code and links a second key** — is named on the rider's own screens: the review's codes and
-clearing, the new address, the minted code and the second key are each an entry made by a key
-other than the rider's device. Revoking the named key clears its address and voids its codes, and
-the list marks the second key.
+*Rejected*, an earlier draft of this ADR: a review whose first device replaced the codes and cleared
+the address with no step-up. A key the edge added that took the review first then held the only
+codes in force, and had cleared the rider's address. The edge had turned a device key into a
+recovery secret, and once a revoke stopped replacing codes (H1) the rider could not take them back.
+
+A later device's review shows the same list and the same offer. Every reset and revoke the first
+device made is an entry in the log, so **the later device is also shown them as account-change
+notices naming the key that made them**. So the silent variant reviewer G1 traced is named on the
+rider's own screens: an edge-added key takes the review first, **then binds an address of its own
+or mints a link code and links a second key**. The new address, the minted code and the second key
+are each an entry made by a key other than the rider's device. Revoking the named key voids its
+link codes and, inside the address's 7-day hold, clears the address it bound, and the list marks
+the second key. An edge-added key cannot reset. It holds no recovery secret, unless the edge
+learned a code in plaintext or bound an address before phase 1 (residue (a) and (c)), and an edge
+that did is in the remaining case below.
 
 Then D-8's *"an edge with nothing but a token can no longer add, recover or remove a key"* holds for
-accounts that predate phase 1 as well, **once every device of the rider has done the review and the
-rider has revoked what they do not recognise**, and from then on any change another key makes is
-reported on every device. ⚠️ What stays is the **noisy** variant: a key the edge added is a real
-device key until the rider revokes it, so it can revoke the rider's own keys first. That is a
-lock-out the app cannot undo for the rider (a rider with a recovery code or a bound address of
-their own recovers from it, and the recovery is logged), and it is why the review and the notices
-are shown at each device's first sealed use rather than tucked away. An invite expires in 7 days on
-its own. The wording of the review and the notices, and their place, are approved in the build's
-pull request (D-14 Q6).
+accounts that predate phase 1 as well, **once every device of the rider has done the review, and
+the rider has revoked what they do not recognise and reset**. From then on, any change another key
+makes is reported on every device. ⚠️ What stays is the **noisy** variant: a key the edge added, or
+a stolen unlocked phone, is a real device key until the rider revokes it, so it can revoke the
+rider's own keys first. That no longer locks the rider out for good: **a rider with a recovery code
+or an established address of their own recovers from it**, with `recover` on a new device, the
+reset and *revoke every other key*, which leaves the other side nothing to sign with. The recovery
+is logged. A revoke never touches the codes or an established address, so nothing the other side
+can do with a device key alone takes that way back away.
+
+⚠️ **The remaining case, stated plainly: a thief or an edge holding a device key AND a recovery
+secret.** That is an unlocked phone and a recovery code; or an unlocked phone whose mail app reads
+an established recovery address; or the pre-phase-1 edge that learned a code or bound an address
+(residue (a), (c)) and resets before the rider does. A recovery secret is by definition enough to
+take the account, so whoever resets first with one wins. If that is not the rider, the rider is
+locked out for good. That is why the app tells a rider to keep the codes on paper and not on the
+phone, and why it says that an address whose mail the same phone reads is a weaker recovery than a
+code. A key that binds an address of its own also reaches this case 7 days later, if the rider has
+not revoked it by then. So the review and the notices are shown at each device's first sealed use
+rather than tucked away. ⚠️ **Deleting the account is outside this**: its step-up also accepts a
+fresh erase statement from any live key (`identity.ts` §`stepUp`), so a thief with an unlocked
+phone can delete it, as today. The device copy is canonical and survives that (ADR 0036 D-3).
+An invite expires in 7 days on its own. The wording of the review, the notices and the reset, and
+their place, are approved in the build's pull request (D-14 Q6).
 
 *The author's choice*, over two alternatives:
 
@@ -962,9 +1033,9 @@ way-out), which has no session to check, what
 
 | What is lost or taken | What it exposes | What is done |
 |---|---|---|
-| **A device** | Its pin is public. It holds no instance secret and no HPKE context beyond a request in flight (D-2), so **no past reply can be decrypted from it**. Whoever holds it unlocked can make sealed requests as that device, as they could make any request today | Revoke its key from another device (`identity.ts` §`revokeDevice`, #773), through the sealed, device-signed revoke route (D-7). Its signatures then fail D-8 on its next sealed request |
-| **A key the edge added, or a recovery address it bound, before phase 1** | Through the bearer-only link and recovery-email routes as they are today (D-8's residue): a key that signs sealed requests as a genuine device key, and an address that recovers the account by mail | The sealed review (D-8), **per device**: new recovery codes and the address cleared by the first device to do it, and on **every** device the device list, with each key's added-at and last-used, and the rider asked to revoke what they do not recognise. From phase 1, **every account-security change made by a key other than the device's own** — codes replaced, an address bound or cleared, a link code minted, a key added by link or by recover, a key revoked — is shown on that device as a notice naming the key, until that device itself acknowledges it, so a key that takes the review first and then binds an address, mints a link code or links a second key is named on the rider's own screens. **Revoking a key** also replaces the codes, clears any address it bound, voids the link codes it minted, and shows the device list again with the keys added since its first sealed use marked. ⚠️ Such a key cannot be told from the rider's own cryptographically, so the rider's review and the notices are the only control. Until the rider revokes it, it can still revoke the rider's own keys first, a lock-out the app cannot undo for them |
-| **The instance encryption key** (one private half leaks) | Every request sealed to that key **that somebody recorded**, and every reply derived from those requests (D-5's forward-secrecy note), for that key's life. ⚠️ **And, against an active edge, future requests too**: an edge holding the leaked key can withhold the successor's statement and keep serving the old key's last one, which verifies until its `notAfter`, so a device that has **not yet** seen the successor keeps sealing to the leaked key until then: **at most 48 hours after the rotation** (D-5), because the instance signs nothing for a superseded key | `operator instance-key rotate --drop-old`. A device that has seen the new statement never seals to the old key again (D-5's no-going-back rule), so against a **passive** observer devices follow at their next daily refresh, and against an edge that holds only the leaked key no device seals to it more than 48 hours after the rotation. An edge that also holds the identity key can sign statements of its own, which is the next row |
+| **A device** | Its pin is public. It holds no instance secret and no HPKE context beyond a request in flight (D-2), so **no past reply can be decrypted from it**. Whoever holds it unlocked can make sealed requests as that device, as they could make any request today | Revoke its key from another device (`identity.ts` §`revokeDevice`, #773), through the sealed, device-signed revoke route (D-7). Its signatures then fail D-8 on its next sealed request. A thief who revokes the rider's other keys first takes nothing else: a revoke never replaces the codes or clears an established address (D-8), so the rider recovers on a new device with a recovery code, or an established address, with the full reset and *revoke every other key*, and the thief is left with no key. ⚠️ **Not if the thief also holds a recovery secret** — a code, or the mail of an established address on that same phone — and resets first: that is a permanent lock-out (D-8's remaining case) |
+| **A key the edge added, or a recovery address it bound, before phase 1** | Through the bearer-only link and recovery-email routes as they are today (D-8's residue): a key that signs sealed requests as a genuine device key, and an address that recovers the account by mail | The sealed review (D-8), **per device**: on **every** device the bound address shown and the full reset (new codes, every address cleared, behind a recovery-code or mailed-token step-up) offered, and the device list, with each key's added-at and last-used, and the rider asked to revoke what they do not recognise. From phase 1, **every account-security change made by a key other than the device's own** — codes replaced, an address bound or cleared, a link code minted, a key added by link or by recover, a key revoked — is shown on that device as a notice naming the key, until that device itself acknowledges it, so a key that takes the review first and then binds an address, mints a link code or links a second key is named on the rider's own screens. **Revoking a key** voids the link codes it minted, clears an address it bound only inside that address's 7-day hold, never replaces the codes or clears an established address, and shows the device list again with the keys added since its first sealed use marked. ⚠️ Such a key cannot be told from the rider's own cryptographically, so the rider's review and the notices are the only control. Until the rider revokes it, it can still revoke the rider's own keys first; a rider with a recovery code or an established address of their own recovers from that with `recover`, the reset and *revoke every other key*. It cannot reset without a recovery secret; an edge that has one (residue (a), (c)) and resets first locks the rider out for good |
+| **The instance encryption key** (one private half leaks) | Every request sealed to that key **that somebody recorded**, and every reply derived from those requests (D-5's forward-secrecy note), for that key's life. ⚠️ **And, against an active edge, future requests too**: an edge holding the leaked key can withhold the successor's statement and keep serving the old key's last one, which verifies until its `notAfter`, so a device that has **not yet** seen the successor keeps sealing to the leaked key until then: **at most 48 hours after the rotation, plus however far the box's clock runs ahead** (D-5; the box's NTP requirement, D-9, keeps that to seconds), because the instance signs nothing for a superseded key | `operator instance-key rotate --drop-old`. A device that has seen the new statement never seals to the old key again (D-5's no-going-back rule), so against a **passive** observer devices follow at their next daily refresh, and against an edge that holds only the leaked key no device seals to it more than 48 hours, plus the box's clock error, after the rotation. An edge that also holds the identity key can sign statements of its own, which is the next row |
 | **The instance identity key** | Nothing recorded. It lets whoever holds it sign an encryption key statement of their own — which every device accepts under its pin — or an endorsement of their own identity key, so the edge could intercept **future** sealed traffic | `rotate-identity --compromised`, and every device re-pins from a new card (D-6). ⚠️ **Honest limit: identity-key compromise plus an edge is a silent takeover of future sealed traffic until the rider is told out of band.** The operator's command changes nothing a device can observe, because the only channel to it is the one the attacker holds; a device learns to refuse only when the operator reaches the rider some other way and the rider scans a new card. Requiring the rider to confirm even a planned, endorsed re-pin against a new card (D-5, D-14 Q8) stops a stolen key's endorsement being followed silently; it cannot stop a stolen key's encryption statements |
 | **The operator secret** | Both private keys, wrapped in any backup, and every model key at rest (ADR 0046 D-9) | A new operator secret, `instance-key reset`, every device re-pins, every model key re-entered. Stated in the operator guide |
 | **The box itself** | **Everything**, as today: an instance decrypts what it receives to use it, holds the operator secret in its environment, and stores the masking data and job rows in clear (ADR 0046) | Nothing in this ADR protects against the operator or the box. **End-to-end means device-to-instance, not device-to-device** |
@@ -1055,7 +1126,9 @@ survives, on the home network or anywhere else — and the key is accepted seale
 This ADR asked the owner eight questions, each with a recommended answer. **The owner answered all
 eight on 2026-10-08**, in a comment on this ADR's pull request
 ([#1183, comment 6058845719](https://github.com/openzigs/onyourleft/pull/1183#issuecomment-6058845719)),
-quoted verbatim:
+quoted verbatim. The comment was posted from the owner's account by the owner's assistant,
+relaying the answers the owner gave directly in the owner's own session on 2026-10-08; the owner's
+approval of this ADR confirms them.
 
 > **Owner rulings, 2026-10-08, on ADR 0047's questions (D-14):**
 > - **Q7 (sync waits):** yes. Sync, ride uploads included, waits for #1179 and ships sealed only; #777 waits with it.
@@ -1092,7 +1165,10 @@ approves the ADR as a whole separately.
    rotation (D-10). Shorter statements cost a signature more often and a device that has been
    offline a re-read before it seals; one statement for the key's whole life, the alternative
    D-5 rejects, would let that edge hold a device for up to 37 days. **Recommended and ruled: 30 days, 7
-   days and 48 hours, re-signed daily.**
+   days and 48 hours, re-signed daily.** A consequence, not a change to the ruling (review H2): a
+   statement's 48 hours are counted on the box's clock, so the bound on that edge is 48 hours plus
+   however far the box's clock runs ahead, which the NTP requirement on the box (D-9) keeps to
+   seconds.
 4. **Should a later ADR admit sealed camera pictures through the tunnel?** **Recommended: no, not
    now. Ruled: no** (*"camera pictures stay off the tunnel, even sealed"*). ADR 0029 D-6 and the Q3 ruling stand; a picture's size and timing leak more than text's,
    and the home network or an overlay already serve the case.
@@ -1102,9 +1178,11 @@ approves the ADR as a whole separately.
    can mint (D-11), are phase 2.
 6. **The rider-facing sentences**: the mismatch refusal (D-6), the "this needs the instance's card"
    notice, the "confirm the new card" notice of a planned rotation (D-5), the expired-key,
-   older-key and clock refusals (D-5, D-9), the per-device account review that replaces the
-   recovery codes, clears the recovery address and asks the rider to revoke keys they do not
-   recognise, and the account-change notices ("this key replaced your codes", "bound an address",
+   older-key and clock refusals (D-5, D-9), the per-device account review that asks the rider to
+   revoke keys they do not recognise and offers the full reset (as revised after the ruling for
+   review H1, D-8: it no longer replaces the codes or clears the address by itself; the ruling
+   covers its wording unchanged), the full reset and the 7-day hold on a new address, and the
+   account-change notices ("this key replaced your codes", "bound an address",
    "minted a link code", "a new key was added to your account") on every other device (D-8), the mail's "type this code into the app" text (D-8),
    and the web-build notice (D-11) are **draft wording** for the owner to
    approve, in #1179's build, as `apps/web`'s other new text is (#880's convention).
@@ -1160,8 +1238,14 @@ approves the ADR as a whole separately.
   replaced, an address bound or cleared, a link code minted, a key added or revoked, each naming the
   key that made it and shown until that device acknowledges it. That is a new table, a per-device
   acknowledgement, and a notice a rider sees after every change made from another of their own
-  devices, which is the price of naming the ones they did not make. Revoking a key now also replaces
-  the recovery codes, so a rider revoking a lost phone gets new codes too.
+  devices, which is the price of naming the ones they did not make.
+- **A revoke no longer touches the rider's recovery** (D-8, review H1): it voids what the revoked
+  key itself did, and new codes or a cleared address come only from the **full reset**, a separate
+  request behind a recovery-code or mailed-token step-up. So a rider revoking a lost phone whose
+  codes it was shown must reset to replace them, and a rider who has lost their codes and has no
+  established address cannot replace them at all. A new recovery address is held 7 days before it
+  recovers anything. ⚠️ A thief or an edge holding a device key **and** a recovery secret can still
+  reset first and lock the rider out for good (D-8's remaining case).
 - **Phones and the box need a correct clock** (D-9): a clock more than 2 minutes off fails every
   sealed request until the device re-signs with the instance's time, and the app says which clock
   is wrong.
@@ -1173,7 +1257,8 @@ approves the ADR as a whole separately.
   measures it.
 - **No forward secrecy against the instance's encryption key** in `base` mode, bounded by rotation
   and deletion to about 37 days (D-5); against an active edge holding a leaked encryption key, an
-  unrefreshed device can be held on it for up to 48 hours after the rotation (D-10). The instance
+  unrefreshed device can be held on it for up to 48 hours after the rotation, plus however far the
+  box's clock runs ahead, which is why the box's clock must be set by NTP (D-9, D-10). The instance
   signs one statement a day to keep that bound (D-5).
 - **A stolen identity key plus the edge is a silent takeover of future sealed traffic until the
   rider is told out of band** (D-10).
@@ -1185,11 +1270,11 @@ approves the ADR as a whole separately.
 
 | Issue | Constraint |
 |---|---|
-| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Builds phase 1: the `packages/domain` HPKE module and its port, both WebCrypto implementations, D-3's vector gate and mutations, the key table and its migration, the operator `instance-key` commands, the daily re-signing of 48-hour statements and the rotation `operator restore` ends with (D-5), `/v1/instance/keys`, `/v1/sealed` and the route mark, the sealed-only mark on every route D-7's table names (the identity routes, every `/v1/moderation/*` route, the sync routes and history search included), the sessionless rule of D-8 and D-9 and its dispatch to the named routes only, the outer body limit of D-9, the pin and the card in the app, the durable replay record, the per-device sealed account review with each key's last-used time, the account-change log with its per-device acknowledgement and its notices on every other device, and the revoke that also replaces the codes, clears the revoked key's address and voids its link codes (D-8), the unsigned `issuedAt` in `recover/email` and the `stale_request` refusal (D-8, D-9), the start-time re-sign or rotation, the key `serial` and the device's 48-hour cap from its own first verification (D-5), the device's kept clock offset (D-9), the sessionless dispatch of `leave-session` in phase 2 (D-9), the mail rule — a typed code only, never a link — in the two route summaries and `docs/operating-an-instance.md` (D-8), and the rewrite of `auth/crypto.ts`'s header. Files phase 2 as its own issue |
+| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Builds phase 1: the `packages/domain` HPKE module and its port, both WebCrypto implementations, D-3's vector gate and mutations, the key table and its migration, the operator `instance-key` commands, the daily re-signing of 48-hour statements and the rotation `operator restore` ends with (D-5), `/v1/instance/keys`, `/v1/sealed` and the route mark, the sealed-only mark on every route D-7's table names (the identity routes, every `/v1/moderation/*` route, the sync routes and history search included), the sessionless rule of D-8 and D-9 and its dispatch to the named routes only, the outer body limit of D-9, the pin and the card in the app, the durable replay record, the per-device sealed account review with each key's last-used time, the account-change log with its per-device acknowledgement and its notices on every other device, the narrowed revoke (the revoked key's link codes voided and its address cleared only inside the address's 7-day hold, the codes never replaced), the 7-day hold on a new address, the full reset route with its step-up, and `recover`'s reset and *revoke every other key* options (D-8), the unsigned `issuedAt` in `recover/email` and the `stale_request` refusal (D-8, D-9), the start-time re-sign or rotation, the key `serial` and the device's 48-hour cap from its own first verification (D-5), the device's kept clock offset (D-9), the sessionless dispatch of `leave-session` in phase 2 (D-9), the mail rule — a typed code only, never a link — in the two route summaries and `docs/operating-an-instance.md` (D-8), and the rewrite of `auth/crypto.ts`'s header. Files phase 2 as its own issue |
 | #1097 | The operator secret it builds also wraps the instance's keys (D-5); its in-app key route is sealed-only (D-7, D-13) |
 | #1095 | Its routes and SSE stream are sealed-only, with D-9's sequence, `end` event and resume |
 | #1101 | Its push and pull are sealed-only; the account export becomes sealed in the same change (D-7) |
-| #772, #773 | Registration, link-code minting, linking, recovery, recovery-email and device revocation are sealed and device-signed (D-7, D-8); the link code screen carries the card (D-6); a recovery or confirmation mail carries a typed code and no link of any kind (D-8) |
+| #772, #773 | Registration, link-code minting, linking, recovery, recovery-email and device revocation are sealed and device-signed (D-7, D-8); a revoke no longer replaces codes, and the full reset and `recover`'s options are new (D-8); the link code screen carries the card (D-6); a recovery or confirmation mail carries a typed code and no link of any kind (D-8) |
 | #83 (moderation) | Every `/v1/moderation/*` route is sealed-only and signed by the moderator's device key (D-7); the rider's own blocks and reports are phase 2 |
 | #776, #881, #37, #38, #777 | Phase 1: every sync route is sealed-only from the day `instance.ts` hands the handler a sync, so sync is never served in plaintext (D-7, Q7) |
 | #835 | `POST /v1/history/search` is sealed-only (D-7) |
