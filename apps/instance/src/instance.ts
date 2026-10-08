@@ -9,6 +9,8 @@ import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
+import { createLocalModel } from './analysis/model.ts';
+import type { ModelConnection } from './analysis/model-turn.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
@@ -94,6 +96,13 @@ export interface StartedInstance {
   readonly opened: Promise<void>;
   /** How many rate-limit keys — internet addresses among them — the accounts hold now (#892). */
   heldRateLimitKeys(): number;
+  /**
+   * The analysis model (#1096), once the store is open and when one is
+   * configured at a local address; `undefined` otherwise. ⚠️ **Nothing calls
+   * it yet**: the agent that runs over it (`analysis/agent.ts`, #1098) is
+   * started by #1095's job engine, which is not built.
+   */
+  analysisModel(): ModelConnection | undefined;
   stop(): Promise<void>;
 }
 
@@ -135,6 +144,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
   let history: History | undefined;
+  let analysisModel: ModelConnection | undefined;
   let rooms: Rooms | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
@@ -271,6 +281,19 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ? { state: 'on', model: settings.embedding.model }
         : { state: 'off', code: settings.code },
     );
+    // The analysis model (#1096, ADR 0046 D-9 source 1): off, and saying why,
+    // when no local model is configured. Its address is checked again on
+    // every turn (`analysis/model.ts`); no model name is logged.
+    const analysis = options.config.analysis;
+    analysisModel =
+      analysis.kind === 'on'
+        ? createLocalModel({ settings: analysis, resolve: options.resolve ?? systemResolver })
+        : undefined;
+    logEvent(
+      log,
+      'analysis-model',
+      analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
+    );
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -399,6 +422,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     opened,
     heldRateLimitKeys: () =>
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
+    analysisModel: () => analysisModel,
     async stop() {
       stopping = true;
       stopSweeping();
