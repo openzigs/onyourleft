@@ -206,7 +206,7 @@ describe('what the section does not contain (ADR 0030 R7, ADR 0029 D-8)', () => 
   });
 });
 
-describe('read back from the real store (CLAUDE.md §5)', () => {
+describe('read back from the real store (docs/agents/quality-gate.md §5)', () => {
   it('shows the sentences saved with the ride, through a connection nothing wrote on', async () => {
     resetFixtureIds();
     const harness = createStoreHarness();

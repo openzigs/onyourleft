@@ -68,7 +68,7 @@
  *
  * ## Three athletes, not two
  *
- * `seedAthletes` has seeded three since #26 and `CLAUDE.md` section 5 says why
+ * `seedAthletes` has seeded three since #26 and `docs/agents/quality-gate.md` section 5 says why
  * the assertions that need the third were left for this issue: **with two
  * athletes, "everything except B's rows" and "everything A is entitled to" are
  * the same set.** A store that returned every row it could reach would pass a
@@ -981,7 +981,7 @@ describe('no athlete-scoped call crosses athletes', () => {
     await harness.destroy();
   });
 
-  // Read through a connection the writes never touched — CLAUDE.md section 5's
+  // Read through a connection the writes never touched — docs/agents/quality-gate.md section 5's
   // "wrong harness" cause. A probe served by the writing handle would be
   // asserting against the objects it just constructed.
   it.each(PROBES.map((probe) => [probe.member, probe] as const))(

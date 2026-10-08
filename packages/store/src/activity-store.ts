@@ -468,7 +468,7 @@ export class ActivityStore {
    *
    * Every persistence test in this package closes and reopens before asserting.
    * A write that reports success while the read cannot see it is this
-   * program's dominant defect shape (CLAUDE.md section 5), and reading through
+   * program's dominant defect shape (docs/agents/quality-gate.md section 5), and reading through
    * a still-open handle cannot distinguish "persisted" from "still in the
    * connection's transaction queue".
    */
@@ -653,7 +653,7 @@ export class ActivityStore {
       // from `id`, `displayName` and `createdAt` alone, so saving a threshold
       // silently erased every *other* optional field on the row — `mass` then,
       // and `units` now. That is the "a write that reports success while the
-      // read cannot see it" shape CLAUDE.md §5 names, in its quietest form: the
+      // read cannot see it" shape docs/agents/quality-gate.md §5 names, in its quietest form: the
       // write this method is *about* lands, the read for it succeeds, and a
       // neighbouring field is gone. Spreading the decoded record and then
       // overriding is what makes a field added to `AthleteRecord` survive a

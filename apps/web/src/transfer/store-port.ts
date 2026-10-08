@@ -8,7 +8,7 @@
  * reason `recording/recorder.ts` narrows its own: a test then hands the same
  * code the round-trip harness's store (`@onyourleft/store/testing`), so the
  * import assertions read back on a **connection this process never wrote
- * through** rather than on the handle that did the writing. CLAUDE.md §5 calls
+ * through** rather than on the handle that did the writing. docs/agents/quality-gate.md §5 calls
  * that the fourth cause of a write that reports success while the read cannot
  * see it, and it is the one a naive test cannot detect.
  */

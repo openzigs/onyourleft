@@ -30,7 +30,7 @@ afterEach(() => {
  * prop the screen reaches for the browser's `localStorage`, which jsdom keeps
  * for the whole FILE — so one test's waypoints turn up in the next one's
  * assertions and a test that placed three finds eleven. That is the shape
- * `CLAUDE.md` §5 calls the wrong harness, arriving through a global.
+ * `docs/agents/quality-gate.md` §5 calls the wrong harness, arriving through a global.
  */
 function isolatedStorage(): DraftStorage {
   let held: RouteDraft | undefined;

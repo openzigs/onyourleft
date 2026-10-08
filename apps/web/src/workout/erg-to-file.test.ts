@@ -27,7 +27,7 @@
  *
  * ## The auto-pause trap, and why `autoPause: null` here is not a dodge
  *
- * `CLAUDE.md` §8: a recorder fed **only power** auto-pauses, because an
+ * `docs/agents/toolchain.md` §8: a recorder fed **only power** auto-pauses, because an
  * ERG-mode trainer holds a target while the rider is off the bike. This bench
  * subscribes to `power` alone, so a twelve-second ride would record ten seconds
  * and then pause — which would be the simulator's subscription showing through,

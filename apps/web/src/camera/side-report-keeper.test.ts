@@ -4,7 +4,7 @@
  * **Which ride a side-camera session's report is saved with** — #388. A
  * scripted ride controller, driven through the same snapshot sequence
  * `ride/controller.ts` produces, and the real store read back through a fresh
- * connection (CLAUDE.md §5).
+ * connection (docs/agents/quality-gate.md §5).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -352,7 +352,7 @@ describe('the pose summary goes where the sentences go (#801)', () => {
   });
 });
 
-describe('against the real store (CLAUDE.md §5)', () => {
+describe('against the real store (docs/agents/quality-gate.md §5)', () => {
   let harness: StoreHarness;
 
   beforeEach(async () => {

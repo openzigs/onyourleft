@@ -169,7 +169,7 @@ export const CORRIDOR_DENSE_AHEAD_METRES = 150;
  * ⚠️ **The DRAWN road, never the ridden one.** A point keeps the route
  * distance it was built for (`CorridorPoint.distance`), and its height and
  * gradient are read there, on the centreline: the trainer's grade, distance,
- * "To go", the ghost and the pacer's gap do not see this (CLAUDE.md §2's
+ * "To go", the ghost and the pacer's gap do not see this (docs/agents/game.md §2's
  * racing-line note; `line-on-the-road.test.ts`). The scenery's PLACEMENT did
  * not see it either until #571, which is why #543 left the arrangement digest
  * where it was and #571 moved it.

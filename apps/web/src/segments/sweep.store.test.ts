@@ -12,7 +12,7 @@
  * `read` discards every open handle before it opens another, so the claim here
  * is that a **fresh IndexedDB connection can see the effort**, not that the
  * objects the sweep just built have the fields they were given. That is
- * CLAUDE.md §5's four causes of a write that reports success while the read
+ * docs/agents/quality-gate.md §5's four causes of a write that reports success while the read
  * cannot see it — wrong storage, wrong layer, wrong time, wrong harness —
  * and until this file every one of them was untested on this path, because
  * nothing in the client had ever written a segment effort at all.

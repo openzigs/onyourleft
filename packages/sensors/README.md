@@ -385,7 +385,7 @@ a second or two after every ERG change. The app shows zero watts and my ride fil
 5. **Write the test first**, in `scenarios.test.ts`: script it, `advance`, and assert on what the
    subscriber received. Watch it fail against the unmodified simulator.
 6. **Mutate the implementation** — invert the condition, delete the write — and watch the test go
-   red again. List the mutation in the pull request; CLAUDE.md §5 makes that the gate.
+   red again. List the mutation in the pull request; docs/agents/quality-gate.md §5 makes that the gate.
 7. **Add a row to the table above.** The table is how the next contributor finds out the fault is
    already reproducible.
 
@@ -918,7 +918,7 @@ write an unverifiable scaling to a brake.
   gradient, are unverified.
 - **Backgrounding.** #90 hypothesises that a phone backgrounding the tab is what
   kills a simulated ride. Web Bluetooth has no background operation at all
-  (CLAUDE.md §8), so there is nothing to test here until the native shell (#15).
+  (docs/agents/web-bluetooth.md §8), so there is nothing to test here until the native shell (#15).
 
 ## Running it
 

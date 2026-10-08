@@ -60,7 +60,7 @@ describe('a rider who did ask for one', () => {
   });
 
   it('cannot be told what the rider weighs, which is what keeps the two apart', () => {
-    // ⚠️ **A compile-time guarantee, mutation-tested the way CLAUDE.md §5
+    // ⚠️ **A compile-time guarantee, mutation-tested the way docs/agents/quality-gate.md §5
     // prescribes**: give `pacerChoice` a third parameter for the rider's mass
     // and this file fails to compile with TS2578, an unused
     // '@ts-expect-error'. It replaces an assertion that used to read

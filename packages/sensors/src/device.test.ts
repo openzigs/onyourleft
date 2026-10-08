@@ -5,7 +5,7 @@
  *
  * The test that matters here is the second one. Comparing two devices on their
  * id alone passes every test a single-platform suite contains, because within
- * one platform the transport is always the same — it is the shape CLAUDE.md §5
+ * one platform the transport is always the same — it is the shape docs/agents/quality-gate.md §5
  * calls out as "a query matching on an entity id without the column that scopes
  * it", and it surfaces for the first time when a remembered device from one
  * stack is checked against a device on another.

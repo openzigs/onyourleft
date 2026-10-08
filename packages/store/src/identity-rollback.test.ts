@@ -184,7 +184,7 @@ describe('export → downgrade → re-import', () => {
     // --- 5. And they verify on a FRESH connection, read back through the same
     //        path a real consumer uses. Verifying `reimported` here instead
     //        would only prove that `JSON.parse` round-trips an object this test
-    //        is still holding — the "wrong harness" shape in CLAUDE.md §5, and
+    //        is still holding — the "wrong harness" shape in docs/agents/quality-gate.md §5, and
     //        blind to a re-import that acknowledged the write and stored
     //        nothing.
     const reopened = openActivityStore(databaseName);

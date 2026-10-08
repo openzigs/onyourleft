@@ -45,7 +45,7 @@
  * `packages/store` pattern for reading what actually landed, used by
  * `migrations.test.ts` and three others. Counting through `ActivityStore`'s own
  * scoped reads would ask the code under test whether it deleted the rows, which
- * is the "wrong harness" cause in `CLAUDE.md` section 5: a read filtered by the
+ * is the "wrong harness" cause in `docs/agents/quality-gate.md` section 5: a read filtered by the
  * same predicate as the delete returns nothing either way.
  */
 

@@ -52,7 +52,7 @@ Concretely:
   [`tools/fixture-corpus/third-party-acceptance.test.ts`](tools/fixture-corpus/third-party-acceptance.test.ts),
   and never from `src/`. `packages/fit`'s `exports` do not reach it.
 - Its dependency closure is `buffer` (MIT) → `base64-js` (MIT), `ieee754` (BSD-3-Clause). All
-  permissive, all fine under `packages/` per CLAUDE.md §3. Verified with `pnpm licenses list --json`.
+  permissive, all fine under `packages/` per docs/agents/licence-boundary.md §3. Verified with `pnpm licenses list --json`.
 - It exists to **disagree with this package**. Its own reading of a file is what #31's third-party
   acceptance criterion is asserted against.
 
@@ -255,7 +255,7 @@ two tables agree. If they ever disagree, that test says so.
 | The CRC catalogue's published parameters for CRC-16/ARC | The polynomial, and the check value `0xBB3D` over `123456789` that pins this implementation | 2026-09-04 |
 
 **No number was taken from a Garmin SDK artefact, from `Profile.xlsx`, or from GPL/AGPL prior-art
-source.** Reading prior art to check a protocol detail is permitted by `CLAUDE.md` §6; copying from
+source.** Reading prior art to check a protocol detail is permitted by `docs/agents/scope-and-ip.md` §6; copying from
 it is not, and nothing was copied. That includes the sixteen-entry CRC nibble table the public
 documentation presents inside a C routine: the routine is expression, so `src/decode/crc.ts` derives
 the loop from the polynomial instead, and `crc.test.ts` regenerates the nibble table from the same
@@ -571,7 +571,7 @@ may have exported precisely to share without it.
 `SECURITY.md` names **XXE in GPX and TCX specifically**. This package parses XML with its own reader
 ([`src/xml/parse.ts`](src/xml/parse.ts)) rather than a dependency, for three reasons in this order:
 `src/` has no platform surface so `DOMParser` is a compile error; a parser dependency under
-`packages/` is a licence question before it is a technical one (CLAUDE.md §3, and MPL/EPL/BlueOak are
+`packages/` is a licence question before it is a technical one (docs/agents/licence-boundary.md §3, and MPL/EPL/BlueOak are
 unruled until #24); and the subset needed is small enough that the FIT decoder's precedent —
 depending on nothing — applies.
 

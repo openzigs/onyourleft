@@ -8,7 +8,23 @@ export default defineConfig({
     // package gets to choose its own environment, and `pnpm --filter <pkg> test`
     // and `pnpm test` then run the same thing. Vitest 4 removed the separate
     // workspace file in favour of this field.
-    projects: ['packages/*', 'apps/*'],
+    //
+    // ⚠️ Every DIRECTORY under `packages/` and `apps/`, and no file with an
+    // extension (#1170). `packages/*` alone also matched FILES, and Vitest
+    // refuses a matched file that is not a Vitest config, so `packages/CLAUDE.md`
+    // (the area instructions Claude Code loads for work under `packages/`)
+    // killed every run before it selected a test. The negation drops
+    // `CLAUDE.md`, `NOTES.md` and anything else with a dot, beside the packages
+    // or the apps. ⚠️ It is deliberately NOT a list of config files
+    // (`packages/*/vitest.config.ts`): that silently drops a package with no
+    // config of its own, and `check:test-split` cannot notice, because its
+    // universe is what this selects. A directory here is a project whether or
+    // not it has a config, as it was before #1170 — measured: a config-less
+    // `packages/zzprobe` with one test is selected, and the run lists the same
+    // 682 files origin/main does. Two limits: a package directory whose NAME
+    // has a dot in it would be dropped, and a file with NO extension beside the
+    // packages (`packages/NOTES`) still fails the run — loudly, naming it.
+    projects: ['packages/*', 'apps/*', '!{packages,apps}/*.*'],
     coverage: {
       provider: 'v8',
       // `json-summary` is what the CI step renders into the run summary; `html`

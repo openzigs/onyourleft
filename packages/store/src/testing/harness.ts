@@ -7,7 +7,7 @@
  *
  * The dominant defect in this program's persistence work is **a write that
  * reports success while the read cannot see it**, and it has four causes
- * (CLAUDE.md section 5): *wrong storage*, *wrong layer*, *wrong time* and
+ * (docs/agents/quality-gate.md section 5): *wrong storage*, *wrong layer*, *wrong time* and
  * *wrong harness*. The fourth makes the other three invisible, because the
  * natural way to write the test — assert against the object you just
  * constructed, or read back through the connection that did the writing —

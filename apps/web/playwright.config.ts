@@ -5,7 +5,7 @@
  *
  * ## Chromium only, and that is not a shortcut
  *
- * ADR 0003 and CLAUDE.md §8: Web Bluetooth ships in no Safari and no Firefox,
+ * ADR 0003 and docs/agents/web-bluetooth.md §8: Web Bluetooth ships in no Safari and no Firefox,
  * anywhere, ever, so the core feature of this product is Chromium-only by the
  * platform's decision rather than ours. Running this gate on three engines
  * would be checking a map in browsers that cannot pair a trainer. The *map*

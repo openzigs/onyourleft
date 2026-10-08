@@ -570,6 +570,39 @@ function vp8lChunk(bytes: Uint8Array): Uint8Array {
   throw new Error('a WebP with no VP8L chunk');
 }
 
+/**
+ * The RIFF chunk types of a WebP, in order — #1167. An `ICCP`, `EXIF` or `XMP `
+ * chunk changes nothing this reader decodes, so the brand gate reads the
+ * chunks themselves to hold the logos to carrying none.
+ *
+ * ⚠️ It refuses a file that only LOOKS like that list (#1178's review): another
+ * RIFF form than `WEBP`, a RIFF size that is not the file's, stray bytes after
+ * the last chunk, or a chunk whose length runs past the end — so "one `VP8L`
+ * chunk" means the whole file is one `VP8L` chunk, as `pngChunkTypes` holds a
+ * PNG's chunks to ending at its end.
+ */
+export function webpChunkTypes(bytes: Uint8Array): readonly string[] {
+  const ascii = (from: number, to: number): string =>
+    String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes.length < 12 || ascii(0, 4) !== 'RIFF' || ascii(8, 12) !== 'WEBP') {
+    throw new Error('not a WebP');
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) !== bytes.length - 8) {
+    throw new Error("the RIFF size is not the file's");
+  }
+  const types: string[] = [];
+  let offset = 12;
+  while (offset < bytes.length) {
+    if (offset + 8 > bytes.length) throw new Error('stray bytes after the last chunk');
+    types.push(ascii(offset, offset + 4));
+    const length = view.getUint32(offset + 4, true);
+    offset += 8 + length + (length & 1);
+  }
+  if (offset !== bytes.length) throw new Error('a chunk runs past the end of the file');
+  return types;
+}
+
 /** The picture's size, read from its VP8L header alone. */
 export function webpDimensions(bytes: Uint8Array): { width: number; height: number } {
   const reader = new BitReader(vp8lChunk(bytes));

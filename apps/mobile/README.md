@@ -54,7 +54,7 @@ three so that its answer is the same in CI and on a machine where a sync has jus
 That notice is reproduced here because that is the obligation, and reproducing it is the whole
 reason those files are exempt from the SPDX header rule rather than stamped with ours. **Stamping
 `AGPL-3.0-or-later` on a file we did not write would be false twice**: it claims authorship we do
-not have, and it displaces the notice MIT requires to travel with the work. `CLAUDE.md` §3 is a rule
+not have, and it displaces the notice MIT requires to travel with the work. `docs/agents/licence-boundary.md` §3 is a rule
 about not misdeclaring a licence; putting our identifier on somebody else's launcher icon is exactly
 the thing it forbids, pointed the other way.
 

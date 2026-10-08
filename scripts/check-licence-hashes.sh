@@ -20,7 +20,7 @@
 # protected path, amended only by a superseding ADR.
 #
 # The same reasoning applies to the copy of each text a leaf package carries
-# under apps/ and packages/ — CLAUDE.md section 3's "belt and braces". Those are
+# under apps/ and packages/ — docs/agents/licence-boundary.md section 3's "belt and braces". Those are
 # not recorded in the ADR and must not be: four more digests in a protected
 # document would need a superseding ADR every time a package is added. Instead
 # each copy is required to be byte-identical to the canonical text its path

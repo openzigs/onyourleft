@@ -10,7 +10,7 @@
  * issue #342 has been open since 2016 without one, reported evidence ranges from
  * three to seven, **and the budget is OS-wide rather than per-application** — it
  * is shared with the athlete's earbuds, their watch and anything else paired.
- * CLAUDE.md §8 settles it for this program: *"Plan for ~3 concurrent
+ * docs/agents/web-bluetooth.md §8 settles it for this program: *"Plan for ~3 concurrent
  * connections, not 7."*
  *
  * Three is exactly the number a naive pairing flow spends: trainer, heart-rate
@@ -59,7 +59,7 @@ import { deviceProvides, type SensorDevice } from './device';
 /**
  * How many devices to plan for at once.
  *
- * CLAUDE.md §8. Not a limit this program enforces on the platform — the platform
+ * docs/agents/web-bluetooth.md §8. Not a limit this program enforces on the platform — the platform
  * enforces its own, and refuses a connection when it is out — but the number to
  * design against, because a UI that lets an athlete pair five sensors and then
  * fails on the fourth has already failed.

@@ -185,7 +185,7 @@ export function unitsSaveFailure(reason: string): string {
  * `local-athlete.ts` §`renderAfterAthlete` deliberately swallows a failure from
  * `ensureLocalAthlete`, so a start-up where the row could not be created still
  * renders this screen over a store that answers. Discarding that return is
- * CLAUDE.md §5's *"a write that reports success while the read cannot see it"*:
+ * docs/agents/quality-gate.md §5's *"a write that reports success while the read cannot see it"*:
  * every screen would flip to miles, the panel would say `UNITS_SAVED`, and the
  * next reload would be back in kilometres with nothing having said so.
  */
@@ -1456,7 +1456,7 @@ function EveryChoice(props: {
  *
  * ⚠️ **No view-level test could see it**, because every case in
  * `SettingsView.test.tsx` passes `onRiderMassChange={() => undefined}` — the
- * prop never moves, so the key never moves. That is CLAUDE.md §5's *wrong
+ * prop never moves, so the key never moves. That is docs/agents/quality-gate.md §5's *wrong
  * harness*: the double is inert in exactly the dimension the defect lives in.
  * `shell/AppShell.test.tsx` §`what the rider weighs (#325)` is where the
  * regression is held, because the shell is the one place that supplies a real

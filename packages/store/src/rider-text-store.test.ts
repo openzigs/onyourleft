@@ -4,7 +4,7 @@
  * The rider's goals, ride notes and documents (#836): kept on the device
  * first, one table, one row per athlete, kind and key.
  *
- * What matters here is what CLAUDE.md §5 names — a write that reports success
+ * What matters here is what docs/agents/quality-gate.md §5 names — a write that reports success
  * while a fresh read cannot see it (the round trip, red against a store that
  * never writes) — and the limits #836 states in characters, each checked at
  * the edge and one past it.

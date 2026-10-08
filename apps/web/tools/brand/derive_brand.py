@@ -5,8 +5,8 @@ Every brand image the app ships, made from the owner's three source pictures -- 
     python3 apps/web/tools/brand/derive_brand.py            # write the outputs
     python3 apps/web/tools/brand/derive_brand.py --check    # write nothing; fail
                                                             # unless every committed
-                                                            # output decodes to the
-                                                            # pixels this makes
+                                                            # output is what this
+                                                            # makes (see below)
 
 Run it with the interpreter of a virtual environment holding exactly the
 packages `brand.json` pins (`pip install -r apps/web/tools/brand/requirements.txt`);
@@ -54,22 +54,29 @@ Every step is integer or float arithmetic on NumPy arrays, SciPy's filters and
 Pillow's resampler. PNGs are written with no metadata at a fixed compression
 level; the full logo is written as LOSSLESS WebP (#972), with no metadata.
 
-## What `--check` compares, and why it is not bytes -- #972
+## What `--check` compares, by kind of file -- #972, #1167
 
-`--check` re-makes everything in memory and compares DECODED PIXELS: the
-same format (the extension says which), the same mode, the same size, and the
-same RGBA bytes. It compared the files' bytes until #972, and that was a
-promise the pinned packages cannot keep: Pillow's wheels bundle their own
-zlib, which on Linux (zlib-ng) compresses the very same pixels into different
-bytes than on the Mac where the outputs were made. Measured on 2026-10-05 with
-the pinned Python and packages on Linux: every one of the 23 outputs failed a
-byte comparison, and every one decoded to exactly the pixels the script makes.
-The pixels are the art and are what this script decides; the compressor's
-bytes are not. `ASSET003` still pins the committed bytes, so a file cannot
-change unseen -- what changes is that a contributor on another platform can
-re-run `--check` and get an answer about the art. Both encoders here are
-lossless, so a pixel comparison is the whole of what a byte comparison could
-promise about the picture.
+`--check` re-makes everything in memory and compares it with what is
+committed, and how depends on the kind of file (the owner's ruling of
+2026-10-07):
+
+- **The two WebP logos: their BYTES.** Lossless WebP from Pillow 12.3.0
+  (libwebp 1.6.0) is byte-identical on macOS and Linux, so a byte comparison
+  costs no contributor anything. A Pillow or libwebp that writes different
+  bytes turns `--check` red on purpose: re-derive, read the diff, and move the
+  two `ASSETS.toml` digests.
+- **The PNGs (the wordmark and the icons): their DECODED PIXELS, and no
+  rendering metadata.** The same format, mode, size and RGBA bytes. Not their
+  bytes, because Pillow's wheels bundle their own zlib, which on Linux
+  (zlib-ng) compresses the very same pixels into different bytes than on the
+  Mac where the outputs were made: measured on 2026-10-05 with the pinned
+  Python and packages on Linux, every PNG failed a byte comparison and every
+  one decoded to exactly the pixels the script makes. But a pixel comparison
+  cannot see a colour profile, a gamma or an EXIF block (`iCCP`, `gAMA`,
+  `sRGB`, `cHRM`, `cICP`, `eXIf`), and each changes how a browser draws the
+  picture -- so both the made file and the committed one may carry only the
+  chunks Pillow writes for a picture with no metadata (`PNG_CHUNKS`), and any
+  other is refused by name. `ASSET003` still pins the committed bytes.
 """
 
 from __future__ import annotations
@@ -381,17 +388,106 @@ def encode(path: str, picture: Image.Image) -> bytes:
 
 FORMATS = {".png": "PNG", ".webp": "WEBP"}
 
+# The only chunks a PNG this script writes carries -- what Pillow writes for a
+# picture with no metadata -- and so the only ones `--check` allows in a made
+# or a committed one. A list of what is ALLOWED rather than of what is not, so a
+# rendering chunk nobody listed (`cICP` is the newest) is refused too.
+PNG_CHUNKS = frozenset({b"IHDR", b"PLTE", b"tRNS", b"IDAT", b"IEND"})
+# Why the chunks most likely to be met are refused, for the message.
+RENDERING_CHUNKS = {
+    b"iCCP": "an embedded colour profile",
+    b"sRGB": "a rendering intent",
+    b"gAMA": "a gamma",
+    b"cHRM": "chromaticities",
+    b"cICP": "coding-independent colour information",
+    b"eXIf": "an EXIF block",
+}
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+class Unreadable(Exception):
+    """A file `--check` could not read at all, said in words for the message --
+    as distinct from a readable PNG that carries a chunk it refuses."""
+
+
+def png_chunks(data: bytes) -> list[bytes]:
+    """The chunk types of a PNG, in order, or `Unreadable` for one whose framing
+    is broken."""
+    if not data.startswith(PNG_SIGNATURE):
+        raise Unreadable("it does not begin with the PNG signature")
+    types, offset = [], len(PNG_SIGNATURE)
+    while offset + 8 <= len(data):
+        length = int.from_bytes(data[offset : offset + 4], "big")
+        types.append(data[offset + 4 : offset + 8])
+        offset += 12 + length
+    if offset != len(data):
+        raise Unreadable("a chunk runs past the end of the file")
+    return types
+
+
+def article(word: str) -> str:
+    """`an iCCP`, `an eXIf`, `a gAMA`: by the first letter's vowel."""
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
+def png_metadata(data: bytes) -> str | None:
+    """The first chunk outside `PNG_CHUNKS`, said in words, or None. Raises
+    `Unreadable` for a file whose chunks cannot be read."""
+    for chunk in png_chunks(data):
+        if chunk not in PNG_CHUNKS:
+            name = chunk.decode("latin-1")
+            what = RENDERING_CHUNKS.get(chunk, "a chunk Pillow does not write here")
+            return f"{article(name)} {name} chunk ({what})"
+    return None
+
+
+def decoded(which: str, data: bytes, expected: str) -> Image.Image:
+    """`data` decoded in full, or `Unreadable` naming `which` and why.
+
+    Pillow says a broken file in more than one way -- `OSError` for a damaged
+    data stream, `SyntaxError` for a bad header, `zlib.error`, `EOFError`,
+    `struct.error`, a decompression-bomb error -- and a chunk layout that reads
+    cleanly says nothing about the bytes inside `IDAT`. So every one of them is
+    a reason, never a traceback.
+    """
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except Exception as error:  # noqa: BLE001 -- see above: the decoder's errors are not one class
+        raise Unreadable(f"{which} does not decode ({type(error).__name__}: {error})") from error
+    if image.format != expected:
+        raise Unreadable(f"{which} decodes as {image.format}, not {expected}")
+    return image
+
 
 def same_pixels(path: str, made: bytes, committed: bytes) -> bool:
-    """Whether the committed file is the picture this script makes, decoded."""
+    """Whether the committed file is the picture this script makes, decoded.
+    Raises `Unreadable` for either file that does not decode."""
     expected = FORMATS[Path(path).suffix]
-    a = Image.open(io.BytesIO(made))
-    b = Image.open(io.BytesIO(committed))
-    if a.format != expected or b.format != expected:
-        return False
-    a.load()
-    b.load()
+    a = decoded("the file this script makes", made, expected)
+    b = decoded("the committed file", committed, expected)
     return a.mode == b.mode and a.size == b.size and a.tobytes() == b.tobytes()
+
+
+def why_not_made(path: str, made: bytes, committed: bytes) -> str | None:
+    """Why the committed file is not the one this script makes, or None if it is."""
+    suffix = Path(path).suffix
+    if suffix == ".webp":
+        return None if made == committed else "its bytes are not the bytes this script makes"
+    if suffix == ".png":
+        for which, data in (("the committed file", committed), ("the file this script makes", made)):
+            try:
+                found = png_metadata(data)
+            except Unreadable as error:
+                return f"{which} is not a readable PNG: {error}"
+            if found is not None:
+                return f"{which} carries {found}"
+        try:
+            same = same_pixels(path, made, committed)
+        except Unreadable as error:
+            return str(error)
+        return None if same else "it does not decode to the pixels this script makes"
+    return f"{path} is neither a .png nor a .webp"
 
 
 def derive() -> dict[str, bytes]:
@@ -461,7 +557,7 @@ def records() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true", help="write nothing; compare bytes")
+    parser.add_argument("--check", action="store_true", help="write nothing; compare with what is committed")
     parser.add_argument("--records", action="store_true", help="print the ASSETS.toml entries")
     arguments = parser.parse_args()
     if arguments.records:
@@ -470,17 +566,23 @@ def main() -> None:
     check_tools()
     made = derive()
     if arguments.check:
-        differ = [
-            path
+        differ = {
+            path: (
+                "it is not there"
+                if not inside_root(path).exists()
+                else why_not_made(path, data, inside_root(path).read_bytes())
+            )
             for path, data in made.items()
-            if not inside_root(path).exists()
-            or not same_pixels(path, data, inside_root(path).read_bytes())
-        ]
-        for path in differ:
-            print(f"derive_brand: {path} is not the picture this script makes", file=sys.stderr)
-        if differ:
+        }
+        failed = {path: reason for path, reason in differ.items() if reason is not None}
+        for path, reason in failed.items():
+            print(f"derive_brand: {path}: {reason}", file=sys.stderr)
+        if failed:
             raise SystemExit(1)
-        print(f"derive_brand: all {len(made)} outputs decode to the pixels this script makes")
+        print(
+            f"derive_brand: all {len(made)} outputs are what this script makes "
+            "(the WebPs byte for byte, the PNGs pixel for pixel and with no rendering metadata)"
+        )
         return
     for path, data in made.items():
         target = inside_root(path)

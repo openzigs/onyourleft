@@ -362,3 +362,23 @@ that, and #767's criterion says so.
   ([ADR 0036](0036-a-self-hostable-instance-server-now.md) D-7).
 - **A real Durable Objects bill differs from D-4's arithmetic.** Then the rate card was not the whole
   story, and ADR 0002 H's bill is what corrects it.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-07** — **D-9's table is no longer the instance's whole runtime closure.**
+  [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of 2026-10-04 and 2026-10-07, adds the
+  Vercel AI SDK to the instance: `ai` and `@ai-sdk/openai-compatible`, and through them
+  `@ai-sdk/provider`, `@ai-sdk/provider-utils`, `@ai-sdk/gateway`, `@vercel/oidc`, `zod` (a peer),
+  `undici`, `eventsource-parser`, `@standard-schema/spec`, `@workflow/serde` and `json-schema`.
+  ADR 0046 D-8 is the table, in D-9's shape, with each licence read on 2026-10-04; the install
+  ([#1096](https://github.com/openzigs/onyourleft/issues/1096)) and `check:licences` and
+  `check:notices` over pnpm's own resolution are the record where they differ from it. `execa` is
+  not in that closure on the versions read; it arrives if the gateway moves to `@vercel/oidc` 4.x,
+  which the owner's ruling accepts, and its rows are added then. **D-2 is kept**: only one
+  Node-adapter module under `apps/instance/src/analysis/` imports `ai`, and the agent's engine is
+  written against a model port and a clock, so the Durable Object adapter is not foreclosed. The
+  body above is not edited.

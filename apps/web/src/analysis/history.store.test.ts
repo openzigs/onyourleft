@@ -13,7 +13,7 @@
  *
  * `@onyourleft/store/testing`'s `read` discards every open handle before it
  * opens another, so nothing here is served by the connection that wrote
- * (CLAUDE.md §5, "The round-trip harness").
+ * (docs/agents/quality-gate.md §5, "The round-trip harness").
  */
 
 import { beatsPerMinute, localDay, seconds, unixSeconds, watts } from '@onyourleft/domain';

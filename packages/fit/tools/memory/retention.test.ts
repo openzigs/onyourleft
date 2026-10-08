@@ -18,7 +18,7 @@
  * `heapUsed` after a forced collection reads **47.9 MiB for the array spelling
  * and 48.4 MiB for the streaming one** — the two are indistinguishable, because
  * what survives each call is the same activity. A test written that way would
- * have passed against the unfixed decoder, which is the trap CLAUDE.md §5 names.
+ * have passed against the unfixed decoder, which is the trap docs/agents/quality-gate.md §5 names.
  *
  * `process.resourceUsage().maxRSS` *is* a real peak and was tried second. It
  * separates the two (19–28 bytes per input byte streaming, 129 array) but its

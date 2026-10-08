@@ -810,3 +810,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `side-link.test.ts` pairs, commands and sends pictures with the engine's two faults on handed
   channels (`testing.ts` §`strandsHandedChannels`, §`losesSendsInDataChannelEvent`). On the code
   before this entry, that test fails at the first step.
+
+- **2026-10-07** — **A pointer only: D-11's path is due to move, and this entry does not move it.**
+  [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of 2026-10-04 and 2026-10-07, runs AI
+  analysis only on the rider's instance. #1092's comment ruling 1 of 2026-10-04 moves D-11's *"The
+  phone never talks to the computer … the tablet sends them on through
+  `camera/analysis-transport.ts`"* to the instance, which would ask the vision model. **D-11 is not
+  decided by ADR 0046**: [#1106](https://github.com/openzigs/onyourleft/issues/1106) makes that
+  privacy ruling and records it, and until it lands the path stays where D-11 puts it. The owner's
+  Q3 ruling of 2026-10-07 bounds it: *"Pictures travel only over the home network or a
+  WireGuard-class overlay, never through the Cloudflare tunnel (ADR 0029 D-6)."* D-3's never-sent
+  list holds on the instance: a job's input carries the pose summary only with camera consent, and
+  no instance tool returns it (ADR 0046 D-6, D-14(d)). The body above is not edited.

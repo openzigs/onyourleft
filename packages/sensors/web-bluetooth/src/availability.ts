@@ -7,7 +7,7 @@
  * `unavailable` cleanly when `navigator.bluetooth` is absent, rather than
  * throwing — this is the Safari and Firefox path and it must be graceful."*
  * Safari and Firefox are a quarter of the web and they are never going to
- * implement this (CLAUDE.md §8); an exception on that path is an exception on
+ * implement this (docs/agents/web-bluetooth.md §8); an exception on that path is an exception on
  * first load for a quarter of visitors.
  *
  * ## Four ways this is unusable, not one
