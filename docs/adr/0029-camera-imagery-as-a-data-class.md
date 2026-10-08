@@ -1070,4 +1070,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   accepted only on the home network (a private address on the local network, never an overlay) or
   through the operator command, and the owner ruled the same day that the masking sync and the job
   stream do not ship before it, so the masking data and job text never cross Cloudflare's edge
-  readable. The body above is not edited.
+  readable. Until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes the device
+  path, the hosted consent the app ships stays the one the last 2026-09-29 entry above quotes; this
+  entry quotes no consent of its own. The body above is not edited.
