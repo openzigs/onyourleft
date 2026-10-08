@@ -14,12 +14,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { CameraCaptureError } from './camera-port';
+import { chromiumDisplayP3Jpeg, chromiumSrgbJpeg } from './chromium-jpeg-testing';
 import {
   capturedFrame,
   carriesNoMetadata,
+  colourProfileProblem,
   jpegMetadataSegmentsIn,
+  MAXIMUM_ICC_PROFILE_BYTES,
   metadataMarkersIn,
 } from './frame';
+import { cleanFrameBytes } from './testing';
 
 /** The first bytes of a JPEG: SOI, then APP0/JFIF. Carries no metadata. */
 function cleanJpeg(length = 512): Uint8Array {
@@ -92,7 +96,7 @@ describe('what counts as metadata', () => {
 });
 
 describe('constructing a frame', () => {
-  const clean = { bytes: cleanJpeg(), mediaType: 'image/jpeg', width: 1280, height: 720 };
+  const clean = { bytes: cleanFrameBytes(512), mediaType: 'image/jpeg', width: 1280, height: 720 };
 
   it('accepts a re-encoded picture and keeps its size', () => {
     const frame = capturedFrame(clean);
@@ -161,76 +165,411 @@ function ascii(text: string): number[] {
   return Array.from(text, (character) => character.charCodeAt(0));
 }
 
-/** SOI, `segments`, a scan header, some entropy data and EOI. */
-function walkedJpeg(...segments: readonly (readonly number[])[]): Uint8Array {
-  const head = [0xff, 0xd8, ...segments.flat(), 0xff, 0xda, 0x00, 0x02];
-  return new Uint8Array([...head, 0x12, 0x34, 0x56, 0xff, 0xd9]);
+const SOI = [0xff, 0xd8];
+const EOI = [0xff, 0xd9];
+const JFIF = segment(0xe0, [...ascii('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+const TABLE = segment(0xdb, [0x00, ...new Array<number>(64).fill(1)]);
+/** One DC table with a single one-bit code. */
+const HUFFMAN = segment(0xc4, [0x00, 1, ...new Array<number>(15).fill(0), 0x00]);
+const FRAME = segment(0xc0, [8, 0, 16, 0, 16, 1, 1, 0x11, 0]);
+const SCAN = segment(0xda, [1, 1, 0x00, 0, 63, 0]);
+/**
+ * Entropy data the size of a picture — past the signature scan's 4 096-byte
+ * window, so the scan cannot be what refuses any probe below — with a stuffed
+ * `FF00` and a restart in it, which a walk must step over.
+ */
+const ENTROPY = [
+  ...new Array<number>(3000).fill(0x12),
+  0xff,
+  0x00,
+  0xff,
+  0xd3,
+  ...new Array<number>(3000).fill(0x34),
+];
+const EXIF = segment(0xe1, [
+  ...ascii('Exif\0\0'),
+  ...ascii('MM'),
+  0x00,
+  0x2a,
+  0,
+  0,
+  0,
+  8,
+  ...ascii('GPSLatitude 51.5074 N'),
+]);
+const FILL = new Array<number>(5000).fill(0x20);
+
+/** SOI, `head`, a frame, one scan and its data, and EOI: a whole JPEG. */
+function picture(...head: readonly (readonly number[])[]): number[] {
+  return [...SOI, ...head.flat(), ...FRAME, ...SCAN, ...ENTROPY, ...EOI];
 }
 
-const JFIF = segment(0xe0, [...ascii('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0]);
-const ICC = segment(0xe2, [...ascii('ICC_PROFILE\0'), 1, 1, ...new Array<number>(64).fill(7)]);
-const TABLE = segment(0xdb, new Array<number>(65).fill(1));
-const FRAME = segment(0xc0, [8, 0, 16, 0, 16, 1, 1, 0x11, 0]);
-const EXIF = segment(0xe1, [...ascii('Exif\0\0'), 0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8]);
+function bytesOf(...parts: readonly (readonly number[])[]): Uint8Array {
+  return new Uint8Array(parts.flat());
+}
 
-describe('walking a JPEG header — #1063’s review, B2', () => {
-  it('admits what the canvas encoder writes: JFIF, an ICC profile, tables and a frame', () => {
-    const bytes = walkedJpeg(JFIF, ICC, TABLE, FRAME);
-    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual([]);
-    expect(carriesNoMetadata(bytes)).toBe(true);
+/** An ICC segment's contents: the identifier, chunk `sequence` of `count`, and `profile`. */
+function iccSegment(profile: readonly number[], sequence = 1, count = 1): number[] {
+  return segment(0xe2, [...ascii('ICC_PROFILE\0'), sequence, count, ...profile]);
+}
+
+/** A colour profile built from `tags`, each laid end to end after the table, as Skia lays them. */
+function colourProfile(
+  tags: readonly (readonly [string, readonly number[]])[],
+  patch: (profile: number[]) => void = () => undefined,
+): number[] {
+  const tableEnd = 132 + 12 * tags.length;
+  const data: number[] = [];
+  const table: number[] = [];
+  for (const [signature, contents] of tags) {
+    const offset = tableEnd + data.length;
+    table.push(...ascii(signature), ...uint32(offset), ...uint32(contents.length));
+    data.push(...contents);
+    while (data.length % 4 !== 0) {
+      data.push(0);
+    }
+  }
+  const header = new Array<number>(128).fill(0);
+  header.splice(36, 4, ...ascii('acsp'));
+  const profile = [...header, ...uint32(tags.length), ...table, ...data];
+  profile.splice(0, 4, ...uint32(profile.length));
+  patch(profile);
+  return profile;
+}
+
+function uint32(value: number): number[] {
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+}
+
+const XYZ = [...ascii('XYZ '), 0, 0, 0, 0, 0, 0, 0x6f, 0xa2, 0, 0, 0x38, 0xf5, 0, 0, 3, 0x90];
+const DESCRIPTION = [...ascii('mluc'), 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 12, ...ascii('enUS')];
+const COLOUR_TAGS: readonly (readonly [string, readonly number[]])[] = [
+  ['desc', DESCRIPTION],
+  ['rXYZ', XYZ],
+  ['wtpt', XYZ],
+];
+
+/** Where the ICC profile starts in the captured Chromium pictures: SOI, APP0, APP2's head. */
+const CHROMIUM_PROFILE_AT = 2 + 18 + 4 + 12 + 2;
+
+describe('the real encoder’s pictures are admitted — #1063’s review, round 2', () => {
+  it('admits the pinned Chromium’s sRGB and Display P3 canvas JPEGs whole', () => {
+    // An allowlist that refused these would refuse every live side-camera
+    // picture (#530). `browser/frame.browser.spec.ts` asks the encoder again.
+    for (const bytes of [chromiumSrgbJpeg(), chromiumDisplayP3Jpeg()]) {
+      expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual([]);
+      expect(carriesNoMetadata(bytes)).toBe(true);
+    }
   });
 
-  it('finds Exif placed after a segment longer than the signature scan’s window', () => {
-    // The review's probe: a 5 000-byte APP2, then APP1 Exif. The scan misses
-    // it — which is the bypass — and the walk does not.
-    const padding = segment(0xe2, new Array<number>(5000).fill(0x20));
-    const bytes = walkedJpeg(JFIF, padding, EXIF, FRAME);
+  it('admits a built profile of colour tags, so the rules below each refuse ONE thing', () => {
+    expect(colourProfileProblem(new Uint8Array(colourProfile(COLOUR_TAGS)))).toBeUndefined();
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, iccSegment(colourProfile(COLOUR_TAGS))))),
+    ).toStrictEqual([]);
+  });
+
+  it('admits a progressive file: tables and a second scan after the first', () => {
+    const bytes = bytesOf(picture(JFIF, TABLE, HUFFMAN).slice(0, -2), HUFFMAN, SCAN, ENTROPY, EOI);
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual([]);
+    const progressive = bytesOf(
+      SOI,
+      JFIF,
+      TABLE,
+      segment(0xc2, [8, 0, 16, 0, 16, 1, 1, 0x11, 0]),
+      SCAN,
+      ENTROPY,
+      segment(0xdd, [0, 4]),
+      SCAN,
+      ENTROPY,
+      EOI,
+    );
+    expect(jpegMetadataSegmentsIn(progressive)).toStrictEqual([]);
+  });
+});
+
+describe('the review’s probes, each refused — #1063’s review, B2 round 2', () => {
+  it('refuses an ICC APP2 carrying 5 000 bytes and then an Exif GPS block', () => {
+    const bytes = bytesOf(picture(JFIF, iccSegment([...FILL, ...EXIF])));
     expect(metadataMarkersIn(bytes)).toStrictEqual([]);
-    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP2', 'APP1']);
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP2']);
     expect(carriesNoMetadata(bytes)).toBe(false);
   });
 
-  it('finds Exif after a long ICC profile, which is itself admitted', () => {
-    const longIcc = segment(0xe2, [...ascii('ICC_PROFILE\0'), ...new Array<number>(6000).fill(3)]);
-    expect(jpegMetadataSegmentsIn(walkedJpeg(JFIF, longIcc, EXIF, FRAME))).toStrictEqual(['APP1']);
+  it('refuses an ICC APP2 carrying plain GPS and device text', () => {
+    const bytes = bytesOf(picture(JFIF, iccSegment(ascii('lat=51.5074 lon=-0.1278 Pixel 8 Pro'))));
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP2']);
   });
 
-  it('refuses every APPn but APP0 and an ICC APP2, by marker whatever it holds', () => {
+  it('refuses a profile split into two chunks, and a second profile', () => {
+    const profile = colourProfile(COLOUR_TAGS);
+    const half = profile.length >> 1;
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(
+          picture(
+            JFIF,
+            iccSegment(profile.slice(0, half), 1, 2),
+            iccSegment(profile.slice(half), 2, 2),
+          ),
+        ),
+      ),
+    ).toStrictEqual(['APP2', 'APP2']);
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, iccSegment(profile), iccSegment(profile)))),
+    ).toStrictEqual(['APP2']);
+    // A whole, valid profile that says it is the first of two chunks.
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, iccSegment(profile, 1, 2))))).toStrictEqual(
+      ['APP2'],
+    );
+  });
+
+  it('refuses a JPEG with Exif embedded in an ICC segment past 4 KiB', () => {
+    const embedded = [...SOI, ...JFIF, ...EXIF, ...EOI];
+    const bytes = bytesOf(picture(JFIF, iccSegment([...FILL, ...embedded])));
+    expect(metadataMarkersIn(bytes)).toStrictEqual([]);
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP2']);
+  });
+
+  it('refuses Exif after the end of the image', () => {
+    const bytes = bytesOf(picture(JFIF), EXIF, EOI);
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['trailing']);
+    expect(carriesNoMetadata(bytes)).toBe(false);
+  });
+
+  it('refuses a whole second JPEG, carrying Exif, after the end of the image', () => {
+    const bytes = bytesOf(picture(JFIF), picture(JFIF, EXIF));
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['trailing']);
+  });
+
+  it('refuses anything at all after the end, a single byte included', () => {
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF), [0x00]))).toStrictEqual(['trailing']);
+  });
+
+  it('refuses Exif between two scans', () => {
+    const bytes = bytesOf(
+      picture(JFIF).slice(0, -2),
+      segment(0xe1, [...EXIF.slice(4), ...FILL]),
+      SCAN,
+      ENTROPY,
+      EOI,
+    );
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP1']);
+  });
+
+  it('refuses a comment between two scans', () => {
+    const bytes = bytesOf(
+      picture(JFIF).slice(0, -2),
+      segment(0xfe, ascii('home')),
+      SCAN,
+      ENTROPY,
+      EOI,
+    );
+    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['COM']);
+  });
+
+  it('refuses an APP0 that is not exactly JFIF with no thumbnail', () => {
+    // Exif past 4 KiB inside an APP0 that says JFIF.
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(picture(segment(0xe0, [...ascii('JFIF\0'), ...FILL, ...EXIF.slice(4)]))),
+      ),
+    ).toStrictEqual(['APP0']);
+    // JFXX, the thumbnail extension, carrying a JPEG with Exif.
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(picture(JFIF, segment(0xe0, [...ascii('JFXX\0'), 0x10, ...SOI, ...EXIF, ...EOI]))),
+      ),
+    ).toStrictEqual(['APP0']);
+    // A JFIF thumbnail of 1 × 1.
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(picture(segment(0xe0, [...ascii('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0]))),
+      ),
+    ).toStrictEqual(['APP0']);
+  });
+
+  it('refuses a JPG0 segment carrying GPS text', () => {
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, segment(0xf0, ascii('GPS 51.5074,-0.1278'))))),
+    ).toStrictEqual(['JPG0']);
+  });
+
+  it('refuses a table, a frame, a scan header or a restart interval padded with text', () => {
+    const text = ascii('GPS 51.5,-0.12');
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, segment(0xdb, [...TABLE.slice(4), ...text])))),
+    ).toStrictEqual(['DQT']);
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, segment(0xc4, [...HUFFMAN.slice(4), ...text])))),
+    ).toStrictEqual(['DHT']);
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(SOI, JFIF, segment(0xc0, [...FRAME.slice(4), ...text]), SCAN, ENTROPY, EOI),
+      ),
+    ).toStrictEqual(['SOF0']);
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(SOI, JFIF, FRAME, segment(0xda, [...SCAN.slice(4), ...text]), ENTROPY, EOI),
+      ),
+    ).toStrictEqual(['SOS']);
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF, segment(0xdd, [0, 4, ...text])))),
+    ).toStrictEqual(['DRI']);
+  });
+
+  it('refuses every APPn but a JFIF APP0 and one ICC APP2, by marker whatever it holds', () => {
     for (let marker = 0xe1; marker <= 0xef; marker += 1) {
-      const bytes = walkedJpeg(JFIF, segment(marker, [1, 2, 3]));
+      const bytes = bytesOf(picture(JFIF, segment(marker, [1, 2, 3])));
       expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual([`APP${String(marker - 0xe0)}`]);
     }
   });
 
-  it('refuses a comment segment', () => {
-    const bytes = walkedJpeg(JFIF, segment(0xfe, ascii('taken at home')), FRAME);
-    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['COM']);
-    expect(carriesNoMetadata(bytes)).toBe(false);
+  it('refuses a fill byte or a standalone marker between segments, which the encoder never writes', () => {
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, [0xff])))).toStrictEqual(['FFFF']);
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, [0xff, 0x01])))).toStrictEqual(['FF01']);
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, [0xff, 0xd0])))).toStrictEqual(['RST0']);
   });
 
+  it('refuses a second frame header, and one after a scan', () => {
+    expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, FRAME)))).toStrictEqual(['SOF0']);
+    expect(
+      jpegMetadataSegmentsIn(bytesOf(picture(JFIF).slice(0, -2), FRAME, SCAN, ENTROPY, EOI)),
+    ).toStrictEqual(['SOF0']);
+  });
+
+  it('refuses a JFIF or an ICC segment after the frame', () => {
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, FRAME, JFIF, SCAN, ENTROPY, EOI))).toStrictEqual([
+      'APP0',
+    ]);
+    expect(
+      jpegMetadataSegmentsIn(
+        bytesOf(SOI, FRAME, iccSegment(colourProfile(COLOUR_TAGS)), SCAN, ENTROPY, EOI),
+      ),
+    ).toStrictEqual(['APP2']);
+  });
+});
+
+describe('what a colour profile may say — #1063’s review, round 2', () => {
+  /** The captured sRGB picture's profile, with `patch` applied at `at` within it. */
+  function patchedChromium(at: number, bytes: readonly number[]): Uint8Array {
+    const picture = chromiumSrgbJpeg();
+    picture.set(bytes, CHROMIUM_PROFILE_AT + at);
+    return picture;
+  }
+
+  it('reads the captured profile where the patches below assume it is', () => {
+    const picture = chromiumSrgbJpeg();
+    expect(
+      String.fromCharCode(...picture.subarray(CHROMIUM_PROFILE_AT + 36, CHROMIUM_PROFILE_AT + 40)),
+    ).toBe('acsp');
+  });
+
+  it('refuses a device maker or model in the header', () => {
+    expect(jpegMetadataSegmentsIn(patchedChromium(48, ascii('GOOG')))).toStrictEqual(['APP2']);
+    expect(jpegMetadataSegmentsIn(patchedChromium(52, ascii('PX8P')))).toStrictEqual(['APP2']);
+  });
+
+  it('refuses bytes in the header’s reserved space', () => {
+    expect(jpegMetadataSegmentsIn(patchedChromium(110, [0x51]))).toStrictEqual(['APP2']);
+  });
+
+  it('refuses a size field that disagrees with the profile, and no acsp', () => {
+    expect(jpegMetadataSegmentsIn(patchedChromium(3, [0x00]))).toStrictEqual(['APP2']);
+    expect(jpegMetadataSegmentsIn(patchedChromium(36, ascii('xxxx')))).toStrictEqual(['APP2']);
+  });
+
+  it('refuses the device tags, a dictionary, and any tag it does not know', () => {
+    for (const tag of ['dmnd', 'dmdd', 'meta', 'targ', 'zzzz']) {
+      const profile = colourProfile([...COLOUR_TAGS, [tag, ascii('Pixel 8 Pro, 51.5074 N')]]);
+      expect(colourProfileProblem(new Uint8Array(profile))).toBe('tag');
+      expect(jpegMetadataSegmentsIn(bytesOf(picture(JFIF, iccSegment(profile))))).toStrictEqual([
+        'APP2',
+      ]);
+    }
+  });
+
+  it('refuses a description longer than 512 bytes', () => {
+    const long: readonly [string, readonly number[]] = [
+      'desc',
+      [...DESCRIPTION, ...new Array<number>(500).fill(0x41)],
+    ];
+    expect(colourProfileProblem(new Uint8Array(colourProfile([long])))).toBe('text');
+  });
+
+  it('refuses bytes no tag declares: between two tags and after the last', () => {
+    const between = colourProfile(COLOUR_TAGS, (profile) => {
+      // Move the second tag four bytes on, and write a word in the gap.
+      const entry = 132 + 12;
+      const offset =
+        ((profile[entry + 4] ?? 0) << 24) |
+        ((profile[entry + 5] ?? 0) << 16) |
+        ((profile[entry + 6] ?? 0) << 8) |
+        (profile[entry + 7] ?? 0);
+      profile.splice(offset, 0, ...ascii('home'));
+      profile.splice(entry + 4, 4, ...uint32(offset + 4));
+      const third = entry + 12;
+      const thirdOffset =
+        ((profile[third + 4] ?? 0) << 24) |
+        ((profile[third + 5] ?? 0) << 16) |
+        ((profile[third + 6] ?? 0) << 8) |
+        (profile[third + 7] ?? 0);
+      profile.splice(third + 4, 4, ...uint32(thirdOffset + 4));
+      profile.splice(0, 4, ...uint32(profile.length));
+    });
+    expect(colourProfileProblem(new Uint8Array(between))).toBe('uncovered');
+    const after = colourProfile(COLOUR_TAGS, (profile) => {
+      profile.push(...ascii('lat=51.5074'));
+      profile.splice(0, 4, ...uint32(profile.length));
+    });
+    expect(colourProfileProblem(new Uint8Array(after))).toBe('uncovered');
+  });
+
+  it('refuses a tag that runs outside the profile, or into the tag table', () => {
+    const outside = colourProfile(COLOUR_TAGS, (profile) => {
+      profile.splice(132 + 8, 4, ...uint32(4096));
+    });
+    expect(colourProfileProblem(new Uint8Array(outside))).toBe('tag range');
+    const intoTable = colourProfile(COLOUR_TAGS, (profile) => {
+      profile.splice(132 + 4, 4, ...uint32(100));
+    });
+    expect(colourProfileProblem(new Uint8Array(intoTable))).toBe('tag range');
+  });
+
+  it('refuses a profile larger than 16 KiB, whatever it holds', () => {
+    const big = colourProfile([
+      [
+        'rTRC',
+        [...ascii('curv'), 0, 0, 0, 0, ...uint32(8200), ...new Array<number>(16_400).fill(0)],
+      ],
+    ]);
+    expect(big.length).toBeGreaterThan(MAXIMUM_ICC_PROFILE_BYTES);
+    expect(colourProfileProblem(new Uint8Array(big))).toBe('size');
+  });
+});
+
+describe('the rest of the walk', () => {
   it('refuses a segment whose length runs past the buffer', () => {
-    // An APP0 claiming 0x4000 bytes in a buffer of a few dozen.
     const bytes = new Uint8Array([
       0xff, 0xd8, 0xff, 0xe0, 0x40, 0x00, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9,
     ]);
     expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['malformed']);
   });
 
-  it('refuses a length under two, a stray byte, an early end and a header with no scan', () => {
+  it('refuses a length under two, a stray byte, an early end, and a file with no frame or no scan', () => {
     expect(
-      jpegMetadataSegmentsIn(
-        new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01, 0xff, 0xda, 0, 2, 0xff, 0xd9]),
-      ),
+      jpegMetadataSegmentsIn(bytesOf(SOI, [0xff, 0xe0, 0x00, 0x01], FRAME, SCAN, EOI)),
     ).toStrictEqual(['malformed']);
-    expect(
-      jpegMetadataSegmentsIn(new Uint8Array([0xff, 0xd8, 0x00, 0xe0, 0x00, 0x02, 0xff, 0xd9])),
-    ).toStrictEqual(['malformed']);
-    expect(
-      // EOI, then bytes that would read as a two-byte length and a scan: an
-      // end before the scan is the end, not a segment.
-      jpegMetadataSegmentsIn(new Uint8Array([0xff, 0xd8, 0xff, 0xd9, 0x00, 0x02, 0xff, 0xda])),
-    ).toStrictEqual(['malformed']);
-    expect(jpegMetadataSegmentsIn(new Uint8Array([0xff, 0xd8, ...JFIF]))).toStrictEqual([
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, [0x00, 0xe0, 0x00, 0x02], EOI))).toStrictEqual([
+      'malformed',
+    ]);
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, EOI))).toStrictEqual(['malformed']);
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, JFIF, FRAME, EOI))).toStrictEqual(['malformed']);
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, JFIF, SCAN, ENTROPY, EOI))).toStrictEqual([
+      'SOS',
+      'malformed',
+    ]);
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, JFIF, FRAME, SCAN, ENTROPY))).toStrictEqual([
       'malformed',
     ]);
     expect(jpegMetadataSegmentsIn(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toStrictEqual([
@@ -238,20 +577,39 @@ describe('walking a JPEG header — #1063’s review, B2', () => {
     ]);
   });
 
-  it('refuses a zero marker and a second start-of-image, however walkable what follows', () => {
+  it('refuses a zero marker and a second start-of-image', () => {
     for (const marker of [0x00, 0xd8]) {
-      const bytes = new Uint8Array([0xff, 0xd8, 0xff, marker, 0x00, 0x02, 0xff, 0xda, 0x00, 0x02]);
-      expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['malformed']);
+      expect(
+        jpegMetadataSegmentsIn(bytesOf(picture(JFIF, [0xff, marker, 0x00, 0x02]))),
+      ).toStrictEqual(['malformed']);
     }
   });
 
   it('keeps what it found before a malformed tail', () => {
-    const bytes = new Uint8Array([0xff, 0xd8, ...EXIF, 0xff, 0xe0, 0x40, 0x00]);
-    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual(['APP1', 'malformed']);
+    expect(jpegMetadataSegmentsIn(bytesOf(SOI, EXIF, [0xff, 0xe0, 0x40, 0x00]))).toStrictEqual([
+      'APP1',
+      'malformed',
+    ]);
+  });
+});
+
+describe('a captured frame is held to the same walk — #1063’s review, round 2', () => {
+  it('refuses a frame carrying Exif after its end, which the signature scan alone admitted', () => {
+    const bytes = bytesOf(picture(JFIF), EXIF, EOI);
+    expect(metadataMarkersIn(bytes)).toStrictEqual([]);
+    expect(() => capturedFrame({ bytes, mediaType: 'image/jpeg', width: 16, height: 16 })).toThrow(
+      CameraCaptureError,
+    );
   });
 
-  it('steps over fill bytes and standalone markers before the scan', () => {
-    const bytes = walkedJpeg(JFIF, [0xff], [0xff, 0x01], FRAME);
-    expect(jpegMetadataSegmentsIn(bytes)).toStrictEqual([]);
+  it('accepts the real encoder’s output', () => {
+    expect(
+      capturedFrame({
+        bytes: chromiumDisplayP3Jpeg(),
+        mediaType: 'image/jpeg',
+        width: 16,
+        height: 16,
+      }).bytes.length,
+    ).toBe(879);
   });
 });

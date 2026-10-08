@@ -144,8 +144,7 @@ describe('what leaves, exactly', () => {
 
   it('refuses a picture larger than it will send, without sending', async () => {
     const { send, sent } = recordingSend(() => modelReply('ready'));
-    const big = new Uint8Array(MAXIMUM_PICTURE_BYTES + 1);
-    big.set(cleanFrameBytes(64));
+    const big = cleanFrameBytes(MAXIMUM_PICTURE_BYTES + 1);
     const outcome = await riderAnalysisPort(endpoint(), { send })?.askAboutFrame(request(big))
       .outcome;
     expect(outcome).toStrictEqual({ kind: 'failed', failure: 'picture-too-large' });

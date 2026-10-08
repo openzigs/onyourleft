@@ -30,9 +30,10 @@
  * ends the pairing on `undefined`, as it does for an unknown control message.
  *
  * ⚠️ **It also refuses a picture carrying a metadata marker**, with
- * `frame.ts` §`carriesNoMetadata` — a walk of every segment before the scan
- * (an `APP1`–`APP15` other than an ICC profile, or a `COM`, is refused) and
- * the signature scan. D-9's strip point is on the phone and an
+ * `frame.ts` §`carriesNoMetadata` — a walk of the WHOLE file against an
+ * allowlist of what a canvas encoder writes (JFIF, one colour-only ICC
+ * profile, the tables, the frame and its scans, and nothing after the end;
+ * #1063's review, round 2) and the signature scan. D-9's strip point is on the phone and an
  * honest phone never sends one, so a picture with an Exif block in it is a
  * phone running something that is not this client, and the tablet will not
  * hold it even for the length of one inference.

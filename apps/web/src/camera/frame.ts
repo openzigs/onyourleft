@@ -32,7 +32,8 @@
  * Nothing above would notice, because a JPEG is a JPEG.
  *
  * {@link capturedFrame} is the only constructor of a {@link CapturedFrame}, and
- * it **refuses** bytes that carry a metadata marker. So an adapter that skips
+ * it **refuses** bytes that are anything but what a canvas encoder writes
+ * ({@link jpegMetadataSegmentsIn}) or that carry a metadata marker. So an adapter that skips
  * the re-encode does not leak a location quietly; it throws, on the first
  * capture, before anything is stored, exported or looked at.
  *
@@ -144,46 +145,114 @@ export function metadataMarkersIn(bytes: Uint8Array): readonly string[] {
 }
 
 /**
- * The ICC profile segment's identifier, which is the one `APPn` segment a
- * picture this client stores may carry besides JFIF's `APP0`.
- *
- * ⚠️ **Measured, not assumed** (#1063's review, 2026-10-08): the pinned
- * Chromium's `canvas.toBlob('image/jpeg')` writes `APP0` and then `APP2`
- * `ICC_PROFILE` — the canvas's colour space — in both `srgb` and
- * `display-p3`, and the Android WebView is the same Skia encoder. Refusing
- * every `APP1`–`APP15` would therefore refuse every picture the phone sends.
- * An ICC profile describes colour; it has no tag for a place, a time or a
- * device, which is why this one segment is admitted and nothing else is.
+ * The identifier an `APP2` segment carrying an ICC colour profile opens with.
  */
 const ICC_PROFILE_IDENTIFIER = 'ICC_PROFILE\0';
 
 /**
- * Every metadata-bearing segment in a JPEG's header, found by WALKING its
- * segments from start-of-image to start-of-scan (#1063's review, B2), with
- * `malformed` for a header that cannot be walked. Empty means the header holds
- * JFIF, an ICC profile, and the tables and frame a decoder needs, and nothing
- * else.
+ * The largest ICC profile a picture may carry: 16 KiB.
  *
- * ## Why a walk, when {@link metadataMarkersIn} is a scan
+ * ## Provenance
  *
- * A signature scan has a window, and a window is a place to stand outside: an
- * `APP2` of five thousand bytes put the Exif block past {@link metadataMarkersIn}'s
- * 4 096, and the picture passed. A walk has no window — it visits every
- * segment before the scan, however long each is — and it refuses by MARKER
- * rather than by contents, so an `APP1` is refused whatever it says inside.
+ * Measured (#1063's review, round 2, 2026-10-08): the pinned Chromium's
+ * `canvas.toBlob('image/jpeg')` writes a **456-byte** profile for an `srgb`
+ * canvas and a **520-byte** one for `display-p3` — Skia's own, with
+ * parametric curves. The Android WebView is the same Skia encoder and has NOT
+ * been measured (#733 owes it), so the bound is not set at the measured size:
+ * a matrix profile whose three curves are 1 024-entry tables, the largest
+ * shape a colour-only RGB writer commonly emits, is about 6.3 KiB, and 16 KiB
+ * is that with room. It sits well inside one `APP2` chunk (65 519 bytes) and a
+ * quarter of a side-camera picture message
+ * (`side-link-pictures.ts` §`MAXIMUM_SIDE_PICTURE_MESSAGE_BYTES`), so what it
+ * bounds is how much a profile may say, not whether one fits.
+ */
+export const MAXIMUM_ICC_PROFILE_BYTES = 16 * 1024;
+
+/**
+ * The largest a profile's free-text tag (`desc`, `cprt`) may be: 512 bytes.
+ * Skia writes 36 and 100 for the description and 60 for the copyright.
+ */
+const MAXIMUM_ICC_TEXT_TAG_BYTES = 512;
+
+/**
+ * The tags a colour profile may carry: colour, and the two names a profile
+ * gives itself. ⚠️ An ALLOWLIST — `dmnd` and `dmdd` (the device's maker and
+ * model), `meta` (a free dictionary) and any tag this list does not name are
+ * refused.
+ */
+const ICC_COLOUR_TAGS: ReadonlySet<string> = new Set([
+  'desc',
+  'cprt',
+  'wtpt',
+  'bkpt',
+  'rXYZ',
+  'gXYZ',
+  'bXYZ',
+  'rTRC',
+  'gTRC',
+  'bTRC',
+  'kTRC',
+  'chad',
+  'chrm',
+  'cicp',
+  'A2B0',
+  'A2B1',
+  'A2B2',
+  'B2A0',
+  'B2A1',
+  'B2A2',
+]);
+
+/** The two free-text tags, held to {@link MAXIMUM_ICC_TEXT_TAG_BYTES}. */
+const ICC_TEXT_TAGS: ReadonlySet<string> = new Set(['desc', 'cprt']);
+
+/** An ICC profile's header and tag count, before the tag table. */
+const ICC_TAG_TABLE_START = 132;
+
+/**
+ * Everything in a JPEG this program will not hold, found by walking the WHOLE
+ * file against an ALLOWLIST of what a canvas JPEG encoder writes (#1063's
+ * review, B2 and its round 2). Empty means the file is that and nothing else.
  *
- * - `APP0` (`FFE0`, JFIF) is admitted; `APP2` only with the ICC identifier.
- * - Every other `APP1`–`APP15` (`FFE1`–`FFEF`) is refused, by name.
- * - `COM` (`FFFE`) is refused: a comment is free text.
- * - A segment whose length runs past the buffer, a length under two, a byte
- *   that is not a marker where one must be, a second start-of-image or an
- *   end-of-image before the scan, and a header that never reaches the scan are
- *   each `malformed` — refused, because a header this cannot walk is a header
- *   it cannot vouch for.
+ * ## What is admitted, and nothing else is
  *
- * Used where a picture from the PHONE is held: the link's arrival check
- * (`side-link-pictures.ts` §`sidePictureFrom`) and the snapshot's save
- * (`snapshot-keeper.ts` §`snapshotProblem`). Names no offset (D-8).
+ * | Marker | Admitted when |
+ * |---|---|
+ * | `SOI` | the first two bytes, and nowhere else |
+ * | `APP0` | once, before the frame, in exactly the JFIF form: identifier `JFIF\0`, length 16, version 1, no thumbnail |
+ * | `APP2` | once, before the frame: ONE ICC profile in one chunk (sequence 1 of 1) that passes {@link colourProfileProblem} |
+ * | `DQT`, `DHT` | anywhere before `EOI`, with a length equal to the tables they declare |
+ * | `DRI` | with length 4 |
+ * | `SOF0`, `SOF1`, `SOF2` | once, before the first scan, 8-bit, with a length equal to its components |
+ * | `SOS` | after the frame, with a length equal to its components — and its entropy data is stepped over (`FF00` stuffing, `RST0`–`RST7`, fill bytes) to the next marker |
+ * | `EOI` | as exactly the last two bytes, after at least one scan |
+ *
+ * Every other marker — `APP1`–`APP15` but that one `APP2`, `COM`, `JPG0`–`JPG13`,
+ * `DNL`, `TEM`, a stray `RSTn`, a second `SOI` — is refused by name, wherever
+ * it is: in the header, between two scans, or after the end. Anything after
+ * `EOI` is `trailing`; a length past the buffer, a byte that is not a marker
+ * where one must be, or a file with no frame or no scan is `malformed`.
+ *
+ * ## Why an allowlist, and the whole file
+ *
+ * Round 1's walk stopped at the first scan and refused a denylist of `APPn`
+ * and `COM`. The review's probes walked straight past it: Exif in an `APP1`
+ * between two scans, or after `EOI`, or in a whole second JPEG after `EOI`; a
+ * non-JFIF `APP0`, a `JPG0`, or a `DQT` padded with text; and an ICC
+ * `APP2` carrying a GPS block. A denylist is complete on the day it is written;
+ * a list of what the one encoder here writes is complete by construction, and
+ * a segment whose length must equal its declared contents has no room for a
+ * sentence.
+ *
+ * ⚠️ **What it cannot see** is anything in the PIXELS — a picture of a street
+ * sign is a picture of a street sign — and the residue a colour profile is
+ * allowed (§{@link colourProfileProblem}). It is a check that the bytes are a
+ * re-encode, not a proof that they say nothing.
+ *
+ * Used wherever a picture is held: {@link capturedFrame}, the side link's
+ * arrival check (`side-link-pictures.ts` §`sidePictureFrom`) and the
+ * snapshot's save (`snapshot-keeper.ts` §`snapshotProblem`). Names no offset
+ * (D-8).
  */
 export function jpegMetadataSegmentsIn(bytes: Uint8Array): readonly string[] {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
@@ -191,26 +260,25 @@ export function jpegMetadataSegmentsIn(bytes: Uint8Array): readonly string[] {
   }
   const found: string[] = [];
   let at = 2;
+  let jfif = false;
+  let profile = false;
+  let frame = false;
+  let scans = 0;
   for (;;) {
     if (at + 1 >= bytes.length || bytes[at] !== 0xff) {
       return [...found, 'malformed'];
     }
     const marker = bytes[at + 1] ?? 0;
-    if (marker === 0xff) {
-      // A fill byte before the marker.
-      at += 1;
-      continue;
+    if (marker === 0xd9) {
+      if (!frame || scans === 0) {
+        return [...found, 'malformed'];
+      }
+      return at + 2 === bytes.length ? found : [...found, 'trailing'];
     }
-    if (marker === 0xda) {
-      return found;
-    }
-    if (marker === 0x00 || marker === 0xd8 || marker === 0xd9) {
-      return [...found, 'malformed'];
-    }
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      // Standalone markers carry no length.
-      at += 2;
-      continue;
+    if (!carriesLength(marker)) {
+      // A fill byte, `TEM`, a stray `RSTn`, a second `SOI` or a zero: none of
+      // them is something the encoder writes between segments.
+      return [...found, marker === 0xd8 || marker === 0x00 ? 'malformed' : markerName(marker)];
     }
     if (at + 3 >= bytes.length) {
       return [...found, 'malformed'];
@@ -220,26 +288,292 @@ export function jpegMetadataSegmentsIn(bytes: Uint8Array): readonly string[] {
     if (length < 2 || next > bytes.length) {
       return [...found, 'malformed'];
     }
-    if (marker === 0xfe) {
-      found.push('COM');
-    } else if (marker >= 0xe1 && marker <= 0xef) {
-      const iccProfile =
-        marker === 0xe2 &&
-        indexOfSignature(
-          bytes.subarray(at + 4, next),
-          ICC_PROFILE_IDENTIFIER,
-          ICC_PROFILE_IDENTIFIER.length,
-        ) === 0;
-      if (!iccProfile) {
-        found.push(`APP${String(marker - 0xe0)}`);
+    const contents = bytes.subarray(at + 4, next);
+    const beforeFrame = !frame && scans === 0;
+    if (marker === 0xe0) {
+      if (jfif || !beforeFrame || !plainJfif(contents)) {
+        found.push('APP0');
       }
+      jfif = true;
+    } else if (marker === 0xe2) {
+      if (profile || !beforeFrame || iccSegmentProblem(contents) !== undefined) {
+        found.push('APP2');
+      }
+      profile = true;
+    } else if (marker === 0xdb) {
+      if (!quantisationTablesFit(contents)) {
+        found.push('DQT');
+      }
+    } else if (marker === 0xc4) {
+      if (!huffmanTablesFit(contents)) {
+        found.push('DHT');
+      }
+    } else if (marker === 0xdd) {
+      if (contents.length !== 2) {
+        found.push('DRI');
+      }
+    } else if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      if (!beforeFrame || !frameHeaderFits(contents)) {
+        found.push(markerName(marker));
+      }
+      frame = true;
+    } else if (marker === 0xda) {
+      if (!frame || !scanHeaderFits(contents)) {
+        found.push('SOS');
+      }
+      scans += 1;
+      at = endOfEntropyData(bytes, next);
+      continue;
+    } else {
+      found.push(markerName(marker));
     }
     at = next;
   }
 }
 
+/** Whether `marker` is followed by a two-byte length. */
+function carriesLength(marker: number): boolean {
+  return !(
+    marker === 0x00 ||
+    marker === 0x01 ||
+    marker === 0xff ||
+    (marker >= 0xd0 && marker <= 0xd8)
+  );
+}
+
+/** A marker's name, for a refusal: `APP1`, `COM`, `JPG0`, or its two bytes. */
+function markerName(marker: number): string {
+  if (marker >= 0xe0 && marker <= 0xef) {
+    return `APP${String(marker - 0xe0)}`;
+  }
+  if (marker === 0xfe) {
+    return 'COM';
+  }
+  if (marker >= 0xf0 && marker <= 0xfd) {
+    return `JPG${String(marker - 0xf0)}`;
+  }
+  if (marker >= 0xd0 && marker <= 0xd7) {
+    return `RST${String(marker - 0xd0)}`;
+  }
+  if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+    return `SOF${String(marker - 0xc0)}`;
+  }
+  return `FF${marker.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
 /**
- * Whether a picture from the phone may be held: neither the segment walk
+ * Where the marker after a scan's entropy data starts. Inside it, `FF00` is a
+ * stuffed byte, `FFD0`–`FFD7` a restart and a run of `FF` fill; any other
+ * `FFxx` is the next marker. The buffer's length when there is none, which the
+ * walk then calls `malformed`.
+ */
+function endOfEntropyData(bytes: Uint8Array, from: number): number {
+  let at = from;
+  while (at < bytes.length) {
+    if (bytes[at] !== 0xff) {
+      at += 1;
+      continue;
+    }
+    const after = bytes[at + 1];
+    if (after === undefined) {
+      return at;
+    }
+    if (after === 0x00 || (after >= 0xd0 && after <= 0xd7)) {
+      at += 2;
+    } else if (after === 0xff) {
+      at += 1;
+    } else {
+      return at;
+    }
+  }
+  return at;
+}
+
+/**
+ * `APP0` exactly as JFIF writes it with no thumbnail: `JFIF\0`, version 1.x,
+ * a density unit of 0–2, a non-zero density, and a thumbnail of 0 × 0 — so
+ * its fourteen bytes are all accounted for.
+ */
+function plainJfif(contents: Uint8Array): boolean {
+  return (
+    contents.length === 14 &&
+    indexOfSignature(contents, 'JFIF\0', 5) === 0 &&
+    contents[5] === 1 &&
+    (contents[7] ?? 3) <= 2 &&
+    ((contents[8] ?? 0) | (contents[9] ?? 0)) !== 0 &&
+    ((contents[10] ?? 0) | (contents[11] ?? 0)) !== 0 &&
+    contents[12] === 0 &&
+    contents[13] === 0
+  );
+}
+
+/** `DQT`: one or more 8- or 16-bit tables, filling the segment exactly. */
+function quantisationTablesFit(contents: Uint8Array): boolean {
+  let at = 0;
+  while (at < contents.length) {
+    const precision = (contents[at] ?? 0) >> 4;
+    const table = (contents[at] ?? 0) & 0x0f;
+    if (precision > 1 || table > 3) {
+      return false;
+    }
+    at += 1 + (precision === 0 ? 64 : 128);
+  }
+  return contents.length > 0 && at === contents.length;
+}
+
+/** `DHT`: one or more tables, each sixteen counts and their values, filling the segment exactly. */
+function huffmanTablesFit(contents: Uint8Array): boolean {
+  let at = 0;
+  while (at < contents.length) {
+    const kind = (contents[at] ?? 0) >> 4;
+    const table = (contents[at] ?? 0) & 0x0f;
+    if (kind > 1 || table > 3 || at + 17 > contents.length) {
+      return false;
+    }
+    let values = 0;
+    for (let index = 1; index <= 16; index += 1) {
+      values += contents[at + index] ?? 0;
+    }
+    if (values > 256) {
+      return false;
+    }
+    at += 17 + values;
+  }
+  return contents.length > 0 && at === contents.length;
+}
+
+/** `SOFn`: 8-bit, a width, one to four components and nothing else. */
+function frameHeaderFits(contents: Uint8Array): boolean {
+  const components = contents[5] ?? 0;
+  return (
+    contents[0] === 8 &&
+    ((contents[3] ?? 0) | (contents[4] ?? 0)) !== 0 &&
+    components >= 1 &&
+    components <= 4 &&
+    contents.length === 6 + 3 * components
+  );
+}
+
+/** `SOS`: one to four components, the spectral selection and nothing else. */
+function scanHeaderFits(contents: Uint8Array): boolean {
+  const components = contents[0] ?? 0;
+  return components >= 1 && components <= 4 && contents.length === 4 + 2 * components;
+}
+
+/** Why an `APP2`'s contents are not one admissible ICC profile, or `undefined`. */
+function iccSegmentProblem(contents: Uint8Array): string | undefined {
+  const identifier = ICC_PROFILE_IDENTIFIER.length;
+  if (
+    contents.length < identifier + 2 ||
+    indexOfSignature(contents, ICC_PROFILE_IDENTIFIER, identifier) !== 0
+  ) {
+    return 'not an ICC profile';
+  }
+  if (contents[identifier] !== 1 || contents[identifier + 1] !== 1) {
+    return 'more than one chunk';
+  }
+  return colourProfileProblem(contents.subarray(identifier + 2));
+}
+
+/**
+ * Why `profile` is not a profile that says only colour, or `undefined`.
+ *
+ * ⚠️ **An ICC profile is NOT metadata-free**, and round 1's comment here said
+ * it was ("no tag for a place, a time or a device") — wrong on all three. Its
+ * header has a creation date and time (bytes 24–35), the device's maker and
+ * model (48–55), a creator (80–83), and its tag table can hold the device's
+ * maker and model as text (`dmnd`, `dmdd`), a free dictionary (`meta`) and
+ * any private tag at all. So a profile is admitted only when:
+ *
+ * - its size field equals its length, and that is at most
+ *   {@link MAXIMUM_ICC_PROFILE_BYTES};
+ * - `acsp` is at 36;
+ * - the device's maker and model (48–55) and the reserved bytes (100–127) are zero;
+ * - every tag is a colour tag ({@link ICC_COLOUR_TAGS}), lies inside the
+ *   profile, and a free-text one is at most {@link MAXIMUM_ICC_TEXT_TAG_BYTES};
+ * - and the tags' data covers everything after the tag table, with at most
+ *   three zero bytes of alignment between them — so there is nowhere to put a
+ *   byte no tag declares.
+ *
+ * ⚠️ **What is NOT checked, deliberately**: the profile's bytes. The Android
+ * WebView's encoder has not been measured on a device (#733 owes it), and a
+ * pin to the bytes Chromium writes on a desktop could refuse every live
+ * side-camera picture — #530, which has shipped. So the creation date, the
+ * creator and the CMM are not read (Skia writes 2016-01-01 and zeroes,
+ * measured), and the description and copyright are free text up to 512 bytes
+ * each. That residue is the price of not pinning, and it is stated rather
+ * than hidden.
+ */
+export function colourProfileProblem(profile: Uint8Array): string | undefined {
+  const length = profile.length;
+  if (length < ICC_TAG_TABLE_START || length > MAXIMUM_ICC_PROFILE_BYTES) {
+    return 'size';
+  }
+  if (readUint32(profile, 0) !== length) {
+    return 'size';
+  }
+  if (indexOfSignature(profile.subarray(36), 'acsp', 4) !== 0) {
+    return 'signature';
+  }
+  if (!zeroes(profile, 48, 56) || !zeroes(profile, 100, ICC_TAG_TABLE_START - 4)) {
+    return 'device';
+  }
+  const count = readUint32(profile, 128);
+  const tableEnd = ICC_TAG_TABLE_START + 12 * count;
+  if (tableEnd > length) {
+    return 'tag table';
+  }
+  const ranges = new Map<string, readonly [number, number]>();
+  for (let index = 0; index < count; index += 1) {
+    const entry = ICC_TAG_TABLE_START + 12 * index;
+    const signature = String.fromCharCode(...profile.subarray(entry, entry + 4));
+    const offset = readUint32(profile, entry + 4);
+    const size = readUint32(profile, entry + 8);
+    if (!ICC_COLOUR_TAGS.has(signature)) {
+      return 'tag';
+    }
+    if (offset < tableEnd || size === 0 || offset + size > length) {
+      return 'tag range';
+    }
+    if (ICC_TEXT_TAGS.has(signature) && size > MAXIMUM_ICC_TEXT_TAG_BYTES) {
+      return 'text';
+    }
+    // Two tags may share one block of data (Skia's three curves do).
+    ranges.set(`${String(offset)}+${String(size)}`, [offset, size]);
+  }
+  let covered = tableEnd;
+  for (const [offset, size] of [...ranges.values()].sort((a, b) => a[0] - b[0])) {
+    if (offset < covered || offset - covered > 3 || !zeroes(profile, covered, offset)) {
+      return 'uncovered';
+    }
+    covered = offset + size;
+  }
+  if (length - covered > 3 || !zeroes(profile, covered, length)) {
+    return 'uncovered';
+  }
+  return undefined;
+}
+
+function readUint32(bytes: Uint8Array, at: number): number {
+  return (
+    (((bytes[at] ?? 0) << 24) >>> 0) +
+    ((bytes[at + 1] ?? 0) << 16) +
+    ((bytes[at + 2] ?? 0) << 8) +
+    (bytes[at + 3] ?? 0)
+  );
+}
+
+function zeroes(bytes: Uint8Array, from: number, to: number): boolean {
+  for (let at = from; at < to; at += 1) {
+    if (bytes[at] !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether a picture may be held: neither the whole-file walk
  * ({@link jpegMetadataSegmentsIn}) nor the signature scan
  * ({@link metadataMarkersIn}) finds anything. Both, because the scan also
  * looks inside the segments the walk admits.
@@ -311,8 +645,11 @@ export function capturedFrame(input: {
   if (input.mediaType !== FRAME_MEDIA_TYPE) {
     throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
   }
-  const markers = metadataMarkersIn(input.bytes);
-  if (markers.length > 0) {
+  // The same whole-file allowlist the link and the snapshot hold a picture
+  // to (#1063's review, round 2), not the signature scan alone: every
+  // producer here is a canvas re-encode, which the allowlist is written from,
+  // and `frame.browser.spec.ts` holds it to the pinned Chromium's real output.
+  if (!carriesNoMetadata(input.bytes)) {
     throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
   }
   return {
