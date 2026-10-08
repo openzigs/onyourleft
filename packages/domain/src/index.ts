@@ -282,6 +282,39 @@ export {
   verifyRecordSignature,
 } from './identity/record';
 
+// --- HPKE between the app and its instance (#1188, ADR 0047) ---------------
+//
+// RFC 9180, suite X25519 / HKDF-SHA256 / AES-128-GCM, `mode_base`, and ADR
+// 0047 D-2's reply keys — written once against a six-member primitives port
+// (`hpke/primitives.ts`) that `packages/store` and `apps/instance` implement
+// over `crypto.subtle`. `hpke/hpke-testing.ts` (the injected ephemeral key,
+// and the RFC vectors) is deliberately NOT exported here; it is reached only
+// as `@onyourleft/domain/hpke-testing`, from tests.
+
+export type { HpkeRefusal } from './hpke/errors';
+export { HpkeError } from './hpke/errors';
+export type { HpkePrimitives, X25519KeyPair } from './hpke/primitives';
+export type {
+  HpkeRecipientContext,
+  HpkeReplyOpener,
+  HpkeReplySealer,
+  HpkeSenderContext,
+} from './hpke/hpke';
+export {
+  HPKE_AEAD_ID,
+  HPKE_KDF_ID,
+  HPKE_KEM_ID,
+  HPKE_MESSAGE_LIMIT,
+  HPKE_MODE_BASE,
+  HPKE_RESPONSE_LABEL,
+  HPKE_RESPONSE_NONCE_BYTES,
+  openReply,
+  sealReply,
+  setupBaseRecipient,
+  setupBaseSender,
+  X25519_KEY_BYTES,
+} from './hpke/hpke';
+
 // --- Analysis (#75) ---------------------------------------------------------
 //
 // The power-duration curve and the critical-power model fitted to it. Pure

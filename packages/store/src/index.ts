@@ -262,6 +262,7 @@ export {
   ensureDeviceSigningKey,
   generateDeviceKey,
   signingKeyFor,
+  webCryptoHpkePrimitives,
   webCryptoSha256,
   webCryptoVerifier,
 } from './web-crypto';
