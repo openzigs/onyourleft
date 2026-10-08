@@ -208,7 +208,8 @@ pure function of the request, so an instance that answered **the same request tw
 let through by a replay record lost in a restart, or a retry of a request whose first answer was
 never delivered — would seal two different plaintexts under one AES-GCM (key, nonce) pair. GCM then
 leaks the XOR of the two plaintexts and its GHASH key, and whoever holds both ciphertexts can forge
-reply messages under that key. RFC 9458 §6.5.2 gives exactly this reason for its server-chosen
+reply messages under that key. RFC 9458 §6.5 (*"Replay Attacks"*, in the section's own body rather
+than either of its subsections) gives exactly this reason for its server-chosen
 `response_nonce`: it *"ensures that responses have unique AEAD keys and nonces even when requests
 are replayed"*. D-9's replay record is still required, durable and atomic, but for side effects
 (a second paid job), not for the AEAD's safety, which no longer depends on an operational property.
@@ -299,8 +300,12 @@ ADR.
   ```json
   { "purpose": "oyl-instance-key-v1", "instanceOrigin": "https://ride.example",
     "keyId": "<16 hex>", "encryptionKey": "<64 hex>",
-    "notBefore": 1790000000, "notAfter": 1793196800 }
+    "notBefore": 1790000000, "issuedAt": 1790086400, "notAfter": 1790259200 }
   ```
+
+  where `notBefore` is when **that encryption key** was made, the same in every statement for it,
+  and `issuedAt` and `notAfter` are when **this statement** was signed and when it stops verifying
+  (D-5: a statement lives 48 hours and is re-signed daily).
 
   canonicalised in `packages/domain` beside `device-statement.ts`, with a purpose no device
   statement and no activity record carries, for `device-statement.ts`'s own reason.
@@ -337,6 +342,14 @@ error, `/metrics` or an export.
   pin**. A separate key file was rejected because #791's backup copies the database and the blobs
   and nothing else: the file would either be missed (a restore breaks every pin) or need a third
   backup path to keep in step.
+- ⚠️ **`operator restore` rotates the encryption key as its last step.** A backup made before the
+  latest rotation restores a newest encryption key whose `notBefore` is **older** than one every
+  device has already verified, and the newer key's private half is gone with the restore. Under
+  the no-going-back rule below every device would refuse every statement served, get
+  `instance_key_unknown`, re-read and be refused again, and sealing would stop until the next
+  scheduled rotation, up to 30 days later. So `restore`, once the database and blobs are back and
+  `verify` passes, makes a new encryption key and statement (`notBefore` = now), which is newer
+  than anything a device has seen. The identity key is restored unchanged, so every pin holds.
 - **Rejected: the key in an environment variable.** The operator would have to generate and paste
   it, every rotation would be a restart and an edit of `.env`, and the variable would be one more
   secret in the compose file. One operator secret wrapping keys the instance manages is less for an
@@ -357,14 +370,26 @@ error, `/metrics` or an export.
 
 **Rotating the encryption key** (*the author's choice* of the numbers):
 
-- **Automatically every 30 days**: a new X25519 key and statement, made by the HTTP process, the one
-  writer (ADR 0037 D-5). **A statement's `notAfter` is its `notBefore` plus 37 days** — the
-  rotation period plus the overlap below, and no more — so a statement is still valid for exactly
-  as long as its key is still kept for decryption, and expires when that key is deleted — never
-  during its own overlap. Devices re-read `/v1/instance/keys` at sign-in and at least daily.
-- **A device never goes back.** It seals to the verified statement with the latest `notBefore`, and
-  **it stores, per instance, the latest `notBefore` and `keyId` it has ever verified, and never seals
-  to a statement older than that**, whatever `/v1/instance/keys` serves later. An edge that strips
+- **Automatically every 30 days**: a new X25519 key and its first statement, made by the HTTP
+  process, the one writer (ADR 0037 D-5).
+- **Statements are short-lived and re-signed daily**, *the author's choice* (D-14 Q3): **a
+  statement's `notAfter` is its `issuedAt` plus 48 hours**, and once a day the instance signs a
+  fresh statement for its **current** encryption key. It stops re-signing a key the moment that
+  key has a successor. So a statement for a superseded key stops verifying at most 48 hours after
+  the successor exists, whether the rotation was scheduled or on demand, and the old key's private
+  half, kept 7 days (below), outlives every statement that was ever signed for it. Statement
+  validity and key deletion are therefore two separate bounds, and the one that limits an active
+  edge is the 48 hours (D-10). The cost is one Ed25519 signature a day, and that a device must
+  re-read `/v1/instance/keys` before sealing if the statement it holds is past its `notAfter`.
+  Devices re-read at sign-in and at least daily anyway. *Rejected*: one statement per key valid for
+  the key's whole 37-day life, which an earlier draft of this ADR chose: against an edge holding a
+  leaked encryption key it let an unrefreshed device be held on that key for up to 37 days, and
+  after an on-demand rotation the statement outlived the key it named.
+- **A device never goes back.** It seals to the verified statement whose key has the latest
+  `notBefore`, and **it stores, per instance, the latest key `notBefore` and `keyId` it has ever
+  verified, and never seals to a key older than that**, whatever `/v1/instance/keys` serves later.
+  (A re-signed statement for the same key does not move `notBefore`, so daily re-signing never
+  trips this rule.) An edge that strips
   the newest statement from the response therefore cannot move a device that has once seen it back
   onto an older key. A statement past its `notAfter` is never used.
 - **The old key is kept for decryption for 7 days after its successor exists** (the overlap), so a
@@ -374,11 +399,12 @@ error, `/metrics` or an export.
 - **On demand**: `operator instance-key rotate`, and `operator instance-key rotate --drop-old`,
   which deletes the old private half at once — the answer to a suspected leak of the encryption key
   (D-10). ⚠️ **Deletion stops the instance reading the old key; it does not stop a device sealing
-  to it.** The old statement still verifies under the identity key until its `notAfter`, and an
-  edge that holds the leaked private key can keep serving it — and forge the plaintext
-  `instance_key_unknown` — to a device that has **not yet** seen the successor. Against an active
-  edge, statement validity, not deletion, bounds the exposure: up to 37 days for such a device,
-  unless the identity key is rotated too (D-10).
+  to it.** The old key's last statement still verifies under the identity key until its
+  `notAfter`, and an edge that holds the leaked private key can keep serving it — and forge the
+  plaintext `instance_key_unknown` — to a device that has **not yet** seen the successor. Against
+  an active edge, statement validity, not deletion, bounds the exposure: **at most 48 hours** from
+  the rotation for such a device, because the instance signs nothing for the old key after it
+  (above), unless the edge also holds the identity key (D-10).
 - ⚠️ **Why deletion matters all the same**: `base` mode has no forward secrecy against the
   recipient's key. Anyone who recorded ciphertext and later obtains an encryption private key reads
   every request sealed to it and every reply derived from those requests (D-2). Deleting old keys
@@ -461,9 +487,10 @@ where an invite is shared; the trade is the same as Q1's, one step removed.
 ### D-7 — What is sealed, in two phases
 
 **Phase 1, which #1179 ships, and without which #1095, #1097's in-app key, and #1101 do not ship**
-(the owner's rulings). It has three parts: the payloads the owner named, **every route that adds or
+(the owner's rulings). It has four parts: the payloads the owner named, **every route that adds or
 removes a device key or carries a recovery secret** (without which D-8's sender check can be walked
-around, below), and **every route that serves the athlete's synced history**.
+around, below), **every route that serves the athlete's synced history**, and **every moderator
+route** (below).
 
 | Payload | Route (inner, D-9) | Direction sealed |
 |---|---|---|
@@ -480,6 +507,8 @@ around, below), and **every route that serves the athlete's synced history**.
 | **Revoking a device key** (any key, not only the last) | `POST /v1/auth/devices/{publicKey}/revoke` | request |
 | **Deleting the account**, whose step-up carries a recovery code (`identity.ts` §`stepUp`) | `DELETE /v1/account` | request |
 | **Minting an invite** (a moderator's) | `POST /v1/moderation/invites` | both: the code is in the reply |
+| **Every other moderator action**: suspending and lifting a suspension, hiding a display name, approving and refusing a registration, dismissing a report | `POST /v1/moderation/athletes/{athleteId}/suspend`, `…/unsuspend`, `…/hide-display-name`, `POST /v1/moderation/registrations/{athleteId}/approve`, `…/refuse`, `POST /v1/moderation/reports/{reportId}/dismiss` | both: each request carries the moderator's reason, and the reply its log id |
+| **Every moderator read**: the report queue (other riders' report text), the registrations awaiting approval, the suspended list and the moderation log | `GET /v1/moderation/reports`, `GET /v1/moderation/registrations`, `GET /v1/moderation/suspended`, `GET /v1/moderation/log` | reply |
 | **The synced history**: manifest, records and their original files, items (`write-up` and `side-camera-report` among them), tombstones, race consent, the athlete's activities and streams | every route `apps/instance/src/sync/routes.ts` declares | both |
 | **History search** (ADR 0040), whose answer is passages of past write-ups and notes | `POST /v1/history/search` | both |
 
@@ -505,6 +534,17 @@ the bearer token alone, which is a lock-out. Sealing and device-signing every on
 (D-8) means the secrets they move cross the edge only as ciphertext, and an edge with nothing but a
 token can no longer add, recover or remove a key.
 
+**Why every moderator route is in phase 1** — every route `apps/instance/src/moderation/routes.ts`
+declares `reaches: 'moderation'`, which the table above names one by one: each is a bearer-session
+route today, and a moderator is told apart only by the device key their session names
+(`identity.ts` §`IdentityOptions.moderators`). So an edge holding a moderator's token could
+**suspend any rider** — which ends every one of that rider's sessions and refuses every one of
+their keys, the lock-out that puts revoke in phase 1, applied to anyone — approve accounts it
+registered itself in approval mode, hide display names, dismiss reports, and read other riders'
+reports and the moderation log. Sealed and signed by the moderator's device key (D-8), none of that
+is open to a token alone. The rider-facing half, `POST /v1/reports` and the blocks routes, moves
+only the rider's own report and block list and is phase 2.
+
 **Why sync is sealed in phase 1, and how that costs nothing now**, *the author's choice, put to the
 owner as D-14 Q7*: a finished job's result is a `ScreenedWriteUp` the device keeps and syncs as a
 `write-up` item (`apps/instance/src/sync/routes.ts`'s item kinds; `sync.ts`: *"Kept byte for byte:
@@ -518,9 +558,14 @@ sealed-only in the route table now means sync is sealed from the day it is wired
 version ever shipped and nothing to migrate. The cost is that sync waits for #1179. History search
 is in the table for the same reason: its answer is passages of the same write-ups and notes.
 
-**Phase 2, what is left**: the sign-in answer for a key the instance already holds (and so the
-session token), `/v1/auth/account`, the device list, the display name, the adult confirmation, the
-suspended athlete's way-out session, blocks and reports, and the room routes' HTTP side. When phase
+**Phase 2, what is left**: the sign-in answer for a key the instance already holds, `/v1/auth/account`,
+the device list, the display name, the adult confirmation, the suspended athlete's way-out session,
+a rider's own blocks and reports (`GET`, `POST` and `DELETE /v1/blocks…`, `POST /v1/reports`), and
+the room routes' HTTP side. ⚠️ **Sealing the sign-in answer does not hide the session token**: the
+token still rides in every `POST /v1/sealed`'s `Authorization` header (D-11, decided), so the edge
+reads it after phase 2 exactly as before. What phase 2 ends is the token's **usefulness** — once
+every route that reaches an athlete is sealed and device-signed, the token alone opens none of them
+— not its **visibility**. When phase
 2 is done, **every route that reaches an athlete's own data is sealed**, and the plaintext routes
 left are the ones that carry nothing personal: `/health`, `/ready`, `/source`, `/openapi.json`,
 `/licences/third-party.txt`, `/instance`, `/v1/instance/keys` and the sign-in challenge. Phase 2's
@@ -556,27 +601,83 @@ the ciphertext, the edge never sees it and cannot move it into a request of its 
 `oyl-sealed-request-v1` purpose is distinct from the four device-statement purposes, so no sign-in,
 link, recovery or erase statement verifies as a sealed request, nor the reverse.
 
-**A sealed request with no session yet** — registering, linking, recovering, asking for a recovery
-mail in phase 1, and phase 2's sign-in — cannot name a session's key. There the sealed-request
-statement is signed by **the key the inner statement adds or signs in with** (the `publicKey` of
-its `oyl-auth-v1`, `oyl-link-v1` or `oyl-recover-v1` statement), the instance requires the two to
-name the same key, and the AAD's `tokenSha256` is `null` (D-9). That proves only that whoever sent
-the request holds that key — and the edge can always seal a request of its own with a key of its
-own. **What stops it is that it has nothing to put inside**: the link code, the recovery codes and
-the mailed token now cross the edge only as ciphertext (D-7) or by mail, so an edge that never saw
-one cannot use one, and a new device's sealed `/v1/auth/link` cannot be raced by an edge that cannot
-read the code in it.
+**A sealed request with no session yet** — registering, linking and recovering in phase 1, and
+phase 2's sign-in — cannot name a session's key. There the sealed-request statement is signed by
+**the key the inner statement adds or signs in with** (the `publicKey` of its `oyl-auth-v1`,
+`oyl-link-v1` or `oyl-recover-v1` statement), the instance requires the two to name the same key,
+and the AAD's `tokenSha256` is `null` (D-9). That proves only that whoever sent the request holds
+that key — and the edge can always seal a request of its own with a key of its own. **What stops it
+is that it has nothing to put inside**: the link code, the recovery codes and the mailed token now
+cross the edge only as ciphertext (D-7), or by mail in a form no browser fetches through the edge
+(below), so an edge that never saw one cannot use one, and a new device's sealed `/v1/auth/link`
+cannot be raced by an edge that cannot read the code in it.
+
+**Asking for a recovery mail is sealed and not signed**, *the author's choice*.
+`POST /v1/auth/recover/email`'s request is `{ address }` and nothing else (`auth/routes.ts`): it
+carries no device statement, so there is no key for the sealed-request rule above to name. Its
+envelope therefore carries **no** sealed-request statement; it is the one sessionless route that
+admits one without, and D-9's dispatch admits that only for this inner path. That is safe because
+the request moves no secret to whoever sends it: the token goes to the address an athlete bound
+(`identity.ts` §`requestEmailRecovery`), the answer is `204` whether or not the address is held,
+and the edge could seal the same request itself whenever it liked. What sealing
+buys is that the edge does not learn **which address** a rider is recovering. Without a signed
+`issuedAt` it has no freshness check; the durable `enc` record (D-9) still refuses a replay of one
+envelope, and the per-address and per-client limits that bound the mail today
+(`emailPerAddress`, `perAddress`) bound a fresh one. *Rejected*: making the device sign it with the
+fresh key it will recover with, which the instance could check but not tie to anything — the token,
+not the key, is what binds the later `recover`.
+
+**The mailed token reaches only the app, never a page fetched through the edge**, *the author's
+choice*, and a constraint on whoever writes the mail. `RecoveryMailer` (`identity.ts`) is supplied
+by the operator, and the routes call what it sends a *link* (`auth/routes.ts`: *"Email a
+single-use recovery link"*, *"Follow the link mailed to a recovery address"*). If that link were an
+`https:` URL on the instance's origin — the obvious way to write one — a rider who opened it would
+send the token **through the tunnel in plaintext**, and the edge could redeem it in a sealed
+`recover` signed with a key of its own: an account takeover. So **both tokens a mailer carries —
+the recovery token and the address-confirmation token — reach the device only as text the rider
+types into the app, or as a link in a scheme the app alone handles (not `http:` or `https:`)**,
+and the app sends them only inside a sealed request (`recover`, `recovery-email/confirm`, D-7). The
+mail names no URL on the instance's origin or any other web origin. #1179 rewrites those two route
+summaries to say *code* rather than *link*, documents the rule for a mailer author in
+`docs/operating-an-instance.md`, and the app refuses to treat any `https:` URL as a recovery or
+confirmation link. ⚠️ An Android App Link is an `https:` URL and is **rejected** for this: on a
+device without the app, or where the association has not been verified, it opens in a browser and
+the browser fetches it through the edge. Nothing needs migrating: `apps/instance/src/instance.ts`
+hands the identity service no mailer today, so email recovery answers `not_found` on every running
+instance.
 
 **So, with phase 1 shipped, an edge holding nothing but a rider's bearer token cannot** start a job,
 read the masking data, the export or the synced history, mint a link code or an invite, add,
-recover or revoke a key, change the recovery address, or delete the account: every one of those is
-sealed and signed by a device key the edge does not hold. D-11 says what the token still buys it.
+recover or revoke a key, change the recovery address, delete the account, or — with a moderator's
+token — act as a moderator or read the moderator's queues: every one of those is sealed and signed
+by a device key the edge does not hold. D-11 says what the token still buys it.
 
-⚠️ **One residue, stated rather than hidden**: a recovery code or an invite that crossed the edge in
-plaintext **before** phase 1 shipped (registration's answer, a plaintext recovery or step-up) may be
-in the edge's hands. #1179 therefore adds a sealed, device-signed route that **replaces** an
-athlete's recovery codes, and the app offers it once to every athlete whose account predates the
-pin; the old codes stop working when it is used. An invite expires in 7 days on its own.
+⚠️ **One residue, stated rather than hidden: what the edge may already have done before phase 1
+shipped.** With nothing but a token, an edge could then have (a) learned a recovery code or an
+invite that crossed in plaintext (registration's answer, a plaintext recovery or step-up); (b)
+**added a device key of its own**, through the bearer-only link-code mint and a plaintext
+`/v1/auth/link` signed by its own key (`identity.ts` §`mintLinkCode`, §`link` → §`addKey`); and (c)
+**bound a recovery address of its own**, through the bearer-only `POST /v1/auth/recovery-email` and
+`/confirm`, whose confirmation token is mailed to the address the edge gave. New codes undo only
+(a). A key from (b) signs sealed requests as a genuine device key, which D-8 cannot tell from the
+rider's own; an address from (c) is enough for a sealed `recover/email` and `recover` after phase 1.
+So #1179 adds **one sealed, device-signed review**, which the app offers once to every athlete
+whose account predates the pin, and which:
+
+1. **replaces the athlete's recovery codes**, so the old ones stop working;
+2. **clears the bound recovery address** in the same request, so an address the edge bound recovers
+   nothing; the rider gives and confirms one again, sealed (D-7), if they want email recovery;
+3. **shows the device list** — read sealed, as part of the review, though the plain device list is
+   phase 2 — with each key's `addedAt` (`auth/routes.ts`, the device list's schema) and the keys
+   added before the pin marked, and **asks the rider to revoke any key they do not recognise**,
+   through the sealed revoke route (D-7).
+
+Then D-8's *"an edge with nothing but a token can no longer add, recover or remove a key"* holds for
+accounts that predate phase 1 as well, **once the rider has done the review**. ⚠️ Until they have,
+a key the edge added is a real device key: it can seal requests, do the review itself, and revoke
+the rider's own keys first. That is a lock-out the app cannot undo for the rider, and it is why the
+review is offered at the first sealed use rather than tucked away. An invite expires in 7 days on
+its own. Both the review's wording and its place are D-14 Q6's.
 
 *The author's choice*, over two alternatives:
 
@@ -599,7 +700,16 @@ pin; the old codes stop working when it is used. An invite expires in 7 days on 
   marked so and unreachable any other way; `openapi.json` (#36) documents those routes with that
   mark.
 - **The envelope** is JSON, `{ "v": 1, "keyId": "…", "enc": "<base64url>", "ct": "<base64url>" }`,
-  so the existing body-size limits and JSON parsing apply before any cryptography. **A reply** is
+  so a body-size limit and JSON parsing apply before any cryptography. ⚠️ **That limit is not
+  `config.bodyLimitBytes` unchanged** (1 MiB by default, `apps/instance/src/config.ts`
+  §`DEFAULT_BODY_LIMIT_BYTES`): `POST /v1/sync/records` already carries the original file as base64
+  inside JSON, and sealing pads that body up to its bucket (below) and base64url-encodes it again in
+  `ct`, about 4/3 × 4/3 ≈ 1.78 times the raw file. So `/v1/sealed`'s outer limit is **the inner
+  limit, plus the inner framing (method, path, statement, signature), rounded up to its padding
+  bucket, plus the 16-byte tag, times 4/3, plus the envelope's own fields**, computed from the same
+  configured limit, and checked before any cryptography; the inner limit is then applied to the
+  opened body exactly as the plaintext route applied it, so a file the plaintext route accepts is
+  accepted sealed and nothing larger. **A reply** is
   `{ "v": 1, "nonce": "<base64url>", "ct": "<base64url>" }`, `nonce` being D-2's `response_nonce`;
   a stream's first event carries the `nonce` and every event after it only its `ct`.
 - **The order of checks on the instance**, for a request that carries a bearer session: the session
@@ -607,19 +717,42 @@ pin; the old codes stop working when it is used. An invite expires in 7 days on 
   no X25519; then `keyId` (unknown or outside its overlap → plaintext `instance_key_unknown`,
   carrying nothing else); then `Open`; then the device signature (D-8); then freshness and replay;
   then the inner route. **For a sessionless sealed request** (D-8: registering, linking,
-  recovering, phase 2's sign-in), which has no session to check, what replaces that first step is a
-  **per-client-address rate limit on sessionless sealed requests**, counted before any X25519, on
-  the model of `identity.ts`'s existing per-address limiters (`perAddress`, `registrations`); the
-  inner route's own limits then apply as today. A flood from many addresses still costs one X25519
-  per request up to those limits, which is the price of a route that has no session to show.
+  recovering, asking for a recovery mail, phase 2's sign-in), which has no session to check, what
+  replaces that first step is a **per-client-address rate limit on sessionless sealed requests**,
+  counted before any X25519, on the model of `identity.ts`'s existing per-address limiters
+  (`perAddress`, `registrations`); the inner route's own limits then apply as today. A flood from
+  many addresses still costs one X25519 per request up to those limits, which is the price of a
+  route that has no session to show.
+  - ⚠️ **That limit is per rider only through `apps/instance/src/client-address.ts`.** Behind
+    `cloudflared` every request arrives from one peer, so the address is the rider's only when the
+    operator sets `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and the peer is loopback or listed in
+    `OYL_INSTANCE_TRUSTED_PROXIES` — which the home deployment does
+    (`apps/instance/deploy/home/compose.yaml`: `cf-connecting-ip`, and the tunnel container's
+    address). Without it there is one shared bucket, and one flood refuses registration, linking
+    and recovery for every rider; the operator guide says so where it documents sealing.
+  - ⚠️ **The edge writes that header**, so the limit protects the instance from the internet and
+    not from the edge, which can choose any address it likes. That costs nothing new: an edge can
+    deny service to every rider anyway, by not forwarding.
+  - **A sessionless envelope is dispatched only to the sessionless routes named here** —
+    `POST /v1/auth/session` (for a key the instance has not seen in phase 1, and any key in phase
+    2), `POST /v1/auth/link`, `POST /v1/auth/recover` and `POST /v1/auth/recover/email` — and only
+    the last of those without a sealed-request statement (D-8). Any other inner path in an envelope
+    with no `Authorization` header is refused `unauthenticated` after `Open`, sealed, so a
+    sessionless envelope can never reach a session route, nor one with a fallback.
 - **HPKE `info`** is `"oyl-sealed-v1"`. **The AAD of the request** is the RFC 8785 bytes of
   `{ "purpose": "oyl-sealed-aad-v1", "direction": "request", "instanceOrigin", "keyId",
   "tokenSha256" }`, where `tokenSha256` is the SHA-256 the instance already stores for the session,
   or `null` for a sessionless request. So a ciphertext moved to another session, another instance or
   another key does not open. **The AAD of each reply message** is the same with `"direction":
-  "response"`, the request's `enc`, the reply's `response_nonce`, and, for a stream, the event's id
-  and kind.
-- **Replay**: the signed `issuedAt` must be within **120 s** of the instance's clock, and the
+  "response"`, the request's `enc` and the reply's `response_nonce`. **A stream event's id and kind
+  travel only inside its ciphertext**, *the author's choice*: the SSE frame on the wire carries a
+  `data:` line and nothing else — no `event:` field and no `id:` field — so the edge learns no
+  event's kind (section, progress, `end`…) and no id beyond the count it can make anyway. Nothing
+  about the event needs to be known before opening it, because its position is already bound by the
+  sequence number in the AEAD nonce (D-2); so the reply AAD carries no event id or kind, and the
+  opened event's own id and kind are what the device acts on and what resume names.
+- **Replay**: the signed `issuedAt` must be within **120 s** of the instance's clock (every
+  sealed request but `recover/email`, which carries no statement, D-8), and the
   SHA-256 of `enc` is recorded, per instance, for **10 minutes**; a second request with the same
   `enc` is refused `replayed` without running anything. **The record is durable and atomic**: a
   table in the instance's SQLite database, written by the HTTP process (the one writer, ADR 0037
@@ -649,7 +782,8 @@ pin; the old codes stop working when it is used. An invite expires in 7 days on 
 | What is lost or taken | What it exposes | What is done |
 |---|---|---|
 | **A device** | Its pin is public. It holds no instance secret and no HPKE context beyond a request in flight (D-2), so **no past reply can be decrypted from it**. Whoever holds it unlocked can make sealed requests as that device, as they could make any request today | Revoke its key from another device (`identity.ts` §`revokeDevice`, #773), through the sealed, device-signed revoke route (D-7). Its signatures then fail D-8 on its next sealed request |
-| **The instance encryption key** (one private half leaks) | Every request sealed to that key **that somebody recorded**, and every reply derived from those requests (D-5's forward-secrecy note), for that key's life. ⚠️ **And, against an active edge, future requests too**: an edge holding the leaked key can withhold the successor's statement and keep serving the old one, which verifies until its `notAfter`, so a device that has **not yet** seen the successor keeps sealing to the leaked key for up to 37 days (D-5) | `operator instance-key rotate --drop-old`. A device that has seen the new statement never seals to the old one again (D-5's no-going-back rule), so against a **passive** observer devices follow at their next daily refresh. Against an edge that holds the key, the bound is the old statement's `notAfter`; to cut it short, rotate the identity key as well (next row), which only a rider told out of band can act on |
+| **A key the edge added, or a recovery address it bound, before phase 1** | Through the bearer-only link and recovery-email routes as they are today (D-8's residue): a key that signs sealed requests as a genuine device key, and an address that recovers the account by mail | The one-time sealed review (D-8): new recovery codes, the address cleared, and the device list shown with the rider asked to revoke what they do not recognise. ⚠️ Until the rider does it, that key can do the review itself and revoke the rider's keys first; the app cannot undo that lock-out for them |
+| **The instance encryption key** (one private half leaks) | Every request sealed to that key **that somebody recorded**, and every reply derived from those requests (D-5's forward-secrecy note), for that key's life. ⚠️ **And, against an active edge, future requests too**: an edge holding the leaked key can withhold the successor's statement and keep serving the old key's last one, which verifies until its `notAfter`, so a device that has **not yet** seen the successor keeps sealing to the leaked key until then: **at most 48 hours after the rotation** (D-5), because the instance signs nothing for a superseded key | `operator instance-key rotate --drop-old`. A device that has seen the new statement never seals to the old key again (D-5's no-going-back rule), so against a **passive** observer devices follow at their next daily refresh, and against an edge that holds only the leaked key no device seals to it more than 48 hours after the rotation. An edge that also holds the identity key can sign statements of its own, which is the next row |
 | **The instance identity key** | Nothing recorded. It lets whoever holds it sign an encryption key statement of their own — which every device accepts under its pin — or an endorsement of their own identity key, so the edge could intercept **future** sealed traffic | `rotate-identity --compromised`, and every device re-pins from a new card (D-6). ⚠️ **Honest limit: identity-key compromise plus an edge is a silent takeover of future sealed traffic until the rider is told out of band.** The operator's command changes nothing a device can observe, because the only channel to it is the one the attacker holds; a device learns to refuse only when the operator reaches the rider some other way and the rider scans a new card. Requiring the rider to confirm even a planned, endorsed re-pin against a new card (D-5, D-14 Q8) stops a stolen key's endorsement being followed silently; it cannot stop a stolen key's encryption statements |
 | **The operator secret** | Both private keys, wrapped in any backup, and every model key at rest (ADR 0046 D-9) | A new operator secret, `instance-key reset`, every device re-pins, every model key re-entered. Stated in the operator guide |
 | **The box itself** | **Everything**, as today: an instance decrypts what it receives to use it, holds the operator secret in its environment, and stores the masking data and job rows in clear (ADR 0046) | Nothing in this ADR protects against the operator or the box. **End-to-end means device-to-instance, not device-to-device** |
@@ -659,16 +793,23 @@ pin; the old codes stop working when it is used. An invite expires in 7 days on 
 Even with both phases shipped, the edge still sees:
 
 - **That a rider is talking to this instance**: their IP address, when, how often, and for how
-  long; the size of each sealed message to within its padding bucket (D-9); and the timing of each
-  SSE event, which leaks roughly how many sections a write-up had and how long each took.
+  long; the size of each sealed message to within its padding bucket (D-9); and the timing and
+  count of each SSE event, which leaks roughly how many sections a write-up had and how long each
+  took — though not any event's kind, which travels only inside its ciphertext (D-9).
+- **Whether a sealed request had a session**: a sessionless envelope carries no `Authorization`
+  header (D-9), so the edge can tell registering, linking, recovering and asking for a recovery
+  mail — and, in phase 2, signing in — from every other sealed request, though not which of them.
 - **The shape of each reply**: whether it is one answer or a `text/event-stream`, and how long the
   stream stays open. A job is the only sealed operation that streams, so **the edge can tell a job
   from a key, masking or sync request** by its response, though not which job or what it says.
   "All look alike" in D-9 is true of the request only.
 - **The bearer session token**, in the `Authorization` header, **decided: it stays outside the
-  ciphertext**. Checking it before any Diffie–Hellman is what keeps an unauthenticated flood cheap
-  (D-9), and while phase 1's plaintext routes exist it travels in their headers regardless. What
-  makes the edge's copy useless **on sealed routes** is D-8's signature. ⚠️ **On the routes still
+  ciphertext**, in every phase. Checking it before any Diffie–Hellman is what keeps an
+  unauthenticated flood cheap (D-9), so it rides in the header of every `POST /v1/sealed` as well as
+  of every plaintext route. ⚠️ **Phase 2 does not make it secret**: sealing the sign-in answer hides
+  the token in that one reply, and the edge reads the same token in the next sealed request's header.
+  What makes the edge's copy useless **on sealed routes** is D-8's signature, and what phase 2 ends
+  is its usefulness, not its visibility. ⚠️ **On the routes still
   plaintext it is a full credential, and its real size is this**: until phase 2 the edge can call
   them as the rider, at any time and not only while it watches — read the account summary and the
   device list, change the display name, confirm adulthood, take the suspended athlete's way-out
@@ -677,10 +818,15 @@ Even with both phases shipped, the edge still sees:
   left plaintext, the token would have let the edge read the rider's **whole stored history** (not
   only what passed while it watched), **write** to it (push items, ingest rides) and **delete** from
   it (tombstones); and had the link and recovery routes been left bearer-only, it would have let the
-  edge **add a device of its own** (D-7, D-8). Phase 1 seals all of those for that reason. Phase 2
-  closes the rest.
+  edge **add a device of its own** (D-7, D-8); and had the moderator routes been left plaintext, a
+  moderator's token would have let the edge **suspend any rider** (ending their sessions and
+  refusing their keys), lift a suspension, hide display names, approve or refuse registrations —
+  its own included — dismiss reports, and read the report queue, the registrations awaiting
+  approval, the suspended list and the moderation log (D-7). Phase 1 seals all of those for that
+  reason. Phase 2 closes the rest.
 - **Every plaintext route's whole content** until phase 2: the sign-in answer for an existing key
-  (and so the session token itself), the account summary, the device list and the display name.
+  (and so the session token itself, which it would read in the next request's header anyway), the
+  account summary, the device list, the display name, and a rider's own blocks and reports.
 - **Nothing about a web build whose JavaScript reaches the rider through an edge that also sees this
   traffic** is protected at all, because that edge could serve different code (Context) — and that
   is true whether the build is served by the instance through the tunnel, by Cloudflare Pages, or by
@@ -739,10 +885,14 @@ answered.
    key is accepted **only sealed and only from the home network** (D-13): no plaintext key route
    survives phase 1 on the home network either, because D-7 keeps no plaintext twin. That costs
    nothing but convenience.
-3. **Is the encryption key's rotation of 30 days, with a 7-day overlap, acceptable?** Each statement
-   is then valid for 37 days (D-5), which is also the longest an edge holding a leaked encryption
-   key can keep an unrefreshed device sealing to it (D-10). Shorter bounds both; longer means fewer
-   statements to fetch. **Recommended: 30 and 7.**
+3. **Are a 30-day encryption key, kept 7 days after its successor, and 48-hour statements re-signed
+   daily acceptable?** The key's life (about 37 days) bounds what a leaked key exposes of recorded
+   traffic (D-5's forward-secrecy note); the statement's 48 hours bound how long an edge holding a
+   leaked key, and not the identity key, can keep an unrefreshed device sealing to it after a
+   rotation (D-10). Shorter statements cost a signature more often and a device that has been
+   offline a re-read before it seals; one statement for the key's whole life, the alternative
+   D-5 rejects, would let that edge hold a device for up to 37 days. **Recommended: 30 days, 7
+   days and 48 hours.**
 4. **Should a later ADR admit sealed camera pictures through the tunnel?** **Recommended: no, not
    now.** ADR 0029 D-6 and the Q3 ruling stand; a picture's size and timing leak more than text's,
    and the home network or an overlay already serve the case.
@@ -751,8 +901,10 @@ answered.
    revisited if a room ever carries anything personal. The rooms' HTTP routes, whose ticket a token
    can mint (D-11), are phase 2.
 6. **The rider-facing sentences**: the mismatch refusal (D-6), the "this needs the instance's card"
-   notice, the "confirm the new card" notice of a planned rotation (D-5), the replace-your-recovery-
-   codes offer (D-8), and the web-build notice (D-11) are **draft wording** for the owner to
+   notice, the "confirm the new card" notice of a planned rotation (D-5), the one-time account
+   review that replaces the recovery codes, clears the recovery address and asks the rider to
+   revoke keys they do not recognise (D-8), the mail's "type this code into the app" text (D-8),
+   and the web-build notice (D-11) are **draft wording** for the owner to
    approve, in #1179's build, as `apps/web`'s other new text is (#880's convention).
    **Recommended: approve them in the build's pull request**, not here, where they would be read
    without the screens they sit on.
@@ -782,7 +934,7 @@ answered.
 - **ADR 0046's analysis can ship**: #1101's masking sync and #1095's job stream are unblocked by
   phase 1, and a pasted key can be set from the app away from home once the owner answers Q2.
 - **Cloudflare sees ciphertext for the payloads the owner named**, for every route that adds,
-  recovers or removes a device key, and for the synced history; and, once phase 2 ships, for every
+  recovers or removes a device key, for every moderator route, and for the synced history; and, once phase 2 ships, for every
   route that carries an athlete's data.
 - **The instance can be moved behind any proxy** without the proxy being trusted with content.
 
@@ -797,6 +949,8 @@ answered.
   from a screen. A rider who only ever typed an address cannot use the phase 1 features, or
   register through the tunnel, until they have one (D-6, Q1). A planned identity rotation asks
   every rider for a new card (D-5, Q8).
+- **An account that predates phase 1 needs a one-time review** by its rider (D-8), because what an
+  edge did with a token before then is not undone by sealing.
 - **Sync waits for #1179** (D-7, Q7), and linking, recovery and device revocation change shape:
   each becomes sealed and device-signed, which #773's and #772's existing tests must follow.
 - **One Ed25519 signature and one X25519 per sealed request** on the device, and one X25519 and one
@@ -805,7 +959,8 @@ answered.
   measures it.
 - **No forward secrecy against the instance's encryption key** in `base` mode, bounded by rotation
   and deletion to about 37 days (D-5); against an active edge holding a leaked encryption key, an
-  unrefreshed device can be held on it for up to a statement's 37-day life (D-10).
+  unrefreshed device can be held on it for up to 48 hours after the rotation (D-10). The instance
+  signs one statement a day to keep that bound (D-5).
 - **A stolen identity key plus the edge is a silent takeover of future sealed traffic until the
   rider is told out of band** (D-10).
 - **Metadata remains** (D-11): who, when, how much, which replies are jobs, and the bearer token,
@@ -816,11 +971,12 @@ answered.
 
 | Issue | Constraint |
 |---|---|
-| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Builds phase 1: the `packages/domain` HPKE module and its port, both WebCrypto implementations, D-3's vector gate and mutations, the key table and its migration, the operator `instance-key` commands, `/v1/instance/keys`, `/v1/sealed` and the route mark, the sealed-only mark on every route D-7's table names (the identity routes, the sync routes and history search included), the sessionless rule of D-8 and D-9, the pin and the card in the app, the durable replay record, the sealed route that replaces an athlete's recovery codes (D-8), and the rewrite of `auth/crypto.ts`'s header. Files phase 2 as its own issue |
+| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Builds phase 1: the `packages/domain` HPKE module and its port, both WebCrypto implementations, D-3's vector gate and mutations, the key table and its migration, the operator `instance-key` commands, the daily re-signing of 48-hour statements and the rotation `operator restore` ends with (D-5), `/v1/instance/keys`, `/v1/sealed` and the route mark, the sealed-only mark on every route D-7's table names (the identity routes, every `/v1/moderation/*` route, the sync routes and history search included), the sessionless rule of D-8 and D-9 and its dispatch to the named routes only, the outer body limit of D-9, the pin and the card in the app, the durable replay record, the one-time sealed account review (D-8), the mail rule — a code or a non-web app link, never an `https:` URL — in the two route summaries and `docs/operating-an-instance.md` (D-8), and the rewrite of `auth/crypto.ts`'s header. Files phase 2 as its own issue |
 | #1097 | The operator secret it builds also wraps the instance's keys (D-5); its in-app key route is sealed-only (D-7, D-13) |
 | #1095 | Its routes and SSE stream are sealed-only, with D-9's sequence, `end` event and resume |
 | #1101 | Its push and pull are sealed-only; the account export becomes sealed in the same change (D-7) |
-| #772, #773 | Registration, link-code minting, linking, recovery, recovery-email and device revocation are sealed and device-signed (D-7, D-8); the link code screen carries the card (D-6) |
+| #772, #773 | Registration, link-code minting, linking, recovery, recovery-email and device revocation are sealed and device-signed (D-7, D-8); the link code screen carries the card (D-6); a recovery or confirmation mail carries a code or a non-web app link, never an `https:` URL (D-8) |
+| #83 (moderation) | Every `/v1/moderation/*` route is sealed-only and signed by the moderator's device key (D-7); the rider's own blocks and reports are phase 2 |
 | #776, #881, #37, #38, #777 | Phase 1: every sync route is sealed-only from the day `instance.ts` hands the handler a sync, so sync is never served in plaintext (D-7, Q7) |
 | #835 | `POST /v1/history/search` is sealed-only (D-7) |
 | `apps/web/src/privacy/no-network.test.ts` | Unchanged: sealing goes through `instance-transport.ts`, the one module, and adds no network call |
