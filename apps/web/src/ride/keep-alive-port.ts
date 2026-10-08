@@ -13,7 +13,7 @@
  *
  * ## Why this is a `*-port.ts`
  *
- * CLAUDE.md §4j: the suffix makes both methods `WIRE003` targets. Since #647
+ * docs/agents/wiring-gate.md §4j: the suffix makes both methods `WIRE003` targets. Since #647
  * the controller calls `keepRideAlive` in ONE place, `askToKeepAlive`, which
  * `syncKeepAlive`, a granted notification (#526) and a sensor pairing mid-ride
  * all go through — so deleting that call is a red `WIRE003`. ⚠️ Deleting one

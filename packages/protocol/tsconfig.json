@@ -1,6 +1,6 @@
 {
   // `lib` is ES2024 and nothing else, and `types` is empty — packages/domain's
-  // and packages/physics' closure, for the reason CLAUDE.md §4d gives: the
+  // and packages/physics' closure, for the reason docs/agents/lint-boundaries.md §4d gives: the
   // same bytes are decoded in a browser, in the Android WebView and in a room
   // (`apps/instance`, under Node or `workerd`), so nothing here may name a
   // platform. With `types: []`, `WebSocket`, `fetch`, `TextEncoder`, `process`
@@ -11,7 +11,7 @@
   // authoring-time directory that needs a wider library, so the main tsconfig
   // IS the one that enforces. The closure is conditional on nothing here
   // pulling `/// <reference types="node" />` back in, which is why
-  // `vitest.config.ts` imports nothing (CLAUDE.md §4d).
+  // `vitest.config.ts` imports nothing (docs/agents/lint-boundaries.md §4d).
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2024"],

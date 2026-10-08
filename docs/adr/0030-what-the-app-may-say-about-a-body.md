@@ -668,3 +668,32 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   frontal-plane rule survive as a runtime screen on model text: a write-up that fails is withheld
   whole, never redacted. D-7 is untouched, because nothing on that path is live. ADR 0035 D-2 is
   the table of what applies to which text.
+- **2026-10-04** — **D-3 and D-5 are superseded in part by
+  [ADR 0045](0045-fit-from-one-side-camera.md)** (#1059), on the owner's rulings of 2026-10-03
+  (ruling 3 of epic [#1055](https://github.com/openzigs/onyourleft/issues/1055), and the FDA
+  condition-6 ruling quoted in ADR 0045's Context). This entry records where the decisions went; it
+  does not make them, because an amendment cannot reverse one
+  ([ADR 0013](0013-adr-amendments.md)). What changes:
+  - **D-3's first sentence** is superseded for exactly **four sagittal angles** (knee at bottom dead
+    centre, hip at top dead centre, elbow and trunk at bottom dead centre), rendered as numbers only
+    on **one surface**, the Fit check section of a saved ride's page, each rounded and with R8's
+    caveat in the same sentence (ADR 0045 D-3, D-7, D-8). Everywhere else D-3 stands as amended on 2026-09-28, and
+    a limb angle, a segment length and a body dimension are still never rendered anywhere. **R1** is
+    relaxed for those four values on that surface only.
+  - **D-3's second reason, condition 6**, is not argued away: the owner accepts the risk, framed
+    (ADR 0045 D-11).
+  - **D-5** is superseded for its **product boundary**: the program offers a *fit check*. **Its
+    equipment half is superseded for a model's write-up only** (ADR 0035), on the owner's ruling of
+    2026-10-04, *"Allow advice too"*: a write-up may name a component and suggest an equipment or
+    position change (ADR 0045 D-10). **For everything the app itself writes, the Fit check section
+    included, the equipment half is untouched** (no size, no component, no component position, no
+    direction to move one), and the verdict clause is untouched everywhere (no position or fit is
+    called correct, optimal, good or bad; ADR 0045 adopts no verdict, signed or unsigned).
+  - **D-8 stands**, as amended on 2026-09-28, with its **first bullet narrowed, not deleted**:
+    ADR 0045 D-7 lifts its three degree rules in one file, named by exact path, and nowhere else.
+    The frontal-plane rule is not narrowed anywhere.
+  - **What stands exactly as written**: D-1, **D-4** (nothing in the frontal plane, as a number, a
+    word or a picture), D-6 (kept explicitly by ADR 0045 D-9) and D-7. **D-2 stands as amended on
+    2026-09-28** (R2 to R10; **R5 and R6 untouched**, **R4 and R7's non-medical half relaxed for a
+    model's write-up only** as above, and R1 relaxed only as above). The body above
+    is not edited.

@@ -6,7 +6,7 @@
  *
  * `check:wiring` sees that the port's methods have a production caller, and
  * nothing more: the page is handed the port as an OPTIONAL prop, and a
- * `main.tsx` that stopped passing it would be green there (CLAUDE.md §4j
+ * `main.tsx` that stopped passing it would be green there (docs/agents/wiring-gate.md §4j
  * §Limits). So this renders the real `AppShell` at the real detail route,
  * handed a port built from the same functions with the same arguments as
  * `main.tsx` §`buildRideAnalysis` — `riderModelStepSource` over a scripted
@@ -40,7 +40,7 @@ import { modelServer, REPLY_MARKER, STILL_CLOCK, type ModelServer } from './mode
 import { createRideAnalysis } from './ride-analysis';
 import type { RideAnalysisPort } from './ride-analysis-port';
 import { ASK_LABEL, WRITE_UP_HEADING, WRITE_UP_SAVED } from './RideWriteUpControl';
-import { RUN_FAILURE_TEXT } from './runner';
+import { RUN_FAILURE_TEXT } from '@onyourleft/analysis';
 import {
   WRITE_UP_EARLIER,
   WRITE_UP_FRAMING_LEAD,

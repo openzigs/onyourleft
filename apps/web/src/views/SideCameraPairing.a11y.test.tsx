@@ -32,6 +32,7 @@ import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../
 
 import { SideCameraControl } from './SideCameraControl';
 import { SideCameraView } from './SideCameraView';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -85,6 +86,7 @@ function setUp() {
 function agreedController(codePixels?: () => ReturnType<typeof photographedCode>) {
   const camera = scriptedCamera(codePixels === undefined ? {} : { codePixels });
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
   });

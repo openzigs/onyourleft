@@ -265,7 +265,18 @@ function statusOnly(preference: AnnouncementPreference): AnnouncementPreference 
   };
 }
 
-/** The readings a sentence may be built from. Everything else is not announceable. */
+/**
+ * The readings a sentence may be built from. Everything else is not announceable.
+ *
+ * ⚠️ **The moving time (`fields.ts` §`MOVING_TIME_KEY`) is deliberately NOT
+ * here — #1111's decision, recorded where it would be reversed.** It is a
+ * reading, not an event: it changes every second by exactly a second, so it
+ * has no threshold that means anything to cross, and a sentence on a cadence
+ * would spend the one window (#396) a climb or a fault may need. A rider who
+ * wants it reads the field. Making it speakable is a #395-shaped decision —
+ * a rank, a trigger and a "never" setting — not a key added to this list;
+ * `announce.test.ts` §"#1111" goes red if it is added on its own.
+ */
 export const ANNOUNCEABLE_READINGS: readonly string[] = ['power', 'remaining'];
 
 export interface AnnounceInput {

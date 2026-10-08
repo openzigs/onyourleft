@@ -297,7 +297,7 @@ describe('a reconnect that supplies a different service set', () => {
     // `queue.run` promise while the operation it was running carries on to its
     // own conclusion, so `connect` rejecting is not the end of the work — and a
     // test that asserted here would be green whatever the abandoned body went on
-    // to write. That is CLAUDE.md §5's *wrong time* in its exact form, and
+    // to write. That is docs/agents/quality-gate.md §5's *wrong time* in its exact form, and
     // without these lines the mutation that applies the resolved set before the
     // link-dropped check turns nothing red.
     await settle();
@@ -474,7 +474,7 @@ describe('trainer-control, which is a safety claim and not a request', () => {
   it('resolves a service named twice in one link exactly once', async () => {
     // The memo at `transport.ts:616`. The #152 review probed it: deleting the
     // lookup left all 678 sensors tests green, so a new code path shipped with
-    // nothing proving it — CLAUDE.md §5 exactly.
+    // nothing proving it — docs/agents/quality-gate.md §5 exactly.
     //
     // FTMS is the case the memo exists for: it is named once by its measurement
     // profile and again by the control point, so an unmemoised link asks the

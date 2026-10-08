@@ -5,7 +5,7 @@
  *
  * The compile-time guarantee below arrived with the workspace scaffold in #23,
  * moved from `formatSpeed` to `formatSpeedValue` in #143, and moves here with
- * #238. It is kept rather than dropped because CLAUDE.md §5 is explicit that
+ * #238. It is kept rather than dropped because docs/agents/quality-gate.md §5 is explicit that
  * such a guarantee only holds while its absence breaks the build, and this is
  * still the function on the path a sensor reading takes to the screen.
  */
@@ -231,7 +231,7 @@ describe('formatMass (#325, the tier ADR 0020 D-1 reserved and did not ship)', (
   });
 
   it('refuses a raw number at the type, which is what stops pounds being read as kilograms', () => {
-    // CLAUDE.md §5's compile-time guarantee, mutation-tested the way that
+    // docs/agents/quality-gate.md §5's compile-time guarantee, mutation-tested the way that
     // section prescribes: widen `formatMass`'s parameter to `number` and this
     // file fails to compile with TS2578, an unused '@ts-expect-error'.
     //

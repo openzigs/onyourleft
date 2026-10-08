@@ -36,14 +36,14 @@
  * Today that distinction is the whole reason this gate can be strict without
  * being a lie: `packages/domain`, `fit`, `physics` and `sensors` have **zero**
  * production dependencies, `store` has one (`dexie`, Apache-2.0), and
- * `apps/web` has 28, all permissive. Every one of the licences CLAUDE.md §3
+ * `apps/web` has 28, all permissive. Every one of the licences docs/agents/licence-boundary.md §3
  * listed as "not ruled on yet" reaches every package **only** through Vitest.
  *
  * ## Where the closures come from, and the probe that does not work
  *
  * From `pnpm licenses list --json --filter <pkg> [--prod]`, which is pnpm's
  * own resolution of its own lockfile. Not from a hand-rolled walk of
- * `node_modules`, and not from `require.resolve`: CLAUDE.md §3 records that a
+ * `node_modules`, and not from `require.resolve`: docs/agents/licence-boundary.md §3 records that a
  * clean `require.resolve` probe "is not evidence of anything", because under
  * pnpm's isolated `node_modules` it returns *not resolvable* for every
  * transitive dependency — including ones that genuinely do reach the package.
@@ -102,7 +102,7 @@ const POLICY = {
   /**
    * Permissive. No obligation that survives into a distributed artefact beyond
    * attribution, so these pass everywhere, in both closures, under both paths.
-   * This is CLAUDE.md §3's list verbatim.
+   * This is docs/agents/licence-boundary.md §3's list verbatim.
    */
   permissive: ['MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'ISC'],
 
@@ -122,7 +122,7 @@ const POLICY = {
    * own LICENSE does not describe.
    *
    * ⚠️ `Unlicense` is here rather than in `permissive` above although it grants
-   * more than MIT does. `permissive` is CLAUDE.md §3's quotable list verbatim
+   * more than MIT does. `permissive` is docs/agents/licence-boundary.md §3's quotable list verbatim
    * and stays that way; ADR 0016 D-1 explains the choice.
    */
   weak: ['MPL-2.0', 'BlueOak-1.0.0', 'CC0-1.0', 'MIT-0', '0BSD', 'Unlicense'],
@@ -137,7 +137,7 @@ const POLICY = {
    *
    * ⚠️ Forbidden under `packages/` in **both** closures, deliberately. That is
    * stricter than the distributed-artefact argument alone would require, and
-   * it is CLAUDE.md §3 verbatim: "A GPL or AGPL dependency anywhere under
+   * it is docs/agents/licence-boundary.md §3 verbatim: "A GPL or AGPL dependency anywhere under
    * `packages/` fails CI. If a package needs one, the code moves to `apps/` or
    * the dependency is replaced. There is no third option and no exemption."
    * ADR 0015 D-3 keeps that as it stands rather than relaxing it.

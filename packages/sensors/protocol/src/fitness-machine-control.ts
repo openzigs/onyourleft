@@ -757,7 +757,7 @@ export interface TrainerControl {
    * Let the trainer go at the end of a ride, a workout or an ERG session — the
    * one place in the program that decides what a release sends (#372).
    *
-   * ⚠️ **Named `letGo` rather than `release` on purpose.** CLAUDE.md §4j's
+   * ⚠️ **Named `letGo` rather than `release` on purpose.** docs/agents/wiring-gate.md §4j's
    * `WIRE003` credits a call by member name, and production already calls a
    * `release()` on the screen wake lock and the map protocol — so a method
    * called `release` stayed green in that gate with every one of its own

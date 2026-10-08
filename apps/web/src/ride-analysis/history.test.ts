@@ -45,16 +45,16 @@ import {
   type HistorySource,
   type HistoryTransport,
   type RetrievedHistory,
-} from './history';
+} from '@onyourleft/analysis';
 import {
   modelServer,
   STILL_CLOCK,
   type ModelServer,
   type ModelServerRequest,
 } from './model-server-testing';
-import type { ModelStepPort } from './model-step-port';
+import type { ModelStepPort } from '@onyourleft/analysis';
 import { createRideAnalysis, HISTORY_NOTICE_TEXT, type RideAnalysisOptions } from './ride-analysis';
-import { CURRENT_ANALYSIS_TEMPLATE } from './template';
+import { CURRENT_ANALYSIS_TEMPLATE } from '@onyourleft/analysis';
 
 const LIMITS = { limit: 6, characters: 5_400 };
 

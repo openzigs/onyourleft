@@ -102,6 +102,14 @@ export interface InstanceCallOptions {
    * {@link MAXIMUM_ROOM_ROUTE_ANSWER_BYTES}.
    */
   readonly maximumAnswerBytes?: number;
+  /**
+   * A query string, as names and values (#961: a moderators' list's `limit`
+   * and `cursor`). Encoded here with `URLSearchParams` and appended AFTER the
+   * path has passed {@link isPlainPath}, so no value — a cursor the instance
+   * wrote, say — can reach the path: `?`, `#`, `/` and `%` in it are encoded.
+   * A path that carries a `?` of its own is still refused.
+   */
+  readonly query?: Readonly<Record<string, string>>;
 }
 
 /** One instance, reached over HTTP. */
@@ -199,9 +207,11 @@ export function instanceHttp(origin: string, send?: InstanceSend): InstanceHttp 
       const headers: Record<string, string> = { accept: 'application/json' };
       if (options.token !== undefined) headers.authorization = `Bearer ${options.token}`;
       if (options.body !== undefined) headers['content-type'] = 'application/json';
+      const query =
+        options.query === undefined ? '' : new URLSearchParams(options.query).toString();
       let response: Response;
       try {
-        response = await sender(`${origin}${path}`, {
+        response = await sender(`${origin}${path}${query === '' ? '' : `?${query}`}`, {
           method,
           headers,
           ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),

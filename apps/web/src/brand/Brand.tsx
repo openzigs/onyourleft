@@ -26,12 +26,42 @@
  * letters sit on its own white sticker in both palettes; what differs is that
  * the light variant is laid on a soft shadow of its outline, so the white
  * sticker has an edge on the light palette's white canvas.
+ *
+ * ## The full logo is ONE picture, chosen by palette — #972, #1136
+ *
+ * The wordmark keeps the two-picture switch above: it is outside the view
+ * that suspends (below) and its two files are 48 KB together. The full logo's
+ * two are about 490 KB together, and About used to fetch both on every first
+ * visit to draw one. So {@link FullLogo} renders ONE `<img>`, whose source is
+ * the picture for the palette in force read from `data-theme` through
+ * `design/theme-selection.ts` §`watchDocumentTheme` — the same attribute
+ * `theme.css` keys on, so the picture still cannot disagree with the page,
+ * and a change of palette (Settings, the device, another tab) swaps the
+ * source. ⚠️ Both files are still PRECACHED, deliberately: a rider can change
+ * palette offline (Settings, or *Match this device* at dusk), and a picture
+ * that was never fetched would then be missing from an About page that
+ * otherwise works offline. What #972 bought is the bytes a visit fetches, not
+ * the bytes an install caches.
+ *
+ * ⚠️ **It is `loading="lazy"`, and that is what lets About paint without it**
+ * (#1136). React 19.3 holds the commit of a transition for an `<img>` inside a
+ * `<ViewTransition>` (every view is, #945) until the picture has loaded or
+ * about 800 ms have passed — a "suspensey" image — unless it has an `onLoad`
+ * or `loading="lazy"` (`react-dom` §`maySuspendCommit`). Without it a rider on
+ * a slow device or network saw "Loading this page…" under About's heading
+ * while a decorative picture loaded. `width` and `height` are the picture's
+ * own, so the box is reserved before it arrives and nothing moves when it
+ * does. `browser/logo.browser.spec.ts` holds the page to it with the logo's
+ * request held back, against a control that is the old markup.
  */
 
-import type { JSX } from 'react';
+import { useSyncExternalStore, type JSX } from 'react';
 
-import logoDark from './logo-dark.png';
-import logoLight from './logo-light.png';
+import { documentTheme, watchDocumentTheme } from '../design/theme-selection';
+import type { Theme } from '../design/tokens';
+
+import logoDark from './logo-dark.webp';
+import logoLight from './logo-light.webp';
 import wordmarkDark from './wordmark-dark.png';
 import wordmarkLight from './wordmark-light.png';
 
@@ -78,15 +108,54 @@ export function Wordmark(props: { readonly text: string }): JSX.Element {
 /** The words of the full logo: the name, and nothing else (the owner dropped the tagline). */
 export const FULL_LOGO_TEXT = 'On Your Left';
 
+/** One picture of the full logo: its file and its own size in pixels. */
+export interface LogoPicture {
+  readonly src: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The full logo's picture for each palette. The sizes are the files' own,
+ * which `Brand.test.tsx` reads back out of each file's VP8L header.
+ *
+ * Both are LOSSLESS WebP since #972 — about a third smaller than the PNGs
+ * they replaced, and the same pixels. Every browser this app supports decodes
+ * WebP: Chrome and the Android System WebView since well before anything here
+ * runs (Web Bluetooth needs Chrome 56; WebP is in Chrome 32), Safari 14 (on
+ * macOS 11 and iOS 14 and later) and
+ * Firefox 65. An engine that could not would show nothing where the logo is,
+ * and lose no words: the name is the visually hidden text beside it.
+ */
+export const FULL_LOGO_PICTURES: Readonly<Record<Theme, LogoPicture>> = {
+  light: { src: logoLight, width: 512, height: 412 },
+  dark: { src: logoDark, width: 512, height: 408 },
+};
+
+function subscribeToDocumentTheme(onChange: () => void): () => void {
+  return watchDocumentTheme(document, onChange);
+}
+
+function readDocumentTheme(): Theme {
+  return documentTheme(document);
+}
+
 /** The full logo — the emblem, the wordmark and its sticker outline — as About shows it. */
 export function FullLogo(): JSX.Element {
+  const picture =
+    FULL_LOGO_PICTURES[useSyncExternalStore(subscribeToDocumentTheme, readDocumentTheme)];
   return (
     <p className="oyl-brand-logo">
-      <BrandPicture
-        text={FULL_LOGO_TEXT}
-        light={logoLight}
-        dark={logoDark}
+      <span className="oyl-visually-hidden">{FULL_LOGO_TEXT}</span>
+      <img
         className="oyl-brand-logo__image"
+        src={picture.src}
+        width={picture.width}
+        height={picture.height}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        draggable={false}
       />
     </p>
   );

@@ -13,7 +13,7 @@
  *
  * ## Why this is a `*-port.ts`, and what the suffix buys
  *
- * CLAUDE.md §4j: `check:wiring` watches `apps/web/src/game/`,
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches `apps/web/src/game/`,
  * `apps/web/src/ride/`, `apps/web/src/offline/` and **every `*-port.ts` under
  * `apps/`**. A camera module in a directory of its own would be in none of the
  * three, so a correct, unit-tested, typechecked capture pipeline that nothing
@@ -48,7 +48,7 @@
  * ## Why the interface is here and the Android half is not
  *
  * `apps/web` depends on `@onyourleft/mobile`, so `apps/mobile` cannot depend
- * back without a workspace cycle — and CLAUDE.md §4h's rule is that the split
+ * back without a workspace cycle — and docs/agents/game.md §4h's rule is that the split
  * is *by capability, not by folder*: `apps/mobile/capacitor.config.ts` sets
  * `webDir: '../web/dist'`, so the shell ships **this** bundle and a capture
  * pipeline written under `apps/mobile/src` would typecheck, test green and

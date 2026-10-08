@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **The live pose outline, as lines and points to draw over the picture it
+ * came from** — [#1061](https://github.com/openzigs/onyourleft/issues/1061),
+ * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-9.
+ *
+ * In picture HEIGHTS across and down, the unit `framing.ts` §`FRAMING_GUIDE`
+ * and §`referenceOutline` are in, so the guide, the ghost and this outline are
+ * drawn in one `viewBox` of `aspect × 1` and none is stretched.
+ *
+ * ⚠️ **Drawing, not measuring.** It joins the near side's landmarks the model
+ * reported, as the model reported them: no angle, no length, no verdict (D-9),
+ * and nothing across the rider — every bone joins two points on the near side,
+ * so no line is in the frontal plane (ADR 0030 D-4). A landmark the model did
+ * not keep leaves a gap rather than a line to somewhere invented.
+ */
+
+import type { OutlineSegment } from './framing';
+import type { SidePose, SidePoseLandmark } from './side-analysis-port';
+
+/** The bones drawn, head to foot and then shoulder to hand: all on the near side. */
+export const LIVE_OUTLINE_BONES: readonly (readonly [SidePoseLandmark, SidePoseLandmark])[] = [
+  ['ear', 'shoulder'],
+  ['shoulder', 'hip'],
+  ['hip', 'knee'],
+  ['knee', 'ankle'],
+  ['ankle', 'heel'],
+  ['heel', 'toe'],
+  ['shoulder', 'elbow'],
+  ['elbow', 'wrist'],
+];
+
+/** One joint of the outline, in picture heights. */
+export interface OutlinePoint {
+  readonly name: SidePoseLandmark;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** The outline of `pose`, drawn over a picture `aspect` wide and 1 high. */
+export function liveOutline(
+  pose: SidePose,
+  aspect: number,
+): { readonly bones: readonly OutlineSegment[]; readonly joints: readonly OutlinePoint[] } {
+  const joints = pose.landmarks.map((mark) => ({
+    name: mark.name,
+    x: mark.x * aspect,
+    y: mark.y,
+  }));
+  const at = new Map(joints.map((joint) => [joint.name, joint]));
+  const bones: OutlineSegment[] = [];
+  for (const [from, to] of LIVE_OUTLINE_BONES) {
+    const start = at.get(from);
+    const end = at.get(to);
+    if (start !== undefined && end !== undefined) {
+      bones.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y });
+    }
+  }
+  return { bones, joints };
+}

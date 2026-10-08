@@ -7,7 +7,7 @@
  *
  * `open()` must answer a NEW store instance over the SAME storage each time it
  * is called. Every read here goes through a fresh instance, never the one that
- * wrote (`CLAUDE.md` §5), so an implementation that kept its blobs in the
+ * wrote (`docs/agents/quality-gate.md` §5), so an implementation that kept its blobs in the
  * port object would fail.
  *
  * Test support, never shipped: nothing but a test imports it.

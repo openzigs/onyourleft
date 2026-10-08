@@ -18,7 +18,7 @@
  *
  * #654's first pass found the Activities screen laid out 447 px wide inside a
  * 320 px phone and Credits 595 px wide, and **no gate looked**: jsdom performs
- * no layout (CLAUDE.md §4e), and the only 320 px check in the browser gate
+ * no layout (docs/agents/accessibility.md §4e), and the only 320 px check in the browser gate
  * measured the shell harness, whose views are handed no ports and so render
  * no table at all. This page is where every route is laid out by a real engine,
  * with the data that makes a route wide.
@@ -111,8 +111,19 @@ import {
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
 
-/** How long the DOM must be still before a route counts as settled. */
-const QUIET_MS = 250;
+/**
+ * How long the DOM must be still before a route counts as settled.
+ *
+ * 100 ms since #1137 (it was 250), on the owner's ruling of 2026-10-05 to try
+ * it and keep it only if the flaky rate does not rise; PR #1138 records the
+ * measurement, under CPU load locally and on the runner (CI run 37288932952).
+ * Every route visit pays it at least once, so it is about 40 % of the case
+ * time of the walks on this page. What guards the shapes that resolved too
+ * early before is not this number: {@link untilViewShown} (a Suspense
+ * fallback is not a shown view) and {@link viewTransitionsFinished} (a fade's
+ * still DOM is not a settled one).
+ */
+const QUIET_MS = 100;
 /** The most a route is waited for, first for its `h1` and then for quiet. */
 const PATIENCE_MS = 10_000;
 
@@ -220,6 +231,11 @@ export interface ReflowMeasurement {
    * walk began (#683's review).
    */
   readonly errors: readonly string[];
+  /**
+   * The route's `h1` came, its view was on the page rather than its `Suspense`
+   * fallback (#1132), and the DOM then went still — each within
+   * {@link PATIENCE_MS}.
+   */
   readonly settledWithinPatience: boolean;
   /**
    * The first control in `main`, in document order, that is laid out — #666.
@@ -524,14 +540,25 @@ async function buildOnWorkouts(): Promise<void> {
   if (chart === null || chart === undefined) {
     throw new Error('the builder holds blocks and drew no block chart');
   }
-  // `&chart=above` — #1050's control: the chart put back between the block
-  // list and the Save form, where #1043 drew it.
-  if (new URLSearchParams(window.location.search).get('chart') === 'above') {
+  const query = new URLSearchParams(window.location.search);
+  // `&save=below` — #1087's control: the Save form put back after the block
+  // list, between it and the chart, where #1050 left it.
+  if (query.get('save') === 'below') {
     const save = document.querySelector('form[aria-label="Save this workout"]');
-    if (save === null) {
-      throw new Error('the builder has no Save form to put the chart above');
+    const list = form.closest('.oyl-sections')?.querySelector('ol');
+    if (save === null || list === null || list === undefined) {
+      throw new Error('the builder has no Save form or block list to put it after');
     }
-    save.before(chart);
+    list.after(save);
+  }
+  // `&blocks=nowrap` — #1087's reflow control: every block's line kept on one
+  // line, which the reflow walk must find scrolling the page sideways at
+  // 320×256, or the walk never laid the block list out.
+  if (query.get('blocks') === 'nowrap') {
+    for (const item of form.closest('.oyl-sections')?.querySelectorAll<HTMLElement>('ol > li') ??
+      []) {
+      item.style.whiteSpace = 'nowrap';
+    }
   }
 }
 
@@ -581,6 +608,40 @@ async function untilHeading(title: string): Promise<boolean> {
   const deadline = performance.now() + PATIENCE_MS;
   while (performance.now() < deadline) {
     if (document.querySelector('h1')?.textContent === title) {
+      return true;
+    }
+    await nextFrame();
+  }
+  return false;
+}
+
+/**
+ * Resolve once `main` holds the route's view and not its `Suspense` fallback,
+ * or at the deadline — #1132.
+ *
+ * ⚠️ The groups are preloaded here, so a view's chunk is in memory, and the
+ * view can STILL suspend on its first visit: React 19.3 holds a transition's
+ * commit for an `<img>` that has not loaded (a "suspensey" image), so About —
+ * whose logo (`brand/Brand.tsx` §`FullLogo`) is the one image a `sections`
+ * route draws — commits its `h1` over "Loading this page…" and reveals the
+ * page only when the logo has loaded or React stops waiting for it. On a slow
+ * runner that took longer than {@link QUIET_MS} with frames running, and
+ * {@link untilQuiet} called the fallback settled: `sections.browser.spec.ts`
+ * then counted no sections at all. A still DOM is not a shown view.
+ *
+ * ⚠️ Since #1136 the logo is `loading="lazy"`, which React does not wait for,
+ * so About no longer suspends on it; the wait stays, because a still DOM is
+ * still not a shown view whatever a future view suspends on.
+ *
+ * ⚠️ It sees the shell's top-level fallback only: a view's own nested
+ * `Suspense` boundary (AnalysisView's lazy `FitnessChart`, whose fallback is
+ * `null`) leaves no mark, so `shown` does not mean every boundary resolved.
+ */
+async function untilViewShown(): Promise<boolean> {
+  const deadline = performance.now() + PATIENCE_MS;
+  while (performance.now() < deadline) {
+    // `shell/lazy-view.tsx` §`ViewLoading`, the fallback's own mark.
+    if (document.querySelector('main [data-oyl-view-loading]') === null) {
       return true;
     }
     await nextFrame();
@@ -1290,6 +1351,8 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   window.location.hash = hash;
   const { route } = matchHash(hash);
   const headed = await untilHeading(route.title);
+  // Before the fade and the quiet: the reveal is a view transition of its own.
+  const shown = headed && (await untilViewShown());
   await viewTransitionsFinished();
   let quiet = await untilQuiet();
   if (
@@ -1341,7 +1404,7 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
     expectation,
     markerPresent: marker === undefined ? null : document.querySelector(marker) !== null,
     errors: raised,
-    settledWithinPatience: headed && quiet,
+    settledWithinPatience: headed && shown && quiet,
     firstControl: firstControl(),
     fold: foldLine(),
     proseBeforeFirstControl: proseBeforeFirstControl(),

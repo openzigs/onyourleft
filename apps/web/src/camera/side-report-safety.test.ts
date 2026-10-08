@@ -29,7 +29,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { importWalk, SOURCE_ROOT, specifiersIn } from './import-walk-testing';
+import { ANALYSIS_ROOT, importWalk, SOURCE_ROOT, specifiersIn } from './import-walk-testing';
 
 /** Every module a side-camera report passes through, from pose numbers to the page. */
 const REPORT_PATH = [
@@ -37,8 +37,9 @@ const REPORT_PATH = [
   'camera/side-report-wording.ts',
   'camera/side-report-port.ts',
   'camera/side-report-keeper.ts',
-  // #801: the pose summary's type, on the path from the report to the store.
-  'camera/side-session-summary.ts',
+  // #801: the pose summary's type, on the path from the report to the store —
+  // in `@onyourleft/analysis` since #1094.
+  `${ANALYSIS_ROOT}/pose-summary.ts`,
   'detail/load.ts',
   'detail/SideCameraSection.tsx',
 ] as const;
@@ -64,7 +65,7 @@ describe('the report path reaches no trainer (#388, CLAUDE.md §6)', () => {
     );
     // And the keeper reaches the summary it writes (#801).
     expect(closure(['camera/side-report-keeper.ts']).modules).toContain(
-      'camera/side-session-summary.ts',
+      `${ANALYSIS_ROOT}/pose-summary.ts`,
     );
   });
 

@@ -6,7 +6,7 @@
  *
  * ## What is here and what is deliberately not
  *
- * jsdom performs no layout (CLAUDE.md §4e), so nothing in this file can say
+ * jsdom performs no layout (docs/agents/accessibility.md §4e), so nothing in this file can say
  * that *Pause* is on screen, that a panel is in a corner or that the world
  * fills anything. `browser/ride.browser.spec.ts` measures all of that in the
  * pinned Chromium. What a DOM *can* say is the wiring that layout depends on,
@@ -307,6 +307,8 @@ describe('a notice is laid out by the HUD — #423', () => {
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
     readTrainer: () => ({ kind: 'no-control', control: undefined }),
   };
 

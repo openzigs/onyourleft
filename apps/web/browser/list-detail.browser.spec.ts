@@ -61,6 +61,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { NIGHTLY } from './nightly';
 import type { ReflowMeasurement } from './reflow-harness';
 
 /** `rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS`, for its reason (#439). */
@@ -121,15 +122,22 @@ const LIST_DETAIL = ALL_ROUTES.filter((route) => route.layout === 'list-detail')
  *   name and *Save workout* ahead of the block form (below it, the button was
  *   72 px under the landscape fold). On a phone, after the one-pane list —
  *   headed since #670's review by *Build a workout*, which moves focus to the
- *   builder — it is above the fold, by too little to hold: re-taken for
- *   #982, whose 48 px card drawings moved it down 32 px, it ends 45.9 px above
- *   the fold in this Chromium on a Mac (77.9 before) and 21.1 px on
+ *   builder — it was above the fold by too little to hold: re-taken for
+ *   #982, whose 48 px card drawings moved it down 32 px, it ended 45.9 px
+ *   above the fold in this Chromium on a Mac (77.9 before) and 21.1 px on
  *   the CI runner (53.1 before, run 36881810211; after, run 36887027370).
+ *   ⚠️ **Held on a phone since #1087**: the figures above had gone stale —
+ *   on `main` before #1087 it ended 84 px above the fold on DejaVu Sans, the
+ *   runner's face (84.0 on CI, run 37168523170) — and #1087 put the name and
+ *   *Save workout* ahead of the builder's "This workout" heading and block
+ *   list: 173 px. With no blocks this hold passes either way round; what
+ *   fails without #1087 is `controls-first.browser.spec.ts` §"#1050, #1087",
+ *   with blocks.
  */
 const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
   activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
   routes: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
-  workouts: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name],
+  workouts: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
 };
 
 /**
@@ -1342,7 +1350,14 @@ function boundFor(before: PrimaryMargin): number {
   return before.margin - before.cardsAbove * SHAPE_CARD_COST_PIXELS - 0.5;
 }
 
-test.describe('#941 — cards with their shape drawn on them', () => {
+/*
+ * #941 is two describes since #1137. The primaries' margins with the drawings
+ * on and their control are LAYOUT measurements, and run NIGHTLY on the owner's
+ * ruling of 2026-10-05 (`nightly.ts`); what a card's drawing is to assistive
+ * technology (one `aria-hidden` shape, empty of text) and its link's 44 × 44
+ * target stay in the required describe below it.
+ */
+test.describe('#941 — the drawings’ cost to each primary', { tag: NIGHTLY }, () => {
   /*
    * In both palettes (#941 asks for both), parametrised over `THEMES` with
    * `colorScheme` as the reflow walk is. Not only for form's sake: the dark
@@ -1417,7 +1432,9 @@ test.describe('#941 — cards with their shape drawn on them', () => {
     expect(before?.cardsAbove ?? 0).toBeGreaterThan(0);
     expect(tall?.margin ?? Number.POSITIVE_INFINITY).toBeLessThan(bound);
   });
+});
 
+test.describe('#941 — cards with their shape drawn on them', () => {
   for (const theme of THEMES) {
     test(`every card carries one painted, aria-hidden shape, in the ${theme} palette`, async ({
       page,
@@ -1573,7 +1590,8 @@ function rgbOf(hex: string): string {
 /**
  * #1072 — a card carried into its detail, with Motion (ADR 0041).
  *
- * Each frame for 0.7 s after the press, the detail's wrapper
+ * Each frame from just before the press until it has settled (#1163: a set
+ * number of frames AND 0.7 s after it, below), the detail's wrapper
  * (`ListDetail.tsx` §"Carrying a card into its detail") is read for its
  * computed transform: a card carried shows frames that are not at rest, and
  * ends at rest. ⚠️ **The control is the same selection by ADDRESS**: the hash
@@ -1582,53 +1600,105 @@ function rgbOf(hex: string): string {
  * pane always runs. And under `prefers-reduced-motion: reduce` a press must
  * move nothing either, with the same press under no preference, on a list
  * mounted afresh in the same page, as that case's control.
+ *
+ * Since #1137 the carry runs NIGHTLY (`nightly.ts`, the owner's ruling of
+ * 2026-10-05) and the reduced-motion case is its own describe, which stays in
+ * the required job; the helpers below are shared by both.
  */
-test.describe('#1072 — a card carried into its detail', () => {
-  /** Frames whose transform was off rest, read for 0.7 s around `act`. */
-  async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
-    await page.evaluate(() => {
-      const held = window as unknown as { oylCarry?: string[] };
+
+/*
+ * How the detail is read (#1163). It used to be every animation frame for a
+ * fixed 0.7 s of wall clock, which counts what the runner can draw rather than
+ * what the page did: a loaded CI runner read 9 frames, and 3 workers on a Mac
+ * under load read 2 to 7. So the window is no longer a duration alone. It
+ * opens before `act` and closes once BOTH hold — at least
+ * `CARRY_FRAMES_AFTER_ACT` frames have been read after `act` returned, and at
+ * least `CARRY_SETTLE_MS` has passed since then — or at `CARRY_CEILING_MS`,
+ * which only a stalled page reaches and which then fails on the frame count
+ * rather than hanging. The carry itself is `MOTION_FOR_SCRIPT.medium`, 200 ms,
+ * so 700 ms after the press still covers it three times over, now from the
+ * press rather than from before it.
+ */
+const CARRY_FRAMES_AFTER_ACT = 20;
+const CARRY_SETTLE_MS = 700;
+const CARRY_CEILING_MS = 15_000;
+
+/** Frames whose transform was off rest, read around `act` (#1163: by count and time). */
+async function framesOffRest(page: Page, act: () => Promise<void>): Promise<string[]> {
+  await page.evaluate(
+    ({ frames, settle, ceiling }) => {
+      const held = window as unknown as {
+        oylCarry?: string[];
+        oylCarryAct?: () => void;
+        oylCarryDone?: boolean;
+      };
       held.oylCarry = [];
-      const until = performance.now() + 700;
+      held.oylCarryDone = false;
+      const giveUp = performance.now() + ceiling;
+      // Unknown until `act` returns: until then the window cannot close.
+      let actedAt: number | undefined;
+      let readAtAct = 0;
+      held.oylCarryAct = () => {
+        actedAt = performance.now();
+        readAtAct = held.oylCarry?.length ?? 0;
+      };
       const sample = (): void => {
         const wrapper = document.querySelector(
           '[data-oyl-pane="detail"] .oyl-list-detail__carried',
         );
         if (wrapper !== null) held.oylCarry?.push(getComputedStyle(wrapper).transform);
-        if (performance.now() < until) requestAnimationFrame(sample);
+        const now = performance.now();
+        const closed =
+          actedAt !== undefined &&
+          now - actedAt >= settle &&
+          (held.oylCarry?.length ?? 0) - readAtAct >= frames;
+        if (closed || now >= giveUp) held.oylCarryDone = true;
+        else requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
-    });
-    await act();
-    await page.waitForTimeout(750);
-    const frames = await page.evaluate(
-      () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
-    );
-    expect(frames.length, 'no frame of the detail was read').toBeGreaterThan(10);
-    // It ends where it belongs, whatever happened on the way.
-    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
-    return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');
-  }
+    },
+    { frames: CARRY_FRAMES_AFTER_ACT, settle: CARRY_SETTLE_MS, ceiling: CARRY_CEILING_MS },
+  );
+  await act();
+  await page.evaluate(() => {
+    (window as unknown as { oylCarryAct?: () => void }).oylCarryAct?.();
+  });
+  await page.waitForFunction(
+    () => (window as unknown as { oylCarryDone?: boolean }).oylCarryDone === true,
+    undefined,
+    { timeout: CARRY_CEILING_MS + 5_000 },
+  );
+  const frames = await page.evaluate(
+    () => (window as unknown as { oylCarry?: string[] }).oylCarry ?? [],
+  );
+  expect(frames.length, 'no frame of the detail was read').toBeGreaterThanOrEqual(
+    CARRY_FRAMES_AFTER_ACT,
+  );
+  // It ends where it belongs, whatever happened on the way.
+  expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frames.at(-1));
+  return frames.filter((each) => each !== 'none' && each !== 'matrix(1, 0, 0, 1, 0, 0)');
+}
 
-  /** Motion's features arrive in a chunk of their own; a press before them is not carried. */
-  async function motionLoaded(page: Page): Promise<void> {
-    await page.waitForFunction(() =>
-      performance
-        .getEntriesByType('resource')
-        .some((entry) => entry.name.includes('motion-features')),
-    );
-    await page.waitForTimeout(100);
-  }
+/** Motion's features arrive in a chunk of their own; a press before them is not carried. */
+async function motionLoaded(page: Page): Promise<void> {
+  await page.waitForFunction(() =>
+    performance
+      .getEntriesByType('resource')
+      .some((entry) => entry.name.includes('motion-features')),
+  );
+  await page.waitForTimeout(100);
+}
 
-  async function press(page: Page, route: RouteDefinition): Promise<() => Promise<void>> {
-    await visit(page, route, hrefFor(route));
-    await motionLoaded(page);
-    const id = await selectionOf(page, route);
-    return async () => {
-      await page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`).click();
-    };
-  }
+async function press(page: Page, route: RouteDefinition): Promise<() => Promise<void>> {
+  await visit(page, route, hrefFor(route));
+  await motionLoaded(page);
+  const id = await selectionOf(page, route);
+  return async () => {
+    await page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`).click();
+  };
+}
 
+test.describe('#1072 — a card carried into its detail', { tag: NIGHTLY }, () => {
   for (const viewport of [SHORT_LANDSCAPE, PHONE]) {
     test(`on every list–detail route at ${viewport.name}, and the control by address`, async ({
       page,
@@ -1658,7 +1728,13 @@ test.describe('#1072 — a card carried into its detail', () => {
       }
     });
   }
+});
 
+/*
+ * #1072's reduced-motion half stays REQUIRED (#1137): a rider who asked for
+ * less motion is an accessibility claim, and the carry above it is appearance.
+ */
+test.describe('#1072 — a card is not carried under reduced motion', () => {
   test('under reduced motion a press moves nothing, and the control moves', async ({ page }) => {
     // Asked before the page loads: Motion reads the preference when an
     // element mounts (ADR 0041's amendment for #1072 says what that costs).

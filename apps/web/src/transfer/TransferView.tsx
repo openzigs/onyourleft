@@ -194,7 +194,7 @@ export function TransferView({
    * reads it — and a sibling's state change is not a re-render. Without this
    * counter the export panel's `useEffect` has nothing to depend on that
    * changes, so a rider who imports a ride is told, on the same screen, that
-   * there is nothing on this device to export. That is CLAUDE.md §5's "a write
+   * there is nothing on this device to export. That is docs/agents/quality-gate.md §5's "a write
    * that reports success while the read cannot see it", one layer above the
    * store: the ride is on disk and the panel next to it is describing the
    * device as empty.
@@ -411,7 +411,9 @@ function ImportPanel({
         Import a FIT, GPX or TCX file — including the bulk export from your Strava account.
       </p>
       <div className="oyl-transfer__form">
-        <label htmlFor="oyl-import-files">Activity files</label>
+        <label htmlFor="oyl-import-files" id="oyl-import-files-label">
+          Activity files
+        </label>
         {/*
           ⚠️ **No `accept` attribute, deliberately.** `accept=".fit,.gpx,.tcx"`
           hides from the picker exactly the files #51's second criterion is
@@ -420,7 +422,7 @@ function ImportPanel({
           happened to each is the behaviour asked for. A filter that quietly
           drops them before the batch sees them reports on nothing.
         */}
-        <FileDrop hint="Or drop activity files here">
+        <FileDrop hint="Or drop activity files here" labelId="oyl-import-files-label">
           <input
             ref={filesInput}
             id="oyl-import-files"
@@ -431,7 +433,9 @@ function ImportPanel({
           />
         </FileDrop>
 
-        <label htmlFor="oyl-import-folder">Or a whole folder</label>
+        <label htmlFor="oyl-import-folder" id="oyl-import-folder-label">
+          Or a whole folder
+        </label>
         {/*
           The unzipped archive, in one gesture — hundreds of files across the
           directories the export was written with, which is #51's sixth
@@ -447,7 +451,7 @@ function ImportPanel({
           19 does not declare it; React passes an unknown lowercase attribute
           through to the DOM unchanged.
         */}
-        <FilePicker choose="Choose a folder">
+        <FilePicker choose="Choose a folder" labelId="oyl-import-folder-label">
           <input
             {...DIRECTORY_PICKER}
             ref={folderInput}

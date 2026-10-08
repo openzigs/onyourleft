@@ -8,7 +8,7 @@
   // a bare `fetch` inside `src/` would typecheck cleanly, because
   // `tsconfig.json` above admits @types/node for the generator's sake.
   //
-  // CLAUDE.md section 4d: that closure is conditional on nothing in the program
+  // docs/agents/lint-boundaries.md section 4d: that closure is conditional on nothing in the program
   // pulling a `/// <reference types="node" />` back in through a `.d.ts`.
   // `vitest.config.ts` is deliberately excluded here and imports nothing, for
   // the reason packages/domain/vitest.config.ts records at length.

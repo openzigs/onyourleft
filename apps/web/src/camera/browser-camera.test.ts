@@ -35,6 +35,7 @@ import { CameraController } from './session';
 import { cleanFrameBytes, manualSchedule, stillRoom } from './testing';
 import { PRESENCE_CHECK_MILLISECONDS } from './presence';
 import { frameLeaksIn } from './notice';
+import { browserSecureWindow } from './secure-window-testing';
 
 function track(): VideoTrackLike & { stopped: boolean } {
   return {
@@ -711,6 +712,7 @@ describe('a camera that has stopped delivering pictures — #516', () => {
     const timers = manualSchedule();
     let now = 0;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port,
       schedule: timers.schedule,
       clock: () => now,

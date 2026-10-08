@@ -27,7 +27,7 @@
  * its own could not be rendered there at all.
  */
 
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 
 import type { KitColour } from '@onyourleft/store';
 
@@ -282,7 +282,7 @@ export interface GameViewProps {
    * is what stops a rider who leaves with the browser's own Back button being
    * left on some other page with no header.
    *
-   * ⚠️ **Absent rather than hidden, and that is CLAUDE.md §4e rather than
+   * ⚠️ **Absent rather than hidden, and that is docs/agents/accessibility.md §4e rather than
    * taste.** The accessibility suite loads no stylesheet, so a header hidden
    * with `display: none` is, to `tabbableElements`, eleven focusable links —
    * and to a keyboard user behind an opaque full-bleed stage it is eleven tab
@@ -413,6 +413,33 @@ function oneNoticeOnly(): boolean {
   return (
     typeof window.matchMedia === 'function' && window.matchMedia(ONE_NOTICE_ONLY_QUERY).matches
   );
+}
+
+/** What there is to watch with no trainer port: nothing, and nothing to stop. */
+function watchNothing(): () => void {
+  return () => undefined;
+}
+
+/**
+ * The recorder's moving time, kept current — #1111's review.
+ *
+ * ⚠️ **Subscribed, not only read during render**, for {@link useOneNoticeOnly}'s
+ * reason. A running game re-renders on every frame, but a PAUSED one does not
+ * — and the game's *Pause* does not pause the RECORDING (`trainer-port.ts`
+ * §`GameTrainerPort.rideMovingSeconds`), so a figure read only on the tick's
+ * render froze at the press while the recorder went on counting. The
+ * controller tells its subscribers on every tick of the ride's clock
+ * (`ride/controller.ts` §`tick`), and `useSyncExternalStore` re-renders only
+ * when the figure has changed. It is still read on every other render, so a
+ * frame never shows an older figure than the recorder holds.
+ */
+function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideMovingSeconds(), [trainer]);
+  return useSyncExternalStore(watch, read);
 }
 
 /**
@@ -684,6 +711,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * link is said once, when it goes — `side-camera.ts` §`sideCameraLostEvent`.
    */
   const sideCamera = useSideCamera(props.sidePairing);
+  /** @see useRideMovingSeconds */
+  const movingSeconds = useRideMovingSeconds(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -922,7 +951,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // was.** Both belong to the *ride*, and `start` is where a ride begins —
     // this callback releases resources. Clearing it in both places made each
     // assignment individually invisible: deleting either left the whole suite
-    // green, because the other covered for it, which is CLAUDE.md §5's "a test
+    // green, because the other covered for it, which is docs/agents/quality-gate.md §5's "a test
     // that cannot fail is not a test" seen from the implementation's side.
     // There is exactly one way back to the picker (`onEnd`) and exactly one way
     // out of it (`start`), so one reset is the whole of it.
@@ -1890,6 +1919,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
+        // #1111: the RECORDER's moving time — never the simulation's
+        // `elapsed`, which is a second clock that does not know about the
+        // recorder's auto-pause. @see useRideMovingSeconds
+        movingSeconds={movingSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         // #783: a count and ONE chosen gap on a room ride, never a list.
         {...(roomRef.current === undefined
@@ -2026,9 +2059,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           // exists to refuse. The rest is not lost: the HUD's one region still
           // SAYS the whole sentence (`easedText`, above), and the Ride screen
           // shows it behind its disclosure. `ride.browser.spec.ts` §"#585"
-          // publishes the margin.
+          // publishes the margin. Kept (#1086): the mark is an attribute on
+          // the notice itself, no wrapper, so it moves nothing.
           rescue === undefined ? undefined : (
-            <StatusMessage key="workout-eased" tone="warning" label="Eased">
+            <StatusMessage key="workout-eased" tone="warning" label="Eased" kept>
               {workoutRescueHeadline(rescue)}
             </StatusMessage>
           ),
@@ -2102,9 +2136,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           // (`ride/controller.ts` §`askAgainIfRefused`), and a rider who lost
           // the elevation strip for that has not lost a ride.
           // `ride.browser.spec.ts` §"#647" measures it at every overlay
-          // viewport, with and without the road notice beside it.
+          // viewport, with and without the road notice beside it. Kept
+          // (#1086), by an attribute on the notice and no wrapper.
           mayStop ? (
-            <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL}>
+            <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL} kept>
               {RIDE_MAY_STOP_WITH_SCREEN_OFF}
             </StatusMessage>
           ) : undefined,

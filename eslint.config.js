@@ -88,7 +88,7 @@ const spdxHeader = (content) => ({
  * bare specifier**, never a relative one, so `./x` and `../x` cannot be a
  * builtin under any resolution. A bare `import 'constants'` is still an error,
  * and so is `node:constants` through the group above — checked with a probe
- * file, both spellings, which is the rule CLAUDE.md §4d states for anything
+ * file, both spellings, which is the rule docs/agents/lint-boundaries.md §4d states for anything
  * touching these gates.
  *
  * ⚠️ The slashless negations alone were **one axis short** (#163): gitignore
@@ -166,6 +166,25 @@ const BLE_LIBRARY_IMPORT_PATTERNS = [
     group: ['@capacitor-community/bluetooth-le', '@capacitor/*', 'webbluetooth', 'noble', 'bleno'],
     message:
       'packages/sensors defines the transport-agnostic abstraction and implements no transport. A BLE library belongs in the adapter that owns it — #40 for Web Bluetooth, #15 for the native stacks.',
+  },
+];
+
+/**
+ * What `packages/analysis` may not name on top of the shared list (ADR 0046
+ * D-5, #1094): the store, which carries Dexie and the DOM lib, and any model
+ * SDK or schema library — the package holds the rules, the instance holds the
+ * engine that calls a model.
+ */
+const ANALYSIS_IMPORT_PATTERNS = [
+  {
+    group: ['@onyourleft/store', '@onyourleft/store/*'],
+    message:
+      'packages/analysis does not depend on the store (ADR 0046 D-5): restate the fields it reads as a structural type, as input.ts and hosted-mask.ts do.',
+  },
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*', 'zod', 'zod/*', 'openai', '@anthropic-ai/*'],
+    message:
+      'No model SDK or schema library enters packages/analysis (ADR 0046 D-5): the package holds the rules, the instance holds the engine.',
   },
 ];
 
@@ -478,7 +497,7 @@ export default tseslint.config(
   // paragraph replaces asked for. `vitest.config.ts` is named explicitly
   // because it is part of the platform-free program's neighbourhood and a
   // `defineConfig` import there is precisely how the closure was broken once
-  // before (CLAUDE.md section 4d).
+  // before (docs/agents/lint-boundaries.md section 4d).
   {
     files: ['packages/sensors/src/**/*.{ts,tsx}', 'packages/sensors/vitest.config.ts'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
@@ -575,6 +594,27 @@ export default tseslint.config(
   {
     files: ['packages/protocol/**/*.{ts,tsx}'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- packages/analysis is the write-up's core, and platform-free -----------
+  // #1094, ADR 0046 D-5. The runner, the templates, the screen and the mask run
+  // on a rider's device and on their instance, so they take packages/domain's
+  // isolation; `packages/analysis/tsconfig.platform-free.json` is the closure
+  // and this is the fast duplicate. On top of it: the store (Dexie and the DOM
+  // lib — the shapes the core reads are restated structurally) and any model
+  // SDK, which belongs to the instance's engine and never to the rules (D-5).
+  // The tests run under Node and read files, so they take only the second
+  // half, as the Durable Object adapter's tests do above.
+  {
+    files: ['packages/analysis/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...ANALYSIS_IMPORT_PATTERNS]),
+  },
+  {
+    files: ['packages/analysis/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
+    },
   },
 
   // --- packages/physics is pure computation, and pure means deterministic -----
@@ -881,7 +921,7 @@ export default tseslint.config(
   // --- Device tooling --------------------------------------------------------
   // `apps/mobile/tools/` is the same case one directory over and is deliberately
   // NOT under `scripts/`: it needs `adb` and a physical phone, so it could never
-  // be a bare-clone repository check (#410, CLAUDE.md §2). It runs on Node, and
+  // be a bare-clone repository check (#410, docs/agents/layout.md §2). It runs on Node, and
   // it needs two globals `scripts/` does not — `fetch` and `WebSocket` are how
   // it speaks the DevTools protocol through an adb forward.
   //

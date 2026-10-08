@@ -79,6 +79,7 @@ import {
   keyboardReachableElements,
   tabbableElements,
 } from './audit';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 // `join` rather than `new URL(…, import.meta.url)`, which Vite rewrites into an asset URL.
 const THEME = readFileSync(
@@ -298,6 +299,7 @@ function matchPort(): MatchPort {
  */
 function cameraController(): CameraController {
   return new CameraController({
+    secureWindow: browserSecureWindow(),
     port: {
       cameraAvailability: () => Promise.resolve({ kind: 'no-camera' as const }),
       requestCameraAccess: () => Promise.resolve({ kind: 'no-camera' as const }),

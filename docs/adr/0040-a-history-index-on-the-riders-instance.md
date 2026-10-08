@@ -515,3 +515,31 @@ connected, so its first sentence is conditional: a rider with no instance is a s
   because the upstream docs lead with it.
 - **Nothing mechanical checks D-5's licence rule, D-9's timing or D-11.** They are review questions
   until #835 and #836 land, and a reviewer of either asks them.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-07** — **The write-up now runs on the instance, so the history step becomes a tool, and
+  the screen and the masking move there too.** [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's
+  rulings of 2026-10-04 and 2026-10-07, runs AI analysis only on the rider's instance, and five
+  statements here stop being true. **D-2's** *"Where the screen and the summary builder run: on the
+  device, and nowhere else"*: the screen runs on the instance before a candidate is kept and again on
+  the device before display, both from `@onyourleft/analysis`. **The summary builder stays on the
+  device**: the device still renders a ride's summary passages and syncs them beside the ride, and
+  builds the asked-about ride's input for a job (the owner's Q1 ruling), so that half of D-2's
+  sentence still holds. **D-8's** *"A separate "history"
+  step … is the only step that sees a passage"*: the history step becomes the `history_search` tool
+  ([#1099](https://github.com/openzigs/onyourleft/issues/1099)), with D-8's same bounds — at most 6
+  passages of at most 900 characters a call — and the same data fence. **D-9's masking on the
+  device**: masking data is synced to the instance and masking runs there, over every message of
+  every hosted request, tool results included (ADR 0046 D-10). **D-9's** *"the history step runs on
+  the rider's own computer only"*, and **§Consequences'** *"(a) a rider with no instance loses
+  nothing — the write-up works exactly as ADR 0035 built it"* and *"one who does not gets the
+  write-up without history and loses nothing"*: there is no rider's computer on the analysis path,
+  and a rider with no instance has no write-up and keeps every other feature. D-2's keeping of the
+  side-camera pose summary out of the index is now the owner's ruling (Q2): never indexed, never
+  returned by a tool. D-1, D-3 to D-7 and D-10 to D-11 are otherwise unchanged. The body above is
+  not edited.

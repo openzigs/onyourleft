@@ -3,7 +3,7 @@
   "creator": "Matthew Cronin",
   "url": "https://github.com/openzigs/onyourleft/tree/main/apps/web/tools/brand",
   "read": "2026-10-01",
-  "tool": "Python 3.14 with Pillow 12.3.0, NumPy 2.5.3 and SciPy 1.18.1",
+  "tool": "Python 3.14 with Pillow 12.3.0 (and the libwebp 1.6.0 its wheel bundles), NumPy 2.5.3 and SciPy 1.18.1",
   "packages": {
     "pillow": "12.3.0",
     "numpy": "2.5.3",
@@ -38,7 +38,7 @@
     },
     "logo": {
       "source": "apps/web/tools/brand/sources/gemini-logo-green.jpeg",
-      "modified": "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized"
+      "modified": "the full logo taken off its green screen by a chroma key (alpha from how much greener than red and blue a pixel is), the green spill taken out of its edges, cropped to what it covers, and for the light palette laid on a soft navy shadow of its own outline so the white sticker outline reads on a white canvas, then resized and written as lossless WebP (libwebp 1.6.0, exact, with no metadata)"
     }
   },
   "outputs": [
@@ -79,13 +79,13 @@
       "size": 64
     },
     {
-      "path": "apps/web/src/brand/logo-light.png",
+      "path": "apps/web/src/brand/logo-light.webp",
       "family": "logo",
       "kind": "logo-light",
       "size": 512
     },
     {
-      "path": "apps/web/src/brand/logo-dark.png",
+      "path": "apps/web/src/brand/logo-dark.webp",
       "family": "logo",
       "kind": "logo-dark",
       "size": 512

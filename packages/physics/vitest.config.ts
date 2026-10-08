@@ -13,7 +13,7 @@
  * a type that leaks in here leaks in everywhere.
  *
  * It is not hypothetical: that is exactly how the guard was silently broken in
- * `packages/domain` until #23's review (CLAUDE.md §4d). Vitest accepts a plain
+ * `packages/domain` until #23's review (docs/agents/lint-boundaries.md §4d). Vitest accepts a plain
  * object, and `defineConfig` is only an identity function for editor typing.
  */
 export default {

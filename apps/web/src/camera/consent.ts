@@ -71,10 +71,11 @@ export const BYSTANDER_SENTENCE =
   'will not be in it, or leave the camera off.';
 
 /**
- * What a screenshot of a camera picture meets — #1060,
+ * What a screenshot of a camera picture meets — #1061,
  * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
- * D-12. In the Android shell the window carries `FLAG_SECURE` while a camera
- * picture is on screen; a web page cannot stop a screenshot or the browser's
+ * D-12, in the wording drafted for #1060 (PR #1121). In the Android shell the
+ * window carries `FLAG_SECURE` while a camera picture is on screen
+ * (`secure-window.ts`); a web page cannot stop a screenshot or the browser's
  * own tab-switcher preview, and the rider is told so rather than left to
  * assume. Shown on the Camera page (in {@link CONSENT_STATEMENT}) and on the
  * side-camera phone's page, whose own framing preview D-12 covers too.
@@ -103,16 +104,19 @@ export const SCREENSHOT_SENTENCE =
  * 4. **what an erase cannot reach** — D-4's honest half, said **before** the
  *    rider presses anything rather than discovered afterwards.
  *
- * ⚠️ **Since #1060 a side camera's picture is SHOWN and one can be KEPT**, and
- * a reviewer who remembers line 3 reading *"thrown away as soon as it has been
- * looked at"* with no other way to keep one is reading the old file.
+ * ⚠️ **Since #1061 a side camera's picture is SHOWN on this tablet, and since #1060
+ * one can be KEPT**, and a reviewer who remembers line 3 reading *"thrown away as soon
+ * as it has been looked at"* with no other way to keep one is reading the old file.
  * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
  * supersedes ADR 0033 D-6 on that path: the picture is shown on the tablet
  * while the rider has the view on (D-1, D-8), anyone who can see the screen
  * sees it (D-6, D-7), and one press of *Save snapshot* keeps one still with its
  * ride (D-3, D-5). D-7 and D-12 ask this list for two more sentences — the
  * picture is shown on this tablet, and {@link SCREENSHOT_SENTENCE} — and D-10
- * says the words are #1060's, with the owner's approval.
+ * says the words are #1060's, with the owner's approval. #1061 shipped a
+ * narrower interim sentence; #1060's full wording replaces it, and its pull
+ * request merges only once #1063 has landed, so the consent never describes a
+ * button the app does not have.
  *
  * ⚠️ The fourth line is short today and will get longer, and it is worth
  * knowing why it is short: the two sentences ADR 0029 D-4 writes for

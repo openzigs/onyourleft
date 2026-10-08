@@ -34,6 +34,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -144,7 +145,7 @@ function lastRide(): Element {
 
 /**
  * The load metrics' familiar names, which are registered trademarks
- * (CLAUDE.md §6) — as whole words, so "IF" is not found inside "different".
+ * (docs/agents/scope-and-ip.md §6) — as whole words, so "IF" is not found inside "different".
  */
 const TRADEMARKED =
   /\b(NP|TSS|IF|CTL|ATL|TSB|Normali[sz]ed Power|Training Stress|Intensity Factor|Chronic Training Load|Acute Training Load)\b/;
@@ -214,6 +215,51 @@ describe('the home screen — #428', () => {
     expect(readings).toEqual(['50:00', '30.0']);
     expect(text()).toContain('not worked out yet');
     expect(text()).toContain('No ride here has a load yet');
+  });
+
+  it('says a ride with nothing to work a load out from has none, and offers no Analysis — #1084', async () => {
+    await openHome([
+      ride('marked', 2, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+    ]);
+    const load = [...lastRide().querySelectorAll('dt')].find((t) => t.textContent === 'Load');
+    expect(load?.nextElementSibling?.textContent).toBe(
+      'none: nothing on this ride to work one out from',
+    );
+    expect(text()).not.toContain('not worked out yet');
+    expect(text()).toContain('No ride here has a load, so there is nothing to smooth');
+    expect(text()).not.toContain('can work them out');
+    // No invented zero anywhere in the last ride's facts.
+    const readings = [...lastRide().querySelectorAll('.oyl-reading__value')].map(
+      (reading) => reading.textContent,
+    );
+    expect(readings).toEqual(['50:00', '30.0']);
+    expectClean('home, a ride with no load to work out');
+  });
+
+  it('still says "not worked out yet" beside a ride with nothing to work out — #1084', async () => {
+    await openHome([
+      ride('marked', 3, { effortWeightedPower: undefined, loadCoveredTime: seconds(0) }),
+      ride('bare', 2, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+    ]);
+    expect(text()).toContain('not worked out yet');
+    expect(text()).toContain('Analysis can work them out');
+  });
+
+  it('keeps the Analysis link when the history was cut short — #1084', async () => {
+    // Every ride inside the window is marked; the one past it has no summary
+    // at all, and only Analysis can work it out.
+    const marked = Array.from({ length: HISTORY_ACTIVITY_LIMIT }, (_unused, index) =>
+      ride(`m${String(index)}`, HISTORY_ACTIVITY_LIMIT + 10 - index, {
+        effortWeightedPower: undefined,
+        loadCoveredTime: seconds(0),
+      }),
+    );
+    await openHome([
+      ...marked,
+      ride('past', 1, { effortWeightedPower: undefined, loadCoveredTime: undefined }),
+    ]);
+    expect(text()).not.toContain('nothing on any of them was enough');
+    expect(text()).toContain('Analysis can work them out');
   });
 
   it('full: the week and the fitness sentences, from the same words Analysis uses', async () => {

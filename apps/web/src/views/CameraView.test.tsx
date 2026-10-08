@@ -52,7 +52,8 @@ import {
   SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;
 
@@ -73,7 +74,11 @@ function screenHtml(): string {
 }
 
 function controllerFor(camera: ReturnType<typeof scriptedCamera>): CameraController {
-  return new CameraController({ port: camera.port, schedule: manualSchedule().schedule });
+  return new CameraController({
+    secureWindow: browserSecureWindow(),
+    port: camera.port,
+    schedule: manualSchedule().schedule,
+  });
 }
 
 /** The button whose visible label contains `text`. */
@@ -651,7 +656,12 @@ function controllerWith(
   camera: ReturnType<typeof scriptedCamera>,
   keep: FrameKeep,
 ): CameraController {
-  return new CameraController({ port: camera.port, schedule: manualSchedule().schedule, keep });
+  return new CameraController({
+    secureWindow: browserSecureWindow(),
+    port: camera.port,
+    schedule: manualSchedule().schedule,
+    keep,
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -747,6 +757,7 @@ describe('your own computer — #387', () => {
   }> {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       analysis: () => riderAnalysisPort(readAnalysisEndpoint(), { send }),
@@ -927,6 +938,7 @@ describe('your own computer — #387', () => {
     };
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       analysis: () => port,
@@ -1064,6 +1076,7 @@ describe('a hosted model, on your own key — #518', () => {
   }> {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(readHostedModel(), { guard: patternsOnlyGuard, send }),

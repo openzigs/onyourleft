@@ -21,7 +21,7 @@
  * `apps/web/public/licences/third-party.txt`, which Vite copies into `dist`
  * — so it is served beside the app, precached by the service worker like
  * everything else in `public/`, and inside the APK because the APK carries
- * `dist` (CLAUDE.md §4h). One document with four parts:
+ * `dist` (docs/agents/game.md §4h). One document with four parts:
  *
  * 1. every package in the app's **distributed** closure, with its name,
  *    version, licence expression and the **verbatim** text of every
@@ -52,7 +52,7 @@
  *   Gradle, so shape (a) would still have needed a committed input.
  *
  * The price is the one `credits/source.ts` names about a generated, committed
- * file: a second copy of a source of truth. That is exactly what CLAUDE.md §4k
+ * file: a second copy of a source of truth. That is exactly what docs/agents/generated-and-cost-gates.md §4k
  * gates, and this checker is that gate's shape — **including its own
  * `pnpm install --frozen-lockfile` first**, for #298's reason: a regenerate-
  * and-diff over a `node_modules` nobody checked against the lockfile proves
@@ -61,7 +61,7 @@
  *
  * ## The closure is the union, not `--filter @onyourleft/web`
  *
- * ⚠️ `pnpm licenses list --filter` does not follow workspace links (CLAUDE.md
+ * ⚠️ `pnpm licenses list --filter` does not follow workspace links (docs/agents/licence-gates.md
  * §4g): `dexie` reaches the app only through `@onyourleft/store`, and a
  * notices file built from `--filter @onyourleft/web` alone would leave it out.
  * So the closure is the union of every workspace package's `--prod` closure,
@@ -1112,7 +1112,7 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
     );
     for (const problem of result.problems) console.error(`  - ${problem}`);
     console.error(
-      `\nSee CLAUDE.md §4g and scripts/check-third-party-notices.mjs. Root: ${relative(process.cwd(), root) || '.'}`,
+      `\nSee docs/agents/licence-gates.md §4g and scripts/check-third-party-notices.mjs. Root: ${relative(process.cwd(), root) || '.'}`,
     );
     process.exit(1);
   }

@@ -4,7 +4,7 @@
 is the deliverable rather than an omission.** Nobody has run any part of it: not the owner, not an
 agent, and not a person who uses a screen reader. The parts marked *needs a screen-reader user* have
 no such person in the loop today, and saying so is the honest state — a table filled in from
-reasoning would be worse than no document, because CLAUDE.md §4a's *"a documented command nobody
+reasoning would be worse than no document, because docs/agents/commands.md §4a's *"a documented command nobody
 has run is the most expensive kind of wrong"* applies to a result cell exactly as it does to a
 command.
 **Written:** 2026-09-21, by [#393](https://github.com/openzigs/onyourleft/issues/393), against

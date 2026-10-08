@@ -28,7 +28,7 @@
  * control for an autonomous race car"*, Vehicle System Dynamics, 2020, which
  * notes that it *"is quite near to a minimum time line in corners"*. It is
  * implemented from that idea and from arithmetic: no code was read, and the
- * authors' reference implementation was not opened (CLAUDE.md §6).
+ * authors' reference implementation was not opened (docs/agents/scope-and-ip.md §6).
  *
  * Each profile sample `i` is moved sideways by `offset[i]` along the road's
  * own normal `Nᵢ` — its RIGHT, on the map and on the screen, since #583 — so

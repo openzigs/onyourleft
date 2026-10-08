@@ -91,9 +91,15 @@ export type RouteId =
  * - `dashboard` drops it too, for a grid of cards rather than one column —
  *   the home screen (#428), which a landscape tablet should fill.
  *
- * ⚠️ The trainer game is `prose` and that is not an oversight: its *picker* is
- * a form and wants the measure, and its *ride* is a fixed full-bleed stage
- * (#423) which no `max-width` on an ancestor can bound.
+ * ⚠️ The trainer game is declared `prose`, and the measure is not what it
+ * gets on a wide window: its *ride* is a fixed full-bleed stage (#423) which
+ * no `max-width` on an ancestor can bound, and since #940 and #1011 its
+ * *chooser* — route cards beside the loadout, no longer one form — takes the
+ * width back from 60 rem (`theme.css` §"Wide: the cards beside the loadout",
+ * `.oyl-main--prose:has(.oyl-chooser)`). Below that the chooser is one column
+ * and the measure is a phone's width anyway. It stays `prose` here because
+ * nothing else on this table describes a route that undoes its own measure
+ * for one of its two screens.
  *
  * - `list-detail` drops it for a list BESIDE its detail — #670, Material 3's
  *   list–detail canonical layout, taken as a pattern (ADR 0009). Two panes at

@@ -9,7 +9,7 @@
  *
  * There are **twenty-one** fakes here, and there are twenty-one on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
- * causes CLAUDE.md section 5 names, and they fail for different reasons at
+ * causes docs/agents/quality-gate.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
@@ -347,7 +347,7 @@ const MISROUTED_PREFIX = 'cache:';
  *
  * This is the interesting one. It writes through the real store, so the bytes
  * are real, the transaction is real, and it commits. Then it moves the blob
- * rows to a key nothing queries — CLAUDE.md section 5's *wrong storage*, in the
+ * rows to a key nothing queries — docs/agents/quality-gate.md section 5's *wrong storage*, in the
  * "different key prefix" variant, which is the variant a `expect(write).resolves`
  * test and a same-connection read both pass over in silence.
  *
@@ -402,7 +402,7 @@ export function misroutedBlobStoreFactory(): StoreFactory {
  * dropped for thirty seconds has become thirty seconds at 0 bpm. #27 names this
  * as the thing that "corrupts every downstream metric in #11", and a layer
  * above the store quietly normalising `undefined` to `0` is how it happens for
- * real — CLAUDE.md section 5's *wrong layer*.
+ * real — docs/agents/quality-gate.md section 5's *wrong layer*.
  *
  * It exists because a mutation run found the hole it closes: deleting the
  * sample-by-sample comparison from `assertStreamSetRoundTrip` left every test
@@ -434,7 +434,7 @@ export function gapFillingStoreFactory(): StoreFactory {
  * A repository whose **every second flush is acknowledged and never written**.
  *
  * The fourth failure shape, and the one that belongs to #46 specifically:
- * CLAUDE.md section 5's *wrong layer* — "acknowledged at the edge, nothing
+ * docs/agents/quality-gate.md section 5's *wrong layer* — "acknowledged at the edge, nothing
  * below persisted". `appendRecordingChunk` resolves with the sequence number
  * the caller expects, the recorder advances its flush cursor, and the row is
  * simply not there.
@@ -473,7 +473,7 @@ export function droppedFlushStoreFactory(): StoreFactory {
 /**
  * A repository that **tidies a record's claims on the way in**.
  *
- * The fifth failure shape, and #61's: CLAUDE.md section 5's *wrong layer*. A
+ * The fifth failure shape, and #61's: docs/agents/quality-gate.md section 5's *wrong layer*. A
  * layer above the store rounds the ride's distance to a whole metre — a change
  * so plausible that it survives review, and one that a naive round trip cannot
  * see. The write succeeds. The row is real, in a real transaction that really
@@ -769,7 +769,7 @@ export function truncatedWorkoutStoreFactory(): StoreFactory {
  * athlete in the fixture the correct query and this one return identical
  * results, so a suite that seeds one athlete certifies the bug. The harness
  * fixtures carry three athletes for exactly this shape of reason — see
- * CLAUDE.md section 5 — and `activity-store.ghost-scope.test.ts` is where the
+ * docs/agents/quality-gate.md section 5 — and `activity-store.ghost-scope.test.ts` is where the
  * red/green pair lives.
  *
  * ⚠️ It reproduces the bug by **filtering the real result less**, not by
@@ -882,7 +882,7 @@ export function consentIgnoredStoreFactory(): StoreFactory {
  * written**.
  *
  * The twelfth fake, for #238's narrow athlete write. It is the purest form of
- * the shape CLAUDE.md section 5 names: `setAthleteUnits` answers with exactly
+ * the shape docs/agents/quality-gate.md section 5 names: `setAthleteUnits` answers with exactly
  * the row a correct implementation would have answered with — same id, same
  * name, same `createdAt`, `units` set to what was asked for — and the database
  * is untouched. Every caller that trusts the return value is satisfied. Only a
@@ -1071,7 +1071,7 @@ export function lastWordDroppedStoreFactory(): StoreFactory {
  *   assertion that catches it has to discard every connection first.
  *
  * Only a round trip that closes the writer, opens a fresh connection and reads
- * through the public path notices. That is CLAUDE.md §5's *wrong time* and
+ * through the public path notices. That is docs/agents/quality-gate.md §5's *wrong time* and
  * *wrong layer* causes in one store, and `camera-frame-store.test.ts` is the
  * red/green pair — beside the property it is about, for
  * `roundedClaimStoreFactory`'s reason.
@@ -1241,7 +1241,7 @@ export function poselessReportStoreFactory(): StoreFactory {
  * A repository whose write-up put **acknowledges a second write-up and keeps
  * the first**.
  *
- * The nineteenth fake, for #800's write path and CLAUDE.md §5's *wrong time*:
+ * The nineteenth fake, for #800's write path and docs/agents/quality-gate.md §5's *wrong time*:
  * the owner's ruling 7 on #795 is that a new analysis replaces the saved one,
  * and this store answers the new one with success and goes on holding the old
  * — so the ride page shows last week's words under today's press, with the

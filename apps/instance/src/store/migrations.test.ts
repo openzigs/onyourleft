@@ -212,7 +212,7 @@ describe('the migrations (#769)', () => {
    * migration's `down` and `up`, which is more than the fresh file asked of
    * them, not less. Seeding twice adds nothing (`FIXTURE_ROWS`).
    *
-   * ⚠️ **Its timeout is judged against CI under coverage** (CLAUDE.md §4c).
+   * ⚠️ **Its timeout is judged against CI under coverage** (docs/agents/ci.md §4c).
    * Before the walk, on `Tests and coverage report`: 505–993 ms on 34 of 38
    * green runs read on 2026-10-01 (36843950489 to 36882904839), then 1 140,
    * 1 829, 2 775 and 3 293 ms (36849145949, 36881644356, 36877000180,

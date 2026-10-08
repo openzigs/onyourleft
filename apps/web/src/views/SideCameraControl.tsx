@@ -16,17 +16,22 @@
  *    filming, stopped, or link lost"*), **Start filming**, **Stop filming**,
  *    what became of the last command, and **End pairing**.
  *
- * ⚠️ **No picture of the phone's is ever on this screen** — the owner's
- * ruling on #527, *"the tablet shows state only"*. The one picture this
- * screen ever shows is its OWN front camera's, while it is reading the
- * phone's code and never once paired: the owner relaxed #527 for those
- * seconds on 2026-09-26 (#557, ADR 0033's amendment), and
- * `camera/ScanViewfinder.tsx` is the whole of it. Since #530 the pictures do
- * cross to this tablet, and they go straight to the pose model
- * (`camera/side-analysis.ts`); what this screen reads is
- * `camera/side-analysis-port.ts` §`SideAnalysisState` — counts, and whether
- * the camera is where it was last time — and nothing on that port could be
- * drawn as a picture or says anything about a body (ADR 0033 D-6, ADR 0030).
+ * ⚠️ **Since #1061 the phone's picture IS on this screen**, and a reviewer who
+ * remembers *"no picture of the phone's is ever on this screen"* (the owner's
+ * #527 ruling, *"the tablet shows state only"*) is reading the old file: the
+ * owner reversed it on 2026-10-03, and
+ * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-1 superseded ADR 0033 D-6 on this path. While the phone is framing or
+ * filming, `camera/SideLiveView.tsx` shows the latest picture with the outline
+ * of where the model found the rider in it, below the phone's state and the
+ * framing check, which stays the primary signal in words. It is absent — not
+ * hidden — once the link is lost or the pairing ends. The other picture this
+ * screen shows is its OWN front camera's, while it reads the phone's code
+ * (#557, `camera/ScanViewfinder.tsx`). Both hold Android's secure window flag
+ * while they are on screen (ADR 0044 D-12). What the analysis text reads is
+ * still `camera/side-analysis-port.ts` §`SideAnalysisState` — counts, and
+ * whether the camera is where it was last time — and nothing says anything
+ * about a body (ADR 0030).
  *
  * ⚠️ **The pairing is not this component's.** It is held by the port
  * (`side-pairing-port.ts` §`currentSideCamera`) so that leaving this screen to
@@ -42,6 +47,7 @@ import { PairingCode } from '../camera/PairingCode';
 import type { CameraFacing } from '../camera/camera-port';
 import type { CameraController } from '../camera/session';
 import { ScanViewfinder } from '../camera/ScanViewfinder';
+import { SideLiveView } from '../camera/SideLiveView';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import {
   SIDE_PAIRING_END_TEXT,
@@ -194,6 +200,16 @@ function Paired({
     <>
       <Controls control={pairing.control} state={state} />
       {pairing.analysis === undefined ? null : <Analysis analysis={pairing.analysis} />}
+      {/*
+        #1061: the picture, below the controls and the words, and only while
+        the phone is framing or filming — so a lost link or a stop REMOVES it.
+        Watching it is what asks the model for its picture back
+        (`side-live-view-port.ts` §`onSideLiveView`).
+      */}
+      {pairing.liveView !== undefined &&
+      (state.phone === 'framing' || state.phone === 'filming') ? (
+        <SideLiveView view={pairing.liveView} controller={controller} />
+      ) : null}
     </>
   );
 }
@@ -212,7 +228,7 @@ export function sidePicturesText(state: SideAnalysisState): string {
   }
   switch (state.model) {
     case 'waiting':
-      return 'The phone’s pictures are looked at on this tablet as they arrive, and thrown away at once. None has arrived yet.';
+      return 'The phone’s pictures are looked at on this tablet as they arrive, shown here until the next one replaces them, and then thrown away. None has arrived yet.';
     case 'loading':
       return 'Loading the pose model on this tablet. Pictures arriving meanwhile wait, one at a time.';
     case 'unavailable':

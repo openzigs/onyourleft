@@ -10,7 +10,7 @@
  * 320×256, a header covering **70% of the viewport** and a "Skip to main
  * content" that landed the `<h1>` **entirely behind it**. The review's durable
  * finding was that this repository's accessibility gate is structurally blind
- * to *layout*: jsdom performs no layout (CLAUDE.md §4e), `theme.a11y.test.ts`
+ * to *layout*: jsdom performs no layout (docs/agents/accessibility.md §4e), `theme.a11y.test.ts`
  * reads the stylesheet as a file, and the browser gate rendered a map, a 3D
  * scene and a HUD panel — never the chrome.
  *
@@ -47,7 +47,7 @@
  * `contrast.a11y.test.ts` owns the palette.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 import {
@@ -71,6 +71,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
 /**
  * The viewports measured, and why each is here.
@@ -163,6 +164,50 @@ async function openShell(page: Page): Promise<void> {
   await page.waitForSelector('html[data-oyl-shell-ready]');
 }
 
+/**
+ * One load of `url` at `size`, shared by the cases that only READ it — #1128,
+ * `shared-load.ts`'s rule: a case that scrolls, focuses, presses, strips a
+ * style, takes a screenshot or reads a request takes its own `page` and loads
+ * its own, as every control here does. The key names the page, the viewport and
+ * the palette, and the load checks the page really is at that size and in that
+ * palette, so two cases cannot share a page laid out for a third.
+ */
+async function sharedShell(
+  browser: Browser,
+  size: { readonly width: number; readonly height: number },
+  {
+    url = '/shell.html',
+    theme = 'light',
+    open = openShell,
+  }: { url?: string; theme?: Theme; open?: (page: Page) => Promise<void> } = {},
+): Promise<Page> {
+  return sharedPage(
+    browser,
+    `${url} at ${String(size.width)}×${String(size.height)}, ${theme}`,
+    async (page) => {
+      await open(page);
+      const seen = await page.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        theme: document.documentElement.dataset['theme'],
+      }));
+      expect(seen, 'the shared load is not the page its key names').toEqual({
+        width: size.width,
+        height: size.height,
+        theme,
+      });
+    },
+    test.info(),
+  );
+}
+
+// The page the cases below share goes when this file's cases do (`shared-load.ts`).
+test.afterAll(releaseSharedPage);
+// What a red shared case read, since the `page` fixture's screenshot is not it (#1076).
+test.afterEach(async () => {
+  await attachSharedPageOnFailure(test.info());
+});
+
 /** Two animation frames, which is when a scroll a focus call caused has settled. */
 async function settled(page: Page): Promise<void> {
   await page.evaluate(
@@ -182,7 +227,7 @@ for (const viewport of VIEWPORTS) {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
     test('the stylesheet loaded and the page can scroll, or nothing below means anything', async ({
-      page,
+      browser,
     }) => {
       // The control, and it is not ceremony. Both of the measurements this file
       // exists for are trivially satisfied by a broken page: chrome that is
@@ -191,7 +236,7 @@ for (const viewport of VIEWPORTS) {
       // is "clear of the header" by having never moved. Every viewport above
       // 320×640 reported exactly that on this harness's first run, before
       // `shell-harness.tsx` §SPACER_PIXELS existed.
-      await openShell(page);
+      const page = await sharedShell(browser, viewport);
 
       const state = await page.evaluate(() => {
         const header = document.querySelector('.oyl-header');
@@ -236,8 +281,8 @@ for (const viewport of VIEWPORTS) {
       ).toBeGreaterThan(0);
     });
 
-    test('content is not required to scroll in two dimensions (SC 1.4.10)', async ({ page }) => {
-      await openShell(page);
+    test('content is not required to scroll in two dimensions (SC 1.4.10)', async ({ browser }) => {
+      const page = await sharedShell(browser, viewport);
 
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth,
@@ -924,7 +969,7 @@ for (const viewport of HEADER_VIEWPORTS) {
  *
  * ## Why here and not in the fast suite
  *
- * jsdom performs no layout and resolves no custom property (CLAUDE.md §4e), so
+ * jsdom performs no layout and resolves no custom property (docs/agents/accessibility.md §4e), so
  * nothing in `pnpm run test` can measure a button. `theme.a11y.test.ts` reads
  * the stylesheet as a file: it can see a declaration, never what the
  * declaration does — which is the same blindness that let #307 ship a header
@@ -990,9 +1035,9 @@ for (const viewport of VIEWPORTS) {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
     test('every mid-ride control is at least a 44×44 target as Chromium lays it out', async ({
-      page,
+      browser,
     }) => {
-      await openShell(page);
+      const page = await sharedShell(browser, viewport);
       const boxes = await specimenBoxes(page);
 
       // ⚠️ The control that matters most here. Handed no ports, every one of
@@ -1049,8 +1094,8 @@ test.describe('the touch target is declared rather than emergent', () => {
   // somebody did: it measures the box a rider touches at all five.
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test('the minimum is a declaration on .oyl-button, in both axes', async ({ page }) => {
-    await openShell(page);
+  test('the minimum is a declaration on .oyl-button, in both axes', async ({ browser }) => {
+    const page = await sharedShell(browser, { width: 1280, height: 800 });
 
     const declared = await page.evaluate((selector) => {
       return [...document.querySelectorAll(selector)].map((element) => {
@@ -1333,8 +1378,8 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
   test.describe(`#427 — the navigation at ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test(`is a ${viewport.expect}`, async ({ page }) => {
-      await openShell(page);
+    test(`is a ${viewport.expect}`, async ({ browser }) => {
+      const page = await sharedShell(browser, viewport);
       const nav = await page.evaluate(() => {
         const element = document.querySelector('nav[aria-label="Primary"]');
         if (element === null) throw new Error('no Primary nav');
@@ -1373,9 +1418,9 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
     });
 
     test('holds at most five destinations, each a 44×44 target as Chromium lays it out', async ({
-      page,
+      browser,
     }) => {
-      await openShell(page);
+      const page = await sharedShell(browser, viewport);
       const links = await navLinks(page);
       // The apparatus: an empty list passes every loop below.
       expect(links.length).toBeGreaterThan(2);
@@ -1392,8 +1437,8 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       }
     });
 
-    test('marks where you are with a shape, not only a colour', async ({ page }) => {
-      await openShell(page);
+    test('marks where you are with a shape, not only a colour', async ({ browser }) => {
+      const page = await sharedShell(browser, viewport);
       const links = await navLinks(page);
       expect(links.length).toBeGreaterThan(2);
       expect(paintedPillFaults(links)).toEqual([]);
@@ -1419,8 +1464,8 @@ for (const viewport of NAVIGATION_VIEWPORTS) {
       expect(paintedPillFaults(links)).not.toEqual([]);
     });
 
-    test('#944 — is no larger than before the indicator', async ({ page }) => {
-      await openShell(page);
+    test('#944 — is no larger than before the indicator', async ({ browser }) => {
+      const page = await sharedShell(browser, viewport);
       const box = await page.evaluate(() => {
         const element = document.querySelector('nav[aria-label="Primary"]');
         if (element === null) throw new Error('no Primary nav');
@@ -1619,7 +1664,7 @@ for (const viewport of [
 
 /**
  * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
- * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and CLAUDE.md
+ * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and docs/agents/browser-gate.md
  * §4f records this repository getting the two the wrong way round once.
  */
 const MINIMUM_TARGET_PIXELS = 24;
@@ -2071,6 +2116,12 @@ async function openControls(page: Page, url = CONTROLS_PAGE, theme?: Theme): Pro
   ).toBe(8);
 }
 
+/** The control specimens, as {@link sharedShell} loads them. */
+const SHARED_CONTROLS = {
+  url: CONTROLS_PAGE,
+  open: async (page: Page) => openControls(page),
+} as const;
+
 interface RowBox {
   readonly markup: string;
   readonly height: number;
@@ -2110,9 +2161,9 @@ for (const viewport of VIEWPORTS) {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
     test('is at least a 44×44 target as Chromium lays it out, whichever markup it uses', async ({
-      page,
+      browser,
     }) => {
-      await openControls(page);
+      const page = await sharedShell(browser, viewport, SHARED_CONTROLS);
       const rows = await rowBoxes(page, false);
       expect(rows.length).toBe(ROW_COUNT);
       expect(new Set(rows.map((row) => row.markup))).toEqual(new Set(['beside', 'wrapping']));
@@ -2166,8 +2217,8 @@ for (const viewport of VIEWPORTS) {
       }
     });
 
-    test("the file input's button is a 44 px target", async ({ page }) => {
-      await openControls(page);
+    test("the file input's button is a 44 px target", async ({ browser }) => {
+      const page = await sharedShell(browser, viewport, SHARED_CONTROLS);
       const height = await page
         .locator('[data-oyl-native-control="file"]')
         .evaluate((input) => input.getBoundingClientRect().height);
@@ -2179,8 +2230,8 @@ for (const viewport of VIEWPORTS) {
 test.describe('#667 — the row target is declared, and nothing else holds it', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test('the 44 px minimum is a declaration on every row', async ({ page }) => {
-    await openControls(page);
+  test('the 44 px minimum is a declaration on every row', async ({ browser }) => {
+    const page = await sharedShell(browser, { width: 1280, height: 800 }, SHARED_CONTROLS);
     for (const row of await rowBoxes(page, false)) {
       expect(Number.parseFloat(row.minHeight), `a ${row.markup} row`).toBeGreaterThanOrEqual(
         TOUCH_TARGET_PIXELS,
@@ -2216,9 +2267,13 @@ for (const theme of THEMES) {
     test.use({ viewport: { width: 1280, height: 800 }, colorScheme: theme });
 
     test('draws the file button as the secondary button, a token clear of its label', async ({
-      page,
+      browser,
     }) => {
-      await openControls(page, CONTROLS_PAGE, theme);
+      const page = await sharedShell(
+        browser,
+        { width: 1280, height: 800 },
+        { ...SHARED_CONTROLS, theme },
+      );
       const read = await page.evaluate(() => {
         const pick = (style: CSSStyleDeclaration) => ({
           color: style.color,
@@ -2251,9 +2306,13 @@ for (const theme of THEMES) {
     });
 
     test('paints checkboxes, radios, a range and a progress bar in the accent token', async ({
-      page,
+      browser,
     }) => {
-      await openControls(page, CONTROLS_PAGE, theme);
+      const page = await sharedShell(
+        browser,
+        { width: 1280, height: 800 },
+        { ...SHARED_CONTROLS, theme },
+      );
       const accents = await page.evaluate(() =>
         [
           ...document.querySelectorAll(

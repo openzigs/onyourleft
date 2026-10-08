@@ -39,7 +39,7 @@
  * **The formulae themselves are unaffected and are used freely.** They are
  * published — Allen & Coggan, *Training and Racing with a Power Meter* (2006) —
  * and a trademark protects a name, not arithmetic. A mathematical formula is
- * not copyrightable either (CLAUDE.md §6). GoldenCheetah implements the same
+ * not copyrightable either (docs/agents/scope-and-ip.md §6). GoldenCheetah implements the same
  * three and is **GPL-2.0**: reading it to check the arithmetic is permitted and
  * copying from it is fatal inside `packages/` (§3). Nothing here is derived
  * from it — every expression below is written from the published description.

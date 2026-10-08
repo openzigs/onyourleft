@@ -45,8 +45,8 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { SideSessionSummary } from '../camera/side-session-summary';
-import { SIDE_POSE_SOURCES } from '../camera/side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
+import { SIDE_POSE_SOURCES } from '@onyourleft/analysis';
 import { coordinatesIn } from '../privacy/boundaries';
 import { MAXIMUM_IMPORTED_SAMPLES } from '../transfer/read-activity-file';
 
@@ -59,7 +59,7 @@ import {
   SECTION_KINDS,
   type RideAnalysisInput,
   type RideAnalysisOptions,
-} from './input';
+} from '@onyourleft/analysis';
 import { rideSummaryBody } from './ride-summary';
 
 const TEMPLATE = 'ride-analysis/1';
@@ -389,7 +389,7 @@ describe('what never leaves: nothing that locates or identifies the rider', () =
     expect(leaksIn({ ...input, at: rounded }, located).numbers).toStrictEqual([rounded]);
   });
 
-  it('never uses a registered metric name in any key (CLAUDE.md §6)', async () => {
+  it('never uses a registered metric name in any key (docs/agents/scope-and-ip.md §6)', async () => {
     const ride = rideFor(ATHLETE_A);
     const from = await saved(ride, streamSetFor(ride, { sampleCount: 3600 }), {
       athlete: { mass: kilograms(70), thresholdPower: watts(250) },

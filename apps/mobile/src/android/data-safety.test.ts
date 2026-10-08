@@ -18,7 +18,7 @@
  *    #318 established the shipped app carries, and it runs on a clean clone.
  * 3. **The rule against the artefact.** The merged manifest, when a Gradle
  *    build has produced one. It **skips loudly** otherwise — CI does not build
- *    Android (CLAUDE.md §4c) — because a silent skip here is exactly #318's
+ *    Android (docs/agents/ci.md §4c) — because a silent skip here is exactly #318's
  *    defect, one layer in.
  */
 

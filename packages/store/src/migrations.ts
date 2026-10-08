@@ -14,7 +14,7 @@
  * does not have — **cannot** be executed as written. Not "is hard": the event
  * does not exist.
  *
- * ADR 0005 section F decided what it means instead, and CLAUDE.md section 5
+ * ADR 0005 section F decided what it means instead, and packages/CLAUDE.md section 5
  * repeats it:
  *
  * 1. Every migration is a pair of pure functions over serialisable records.

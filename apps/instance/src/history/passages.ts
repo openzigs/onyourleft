@@ -99,6 +99,11 @@ const HEADER_END = /[,\s]/u;
  * time, which is quadratic. This scan remembers where the header that each
  * `data:` starts in ends, and every later `data:` before that point shares
  * the answer, so every character is looked at a bounded number of times.
+ *
+ * ⚠️ **The client has a copy**, `apps/web/src/rider-text/data-url.ts`, which
+ * refuses such a document before it is added (#933): the client may not
+ * import this package, and `data-url.test.ts` there fails when the two
+ * copies' code differs. Change both together.
  */
 export function holdsDataUrl(text: string): boolean {
   let end = -1;

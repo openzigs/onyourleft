@@ -125,7 +125,7 @@ export type RiderPresence = 'present' | 'absent' | 'unknown';
  * name, because two independent pausers is the arrangement that produces a
  * ride which pauses and resumes in a loop.
  *
- * The defect it answers is `CLAUDE.md` §8's converse: an ERG-mode trainer
+ * The defect it answers is `docs/agents/toolchain.md` §8's converse: an ERG-mode trainer
  * holds a power target at a rider who is not there, and reports a speed that
  * is the flywheel it is spinning, so {@link isMovingReading} says "moving" for
  * as long as the rider is off getting a drink.

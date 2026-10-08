@@ -7,7 +7,7 @@
  * ## Why this file exists when `game/stage.test.tsx` already tests the callback
  *
  * `GameViewProps.onImmersive` is an **optional prop threaded through JSX**, and
- * CLAUDE.md §4j is explicit that `check:wiring` cannot see one: a shell that
+ * docs/agents/wiring-gate.md §4j is explicit that `check:wiring` cannot see one: a shell that
  * never passed it would be a correct, unit-tested `GameView` wired to nothing,
  * with the gate green. `stage.test.tsx` proves the component *says* it has the
  * screen. This proves the shell *listens* — by starting a ride through the real

@@ -9,7 +9,7 @@
  *
  * `read()` closes every store this harness has opened before it opens
  * another, so no read can be served by the connection that wrote: the
- * "wrong harness" cause of `CLAUDE.md` §5's defect shape is not expressible
+ * "wrong harness" cause of `docs/agents/quality-gate.md` §5's defect shape is not expressible
  * here. The database is a FILE in a fresh temporary directory, because an
  * in-memory database cannot be reopened and a reopen is the whole point.
  *
@@ -179,7 +179,7 @@ export async function assertAthleteRoundTrip(
 //
 // Two athletes cannot tell "scoped correctly" from "returns everything the
 // caller is not"; the third is what separates a filter from an exclusion
-// (`CLAUDE.md` §5).
+// (`docs/agents/quality-gate.md` §5).
 
 export const ATHLETE_A = 'athlete-a';
 export const ATHLETE_B = 'athlete-b';

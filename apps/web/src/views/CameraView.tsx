@@ -553,7 +553,7 @@ function Camera({
               // number already on screen: this counter is what a rider decides
               // whether to press "Delete every picture" by, and a count derived
               // from what this tab believes it wrote is the write-reports-
-              // success-while-the-read-cannot-see-it shape CLAUDE.md §5 names.
+              // success-while-the-read-cannot-see-it shape docs/agents/quality-gate.md §5 names.
               //
               // `captureOne` never rejects — see `camera/session.ts`.
               void controller.captureOne().then((result) => {

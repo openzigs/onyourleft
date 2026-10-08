@@ -9,7 +9,7 @@
  * write here and the least useful. It goes red for a reordering that changes
  * nothing, it goes green for a header field that is well-formed and wrong, and
  * it never once exercises the question that matters — **can the consumer read
- * it?** CLAUDE.md §5's defect shape is *a write that reports success while the
+ * it?** docs/agents/quality-gate.md §5's defect shape is *a write that reports success while the
  * read cannot see it*, and its instruction is to *"assert by reading back
  * through the same path a real consumer uses"*. So the container is read back
  * through `pmtiles`' own `PMTiles` class, which is the class `maplibre.ts`

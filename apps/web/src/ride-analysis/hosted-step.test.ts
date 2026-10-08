@@ -14,12 +14,13 @@ import { hostedModelPort, type HostedSend } from '../camera/hosted-transport';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import { hostedStepPort, type HostedStepAsker } from './hosted-step';
-import type { RideAnalysisInput } from './input';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 import { modelServer, STILL_CLOCK, type ModelServer } from './model-server-testing';
-import type { ModelStepPort, StepRequest } from './model-step-port';
-import { runAnalysis } from './runner';
-import { sealStep } from './sealed-step';
-import { patternsOnlyGuard } from './personal-details-testing';
+import type { ModelStepPort, StepRequest } from '@onyourleft/analysis';
+import { runAnalysis } from '@onyourleft/analysis';
+import { sealStep } from '@onyourleft/analysis/testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -69,6 +70,7 @@ function counted(server: ModelServer = modelServer()): {
 /** A camera controller with the hosted model turned on, or not. */
 function controller(send: HostedSend, hostedOn = true): CameraController {
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),

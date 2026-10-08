@@ -247,7 +247,7 @@ describe('the HUD’s one live region — #397', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36387309239 (the slower of the two
   // runners, a job over 1 000 s) — 45 % of that default. 7 s is about three times the slowest, so a
   // slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('says nothing to a rider who has chosen nothing — OFF by default', async () => {
     await startRide();
     await pump(200);
@@ -315,7 +315,7 @@ describe('the road ahead, through the same region — #399', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
   // runners, a job over 1 000 s) — 87 % of that default. 14 s is about three times the slowest, so
   // a slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('says nothing about a climb when that row is never', async () => {
     routes = [hillyRoute()];
     chooseAnnouncements({
@@ -365,6 +365,8 @@ function trainerPort(hasControl: boolean): GameTrainerPort {
     workoutRescue: () => undefined,
     recordingMayStop: () => false,
     gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
   };
 }
 

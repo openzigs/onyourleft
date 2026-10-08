@@ -53,7 +53,7 @@ import type { DegreesBearing, GeographicPosition, Metres } from './quantities';
  * Source: WGS 84 defines a = 6 378 137 m exactly and 1/f = 298.257223563
  * exactly, giving b = a(1 − f) = 6 356 752.314245… m; R₁ follows by arithmetic
  * and is quoted as 6 371.0088 km by the IUGG. Both inputs are published
- * constants, which CLAUDE.md §6 records as facts rather than as anybody's
+ * constants, which docs/agents/scope-and-ip.md §6 records as facts rather than as anybody's
  * implementation.
  */
 export const EARTH_MEAN_RADIUS_METRES = 6_371_008.8;

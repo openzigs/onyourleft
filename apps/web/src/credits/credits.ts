@@ -62,7 +62,7 @@ import type { AssetEntry, ParsedManifest } from './manifest';
  * second.** That one decides which entries `ASSET006` demands `creator`, `url`
  * and `modified` on; this one decides which entries the screen credits. Drift
  * between them is silent in both directions and `credits.test.ts` reads the
- * script and compares, because `CLAUDE.md` §4g records exactly this hazard
+ * script and compares, because `docs/agents/licence-gates.md` §4g records exactly this hazard
  * between ADR 0015's prose tables and `check-dependency-licences.mjs`'s
  * `POLICY` and says nothing mechanically prevents it.
  *

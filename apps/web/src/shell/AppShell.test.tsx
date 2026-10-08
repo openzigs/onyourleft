@@ -438,7 +438,7 @@ describe('what the rider weighs (#325)', () => {
    * `onRiderMassChange={() => undefined}`, so the `riderMass` prop never moves;
    * in the shell it does, and `WeightField` is keyed on it. A successful save
    * therefore remounted the field and threw away the confirmation the same
-   * handler had just set — CLAUDE.md §5's *wrong harness*, where the double is
+   * handler had just set — docs/agents/quality-gate.md §5's *wrong harness*, where the double is
    * inert in exactly the dimension the bug lives in.
    *
    * The confirmation is a `StatusMessage live`, which is the **only**

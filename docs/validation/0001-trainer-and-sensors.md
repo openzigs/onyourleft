@@ -64,7 +64,7 @@ So:
 | A power meter | Cycling Power Service (`0x1818`), ideally **not** the trainer, so #134's "at least one real power meter" is a second device |
 | A speed/cadence sensor | Cycling Speed and Cadence (`0x1816`) |
 | A heart rate strap | Heart Rate Service (`0x180D`) |
-| A laptop running Chrome or Edge | **Not Safari, not Firefox** — neither implements Web Bluetooth and neither intends to (CLAUDE.md §8) |
+| A laptop running Chrome or Edge | **Not Safari, not Firefox** — neither implements Web Bluetooth and neither intends to (docs/agents/web-bluetooth.md §8) |
 | A second app that can control the trainer | The trainer vendor's own phone app is easiest. Needed for T6 |
 | Two platform accounts | Strava, plus Garmin Connect or TrainingPeaks — for part C |
 
@@ -290,7 +290,7 @@ distance, elapsed time, moving time and every channel are right.
 That is a **deliberate** choice with two rejected alternatives, both worse: writing `0,0` puts the
 ride in the Gulf of Guinea (`packages/fit/src/xml/track.ts` says so), and dropping every sample
 yields an empty track carrying nothing. This project's own decoder reads the file back happily —
-which is exactly the encoder-and-decoder-wrong-in-the-same-direction blind spot CLAUDE.md §5 names,
+which is exactly the encoder-and-decoder-wrong-in-the-same-direction blind spot docs/agents/quality-gate.md §5 names,
 and the reason a third-party importer is the only thing that settles it.
 
 **So whichever way this goes, it is a result:**
@@ -358,5 +358,5 @@ Said here rather than discovered later:
 - **Nothing about frame rate or thermal behaviour.** ADR 0008 D-2's rendering gate was **waived**,
   not passed, and a 60-minute run on the device floor is still outstanding.
 - **Nothing about more than three concurrent BLE connections.** Web Bluetooth's practical budget is
-  about three, not seven (CLAUDE.md §8), and pairing four devices is a test of that limit rather
+  about three, not seven (docs/agents/web-bluetooth.md §8), and pairing four devices is a test of that limit rather
   than of anything in this document.

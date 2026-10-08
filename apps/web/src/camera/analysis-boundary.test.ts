@@ -70,8 +70,9 @@ const CANCELLATION_TYPES = /(?<![\w.$])(?:AbortSignal|AbortController)\b/;
 /** The modules on the near side of the port. */
 const ABOVE_THE_TRANSPORT = [
   join('camera', 'analysis-port.ts'),
-  // #799: the picture-free half of the port, split out of it.
-  join('camera', 'model-answer.ts'),
+  // #799: the picture-free half of the port, split out of it — in
+  // `@onyourleft/analysis` since #1094, as a path from `src`.
+  join('..', '..', '..', 'packages', 'analysis', 'src', 'screen', 'model-answer.ts'),
   join('camera', 'analysis-endpoint.ts'),
   join('camera', 'analysis-response.ts'),
   join('camera', 'useAnalysis.ts'),

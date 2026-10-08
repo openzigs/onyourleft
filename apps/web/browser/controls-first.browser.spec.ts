@@ -114,6 +114,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST, reflowFaults, reflowMargin } from './reflow-faults';
 import type { ReflowMeasurement } from './reflow-harness';
 
 /** SC 2.5.5 (AAA) — `shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS`. */
@@ -302,15 +303,47 @@ async function hashFor(page: Page, route: RouteDefinition): Promise<string> {
   return hrefFor(route, parameter);
 }
 
-async function visit(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
+/** One route's measurement, with no judgment made of it. */
+async function measure(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
   const hash = await hashFor(page, route);
   const seen = await page.evaluate(async (target) => window.__oylReflow?.visit(target), hash);
   if (seen === undefined) {
     throw new Error('the reflow harness published no measurement');
   }
+  return seen;
+}
+
+async function visit(page: Page, route: RouteDefinition): Promise<ReflowMeasurement> {
+  const seen = await measure(page, route);
   expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
   expect(seen.settledWithinPatience, `${route.id} did not settle`).toBe(true);
   return seen;
+}
+
+/**
+ * #660's judgment of the walk, carried by the light phone walk — #1128,
+ * `reflow-faults.ts`: that walk opens the same page `reflow.browser.spec.ts`'s
+ * light walk did at 390×844, so each route's one measurement is judged by both
+ * specs' rules rather than taken twice.
+ */
+interface ReflowJudgment {
+  readonly populated: boolean;
+  readonly faults: string[];
+  readonly margins: string[];
+}
+
+// The light phone walk below stands in for `reflow.browser.spec.ts`'s at this
+// viewport, so it must BE that viewport: fail at load rather than leave it
+// walked by neither spec.
+if (
+  PHONE.width !== LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.width ||
+  PHONE.height !== LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.height
+) {
+  throw new Error(
+    `controls-first's phone is ${String(PHONE.width)}×${String(PHONE.height)}, and reflow-faults.ts ` +
+      'says the light reflow walk it carries is at ' +
+      `${String(LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.width)}×${String(LIGHT_PHONE_WALKED_BY_CONTROLS_FIRST.height)}`,
+  );
 }
 
 /**
@@ -462,6 +495,7 @@ function judge(
 async function walk(
   page: Page,
   viewport: Viewport,
+  reflow?: ReflowJudgment,
 ): Promise<{
   readonly lines: string[];
   readonly faults: Map<string, readonly string[]>;
@@ -477,7 +511,18 @@ async function walk(
   const emptyFaults = new Map<string, readonly string[]>();
   const empty = await page.evaluate(() => window.__oylReflow?.data === 'empty');
   for (const route of ALL_ROUTES) {
-    const seen = await visit(page, route);
+    let seen: ReflowMeasurement;
+    if (reflow === undefined) {
+      seen = await visit(page, route);
+    } else {
+      // Judged for #660 first, and #666's own two checks made soft, so a route
+      // that fails both is reported by both rather than by whichever ran first.
+      seen = await measure(page, route);
+      reflow.faults.push(...reflowFaults(route, seen, reflow.populated));
+      reflow.margins.push(reflowMargin(route, seen));
+      expect.soft(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expect.soft(seen.settledWithinPatience, `${route.id} did not settle`).toBe(true);
+    }
     const verdict = judge(route, seen, viewport, !empty);
     lines.push(verdict.line);
     if (verdict.faults.length > 0) {
@@ -567,11 +612,42 @@ test.describe('#666 — the first control is above the fold on every route', () 
       test.use({ colorScheme: theme });
 
       for (const data of ['empty', 'populated'] as const) {
-        test(`at a ${PHONE.name}, ${data}`, async ({ page }) => {
+        // #1128: in the light palette this is ALSO #660's reflow walk at the
+        // phone — `reflow-faults.ts` — so the case says so in its name.
+        const reflows = theme === 'light' ? ', and every route reflows (#660)' : '';
+        test(`at a ${PHONE.name}, ${data}${reflows}`, async ({ page }) => {
           test.setTimeout(180_000);
           await open(page, PHONE, `data=${data}`);
           expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
-          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(page, PHONE);
+          const reflow: ReflowJudgment | undefined =
+            theme === 'light'
+              ? { populated: data === 'populated', faults: [], margins: [] }
+              : undefined;
+          const { lines, faults, exempted, emptyLines, emptyFaults } = await walk(
+            page,
+            PHONE,
+            reflow,
+          );
+          if (reflow !== undefined) {
+            console.log(
+              `reflow ${data} ${String(PHONE.width)}×${String(PHONE.height)}\n  ${reflow.margins.join('\n  ')}`,
+            );
+            // Soft, so a #666 fault below is reported beside it, not instead.
+            expect
+              .soft(
+                reflow.faults,
+                'reflow (#660, reflow-faults.ts): a route at the phone in the light palette',
+              )
+              .toEqual([]);
+            // Per route above, which names the route; this catches one raised
+            // after the last route was measured — the reflow walk's last check.
+            expect
+              .soft(
+                await page.evaluate(() => window.__oylReflow?.errors),
+                'reflow (#660): errors the page raised during the walk',
+              )
+              .toEqual([]);
+          }
           console.log(`controls first, ${PHONE.name}, ${data}\n  ${lines.join('\n  ')}`);
           expect([...faults.values()].flat()).toEqual([]);
           if (data === 'empty') {
@@ -991,7 +1067,7 @@ test.describe('#1013 — the help control beside a section heading', () => {
 });
 
 /**
- * #1050 — *Save workout* with blocks in the builder.
+ * #1050, #1087 — *Save workout* with blocks in the builder.
  *
  * Every other walk here renders the workout builder with NO blocks, so the
  * block list and the block chart (#1043) — drawn only once a block exists —
@@ -1001,23 +1077,20 @@ test.describe('#1013 — the help control beside a section heading', () => {
  * and this publishes *Save workout*'s margin to the fold — to its pane's
  * bottom where that pane scrolls on its own (#723) — with and without them.
  *
- * - **Held** to §4f's 50 px floor on the owner's tablet both ways up. With
- *   the chart where #1043 drew it, between the list and the Save form, it
- *   could not be: in landscape the four blocks and the chart put *Save
- *   workout* about 46 px UNDER the fold on a Mac. The chart moved below the
- *   form (`WorkoutsView.tsx`, #1050), which is the issue's own remedy.
- * - **Published, not held, on a phone** (390×844), and the floor there is
- *   not one the layout can meet by moving the chart: one pane puts the list
- *   of saved workouts first, the builder after it, and the block list alone
- *   — each block a line and a 44 px *Remove* button — puts *Save workout*
- *   about 120 px under the fold with four blocks on a Mac. With none it is
- *   above the fold (`list-detail.browser.spec.ts` §`PRIMARY_ON_ARRIVAL`
- *   says by how little). A builder that grows with every block cannot keep a
- *   button below it on one screen; the phone's way to it is scrolling.
- * - **The control**: `&chart=above` puts the chart back between the list and
- *   the form on the live page, and on the landscape tablet *Save workout* must
- *   then fall under the floor — so the hold above is the chart's place doing
- *   the work, not a fixture too small to matter.
+ * - **Held** to §4f's 50 px floor on the owner's tablet both ways up AND, since
+ *   #1087, on a phone (390×844), with blocks and without. #1050 moved the
+ *   chart below the form; the block list was still above it, and each block
+ *   (a line and a 44 px *Remove* button) moved *Save workout* down: on a phone
+ *   it was about 120 px UNDER the fold with four blocks, and on the landscape
+ *   tablet 65.9 px above it on CI (run 37168523170), 16 px over the floor —
+ *   one more block's worth. So the Save form is first in the builder now
+ *   (`WorkoutsView.tsx`, #1087), and its margin does not depend on how many
+ *   blocks there are; the spec requires it to be the same with four as with
+ *   none, within a pixel.
+ * - **The control**: `&save=below` puts the Save form back after the block
+ *   list on the live page, where #1050 left it, and on the phone *Save
+ *   workout* must then fall under the floor — so the hold above is the form's
+ *   place doing the work, not a fixture too small to matter.
  */
 const SAVE_WORKOUT = 'Save workout';
 
@@ -1045,10 +1118,9 @@ async function saveWorkoutMargin(
   };
 }
 
-test.describe('#1050 — Save workout, with blocks in the builder', () => {
+test.describe('#1050, #1087 — Save workout, with blocks in the builder', () => {
   for (const viewport of [...TABLETS, PHONE]) {
-    const held = viewport !== PHONE;
-    test(`its margin to the fold on a ${viewport.name}${held ? `, held to ${String(FOLD_MARGIN_PIXELS)} px` : ''}`, async ({
+    test(`its margin to the fold on a ${viewport.name}, held to ${String(FOLD_MARGIN_PIXELS)} px`, async ({
       page,
     }) => {
       await open(page, viewport, 'data=populated');
@@ -1056,7 +1128,7 @@ test.describe('#1050 — Save workout, with blocks in the builder', () => {
       await open(page, viewport, 'data=populated&builder=blocks');
       const withBlocks = await saveWorkoutMargin(page);
       console.log(
-        `[#1050] “${SAVE_WORKOUT}” @ ${viewport.name}: ${withBlocks.margin.toFixed(1)} px with ` +
+        `[#1087] “${SAVE_WORKOUT}” @ ${viewport.name}: ${withBlocks.margin.toFixed(1)} px with ` +
           `${String(withBlocks.blocks)} blocks and the chart, ${without.margin.toFixed(1)} px with none`,
       );
       // The fixture is what it says, or this measured the empty builder twice.
@@ -1064,37 +1136,36 @@ test.describe('#1050 — Save workout, with blocks in the builder', () => {
       expect(without.chart).toBe(0);
       expect(withBlocks.blocks).toBe(BUILDER_BLOCK_COUNT);
       expect(withBlocks.chart).toBe(1);
-      if (held) {
-        expect(withBlocks.margin).toBeGreaterThan(FOLD_MARGIN_PIXELS);
-      }
+      expect(without.margin).toBeGreaterThan(FOLD_MARGIN_PIXELS);
+      expect(withBlocks.margin).toBeGreaterThan(FOLD_MARGIN_PIXELS);
+      // #1087: a block does not move it — a fifth or a tenth cannot spend the margin.
+      expect(Math.abs(withBlocks.margin - without.margin)).toBeLessThanOrEqual(1);
     });
   }
 
-  test('the control — with the chart above the form, Save workout falls under the floor on the landscape tablet', async ({
+  test('the control — with the Save form after the block list, Save workout falls under the floor on a phone', async ({
     page,
   }) => {
-    const [landscape] = TABLETS;
-    if (landscape === undefined) throw new Error('no tablet viewport');
-    await open(page, landscape, 'data=populated&builder=blocks&chart=above');
-    const above = await saveWorkoutMargin(page);
+    await open(page, PHONE, 'data=populated&builder=blocks&save=below');
+    const below = await saveWorkoutMargin(page);
     console.log(
-      `[#1050] control: “${SAVE_WORKOUT}” @ ${landscape.name}, chart above the form: ` +
-        `${above.margin.toFixed(1)} px`,
+      `[#1087] control: “${SAVE_WORKOUT}” @ ${PHONE.name}, the form after the list: ` +
+        `${below.margin.toFixed(1)} px`,
     );
-    expect(above.blocks).toBe(BUILDER_BLOCK_COUNT);
-    expect(above.chart).toBe(1);
-    // The chart really is above the form, or this measured the shipped page.
+    expect(below.blocks).toBe(BUILDER_BLOCK_COUNT);
+    expect(below.chart).toBe(1);
+    // The form really is after the list, or this measured the shipped page.
     expect(
       await page.evaluate(() => {
-        const chart = document.querySelector('.oyl-main svg.oyl-block-chart');
+        const list = document.querySelector('.oyl-main .oyl-sections ol');
         const form = document.querySelector('form[aria-label="Save this workout"]');
         return (
-          chart !== null &&
+          list !== null &&
           form !== null &&
-          (chart.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+          (list.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
         );
       }),
     ).toBe(true);
-    expect(above.margin).toBeLessThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(below.margin).toBeLessThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 });

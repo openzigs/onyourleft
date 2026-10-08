@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { mount, settle, type Mounted } from '../testing/mount';
 
-import type { AnalysisCall, AnalysisOutcome, UntrustedText } from './model-answer';
+import type { AnalysisCall, AnalysisOutcome, UntrustedText } from '@onyourleft/analysis';
 import { useAnalysis, type AnalysisSchedule, type PictureAsker } from './useAnalysis';
 
 let mounted: Mounted | undefined;

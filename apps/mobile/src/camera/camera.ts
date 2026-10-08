@@ -95,7 +95,7 @@ export const ANDROID_CAMERA_DENIED: CameraPermissionNotice = {
  * cannot read its own manifest through the WebView, so this is a **claim** —
  * and the claim is checked against the manifest the Gradle merge actually
  * ships by `merged-manifest.test.ts`, on a machine that has built one. CI has
- * not (CLAUDE.md §4c), so there it skips, loudly, naming the paths.
+ * not (docs/agents/ci.md §4c), so there it skips, loudly, naming the paths.
  *
  * The pair is the point. `required: false` on the feature is what keeps the app
  * installable on a device with no camera, and a build that declared the

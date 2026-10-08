@@ -7,7 +7,7 @@
  * `packages/physics`' copies record: importing `vitest/config` pulls Vite's
  * declarations, and through them `@types/node`, into the program that
  * `tsconfig.json`'s `types: []` narrows — which is what makes `WebSocket`,
- * `fetch` and `Buffer` compile errors here (CLAUDE.md §4d).
+ * `fetch` and `Buffer` compile errors here (docs/agents/lint-boundaries.md §4d).
  */
 export default {
   test: {

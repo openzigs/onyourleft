@@ -19,7 +19,7 @@
  *
  * ## Why the pane that is not shown is `hidden` rather than styled away
  *
- * `a11y/audit.ts` loads no stylesheet (CLAUDE.md §4e), so a pane hidden by a
+ * `a11y/audit.ts` loads no stylesheet (docs/agents/accessibility.md §4e), so a pane hidden by a
  * media query alone would look present and focusable to the audit and to
  * `tabbableElements`. Deciding the panes here and writing the `hidden`
  * attribute keeps what the audit sees and what a rider sees the same — and

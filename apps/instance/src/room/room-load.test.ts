@@ -7,7 +7,7 @@
  * time the CI issue (#771) allows, "or the long run moves to #792 and this
  * suite runs a shorter one". It moved: measured on 2026-09-29 on an Apple M4
  * Pro, the full hour is 49.4 s of Vitest time (68.6 µs per rider-tick, 720 000 rider-ticks), and the CI runner
- * is about three times slower under coverage (CLAUDE.md §4c) — minutes of a
+ * is about three times slower under coverage (docs/agents/ci.md §4c) — minutes of a
  * job #771 records as already over budget. So this runs every rider for
  * {@link TICKS} ticks, which exercises every path a tick takes at the largest
  * room size (two rooms of 100), and #792 owns the hour.

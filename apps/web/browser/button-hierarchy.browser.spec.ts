@@ -5,7 +5,7 @@
  * them — #668, #688's hovered secondary, and #992's filled kinds: the
  * secondary TONAL (`surfaceOverlay`, no outline) and the tertiary TEXT.
  *
- * jsdom resolves no stylesheet and performs no layout (CLAUDE.md §4e), so
+ * jsdom resolves no stylesheet and performs no layout (docs/agents/accessibility.md §4e), so
  * `contrast.a11y.test.ts` can only check the pairs `design/tokens.ts` DECLARES.
  * #688 is what that leaves open: a state nobody meant to draw is a pair nobody
  * declared, and the secondary's hover drew `accent` on `accentHover` — 1.40:1 —

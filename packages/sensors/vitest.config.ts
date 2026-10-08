@@ -11,10 +11,10 @@
  * the thing that makes `process`, `Buffer` and `fetch` compile errors.
  *
  * That is not a hypothetical: it is exactly how the guard was silently broken in
- * `packages/domain` until #23's review (CLAUDE.md §4d). Vitest accepts a plain
+ * `packages/domain` until #23's review (docs/agents/lint-boundaries.md §4d). Vitest accepts a plain
  * object, and `defineConfig` is only an identity function for editor typing.
  *
- * **What changed in #40, since CLAUDE.md §4d sends readers here.** This package
+ * **What changed in #40, since docs/agents/lint-boundaries.md §4d sends readers here.** This package
  * now has two programs. `tsconfig.json` includes `src/`, `web-bluetooth/` and
  * this file, and carries `lib: ["ES2024", "DOM"]` with
  * `types: ["web-bluetooth"]`, because the adapter needs the DOM.

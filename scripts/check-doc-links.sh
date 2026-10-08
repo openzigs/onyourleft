@@ -128,7 +128,7 @@ while IFS= read -r document; do
 done < <(documents)
 
 if [ "${findings}" -ne 0 ]; then
-  printf '\n%d documentation link finding(s). See CLAUDE.md section 4a.\n' "${findings}" >&2
+  printf '\n%d documentation link finding(s). See docs/agents/commands.md section 4a.\n' "${findings}" >&2
   exit 1
 fi
 

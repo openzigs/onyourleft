@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useId, useState, type JSX } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   isConflict,
   MAXIMUM_MODERATION_REASON,
   type AccountAction,
+  type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
   type ModerationPort,
   type ModerationRead,
   type OpenReport,
   type PendingRegistration,
+  type SuspendedAccount,
 } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
 
@@ -46,6 +49,13 @@ import { hrefFor, routeById } from '../shell/routes';
  *
  * Every action that changes nothing says {@link NOTHING_CHANGED_TEXT}'s one
  * sentence (`instance/moderation-port.ts`), whatever the instance's reason.
+ *
+ * ## Two lists a page at a time — #961
+ *
+ * The suspended accounts and the log are shown a page at a time, newest first,
+ * each with a *Show more* control while the instance says there is more. A
+ * page is appended to what is shown; an action reads everything back from the
+ * first page again.
  *
  * ## A report about you — #905
  *
@@ -93,6 +103,15 @@ export const MODERATION_LOG_UNREADABLE_TEXT =
   'The moderation log could not be read from the instance, so it is not shown here. The ' +
   'queues above are as the instance gave them.';
 
+/** Said in place of the suspended accounts when the instance gave the queues and not them (#961). */
+export const SUSPENDED_UNREADABLE_TEXT =
+  'The suspended accounts could not be read from the instance, so they are not shown here. You ' +
+  'can still lift a suspension by the account’s id, below.';
+
+/** Said under a list when its next page could not be read (#961). */
+export const MORE_UNREADABLE_TEXT =
+  'The next page could not be read from the instance. What is shown above is unchanged.';
+
 /** What each logged action is called on this screen. */
 const ACTION_LABEL: Readonly<Record<string, string>> = {
   approve_registration: 'Approved an account',
@@ -126,9 +145,51 @@ interface Done {
   readonly finished: (outcome: ModerationOutcome) => Promise<void>;
 }
 
+/**
+ * The question a choice asks before it acts — #962. Suspending an account and
+ * hiding a display name are asked in `ConfirmDialog`, as Activities' delete is.
+ */
+interface Confirmation {
+  readonly title: string;
+  readonly body: string;
+  readonly confirmLabel: string;
+}
+
 interface Choice {
   readonly label: string;
   readonly run: (reason: string) => Promise<ModerationOutcome>;
+  /** Asked first when present; the action runs only once it is confirmed. */
+  readonly confirm?: Confirmation;
+}
+
+/** The way out of every moderation confirmation. */
+export const MODERATION_CANCEL_LABEL = 'Change nothing';
+
+/** That the confirmed action is logged — the last sentence of every confirmation. */
+const LOGGED_SENTENCE =
+  'It is written to the moderation log with your account and the reason you gave.';
+
+/** #962: what suspending `athleteId` is confirmed with. */
+export function suspendConfirmation(athleteId: string): Confirmation {
+  return {
+    title: athleteId.trim() === '' ? 'Suspend this account?' : `Suspend account ${athleteId}?`,
+    body:
+      'Until you lift the suspension, the account cannot use this instance except to take its ' +
+      `data out or delete itself. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Suspend it',
+  };
+}
+
+/** #962: what hiding `athleteId`'s display name is confirmed with. */
+export function hideNameConfirmation(athleteId: string): Confirmation {
+  return {
+    title:
+      athleteId.trim() === ''
+        ? 'Hide this account’s display name?'
+        : `Hide the display name of account ${athleteId}?`,
+    body: `Other riders will no longer see the name this account chose. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Hide the name',
+  };
 }
 
 /** A reason box and the actions it goes with, and what the last one did. */
@@ -144,19 +205,18 @@ function Decide({
   const reasonId = useId();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<ModerationOutcome | undefined>(undefined);
+  /** The choice whose confirmation is open — #962. */
+  const [confirming, setConfirming] = useState<Choice | undefined>(undefined);
 
   async function run(choice: Choice): Promise<void> {
     setBusy(true);
-    setOutcome(undefined);
     onDone.starting();
     const answer = await choice.run(reason);
     setBusy(false);
-    // A success is said by the page rather than here: the row this was pressed
-    // on may leave the screen once the queue is read again. A refusal is said
-    // here, beside what was pressed.
+    // What it came to — done OR refused — is said by the page rather than
+    // here (#960): the row this was pressed on may leave the screen once the
+    // queue is read again, and a refusal said inside it would go with it.
     if (answer.kind === 'done') setReason('');
-    else setOutcome(answer);
     // Read back either way: a refused action can be logged too.
     await onDone.finished(answer);
   }
@@ -172,7 +232,6 @@ function Decide({
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
-            setOutcome(undefined);
           }}
         />
       </p>
@@ -181,20 +240,34 @@ function Decide({
           <Button
             key={choice.label}
             variant="secondary"
-            disabled={busy}
+            // `aria-disabled` rather than `disabled` while an action runs, so
+            // focus handed back by a closing confirmation lands on it rather
+            // than falling to the page; `run` refuses the press.
+            unavailable={busy}
             onClick={() => {
-              void run(choice);
+              if (busy) return;
+              if (choice.confirm === undefined) void run(choice);
+              else setConfirming(choice);
             }}
           >
             {choice.label}
           </Button>
         ))}
       </p>
-      {outcome === undefined || outcome.kind === 'done' ? null : (
-        <StatusMessage tone="warning" label="Not done" live>
-          {outcome.text}
-        </StatusMessage>
-      )}
+      <ConfirmDialog
+        open={confirming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(undefined);
+        }}
+        title={confirming?.confirm?.title ?? ''}
+        confirmLabel={confirming?.confirm?.confirmLabel ?? ''}
+        cancelLabel={MODERATION_CANCEL_LABEL}
+        onConfirm={() => {
+          if (confirming !== undefined) void run(confirming);
+        }}
+      >
+        <p>{confirming?.confirm?.body}</p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -290,6 +363,7 @@ function Reports({
                     },
                     {
                       label: 'Suspend the account',
+                      confirm: suspendConfirmation(report.targetAthleteId),
                       run: async (reason) =>
                         port.actOnAccount(
                           report.targetAthleteId,
@@ -300,6 +374,7 @@ function Reports({
                     },
                     {
                       label: 'Hide its display name',
+                      confirm: hideNameConfirmation(report.targetAthleteId),
                       run: async (reason) =>
                         port.actOnAccount(
                           report.targetAthleteId,
@@ -314,6 +389,102 @@ function Reports({
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/** *Show more* under a paged list (#961), and what it says when the page did not come. */
+function More({
+  label,
+  next,
+  failed,
+  onMore,
+}: {
+  readonly label: string;
+  readonly next: string | null;
+  readonly failed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false);
+  if (next === null) return null;
+  return (
+    <>
+      {failed ? (
+        <StatusMessage tone="warning" label="Not read" live>
+          {MORE_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : null}
+      <p>
+        <Button
+          variant="secondary"
+          unavailable={busy}
+          onClick={() => {
+            if (busy) return;
+            setBusy(true);
+            void onMore(next).finally(() => {
+              setBusy(false);
+            });
+          }}
+        >
+          {label}
+        </Button>
+      </p>
+    </>
+  );
+}
+
+function Suspended({
+  port,
+  suspended,
+  moreFailed,
+  onMore,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly suspended: ModerationList<SuspendedAccount> | undefined;
+  readonly moreFailed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
+  readonly onDone: Done;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-suspended">
+      <h2 id="oyl-moderation-suspended">Suspended accounts</h2>
+      {suspended === undefined ? (
+        <StatusMessage tone="warning" label="Not read">
+          {SUSPENDED_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : suspended.items.length === 0 ? (
+        <p className="oyl-muted">No account is suspended.</p>
+      ) : (
+        <>
+          <ul className="oyl-moderation__list oyl-moderation__suspended">
+            {suspended.items.map((each) => (
+              <li key={each.athleteId}>
+                <h3>{each.displayName}</h3>
+                <p>
+                  Account <code>{each.athleteId}</code>, suspended {when(each.suspendedAt)}.
+                </p>
+                <Decide
+                  label={`Reason for lifting the suspension of ${each.displayName}`}
+                  onDone={onDone}
+                  choices={[
+                    {
+                      label: 'Lift the suspension',
+                      run: async (reason) => port.actOnAccount(each.athleteId, 'unsuspend', reason),
+                    },
+                  ]}
+                />
+              </li>
+            ))}
+          </ul>
+          <More
+            label="Show more suspended accounts"
+            next={suspended.next}
+            failed={moreFailed}
+            onMore={onMore}
+          />
+        </>
       )}
     </section>
   );
@@ -354,9 +525,13 @@ function AnAccount({
         label="Reason for the log"
         onDone={onDone}
         choices={[
-          { label: 'Suspend', run: act('suspend') },
+          { label: 'Suspend', run: act('suspend'), confirm: suspendConfirmation(athleteId) },
           { label: 'Lift the suspension', run: act('unsuspend') },
-          { label: 'Hide the display name', run: act('hide_display_name') },
+          {
+            label: 'Hide the display name',
+            run: act('hide_display_name'),
+            confirm: hideNameConfirmation(athleteId),
+          },
         ]}
       />
     </section>
@@ -365,13 +540,17 @@ function AnAccount({
 
 function Log({
   me,
-  entries,
+  log,
+  moreFailed,
+  onMore,
 }: {
   readonly me: string;
-  readonly entries: readonly ModerationLogEntry[] | undefined;
+  readonly log: ModerationList<ModerationLogEntry> | undefined;
+  readonly moreFailed: boolean;
+  readonly onMore: (cursor: string) => Promise<void>;
 }): JSX.Element {
-  // Newest first: the instance keeps it oldest first.
-  const newestFirst = entries === undefined ? undefined : [...entries].reverse();
+  // Newest first, as the instance pages it (#961).
+  const newestFirst = log?.items;
   const who = (id: string): JSX.Element => (id === me ? <>you</> : <code>{id}</code>);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-log">
@@ -384,7 +563,7 @@ function Log({
       ) : newestFirst.length === 0 ? (
         <p className="oyl-muted">Nothing has been logged yet.</p>
       ) : (
-        <ol className="oyl-moderation__list oyl-moderation__log" reversed>
+        <ol className="oyl-moderation__list oyl-moderation__log">
           {newestFirst.map((entry) => (
             <li key={entry.logId}>
               <strong>{actionLabel(entry.action)}</strong>, {when(entry.at)}, by{' '}
@@ -395,6 +574,9 @@ function Log({
             </li>
           ))}
         </ol>
+      )}
+      {log === undefined || log.items.length === 0 ? null : (
+        <More label="Show older entries" next={log.next} failed={moreFailed} onMore={onMore} />
       )}
     </section>
   );
@@ -408,11 +590,51 @@ export function ModerationView({
   const [state, setState] = useState<ModerationRead | undefined>(undefined);
   /** What the last action on this page came to, until the next one starts. */
   const [last, setLast] = useState<ModerationOutcome | undefined>(undefined);
+  /** Whether the last *Show more* on each list failed (#961). */
+  const [moreFailed, setMoreFailed] = useState({ log: false, suspended: false });
+  /**
+   * Counts the reads begun: a page asked for under one read is dropped when
+   * another has begun since, because it is the next page of a list no longer
+   * shown — the read-back after an action starts both lists again.
+   */
+  const generation = useRef(0);
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
-    setState(await port.read());
+    generation.current += 1;
+    const read = await port.read();
+    setMoreFailed({ log: false, suspended: false });
+    setState(read);
   }, [port]);
+
+  /** Append the next page of one list to what is shown, or say it did not come. */
+  async function more(list: 'log' | 'suspended', cursor: string): Promise<void> {
+    if (port === undefined) return;
+    const askedUnder = generation.current;
+    const next = list === 'log' ? await port.moreLog(cursor) : await port.moreSuspended(cursor);
+    if (generation.current !== askedUnder) return;
+    setMoreFailed((failed) => ({ ...failed, [list]: next === undefined }));
+    if (next === undefined) return;
+    setState((current) => {
+      if (current?.kind !== 'moderator') return current;
+      if (current[list]?.next !== cursor) return current;
+      return list === 'log'
+        ? {
+            ...current,
+            log: {
+              items: [...(current.log?.items ?? []), ...(next.items as ModerationLogEntry[])],
+              next: next.next,
+            },
+          }
+        : {
+            ...current,
+            suspended: {
+              items: [...(current.suspended?.items ?? []), ...(next.items as SuspendedAccount[])],
+              next: next.next,
+            },
+          };
+    });
+  }
 
   useEffect(() => {
     void read();
@@ -461,11 +683,18 @@ export function ModerationView({
   }
   return (
     <div className="oyl-moderation">
-      {last?.kind === 'done' ? (
+      {/* #960: a refusal is said HERE, outside the row it was pressed on, as
+          a success is — the read-back may remove that row, and a sentence
+          inside it would leave with it, unseen. */}
+      {last === undefined ? null : last.kind === 'done' ? (
         <StatusMessage tone="success" live>
           {ACTION_DONE_TEXT}
         </StatusMessage>
-      ) : null}
+      ) : (
+        <StatusMessage tone="warning" label="Not done" live>
+          {last.text}
+        </StatusMessage>
+      )}
       {/* #1009, the owner's ruling: that every action is logged, names the
           moderator and outlives an erased account is read BEFORE acting, as
           consent text is, so it stands above the actions — not below them,
@@ -476,8 +705,20 @@ export function ModerationView({
       </KeptVisible>
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <Suspended
+        port={port}
+        suspended={state.suspended}
+        moreFailed={moreFailed.suspended}
+        onMore={async (cursor) => more('suspended', cursor)}
+        onDone={onDone}
+      />
       <AnAccount port={port} onDone={onDone} />
-      <Log me={state.me} entries={state.log} />
+      <Log
+        me={state.me}
+        log={state.log}
+        moreFailed={moreFailed.log}
+        onMore={async (cursor) => more('log', cursor)}
+      />
     </div>
   );
 }

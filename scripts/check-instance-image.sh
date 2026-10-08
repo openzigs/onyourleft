@@ -31,7 +31,7 @@
 # public image (read 2026-09-29), so what is left is an OUTAGE, and that is
 # what IMG004 names: the pull is its own step, before the build, so a registry
 # that is down reads as the registry being down rather than as a Dockerfile
-# that stopped building. CLAUDE.md §4c records the decision to keep this in the
+# that stopped building. docs/agents/ci.md §4c records the decision to keep this in the
 # required job anyway.
 #
 # Rules:

@@ -174,12 +174,32 @@ export function stubAnalysis(
       // first" an assertion about the stub — which is how a mutation that
       // flips `direction` to ascending survives. It did, until this was
       // written; `stubLibrary` had the same shape and for the same reason.
-      const { orderBy = 'startedAt', direction = 'descending' } = options;
+      const {
+        orderBy = 'startedAt',
+        direction = 'descending',
+        startedAfter,
+        afterActivityId,
+      } = options;
       const key = (ride: StubAnalysisRide): number =>
         orderBy === 'distance' ? ride.activity.distance : ride.activity.startedAt;
-      const sorted = [...rides].sort((left, right) =>
-        direction === 'descending' ? key(right) - key(left) : key(left) - key(right),
-      );
+      // Equal keys in id order, as IndexedDB orders an index's ties by primary
+      // key — which is what makes the store's resume cursor a total order.
+      const ascending = (left: StubAnalysisRide, right: StubAnalysisRide): number =>
+        key(left) - key(right) ||
+        (left.activity.id < right.activity.id ? -1 : left.activity.id > right.activity.id ? 1 : 0);
+      // The resume cursor (#293) is honoured too, so a loader that walks the
+      // history a page at a time (#1130) is tested over the semantics it uses.
+      const after = (ride: StubAnalysisRide): boolean =>
+        startedAfter === undefined ||
+        ride.activity.startedAt > startedAfter ||
+        (afterActivityId !== undefined &&
+          ride.activity.startedAt === startedAfter &&
+          ride.activity.id > afterActivityId);
+      const sorted = rides
+        .filter(after)
+        .sort((left, right) =>
+          direction === 'descending' ? ascending(right, left) : ascending(left, right),
+        );
       // `ActivitySummary` is `ActivityRecord` minus the original-file
       // reference — the projection #62's list reads — so a record satisfies it
       // structurally and no field is copied by hand. The stub rides carry no

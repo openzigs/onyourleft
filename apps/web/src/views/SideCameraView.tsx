@@ -101,6 +101,8 @@ export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
   'While you set it up, it shows you its own picture so you can line the bike up.',
   'That picture is not kept.',
   'This phone keeps nothing about you once the session ends',
+  // #1061, ADR 0044 D-12: the phone's own framing preview is a camera picture
+  // on a screen, so what a screenshot of it meets is never tucked.
   SCREENSHOT_SENTENCE,
 ];
 

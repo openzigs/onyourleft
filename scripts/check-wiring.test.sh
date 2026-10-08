@@ -74,6 +74,18 @@ if [ -z "${WATCHED_DIRECTORIES}" ]; then
   exit 1
 fi
 
+# Every root PORT_ROOTS names, read the same way and for the same reason: since
+# #1184's review a root naming no directory is a hard failure too (#1094).
+PORT_ROOT_DIRECTORIES="$(
+  awk '/^const PORT_ROOTS = \[/ { on = 1 } on { print } on && /\];/ { exit }' "${CHECK}" |
+    grep -o "'[^']*'" |
+    tr -d "'"
+)"
+if ! grep -qx 'packages/analysis/' <<< "${PORT_ROOT_DIRECTORIES}"; then
+  printf 'check-wiring.test: could not read packages/analysis/ out of PORT_ROOTS in %s\n' "${CHECK}" >&2
+  exit 1
+fi
+
 # new_fixture -- a repository with one app, its page, and an empty entry module.
 #
 # ⚠️ Every watched directory is created even when a case writes into none of
@@ -85,7 +97,7 @@ new_fixture() {
   tmp="$(mktemp -d)"
   while IFS= read -r watched; do
     mkdir -p "${tmp}/${watched}"
-  done <<< "${WATCHED_DIRECTORIES}"
+  done <<< "${WATCHED_DIRECTORIES}"$'\n'"${PORT_ROOT_DIRECTORIES}"
   printf '{"name":"onyourleft","private":true}' > "${tmp}/package.json"
   printf '{"name":"@onyourleft/web","private":true}' > "${tmp}/apps/web/package.json"
   cat > "${tmp}/apps/web/index.html" <<'HTML'
@@ -585,7 +597,7 @@ export interface RideStore {
    * The unacknowledged sibling.
    *
    * @unwired declared so that nothing calls it; a test asserts it stays
-   * uncalled, which is CLAUDE.md §4h's `writeWithoutResponse`.
+   * uncalled, which is docs/agents/game.md §4h's `writeWithoutResponse`.
    */
   writeWithoutResponse(): Promise<void>;
 }
@@ -1090,7 +1102,7 @@ assert_silent_about 'and it says nothing about the seam' 'TRAINER_COMMAND_SEAM'
 # --- Nothing else under packages/ is watched ---------------------------------
 #
 # ⚠️ The measurement that keeps #363 honest. Watching `packages/` wholesale
-# reports 171 findings on the real tree -- CLAUDE.md §4b records most of them as
+# reports 171 findings on the real tree -- docs/agents/project-state.md §4b records most of them as
 # deliberate -- so the seam has to be the five paths and not the directory they
 # are in. A sibling of a watched file, unimported and unexported-from, must be
 # invisible here.
@@ -1526,6 +1538,55 @@ TS
 run_check
 assert_red 'an instance port its main does not reach fails'
 assert_says 'and names it' 'WIRE001 apps/instance/src/store-port.ts'
+
+# --- A port in packages/analysis is watched; one in another package is not --------
+# #1094 moved `model-step-port.ts` into `packages/analysis`, and PORT_ROOTS is
+# what kept WIRE003 looking at it (#1184's review: nothing here failed without
+# that entry). The same file one package over is outside the gate on purpose.
+for package in analysis other; do
+  new_fixture
+  write apps/web/src/main.tsx <<TS
+import type { ModelStepPort } from '../../../packages/${package}/src/model-step-port';
+import { startRide } from './ride/controller';
+declare const port: ModelStepPort;
+port.ask();
+startRide();
+TS
+  write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+  write "packages/${package}/src/model-step-port.ts" <<'TS'
+export interface ModelStepPort {
+  ask(): void;
+  cancel(): void;
+}
+TS
+  run_check
+  if [ "${package}" = analysis ]; then
+    assert_red '#1094: a port method nothing calls in packages/analysis fails'
+    assert_says '#1094: and names it as WIRE003' 'WIRE003 packages/analysis/src/model-step-port.ts'
+    assert_says '#1094: the method' '`ModelStepPort.cancel`'
+  else
+    assert_green '#1094: the same port in another package is not watched'
+    assert_silent_about '#1094: and is not reported' 'model-step-port'
+  fi
+done
+
+# --- PORT_ROOTS fails closed, as WATCHED_PREFIXES does ------------------------
+# Rename packages/analysis away and its ports would leave the watched set with
+# every rule green; a root naming no directory is a failure instead.
+new_fixture
+rmdir "${tmp}/packages/analysis"
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_red 'a port root that has been renamed away is a failure, not a quiet skip'
+assert_says 'and names the root that is missing' 'port root missing: packages/analysis/'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]
