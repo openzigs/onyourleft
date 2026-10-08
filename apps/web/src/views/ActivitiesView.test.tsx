@@ -896,7 +896,7 @@ describe('each message is said once, in one live region', () => {
 
   it('when a delete asks to be confirmed', async () => {
     const library = stubLibrary(OWNER, [summary('one', { name: 'Only ride' })]);
-    mounted = await mount(<ActivitiesView library={library} selected="one" />);
+    mounted = await mount(<ActivitiesView library={library} />);
     await settle();
     const remove = queryAll(document.body, 'button').find((button) =>
       (button.textContent ?? '').startsWith('Delete'),
