@@ -468,7 +468,7 @@ template still decides: the sections asked for, the instructions, the budgets an
 - **[ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-4 holds**: no vendor is named,
   defaulted or suggested, and there is one code path that takes a URL and a key. The gateway is in
   the closure because `ai` depends on it, and it is never called. Whether an unused vendor default
-  in a dependency meets *"No vendor endpoint is hard-coded, and no vendor is named in source."* was
+  in a dependency meets *"No vendor endpoint is hard-coded, and no vendor is named in source"* was
   asked (Q7), and the owner ruled it **met** on 2026-10-07: *"Nothing in this repository names,
   defaults to or suggests the dependency's guarded vendor default."* ADR 0031's 2026-10-07
   amendment records it.
@@ -881,7 +881,7 @@ their own could have a write-up with no server at all.
 | #1103 | Removes the device paths — and **not** ADR 0033 D-11's until #1106 lands |
 | #1104 | Every disclosure: the ride page's no-instance sentence, the bring-your-own sentence, the policy and Play Data Safety — **approved by the owner before merge** |
 | #1106 | Side-camera pictures to the instance: its own privacy ruling first |
-| #1058 (ADR 0044) | A live view and a pressed snapshot on the side-camera path. A snapshot is a picture: it must not be reachable from a job request or an instance analysis module (D-14(d)'s extended `no-picture-reachable` gate), and is never sent to a model ([#1067](https://github.com/openzigs/onyourleft/issues/1067)'s own criterion) |
+| #1058 (ADR 0044) | A live view and a pressed snapshot on the side-camera path. A snapshot is a picture: it must not be reachable from a job request or an instance analysis module (D-14(d)'s extended `no-picture-reachable` gate), and is never sent to the rider's computer, to a hosted model or to an instance ([ADR 0044](0044-side-camera-live-view-and-snapshot.md) D-11, the owner's answer of 2026-10-04 to its question 6; [#1067](https://github.com/openzigs/onyourleft/issues/1067) repeats it as a criterion) |
 | #1059 (ADR 0045) | Fit from one side camera. It decides whether a model's write-up may state a fit angle, and so whether `camera/write-up-screen.ts`'s degree rule narrows. **That screen moves into `@onyourleft/analysis` (D-5) and runs twice, on the instance and on the device (D-7, D-3)**: any narrowing is made once, in the package, and both screens take it together. ADR 0030 D-4's frontal-plane screen is not narrowed by either |
 | #1067 | Sends the fit check's angles to the model and narrows the screen as ADR 0045 permits. Its component is `apps/web`'s `input.ts`, `template*.ts`, `write-up-screen.ts` and `angle-claims.ts` — **every one of them moves in #1094**, so #1067 lands in `packages/analysis` after #1094, or #1094 moves its changes with no change of behaviour. Under D-1 its fit section goes **to the instance** inside the job's input, and is bound by D-6 and the owner's Q1 and Q2 rulings as the pose summary is. Q2's ruling names the pose summary only; whether a fit number may be kept in the stored sent log (D-12) is #1067's to put to the owner, and until then it is left out as the pose summary is (*the author's choice*) |
 

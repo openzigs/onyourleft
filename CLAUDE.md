@@ -24,9 +24,8 @@ as a prerequisite** (ADR 0036 D-7). The rest of §1 is in [`docs/agents/layout.m
 > rider's data is (#776); (d) nothing the client refuses to send leaves through the instance
 > (#777). A change that makes any of the four false is a change to an ADR, not a review note.
 >
-> ⚠️ **Except for AI analysis**: [ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
-> runs a ride write-up on the instance only, so a rider with no instance loses the write-up and only
-> that. (b) and (c) hold, and (d) holds as ADR 0046 D-14 narrows it.
+> ⚠️ **Except AI analysis** ([ADR 0046](docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)): a write-up runs only on the instance, so a
+> rider with no instance loses the write-up and only that. (b) and (c) hold; (d) holds as its D-14 narrows it.
 
 ## 3. HARD RULE — the licence boundary is a **path**
 
