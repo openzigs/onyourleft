@@ -30,11 +30,11 @@ afterEach(() => {
 describe('a job’s source (#1097)', () => {
   it('runs a local job on the local model, and says when there is none', async () => {
     const hostedKey = vi.fn(() => Promise.resolve(HELD));
-    expect(await modelForSource('instance-local', { local: LOCAL, hostedKey })).toEqual({
+    expect(await modelForSource('instance-local', 'a', { local: LOCAL, hostedKey })).toEqual({
       ok: true,
       model: LOCAL,
     });
-    expect(await modelForSource('instance-local', { local: undefined, hostedKey })).toEqual({
+    expect(await modelForSource('instance-local', 'a', { local: undefined, hostedKey })).toEqual({
       ok: false,
       failure: 'local_unavailable',
     });
@@ -49,7 +49,7 @@ describe('a job’s source (#1097)', () => {
   ])('fails a hosted job hosted_unavailable when %s, even with masking', async (_why, state) => {
     const behindMasking = vi.fn(() => LOCAL);
     expect(
-      await modelForSource('instance-hosted', {
+      await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(state),
         behindMasking,
@@ -62,7 +62,7 @@ describe('a job’s source (#1097)', () => {
     const fetch = vi.fn(() => Promise.reject(new Error('nothing may be sent')));
     vi.stubGlobal('fetch', fetch);
     expect(
-      await modelForSource('instance-hosted', {
+      await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
       }),
@@ -70,11 +70,23 @@ describe('a job’s source (#1097)', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('refuses the held key to any athlete but the one it is held for, even with masking (ADR 0046 Q9, Q13)', async () => {
+    const behindMasking = vi.fn(() => LOCAL);
+    expect(
+      await modelForSource('instance-hosted', 'another-rider', {
+        local: LOCAL,
+        hostedKey: () => Promise.resolve(HELD),
+        behindMasking,
+      }),
+    ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+    expect(behindMasking).not.toHaveBeenCalled();
+  });
+
   it('builds the hosted model only behind the masking seam, handed the opened key — the control', async () => {
     const hosted: ModelConnection = { turn: () => Promise.reject(new Error('not called')) };
     const behindMasking = vi.fn(() => hosted);
     expect(
-      await modelForSource('instance-hosted', {
+      await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
         behindMasking,

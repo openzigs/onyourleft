@@ -48,6 +48,8 @@ export async function runCommand(
     readonly blobs?: string | undefined;
     /** `OYL_INSTANCE_SECRET_KEY`, for `model-key` (#1097). */
     readonly secret?: string | undefined;
+    /** `OYL_INSTANCE_OWNER_KEY`: whose athlete `model-key set` holds the key for (#1097). */
+    readonly ownerKey?: string | undefined;
     /** Standard input, read whole: where `model-key set` takes the key from. */
     readonly readStandardInput?: () => Promise<string>;
   },
@@ -120,6 +122,7 @@ export async function runCommand(
             model,
             input: await (env.readStandardInput ?? (() => Promise.resolve('')))(),
             secret: env.secret,
+            ownerKey: env.ownerKey,
           });
         } else if (action === 'status' && args.length === 0) {
           report = await modelKeyStatus(paths, env.secret);

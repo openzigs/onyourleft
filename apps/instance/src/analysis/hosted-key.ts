@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **The instance's one hosted model key** — #1097, ADR 0046's ruling 3: *"a
- * hosted key may be held by the instance, on a single-rider instance only. It
- * is encrypted at rest, never logged, never in a backup in clear, and refused
- * with more than one athlete."*
+ * **The instance's one hosted model key** — #1097, ADR 0046 D-9.
+ *
+ * The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*:
+ * *"The instance also hosts group rides and races, so it will have other
+ * riders' accounts."* So holding a key never stops another rider registering.
+ * The same ruling keeps how a key is held: *"Every key is encrypted at rest,
+ * never logged, and never in a backup in clear."*
  *
  * ## Encrypted at rest
  *
@@ -16,11 +19,12 @@
  * is never a column, so `operator backup`'s `VACUUM INTO` copies ciphertext
  * and nothing else.
  *
- * ⚠️ **The URL and the model are the cipher's additional data.** They are
- * stored in clear beside the ciphertext — `model-key status` prints them —
- * so somebody able to write the database could otherwise point the held key
- * at a host of their choosing. Bound in here, an edited URL makes the key
- * unreadable rather than sent somewhere new.
+ * ⚠️ **The athlete, the URL and the model are the cipher's additional
+ * data.** They are stored in clear beside the ciphertext — `model-key status`
+ * prints the URL and the model — so somebody able to write the database could
+ * otherwise point the held key at a host of their choosing, or at another
+ * athlete. Bound in here, an edited row makes the key unreadable rather than
+ * sent somewhere new or used for somebody else.
  *
  * ## A key that cannot be read is a state, never a crash
  *
@@ -29,12 +33,16 @@
  * `unreadable` or `no-secret` — and the instance logs
  * {@link HOSTED_KEY_UNREADABLE} and carries on with its local model, or none.
  *
- * ## Single rider
+ * ## Whose analysis it serves: the operator's, and nobody else's yet
  *
- * The count is the store's, in the statement that writes
- * (`SqlStore.putHostedModelKey`), and registration refuses a second rider
- * while a key is held (`SqlStore.registerAthlete`, the owner's ruling on
- * #1092's question 3). Nothing here counts anything.
+ * The key is held FOR the operator — ADR 0046's Q9 ruling, *"the athlete
+ * whose device holds `OYL_INSTANCE_OWNER_KEY`, the key that already makes
+ * them moderator"* — and `operator model-key set` looks that athlete up.
+ * Other riders' use of it waits for the operator's switch (Q13: *"Other
+ * riders get no analysis until the operator turns it on, whichever key they
+ * use"*) and for each rider's own consent naming the endpoint (Q10), neither
+ * of which is built here: `source.ts` §`modelForSource` refuses the held key
+ * to every athlete but the one it is held for.
  */
 
 import type { HeldHostedModelKey, SqlStore } from '../store/sql-store.ts';
@@ -126,18 +134,23 @@ export function hostedKeyFrom(input: string): string | undefined {
   return key;
 }
 
-function additionalData(url: string, model: string): Uint8Array<ArrayBuffer> {
-  return new TextEncoder().encode(`${ADDITIONAL_DATA_PREFIX}\0${url}\0${model}`);
+function additionalData(athleteId: string, url: string, model: string): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(`${ADDITIONAL_DATA_PREFIX}\0${athleteId}\0${url}\0${model}`);
 }
 
-/** Seal a key for `url` and `model`, under a fresh nonce. */
+/** Seal a key held for `athleteId`, for `url` and `model`, under a fresh nonce. */
 export async function sealHostedKey(
   secret: SecretKey,
-  held: { readonly url: string; readonly model: string; readonly key: string },
+  held: {
+    readonly athleteId: string;
+    readonly url: string;
+    readonly model: string;
+    readonly key: string;
+  },
 ): Promise<{ readonly iv: Uint8Array; readonly ciphertext: Uint8Array }> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: additionalData(held.url, held.model) },
+    { name: 'AES-GCM', iv, additionalData: additionalData(held.athleteId, held.url, held.model) },
     secret,
     new TextEncoder().encode(held.key),
   );
@@ -147,14 +160,14 @@ export async function sealHostedKey(
 /** The key a sealed row holds, or `undefined` when this secret cannot open it. */
 export async function openHostedKey(
   secret: SecretKey,
-  sealed: Pick<HeldHostedModelKey, 'url' | 'model' | 'iv' | 'ciphertext'>,
+  sealed: Pick<HeldHostedModelKey, 'athleteId' | 'url' | 'model' | 'iv' | 'ciphertext'>,
 ): Promise<string | undefined> {
   try {
     const plain = await crypto.subtle.decrypt(
       {
         name: 'AES-GCM',
         iv: sealed.iv.slice(),
-        additionalData: additionalData(sealed.url, sealed.model),
+        additionalData: additionalData(sealed.athleteId, sealed.url, sealed.model),
       },
       secret,
       sealed.ciphertext.slice(),

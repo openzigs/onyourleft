@@ -71,9 +71,10 @@ export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
   'model',
   'indexed',
   'stopped',
-  // A fixed sentence the instance wrote about itself (#1097: a hosted key it
-  // cannot read) — never a value from a request, a row or the environment.
-  'reason',
+  // #1097: one of `analysis/hosted-key.ts`'s two fixed sentences about a held
+  // key the instance cannot read. Named for that one event, so no other
+  // `reason` (a moderator's, a rider's) becomes loggable by it.
+  'hostedKeyProblem',
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

@@ -110,7 +110,6 @@ import {
 } from '../moderation/moderation.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
-  HostedKeyHeldError,
   InviteRefusedError,
   OwnershipConflictError,
   type DeviceKey,
@@ -724,7 +723,6 @@ export function createIdentity(options: IdentityOptions): Identity {
       });
     } catch (error) {
       if (error instanceof InviteRefusedError) return refuse(takeRefusal(error.outcome, 'code'));
-      if (error instanceof HostedKeyHeldError) return refuse('single_rider_instance');
       throw error;
     }
     const session = await openSession({ athleteId, publicKey });

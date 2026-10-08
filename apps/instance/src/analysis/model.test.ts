@@ -25,6 +25,7 @@ import {
   createLocalModel,
   GATEWAY_REFUSED,
   GatewayRefusedError,
+  pinnedTo,
 } from './model.ts';
 import type { ModelTurnRequest, ToolSpec } from './model-turn.ts';
 
@@ -272,6 +273,33 @@ describe('local only, on every turn (ADR 0040 D-6, reused from history/address.t
     });
     expect(await connection.turn(request())).toStrictEqual({ ok: false, failure: 'unresolved' });
     expect(urls).toStrictEqual([]);
+  });
+});
+
+describe('the one-host fetch both models send through (#1097’s review)', () => {
+  const BASE = 'https://models.example/v1';
+
+  it.each([
+    ['another host', 'https://attacker.example/v1/chat/completions'],
+    ['a host that only starts like the base', 'https://models.example.attacker.example/v1/chat'],
+    ['a path that only starts like the base', 'https://models.example/v1evil/chat/completions'],
+    ['the base’s parent', 'https://models.example/'],
+  ])('refuses %s without sending', async (_what, url) => {
+    const send = vi.fn(() => Promise.resolve(new Response('{}')));
+    await expect(pinnedTo(BASE, send)(url, {})).rejects.toThrow(
+      'A request left for a host it was not given.',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends a request under the base, and never follows a redirect — the control', async () => {
+    const send = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(new Response('{}')));
+    await pinnedTo(BASE, send)(`${BASE}/chat/completions`, { method: 'POST' });
+    await pinnedTo(BASE, send)(new URL(BASE), {});
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0]).toBe(`${BASE}/chat/completions`);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', redirect: 'error' });
+    expect(send.mock.calls[1]?.[1]).toMatchObject({ redirect: 'error' });
   });
 });
 

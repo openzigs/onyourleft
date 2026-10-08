@@ -308,11 +308,11 @@ export interface HistoryPassageTable {
 }
 
 /**
- * The instance's ONE hosted model key (#1097, ADR 0046's ruling 3), on a
- * single-rider instance only. Added by migration 0014. `slot` is always 1, so
- * the table holds one row at most; `athlete_id` is the one rider it is held
- * for, so erasing them takes it (`eraseAthlete` derives its tables from the
- * foreign keys). The key itself is AES-256-GCM ciphertext under the operator's
+ * The instance's ONE hosted model key (#1097, ADR 0046 D-9). Added by
+ * migration 0014. `slot` is always 1, so the table holds one row at most;
+ * `athlete_id` is the athlete it is held for — the operator (Q9) — so
+ * erasing them takes it (`eraseAthlete` derives its tables from the foreign
+ * keys). Other riders may be registered beside it (ruling 5). The key itself is AES-256-GCM ciphertext under the operator's
  * `OYL_INSTANCE_SECRET_KEY` (`analysis/hosted-key.ts`); its plaintext is
  * never a column.
  */

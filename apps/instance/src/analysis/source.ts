@@ -13,6 +13,13 @@
  *   key this secret cannot open, or no masking, it fails `hosted_unavailable`
  *   and nothing is sent.
  *
+ * ⚠️ **The held key serves the athlete it is held for, and nobody else.**
+ * That is the operator (ADR 0046 Q9, `operator model-key set`). Every other
+ * athlete's `instance-hosted` job fails `hosted_unavailable`, and nothing is
+ * sent, until the operator's switch (Q13: *"Other riders get no analysis
+ * until the operator turns it on, whichever key they use"*) and each rider's
+ * own endpoint-naming consent (Q10) are built — neither is here.
+ *
  * ⚠️ **No hosted request without masking.** Everything a hosted model is sent
  * is masked first (#1101), so the hosted connection is built ONLY by
  * {@link SourceOptions.behindMasking} — the seam #1101 supplies. Until it
@@ -45,9 +52,10 @@ export interface SourceOptions {
   readonly behindMasking?: (key: OpenedHostedKey) => ModelConnection;
 }
 
-/** The model for a job's source, or why there is none. */
+/** The model for `athleteId`'s job on `source`, or why there is none. */
 export async function modelForSource(
   source: AnalysisSource,
+  athleteId: string,
   options: SourceOptions,
 ): Promise<
   | { readonly ok: true; readonly model: ModelConnection }
@@ -59,7 +67,7 @@ export async function modelForSource(
       : { ok: true, model: options.local };
   }
   const held = await options.hostedKey();
-  if (held.kind !== 'held' || options.behindMasking === undefined) {
+  if (held.kind !== 'held' || held.athleteId !== athleteId || options.behindMasking === undefined) {
     return { ok: false, failure: 'hosted_unavailable' };
   }
   return { ok: true, model: options.behindMasking(held) };

@@ -51,7 +51,6 @@ export const ERROR_STATUS = {
   code_used: 401,
   code_expired: 401,
   registration_closed: 403,
-  single_rider_instance: 403,
   account_suspended: 403,
   step_up_required: 403,
   registration_pending: 403,
@@ -116,8 +115,6 @@ const MESSAGES: Record<ErrorCode, string> = {
   code_used: 'That code has already been used.',
   code_expired: 'That code has expired.',
   registration_closed: 'This instance is not registering new riders.',
-  single_rider_instance:
-    'This instance holds a hosted model key, so it keeps one rider. Its operator must clear the key before another rider can register.',
   account_suspended: 'This account has been suspended by the instance’s moderators.',
   step_up_required:
     'This needs one of your recovery codes, or a fresh signature from one of your devices.',

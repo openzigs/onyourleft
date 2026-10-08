@@ -28,5 +28,6 @@ process.exitCode = await runCommand(process.argv.slice(2), {
   database: process.env.OYL_INSTANCE_DATABASE,
   blobs: process.env.OYL_INSTANCE_BLOBS,
   secret: process.env.OYL_INSTANCE_SECRET_KEY,
+  ownerKey: process.env.OYL_INSTANCE_OWNER_KEY,
   readStandardInput,
 });

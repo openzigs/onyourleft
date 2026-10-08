@@ -326,8 +326,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const state = await hostedKeyState(opened, await secretKey);
       logEvent(log, 'hosted-model-key', {
         state: state.kind,
-        ...(state.kind === 'unreadable' ? { reason: HOSTED_KEY_UNREADABLE } : {}),
-        ...(state.kind === 'no-secret' ? { reason: HOSTED_KEY_NO_SECRET } : {}),
+        ...(state.kind === 'unreadable' ? { hostedKeyProblem: HOSTED_KEY_UNREADABLE } : {}),
+        ...(state.kind === 'no-secret' ? { hostedKeyProblem: HOSTED_KEY_NO_SECRET } : {}),
       });
     })().catch((error: unknown) => {
       logUnhandled(log, null, error);

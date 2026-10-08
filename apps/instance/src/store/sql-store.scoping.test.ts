@@ -289,11 +289,12 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   putHostedModelKey: {
-    notAScopedRead: 'a write, held only on a one-athlete instance (sql-store.hosted-key.test.ts)',
+    notAScopedRead:
+      'the operator’s write, for the operator’s athlete (sql-store.hosted-key.test.ts)',
   },
   getHostedModelKey: {
     notAScopedRead:
-      'the instance’s ONE key, on an instance with one athlete: there is no other athlete’s row to leak (sql-store.hosted-key.test.ts)',
+      'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
   },
   clearHostedModelKey: { notAScopedRead: 'a write: the operator’s, not a rider’s' },
   close: { notAScopedRead: 'not a read' },

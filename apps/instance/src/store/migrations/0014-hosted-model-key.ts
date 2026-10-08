@@ -8,10 +8,10 @@
  *   and the key as AES-256-GCM ciphertext with the 12-byte nonce it was
  *   sealed under (`analysis/hosted-key.ts`). There is no plaintext column, so
  *   a `VACUUM INTO` snapshot (`operator backup`) holds ciphertext only.
- *   `athlete_id` REFERENCES `athlete`: a key is held only on an instance with
- *   exactly one athlete (`SqlStore.putHostedModelKey`), it is held FOR that
- *   athlete, and `eraseAthlete` — which derives its tables from these foreign
- *   keys — takes it with them.
+ *   `athlete_id` REFERENCES `athlete`: the key is held FOR one athlete, the
+ *   operator (ADR 0046 Q9, `operator model-key set`), whatever other riders
+ *   the instance has, and `eraseAthlete` — which derives its tables from
+ *   these foreign keys — takes it with them.
  *
  * `down` drops the table, and the key with it: an operator who rolls back
  * past this migration sets the key again after rolling forward.

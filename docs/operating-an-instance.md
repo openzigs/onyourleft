@@ -167,18 +167,25 @@ What the agent sends the model and what it may read is in
 ## A hosted model key
 
 Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
-service (#1097, ADR 0046's ruling 3). ⚠️ **Nothing uses it yet**: a hosted request must be masked
-first (#1101), so until that lands a job that asks for the hosted source fails
-`hosted_unavailable` and sends nothing. And it is used only for a job whose rider's device asked
-for it — the consent is per job, never the instance's.
+service (#1097, [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
+D-9). ⚠️ **Nothing uses it yet**: a hosted request must be masked first (#1101), so until that
+lands a job that asks for the hosted source fails `hosted_unavailable` and sends nothing. And it is
+used only for a job whose rider's device asked for it — the consent is per job, never the
+instance's.
 
-**Single rider only.** A key is held only on an instance with exactly one athlete — every account
-counts, pending, refused or suspended — because the operator of a multi-rider instance could read
-every rider's key and history; on a one-person box the operator and the rider are the same person.
-`model-key set` is refused on an instance with any other number of athletes, and while a key is
-held **a second rider's registration is refused** (`single_rider_instance`) until you clear it.
-Erasing the account (`DELETE /v1/account`) erases the key with it. The account export says only
-`"hostedModelKey": "a hosted model key is held"`.
+**Held for you, the operator, and for nobody else yet.** The instance also hosts group rides and
+races, so it has other riders, and holding a key changes nothing about them: they register and ride
+as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*. The key is
+held for the operator, who is, in the owner's Q9 ruling, *"the athlete whose device holds
+`OYL_INSTANCE_OWNER_KEY`, the key that already makes them moderator"*: `model-key set` looks that
+athlete up, and is refused when the variable is unset or your device has not signed in to this
+instance yet. **Only your own jobs can use it.** Another rider's job that asks for the hosted
+source fails `hosted_unavailable`, because the two things ADR 0046 requires before it may run are
+not built yet: your switch for other riders (Q13: *"Other riders get no analysis until the operator
+turns it on, whichever key they use"*), and that rider's own consent, recorded on the instance and
+naming the endpoint (Q10). Erasing your account (`DELETE /v1/account`) erases the key with it. Your
+account export says only `"hostedModelKey": "a hosted model key is held"`; another rider's says
+`null`.
 
 **The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
 bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
@@ -187,8 +194,9 @@ bytes of base64 that you make once and keep in the deployment's `.env`, beside n
 openssl rand -base64 32
 ```
 
-Every write draws a fresh nonce, and the URL and model are bound into the encryption, so an edited
-URL in the database makes the key unreadable rather than sending it somewhere new. The server and
+Every write draws a fresh nonce, and the athlete, the URL and the model are bound into the
+encryption, so an edited URL in the database makes the key unreadable rather than sending it
+somewhere new, and an edited athlete makes it unreadable rather than somebody else's. The server and
 the operator's commands both read the variable; a value that is not 32 bytes of base64 stops the
 server starting.
 
@@ -196,6 +204,16 @@ server starting.
 printf '%s' "$KEY" | node src/operator/cli.ts model-key set --url https://… --model <name>
 node src/operator/cli.ts model-key status    # url, model, "a key is held", whether this secret opens it
 node src/operator/cli.ts model-key clear
+```
+
+On the home deployment (#807) the variable goes in the `.env` beside `compose.yaml`
+(`instance.env.example` lists it), and `compose.yaml` hands it to the `instance` service and to no
+other: the `backup` service never sees it. Run the commands in that service, with `-T` so the key
+reaches standard input through the pipe:
+
+```
+printf '%s' "$KEY" | docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key set --url https://… --model <name>
+docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key status
 ```
 
 `set` reads the key from **standard input and nowhere else**: a key given as an argument is refused,
@@ -212,8 +230,17 @@ leaves the key unreadable, and the instance says so and carries on with its loca
 |---|---|
 | `"event":"hosted-model-key","state":"none"` | no key is held |
 | `…"state":"held"` | a key is held and this secret opens it |
-| `…"state":"unreadable","reason":"the hosted key cannot be read with this secret"` | restored under another secret: set the key again, or put the old secret back |
+| `…"state":"unreadable","hostedKeyProblem":"the hosted key cannot be read with this secret"` | restored under another secret: set the key again, or put the old secret back |
 | `…"state":"no-secret"` | a key is held and `OYL_INSTANCE_SECRET_KEY` is not set |
+
+**What clearing leaves.** `model-key clear`, replacing a key with `set`, and erasing the account all
+run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
+database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
+which held copies of the old pages. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
+rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
+that moment, the truncation does not happen and the log's old pages stay until SQLite next writes
+the log over from its start. Neither is the key in clear.
 
 **Rotating the secret.** There is no re-encryption command, because the key itself is the thing to
 re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with

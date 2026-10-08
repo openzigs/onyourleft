@@ -182,8 +182,12 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
   return 'unreachable';
 }
 
-/** A fetch that sends only under `base`, and never follows a redirect. */
-function pinnedTo(base: string, send: typeof globalThis.fetch): typeof globalThis.fetch {
+/**
+ * A fetch that sends only under `base`, and never follows a redirect. Exported
+ * for `model.test.ts` alone, which hands it a foreign URL directly: the SDK
+ * only ever calls `baseURL`, so no run through it can show the guard works.
+ */
+export function pinnedTo(base: string, send: typeof globalThis.fetch): typeof globalThis.fetch {
   return (input, init) => {
     const url = urlOf(input);
     if (url !== base && !url.startsWith(`${base}/`)) {
@@ -225,7 +229,7 @@ export interface HostedModelOptions {
 }
 
 /**
- * A hosted model on the rider's own key (#1097, ADR 0046's ruling 3): the
+ * A hosted model on a key the instance holds (#1097, ADR 0046 D-9): the
  * second OpenAI-compatible endpoint, with the same guard, the same one-host
  * fetch, no retries and the same closed failures as the local one. It is NOT
  * held to the local-address rule — it is hosted by definition — so what

@@ -89,35 +89,85 @@ describe('the key as standard input gives it', () => {
 describe('sealing and opening', () => {
   it('opens what it sealed, and the ciphertext does not hold the key', async () => {
     const secretKey = await secret(1);
-    const sealed = await sealHostedKey(secretKey, { url: URL_TEXT, model: 'm', key: KEY });
+    const sealed = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
     expect(new TextDecoder('latin1').decode(sealed.ciphertext)).not.toContain(MARKER);
     expect(sealed.iv).toHaveLength(12);
-    expect(await openHostedKey(secretKey, { url: URL_TEXT, model: 'm', ...sealed })).toBe(KEY);
+    expect(
+      await openHostedKey(secretKey, { athleteId: 'a', url: URL_TEXT, model: 'm', ...sealed }),
+    ).toBe(KEY);
   });
 
   it('draws a fresh nonce for every seal', async () => {
     const secretKey = await secret(1);
-    const one = await sealHostedKey(secretKey, { url: URL_TEXT, model: 'm', key: KEY });
-    const two = await sealHostedKey(secretKey, { url: URL_TEXT, model: 'm', key: KEY });
+    const one = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
+    const two = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
     expect(one.iv).not.toEqual(two.iv);
     expect(one.ciphertext).not.toEqual(two.ciphertext);
   });
 
   it('will not open with another secret — and says so rather than throwing', async () => {
-    const sealed = await sealHostedKey(await secret(1), { url: URL_TEXT, model: 'm', key: KEY });
-    expect(await openHostedKey(await secret(2), { url: URL_TEXT, model: 'm', ...sealed })).toBe(
-      undefined,
-    );
+    const sealed = await sealHostedKey(await secret(1), {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
+    expect(
+      await openHostedKey(await secret(2), {
+        athleteId: 'a',
+        url: URL_TEXT,
+        model: 'm',
+        ...sealed,
+      }),
+    ).toBe(undefined);
   });
 
   it('will not open once its URL or its model is edited: the key cannot be pointed elsewhere', async () => {
     const secretKey = await secret(1);
-    const sealed = await sealHostedKey(secretKey, { url: URL_TEXT, model: 'm', key: KEY });
+    const sealed = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
     expect(
-      await openHostedKey(secretKey, { url: 'https://attacker.example/v1', model: 'm', ...sealed }),
+      await openHostedKey(secretKey, {
+        athleteId: 'a',
+        url: 'https://attacker.example/v1',
+        model: 'm',
+        ...sealed,
+      }),
     ).toBeUndefined();
     expect(
-      await openHostedKey(secretKey, { url: URL_TEXT, model: 'n', ...sealed }),
+      await openHostedKey(secretKey, { athleteId: 'a', url: URL_TEXT, model: 'n', ...sealed }),
+    ).toBeUndefined();
+  });
+
+  it('will not open once its athlete is edited: the key cannot be moved to another rider', async () => {
+    const secretKey = await secret(1);
+    const sealed = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
+    expect(
+      await openHostedKey(secretKey, { athleteId: 'b', url: URL_TEXT, model: 'm', ...sealed }),
     ).toBeUndefined();
   });
 });
@@ -125,7 +175,12 @@ describe('sealing and opening', () => {
 describe('the state the instance reads', () => {
   it('is none, no-secret, unreadable or held — and only held carries the key', async () => {
     const secretKey = await secret(1);
-    const sealed = await sealHostedKey(secretKey, { url: URL_TEXT, model: 'm', key: KEY });
+    const sealed = await sealHostedKey(secretKey, {
+      athleteId: 'a',
+      url: URL_TEXT,
+      model: 'm',
+      key: KEY,
+    });
     const held = {
       getHostedModelKey: () =>
         Promise.resolve({ athleteId: 'a', url: URL_TEXT, model: 'm', setAt: 1, ...sealed }),

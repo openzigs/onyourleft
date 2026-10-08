@@ -32,9 +32,9 @@ import { migrateForDeploy, openServingStore } from '../store/serving.ts';
  * | `restore <snapshot directory> [--force]` | the snapshot back into place, checked: SQLite's integrity check, every row count and blob count against the manifest, every blob's content against its name |
  * | `verify` | the row counts and the blob count of the data in place — what a restore on another machine is compared with |
  * | `room-open <roomId> --kind ride\|race --length <metres> [--grade <percent>] [--position hoods\|drops\|upright] [--countdown <ms>]` | a room and its course, until #784 and #785 let a rider make one |
- * | `model-key set --url https://… --model <name>` | the instance's one hosted model key, read from standard input, sealed under `OYL_INSTANCE_SECRET_KEY`, on a single-rider instance only (#1097) |
+ * | `model-key set --url https://… --model <name>` | the instance's one hosted model key, read from standard input, sealed under `OYL_INSTANCE_SECRET_KEY`, held for the operator: the athlete whose device holds `OYL_INSTANCE_OWNER_KEY` (#1097, ADR 0046 Q9) |
  * | `model-key status` | the hosted key's URL and model, that a key is held, and whether this secret opens it — never the key |
- * | `model-key clear` | the hosted key gone, so a second rider may register again |
+ * | `model-key clear` | the hosted key gone, scrubbed from the database's free pages and its log |
  *
  * ⚠️ `restore` writes where the instance keeps its data: **stop the
  * instance first** (`docs/operating-an-instance.md`). It refuses to write over
@@ -250,8 +250,12 @@ const MAXIMUM_MODEL_NAME = 200;
  * `model-key set --url https://… --model <name>` (#1097): seal the key read
  * from STANDARD INPUT — never from the command line, where `ps` and a shell's
  * history would show it — under `OYL_INSTANCE_SECRET_KEY`, and hold it for
- * the instance's one rider. Refused, writing nothing, unless there is exactly
- * one athlete.
+ * the operator. ADR 0046's Q9 ruling: the operator is *"the athlete whose
+ * device holds `OYL_INSTANCE_OWNER_KEY`, the key that already makes them
+ * moderator"*. Refused, writing nothing, when that variable is unset or its
+ * device key is not a live key of an athlete here. Any number of other
+ * riders may be registered (ruling 5); the key serves none of them
+ * (`analysis/source.ts`).
  */
 export async function modelKeySet(
   paths: DataPaths,
@@ -261,6 +265,8 @@ export async function modelKeySet(
     /** Standard input, exactly as read. */
     readonly input: string;
     readonly secret: string | undefined;
+    /** `OYL_INSTANCE_OWNER_KEY`: the device key whose athlete is the operator. */
+    readonly ownerKey: string | undefined;
     readonly now?: () => Date;
   },
 ) {
@@ -282,18 +288,35 @@ export async function modelKeySet(
       'OYL_INSTANCE_SECRET_KEY is not set: the key is encrypted under it, so it is needed to hold one.',
     );
   }
-  const sealed = await sealHostedKey(secret, { url: url.url.href, model, key });
+  const ownerKey = options.ownerKey?.trim() ?? '';
+  if (ownerKey === '') {
+    throw new CommandError(
+      'OYL_INSTANCE_OWNER_KEY is not set: the key is held for the operator, the athlete whose device holds it. Nothing was written.',
+    );
+  }
   const store = openServingStore(paths.database);
   try {
-    const put = await store.putHostedModelKey({
+    const device = await store.findDeviceKey(ownerKey);
+    if (device === undefined || device.revokedAt !== null) {
+      throw new CommandError(
+        'OYL_INSTANCE_OWNER_KEY is not a device key of any athlete on this instance: the operator signs in first. Nothing was written.',
+      );
+    }
+    const sealed = await sealHostedKey(secret, {
+      athleteId: device.athleteId,
+      url: url.url.href,
+      model,
+      key,
+    });
+    const put = await store.putHostedModelKey(device.athleteId, {
       url: url.url.href,
       model,
       ...sealed,
       setAt: Math.floor((options.now ?? (() => new Date()))().getTime() / 1000),
     });
-    if (put.outcome === 'not-single-rider') {
+    if (put.outcome === 'no-athlete') {
       throw new CommandError(
-        `A hosted model key is held only on an instance with exactly one rider, and this one has ${String(put.athletes)}. Nothing was written.`,
+        'The operator’s athlete is not on this instance. Nothing was written.',
       );
     }
   } finally {
@@ -325,7 +348,7 @@ export async function modelKeyStatus(paths: DataPaths, secretText: string | unde
   }
 }
 
-/** `model-key clear`: the key gone, and a second rider admitted again. */
+/** `model-key clear`: the key gone, scrubbed (`SqlStore.clearHostedModelKey`). */
 export async function modelKeyClear(paths: DataPaths) {
   const store = openServingStore(paths.database);
   try {

@@ -2114,7 +2114,7 @@
             }
           },
           "403": {
-            "description": "One of `registration_closed`, `single_rider_instance`, `account_suspended`, `registration_refused`, in the one error shape.",
+            "description": "One of `registration_closed`, `account_suspended`, `registration_refused`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4803,7 +4803,6 @@
                   "code_used",
                   "code_expired",
                   "registration_closed",
-                  "single_rider_instance",
                   "account_suspended",
                   "step_up_required",
                   "registration_pending",
@@ -4989,16 +4988,6 @@
       },
       "registration_closed": {
         "description": "`registration_closed` (403), in the one error shape.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      },
-      "single_rider_instance": {
-        "description": "`single_rider_instance` (403), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

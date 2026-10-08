@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The hosted model key in the store (#1097): held only on a single-rider
- * instance, in BOTH directions — a key is refused on an instance with more
- * than one athlete, and a second athlete is refused on an instance holding a
- * key (the owner's ruling on #1092's question 3). Each read back through a
- * fresh connection (`StoreHarness.read`).
+ * The hosted model key in the store (#1097): held for ONE athlete — the
+ * operator, whom `operator model-key set` looks up (ADR 0046 Q9) — on an
+ * instance with any number of riders. The owner's ruling 5 on #1092
+ * *"REPLACES ruling 3's 'single-rider only'"*, so holding a key never refuses
+ * another rider's registration. Each read back through a fresh connection
+ * (`StoreHarness.read`).
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -18,7 +19,7 @@ import {
   registrationFixture,
   type StoreHarness,
 } from './testing/index.ts';
-import { HostedKeyHeldError, type SealedHostedModelKey } from './sql-store.ts';
+import type { SealedHostedModelKey } from './sql-store.ts';
 
 let harness: StoreHarness | undefined;
 afterEach(async () => {
@@ -38,13 +39,12 @@ async function register(h: StoreHarness, athleteId: string): Promise<void> {
   await h.write((store) => store.registerAthlete(registrationFixture(athleteId)));
 }
 
-describe('a hosted key on a single-rider instance only (#1097)', () => {
-  it('is held for the one athlete there is, and read back on a fresh connection', async () => {
+describe('a hosted key, held for the operator’s athlete (#1097)', () => {
+  it('is held for the athlete named, and read back on a fresh connection', async () => {
     harness = await createStoreHarness();
     await register(harness, ATHLETE_A);
-    expect(await harness.write((store) => store.putHostedModelKey(SEALED))).toEqual({
+    expect(await harness.write((store) => store.putHostedModelKey(ATHLETE_A, SEALED))).toEqual({
       outcome: 'stored',
-      athleteId: ATHLETE_A,
     });
     expect(await harness.read((store) => store.getHostedModelKey())).toEqual({
       athleteId: ATHLETE_A,
@@ -52,39 +52,7 @@ describe('a hosted key on a single-rider instance only (#1097)', () => {
     });
   });
 
-  it('replaces a key already held: one row, the newest', async () => {
-    harness = await createStoreHarness();
-    await register(harness, ATHLETE_A);
-    await harness.write((store) => store.putHostedModelKey(SEALED));
-    const second = { ...SEALED, model: 'another', setAt: SEALED.setAt + 1 };
-    await harness.write((store) => store.putHostedModelKey(second));
-    expect(await harness.read((store) => store.getHostedModelKey())).toEqual({
-      athleteId: ATHLETE_A,
-      ...second,
-    });
-  });
-
-  it('is refused on an instance with no athlete, and writes nothing', async () => {
-    harness = await createStoreHarness();
-    expect(await harness.write((store) => store.putHostedModelKey(SEALED))).toEqual({
-      outcome: 'not-single-rider',
-      athletes: 0,
-    });
-    expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
-  });
-
-  it('is refused on an instance with two athletes, and writes nothing', async () => {
-    harness = await createStoreHarness();
-    await register(harness, ATHLETE_A);
-    await register(harness, ATHLETE_B);
-    expect(await harness.write((store) => store.putHostedModelKey(SEALED))).toEqual({
-      outcome: 'not-single-rider',
-      athletes: 2,
-    });
-    expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
-  });
-
-  it('counts athletes whatever their registration state: three, two of them not active, is three', async () => {
+  it('is held on an instance with three riders, whatever their registration state', async () => {
     harness = await createStoreHarness();
     await register(harness, ATHLETE_A);
     for (const [athleteId, registrationState] of [
@@ -96,35 +64,57 @@ describe('a hosted key on a single-rider instance only (#1097)', () => {
         store.registerAthlete({ ...fixture, athlete: { ...fixture.athlete, registrationState } }),
       );
     }
-    expect(await harness.write((store) => store.putHostedModelKey(SEALED))).toEqual({
-      outcome: 'not-single-rider',
-      athletes: 3,
+    expect(await harness.write((store) => store.putHostedModelKey(ATHLETE_B, SEALED))).toEqual({
+      outcome: 'stored',
+    });
+    expect(await harness.read((store) => store.getHostedModelKey())).toMatchObject({
+      athleteId: ATHLETE_B,
+    });
+  });
+
+  it('replaces a key already held: one row, the newest', async () => {
+    harness = await createStoreHarness();
+    await register(harness, ATHLETE_A);
+    await harness.write((store) => store.putHostedModelKey(ATHLETE_A, SEALED));
+    const second = { ...SEALED, model: 'another', setAt: SEALED.setAt + 1 };
+    await harness.write((store) => store.putHostedModelKey(ATHLETE_A, second));
+    expect(await harness.read((store) => store.getHostedModelKey())).toEqual({
+      athleteId: ATHLETE_A,
+      ...second,
+    });
+  });
+
+  it('is refused for an athlete who is not on the instance, and writes nothing', async () => {
+    harness = await createStoreHarness();
+    await register(harness, ATHLETE_A);
+    expect(await harness.write((store) => store.putHostedModelKey(ATHLETE_B, SEALED))).toEqual({
+      outcome: 'no-athlete',
     });
     expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
   });
 
-  it('refuses a second athlete’s registration while a key is held, writing nothing of them', async () => {
+  it('never refuses another rider’s registration while a key is held (ADR 0046 ruling 5)', async () => {
     harness = await createStoreHarness();
     await register(harness, ATHLETE_A);
-    await harness.write((store) => store.putHostedModelKey(SEALED));
+    await harness.write((store) => store.putHostedModelKey(ATHLETE_A, SEALED));
 
-    await expect(register(harness, ATHLETE_B)).rejects.toBeInstanceOf(HostedKeyHeldError);
+    await register(harness, ATHLETE_B);
+    await register(harness, ATHLETE_C);
 
-    expect(await harness.read((store) => store.getAthlete(ATHLETE_B))).toBeUndefined();
-    expect(await harness.read((store) => store.listDeviceKeys(ATHLETE_B))).toEqual([]);
-    expect(await harness.read((store) => store.getHostedModelKey())).toMatchObject({
+    expect(await harness.read((store) => store.getAthlete(ATHLETE_B))).toBeDefined();
+    expect(await harness.read((store) => store.listDeviceKeys(ATHLETE_C))).toHaveLength(1);
+    expect(await harness.read((store) => store.getHostedModelKey())).toEqual({
       athleteId: ATHLETE_A,
+      ...SEALED,
     });
   });
 
-  it('admits a second athlete again once the operator clears the key', async () => {
+  it('clears the key, and says whether there was one', async () => {
     harness = await createStoreHarness();
     await register(harness, ATHLETE_A);
-    await harness.write((store) => store.putHostedModelKey(SEALED));
+    await harness.write((store) => store.putHostedModelKey(ATHLETE_A, SEALED));
     expect(await harness.write((store) => store.clearHostedModelKey())).toBe(true);
     expect(await harness.write((store) => store.clearHostedModelKey())).toBe(false);
-    await register(harness, ATHLETE_B);
-    expect(await harness.read((store) => store.getAthlete(ATHLETE_B))).toBeDefined();
     expect(await harness.read((store) => store.getHostedModelKey())).toBeUndefined();
   });
 });
