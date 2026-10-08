@@ -7,7 +7,9 @@
  * the repository (`eslint.config.js` §`AI_SDK_IMPORT_PATTERNS`; its own test is
  * the one other file allowed, because the guard below can only be tested by
  * calling the SDK). It implements `model-turn.ts`'s {@link ModelConnection}
- * for an OpenAI-compatible server on the box — Ollama — at a local address.
+ * for an OpenAI-compatible server on the box — Ollama — at a local address,
+ * and (#1097, {@link createHostedModel}) for the hosted service the instance
+ * holds a key for, at an `https:` address and no other host.
  *
  * ## What every turn does, and why
  *
@@ -180,6 +182,21 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
   return 'unreachable';
 }
 
+/**
+ * A fetch that sends only under `base`, and never follows a redirect. Exported
+ * for `model.test.ts` alone, which hands it a foreign URL directly: the SDK
+ * only ever calls `baseURL`, so no run through it can show the guard works.
+ */
+export function pinnedTo(base: string, send: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (input, init) => {
+    const url = urlOf(input);
+    if (url !== base && !url.startsWith(`${base}/`)) {
+      return Promise.reject(new TypeError('A request left for a host it was not given.'));
+    }
+    return send(url, { ...init, redirect: 'error' });
+  };
+}
+
 /** A model on the rider's own box, one turn at a time. @see the file comment. */
 export function createLocalModel(options: LocalModelOptions): ModelConnection {
   const { settings, resolve } = options;
@@ -190,68 +207,115 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
       const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
       if (!checked.ok) return { ok: false, failure: checked.why };
       const base = atAddress(settings.baseUrl, checked.address);
-      const pinnedFetch = ((input, init) => {
-        const url = urlOf(input);
-        if (url !== base && !url.startsWith(`${base}/`)) {
-          return Promise.reject(new TypeError('A request left for a host it was not given.'));
-        }
-        return send(url, { ...init, redirect: 'error' });
-      }) as typeof globalThis.fetch;
       const provider = createOpenAICompatible({
         name: 'local',
         baseURL: base,
-        fetch: pinnedFetch,
+        fetch: pinnedTo(base, send),
       });
-      const tools: ToolSet = Object.fromEntries(
-        request.tools.map((spec) => [
-          spec.name,
-          tool({
-            description: spec.description,
-            inputSchema: jsonSchema(spec.parameters as Parameters<typeof jsonSchema>[0]),
-          }),
-        ]),
-      );
-      const timeout = AbortSignal.timeout(Math.max(1, request.timeoutMilliseconds));
-      try {
-        const result = await generateText({
-          model: provider.chatModel(settings.model),
-          system: request.system,
-          messages: sdkMessages(request.messages),
-          ...(request.tools.length === 0 ? {} : { tools }),
-          maxOutputTokens: request.maxOutputTokens,
-          maxRetries: 0,
-          abortSignal: AbortSignal.any([request.signal, timeout]),
-        });
-        const calls: ToolCallRequest[] = result.toolCalls.map((call) =>
-          call.dynamic === true && call.invalid === true
-            ? { callId: call.toolCallId, toolName: call.toolName, invalid: true }
-            : {
-                callId: call.toolCallId,
-                toolName: call.toolName,
-                // Untrusted and unvalidated: the agent checks it against the tool's schema.
-                input: call.input as unknown,
-              },
-        );
-        return {
-          ok: true,
-          text: result.text,
-          calls,
-          finish: finishOf(result.finishReason),
-          usage: {
-            ...(result.usage.inputTokens === undefined
-              ? {}
-              : { inputTokens: result.usage.inputTokens }),
-            ...(result.usage.outputTokens === undefined
-              ? {}
-              : { outputTokens: result.usage.outputTokens }),
-          },
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          failure: failureOf(error, timeout.aborted, request.signal.aborted),
-        };
-      }
+      return oneTurn(provider, settings.model, request);
     },
   };
+}
+
+/** The hosted service the instance holds a key for (#1097): `analysis/hosted-key.ts`. */
+export interface HostedModelOptions {
+  /** The service's OpenAI-compatible base URL. **`https:` only**: anything else throws. */
+  readonly baseUrl: URL;
+  readonly model: string;
+  /** The opened key. Sent as a bearer token to `baseUrl` and nowhere else. */
+  readonly apiKey: string;
+  /** The platform's `fetch` unless a test hands its own. */
+  readonly fetch?: typeof globalThis.fetch;
+}
+
+/**
+ * A hosted model on a key the instance holds (#1097, ADR 0046 D-9): the
+ * second OpenAI-compatible endpoint, with the same guard, the same one-host
+ * fetch, no retries and the same closed failures as the local one. It is NOT
+ * held to the local-address rule — it is hosted by definition — so what
+ * bounds it instead is that `baseUrl` is `https:` and is the only host it can
+ * reach.
+ *
+ * ⚠️ **No production caller yet, on purpose.** A hosted request must be
+ * masked first (#1101), so this is constructed only behind that seam
+ * (`source.ts` §`modelForSource`); until #1101 and a recorded consent naming
+ * the endpoint (ADR 0046 Q10, the operator's included) land, a job asking for
+ * the hosted source fails `hosted_unavailable` and sends nothing.
+ */
+export function createHostedModel(options: HostedModelOptions): ModelConnection {
+  if (options.baseUrl.protocol !== 'https:') {
+    throw new TypeError('A hosted model is reached over https: only.');
+  }
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const base = options.baseUrl.href.replace(/\/+$/, '');
+  const provider = createOpenAICompatible({
+    name: 'hosted',
+    baseURL: base,
+    apiKey: options.apiKey,
+    fetch: pinnedTo(base, send),
+  });
+  return {
+    async turn(request: ModelTurnRequest): Promise<ModelTurn> {
+      if (request.signal.aborted) return { ok: false, failure: 'aborted' };
+      return oneTurn(provider, options.model, request);
+    },
+  };
+}
+
+/** One model step through `provider`, with every rule the file comment states. */
+async function oneTurn(
+  provider: ReturnType<typeof createOpenAICompatible>,
+  model: string,
+  request: ModelTurnRequest,
+): Promise<ModelTurn> {
+  const tools: ToolSet = Object.fromEntries(
+    request.tools.map((spec) => [
+      spec.name,
+      tool({
+        description: spec.description,
+        inputSchema: jsonSchema(spec.parameters as Parameters<typeof jsonSchema>[0]),
+      }),
+    ]),
+  );
+  const timeout = AbortSignal.timeout(Math.max(1, request.timeoutMilliseconds));
+  try {
+    const result = await generateText({
+      model: provider.chatModel(model),
+      system: request.system,
+      messages: sdkMessages(request.messages),
+      ...(request.tools.length === 0 ? {} : { tools }),
+      maxOutputTokens: request.maxOutputTokens,
+      maxRetries: 0,
+      abortSignal: AbortSignal.any([request.signal, timeout]),
+    });
+    const calls: ToolCallRequest[] = result.toolCalls.map((call) =>
+      call.dynamic === true && call.invalid === true
+        ? { callId: call.toolCallId, toolName: call.toolName, invalid: true }
+        : {
+            callId: call.toolCallId,
+            toolName: call.toolName,
+            // Untrusted and unvalidated: the agent checks it against the tool's schema.
+            input: call.input as unknown,
+          },
+    );
+    return {
+      ok: true,
+      text: result.text,
+      calls,
+      finish: finishOf(result.finishReason),
+      usage: {
+        ...(result.usage.inputTokens === undefined
+          ? {}
+          : { inputTokens: result.usage.inputTokens }),
+        ...(result.usage.outputTokens === undefined
+          ? {}
+          : { outputTokens: result.usage.outputTokens }),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: failureOf(error, timeout.aborted, request.signal.aborted),
+    };
+  }
 }

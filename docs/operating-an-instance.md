@@ -164,6 +164,98 @@ it**: its API has no authentication.
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
 
+## A hosted model key
+
+Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
+service (#1097, [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
+D-9). ⚠️ **Nothing uses it yet, for anyone — you included.** A hosted job runs only for an athlete
+whose own consent, naming the endpoint, is recorded on the instance (ADR 0046 Q10), and is refused
+before the key is read; and a hosted request must be masked first (#1101). Neither is built, so a job
+that asks for the hosted source fails `hosted_unavailable`, the key is not opened, and nothing is
+sent. And it is used only for a job whose rider's device asked for it — the source is chosen per
+job, never by the instance.
+
+**Held for you, the operator, and for nobody else yet.** The instance also hosts group rides and
+races, so it has other riders, and holding a key changes nothing about them: they register and ride
+as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*. The key is
+held for the operator, who is, in the owner's Q9 ruling, *"the athlete whose device holds
+`OYL_INSTANCE_OWNER_KEY`, the key that already makes them moderator"*: `model-key set` looks that
+athlete up, and is refused when the variable is unset or your device has not signed in to this
+instance yet. **No job can use it yet, yours included.** ADR 0046 Q10 binds you as it binds every
+rider: a hosted job runs only for an athlete whose own consent, recorded on the instance and naming
+the endpoint, is there, and recording that consent is not built yet — for you or anyone. Another
+rider's job is refused for a second reason as well: your switch for other riders (Q13: *"Other
+riders get no analysis until the operator turns it on, whichever key they use"*) is not built
+either. What remains of #1097 — the switch, a rider's own key, the consent, and where a pasted key
+may be typed — is #1199.
+
+**The key stays with the athlete it was set for.** It is stored against your athlete, not against
+the variable. If you change `OYL_INSTANCE_OWNER_KEY` to another athlete's device key, or your device
+key is revoked, the key does not move: run `model-key clear`, then `model-key set` again as the new
+operator. Erasing your account (`DELETE /v1/account`) erases the key with it. Your
+account export says only `"hostedModelKey": "a hosted model key is held"`; another rider's says
+`null`.
+
+**The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
+bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
+
+```
+openssl rand -base64 32
+```
+
+Every write draws a fresh nonce, and the athlete, the URL and the model are bound into the
+encryption, so an edited URL in the database makes the key unreadable rather than sending it
+somewhere new, and an edited athlete makes it unreadable rather than somebody else's. The server and
+the operator's commands both read the variable; a value that is not 32 bytes of base64 stops the
+server starting.
+
+```
+printf '%s' "$KEY" | node src/operator/cli.ts model-key set --url https://… --model <name>
+node src/operator/cli.ts model-key status    # url, model, "a key is held", whether this secret opens it
+node src/operator/cli.ts model-key clear
+```
+
+On the home deployment (#807) the variable goes in the `.env` beside `compose.yaml`
+(`instance.env.example` lists it), and `compose.yaml` hands it to the `instance` service and to no
+other: the `backup` service never sees it. Run the commands in that service, with `-T` so the key
+reaches standard input through the pipe:
+
+```
+printf '%s' "$KEY" | docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key set --url https://… --model <name>
+docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key status
+```
+
+`set` reads the key from **standard input and nowhere else**: a key given as an argument is refused,
+because `ps` and a shell's history would show it. The URL must be `https:`, with no user name,
+query or fragment; it is the only host the hosted model may reach. The key is never logged, never
+in `/metrics`, never in an error and never in `status`.
+
+**What a backup holds.** `operator backup` copies the database with `VACUUM INTO`, so a snapshot
+holds the key's **ciphertext only**. Keep the secret out of the backup's destination: a snapshot and
+its secret together are the key. A snapshot restored onto a box with a different secret — or none —
+leaves the key unreadable, and the instance says so and carries on with its local model, or none:
+
+| You see | It means |
+|---|---|
+| `"event":"hosted-model-key","state":"none"` | no key is held |
+| `…"state":"held"` | a key is held and this secret opens it |
+| `…"state":"unreadable","hostedKeyProblem":"the hosted key cannot be read with this secret"` | restored under another secret: set the key again, or put the old secret back |
+| `…"state":"no-secret"` | a key is held and `OYL_INSTANCE_SECRET_KEY` is not set |
+
+**What clearing leaves.** `model-key clear`, replacing a key with `set`, and erasing the account all
+run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
+database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
+which held copies of the old pages. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
+rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
+that moment, the truncation does not happen and the log's old pages stay until SQLite next writes
+the log over from its start. Neither is the key in clear.
+
+**Rotating the secret.** There is no re-encryption command, because the key itself is the thing to
+re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with
+the key (which seals it under the new secret), and start the instance. Snapshots taken before then
+need the old secret to read their key; the rest of a snapshot needs no secret at all.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),

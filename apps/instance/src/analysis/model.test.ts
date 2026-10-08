@@ -20,7 +20,13 @@ import {
   type FakeModelServer,
   type ScriptedReply,
 } from './fake-model-server-testing.ts';
-import { createLocalModel, GATEWAY_REFUSED, GatewayRefusedError } from './model.ts';
+import {
+  createHostedModel,
+  createLocalModel,
+  GATEWAY_REFUSED,
+  GatewayRefusedError,
+  pinnedTo,
+} from './model.ts';
 import type { ModelTurnRequest, ToolSpec } from './model-turn.ts';
 
 const LOOPBACK: Resolver = () => Promise.resolve(['127.0.0.1']);
@@ -267,5 +273,95 @@ describe('local only, on every turn (ADR 0040 D-6, reused from history/address.t
     });
     expect(await connection.turn(request())).toStrictEqual({ ok: false, failure: 'unresolved' });
     expect(urls).toStrictEqual([]);
+  });
+});
+
+describe('the one-host fetch both models send through (#1097’s review)', () => {
+  const BASE = 'https://models.example/v1';
+
+  it.each([
+    ['another host', 'https://attacker.example/v1/chat/completions'],
+    ['a host that only starts like the base', 'https://models.example.attacker.example/v1/chat'],
+    ['a path that only starts like the base', 'https://models.example/v1evil/chat/completions'],
+    ['the base’s parent', 'https://models.example/'],
+  ])('refuses %s without sending', async (_what, url) => {
+    const send = vi.fn(() => Promise.resolve(new Response('{}')));
+    await expect(pinnedTo(BASE, send)(url, {})).rejects.toThrow(
+      'A request left for a host it was not given.',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends a request under the base, and never follows a redirect — the control', async () => {
+    const send = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(new Response('{}')));
+    await pinnedTo(BASE, send)(`${BASE}/chat/completions`, { method: 'POST' });
+    await pinnedTo(BASE, send)(new URL(BASE), {});
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0]).toBe(`${BASE}/chat/completions`);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', redirect: 'error' });
+    expect(send.mock.calls[1]?.[1]).toMatchObject({ redirect: 'error' });
+  });
+});
+
+describe('the hosted model on the instance’s key (#1097)', () => {
+  const HOSTED = new URL('https://models.example/v1');
+  const KEY = 'sk-hosted-test-key';
+
+  /**
+   * A fetch standing in for the internet: it records every URL and the
+   * authorization it carried, and answers a request under the hosted base
+   * from the fake model server, so a run is seen whole on loopback.
+   */
+  function hostedFetch(model: FakeModelServer) {
+    const seen: { url: string; authorization: string | null }[] = [];
+    const base = HOSTED.href.replace(/\/+$/, '');
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      seen.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+      if (!url.startsWith(`${base}/`)) return Promise.reject(new Error('another host'));
+      return globalThis.fetch(`${model.baseUrl.href}${url.slice(base.length)}`, init);
+    }) as typeof globalThis.fetch;
+    return { seen, fetch };
+  }
+
+  it('refuses an http: URL outright', () => {
+    expect(() =>
+      createHostedModel({ baseUrl: new URL('http://models.example/v1'), model: 'm', apiKey: KEY }),
+    ).toThrow(/https/);
+  });
+
+  it('reaches the hosted base and no other host over a run, carrying the key as a bearer token there', async () => {
+    const model = await fake(
+      { kind: 'tool-calls', calls: [{ name: 'ride_sections', arguments: '{}' }] },
+      { kind: 'text', text: 'A steady ride.' },
+    );
+    const { seen, fetch } = hostedFetch(model);
+    const connection = createHostedModel({
+      baseUrl: HOSTED,
+      model: 'hosted-model',
+      apiKey: KEY,
+      fetch,
+    });
+    expect((await connection.turn(request())).ok).toBe(true);
+    expect(await connection.turn(request())).toMatchObject({ ok: true, text: 'A steady ride.' });
+    expect(seen).toStrictEqual([
+      { url: 'https://models.example/v1/chat/completions', authorization: `Bearer ${KEY}` },
+      { url: 'https://models.example/v1/chat/completions', authorization: `Bearer ${KEY}` },
+    ]);
+    expect(model.requests.map((body) => body.model)).toStrictEqual([
+      'hosted-model',
+      'hosted-model',
+    ]);
+  });
+
+  it('answers in the same closed failures, never the server’s words', async () => {
+    const model = await fake({
+      kind: 'status',
+      status: 401,
+      body: JSON.stringify({ error: { message: `bad key ${KEY}` } }),
+    });
+    const { fetch } = hostedFetch(model);
+    const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
+    expect(await connection.turn(request())).toStrictEqual({ ok: false, failure: 'refused' });
   });
 });

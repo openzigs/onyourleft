@@ -265,9 +265,18 @@ export interface AccountExport {
     readonly dimension: number;
     readonly passages: number;
   }[];
+  /**
+   * {@link HOSTED_KEY_HELD} when the instance holds a hosted model key for
+   * this athlete (#1097), and `null` when it does not. That and nothing
+   * else: never the key, its service or its model.
+   */
+  readonly hostedModelKey: typeof HOSTED_KEY_HELD | null;
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
+
+/** What the export says of a hosted model key the instance holds for the athlete (#1097). */
+export const HOSTED_KEY_HELD = 'a hosted model key is held';
 
 /** What the export says it leaves out. Fixed sentences; nothing from the account. */
 export const EXPORT_LEAVES_OUT: readonly string[] = [
@@ -279,6 +288,7 @@ export const EXPORT_LEAVES_OUT: readonly string[] = [
   'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
   'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
   'The history index’s passages and vectors: they are cut from the items above and worked out by the model named in historyIndex, so the same model can make them again from those items, and without it they mean nothing.',
+  'A hosted model key: hostedModelKey says only whether one is held. The key is a secret the operator set and can set again, and this file is meant to be carried around.',
 ];
 
 export interface Sync {
@@ -509,6 +519,10 @@ export function createSync(options: SyncOptions): Sync {
             dimension: row.dimension,
             passages: row.passages,
           })),
+          hostedModelKey:
+            (await store.getHostedModelKey())?.athleteId === caller.athleteId
+              ? HOSTED_KEY_HELD
+              : null,
           notIncluded: EXPORT_LEAVES_OUT,
         },
       };
