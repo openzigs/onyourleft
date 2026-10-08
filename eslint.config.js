@@ -267,6 +267,46 @@ const AI_SDK_IMPORT_PATTERNS = [
 ];
 
 /**
+ * HPKE's test support, by name (#1188, ADR 0047 D-3). `hpke-testing.ts` is
+ * the one module that lets a caller choose an HPKE ephemeral key — RFC 9180's
+ * vectors need it, and a production sender that reused one would give every
+ * request to an instance key one shared secret. So no module may import it
+ * but a test or test support (the block after the AI SDK's lifts it for
+ * those). `src/index.ts` does not export it either, which
+ * `packages/domain/src/hpke/hpke-surface.test.ts` holds with
+ * `@ts-expect-error`.
+ */
+const HPKE_TESTING_IMPORT_PATTERNS = [
+  {
+    group: [
+      '@onyourleft/domain/hpke-testing',
+      'hpke-testing',
+      'hpke-testing.ts',
+      '**/hpke-testing',
+    ],
+    message:
+      'HPKE test support (an injectable ephemeral key) is for tests only (#1188, ADR 0047 D-3). Use setupBaseSender from @onyourleft/domain.',
+  },
+  {
+    // `hpke.ts` exports `setupSender` and `encap`, which take an ephemeral
+    // key. Only `src/index.ts` (which re-exports the safe names),
+    // `hpke-testing.ts` and tests may name the module (#1196 review).
+    group: ['**/hpke/hpke', '**/hpke/hpke.ts', './hpke', './hpke.ts'],
+    message:
+      'hpke.ts exports the ephemeral-key-taking core (setupSender, encap). Import setupBaseSender from @onyourleft/domain instead (#1188, ADR 0047 D-3).',
+  },
+];
+
+/** Where a test or test support lives, for the rules such files are exempt from. */
+const TEST_AND_TEST_SUPPORT_FILES = [
+  '**/*.test.{ts,tsx}',
+  '**/*.spec.ts',
+  '**/*-testing.ts',
+  '**/testing/**/*.{ts,tsx}',
+  '**/testing.ts',
+];
+
+/**
  * The instance's SQL driver and query builder, by name (#769). Only
  * `apps/instance/src/store/` may import them — see the block that uses this.
  */
@@ -483,11 +523,40 @@ export default tseslint.config(
   // Everywhere — `packages/`, `apps/web`, `apps/mobile`, the rest of
   // `apps/instance`, the scripts — but the one module and its test. Probed: an
   // `import { generateText } from 'ai'` in `analysis/agent.ts` is an error.
+  //
+  // ⚠️ Since #1188 the same rule also carries HPKE_TESTING_IMPORT_PATTERNS, so
+  // three blocks set it: this one (both lists), the next (tests and test
+  // support: the AI SDK's list alone) and `model.ts`'s (HPKE's alone).
+  // Probed: `import … from '@onyourleft/domain/hpke-testing'` in
+  // `apps/instance/src/auth/crypto.ts` is an error, in `hpke.test.ts` it is not.
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
     rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [...AI_SDK_IMPORT_PATTERNS, ...HPKE_TESTING_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  {
+    files: TEST_AND_TEST_SUPPORT_FILES,
+    ignores: ['apps/instance/src/analysis/model.test.ts'],
+    rules: {
       'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  // The two non-test modules allowed to name `hpke/hpke` (#1196 review).
+  {
+    files: ['packages/domain/src/index.ts', 'packages/domain/src/hpke/hpke-testing.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  {
+    files: ['apps/instance/src/analysis/model.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: HPKE_TESTING_IMPORT_PATTERNS }],
     },
   },
 
@@ -571,8 +640,9 @@ export default tseslint.config(
         {
           patterns: [
             // #1096: this block replaces the AI SDK block above for these
-            // files, so it carries its patterns.
+            // files, so it carries its patterns — and #1188's.
             ...AI_SDK_IMPORT_PATTERNS,
+            ...HPKE_TESTING_IMPORT_PATTERNS,
             {
               group: ['**/web-bluetooth/**', '../web-bluetooth/*', '../../web-bluetooth/*'],
               message:
