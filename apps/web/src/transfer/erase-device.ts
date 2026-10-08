@@ -341,6 +341,12 @@ export async function eraseDevice(
      * The side-camera snapshots held in this tab's memory for a ride not yet
      * saved (#1063) — `camera/snapshot-keeper.ts`. Forgotten FIRST, so a ride
      * whose save lands while the erase runs cannot write one after it.
+     *
+     * ⚠️ `forget()` does NOT stop a write already in flight: that write holds
+     * its own list of snapshots. What makes it safe is `putCameraFrame`'s
+     * check, inside its transaction, that the snapshot's ride is held by its
+     * athlete — once `deleteAthlete` has run the ride is gone and the put is
+     * refused (#1063's review). Do not "simplify" that check away.
      */
     readonly heldSnapshots?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
