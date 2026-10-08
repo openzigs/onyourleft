@@ -40,7 +40,7 @@ import { modelServer, REPLY_MARKER, STILL_CLOCK, type ModelServer } from './mode
 import { createRideAnalysis } from './ride-analysis';
 import type { RideAnalysisPort } from './ride-analysis-port';
 import { ASK_LABEL, WRITE_UP_HEADING, WRITE_UP_SAVED } from './RideWriteUpControl';
-import { RUN_FAILURE_TEXT } from './runner';
+import { RUN_FAILURE_TEXT } from '@onyourleft/analysis';
 import {
   WRITE_UP_EARLIER,
   WRITE_UP_FRAMING_LEAD,

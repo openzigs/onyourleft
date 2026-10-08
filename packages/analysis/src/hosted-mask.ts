@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * **What is masked before anything is sent to a hosted model** —
@@ -93,10 +93,9 @@ import {
   geographicPosition,
   type GeographicPosition,
 } from '@onyourleft/domain';
-import type { AthleteId, AthleteRecord, PrivacyZoneRecord } from '@onyourleft/store';
-import { parseMaskedWords } from '@onyourleft/store';
 
-import { INVISIBLE } from '../camera/angle-claims';
+import { parseMaskedWords } from './masked-words';
+import { INVISIBLE } from './screen/angle-claims';
 
 /** What a masked detail is replaced by. */
 export type MaskKind =
@@ -585,10 +584,22 @@ export function maskForHosted(text: string, guard: MaskingGuard): string {
 
 // --- Where the guard comes from ------------------------------------------------------
 
-/** What {@link readMaskingGuard} reads. `ActivityStore` satisfies it as it stands. */
-export interface MaskingStore {
-  getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
-  listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]>;
+/**
+ * The athlete row's one field the guard reads. `packages/store` §`AthleteRecord`
+ * satisfies it; it is restated here because this package does not depend on
+ * the store (ADR 0046 D-5, #1094). The list is parsed whatever it holds.
+ */
+export interface MaskingAthlete {
+  readonly maskedWords?: unknown;
+}
+
+/**
+ * What {@link readMaskingGuard} reads, keyed by the store's own athlete id.
+ * `ActivityStore` satisfies it as it stands.
+ */
+export interface MaskingStore<Owner> {
+  getAthlete(id: Owner): Promise<MaskingAthlete | undefined>;
+  listPrivacyZones(owner: Owner): Promise<readonly MaskingZone[]>;
 }
 
 /**
@@ -597,9 +608,9 @@ export interface MaskingStore {
  * that by sending nothing (`hosted-transport.ts` §`not-masked`) — a request
  * masked with half a guard would look masked and not be.
  */
-export async function readMaskingGuard(
-  store: MaskingStore,
-  owner: AthleteId,
+export async function readMaskingGuard<Owner>(
+  store: MaskingStore<Owner>,
+  owner: Owner,
 ): Promise<MaskingGuard> {
   const [athlete, zones] = await Promise.all([
     store.getAthlete(owner),

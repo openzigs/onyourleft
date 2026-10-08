@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * **The rider's history, asked of their own instance** — #835, ADR 0040 D-2,
@@ -44,7 +44,7 @@
  * D-9's amendment, which is why `hosted-step.ts` refuses a history step.
  */
 
-import { passedScreen, screenSavedWriteUp } from '../camera/write-up-screen';
+import { passedScreen, screenSavedWriteUp } from './screen/write-up-screen';
 
 /** The kinds of passage the instance returns (the instance's `history/passages.ts` §`INDEXED_KINDS`). */
 export const HISTORY_KINDS = ['write-up', 'ride-summary', 'goal', 'note', 'document'] as const;

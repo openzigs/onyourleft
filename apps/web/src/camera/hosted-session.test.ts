@@ -14,7 +14,7 @@ import { hostedModelDecision, type HostedModel } from './hosted-model';
 import { hostedModelPort, type HostedSend } from './hosted-transport';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
 import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;

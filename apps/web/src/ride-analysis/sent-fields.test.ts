@@ -21,14 +21,18 @@ import { describe, expect, it } from 'vitest';
 import { HOSTED_CONSENT } from '../camera/hosted-model';
 import { COMPUTER_SENDS } from '../detail/write-up';
 
-import { MAXIMUM_SECTIONS, type RideAnalysisInput, type SectionSummary } from './input';
+import {
+  MAXIMUM_SECTIONS,
+  type RideAnalysisInput,
+  type SectionSummary,
+} from '@onyourleft/analysis';
 import {
   acceptPositionNote,
   acceptSectionNote,
   ANALYSIS_TEMPLATES,
   type AnalysisTemplate,
   type EarlierNotes,
-} from './template';
+} from '@onyourleft/analysis';
 
 /**
  * Which words of the disclosure name each key a prompt's JSON carries. A key

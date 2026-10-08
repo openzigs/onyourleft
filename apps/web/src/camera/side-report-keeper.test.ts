@@ -22,7 +22,7 @@ import {
 import { sideReportKeeper, type RideProgress, type RideProgressSource } from './side-report-keeper';
 import type { SideReport } from './side-report';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from './side-report-wording';
-import type { SideSessionSummary } from './side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
 
 const REPORT: SideReport = {
   summary: SIDE_REPORT_OBSERVED,

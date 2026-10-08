@@ -61,7 +61,7 @@
  */
 
 import type { SidePose, SidePoseLandmark } from './side-analysis-port';
-import type { SidePoseSource, SideSessionSummary } from './side-session-summary';
+import type { SidePoseSource, SideSessionSummary } from '@onyourleft/analysis';
 import {
   SIDE_OBSERVATION_KINDS,
   SIDE_OBSERVATION_SENTENCES,

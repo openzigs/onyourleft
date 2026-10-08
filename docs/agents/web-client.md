@@ -366,7 +366,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         lateral movement to a body; and every report sentence
                         is held under the store's `MAXIMUM_SIDE_REPORT_SENTENCE`
                         by a test, because one past it is refused on save and
-                        the keeper drops the report without a word
+                        the keeper drops the report without a word.
+                        ⚠️ Since #1094 `side-session-summary.ts` is
+                        `packages/analysis/src/pose-summary.ts`, with the five
+                        `SIDE_OBSERVATION_KINDS` (the sentences stay in
+                        `side-report-wording.ts`, app text under ADR 0030), and
+                        `write-up-screen.ts`, `angle-claims.ts` and
+                        `model-answer.ts` are in `packages/analysis/src/screen/`.
+                        `no-absolute-angles.ts` stays (it imports the compiler)
+                        and its gate scans `packages/analysis/src` as well
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
@@ -740,7 +748,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         run goes, and says beside them what will be sent, in
                         ADR 0035 D-9 B's words, marked kept-visible. A port
                         remembers a server that refused the `response_format`
-                        hint and stops offering it (#805, from #831's review)
+                        hint and stops offering it (#805, from #831's review).
+                        ⚠️ **Since #1094 the platform-free core is NOT here**:
+                        `runner.ts`, `template*.ts`, `input.ts`, `history.ts`,
+                        `model-step-port.ts`, `sealed-step.ts` and
+                        `hosted-mask.ts` moved to `packages/analysis`
+                        (`@onyourleft/analysis`, Apache-2.0, ADR 0046 D-4),
+                        imported from there unchanged. What stays here is
+                        everything that reads a store, names a transport or
+                        renders: `read-input.ts`, `ride-summary.ts`,
+                        `ride-analysis.ts`, `own-computer-step.ts`,
+                        `hosted-step.ts` and every `.tsx`. The tests that read
+                        the app or the shell stayed too, as `*-app.test.ts`
+                        and `runner-native.test.ts` beside them
     src/rider-text/     the rider's own text for the analysis agent's history
                         (#836, ADR 0040 D-1, D-11) — the goals box on Settings,
                         a ride's note on its page (`RiderTextBox.tsx`, one

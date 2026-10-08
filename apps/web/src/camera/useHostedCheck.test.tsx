@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { mount, settle, type Mounted } from '../testing/mount';
 
-import type { UntrustedText } from './model-answer';
+import type { UntrustedText } from '@onyourleft/analysis';
 import type { HostedCall, HostedOutcome } from './hosted-port';
 import type { AnalysisSchedule } from './useAnalysis';
 import { useHostedCheck, type HostedAsker } from './useHostedCheck';

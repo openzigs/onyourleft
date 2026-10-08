@@ -20,7 +20,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { RideAnalysisInput } from './input';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 import {
   RIDE_SUMMARY_FORMAT,
   RIDE_SUMMARY_VERSION,

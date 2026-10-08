@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * **The one seam between the analysis runner and a model** —
@@ -38,9 +38,8 @@
  * A port that threw would be a second policy, written by accident.
  */
 
-import type { AnalysisFailure, UntrustedText } from '../camera/model-answer';
-import type { HostedFailure } from '../camera/hosted-port';
-import type { AnalysisStepKind, ReplySchema } from './template';
+import type { UntrustedText } from './screen/model-answer';
+import type { AnalysisStepKind, ReplySchema } from './template/template';
 
 /** One step, as it is sent. */
 export interface StepRequest {
@@ -64,10 +63,20 @@ export interface StepRequest {
  */
 export type StepFinish = 'stop' | 'length' | 'other';
 
+/**
+ * Why a step failed, in its transport's own words: an `AnalysisFailure`
+ * from the rider's own computer, or the hosted transport's `HostedFailure`
+ * (`apps/web/src/camera/hosted-port.ts`), which stays with the transport that
+ * names it. A string here, because this package names no transport (ADR 0046
+ * D-5, #1094) and the runner reads none of them: a failed step is a failed
+ * step, whatever its transport called it.
+ */
+export type StepFailure = string;
+
 /** What came back for one step. */
 export type StepReply =
   | { readonly kind: 'answered'; readonly text: UntrustedText; readonly finish: StepFinish }
-  | { readonly kind: 'failed'; readonly failure: AnalysisFailure | HostedFailure };
+  | { readonly kind: 'failed'; readonly failure: StepFailure };
 
 /** What the runner asks of whatever reaches a model. */
 export interface ModelStepPort {

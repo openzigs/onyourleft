@@ -14,6 +14,24 @@ From the layout tree of CLAUDE.md §2, from `packages/`:
 
 ```
 packages/             Apache-2.0, without exception
+  analysis/           the platform-free core of a model-written ride write-up
+                      (#1094, ADR 0046 D-4, D-5) — the runner, the templates,
+                      the input builder, the history passages, the write-up
+                      screen and the angle matchers it shares with
+                      `apps/web`'s source scan, the pose summary's shape, the
+                      hosted mask and the masked-word list. Moved out of
+                      `apps/web` with `git mv` and relicensed Apache-2.0 on the
+                      owner's consent (ADR 0046 D-4), with NO behaviour change.
+                      ⚠️ Its only production dependency is `@onyourleft/domain`:
+                      the store's record shapes are restated structurally
+                      (`input.ts`, `hosted-mask.ts`), and `packages/store`
+                      imports `MAXIMUM_WRITE_UP_CHARACTERS` and
+                      `parseMaskedWords` from HERE, never the reverse. Two
+                      tsconfigs, as `fit`'s: `tsconfig.platform-free.json` is
+                      the one that enforces, over everything but the tests,
+                      and `src/abort.d.ts` declares the one non-ES2024 global
+                      the runner uses, `AbortController`. `sealStep` is in
+                      `./testing`, never in the barrel
   domain/             units, core types, validation, signing, analysis (#25)
     analysis/           the power-duration curve and the critical-power fit (#75),
                         the training zones (#78), the per-ride load metrics
@@ -126,8 +144,9 @@ packages/             Apache-2.0, without exception
 
 
 **`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
-`packages/store`, `packages/physics` and — since [#768](https://github.com/openzigs/onyourleft/issues/768)
-— `packages/protocol` exist.** `apps/instance` was created by
+`packages/store`, `packages/physics`, — since [#768](https://github.com/openzigs/onyourleft/issues/768)
+— `packages/protocol` and — since [#1094](https://github.com/openzigs/onyourleft/issues/1094) —
+`packages/analysis` exist.** `apps/instance` was created by
 [#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
 listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the

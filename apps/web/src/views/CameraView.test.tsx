@@ -52,7 +52,7 @@ import {
   SINGLE_PICTURE_PURPOSE_ALONE,
   SINGLE_PICTURE_TITLE,
 } from './CameraView';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 
 let mounted: Mounted | undefined;

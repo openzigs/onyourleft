@@ -45,8 +45,8 @@
  */
 
 import type { HostedCall, HostedQuestion } from '../camera/hosted-port';
-import type { ModelStepPort, StepReply, StepRequest } from './model-step-port';
-import { isSealedStep, type SealedStep } from './sealed-step';
+import type { ModelStepPort, StepReply, StepRequest } from '@onyourleft/analysis';
+import { isSealedStep, type SealedStep } from '@onyourleft/analysis';
 
 /**
  * What this port asks of the camera controller — the one method that checks
