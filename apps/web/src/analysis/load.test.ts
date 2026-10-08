@@ -390,7 +390,7 @@ describe('loadLibraryBests', () => {
  *
  * `harness.read()` discards every open handle before it opens another, so the
  * second answer below cannot be served by the connection that wrote the ride.
- * That closes all four of the failure causes CLAUDE.md §5 names: a write that
+ * That closes all four of the failure causes docs/agents/quality-gate.md §5 names: a write that
  * landed in a cache, one acknowledged at the edge, one in a transaction that
  * never committed, and a harness comparing against the object it just built.
  */

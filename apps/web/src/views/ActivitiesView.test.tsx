@@ -9,7 +9,7 @@
  * before it deletes — and a real IndexedDB would only make those slower and
  * flakier without making them stricter. The deletion test uses the **real**
  * store through the #28 harness and reads back on a fresh connection, because
- * "the row is gone" is a persistence claim and CLAUDE.md §5 names the failure
+ * "the row is gone" is a persistence claim and docs/agents/quality-gate.md §5 names the failure
  * it would otherwise miss: a write that reports success while the read cannot
  * see it.
  */

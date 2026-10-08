@@ -108,7 +108,7 @@ const BROWSER_LIMITS: readonly string[] = [
 
 /**
  * The sentences the Devices screen never tucks into its disclosure where a
- * browser can pair — #666, ADR 0003 D-7 rule 5 and CLAUDE.md §8.
+ * browser can pair — #666, ADR 0003 D-7 rule 5 and docs/agents/web-bluetooth.md §8.
  * `a11y/kept-visible.a11y.test.tsx` holds them.
  */
 export const DEVICES_KEPT_VISIBLE: readonly string[] = [ONE_GESTURE_PER_DEVICE, ...BROWSER_LIMITS];

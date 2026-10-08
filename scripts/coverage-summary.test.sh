@@ -133,7 +133,7 @@ fi
 
 # --- It must never gate ------------------------------------------------------
 # 0% everywhere still exits 0. A non-zero exit here would be the percentage
-# floor that CLAUDE.md §5 forbids, arriving by the back door.
+# floor that docs/agents/quality-gate.md §5 forbids, arriving by the back door.
 new_fixture
 printf '{"total":{"lines":%s,"statements":%s,"functions":%s,"branches":%s},"/r/packages/domain/src/a.ts":%s}' \
   "$(cell 0 1)" "$(cell 0 1)" "$(cell 0 1)" "$(cell 0 1)" "$(file_entry 0 10)" > "${tmp}/c.json"

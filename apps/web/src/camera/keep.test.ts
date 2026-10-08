@@ -115,7 +115,7 @@ describe('the default is that nothing is kept', () => {
     const outcome = await controller.captureOne();
     expect(outcome.taken).toBe(true);
     // ⚠️ Reported kept, and then READ BACK on a fresh connection below. The
-    // write-reports-success-while-the-read-cannot-see-it shape (CLAUDE.md §5)
+    // write-reports-success-while-the-read-cannot-see-it shape (docs/agents/quality-gate.md §5)
     // is exactly what this pair together rules out: `kept` alone would be
     // satisfied by a sink that returned `true` and wrote nothing.
     expect(outcome.kept).toBe(true);
@@ -286,7 +286,7 @@ describe('there is no global “always keep”', () => {
 describe('a device that will not take it', () => {
   it('does not report a picture kept when the write was refused', async () => {
     // ⚠️ **The write-reports-success-while-the-read-cannot-see-it shape
-    // (CLAUDE.md §5), at the one layer that decides the word "kept".** In
+    // (docs/agents/quality-gate.md §5), at the one layer that decides the word "kept".** In
     // production this write is a whole JPEG into IndexedDB, so
     // `QuotaExceededError` on a full device is the ORDINARY failure — and a
     // keep that swallowed it and answered `true` anyway would put "It is on

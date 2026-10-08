@@ -24,7 +24,7 @@
  * the green half goes red — the mutation recorded in #793's pull request.
  *
  * Every read here is on a connection the writes never touched (the harness's
- * `read`), which is CLAUDE.md §5's "wrong harness" cause closed.
+ * `read`), which is docs/agents/quality-gate.md §5's "wrong harness" cause closed.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';

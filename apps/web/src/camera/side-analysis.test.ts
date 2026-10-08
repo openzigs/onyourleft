@@ -479,7 +479,7 @@ describe('when the session ends', () => {
       link.set({ phone: 'stopped' });
       expect(puts).toHaveLength(1);
       await Promise.all(puts);
-      // A fresh connection, through the public read (CLAUDE.md §5).
+      // A fresh connection, through the public read (docs/agents/quality-gate.md §5).
       const kept = await harness.read(async (store) => store.getFramingReference(ATHLETE_A));
       expect(kept?.check).toBe('matches');
       // The verdict is about THIS session's placement, on the same row.

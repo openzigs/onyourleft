@@ -951,7 +951,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // was.** Both belong to the *ride*, and `start` is where a ride begins —
     // this callback releases resources. Clearing it in both places made each
     // assignment individually invisible: deleting either left the whole suite
-    // green, because the other covered for it, which is CLAUDE.md §5's "a test
+    // green, because the other covered for it, which is docs/agents/quality-gate.md §5's "a test
     // that cannot fail is not a test" seen from the implementation's side.
     // There is exactly one way back to the picker (`onEnd`) and exactly one way
     // out of it (`start`), so one reset is the whole of it.

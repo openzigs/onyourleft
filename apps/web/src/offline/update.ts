@@ -5,7 +5,7 @@
  *
  * ## The defect this exists to prevent
  *
- * CLAUDE.md §5's dominant shape — *"a write that reports success while the read
+ * docs/agents/quality-gate.md §5's dominant shape — *"a write that reports success while the read
  * cannot see it"* — in its most expensive form:
  *
  * > **A deploy reports success and every rider's tab keeps reading the old

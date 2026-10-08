@@ -527,7 +527,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   rulings of 2026-10-04 and 2026-10-07, runs AI analysis only on the rider's instance, and five
   statements here stop being true. **D-2's** *"Where the screen and the summary builder run: on the
   device, and nowhere else"*: the screen runs on the instance before a candidate is kept and again on
-  the device before display, both from `@onyourleft/analysis`. **D-8's** *"A separate "history"
+  the device before display, both from `@onyourleft/analysis`. **The summary builder stays on the
+  device**: the device still renders a ride's summary passages and syncs them beside the ride, and
+  builds the asked-about ride's input for a job (the owner's Q1 ruling), so that half of D-2's
+  sentence still holds. **D-8's** *"A separate "history"
   step … is the only step that sees a passage"*: the history step becomes the `history_search` tool
   ([#1099](https://github.com/openzigs/onyourleft/issues/1099)), with D-8's same bounds — at most 6
   passages of at most 900 characters a call — and the same data fence. **D-9's masking on the

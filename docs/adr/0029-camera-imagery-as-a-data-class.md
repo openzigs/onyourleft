@@ -1067,5 +1067,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   input and result, which Cloudflare sees in clear because it terminates TLS at its edge. The owner
   ruled (Q11) that they are encrypted at the application layer, end to end, by
   [#1179](https://github.com/openzigs/onyourleft/issues/1179); until it ships, a pasted key is
-  accepted only on the home network or through the operator command, and the masking data and job
-  text still cross in clear. The body above is not edited.
+  accepted only on the home network (a private address on the local network, never an overlay) or
+  through the operator command, and the owner ruled the same day that the masking sync and the job
+  stream do not ship before it, so the masking data and job text never cross Cloudflare's edge
+  readable. The body above is not edited.

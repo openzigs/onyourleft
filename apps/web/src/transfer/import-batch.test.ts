@@ -7,7 +7,7 @@
  * round-trip harness, whose `read` discards every open handle before it opens
  * another. So "the ride imported" means a fresh IndexedDB connection can see
  * it, not that the object the importer just built has the fields it was given —
- * which is CLAUDE.md §5's fourth cause of a write that reports success while
+ * which is docs/agents/quality-gate.md §5's fourth cause of a write that reports success while
  * the read cannot see it, and the one a naive test cannot tell apart from
  * success.
  *

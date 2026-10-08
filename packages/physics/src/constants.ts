@@ -4,7 +4,7 @@
  * Physical constants, each with the source it was read from.
  *
  * A constant here is a **fact**: a measured or defined quantity taken from a
- * published paper or a published standard. CLAUDE.md §6 draws the line this
+ * published paper or a published standard. docs/agents/scope-and-ip.md §6 draws the line this
  * file sits on — "a physical constant or an equation from a published paper
  * (Martin et al. 1998, for instance) carries no such restriction. An
  * implementation of it is." Every mature prior-art cycling-physics

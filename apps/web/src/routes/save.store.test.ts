@@ -7,7 +7,7 @@
  *
  * ## Why this is a test of its own rather than a line in `import-form.test.ts`
  *
- * Because the criterion says so, and it says so for a reason CLAUDE.md §5 names
+ * Because the criterion says so, and it says so for a reason docs/agents/quality-gate.md §5 names
  * as the dominant defect shape in this program's persistence work: *a write that
  * reports success while the read cannot see it*, from a wrong storage, a wrong
  * layer, a wrong time or a wrong harness. The fourth is the one that applies

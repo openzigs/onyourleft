@@ -7,7 +7,7 @@
  * Every "it saved" assertion here reads back through `@onyourleft/store/testing`,
  * whose `read` discards every open handle before it opens another. So the claim
  * is that a fresh IndexedDB connection can see the route, not that the object
- * this module just built has the fields it was given — CLAUDE.md §5's fourth
+ * this module just built has the fields it was given — docs/agents/quality-gate.md §5's fourth
  * cause of a write that reports success while the read cannot see it.
  */
 

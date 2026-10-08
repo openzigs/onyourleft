@@ -66,7 +66,7 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  *
  * **Blocks are added one at a time and listed in order.** A workout is built
  * up rather than typed into one box, because the alternative is a text format,
- * and there is no workout file format — ADR 0009 and CLAUDE.md §6 record why,
+ * and there is no workout file format — ADR 0009 and docs/agents/scope-and-ip.md §6 record why,
  * and #202 is the issue that settles it.
  *
  * **Colour carries nothing.** A block's kind is a word in its own cell, for

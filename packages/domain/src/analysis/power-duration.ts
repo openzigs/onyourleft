@@ -56,7 +56,7 @@
  *
  * The maximal-mean-value computation is elementary and is not taken from
  * anywhere. GoldenCheetah has a mature implementation and is **GPL-2.0**:
- * CLAUDE.md §6 permits reading it to check a formula and forbids copying from
+ * docs/agents/scope-and-ip.md §6 permits reading it to check a formula and forbids copying from
  * it, which under §3 would be fatal to this package. Nothing here is derived
  * from that source.
  */

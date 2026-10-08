@@ -32,7 +32,7 @@ export type SensorErrorCode =
   /**
    * The runtime has no BLE stack this transport can drive at all — Safari and
    * Firefox in the browser, where Web Bluetooth is not implemented and (per
-   * CLAUDE.md §8) never will be. Permanent for the session: retrying cannot
+   * docs/agents/web-bluetooth.md §8) never will be. Permanent for the session: retrying cannot
    * help, and a UI that offers a retry button here is lying.
    */
   | 'transport-unsupported'

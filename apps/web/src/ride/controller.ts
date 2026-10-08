@@ -44,7 +44,7 @@
  * ## What is deliberately not here
  *
  * **No automatic reconnection.** Web Bluetooth has no silent reconnect that is
- * shippable in 2026 (CLAUDE.md §8) and `requestDevice` needs a gesture per
+ * shippable in 2026 (docs/agents/web-bluetooth.md §8) and `requestDevice` needs a gesture per
  * device. A dropped sensor becomes a visible state and a button; a controller
  * that retried in a loop would produce a screen that appears to be connecting
  * for ever.
@@ -2459,7 +2459,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         // the forget and THEN attaching is no better: the device the chooser
         // just returned is the one whose grant the forget withdraws, and it
         // cannot be asked for again without another press, because
-        // `requestDevice()` needs a user gesture per device (CLAUDE.md §8).
+        // `requestDevice()` needs a user gesture per device (docs/agents/web-bluetooth.md §8).
         // So the chooser's answer is dropped and the rider presses Pair again
         // once the forget is done — the only order in which the grant they
         // get is one nothing is about to take away.

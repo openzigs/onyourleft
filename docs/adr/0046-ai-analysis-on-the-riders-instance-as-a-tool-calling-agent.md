@@ -1,8 +1,9 @@
 # ADR 0046: AI analysis runs only on the rider's instance, as a tool-calling agent
 
 - **Status**: **Accepted, 2026-10-07.** The owner answered every question this ADR left open, in
-  three comments on [PR #1114](https://github.com/openzigs/onyourleft/pull/1114) on 2026-10-07
-  (quoted in Context), and posted the first-person relicence consent D-4 rests on, on
+  three comments on [PR #1114](https://github.com/openzigs/onyourleft/pull/1114) on 2026-10-07,
+  ruled on three points those answers left to the author in a fourth (all four quoted in Context),
+  and posted the first-person relicence consent D-4 rests on, on
   [#1093](https://github.com/openzigs/onyourleft/issues/1093) the same day. It was **Proposed** from
   2026-10-04 until then, and ⚠️ a reviewer who remembers it awaiting the owner's approval is reading
   the old file. **Nothing is built by this ADR**: the sub-issues of
@@ -194,6 +195,19 @@ And the owner's note on #1093 the same day, verbatim:
 
 Q8 was answered on #1093 the same evening; D-4 quotes it.
 
+[The fourth](https://github.com/openzigs/onyourleft/pull/1114#issuecomment-6049839974)
+(2026-10-08T00:47:59Z, headed 2026-10-07 by the owner), from the acceptance review of this pull
+request:
+
+> **Owner rulings, 2026-10-07 (from the acceptance review):**
+> - **Analysis traffic waits for end-to-end encryption.** #1101 (masking sync) and #1095 (the job
+>   stream) do not ship before #1179. Privacy-zone centres, the words-to-mask list and job text never
+>   cross Cloudflare's edge readable.
+> - **"Home network" for a pasted key means a private address on the local network only.**
+>   WireGuard-class overlays do not count. A request the instance cannot place is refused.
+> - **Rotating the shared key at the same endpoint does not re-ask riders' consent.** Consent names
+>   the endpoint, and only a change of endpoint withdraws it.
+
 ### How the rulings supersede one another, recorded so nobody applies the wrong one
 
 | Earlier statement | Replaced by | Effect |
@@ -205,6 +219,7 @@ Q8 was answered on #1093 the same evening; D-4 quotes it.
 | The epic body's open question 9, *"the candidate is deleted when the device acknowledges the save"* | #1092 comment ruling 8 | Results are kept on the instance (D-12) |
 | `packages/store/src/masked-words.ts`, *"It is NOT in the account export"*, and its device-first note | #1092 comment ruling 7 | Reversed (D-10). The code changes in #1101, not here |
 | #1092 comment ruling 6, *"The key crosses the network once, over the tunnel's TLS"* | The owner's Q11 ruling of 2026-10-07 | Until [#1179](https://github.com/openzigs/onyourleft/issues/1179)'s end-to-end encryption ships, a pasted key is accepted **only on the home network or through the operator command**, never through the tunnel (D-9) |
+| The Q11 ruling's *"Until it ships, a pasted key is accepted only on the home network"*, which held back only the key | The owner's fourth ruling of 2026-10-07, *"#1101 (masking sync) and #1095 (the job stream) do not ship before #1179"* | Nothing but a pasted key crosses the tunnel before #1179, and the key only from the home network as the same ruling defines it (D-9, D-10) |
 | [ADR 0029](0029-camera-imagery-as-a-data-class.md)'s 2026-09-28 entry, the hosted key kept on the device | The owner's Q12 ruling of 2026-10-07 | Removed with the on-device runner; every key lives on the instance (D-1, D-9) |
 
 ### What was read for this ADR, and when
@@ -547,10 +562,21 @@ ruling 2 both expected it.** `@ai-sdk/gateway` 4.0.103 pins `@vercel/oidc` at ex
   on the home network or through the operator command."* So:
   - **Until [#1179](https://github.com/openzigs/onyourleft/issues/1179) ships**, the instance
     accepts a pasted key (a rider's own, or the shared key set from the app) **only from a request
-    that reached it on the home network**, not through the tunnel, or through the operator
-    command. A request through the tunnel that carries a key is refused before the key is read or
-    stored, with an app sentence. How the instance tells the two apart is #1097's to build, and *the
-    author's choice* is that a request it cannot place is treated as having come through the tunnel.
+    on the home network**, or through the operator command. Any other request that carries a key
+    is refused before the key is read or stored, with an app sentence.
+  - **The home network is defined positively**, by the owner's ruling of 2026-10-07: *"a private
+    address on the local network only. WireGuard-class overlays do not count. A request the
+    instance cannot place is refused."* So a request is on the home network only when its source
+    address is a **private address under [ADR 0040](0040-a-history-index-on-the-riders-instance.md)
+    D-6's rule** (the private and link-local ranges `addressSpaceOf` calls `local`) **and** it
+    reached the instance directly over the local network. It is **not** on the home network if it
+    came through the Cloudflare tunnel, whatever address the tunnel's connector presents; if its
+    address is in the shared range `100.64.0.0/10` or otherwise belongs to a WireGuard-class
+    overlay; if it reached a port forwarded from the internet; or if it came over loopback, which is
+    where a tunnel connector on the same box arrives (the operator command is the loopback path).
+    **A request the instance cannot place is refused**, not guessed at. How the instance places a
+    request, and what it cannot see (an overlay on a private range it cannot tell from the LAN), is
+    #1097's to build and state; where it cannot tell, it refuses.
   - **Once #1179 ships**, the key, the synced masking data (D-10) and every job's input and result
     (D-11, D-12) are encrypted to the instance's key, which each device pinned when it was linked,
     and Cloudflare sees only ciphertext. #1179 is its own ADR and decides the scheme.
@@ -598,8 +624,10 @@ What it means for #1097 and #1104 to build:
 2. **The consent names the endpoint** — the origin the request will go to — so the rider agrees to
    a place, not to "a hosted model". The wording is #1104's, approved by the owner.
 3. **Changing the shared endpoint withdraws every rider's consent to it.** A rider who agreed to
-   one service has not agreed to the next; their next hosted job asks again. Changing the shared
-   **key** for the same endpoint does not (*the author's reading* of "endpoint").
+   one service has not agreed to the next; their next hosted job asks again. **Rotating the shared
+   key at the same endpoint does not withdraw it**, by the owner's ruling of 2026-10-07: *"Rotating
+   the shared key at the same endpoint does not re-ask riders' consent. Consent names the endpoint,
+   and only a change of endpoint withdraws it."*
 4. **The Ollama source needs no hosted consent**, because nothing leaves the operator's box (D-10),
    and the operator's switch still applies.
 
@@ -625,10 +653,12 @@ ADR 0029's and ADR 0031's 2026-10-07 amendments record the reconciliation.
   manifest's wording for it.
 - **The device copy stays canonical** (ADR 0036 D-3(b), (c)). The instance's copy is a copy, and an
   edit on the device is what changes it.
-- **On the way, through the tunnel**: in clear at Cloudflare's edge until
-  [#1179](https://github.com/openzigs/onyourleft/issues/1179) ships, and encrypted end to end after
-  it (the owner's Q11 ruling, D-9). Until then the Q11 ruling holds back only a pasted key, not the
-  masking data; §"What this costs" says so.
+- **On the way, through the tunnel: never readable.** The owner ruled on 2026-10-07 that
+  *"#1101 (masking sync) and #1095 (the job stream) do not ship before #1179. Privacy-zone centres,
+  the words-to-mask list and job text never cross Cloudflare's edge readable."* So
+  [#1101](https://github.com/openzigs/onyourleft/issues/1101) is **blocked on
+  [#1179](https://github.com/openzigs/onyourleft/issues/1179)**, and the masking data crosses the
+  tunnel only encrypted end to end (the owner's Q11 ruling, D-9).
 - **`maskForHosted` runs on the instance, over every message of every hosted request, tool results
   included** — because a history passage or a goal a tool returns can name anything, which is why
   the device could not mask for a tool-choosing run.
@@ -646,6 +676,10 @@ ADR 0029's and ADR 0031's 2026-10-07 amendments record the reconciliation.
 > device-key session auth."* #1092 comment ruling 3: *"**Streaming:** live progress, then each section once screened. If a
 > later section fails, everything already shown is withdrawn."*
 
+- **It waits for end-to-end encryption.** The owner ruled on 2026-10-07 that #1095, which builds
+  this stream, does not ship before [#1179](https://github.com/openzigs/onyourleft/issues/1179):
+  job text is among what *"never cross[es] Cloudflare's edge readable"*, so a job's input and every
+  event's text go through the tunnel only encrypted to the instance's pinned key.
 - **A job is a row**, in a SQLite job table on the instance (ADR 0037 D-5, through Kysely, with a
   tested `down`, D-6). Creating one answers at once, well inside Cloudflare's 125 s timeout; the
   work is not done in the request.
@@ -675,11 +709,16 @@ ADR 0029's and ADR 0031's 2026-10-07 amendments record the reconciliation.
   instance's copy and screens it again before it shows a word, as it would any saved row.
 - **The job rows and events themselves** (as opposed to the result) are kept **7 days**, the
   owner's Q5 ruling of 2026-10-07: *"7 days. The result itself is kept, per ruling 8."*
-  [#1095](https://github.com/openzigs/onyourleft/issues/1095) builds it. The *"what was sent"* log
-  (D-10) is kept with the result, because it explains it.
+  [#1095](https://github.com/openzigs/onyourleft/issues/1095) builds it.
+- **The *"what was sent"* log (D-10) is kept with the result, so it outlives the 7-day job rows.**
+  ⚠️ This is *the author's choice*, flagged for the owner: Q2's *"the stored what was sent log"*
+  says the log is stored, and Q5's 7 days names the job rows, but no ruling says how long the log
+  is kept. It is kept as long as the result because it is what explains the result; if the owner
+  rules otherwise it goes with the job rows instead, and #1101 builds whichever is ruled.
 - **Except the pose summary.** On a hosted job the sent log would contain the side-camera pose
   summary whenever the ride's input carried one (D-6). The owner ruled (Q2) that the summary is
-  *"not kept with the result"* and that the stored sent log records only that one was sent, so it **leaves the pose summary out** and records only that one was sent.
+  *"not kept with the result"* and that the stored sent log *"records only that one was sent"*, so
+  the log leaves the summary's content out.
 
 ### D-13 — No platform models on a phone or tablet: never
 
@@ -711,7 +750,9 @@ the analysis endpoint only. Otherwise kept: the input is built on the device und
 exclusions (D-6, the owner's Q1 ruling); **no picture type is reachable** from the job request or from any
 instance analysis module — [#799](https://github.com/openzigs/onyourleft/issues/799)'s
 `no-picture-reachable` gate is extended to `apps/instance/src/analysis/`; tool results come only
-from synced rows; hosted requests are masked on the instance (D-10). **In Share mode (d) holds
+from synced rows; hosted requests are masked on the instance (D-10); and **no job text crosses
+Cloudflare's edge readable**, because the job stream (#1095) waits for #1179 (the owner's ruling of
+2026-10-07, D-10). **In Share mode (d) holds
 because of the owner's Q10 ruling** (D-9): a hosted job runs only for a rider whose own recorded
 consent names the endpoint, so no rider's input leaves for a service they never chose. **The pose
 summary** reaches the instance only inside the device-built input, only with camera consent, and
@@ -738,17 +779,17 @@ merged, and nothing else changed:
    words in §"Owner questions, and the owner's answers", and the decisions they settle rewritten to
    the ruling: D-1 (Q12), D-6 (Q1, Q2), D-7 (Q4), D-8 (Q7), D-9 (Q6, Q9, Q10, Q11, Q13), D-12 (Q2,
    Q5) and D-14(d) (Q1, Q2, Q3, Q10), and §"What this costs" (Q6, Q11).
-4. **`CLAUDE.md` §1**'s sentence beside the invariants block, which said ADR 0046 *"is PROPOSED …
-   Until the owner approves it on #1093, (a) holds unchanged"*, rewritten to say (a) no longer
-   holds for AI analysis alone.
-5. **`docs/architecture.md`**'s ADR index row for 0046, which said *"Proposed, awaiting the owner's
-   approval"*, and its **reservation-table row** for 0046, which said *"**Proposed**: it does not
-   merge until the owner approves it"*.
-6. **The ADR-number record.** `CLAUDE.md` §7's sentence calling 0046 *"**Proposed** until the owner
-   approves it"* moved, with the rest of that record, to
-   [`docs/agents/adr-numbering.md`](../agents/adr-numbering.md) on `main` while this ADR was open
-   ([#1156](https://github.com/openzigs/onyourleft/issues/1156)); 0046's entry is written there as
-   accepted, and the root keeps the next free number, 0047.
+4. **`CLAUDE.md`**: two lines added beside the invariants block, naming the analysis exception to
+   (a) and saying that (d) holds as D-14 narrows it. Against `main` they are an addition: the
+   *Proposed* wording they replaced was only ever on this pull request's branch.
+5. **`docs/architecture.md`**: the ADR index row and the reservation-table row for 0046 added,
+   written as accepted. Against `main` these are additions for the same reason.
+6. **The ADR-number record.** It moved out of `CLAUDE.md` while this ADR was open
+   ([#1156](https://github.com/openzigs/onyourleft/issues/1156), then #1180): which numbers were
+   taken, and when, is [`docs/agents/adr-numbering.md`](../agents/adr-numbering.md), where 0046's
+   entry is written as accepted; the next free number is stated in
+   [`docs/agents/conventions.md`](../agents/conventions.md) §7 and in `docs/architecture.md`, and
+   both say 0047.
 7. **The entries in §"Amendments appended to other ADRs"**, appended to each ADR named, dated
    2026-10-07.
 
@@ -793,22 +834,20 @@ their own could have a write-up with no server at all.
   encryption protects the key from Cloudflare, not from the operator.
 - **The rider's most identifying words leave the device**: privacy zones and the words-to-mask list
   are stored on the instance and carried in its export (D-10).
-- **Until [#1179](https://github.com/openzigs/onyourleft/issues/1179) ships, what this ADR sends
-  through the tunnel is plaintext at Cloudflare's edge.** ADR 0029 D-6 records that Cloudflare
-  terminates TLS there (*"Cloudflare terminates TLS at its edge"*). The owner ruled (Q11,
-  2026-10-07) that this traffic is **encrypted at the application layer, end to end**: the instance
-  holds a key pair, each device pins its public key when linked, and a pasted key, the synced
-  privacy zones and words-to-mask list, and each job's input and result are encrypted so Cloudflare
-  sees only ciphertext. That is #1179's to build, and needs its own ADR. **Until it ships**:
+- **Nothing this ADR sends crosses the tunnel readable, and that costs time.** ADR 0029 D-6
+  records that Cloudflare terminates TLS at its edge (*"Cloudflare terminates TLS at its edge"*).
+  The owner ruled (Q11, 2026-10-07) that this traffic is **encrypted at the application layer, end
+  to end**: the instance holds a key pair, each device pins its public key when linked, and a pasted
+  key, the synced privacy zones and words-to-mask list, and each job's input and result are
+  encrypted so Cloudflare sees only ciphertext. That is #1179's to build, and needs its own ADR.
+  And the owner ruled the same day that the analysis traffic **waits for it**: *"#1101 (masking
+  sync) and #1095 (the job stream) do not ship before #1179."* So:
+  - **No write-up runs on any instance until #1179 ships**, because the job stream (#1095) and the
+    masking it needs (#1101) are blocked on it. A rider who loses the device paths (#1103) before
+    then has no write-up at all until it does; whether #1103 waits for #1095 is the owner's to
+    rule when #1103 is scheduled.
   - **a pasted key is accepted only on the home network or through the operator command** (D-9), so
     no key crosses Cloudflare's edge in clear;
-  - **the synced privacy-zone centres, radii and labels, the words-to-mask list, and every job's
-    input and every result streamed back still cross it in clear** whenever the rider is away from
-    home, because the Q11 ruling holds back only the key. ADR 0029 D-6 rejected Cloudflare Tunnel
-    **by name** for a photograph; this ADR sends no photograph (#1106 decides that, inside Q3's
-    bound), but it does send the rider's most identifying words. **#1104's disclosures — the
-    consent, the bring-your-own sentence, the policy and Play Data Safety — must say so** for as
-    long as it is true, and change when #1179 lands.
   - **A rider who never reaches the home network cannot set their own key** until #1179 ships; they
     use the shared key, if the operator set one, or none.
 - **A rider on a small local model may get no write-up at all.** #795's research, restated in the
@@ -831,13 +870,13 @@ their own could have a write-up with no server at all.
 | Issue | Constraint |
 |---|---|
 | #1094 | Moves the core to `packages/analysis` with no behaviour change; re-runs D-4's authorship check over the files it moves |
-| #1095 | The job table, routes and SSE stream (D-11), job-row retention (D-12) |
+| #1095 | The job table, routes and SSE stream (D-11), job-row retention (D-12). **Blocked on #1179** (the owner's ruling of 2026-10-07): it does not ship before job text can cross Cloudflare's edge only encrypted |
 | #1096 | Installs the SDK in one module; the throwing default provider and its red control; the fake model server; reconciles D-8's table with pnpm's resolution |
-| #1097 | The two key modes, encryption at rest with the operator secret from the environment (Q6), the operator as the athlete of the device holding `OYL_INSTANCE_OWNER_KEY` (Q9), the operator switch over both key modes (Q13), a rider's own endpoint-naming hosted consent (Q10), and a pasted key refused through the tunnel until #1179 ships (Q11) (D-9) |
-| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Application-layer end-to-end encryption between the app and the instance (Q11): its own ADR first; then a pasted key, the synced masking data and every job's input and result are encrypted to the instance's pinned key. When it ships, D-9's home-network rule for a pasted key can be lifted by an amendment |
+| #1097 | The two key modes, encryption at rest with the operator secret from the environment (Q6), the operator as the athlete of the device holding `OYL_INSTANCE_OWNER_KEY` (Q9), the operator switch over both key modes (Q13), a rider's own endpoint-naming hosted consent kept across a key rotation at the same endpoint (Q10, and the ruling of 2026-10-07), and a pasted key accepted only from the home network, defined positively as a private LAN address with overlays and unplaceable requests refused, until #1179 ships (Q11, D-9) |
+| [#1179](https://github.com/openzigs/onyourleft/issues/1179) | Application-layer end-to-end encryption between the app and the instance (Q11): its own ADR first; then a pasted key, the synced masking data and every job's input and result are encrypted to the instance's pinned key. **#1095 and #1101 wait for it.** When it ships, D-9's home-network rule for a pasted key can be lifted by an amendment |
 | #1098 | The agent loop, the tools, the budgets (D-7) |
 | #1099, #1100 | `history_search`, and workouts synced and readable (D-7) |
-| #1101 | Masking data synced; masking on the instance; the preview and the sent log (D-10) |
+| #1101 | Masking data synced; masking on the instance; the preview and the sent log (D-10). **Blocked on #1179** (the owner's ruling of 2026-10-07): privacy-zone centres and the words-to-mask list never cross Cloudflare's edge readable |
 | #1102 | The app client: start, stream, cancel, resume, screen, save (D-3, D-11) |
 | #1103 | Removes the device paths — and **not** ADR 0033 D-11's until #1106 lands |
 | #1104 | Every disclosure: the ride page's no-instance sentence, the bring-your-own sentence, the policy and Play Data Safety — **approved by the owner before merge** |
@@ -858,19 +897,24 @@ the entries were not yet made.
 
 | ADR | The statement that becomes false | What the entry says |
 |---|---|---|
-| [0029](0029-camera-imagery-as-a-data-class.md) | The hosted consent's *"Your key is kept on this device"* (its 2026-09-28 and later entries); the 2026-09-28 entry's *"the key is the rider's own and stored on the device"* (an amendment entry, **not** D-7's body); D-7's "Whose key" row, *"It is not a secret this project holds and `.env.example` gains nothing"*, which the operator secret of D-9 contradicts; and owner decision D-B as D-7 states it, *"on the rider's own key"*, which Share mode contradicts | The key is held by the instance, in one of two modes (D-9), encrypted with an operator secret `.env.example` lists, and the device-held key goes with the on-device runner (Q12); the consent is replaced by #1104's wording. **Share mode is reconciled with D-B by the owner's Q10 ruling**: a hosted job runs only for a rider whose own recorded consent names the endpoint. Its local-address rule is applied to the instance's model URL by ADR 0040 D-6's rule. Pictures to the instance are #1106's, and **D-6's rejection of Cloudflare Tunnel by name is untouched by this ADR**; the entry records the owner's Q11 ruling: application-layer end-to-end encryption (#1179), and until it ships a pasted key only on the home network or through the operator command, while the masking data and every job's text still cross Cloudflare's edge in clear; and Q3's bound on #1106, never through the tunnel |
+| [0029](0029-camera-imagery-as-a-data-class.md) | The hosted consent's *"Your key is kept on this device"* (its 2026-09-28 and later entries); the 2026-09-28 entry's *"the key is the rider's own and stored on the device"* (an amendment entry, **not** D-7's body); D-7's "Whose key" row, *"It is not a secret this project holds and `.env.example` gains nothing"*, which the operator secret of D-9 contradicts; and owner decision D-B as D-7 states it, *"on the rider's own key"*, which Share mode contradicts | The key is held by the instance, in one of two modes (D-9), encrypted with an operator secret `.env.example` lists, and the device-held key goes with the on-device runner (Q12); the consent is replaced by #1104's wording. **Share mode is reconciled with D-B by the owner's Q10 ruling**: a hosted job runs only for a rider whose own recorded consent names the endpoint. Its local-address rule is applied to the instance's model URL by ADR 0040 D-6's rule. Pictures to the instance are #1106's, and **D-6's rejection of Cloudflare Tunnel by name is untouched by this ADR**; the entry records the owner's Q11 ruling: application-layer end-to-end encryption (#1179), and until it ships a pasted key only on the home network or through the operator command, with the masking sync and the job stream waiting for it (the owner's ruling of 2026-10-07); and Q3's bound on #1106, never through the tunnel |
 | [0031](0031-model-licences-and-the-hosted-model-hole.md) | D-4's rule, *"A rider may point this client at a model endpoint **they** chose, on **their** key"*, and *"it takes a URL and a key the rider typed"*, for the shared key the operator typed; condition 1's *"`.env.example` gains nothing"*, which D-9's operator secret contradicts (it is a secret that protects a key, not a key of this project's, which condition 1's first sentence still forbids); and condition 2 as it reads against a dependency with an unused vendor default | D-4 holds on a new path for bring-your-own; Share mode's *"they chose"* is met by the rider's own endpoint-naming consent (Q10); the operator secret is a secret that protects a key, not a key of this project's; the gateway is in the closure, guarded, never called, and the owner ruled condition 2 met (Q7, D-8). D-4's 2026-09-29 entry (the embedding default) is unchanged |
 | [0033](0033-side-camera-link.md) | D-11's *"The phone never talks to the computer … the tablet sends them on through `camera/analysis-transport.ts`"*, once #1106 moves it | A pointer only: D-11 is **not** decided by this ADR; #1092 comment ruling 1 moves it to the instance, and #1106 records that ruling |
 | [0035](0035-model-written-ride-write-ups.md) | D-7's *"The app decides every step; the model never chooses a tool"*; D-7's *"The rider's own computer is offered first when both it and a hosted model are set up"* (line 321 of that file); D-8's *"Nothing is sent in the background"*; D-9 B (own computer) and C (hosted, device key); D-10's *"Where each piece lands"* | D-7 superseded on the instance, and its source order gone with the rider's computer; D-8's bullet narrowed (D-7 above); B withdrawn; C replaced by #1104; D-10 redirected to #1092. **D-4 and D-5's never-sent list are unchanged** |
 | [0036](0036-a-self-hostable-instance-server-now.md) | D-3(a) for AI analysis; D-3(d)'s *"the rider's own analysis endpoint (ADR 0035) is the rider's computer, not this instance"*; and its own 2026-09-29 amendment's *"a rider with no instance gets the write-up without history and loses nothing, which keeps (a)"* and *"The analysis endpoint that **writes** a write-up is still the rider's computer or a hosted service they chose"* | Superseded by D-1, for analysis only; (b) and (c) reconciled by D-14; the 2026-09-29 entry's two sentences are recorded as no longer true, since a rider with no instance has no write-up and the endpoint is the instance's |
 | [0037](0037-instance-runtime-hosting-and-transport.md) | D-9's table as the instance's whole runtime closure | Adds D-8's rows. D-2: the agent's engine is written against ports, and only one Node-adapter module imports `ai` |
-| [0040](0040-a-history-index-on-the-riders-instance.md) | D-2's *"Where the screen and the summary builder run: on the device, and nowhere else"*; D-8's *"**A separate "history" step** … is the **only** step that sees a passage"*; D-9's masking on the device; §Consequences' *"(a) a rider with no instance loses nothing — the write-up works exactly as ADR 0035 built it"* (line 141 of that file) and *"one who does not gets the write-up without history and loses nothing"* (line 479); and D-9's *"the history step runs on the rider's own computer only"* | The screen runs on both, from `@onyourleft/analysis`; the history step becomes the `history_search` tool (#1099), with the same 6 × 900-character bounds and the same fence; masking moves to the instance (D-10); the three sentences about a rider with no instance, and about the rider's own computer, are recorded as no longer true |
+| [0040](0040-a-history-index-on-the-riders-instance.md) | D-2's *"Where the screen and the summary builder run: on the device, and nowhere else"*; D-8's *"**A separate "history" step** … is the **only** step that sees a passage"*; D-9's masking on the device; §Consequences' *"(a) a rider with no instance loses nothing — the write-up works exactly as ADR 0035 built it"* (line 141 of that file) and *"one who does not gets the write-up without history and loses nothing"* (line 479); and D-9's *"the history step runs on the rider's own computer only"* | The screen runs on both, from `@onyourleft/analysis`, and the summary builder stays on the device; the history step becomes the `history_search` tool (#1099), with the same 6 × 900-character bounds and the same fence; masking moves to the instance (D-10); the three sentences about a rider with no instance, and about the rider's own computer, are recorded as no longer true |
 
 **Outside `docs/adr/`**:
 
-- **Made in the pull request that accepted this ADR: `CLAUDE.md` §1**'s warning block, which states
-  ADR 0036 D-3's invariant (a) without the analysis exception. The sentence beside it names this ADR
-  as **accepted** and says (a) no longer holds for AI analysis alone.
+- **Made in the pull request that accepted this ADR**:
+  - **`CLAUDE.md`**: two lines beside the warning block that states ADR 0036 D-3's four invariants,
+    naming this ADR's exception to (a) and saying that (d) holds as D-14 narrows it. They stay in the
+    always-on root rather than moving to `docs/agents/layout.md`, because the block's own heading,
+    *"a rider with no instance loses nothing"*, is false for the write-up.
+  - **[`docs/agents/conventions.md`](../agents/conventions.md) §7 and `docs/architecture.md`**: the
+    next free ADR number, 0047; and 0046's entry in
+    [`docs/agents/adr-numbering.md`](../agents/adr-numbering.md).
 - **Owed, and not made here**, each in the pull request named:
   - **The repository layout** — since #1156 the area files
     [`docs/agents/packages.md`](../agents/packages.md) and
@@ -945,7 +989,11 @@ Until 2026-10-07 this section was §"Owner questions left open".
     result are encrypted so Cloudflare sees only ciphertext. Tracked in
     https://github.com/openzigs/onyourleft/issues/1179. Until it ships, a pasted key is accepted
     only on the home network or through the operator command."* Applied in D-9, D-10 and §"What this
-    costs"; [#1179](https://github.com/openzigs/onyourleft/issues/1179) builds it.
+    costs"; [#1179](https://github.com/openzigs/onyourleft/issues/1179) builds it. **The owner then
+    ruled, from the acceptance review** (Context, the fourth comment), that #1101 and #1095 do not
+    ship before #1179, that the home network is a private LAN address only with overlays and
+    unplaceable requests refused, and that rotating the shared key at the same endpoint keeps every
+    rider's consent. Applied in D-9, D-10, D-14(d), §"What this costs" and §"Constraints".
 12. **Is the device-held hosted key removed with the on-device runner?** (D-1.) **Answered (Q12)**:
     *"removed with the on-device runner. Every key lives on the instance (rulings 5 and 6)."*
     Applied in D-1 and D-9.

@@ -3,7 +3,7 @@
 /**
  * The guarantees that hold at compile time, and the mutation that proves each.
  *
- * CLAUDE.md section 5 states the rule for a compile-time guarantee: *"Remove the
+ * docs/agents/quality-gate.md section 5 states the rule for a compile-time guarantee: *"Remove the
  * brand from the signature and confirm the suite goes red with `TS2578: Unused
  * '@ts-expect-error' directive`."* That error is the mechanism — if a guard is
  * later widened away, the directive that documented it becomes the thing that

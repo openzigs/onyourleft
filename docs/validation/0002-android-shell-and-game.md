@@ -1438,7 +1438,7 @@ what it returned. ⚠️ **It asks nothing** — the questions are the expressio
 the tool has no opinion to go stale.
 
 ⚠️ **It is not under `scripts/`, deliberately.** That directory is the bare-clone set — bash and
-coreutils, no install, no network, no device (CLAUDE.md §2, docs/agents/commands.md §4a) — and this needs `adb`, a phone
+coreutils, no install, no network, no device (docs/agents/layout.md §2, docs/agents/commands.md §4a) — and this needs `adb`, a phone
 with developer options on and a **debug** build. It could never be a repository check, and
 `check:repo` does not call it. It lives beside the Android project whose WebView it talks to.
 

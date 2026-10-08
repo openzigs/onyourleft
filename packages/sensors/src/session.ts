@@ -224,7 +224,7 @@ export function createDeviceSession(device: SensorDevice): DeviceSession {
       }
       // The identity, not the id. A session belongs to one device on one
       // transport, and a measurement carrying a matching id from a different
-      // stack is the cross-scope match CLAUDE.md §5 warns about — it passes
+      // stack is the cross-scope match docs/agents/quality-gate.md §5 warns about — it passes
       // every single-platform test there is.
       if (!sameDevice(measurement.device, device.identity)) {
         throw new SensorError(

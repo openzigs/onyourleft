@@ -10,6 +10,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ---
 
+The toolchain pins and their reasons (TypeScript 6.0.3 not 7.x, Node 24 until 2026-10-28,
+Vitest 4.1.11), pnpm's 24-hour `minimumReleaseAge` (pin an older version; never add a
+`minimumReleaseAgeExclude`), install scripts and `allowBuilds` in `pnpm-workspace.yaml` (a
+security-relevant file on every fork pull request), and why a recorder fed only power
+auto-pauses are in [`docs/agents/toolchain.md`](toolchain.md).
+
 ## 8. Known gotchas (toolchain and runtime)
 
 **TypeScript is pinned to 6.0.3, and 7.0.2 is the current release.** This looks like neglect and is

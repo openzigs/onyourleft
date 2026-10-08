@@ -137,7 +137,7 @@ describe('a workout belongs to exactly one athlete', () => {
     expect(removed.workouts).toBe(1);
     // ⚠️ Read back through a fresh connection, not from the count. A cascade
     // that reported one row and deleted none is exactly the write-reports-
-    // success-and-the-read-cannot-see-it shape CLAUDE.md §5 hunts for, in
+    // success-and-the-read-cannot-see-it shape docs/agents/quality-gate.md §5 hunts for, in
     // reverse.
     expect(await harness.read(async (store) => store.listWorkouts(ATHLETE_A))).toEqual([]);
     expect(await harness.read(async (store) => store.listWorkouts(ATHLETE_B))).toHaveLength(1);
