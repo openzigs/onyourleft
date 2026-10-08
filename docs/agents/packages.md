@@ -38,6 +38,12 @@ packages/             Apache-2.0, without exception
                         (#76) and the fitness/fatigue series (#77) — whose
                         NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
+    hpke/               HPKE, RFC 9180 X25519/HKDF-SHA256/AES-128-GCM base mode,
+                        and ADR 0047 D-2's reply keys (#1188), over a six-member
+                        primitives port that `packages/store/src/hpke-web-crypto.ts`
+                        and `apps/instance/src/auth/crypto.ts` implement. ⚠️ The
+                        injectable ephemeral key is `@onyourleft/domain/hpke-testing`
+                        only, which lint refuses outside a test
     recording/          the recording session state machine and stream merge (#45)
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
