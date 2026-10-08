@@ -607,9 +607,13 @@ export function ActivityDetailView({
       {/*
         #1063. The side camera's snapshots of this ride — counted in words and
         CLOSED until the rider opens them; no picture is read or mounted before
-        that (ADR 0044 D-6). A ride with none renders nothing.
+        that (ADR 0044 D-6). A ride with none renders nothing. Keyed by the
+        ride (#1063's review): the shell keys this view by ROUTE, so moving
+        between two rides' pages keeps it mounted, and an opened section must
+        not stay open for the next ride. The page's own loading state
+        unmounts it between rides today; the key does not rest on that.
       */}
-      <RideSnapshotsSection port={snapshots} activityId={activity.id} />
+      <RideSnapshotsSection key={activity.id} port={snapshots} activityId={activity.id} />
 
       {/*
         #804, #805. A model's write-up of this ride, on every ride's page and
