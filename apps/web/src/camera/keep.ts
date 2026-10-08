@@ -73,6 +73,8 @@ export interface FrameKeep extends FrameSink {
   setKeeping(on: boolean): void;
   /** How many pictures this device is holding. @see CameraFrameStore.countCameraFrames */
   count(): Promise<number>;
+  /** How many of them are side-camera snapshots (#1063). @see CameraFrameStore.countSnapshots */
+  countSnapshots(): Promise<number>;
   /** Deletes every one of them. @see CameraFrameStore.deleteCameraFrames */
   forget(): Promise<number>;
 }
@@ -113,6 +115,9 @@ export function keepThisRide(port: CameraStorePort): FrameKeep {
     },
     async count(): Promise<number> {
       return port.store.countCameraFrames(port.athleteId);
+    },
+    async countSnapshots(): Promise<number> {
+      return port.store.countSnapshots(port.athleteId);
     },
     async forget(): Promise<number> {
       return port.store.deleteCameraFrames(port.athleteId);

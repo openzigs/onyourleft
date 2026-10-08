@@ -46,6 +46,9 @@ import { sidePairingPort } from '../camera/side-link';
 import {
   CameraView,
   CAMERA_NO_PORT,
+  deleteEverythingLabel,
+  deleteEverythingQuestion,
+  keptSnapshotsClause,
   SIDE_CAMERA_UNAVAILABLE,
   SIDE_CAMERA_WAY_TITLE,
   SINGLE_PICTURE_PURPOSE,
@@ -495,6 +498,45 @@ describe('keeping this ride’s pictures', () => {
     expect(keep.forgotten).toBe(1);
     expect(document.body.textContent).toContain('holding no pictures');
   });
+
+  it('asks about any snapshots when it could not count them', () => {
+    expect(deleteEverythingQuestion('unknown')).toBe(
+      'Delete every picture on this device, including any side-camera snapshots kept with your rides? They cannot be brought back.',
+    );
+    expect(deleteEverythingLabel(1)).toBe(
+      'Delete every picture on this device, including 1 side-camera snapshot',
+    );
+    expect(keptSnapshotsClause(0)).toBe('');
+  });
+
+  it('names the side-camera snapshots it would take, and deletes only on a second press — #1063’s review', async () => {
+    const keep = stubKeep(3, 2);
+    await screenWithKeep(keep);
+    await settle();
+    expect(document.body.textContent).toContain(
+      'This device is holding 3 pictures, 2 of them side-camera snapshots kept with your rides.',
+    );
+    const first = button('Delete every picture on this device, including 2 side-camera snapshots');
+    expect(first).toBeDefined();
+    await activateWithKeyboard(first as HTMLElement);
+    await settle();
+    // One press asks; it deletes nothing.
+    expect(keep.forgotten).toBe(0);
+    expect(document.body.textContent).toContain(
+      'Delete every picture on this device, including the 2 side-camera snapshots kept with your rides? They cannot be brought back.',
+    );
+    await activateWithKeyboard(button('Keep them') as HTMLElement);
+    await settle();
+    expect(keep.forgotten).toBe(0);
+    expect(button('Yes, delete every picture')).toBeUndefined();
+
+    await activateWithKeyboard(button('Delete every picture') as HTMLElement);
+    await settle();
+    await activateWithKeyboard(button('Yes, delete every picture') as HTMLElement);
+    await settle();
+    expect(keep.forgotten).toBe(1);
+    expect(document.body.textContent).toContain('holding no pictures');
+  });
 });
 
 /**
@@ -533,6 +575,8 @@ describe('when the device says no — #498', () => {
         counted += 1;
         return fails === 'count' ? Promise.reject(new Error(LEAK)) : Promise.resolve(held);
       },
+      countSnapshots: async () =>
+        fails === 'count' ? Promise.reject(new Error(LEAK)) : Promise.resolve(0),
       forget: async () =>
         fails === 'forget' ? Promise.reject(new Error(LEAK)) : Promise.resolve(held),
     };
@@ -617,9 +661,10 @@ describe('when the device says no — #498', () => {
 });
 
 /** A `FrameKeep` that records what it was asked, with no store behind it. */
-function stubKeep(held = 0): FrameKeep & { forgotten: number } {
+function stubKeep(held = 0, snapshots = 0): FrameKeep & { forgotten: number } {
   let keeping = false;
   let count = held;
+  let snapshotCount = snapshots;
   let forgotten = 0;
   return {
     get keeping(): boolean {
@@ -643,10 +688,12 @@ function stubKeep(held = 0): FrameKeep & { forgotten: number } {
       return Promise.resolve(true);
     },
     count: async () => Promise.resolve(count),
+    countSnapshots: async () => Promise.resolve(snapshotCount),
     forget: async () => {
       forgotten += 1;
       const removed = count;
       count = 0;
+      snapshotCount = 0;
       return Promise.resolve(removed);
     },
   };

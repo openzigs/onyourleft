@@ -1007,6 +1007,14 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
+   * How many of those are side-camera snapshots kept with a ride (#1063),
+   * which {@link forgetKept} deletes with the rest. A count, never a picture.
+   */
+  async keptSnapshotCount(): Promise<number> {
+    return this.#keep?.countSnapshots() ?? Promise.resolve(0);
+  }
+
+  /**
    * Deletes every picture this device kept — ADR 0029 D-2's rider-driven
    * expiry, and the only one that works in this milestone.
    */
