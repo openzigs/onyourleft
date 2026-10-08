@@ -191,6 +191,10 @@ const WATCHED_SUFFIX = /-port\.ts$/;
  * ride analysis's `model-step-port.ts` out of `apps/web` — in
  * `packages/analysis`, so the move took nothing out of this gate's sight.
  * Not `packages/` at large, for the reason `TRAINER_COMMAND_SEAM` gives.
+ *
+ * ⚠️ **Asserted to exist**, as `WATCHED_PREFIXES` is ({@link missingPortRoots},
+ * #1184's review): renaming `packages/analysis` would otherwise take its ports
+ * out of the watched set with the success line none the wiser.
  */
 const PORT_ROOTS = ['apps/', 'packages/analysis/'];
 
@@ -723,6 +727,19 @@ export function missingPrefixes(root) {
 }
 
 /**
+ * The entries of {@link PORT_ROOTS} that name no directory in `root` — a
+ * hard failure for {@link missingPrefixes}' reason (#1184's review): a root
+ * renamed away leaves every `*-port.ts` under it unwatched, and the gate
+ * green over a population it never read.
+ */
+export function missingPortRoots(root) {
+  return PORT_ROOTS.filter((prefix) => {
+    const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
+    return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
+/**
  * The entries of {@link TRAINER_COMMAND_SEAM} that name no file in `root`.
  *
  * ⚠️ **A hard failure for {@link missingPrefixes}' reason**, and a sharper one:
@@ -985,6 +1002,14 @@ export function wiringProblems(root) {
       `watched directory missing: ${missing.join(', ')}. WATCHED_PREFIXES names it and nothing ` +
         'on disk does, so every rule below would pass over an empty population — the failure ' +
         'mode #142 shipped. Move the prefix with the directory.',
+    );
+  }
+  const missingRoots = missingPortRoots(root);
+  if (missingRoots.length > 0) {
+    throw new Error(
+      `port root missing: ${missingRoots.join(', ')}. PORT_ROOTS names it and nothing on disk ` +
+        'does, so every *-port.ts that moved with it would go unwatched — the failure mode #142 ' +
+        'shipped. Move the root with the directory.',
     );
   }
   const missingSeam = missingSeamFiles(root);

@@ -121,8 +121,25 @@ export function specifiersIn(code: string, fileName = 'module.tsx'): string[] {
   return found;
 }
 
-/** The names a module imports from `specifier` by name: `import { a, type B } from '…'`. */
-export function namedImportsIn(code: string, specifier: string, fileName = 'module.tsx'): string[] {
+/**
+ * What a module takes from `specifier`: the names it imports or re-exports by
+ * name (`import { a, type B } from '…'`, `export { c } from '…'`), or
+ * `'whole'` when it refers to the module in ANY other spelling — a namespace
+ * import, a default import, a side-effect import, `export *`, a dynamic
+ * `import('…')`, a type's `import('…').T`, or `import x = require('…')`.
+ *
+ * ⚠️ `'whole'` is what keeps {@link specifiersThrough} conservative (#1184's
+ * review): only a named import says WHICH declaration a module takes, so
+ * every other spelling is read as taking everything the barrel re-exports,
+ * the way the walk follows `index.ts` itself. Until then a namespace import of
+ * `@onyourleft/analysis` came back as the bare package name, and the safety
+ * gates that ask for `model-answer` or `model-step-port` by file did not see it.
+ */
+export function analysisImportsIn(
+  code: string,
+  specifier: string,
+  fileName = 'module.tsx',
+): readonly string[] | 'whole' {
   const source = ts.createSourceFile(
     fileName,
     code,
@@ -131,32 +148,50 @@ export function namedImportsIn(code: string, specifier: string, fileName = 'modu
     fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const names: string[] = [];
-  for (const statement of source.statements) {
-    if (
-      ts.isImportDeclaration(statement) &&
-      ts.isStringLiteralLike(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === specifier
-    ) {
-      const bindings = statement.importClause?.namedBindings;
-      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+  let whole = false;
+  const isSpecifier = (literal: ts.Node | undefined): boolean =>
+    literal !== undefined && ts.isStringLiteralLike(literal) && literal.text === specifier;
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && isSpecifier(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      const bindings = clause?.namedBindings;
+      if (
+        clause !== undefined &&
+        clause.name === undefined &&
+        bindings !== undefined &&
+        ts.isNamedImports(bindings)
+      ) {
         for (const element of bindings.elements) {
           names.push((element.propertyName ?? element.name).text);
         }
+      } else {
+        whole = true;
+      }
+    } else if (ts.isExportDeclaration(node) && isSpecifier(node.moduleSpecifier)) {
+      if (node.exportClause !== undefined && ts.isNamedExports(node.exportClause)) {
+        for (const element of node.exportClause.elements) {
+          names.push((element.propertyName ?? element.name).text);
+        }
+      } else {
+        whole = true;
       }
     } else if (
-      ts.isExportDeclaration(statement) &&
-      statement.moduleSpecifier !== undefined &&
-      ts.isStringLiteralLike(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === specifier &&
-      statement.exportClause !== undefined &&
-      ts.isNamedExports(statement.exportClause)
+      (ts.isImportEqualsDeclaration(node) &&
+        ts.isExternalModuleReference(node.moduleReference) &&
+        isSpecifier(node.moduleReference.expression)) ||
+      (ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        isSpecifier(node.arguments[0])) ||
+      (ts.isImportTypeNode(node) &&
+        ts.isLiteralTypeNode(node.argument) &&
+        isSpecifier(node.argument.literal))
     ) {
-      for (const element of statement.exportClause.elements) {
-        names.push((element.propertyName ?? element.name).text);
-      }
+      whole = true;
     }
-  }
-  return names;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return whole ? 'whole' : names;
 }
 
 /** Every exported name a module declares itself (not one it re-exports from elsewhere). */
@@ -199,16 +234,19 @@ function declaredExports(code: string): string[] {
   return names;
 }
 
-/** Every module of `@onyourleft/analysis` that is not a test or test support, as a path from `src`. */
-export function analysisModules(directory = ANALYSIS_ROOT): string[] {
+/**
+ * Every module of `@onyourleft/analysis` that is not a test or test support, as
+ * a path from `src` — or, with `withTestSupport`, its test support too (what
+ * `@onyourleft/analysis/testing` can reach).
+ */
+export function analysisModules(directory = ANALYSIS_ROOT, withTestSupport = false): string[] {
   return readdirSync(join(SOURCE_ROOT, directory), { withFileTypes: true }).flatMap((entry) => {
     const path = posix.join(directory, entry.name);
     if (entry.isDirectory()) {
-      return analysisModules(path);
+      return analysisModules(path, withTestSupport);
     }
-    return /\.ts$/.test(entry.name) && !/\.d\.ts$|\.test\.ts$|(?:^|-)testing\.ts$/.test(entry.name)
-      ? [path]
-      : [];
+    const isModule = /\.ts$/.test(entry.name) && !/\.d\.ts$|\.test\.ts$/.test(entry.name);
+    return isModule && (withTestSupport || !/(?:^|-)testing\.ts$/.test(entry.name)) ? [path] : [];
   });
 }
 
@@ -245,14 +283,26 @@ export function analysisModuleDeclaring(name: string): string | undefined {
  * (or `/testing`) by name, the path of the package module that declares it
  * (#1094) — so a gate asking "does this module import `model-answer`?" gets the
  * answer it got before the module moved.
+ *
+ * ⚠️ A barrel referred to in any OTHER spelling — `import * as`, `export *`,
+ * a dynamic `import()`, a type's `import('…').T` — names no declaration, so it
+ * is read as an import of EVERY module that barrel can reach (#1184's review):
+ * the package's modules for `@onyourleft/analysis`, and its test support as
+ * well for `/testing`. Conservative, as following `index.ts` in the walk is.
  */
 export function specifiersThrough(code: string, fileName = 'module.tsx'): string[] {
-  const through = Object.keys(FOLLOWED_PACKAGES).flatMap((specifier) =>
-    namedImportsIn(code, specifier, fileName).flatMap((name) => {
+  const through = Object.keys(FOLLOWED_PACKAGES).flatMap((specifier) => {
+    const taken = analysisImportsIn(code, specifier, fileName);
+    if (taken === 'whole') {
+      return analysisModules(ANALYSIS_ROOT, specifier !== '@onyourleft/analysis').map((path) =>
+        path.replace(/\.ts$/, ''),
+      );
+    }
+    return taken.flatMap((name) => {
       const module = analysisModuleDeclaring(name);
       return module === undefined ? [] : [module];
-    }),
-  );
+    });
+  });
   return [...specifiersIn(code, fileName), ...through];
 }
 

@@ -280,6 +280,36 @@ describe('2. in the module graph, an answer cannot reach a trainer', () => {
     expect(importsIn(`// a holder\n${line}\n`, TRAINER_MODULE, 'camera/planted.ts')).toBe(true);
   });
 
+  // #1184's review: a name imported from the barrel was mapped to the module
+  // that declares it, and every OTHER spelling came back as the bare package
+  // name — so a namespace import of `@onyourleft/analysis` held an answer with
+  // nothing here noticing. Each spelling is now read as an import of every
+  // module the barrel reaches, for both entry points.
+  it.each(
+    ['@onyourleft/analysis', '@onyourleft/analysis/testing'].flatMap((barrel) => [
+      [barrel, 'a namespace import', `import type * as A from '${barrel}';`],
+      [barrel, 'a default import', `import A from '${barrel}';`],
+      [barrel, 'a side-effect import', `import '${barrel}';`],
+      [barrel, 'a star re-export', `export * from '${barrel}';`],
+      [barrel, 'a namespace re-export', `export * as A from '${barrel}';`],
+      [barrel, 'a dynamic import', `const lazy = await import('${barrel}');`],
+      [barrel, 'a type query', `type T = import('${barrel}').UntrustedText;`],
+      [barrel, 'an import-equals', `import A = require('${barrel}');`],
+    ]),
+  )('reads every spelling of %s: %s (#1184)', (_barrel, _form, line) => {
+    const source = `// a holder\n${line}\n`;
+    expect(importsIn(source, ANALYSIS_MODULE, 'camera/planted.ts')).toBe(true);
+    expect(importsIn(source, /(?:^|\/)model-step-port$/, 'camera/planted.ts')).toBe(true);
+  });
+
+  it('still reads a named import from the barrel as only the module that declares it (#1184)', () => {
+    // The control: `'whole'` is for the spellings that name no declaration, and
+    // a named import of a template is not an import of `model-answer`.
+    const source = "import { ANALYSIS_TEMPLATE_V1 } from '@onyourleft/analysis';\n";
+    expect(importsIn(source, ANALYSIS_MODULE, 'camera/planted.ts')).toBe(false);
+    expect(importsIn(source, /(?:^|\/)template-v1$/, 'camera/planted.ts')).toBe(true);
+  });
+
   it('reads an import after a regex literal holding `/*` (#864)', () => {
     // A comment-stripping pre-pass took `/*` inside the character class for a
     // comment, and everything up to the `*/` below with it.
