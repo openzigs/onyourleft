@@ -1,10 +1,10 @@
 # ADR 0047: End-to-end encryption between the app and its instance
 
-- **Status**: **Proposed**, 2026-10-08. It decides the scheme the owner asked for on 2026-10-07 and
-  asked the owner eight questions (§"The owner's questions, answered"), and **the owner ruled on all
-  eight on 2026-10-08** (D-14, quoted there). It stays Proposed because the owner approves the whole
-  ADR separately. Nothing is built by this ADR, and nothing it decides binds work until the owner
-  accepts it.
+- **Status**: **Accepted**, 2026-10-08, by the owner
+  ([#1183, comment 6060050970](https://github.com/openzigs/onyourleft/pull/1183#issuecomment-6060050970),
+  quoted in D-14). It decides the scheme the owner asked for on 2026-10-07; it asked the owner eight
+  questions (§"The owner's questions, answered"), and **the owner ruled on all eight on 2026-10-08**
+  (D-14, quoted there) and approved the ADR as a whole the same day. Nothing is built by this ADR.
   [#1179](https://github.com/openzigs/onyourleft/issues/1179) builds it afterwards
 - **Date**: 2026-10-08
 - **Deciders**: **the owner**, whose ruling of 2026-10-07 (quoted in Context) chose application-layer
@@ -18,8 +18,8 @@
   [`docs/architecture.md`](../architecture.md)'s ownership table). No open pull request claimed it
 - **Supersedes**: nothing. It does **not** supersede [ADR 0029](0029-camera-imagery-as-a-data-class.md)
   D-6, and says why in D-12
-- **Amends**: nothing. No existing ADR is edited or gains an amendment in this pull request. When
-  this ADR is accepted and #1179 lands, [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s
+- **Amends**: nothing. No existing ADR is edited or gains an amendment in this pull request, its
+  acceptance included. When #1179 lands, [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s
   D-9 *"until #1179 ships"* clause stops applying in the way D-11 below says, and an amendment to
   ADR 0046 recording that belongs to the pull request that ships it, not to this one
 - **Relates to**: [ADR 0014](0014-portable-identity.md) (the device key),
@@ -887,7 +887,26 @@ only with a step-up**, *the author's choice* (review I1).
      success; one that was pending **when** another key's confirmation bound it is spent and refused.
      The *"added a recovery address"* notice names the address and the key that bound it, so a rider
      who typed another key's mail for their own new address sees which key is its binder, and can
-     revoke that key inside the hold and give the address again from their own.
+     revoke that key inside the hold and give the address again from their own. **The
+     confirmation mail, and the app's pending-confirmation card, name the device that asked**
+     (review L2) — in the notices' own terms, *"asked for by the key added on 12 September"*, draft
+     wording approved in the build's pull request (D-14 Q6) — so a rider who finds two mails at one
+     address types the code their own device asked for, and the other key never becomes its binder.
+     The notice after the fact (above) is still what makes the race safe; naming the device only
+     saves the rider a revoke and a second giving.
+  9. **`/confirm`'s whole check order** (review L1), stated once because (6) and (8) each state half
+     of it. In one transaction, and stopping at the first that answers:
+     1. **Take the confirmation.** A code that is unknown or expired is refused **`code_unknown`**,
+        as today; a code whose confirmation was spent when another key's confirmation bound the
+        address (8) is refused **`confirmation_superseded`**. Either way nothing changes.
+     2. **Another athlete holds the address**: refused **`address_in_use`** (1), as today,
+        and nothing is bound.
+     3. **The address is already bound to this athlete**: the no-op success (6), and the
+        confirmation is spent. A confirmation that reaches this step was not spent at step 1, so it
+        was requested after the bind, which is what keeps (6) from swallowing (8).
+     4. **Two addresses are already bound**: refused **`address_limit`** (2).
+     5. Otherwise the address is **added, held**, with the taken confirmation's key as its binder,
+        and every other pending confirmation of that address for the athlete is spent (8).
 - **How an address is removed: four ways and no others**, each under the removal rule below.
   1. The new sealed, device-signed `POST /v1/auth/recovery-email/clear` (D-7). It removes a **held**
      address only for the key that bound it. It removes an **established** address only with the
@@ -1086,7 +1105,7 @@ Every cell meets the invariant and the rule, or names the accepted residue it fa
 | **Recover**: `POST /v1/auth/recover`, with the full reset and *revoke every other key* as options | Nothing: needs a code, or a token mailed to an established address | As A | Adds a key with the code; with the reset, takes the account | Adds a key with a mailed token, **only while that address is still bound and established** (the re-check, `address_unbound`); with the reset, takes the account | Nothing: sealed, and it has no secret to put inside | With the reset, as the reset row. With *revoke every other key*, every other key — each as a plain revoke, so every **held** address those keys bound is cleared and its pending confirmations voided — and every unredeemed mailed token and link code | Holds for A, B and E. R4 for C and D. The rider does the same first, with their own way back |
 | **Ask for a recovery mail**: `POST /v1/auth/recover/email` | Has a token mailed to an established address it cannot read (unless the mail crosses Cloudflare: D-8, which is D), and can use up the address's 3 an hour (`identity.ts` §`DEFAULT_LIMITS`) | As A | As A | Reads the token, so as C | Can seal the same request itself (D-8: sealed, not signed) and gains nothing | Removes nothing. The token it mails is voided by any later removal of its address, and refused at redemption if the address is gone | Holds: every token it causes is mailed to the rider, who can redeem it, so the limit delays no recovery. D is R4 |
 | **Give a recovery address**: `POST /v1/auth/recovery-email` | Mails a confirmation to an address of its own. Pending confirmations are per key, so the rider's is not cancelled. Can use up the athlete's 5 an hour (`DEFAULT_LIMITS`), which delays only adding an address | As A | As A | As A | Nothing: sealed and signed | Removes nothing | Holds: nothing is bound yet |
-| **Confirm it**: `POST /v1/auth/recovery-email/confirm` | **Adds** its address, held 7 days, beside the established one, which stays in force. Refused `address_limit` when two are bound. Shown on every other device. **An address already bound changes nothing** (review J2): no new hold, and the binder stays the key whose pending confirmation bound it first, so giving the rider's own address and having the rider type the code gains A nothing | As A | As A | As A | Nothing: sealed and signed | Removes nothing; never replaces or re-holds a bound address (`doNothing` on conflict, D-8) | Holds. After the hold it is R2 |
+| **Confirm it**: `POST /v1/auth/recovery-email/confirm` | **Adds** its address, held 7 days, beside the established one, which stays in force. Refused `address_limit` when two are bound, and `confirmation_superseded` when another key's confirmation of the same address bound it first (the mail and the pending-confirmation card name the device that asked, so the rider types their own code). Checks run in item 9's order. Shown on every other device. **An address already bound changes nothing** (review J2): no new hold, and the binder stays the key whose pending confirmation bound it first, so giving the rider's own address and having the rider type the code gains A nothing | As A | As A | As A | Nothing: sealed and signed | Removes nothing; never replaces or re-holds a bound address (`doNothing` on conflict, D-8) | Holds. After the hold it is R2 |
 | **Clear an address, and so replace one**: `POST /v1/auth/recovery-email/clear` (new) | Clears only a held address it bound itself | As A | Also clears an established address, with the code | Also clears the established address whose mail it reads, with a token mailed to it (re-checked) | Nothing: sealed and signed | Removes the address. Voids, in the same transaction, every unredeemed token mailed to it and every pending confirmation of it (review J1), so the R2 remedy leaves no 30-minute token behind | Holds for A, B and E. R4 for C and D |
 | **The full reset**: `POST /v1/auth/recovery/reset` (new) | Refused: no step-up | As A | Replaces the codes, clears every address | As C, with a token mailed to an established address (re-checked) | Nothing: sealed and signed | Removes the codes and every address. Voids every unredeemed mailed token of both kinds, every pending confirmation and every link code | Holds for A, B and E. R4 for C and D |
 | **Recovery codes, viewed or replaced** (no route: only the codes' SHA-256 is stored, so none can be shown again, and only the reset replaces them) | Nothing to view; cannot replace them | As A | As the reset | As the reset | Nothing | As the reset | Holds. C and D are R4 |
@@ -1320,8 +1339,14 @@ This ADR asked the owner eight questions, each with a recommended answer. **The 
 eight on 2026-10-08**, in a comment on this ADR's pull request
 ([#1183, comment 6058845719](https://github.com/openzigs/onyourleft/pull/1183#issuecomment-6058845719)),
 quoted verbatim. The comment was posted from the owner's account by the owner's assistant,
-relaying the answers the owner gave directly in the owner's own session on 2026-10-08; the owner's
-approval of this ADR confirms them.
+relaying the answers the owner gave directly in the owner's own session on 2026-10-08. **The owner's
+approval of this ADR, relayed the same way later that day, confirms those relayed rulings**
+([#1183, comment 6060050970](https://github.com/openzigs/onyourleft/pull/1183#issuecomment-6060050970)),
+quoted verbatim:
+
+> **Owner approval, 2026-10-08:** ADR 0047 is approved: mark it Accepted and merge. The approval was given in the owner's session and is relayed here by the owner's assistant. It also confirms the rulings relayed in comment 6058845719. The reviewer's two non-blocking notes (L1, L2) are folded into the acceptance edit.
+
+The rulings, as relayed:
 
 > **Owner rulings, 2026-10-08, on ADR 0047's questions (D-14):**
 > - **Q7 (sync waits):** yes. Sync, ride uploads included, waits for #1179 and ships sealed only; #777 waits with it.
@@ -1335,8 +1360,9 @@ approval of this ADR confirms them.
 
 Every ruling is the answer this ADR recommended, so no decision above changes; each is marked
 *ruled* where it is made. The questions are kept below as they were asked, with the ruling after
-each, so the reasoning the owner ruled on stays readable. **Status stays Proposed**: the owner
-approves the ADR as a whole separately.
+each, so the reasoning the owner ruled on stays readable. ⚠️ This paragraph said *"Status stays
+Proposed: the owner approves the ADR as a whole separately"* until the owner's approval above, which
+made it Accepted.
 
 1. **May a device with no card pin the instance's key on first use?** It would let a rider who
    typed only an address use the phase 1 features — and **register** through the tunnel, which
@@ -1381,7 +1407,7 @@ approves the ADR as a whole separately.
    confirmation of the same address beat (D-8), the order in which the app offers to replace
    an address (D-8), and the
    account-change notices ("this key replaced your codes", "added a recovery address", "cleared a recovery address",
-   "minted a link code", "a new key was added to your account") on every other device (D-8), the mail's "type this code into the app" text (D-8),
+   "minted a link code", "a new key was added to your account") on every other device (D-8), the mail's "type this code into the app" text (D-8), the confirmation mail's and the pending-confirmation card's naming of the device that asked (D-8, added with review L2 at acceptance),
    and the web-build notice (D-11) are **draft wording** for the owner to
    approve, in #1179's build, as `apps/web`'s other new text is (#880's convention).
    **Recommended and ruled: approved in the build's pull request**, not here, where they would be read
