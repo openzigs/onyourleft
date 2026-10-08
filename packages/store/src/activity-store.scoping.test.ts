@@ -117,6 +117,7 @@ import {
   ATHLETE_C,
   ATHLETES,
   cameraFrameFor,
+  snapshotFor,
   chunksOf,
   framingReferenceFor,
   sideCameraReportFor,
@@ -174,6 +175,8 @@ interface World {
   readonly zone: PrivacyZoneRecord;
   readonly checkpoint: MatchCheckpointRecord;
   readonly frame: CameraFrameRecord;
+  /** #1063. A side-camera snapshot of this athlete's own ride. */
+  readonly snapshot: CameraFrameRecord;
   readonly reference: FramingReferenceRecord;
   readonly report: SideCameraReportRecord;
   readonly writeUp: RideWriteUpRecord;
@@ -240,6 +243,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // athlete would otherwise pass, which is the shape the different privacy-zone
   // centre above guards against one field along.
   const frame = cameraFrameFor(owner);
+  // #1063. Distinct bytes and outline per athlete, on this athlete's own ride.
+  const snapshot = snapshotFor(owner, ride.id);
   // #528. Different numbers per athlete, so a probe that handed back the
   // wrong athlete's reference cannot pass on shape alone.
   const reference = framingReferenceFor(owner);
@@ -276,6 +281,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putActivityRecord(signed);
     await store.putMatchCheckpoint(checkpoint);
     await store.putCameraFrame(frame);
+    await store.putCameraFrame(snapshot);
     await store.putFramingReference(reference);
     await store.putSideCameraReport(report);
     await store.putRideWriteUp(writeUp);
@@ -302,6 +308,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     zone,
     checkpoint,
     frame,
+    snapshot,
     reference,
     report,
     writeUp,
@@ -703,8 +710,11 @@ const PROBES: readonly ScopingProbe[] = [
       // number of rows with somebody else's picture in them would pass the two
       // assertions above, because the id and the owner are metadata and the
       // payload is what matters here.
-      const first = rows[0];
-      expect(first?.bytes).toStrictEqual(mine.frame.bytes);
+      const kept = rows.find((row) => row.id === mine.frame.id);
+      expect(kept?.bytes).toStrictEqual(mine.frame.bytes);
+      expect(rows.map((row) => row.id).sort()).toStrictEqual(
+        [mine.frame.id, mine.snapshot.id].sort(),
+      );
     },
   },
   {
@@ -713,8 +723,9 @@ const PROBES: readonly ScopingProbe[] = [
       'how many pictures everybody on this device has kept, which says that somebody else has been taking them',
     async run(store, mine, theirs) {
       expect(theirs.owner).not.toBe(mine.owner);
-      // One each, so a count that ignored the owner would be three.
-      await expect(store.countCameraFrames(mine.owner)).resolves.toBe(1);
+      // Two each — a kept frame and a snapshot (#1063) — so a count that
+      // ignored the owner would be six.
+      await expect(store.countCameraFrames(mine.owner)).resolves.toBe(2);
     },
   },
   {
@@ -728,6 +739,43 @@ const PROBES: readonly ScopingProbe[] = [
       // `testing/fakes.ts` is the store built to fail exactly here.
       const theirsAfter = await store.listCameraFrames(theirs.owner);
       expect(theirsAfter.map((row) => row.id)).toContain(theirs.frame.id);
+    },
+  },
+  {
+    member: 'listRideSnapshots',
+    leaks:
+      'a picture another rider saved of themselves, on their own ride’s page — a photograph of the inside of somebody else’s house',
+    async run(store, mine, theirs) {
+      const rows = await store.listRideSnapshots(mine.owner, mine.ride.id);
+      everyRowBelongsTo(rows, mine.owner);
+      expect(rows.map((row) => row.id)).toStrictEqual([mine.snapshot.id]);
+      expect(rows[0]?.bytes).toStrictEqual(mine.snapshot.bytes);
+      // Asked for THEIR ride while naming myself: nothing. An index on the
+      // ride alone would hand theirs over here.
+      await expect(store.listRideSnapshots(mine.owner, theirs.ride.id)).resolves.toStrictEqual([]);
+    },
+  },
+  {
+    member: 'countRideSnapshots',
+    leaks: 'that somebody else saved pictures of themselves on a ride',
+    async run(store, mine, theirs) {
+      await expect(store.countRideSnapshots(mine.owner, mine.ride.id)).resolves.toBe(1);
+      await expect(store.countRideSnapshots(mine.owner, theirs.ride.id)).resolves.toBe(0);
+    },
+  },
+  {
+    member: 'deleteRideSnapshot',
+    leaks: 'another rider’s snapshot, destroyed by somebody who only knew its id',
+    async run(store, mine, theirs) {
+      await expect(
+        store.deleteRideSnapshot(mine.owner, theirs.ride.id, theirs.snapshot.id),
+      ).resolves.toBe(false);
+      await expect(
+        store.deleteRideSnapshot(mine.owner, mine.ride.id, theirs.snapshot.id),
+      ).resolves.toBe(false);
+      // Read back as the owner: theirs is still there.
+      const after = await store.listRideSnapshots(theirs.owner, theirs.ride.id);
+      expect(after.map((row) => row.id)).toStrictEqual([theirs.snapshot.id]);
     },
   },
   {

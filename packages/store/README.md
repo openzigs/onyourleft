@@ -197,7 +197,8 @@ record-shape change is an entry in an array.
 "`upgradeWith` is never called from `ActivityStore`" is reading the old file.** Schema version 13
 (#800) gives every side-camera report a required `pose`, so the registry holds
 `SIDE_REPORT_POSE_SUMMARY`, and `ActivityStore` hands every entry to Dexie as the `.upgrade()` of the
-version it names. See §"The pose summary and one write-up per ride — #800".
+version it names. See §"The pose summary and one write-up per ride — #800". Version 15 (#793) and
+version 18 (#1063, `CAMERA_FRAME_SOURCE`) are the second and third entries.
 
 ### `ensureAthlete`, and why `putAthlete` is the wrong call at start-up
 
@@ -638,8 +639,8 @@ That is a gap stated rather than a nullable column nobody sets: an `ActivityReco
 a ride is finished and saved, and a picture is taken while the rider is pedalling. The consequence
 is precise — D-2's *"deleting the activity deletes its frames in the same transaction"* is **vacuous
 today**, and the two expiries that do work are `deleteCameraFrames` (the rider) and `deleteAthlete`
-(the device). [#388](https://github.com/openzigs/onyourleft/issues/388) is the first issue with a
-report tied to a ride; it adds the column, its index and its cascade.
+(the device). ⚠️ Since #1063 a **snapshot** does name its ride (§"Side-camera snapshots"); a kept
+frame still does not.
 
 ### What the read surface deliberately does not have
 
@@ -866,6 +867,29 @@ own device list comes from the server that served the record, so it cannot be wh
 row going. The primary key is `[athleteId+publicKey]`; `listTrustedDeviceKeys(owner)` reads by the
 athlete, and one rule, `trustedDeviceKeyProblem`, holds a row on the way in and out.
 `assertTrustedDeviceKeyRoundTrip` is red against `memoryWriteStoreFactory`.
+
+## Side-camera snapshots — #1063, decided in [ADR 0044](../../docs/adr/0044-side-camera-live-view-and-snapshot.md) D-3 and D-5
+
+Schema version 18, a **record migration**: `cameraFrames` gains an `[athleteId+activityId]` index,
+and every row gains `source` (`'kept'` or `'snapshot'`), `activityId` and `outline`.
+`CAMERA_FRAME_SOURCE` makes every earlier row a `'kept'` frame with no ride and no outline; its `down`
+drops the three fields, so a snapshot comes back as a version-17 kept frame that has lost its ride and
+outline and kept its picture. `migrations.test.ts` runs the pair on a fixture and against a real
+version-17 database.
+
+A **snapshot** is one still the rider pressed *Save snapshot* for on the side camera's live view. It
+names the ride it was taken in, and `putCameraFrame` refuses one whose ride this athlete does not hold.
+A kept frame (#384) still names none. `cameraFrameProblem` is the one rule for both directions. The
+outline is the landmarks the snapshot was shown with, as image-plane shares (`framingReferenceProblem`'s
+rule), and never an angle.
+
+Its reads take the owner first: `listRideSnapshots(owner, ride)` is the one read of a picture a screen
+may make (the ride page's snapshot section, after the rider opens it), `countRideSnapshots` is what the
+closed section says, and `deleteRideSnapshot(owner, ride, id)` deletes one. There is still no read by
+id. `deleteActivity` deletes a ride's snapshots **in the same transaction**, so ADR 0029 D-2's
+*"deleting the activity deletes its frames"* holds for a snapshot. `survivingSnapshotStoreFactory` is
+the store that reports one snapshot deleted and keeps the picture, and `camera-frame-store.test.ts` is
+the red/green pair.
 
 ## Not in this package
 
