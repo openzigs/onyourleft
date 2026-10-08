@@ -211,13 +211,23 @@ describe('the module graph (#799)', () => {
  */
 const PICTURE_READS = /\b(?:listRideSnapshots|listCameraFrames|CameraFrameRecord)\b/u;
 
-/** The request-path modules {@link PICTURE_READS} is checked over. */
-const REQUEST_PATH = [...modulesUnder('instance'), ...modulesUnder('ride-analysis')];
+/**
+ * The request-path modules {@link PICTURE_READS} is checked over — and since
+ * #1094 moved the write-up's core into `packages/analysis`, that package's
+ * modules too, which is where a ride-analysis request is now built.
+ */
+const REQUEST_PATH = [
+  ...modulesUnder('instance'),
+  ...modulesUnder('ride-analysis'),
+  ...analysisModules(),
+];
 
 describe('no request module names a picture read (#1063’s review)', () => {
   it('checks the modules it says it does', () => {
     expect(REQUEST_PATH).toContain('instance/sync.ts');
-    expect(REQUEST_PATH).toContain('ride-analysis/input.ts');
+    expect(REQUEST_PATH).toContain('ride-analysis/read-input.ts');
+    expect(REQUEST_PATH).toContain(`${ANALYSIS_ROOT}/input.ts`);
+    expect(REQUEST_PATH).toContain(`${ANALYSIS_ROOT}/runner.ts`);
   });
 
   it.each(REQUEST_PATH)('%s names no picture read and no picture record', (path) => {
