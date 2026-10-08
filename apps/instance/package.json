@@ -29,6 +29,6 @@
     "rolldown": "1.2.6",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
-    "workerd": "1.20260926.1"
+    "workerd": "1.20261004.1"
   }
 }
