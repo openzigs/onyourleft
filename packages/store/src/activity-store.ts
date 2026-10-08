@@ -1842,6 +1842,23 @@ export class ActivityStore {
   }
 
   /**
+   * How many side-camera snapshots this athlete holds across every ride —
+   * #1063's review.
+   *
+   * What the Camera screen names before *"Delete every picture on this
+   * device"* takes them with everything else: a count through
+   * `[athleteId+activityId]`, which holds snapshots only — a kept frame's ride
+   * is `null`, and a key with `null` in it is in no index — so no JPEG is
+   * decoded to produce a number (ADR 0029 D-8, D-11).
+   */
+  async countSnapshots(owner: AthleteId): Promise<number> {
+    return this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndActivity)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .count();
+  }
+
+  /**
    * Deletes ONE snapshot — #1063, ADR 0044 D-3: *"The rider can also delete
    * one snapshot, through an owner-scoped delete."*
    *

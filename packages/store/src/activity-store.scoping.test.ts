@@ -764,6 +764,16 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'countSnapshots',
+    leaks: 'that somebody else on this device saved pictures of themselves',
+    async run(store, mine, theirs) {
+      expect(theirs.owner).not.toBe(mine.owner);
+      // One snapshot each, beside one kept frame each: an owner-blind count
+      // would be three, and one that counted kept frames two.
+      await expect(store.countSnapshots(mine.owner)).resolves.toBe(1);
+    },
+  },
+  {
     member: 'deleteRideSnapshot',
     leaks: 'another rider’s snapshot, destroyed by somebody who only knew its id',
     async run(store, mine, theirs) {
