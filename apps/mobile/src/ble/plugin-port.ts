@@ -122,7 +122,7 @@ export interface CapacitorBlePort {
    * The plugin's `getDevices(ids)` takes the ids to look up, so the caller has
    * to have kept them. That is the adapter's business, not this seam's.
    *
-   * @unwired nothing reconnects silently, on either platform. CLAUDE.md §8:
+   * @unwired nothing reconnects silently, on either platform. docs/agents/web-bluetooth.md §8:
    * *"there is no silent reconnect that is shippable in 2026 … do not build
    * automatic reconnection"*. This is the call that would serve one when the
    * product decides to have it.

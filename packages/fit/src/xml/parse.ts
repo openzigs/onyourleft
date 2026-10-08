@@ -12,7 +12,7 @@
  *    compile error here, not a choice. Whatever reads GPX has to be
  *    ECMAScript and nothing else, which is what lets #15 run it on a phone.
  * 2. **A parser dependency in `packages/` is a licence question first.**
- *    CLAUDE.md §3: a GPL or AGPL dependency under `packages/` fails CI with no
+ *    docs/agents/licence-boundary.md §3: a GPL or AGPL dependency under `packages/` fails CI with no
  *    exemption, and MPL/EPL/BlueOak are not ruled on until #24. #32's revision
  *    block asks for *"no dependency at all if the subset needed is small — the
  *    FIT decoder took nothing"*. The subset needed is elements, attributes,

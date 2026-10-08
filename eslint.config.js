@@ -881,7 +881,7 @@ export default tseslint.config(
   // --- Device tooling --------------------------------------------------------
   // `apps/mobile/tools/` is the same case one directory over and is deliberately
   // NOT under `scripts/`: it needs `adb` and a physical phone, so it could never
-  // be a bare-clone repository check (#410, CLAUDE.md §2). It runs on Node, and
+  // be a bare-clone repository check (#410, docs/agents/layout.md §2). It runs on Node, and
   // it needs two globals `scripts/` does not — `fetch` and `WebSocket` are how
   // it speaks the DevTools protocol through an adb forward.
   //

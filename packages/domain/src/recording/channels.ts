@@ -26,7 +26,7 @@
  * ChannelReading} is a **discriminated union over the map**, so `channel` and
  * `value` are checked against each other. `recording-safety.test.ts` pins that
  * with `@ts-expect-error`, which is the only way to assert a compile-time
- * guarantee (CLAUDE.md section 5).
+ * guarantee (docs/agents/quality-gate.md section 5).
  */
 
 import { unixSeconds, type Seconds, type UnixSeconds } from '../quantities';

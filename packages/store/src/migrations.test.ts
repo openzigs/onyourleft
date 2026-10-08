@@ -12,7 +12,7 @@
  * first test below proves that, against the real engine, rather than asserting
  * it in a comment.
  *
- * ADR 0005 section F and CLAUDE.md section 5 decided what discharges the intent
+ * ADR 0005 section F and packages/CLAUDE.md section 5 decided what discharges the intent
  * instead, and it is what the rest of this file does:
  *
  * - apply `up` to a fixture **containing records**;

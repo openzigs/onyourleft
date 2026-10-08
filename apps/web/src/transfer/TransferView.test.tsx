@@ -504,7 +504,7 @@ describe('TransferView — the files picker and the folder picker are one select
  * Every other export test here seeds its ride **before** mounting, and that is
  * the one ordering under which a stale read is invisible. This one performs the
  * write through the UI and then asserts on the *other* panel, which is where
- * CLAUDE.md §5's defect shape shows up a layer above the store: the ride is on
+ * docs/agents/quality-gate.md §5's defect shape shows up a layer above the store: the ride is on
  * disk, `getActivity` would return it, and the page still says there is nothing
  * to export. Anything added here that writes and reads the same store wants a
  * test of this shape.

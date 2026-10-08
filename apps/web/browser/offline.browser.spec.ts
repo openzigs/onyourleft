@@ -698,7 +698,7 @@ test.describe('a cold start with the network off', () => {
     // rather than a preference.** #409 asks for the round trip to be read back
     // from a fresh context, on the grounds that asserting `persist()`'s own
     // return value in the calling context is the "wrong harness" cause of
-    // CLAUDE.md §5's defect shape. In this browser that read **cannot
+    // docs/agents/quality-gate.md §5's defect shape. In this browser that read **cannot
     // discriminate**, measured on 2026-09-20 against a profile directory and
     // `vite preview`:
     //

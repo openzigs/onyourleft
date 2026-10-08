@@ -12,7 +12,7 @@
  * instead. #126.
  *
  * **This prints. It does not gate, and must not.** ADR 0005 decision C and
- * CLAUDE.md §5 make the mutation list the gate and forbid inventing a
+ * docs/agents/quality-gate.md §5 make the mutation list the gate and forbid inventing a
  * percentage floor. A non-zero exit here would be that floor arriving by the
  * back door, so the only way this exits non-zero is if it cannot find or parse
  * its input — a report that silently renders nothing is the failure it exists
@@ -80,7 +80,7 @@ export function render(summary) {
     '### Coverage',
     '',
     'Reported, not gated — the gate is the mutation list in the pull request body',
-    '([CLAUDE.md §5](../blob/main/CLAUDE.md), ADR 0005 decision C). There is no',
+    '([docs/agents/quality-gate.md §5](../blob/main/docs/agents/quality-gate.md), ADR 0005 decision C). There is no',
     'percentage floor and one must not be added.',
     '',
     '| Package | Files | Statements | Branches | Functions | Lines |',

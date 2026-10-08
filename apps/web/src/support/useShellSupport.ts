@@ -74,7 +74,7 @@ function documentScreenReturn(listener: () => void): () => void {
   // ⚠️ No `typeof document === 'undefined'` guard, deliberately. This client
   // does not server-render and this function is only ever reached from an
   // effect, which does not run without a DOM — so the guard would be a line no
-  // mutation could turn red, which CLAUDE.md §5 treats as worse than absent.
+  // mutation could turn red, which docs/agents/quality-gate.md §5 treats as worse than absent.
   // `transport.ts` §`knownDevices` declines an unreachable guard for the same
   // reason and writes down what would make it reachable; here it is a build
   // that renders this tree on a server, which is #7's question and not one this

@@ -286,7 +286,7 @@ never as another entry — a jersey colour is not worth an athlete row.
 ⚠️ **A narrow write must be built from the row it read, not from a list of the fields it knows
 about.** `setAthleteThresholds` rebuilt the record from `id`, `displayName` and `createdAt` until
 #238, so saving a threshold silently erased `mass` — and would have erased `units`. The write it was
-*about* landed and the read for it agreed, which is why nothing noticed: it is CLAUDE.md §5's "a
+*about* landed and the read for it agreed, which is why nothing noticed: it is docs/agents/quality-gate.md §5's "a
 write that reports success while the read cannot see it", applied to the field nobody was looking
 at. All four narrow athlete writes now build from the decoded record, and
 `activity-store.units.test.ts`, `activity-store.mass.test.ts` and
@@ -422,7 +422,7 @@ against each and required to go red. Adding a write path to `ActivityStore` fail
 fifth with #61's signed record. The fifth one's red/green pair is in `identity-store.test.ts` rather
 than `harness.test.ts`, because it needs WebCrypto and that file imports no platform primitive.
 
-`CLAUDE.md` section 5 documents it for the issues that will consume it.
+`docs/agents/quality-gate.md` section 5 documents it for the issues that will consume it.
 
 ## Identity — #61, decided in [ADR 0014](../../docs/adr/0014-portable-identity.md)
 
@@ -767,7 +767,7 @@ rendering them is the screen's and the view's job.
 
 Two fakes: `poselessReportStoreFactory` (the eighteenth) writes every report's summary as `null`, a
 real state that only a field-by-field comparison notices; `firstWriteUpStoreFactory` (the
-nineteenth) acknowledges a second write-up and keeps the first — CLAUDE.md §5's *wrong time*.
+nineteenth) acknowledges a second write-up and keeps the first — docs/agents/quality-gate.md §5's *wrong time*.
 `ride-write-up-store.test.ts` holds both red/green pairs.
 
 ⚠️ **Since #801 the summary is written**: `side-report-keeper.ts` puts the session's summary with

@@ -145,7 +145,7 @@ function lastRide(): Element {
 
 /**
  * The load metrics' familiar names, which are registered trademarks
- * (CLAUDE.md §6) — as whole words, so "IF" is not found inside "different".
+ * (docs/agents/scope-and-ip.md §6) — as whole words, so "IF" is not found inside "different".
  */
 const TRADEMARKED =
   /\b(NP|TSS|IF|CTL|ATL|TSB|Normali[sz]ed Power|Training Stress|Intensity Factor|Chronic Training Load|Acute Training Load)\b/;

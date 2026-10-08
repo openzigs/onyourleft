@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## 4. Commands
 
+⚠️ Until #1170 the root's §4 opened with the paragraph below; the commands it introduces are the
+code block that stayed in the root:
+
+Every command, what it prints and what it enforces is [`docs/agents/commands.md`](commands.md) §4a — **read it
+literally**: a command listed there has been run, and nothing else may be quoted as if it had. What
+CI runs is [`docs/agents/ci.md`](ci.md) §4c. The ones nearly every change needs (Node 24 from `.nvmrc`,
+pnpm 11 from `packageManager` through `corepack enable pnpm`):
+
 **Read this section literally.** Commands are split into ones that work **today** and ones that do
 not exist yet. A documented command nobody has run is the most expensive kind of wrong, because every
 downstream issue's acceptance criteria depend on these.
@@ -312,12 +320,35 @@ pnpm --filter @onyourleft/web run test
 # favicon, the wordmark and the logo, from apps/web/tools/brand/sources/. NOT a
 # gate and NOT in CI: it needs Python 3.14 with tools/brand/requirements.txt
 # installed (any other version is refused); it fetches nothing. `--check`
-# writes nothing and fails unless every committed output DECODES to the pixels
-# it makes (since #972; bytes until then, which Pillow's zlib differs on between
-# macOS and Linux); `--records` prints the ASSETS.toml rows. The full logo is
-# lossless WebP since #972. ⚠️ `icons:generate` is gone: it drew the icons until
-# #965. Run on 2026-10-05 on Linux, `--check` green.
+# writes nothing and compares by KIND of file (the owner's ruling of
+# 2026-10-07, #1167): the two lossless WebP logos BYTE FOR BYTE (libwebp 1.6.0
+# writes the same bytes on macOS and Linux, so a Pillow bump that moves them is
+# meant to go red: re-derive, read the diff, move the digests); the PNGs by
+# DECODED PIXELS (Pillow's zlib differs between macOS and Linux, #972) AND with
+# no chunk but IHDR/PLTE/tRNS/IDAT/IEND in the made or the committed file, so a
+# colour profile, gamma or EXIF block (iCCP, gAMA, sRGB, cHRM, cICP, eXIf) is
+# refused by name, and a file it cannot read or decode at all (a broken chunk
+# frame, a damaged IDAT stream) is a printed reason, never a traceback (#1178's
+# review). `--records` prints the ASSETS.toml rows. CI holds the
+# committed pictures to the same chunk lists (`provenance.test.ts`). ⚠️
+# `icons:generate` is gone: it drew the icons until #965. Run on 2026-10-07 on
+# macOS, `--check` green.
 <venv>/bin/python apps/web/tools/brand/derive_brand.py --check
+
+# Its own tests (#1167), with the same interpreter: what `--check` refuses, each
+# with a control, and (`test_make_webp_fixtures.py`) the lossy fixtures' chunk
+# reader refusing a file that only looks like a WebP. NOT in CI, which has no
+# Python with Pillow. 20 cases on 2026-10-07 (11 before #1178's review) — the
+# count is what the run prints.
+<venv>/bin/python -m unittest discover -s apps/web/tools/brand -p 'test_*.py'
+
+# The WebP reader's fixtures (#1167): pictures drawn from arithmetic under
+# apps/web/tools/brand/fixtures/, written by the same pinned Pillow. `--check`
+# compares the lossless ones' bytes (the two lossy ones exist to be refused,
+# and libwebp's lossy encoder promises no bytes across CPUs, so only their chunk
+# layout); `--digests` prints Pillow's RGBA digests, which
+# `webp-testing.test.ts` records.
+<venv>/bin/python apps/web/tools/brand/make_webp_fixtures.py --check
 
 # The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
 # in CI: it needs the network and Blender 4.4.3 (set BLENDER to its path; the
@@ -498,6 +529,14 @@ git show <commit>:CLAUDE.md > /tmp/old-claude.md
 bash scripts/check-agent-docs-conservation.sh /tmp/old-claude.md
 bash scripts/check-agent-docs-conservation.test.sh
 
+# Since #1170 the same check takes a whole previous TREE (its CLAUDE.md,
+# docs/agents/ and area CLAUDE.md files), always counts the area CLAUDE.md files
+# under apps/ and packages/ in the new set, and with --exact also fails a line
+# the new set holds MORE often than before (copied rather than moved). #1170's
+# own run, against main before it:
+mkdir /tmp/old-agents && git archive <commit> CLAUDE.md docs/agents | tar -x -C /tmp/old-agents
+bash scripts/check-agent-docs-conservation.sh --exact /tmp/old-agents
+
 # All eight bare-clone script checks in one command.
 pnpm run check:repo
 
@@ -604,6 +643,8 @@ bash apps/instance/deploy/home/deploy.sh
 | `ASSET008` | a **vector or animation file** under `apps/` or `packages/` — an `.svg`, `.lottie` or `.riv` (any case), or a `.json` whose **top-level** object has `"v"`, `"fr"` and `"layers"` (a Lottie document) — is not named in `ASSETS.toml`. [#937](https://github.com/openzigs/onyourleft/issues/937). ⚠️ **The one extension list in the asset rules, on purpose**: `ASSET001` finds binaries by content and is blind to text, and a text file carries no signal that it is somebody else's work, so what can be keyed on is its kind. It fails open against a format it does not name — `.gltf` and `.obj` are still undiscovered, deliberately. It runs **before** the binary sniff, so a binary `.riv` or `.lottie` is one `ASSET008` rather than an `ASSET001`. The Lottie sniff is a brace walk that skips strings, so a `package.json`, or the three names only nested or inside a string, is not one. Walks `repo_files`, so `node_modules`, `dist` and the rest of `GENERATED` are pruned. A named file is then `ASSET002`–`ASSET004`'s like any entry — a named `CC-BY-SA-4.0` SVG is red by `ASSET004`. Art drawn **in code** is a `.tsx` and is not matched |
 | `AGENT001` | a topic file under `docs/agents/` is not linked from the root `CLAUDE.md`. Since 2026-10-05 the root is an index and everything else is in topic files an agent reads when its work reaches that area; a topic file the index does not name is an instruction nobody is sent to read. A mention in prose is not enough — it must be a Markdown link to `docs/agents/<file>`, which is what the topic map writes |
 | `AGENT002` | the root `CLAUDE.md` is larger than **48 KiB** (49 152 bytes, about 12 000 tokens). Every agent session, and every subagent it dispatches, loads that file whole on every turn, which is why it was split; new text goes in the topic file whose area it is, with a pointer in the index if every task needs to know it exists |
+| `AGENT002` since [#1170](https://github.com/openzigs/onyourleft/issues/1170) | the root `CLAUDE.md` is larger than **15 KiB** (15 360 bytes, about 3 800 tokens). ⚠️ The row above is #1156's 48 KiB, kept verbatim because #1170 moved text and deleted none: the root now holds only the always-on rules, the essential commands and the map |
+| `AGENT003` | an **area** `CLAUDE.md` — any `CLAUDE.md` under `apps/` or `packages/`, `node_modules`, `dist` and `coverage` pruned — is larger than **8 KiB** (8 192 bytes). Claude Code loads one whenever a session works beneath it, so it is the root's cost one directory down; the detail goes in the topic file it points at. [#1170](https://github.com/openzigs/onyourleft/issues/1170) |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:

@@ -57,7 +57,7 @@
  * literature. #76 flags that the common names for *its* metrics are reported to
  * be registered trademarks; those are metric names, none of which appears here,
  * and the register check for them remains #76's. The fractions are published
- * numbers, and a number is not copyrightable (CLAUDE.md §6).
+ * numbers, and a number is not copyrightable (docs/agents/scope-and-ip.md §6).
  */
 
 import {

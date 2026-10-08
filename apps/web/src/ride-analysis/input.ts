@@ -76,7 +76,7 @@
  *
  * ## The names are this project's own
  *
- * CLAUDE.md §6: the load metrics' familiar names are somebody's trademarks.
+ * docs/agents/scope-and-ip.md §6: the load metrics' familiar names are somebody's trademarks.
  * Nothing here computes one, and no key names one; `input.test.ts` holds that.
  */
 

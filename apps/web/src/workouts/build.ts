@@ -25,7 +25,7 @@
  * ## Why a builder exists at all
  *
  * There is no workout file format, and that is a decision rather than an
- * omission — ADR 0009 and CLAUDE.md §6 record why, and #202 is the issue that
+ * omission — ADR 0009 and docs/agents/scope-and-ip.md §6 record why, and #202 is the issue that
  * settles it. Until then this is the only way a workout comes to exist, which
  * is why it validates like a decoder rather than like a form.
  */

@@ -21,7 +21,7 @@
  *   `test:coverage` ran all fifty of them a second time. They now run once,
  *   in that step, and `test:coverage` excludes them.
  *
- * Coverage is REPORTED here, never gated (CLAUDE.md §5). What changes is the
+ * Coverage is REPORTED here, never gated (docs/agents/quality-gate.md §5). What changes is the
  * report — it stops counting what those files alone execute — not what fails.
  *
  * ## The failure this exists to stop

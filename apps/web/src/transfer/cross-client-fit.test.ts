@@ -10,7 +10,7 @@
  * ## Why this is not "encode it twice and compare"
  *
  * Because that compares a function with itself and passes for ever —
- * `CLAUDE.md` §5's *"the test asserted against the object it just
+ * `docs/agents/quality-gate.md` §5's *"the test asserted against the object it just
  * constructed"*, one level up. What makes byte-identity true today is
  * **structural**: ADR 0008 D-1 chose Capacitor for web UI reuse, and
  * `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so the

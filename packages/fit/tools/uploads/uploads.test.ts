@@ -215,7 +215,7 @@ describe('the indoor ride', () => {
     // every sample, which yields an empty track.
     //
     // Our own decoder reads it back happily, which is exactly the
-    // encoder-and-decoder-wrong-together blind spot CLAUDE.md §5 names — and
+    // encoder-and-decoder-wrong-together blind spot docs/agents/quality-gate.md §5 names — and
     // the reason a *third-party* importer is the only thing that settles it.
     // `docs/validation/0001-trainer-and-sensors.md` §5 says what to do with
     // whichever answer comes back.

@@ -148,7 +148,7 @@ export function stubDetail(
 
   // The consent is the one field the page writes, so the stub keeps it and a
   // re-read answers with what was written — a fresh read, not the object the
-  // test built (CLAUDE.md §5, "wrong harness").
+  // test built (docs/agents/quality-gate.md §5, "wrong harness").
   let mayBeRaced = ride.activity.mayBeRaced;
   const store: DetailStore = {
     getActivity: (_owner: AthleteId, id: ActivityId) =>

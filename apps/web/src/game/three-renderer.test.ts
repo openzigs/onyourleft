@@ -1194,7 +1194,7 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
     // Measured: **+1.30 m** at 16 : 10, inside the 1.70 m the bicycle is long.
     // ⚠️ A 4 : 3 tablet measures +2.46 m and is NOT gated: the only 4 : 3
     // tablets in numbers are iPads, and Web Bluetooth does not exist on iOS
-    // (CLAUDE.md §8), so nobody can ride this there. It is recorded so that the
+    // (docs/agents/web-bluetooth.md §8), so nobody can ride this there. It is recorded so that the
     // number is not rediscovered as a regression.
     expect(entersFrameAt(NEAREST, TABLET_ASPECT)).toBeLessThan(BICYCLE_LENGTH_METRES);
     expect(entersFrameAt(NEAREST, 4 / 3)).toBeCloseTo(2.46, 1);

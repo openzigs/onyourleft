@@ -106,3 +106,26 @@ export function decodePng(bytes: Uint8Array): DecodedPng {
   }
   return { width, height, rgba, hasAlpha: channels === 4 };
 }
+
+/**
+ * The chunk types of a PNG, in order — #1167. A pixel comparison cannot see a
+ * colour profile (`iCCP`), a gamma (`gAMA`), a rendering intent (`sRGB`) or an
+ * EXIF block (`eXIf`), each of which changes how a browser draws the picture,
+ * so the brand gate reads the chunks themselves.
+ */
+export function pngChunkTypes(bytes: Uint8Array): readonly string[] {
+  if (!SIGNATURE.every((value, index) => bytes[index] === value)) {
+    throw new Error('not a PNG');
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const types: string[] = [];
+  let offset = 8;
+  while (offset + 8 <= bytes.length) {
+    types.push(String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)));
+    offset += 12 + view.getUint32(offset);
+  }
+  if (offset !== bytes.length) {
+    throw new Error('a PNG chunk runs past the end of the file');
+  }
+  return types;
+}

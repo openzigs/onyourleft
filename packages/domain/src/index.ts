@@ -357,7 +357,7 @@ export {
 
 // --- Fitness and fatigue over a history (#77) ---------------------------------
 //
-// ⚠️ `CTL`, `ATL` and `TSB` are reported registered trademarks — see CLAUDE.md §6
+// ⚠️ `CTL`, `ATL` and `TSB` are reported registered trademarks — see docs/agents/scope-and-ip.md §6
 // and the header of `analysis/fitness.ts`. These names are our own: `base` is
 // the slow average, `recent` the fast one, `freshness` the gap. Do not rename
 // them to the initialisms.

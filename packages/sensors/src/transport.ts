@@ -79,7 +79,7 @@ export type TransportAvailability =
   | { readonly kind: 'available' }
   /**
    * No BLE stack this transport can drive. Safari and Firefox, permanently —
-   * neither implements Web Bluetooth and neither intends to (CLAUDE.md §8). The
+   * neither implements Web Bluetooth and neither intends to (docs/agents/web-bluetooth.md §8). The
    * honest UI here offers the native app, not a retry.
    */
   | { readonly kind: 'unsupported' }

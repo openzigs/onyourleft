@@ -1041,3 +1041,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   and erase. ADR 0044 D-6 applies D-11 to the live picture and to every snapshot, and D-7 there adds
   a sentence for a screen **beside** D-5's bystander sentence, which stands word for word. D-9's one
   strip point stays where ADR 0044 D-2 and D-4 put it. The body above is not edited.
+
+- **2026-10-07** — **The hosted key is no longer kept on the device, and the hosted path's key and
+  consent move to the rider's instance.** [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of
+  2026-10-04 and 2026-10-07, makes AI analysis run only on the rider's instance and removes the
+  on-device runner. Four statements here stop being true. **The 2026-09-28 entry's** *"the key is
+  the rider's own and stored on the device"*, and the hosted consent's *"Your key is kept on this
+  device"* in that entry and the later ones: the device-held key is removed with the runner (the
+  owner's Q12 ruling), and every key is held by the instance in one of two modes — **Share**, one
+  key the operator sets, and **bring your own**, a rider's own key used only for their own analysis
+  — encrypted at rest, never logged, never in an export and never in a backup in clear (ADR 0046
+  D-9). **D-7's "Whose key" row**, *"It is not a secret this project holds and `.env.example` gains
+  nothing"*: the instance reads an operator secret from its environment to encrypt those keys, and
+  `.env.example` lists it (Q6). **Owner decision D-B as D-7 states it**, *"on the rider's own key"*:
+  Share mode spends the operator's key, and is reconciled with D-B by the owner's Q10 ruling — a
+  hosted job runs only for an athlete whose own hosted consent is recorded on the instance and
+  names the endpoint, and changing the shared endpoint withdraws every rider's consent to it; the
+  Ollama source on the operator's box needs none. The consent's wording is replaced by #1104's,
+  approved by the owner. The local-address rule is applied to the instance's model URL by
+  [ADR 0040](0040-a-history-index-on-the-riders-instance.md) D-6's rule. **D-6 is untouched**: its
+  rejection of Cloudflare Tunnel by name for a photograph stands, and the owner's Q3 ruling bounds
+  #1106, which decides side-camera pictures to the instance — *"Pictures travel only over the home
+  network or a WireGuard-class overlay, never through the Cloudflare tunnel"*. What does cross the
+  tunnel is text: a pasted key, the synced privacy zones and words-to-mask list, and every job's
+  input and result, which Cloudflare sees in clear because it terminates TLS at its edge. The owner
+  ruled (Q11) that they are encrypted at the application layer, end to end, by
+  [#1179](https://github.com/openzigs/onyourleft/issues/1179); until it ships, a pasted key is
+  accepted only on the home network (a private address on the local network, never an overlay) or
+  through the operator command, and the owner ruled the same day that the masking sync and the job
+  stream do not ship before it, so the masking data and job text never cross Cloudflare's edge
+  readable. Until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes the device
+  path, the hosted consent the app ships stays the one the last 2026-09-29 entry above quotes; this
+  entry quotes no consent of its own. The body above is not edited.
