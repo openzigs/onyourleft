@@ -40,6 +40,7 @@ import {
   WorkoutError,
 } from '@onyourleft/domain';
 
+import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
 import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
@@ -84,7 +85,6 @@ import {
   SIDE_SESSION_SOURCES,
 } from './records';
 import { parseKitColour } from './kit-colour';
-import { parseMaskedWords } from './masked-words';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
@@ -1664,16 +1664,12 @@ export interface PersistedRideWriteUp {
 }
 
 /**
- * The longest write-up this store keeps, in UTF-16 code units — #800, and the
- * bound #798's runtime screen holds a write-up to.
- *
- * ⚠️ **Here rather than in the client, so there is one number.** The screen
- * lives in `apps/web` and may import this package; this package may not
- * import the client. At most eight sections, a position section and a summary
- * (epic #795) at a generous paragraph each is well under it; a page of a
- * book is about 2 000.
+ * The longest write-up this store keeps — declared in `@onyourleft/analysis`
+ * beside the screen that holds a write-up to it (#1094), so there is still one
+ * number. This package imports it from there; that package never imports this
+ * one (ADR 0046 D-5).
  */
-export const MAXIMUM_WRITE_UP_CHARACTERS = 16_000;
+export { MAXIMUM_WRITE_UP_CHARACTERS };
 
 /**
  * The most sections a write-up template may have — epic #795's *"at most 8

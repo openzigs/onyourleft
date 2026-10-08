@@ -7,16 +7,44 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SOURCE_ROOT } from '../camera/import-walk-testing';
-import { stripComments } from '../units/no-inline-units';
+import * as published from './index';
 import type { RideAnalysisInput } from './input';
 import type { ModelStepPort, StepRequest } from './model-step-port';
-import { runAnalysis } from './runner';
+import { runAnalysis, type RunnerClock } from './runner';
 import { isSealedStep, sealStep } from './sealed-step';
-import { STILL_CLOCK } from './model-server-testing';
+
+/** This package's `src`, on disk. */
+const SOURCE_ROOT = fileURLToPath(new URL('.', import.meta.url));
+
+/** A clock that never moves and never fires (`apps/web`'s `model-server-testing.ts` has the same). */
+const STILL_CLOCK: RunnerClock = {
+  now: () => 0,
+  delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
+};
+
+/**
+ * Whether `code` names `sealStep` as an identifier — read by the TypeScript
+ * parser, so a mention in a comment or in prose is not one. (In `apps/web`
+ * this test stripped comments with the app's own `stripComments`, which a
+ * package cannot import; #1094.)
+ */
+function namesSealStep(code: string): boolean {
+  const source = ts.createSourceFile('module.ts', code, ts.ScriptTarget.Latest, false);
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === 'sealStep') {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
 
 const STEP: StepRequest = {
   kind: 'section',
@@ -89,7 +117,8 @@ function productionSources(directory = SOURCE_ROOT): string[] {
     if (entry.isDirectory()) {
       return productionSources(path);
     }
-    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$|-testing\.tsx?$/.test(entry.name)
+    // `testing.ts` is this package's test-support entry, `-testing.ts` its modules.
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$|(?:^|-)testing\.tsx?$/.test(entry.name)
       ? [relative(SOURCE_ROOT, path)]
       : [];
   });
@@ -98,25 +127,36 @@ function productionSources(directory = SOURCE_ROOT): string[] {
 /** The production modules, other than the sealer, whose code names `sealStep`. */
 function sealers(paths: readonly string[], read: (path: string) => string): string[] {
   return paths
-    .filter((path) => path !== join('ride-analysis', 'sealed-step.ts'))
-    .filter((path) => /\bsealStep\b/.test(stripComments(read(path))));
+    .filter((path) => path !== 'sealed-step.ts')
+    .filter((path) => namesSealStep(read(path)));
 }
 
 describe('only the runner seals', () => {
   const read = (path: string): string => readFileSync(join(SOURCE_ROOT, path), 'utf8');
 
   it('has sources to scan', () => {
-    expect(productionSources().length).toBeGreaterThan(100);
+    expect(productionSources()).toEqual(
+      expect.arrayContaining(['runner.ts', 'sealed-step.ts', join('template', 'template.ts')]),
+    );
   });
 
   it('names sealStep in the runner and in no other production module', () => {
-    expect(sealers(productionSources(), read)).toStrictEqual([join('ride-analysis', 'runner.ts')]);
+    expect(sealers(productionSources(), read)).toStrictEqual(['runner.ts']);
+  });
+
+  it('does not export sealStep from the package, only from its test support (#1094)', () => {
+    // The package's `exports` name `index.ts` and `testing.ts` only, so a
+    // module in `apps/` reaches this package through these two files or not
+    // at all. `testing.ts` hands `sealStep` to tests, and
+    // `apps/web/src/ride-analysis/sealed-step-app.test.ts` fails a shipped
+    // module of the app that names it.
+    expect(Object.keys(published)).toContain('isSealedStep');
+    expect(Object.keys(published)).not.toContain('sealStep');
   });
 
   it('would notice a second module that sealed a step of its own', () => {
     const planted: Record<string, string> = {
-      [join('views', 'Planted.tsx')]:
-        "import { sealStep } from '../ride-analysis/sealed-step';\nsealStep(step);",
+      [join('views', 'Planted.tsx')]: "import { sealStep } from '../sealed-step';\nsealStep(step);",
       [join('views', 'Clean.tsx')]: '// sealStep is named only in a comment here',
     };
     expect(sealers(Object.keys(planted), (path) => planted[path] ?? '')).toStrictEqual([

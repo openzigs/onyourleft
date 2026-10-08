@@ -50,11 +50,11 @@
  * shown; handing it back to a builder would be the one place it survived.
  */
 
-import { MAXIMUM_WRITE_UP_CHARACTERS } from '@onyourleft/store';
+import { MAXIMUM_WRITE_UP_CHARACTERS } from '../screen/write-up-screen';
 
-import { passedScreen, screenSavedWriteUp } from '../camera/write-up-screen';
-import type { HistoryPassage } from './history';
-import type { RideAnalysisInput } from './input';
+import { passedScreen, screenSavedWriteUp } from '../screen/write-up-screen';
+import type { HistoryPassage } from '../history';
+import type { RideAnalysisInput } from '../input';
 import { ANALYSIS_TEMPLATE_V1 } from './template-v1';
 import { ANALYSIS_TEMPLATE_V2 } from './template-v2';
 

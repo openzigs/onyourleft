@@ -39,7 +39,7 @@ import {
   SIDE_REPORT_UNCHANGED_IN_PART,
   SIDE_REPORT_UNREADABLE,
 } from './side-report-wording';
-import type { SideSessionSummary } from './side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
 
 /** How the rider sits, as the camera sees them. Lengths are shares of the picture. */
 interface Posture {

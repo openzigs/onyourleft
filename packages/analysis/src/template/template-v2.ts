@@ -42,7 +42,7 @@
  * under version 2's name and bounds.
  */
 
-import type { HistoryPassage } from './history';
+import type { HistoryPassage } from '../history';
 import type {
   AnalysisTemplate,
   EarlierNotes,
@@ -50,7 +50,7 @@ import type {
   ScreenRule,
   StepPrompt,
 } from './template';
-import type { ChannelSummary, MetricSummary, RideAnalysisInput, SectionSummary } from './input';
+import type { ChannelSummary, MetricSummary, RideAnalysisInput, SectionSummary } from '../input';
 
 /** The longest a note may be, as this version's prompts state it. */
 const NOTE_CHARACTERS = 600;

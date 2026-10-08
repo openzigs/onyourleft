@@ -35,10 +35,10 @@ import { stripComments } from '../units/no-inline-units';
 import { ANALYSIS_FAILURE_TEXT, type AnalysisPort } from './analysis-port';
 import { endpointDecision } from './analysis-endpoint';
 import { riderAnalysisPort, riderModelStepPort } from './analysis-transport';
-import type { ModelStepPort } from '../ride-analysis/model-step-port';
-import { runAnalysis, type RunnerClock, type RunOutcome } from '../ride-analysis/runner';
-import type { RideAnalysisInput } from '../ride-analysis/input';
-import { passedScreen } from './write-up-screen';
+import type { ModelStepPort } from '@onyourleft/analysis';
+import { runAnalysis, type RunnerClock, type RunOutcome } from '@onyourleft/analysis';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
+import { passedScreen } from '@onyourleft/analysis';
 import { computerPoseEstimator } from './computer-pose';
 import { frameLeaksIn } from './notice';
 import { CameraController } from './session';
@@ -46,8 +46,8 @@ import { hostedModelDecision } from './hosted-model';
 import { hostedModelPort } from './hosted-transport';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
 import { manualSchedule, scriptedCamera, sizedFrameBytes } from './testing';
-import { specifiersIn } from './import-walk-testing';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { analysisModules, ANALYSIS_ROOT, specifiersThrough } from './import-walk-testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
 import { browserSecureWindow } from './secure-window-testing';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -112,7 +112,12 @@ describe('1. at runtime, an answer changes nothing the ride reads', () => {
   });
 });
 
-/** Every non-test source file under `apps/web/src`, relative to it. */
+/**
+ * Every non-test source file under `apps/web/src`, relative to it — and, since
+ * #1094 moved the runner, the screen and `model-answer.ts` there, every module
+ * of `@onyourleft/analysis`, as a path from `src` (`import-walk-testing.ts`
+ * §`ANALYSIS_ROOT`).
+ */
 function sources(): readonly string[] {
   const found: string[] = [];
   const walk = (directory: string): void => {
@@ -132,7 +137,7 @@ function sources(): readonly string[] {
     }
   };
   walk(SOURCE_ROOT);
-  return found;
+  return [...found, ...analysisModules()];
 }
 
 function code(path: string): string {
@@ -153,7 +158,9 @@ function code(path: string): string {
 function importsIn(source: string, pattern: RegExp, fileName?: string): boolean {
   // No `stripComments` first (#864): the parser skips comments already, and
   // that pre-pass read `/[/*]/` as the start of a comment.
-  return specifiersIn(source, fileName).some((specifier) => pattern.test(specifier));
+  // #1094: a name imported from `@onyourleft/analysis` counts as an import of
+  // the package module that declares it, as the relative import it replaced did.
+  return specifiersThrough(source, fileName).some((specifier) => pattern.test(specifier));
 }
 
 /** Whether `path` imports a module whose specifier matches `pattern`. */
@@ -178,7 +185,11 @@ const ANALYSIS_MODULE =
 const IMPORTERS: Readonly<
   Record<
     string,
-    'holds an answer' | 'builds the port' | 'reuses the address rule' | 'chooses the port'
+    | 'holds an answer'
+    | 'builds the port'
+    | 'reuses the address rule'
+    | 'chooses the port'
+    | 're-exports it'
   >
 > = {
   // #553, ADR 0033 D-11: the side camera's pictures sent on to the rider's
@@ -210,12 +221,15 @@ const IMPORTERS: Readonly<
   // #798: the run-time screen on a model's write-up. It takes an answer and
   // hands back plain text or the kinds of finding, and the check below holds
   // it to importing no trainer module like every other holder.
-  [join('camera', 'write-up-screen.ts')]: 'holds an answer',
+  [`${ANALYSIS_ROOT}/screen/write-up-screen.ts`]: 'holds an answer',
   // #811: the ride analysis's port and runner. A step's reply is an answer
   // until the template's acceptors or the screen above reduce it; both are
   // also walked transitively by `ride-analysis/runner-safety.test.ts`.
-  [join('ride-analysis', 'model-step-port.ts')]: 'holds an answer',
-  [join('ride-analysis', 'runner.ts')]: 'holds an answer',
+  [`${ANALYSIS_ROOT}/model-step-port.ts`]: 'holds an answer',
+  [`${ANALYSIS_ROOT}/runner.ts`]: 'holds an answer',
+  // #1094: `@onyourleft/analysis`'s barrel, through which the app imports
+  // `model-answer.ts` since the move. It runs nothing.
+  [`${ANALYSIS_ROOT}/index.ts`]: 're-exports it',
   // #802: the step port to the rider's own computer. It reads a reply with
   // `analysis-response.ts` and hands it to the runner as a step's text, and to
   // nothing else — §"4. a ride analysis's reply reaches only the runner".
@@ -524,7 +538,8 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
   });
 
   /** The ride analysis's reply-carrying modules: whoever imports one holds a reply. */
-  const REPLY_MODULE = /(?:^|\/)ride-analysis\/(?:model-step-port|own-computer-step)$/;
+  const REPLY_MODULE =
+    /(?:^|\/)(?:ride-analysis\/own-computer-step|packages\/analysis\/src\/model-step-port)$/;
 
   /**
    * The modules that may import them, and nothing else: the runner (which
@@ -534,7 +549,7 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
    * is a `ScreenedWriteUp`, never a reply.
    */
   const REPLY_HOLDERS: readonly string[] = [
-    join('ride-analysis', 'runner.ts'),
+    `${ANALYSIS_ROOT}/runner.ts`,
     join('ride-analysis', 'own-computer-step.ts'),
     join('camera', 'analysis-transport.ts'),
     // #803: the hosted path. The step port hands a reply to the runner and to
@@ -544,7 +559,10 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
     // step's type, and the rule below reads imports.
     join('ride-analysis', 'hosted-step.ts'),
     join('camera', 'hosted-transport.ts'),
-    join('ride-analysis', 'sealed-step.ts'),
+    `${ANALYSIS_ROOT}/sealed-step.ts`,
+    // #1094: the package's barrel re-exports the port's types and holds
+    // nothing. It is held to the same text rule as every holder.
+    `${ANALYSIS_ROOT}/index.ts`,
   ];
 
   /** The modules outside {@link REPLY_HOLDERS} that import a reply module. */
@@ -576,11 +594,10 @@ describe('4. a ride analysis’s reply reaches only the runner (#802)', () => {
 
   it('2. goes red on a planted view, and a planted store module, that import one', () => {
     const planted: Record<string, string> = {
-      [join('views', 'Planted.tsx')]:
-        "import type { StepReply } from '../ride-analysis/model-step-port';",
+      [join('views', 'Planted.tsx')]: "import type { StepReply } from '@onyourleft/analysis';",
       [join('library', 'planted.ts')]:
         "import { stepReplyFrom } from '../ride-analysis/own-computer-step';",
-      [join('views', 'Clean.tsx')]: "import { runAnalysis } from '../ride-analysis/runner';",
+      [join('views', 'Clean.tsx')]: "import { runAnalysis } from '@onyourleft/analysis';",
     };
     expect(strayHolders(Object.keys(planted), (path) => planted[path] ?? '').sort()).toStrictEqual(
       [join('library', 'planted.ts'), join('views', 'Planted.tsx')].sort(),

@@ -187,6 +187,14 @@ const WATCHED_PREFIXES = [
 const WATCHED_SUFFIX = /-port\.ts$/;
 
 /**
+ * Where a `*-port.ts` is watched: under `apps/`, and — since #1094 moved the
+ * ride analysis's `model-step-port.ts` out of `apps/web` — in
+ * `packages/analysis`, so the move took nothing out of this gate's sight.
+ * Not `packages/` at large, for the reason `TRAINER_COMMAND_SEAM` gives.
+ */
+const PORT_ROOTS = ['apps/', 'packages/analysis/'];
+
+/**
  * The trainer-command seam: the one place this gate reaches into `packages/`.
  *
  * ## Why the limit above could not simply stand — #363
@@ -673,7 +681,8 @@ export function isWatched(relativePath) {
   if (!/\.tsx?$/.test(relativePath) || isTestSupport(relativePath)) return false;
   return (
     WATCHED_PREFIXES.some((prefix) => relativePath.startsWith(prefix)) ||
-    (relativePath.startsWith('apps/') && WATCHED_SUFFIX.test(relativePath)) ||
+    (PORT_ROOTS.some((root) => relativePath.startsWith(root)) &&
+      WATCHED_SUFFIX.test(relativePath)) ||
     TRAINER_COMMAND_SEAM.includes(relativePath)
   );
 }
@@ -682,7 +691,8 @@ export function isWatched(relativePath) {
  * Whether a watched file's **interface methods** are checked as well as its
  * exports — WIRE003.
  *
- * A `*-port.ts` under `apps/`, and every module of the trainer-command seam.
+ * A `*-port.ts` under `apps/` or `packages/analysis/`, and every module of the
+ * trainer-command seam.
  * The second is what makes #362 reportable at all: both of #90's halves were
  * *imported* by production code through the protocol barrel, so WIRE001 was
  * silent and WIRE002 was silent, and the only rule that could see it was the

@@ -57,10 +57,10 @@
 import type { UnixSeconds } from '@onyourleft/domain';
 import type { ActivityId, AthleteId, RideWriteUpRecord } from '@onyourleft/store';
 
-import type { ScreenedWriteUp } from '../camera/write-up-screen';
-import type { HistoryPassage, HistorySource } from './history';
-import { maskForHosted, type MaskingGuard } from './hosted-mask';
-import type { RideAnalysisInput } from './input';
+import type { ScreenedWriteUp } from '@onyourleft/analysis';
+import type { HistoryPassage, HistorySource } from '@onyourleft/analysis';
+import { maskForHosted, type MaskingGuard } from '@onyourleft/analysis';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 import { readRideInput, type RideInputStore } from './read-input';
 import type {
   AskOutcome,
@@ -77,8 +77,8 @@ import {
   type RunnerClock,
   type RunnerDelay,
   type RunOptions,
-} from './runner';
-import { CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
+} from '@onyourleft/analysis';
+import { CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from '@onyourleft/analysis';
 
 /**
  * The step port, as the runner takes it. ⚠️ **Named through the runner, not

@@ -6,12 +6,14 @@
  *
  * A street, a town, a family member's name: the things no pattern can find,
  * because nothing about "Acacia Avenue" or "Priya" looks like an address or a
- * name to a regular expression. `apps/web/src/ride-analysis/hosted-mask.ts`
- * is where they are matched; this package holds only the list.
+ * name to a regular expression. `hosted-mask.ts` beside this file is where
+ * they are matched. This file was `packages/store/src/masked-words.ts` until
+ * #1094 moved it here, so the mask needs nothing from the store; the store
+ * imports it from this package and still re-exports it.
  *
  * ## On the athlete row
  *
- * For ADR 0020 D-2's reason (`unit-system.ts`, `kit-colour.ts`): it is the
+ * For ADR 0020 D-2's reason (`packages/store`'s `unit-system.ts`, `kit-colour.ts`): it is the
  * rider's, not the machine's, so it is on the athlete row and #776's sync can
  * carry it when it lands — the device copy canonical until then, and after.
  * An erase takes it with the row (`deleteAthlete`).

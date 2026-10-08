@@ -71,7 +71,7 @@ import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
 import { hostedModelPort } from './camera/hosted-transport';
-import { readMaskingGuard } from './ride-analysis/hosted-mask';
+import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';

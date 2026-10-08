@@ -28,15 +28,9 @@ describe('angle-claims.ts, the matchers the scan and the screen share', () => {
     expect(text).not.toMatch(/['"]typescript['"]/);
   });
 
-  it('is where the source scan takes its matchers from — one list, not two', () => {
-    const scan = source('./no-absolute-angles.ts');
-    expect(scan).toMatch(/from '\.\/angle-claims'/);
-    // None of the patterns is restated there.
-    expect(scan).not.toMatch(
-      /\bconst\s+(?:DEGREE_SIGN|DEGREE_ABBREVIATION|DEGREE_WORD|FRONTAL_PLANE|INVISIBLE)\b/,
-    );
-    expect(scan).not.toMatch(/\/valgus\//);
-  });
+  // That the source scan (`apps/web/src/camera/no-absolute-angles.ts`) takes
+  // its matchers from here is held in the app, beside the scan:
+  // `apps/web/src/camera/angle-claims-app.test.ts` (#1094).
 
   it('is where the run-time screen takes its matchers from', () => {
     expect(source('./write-up-screen.ts')).toMatch(/from '\.\/angle-claims'/);

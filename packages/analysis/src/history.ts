@@ -44,7 +44,7 @@
  * D-9's amendment, which is why `hosted-step.ts` refuses a history step.
  */
 
-import { passedScreen, screenSavedWriteUp } from '../camera/write-up-screen';
+import { passedScreen, screenSavedWriteUp } from './screen/write-up-screen';
 
 /** The kinds of passage the instance returns (the instance's `history/passages.ts` §`INDEXED_KINDS`). */
 export const HISTORY_KINDS = ['write-up', 'ride-summary', 'goal', 'note', 'document'] as const;

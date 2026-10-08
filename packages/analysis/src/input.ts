@@ -87,13 +87,19 @@ import {
   gradeAt,
   watts,
   wattsPerKilogram,
+  type AltitudeMetres,
+  type BeatsPerMinute,
   type Kilograms,
+  type Metres,
+  type MetresPerSecond,
+  type RevolutionsPerMinute,
   type RouteProfile,
+  type Seconds,
+  type UnixSeconds,
+  type Watts,
 } from '@onyourleft/domain';
-import type { ActivityRecord, AthleteRecord, LapRecord, StreamSet } from '@onyourleft/store';
 
-import { SIDE_POSE_SOURCES, type SideSessionSummary } from '../camera/side-session-summary';
-import { SIDE_OBSERVATION_KINDS } from '../camera/side-report-wording';
+import { SIDE_OBSERVATION_KINDS, SIDE_POSE_SOURCES, type SideSessionSummary } from './pose-summary';
 
 /**
  * The most sections an input carries: eight (#796, answer 2).
@@ -219,7 +225,7 @@ export interface RideAnalysisInput {
 export interface RideAnalysisOptions {
   readonly templateVersion: string;
   /** The ride's laps, from `listLaps`. */
-  readonly laps?: readonly LapRecord[];
+  readonly laps?: readonly AnalysedLap[];
   /** The profile of the route `ride.routeId` names, when that route is still saved. */
   readonly route?: RouteProfile;
   /** The ride's side-camera pose summary (#801), when it has one. */
@@ -228,17 +234,54 @@ export interface RideAnalysisOptions {
   readonly cameraConsented: boolean;
 }
 
-/** The fields of a ride the input may read. Not its name, date, zone or id. */
-export type AnalysedRide = Pick<ActivityRecord, 'movingTime' | 'distance' | 'routeId'>;
+// The four shapes below are the store's records' fields, restated
+// structurally: this package does not depend on `@onyourleft/store`, which
+// carries Dexie and the DOM lib (ADR 0046 D-5, #1094). Each is the subset of
+// `packages/store`'s record that this builder reads, and that record satisfies
+// it as it stands — `input.test.ts` (in `apps/web`) builds from real rows.
 
-/** The fields of a stream set the input may read. */
-export type AnalysedStreams = Pick<
-  StreamSet,
-  'startedAt' | 'sampleInterval' | 'sampleCount' | 'channels'
->;
+/**
+ * The fields of a ride the input may read. Not its name, date, zone or id.
+ * `packages/store` §`ActivityRecord` satisfies it.
+ */
+export interface AnalysedRide {
+  readonly movingTime: Seconds;
+  readonly distance: Metres;
+  /** Only whether there is one is read: the route's profile arrives as an option. */
+  readonly routeId?: string;
+}
 
-/** The fields of an athlete the input may read. Not their name or id. */
-export type AnalysedAthlete = Pick<AthleteRecord, 'mass' | 'thresholdPower'>;
+/** The channels of a stream set the input reads. `packages/store` §`StreamChannels` satisfies it. */
+export interface AnalysedChannels {
+  readonly power?: readonly (Watts | undefined)[];
+  readonly heartRate?: readonly (BeatsPerMinute | undefined)[];
+  readonly cadence?: readonly (RevolutionsPerMinute | undefined)[];
+  readonly speed?: readonly (MetresPerSecond | undefined)[];
+  readonly altitude?: readonly (AltitudeMetres | undefined)[];
+}
+
+/** The fields of a stream set the input may read. `packages/store` §`StreamSet` satisfies it. */
+export interface AnalysedStreams {
+  readonly startedAt: UnixSeconds;
+  readonly sampleInterval: Seconds;
+  readonly sampleCount: number;
+  readonly channels: AnalysedChannels;
+}
+
+/**
+ * The fields of an athlete the input may read. Not their name or id.
+ * `packages/store` §`AthleteRecord` satisfies it.
+ */
+export interface AnalysedAthlete {
+  readonly mass?: Kilograms;
+  readonly thresholdPower?: Watts;
+}
+
+/** The fields of a lap the input may read. `packages/store` §`LapRecord` satisfies it. */
+export interface AnalysedLap {
+  readonly ordinal: number;
+  readonly startedAt: UnixSeconds;
+}
 
 /** Build the input. Pure. @see the file comment. */
 export function rideAnalysisInput(
@@ -408,7 +451,7 @@ function foldShortRuns(runs: readonly Stretch[], streams: AnalysedStreams): Stre
 }
 
 /** The laps as stretches of samples, each lap from its start to the next lap's. */
-function lapStretches(laps: readonly LapRecord[], streams: AnalysedStreams): Stretch[] {
+function lapStretches(laps: readonly AnalysedLap[], streams: AnalysedStreams): Stretch[] {
   const ordered = [...laps].sort((a, b) => a.ordinal - b.ordinal);
   const stretches: { start: number; firstLap: number; lastLap: number }[] = [];
   for (const lap of ordered) {

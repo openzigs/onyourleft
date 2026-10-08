@@ -64,13 +64,13 @@
  * answers is discarded, and {@link RUN_FAILURE_TEXT} says so.
  */
 
-import type { UntrustedText } from '../camera/model-answer';
+import type { UntrustedText } from './screen/model-answer';
 import {
   passedScreen,
   screenWriteUp,
   type ScreenReason,
   type ScreenedWriteUp,
-} from '../camera/write-up-screen';
+} from './screen/write-up-screen';
 import type { HistoryPassage } from './history';
 import type { RideAnalysisInput } from './input';
 import type { ModelStepPort, StepReply } from './model-step-port';
@@ -89,7 +89,7 @@ import {
   type ScreenRule,
   type SectionNote,
   type StepPrompt,
-} from './template';
+} from './template/template';
 
 // --- Budgets ------------------------------------------------------------------
 

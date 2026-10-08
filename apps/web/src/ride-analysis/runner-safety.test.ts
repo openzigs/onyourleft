@@ -9,27 +9,45 @@
  * not pass anything that can write to a machine. So every module under
  * `ride-analysis/` — derived from the directory, not listed, so a module #802
  * or #803 adds there is walked the day it lands — is walked transitively, and
- * must reach no module through which a trainer is written.
+ * must reach no module through which a trainer is written. Since #1094 the
+ * runner, the templates and the screen are in `@onyourleft/analysis`, and
+ * every module of that package is walked too, by the same derivation.
  */
 
 import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { importWalk, readFromDisk, SOURCE_ROOT } from '../camera/import-walk-testing';
+import {
+  ANALYSIS_ROOT,
+  importWalk,
+  readFromDisk,
+  SOURCE_ROOT,
+} from '../camera/import-walk-testing';
 
 /** The modules through which anything reaches a trainer's control point — as the report's walk names them. */
 const TRAINER_MODULE =
   /(?:^|\/)(?:ride\/(?:controller|trainer|RideSession)|game\/(?:gradient|trainer-port|GameView)|workout\/)|@onyourleft\/sensors/;
 
-/** Every non-test module under `ride-analysis/`. */
-const ANALYSIS_MODULES = readdirSync(join(SOURCE_ROOT, 'ride-analysis'))
-  .filter(
-    (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && !/-testing\.tsx?$/.test(name),
-  )
-  .map((name) => `ride-analysis/${name}`)
-  .sort();
+/** Every non-test module under `directory`, a path from `src`, at any depth. */
+function modulesUnder(directory: string): string[] {
+  return readdirSync(join(SOURCE_ROOT, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = posix.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return modulesUnder(path);
+    }
+    return /\.tsx?$/.test(entry.name) &&
+      !/\.d\.ts$/.test(entry.name) &&
+      !/\.test\.tsx?$/.test(entry.name) &&
+      !/(?:^|-)testing\.tsx?$/.test(entry.name)
+      ? [path]
+      : [];
+  });
+}
+
+/** Every non-test module under `ride-analysis/`, and every one of `@onyourleft/analysis` (#1094). */
+const ANALYSIS_MODULES = [...modulesUnder('ride-analysis'), ...modulesUnder(ANALYSIS_ROOT)].sort();
 
 function trainerModulesReachedFrom(
   walk: ReturnType<typeof importWalk>,
@@ -43,10 +61,10 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
   it('walks the runner and its port, so the walk is not over nothing', () => {
     expect(ANALYSIS_MODULES).toEqual(
       expect.arrayContaining([
-        'ride-analysis/runner.ts',
-        'ride-analysis/model-step-port.ts',
-        'ride-analysis/template.ts',
-        'ride-analysis/input.ts',
+        `${ANALYSIS_ROOT}/runner.ts`,
+        `${ANALYSIS_ROOT}/model-step-port.ts`,
+        `${ANALYSIS_ROOT}/template/template.ts`,
+        `${ANALYSIS_ROOT}/input.ts`,
         'ride-analysis/own-computer-step.ts',
         // #804: the ask, its port and the press on the ride's page.
         'ride-analysis/ride-analysis.ts',
@@ -55,8 +73,8 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
       ]),
     );
     // And past one level: the runner reaches the screen's matchers through the screen.
-    expect(importWalk().closure(['ride-analysis/runner.ts']).modules).toContain(
-      'camera/angle-claims.ts',
+    expect(importWalk().closure([`${ANALYSIS_ROOT}/runner.ts`]).modules).toContain(
+      `${ANALYSIS_ROOT}/screen/angle-claims.ts`,
     );
   });
 
@@ -69,14 +87,19 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
     // line two modules away, in the screen it imports.
     const planted = (target: string) => (path: string) => {
       const source = readFromDisk(path);
+      // The specifier is relative to the planted module, wherever it is (#1094).
+      const controller = posix.relative(
+        posix.join(SOURCE_ROOT, posix.dirname(target)),
+        posix.join(SOURCE_ROOT, 'ride/controller'),
+      );
       return path === target && source !== undefined
-        ? `${source}\nimport { createRideController } from '../ride/controller';\n`
+        ? `${source}\nimport { createRideController } from '${controller}';\n`
         : source;
     };
     // #802: and in the step port to the rider's own computer.
     for (const target of [
-      'ride-analysis/runner.ts',
-      'camera/write-up-screen.ts',
+      `${ANALYSIS_ROOT}/runner.ts`,
+      `${ANALYSIS_ROOT}/screen/write-up-screen.ts`,
       'ride-analysis/own-computer-step.ts',
       // #804: the ask and the press.
       'ride-analysis/ride-analysis.ts',

@@ -76,7 +76,7 @@
  */
 
 import type { AnalysisPort, AnalysisRequest } from './analysis-port';
-import type { AnalysisCall, AnalysisFailure, AnalysisOutcome } from './model-answer';
+import type { AnalysisCall, AnalysisFailure, AnalysisOutcome } from '@onyourleft/analysis';
 import { ANALYSIS_PROMPTS } from './analysis-port';
 import { endpointTarget, type AddressSpace, type AnalysisEndpoint } from './analysis-endpoint';
 import { MAXIMUM_RESPONSE_BYTES, readAnalysisReply } from './analysis-response';
@@ -86,7 +86,7 @@ import {
   type NativeAnalysisPost,
   type NativeAnalysisReply,
 } from './http-body';
-import type { ModelStepPort } from '../ride-analysis/model-step-port';
+import type { ModelStepPort } from '@onyourleft/analysis';
 import { ownComputerStepPort } from '../ride-analysis/own-computer-step';
 
 export type {

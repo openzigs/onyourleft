@@ -18,7 +18,12 @@
  *
  * Paths are POSIX paths relative to `apps/web/src`, the way both gates name
  * their modules. A bare specifier (`react`, `@onyourleft/sensors`) is recorded
- * and not followed.
+ * and not followed — **except `@onyourleft/analysis`**, which is followed into
+ * its source under {@link ANALYSIS_ROOT}: #1094 moved the runner, the
+ * templates, the screen and the mask out of this tree into that package, and
+ * a walk that stopped at its name would no longer see what a model request is
+ * built from (`no-picture-reachable.test.ts`) or what the runner can reach
+ * (`runner-safety.test.ts`).
  *
  * A relative specifier whose query is exactly `?url` or `?raw` is an asset
  * handed over as a string and is not followed; one naming an existing
@@ -34,7 +39,7 @@
  * §Limits states for its own walk.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,6 +47,26 @@ import ts from 'typescript';
 
 /** `apps/web/src`, on disk. */
 export const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * `@onyourleft/analysis`'s `src`, as a path from `apps/web/src` — how the walk
+ * names that package's modules (#1094).
+ */
+export const ANALYSIS_ROOT = '../../../packages/analysis/src';
+
+/** `apps/web/src` reached from {@link ANALYSIS_ROOT}'s side, so one module has one name. */
+const SOURCE_FROM_ANALYSIS = '../../../apps/web/src/';
+
+/** A path that climbed out of `src` and back in, named as a path under it. */
+function underSource(path: string): string {
+  return path.startsWith(SOURCE_FROM_ANALYSIS) ? path.slice(SOURCE_FROM_ANALYSIS.length) : path;
+}
+
+/** The workspace packages the walk follows rather than records, by entry point. */
+const FOLLOWED_PACKAGES: Readonly<Record<string, string>> = {
+  '@onyourleft/analysis': `${ANALYSIS_ROOT}/index.ts`,
+  '@onyourleft/analysis/testing': `${ANALYSIS_ROOT}/testing.ts`,
+};
 
 /** A module's source, by its path under `src`, or `undefined` when there is none. */
 export type ReadSource = (path: string) => string | undefined;
@@ -96,6 +121,141 @@ export function specifiersIn(code: string, fileName = 'module.tsx'): string[] {
   return found;
 }
 
+/** The names a module imports from `specifier` by name: `import { a, type B } from '…'`. */
+export function namedImportsIn(code: string, specifier: string, fileName = 'module.tsx'): string[] {
+  const source = ts.createSourceFile(
+    fileName,
+    code,
+    ts.ScriptTarget.Latest,
+    false,
+    fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const names: string[] = [];
+  for (const statement of source.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteralLike(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === specifier
+    ) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          names.push((element.propertyName ?? element.name).text);
+        }
+      }
+    } else if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier !== undefined &&
+      ts.isStringLiteralLike(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === specifier &&
+      statement.exportClause !== undefined &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        names.push((element.propertyName ?? element.name).text);
+      }
+    }
+  }
+  return names;
+}
+
+/** Every exported name a module declares itself (not one it re-exports from elsewhere). */
+function declaredExports(code: string): string[] {
+  const source = ts.createSourceFile('module.ts', code, ts.ScriptTarget.Latest, false);
+  const names: string[] = [];
+  for (const statement of source.statements) {
+    const exported = ts.canHaveModifiers(statement)
+      ? (ts.getModifiers(statement) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+      : false;
+    if (!exported) {
+      continue;
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) {
+          names.push(declaration.name.text);
+        }
+      }
+    } else if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement) ||
+        ts.isInterfaceDeclaration(statement) ||
+        ts.isTypeAliasDeclaration(statement) ||
+        ts.isEnumDeclaration(statement)) &&
+      statement.name !== undefined
+    ) {
+      names.push(statement.name.text);
+    } else if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier === undefined &&
+      statement.exportClause !== undefined &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        names.push(element.name.text);
+      }
+    }
+  }
+  return names;
+}
+
+/** Every module of `@onyourleft/analysis` that is not a test or test support, as a path from `src`. */
+export function analysisModules(directory = ANALYSIS_ROOT): string[] {
+  return readdirSync(join(SOURCE_ROOT, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = posix.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return analysisModules(path);
+    }
+    return /\.ts$/.test(entry.name) && !/\.d\.ts$|\.test\.ts$|(?:^|-)testing\.ts$/.test(entry.name)
+      ? [path]
+      : [];
+  });
+}
+
+let exportedBy: ReadonlyMap<string, string> | undefined;
+
+/**
+ * Which module of `@onyourleft/analysis` declares `name`, as a specifier-shaped
+ * path (`../../../packages/analysis/src/screen/model-answer`), or `undefined`.
+ *
+ * #1094 moved modules the safety gates name by FILE — `model-answer.ts`,
+ * `model-step-port.ts` — into that package, so a module here that imported
+ * `UntrustedText` from `./model-answer` imports it from the package's barrel
+ * now, and a gate that read only the specifier would no longer see it. This is
+ * how {@link specifiersThrough} puts the file back.
+ */
+export function analysisModuleDeclaring(name: string): string | undefined {
+  if (exportedBy === undefined) {
+    const map = new Map<string, string>();
+    for (const path of analysisModules()) {
+      if (/\/(?:index|testing)\.ts$/.test(path)) {
+        continue;
+      }
+      for (const declared of declaredExports(readFileSync(join(SOURCE_ROOT, path), 'utf8'))) {
+        map.set(declared, path.replace(/\.ts$/, ''));
+      }
+    }
+    exportedBy = map;
+  }
+  return exportedBy.get(name);
+}
+
+/**
+ * {@link specifiersIn}, and for every name imported from `@onyourleft/analysis`
+ * (or `/testing`) by name, the path of the package module that declares it
+ * (#1094) — so a gate asking "does this module import `model-answer`?" gets the
+ * answer it got before the module moved.
+ */
+export function specifiersThrough(code: string, fileName = 'module.tsx'): string[] {
+  const through = Object.keys(FOLLOWED_PACKAGES).flatMap((specifier) =>
+    namedImportsIn(code, specifier, fileName).flatMap((name) => {
+      const module = analysisModuleDeclaring(name);
+      return module === undefined ? [] : [module];
+    }),
+  );
+  return [...specifiersIn(code, fileName), ...through];
+}
+
 /** One module's imports: relative ones resolved to paths under `src`, bare ones as written. */
 export interface ModuleImports {
   readonly local: readonly string[];
@@ -145,7 +305,12 @@ export function importWalk(read: ReadSource = readFromDisk): {
     // opened a "comment" that swallowed the imports after it (#864).
     for (const specifier of specifiersIn(source, path)) {
       if (!specifier.startsWith('.')) {
-        bare.push(specifier);
+        const followed = FOLLOWED_PACKAGES[specifier];
+        if (followed !== undefined) {
+          local.push(followed);
+        } else {
+          bare.push(specifier);
+        }
         continue;
       }
       // A `?url` or `?raw` import is an asset handed over as a string, not a
@@ -155,7 +320,7 @@ export function importWalk(read: ReadSource = readFromDisk): {
       if (ASSET_QUERY.test(specifier)) {
         continue;
       }
-      const base = posix.normalize(posix.join(posix.dirname(path), specifier));
+      const base = underSource(posix.normalize(posix.join(posix.dirname(path), specifier)));
       const file = resolveFile(base);
       if (file !== undefined) {
         local.push(file);
