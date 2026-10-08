@@ -210,7 +210,9 @@ describe('no request module names a picture read (#1063’s review)', () => {
   });
 
   it.each(REQUEST_PATH)('%s names no picture read and no picture record', (path) => {
-    expect(stripComments(readFromDisk(path) ?? '')).not.toMatch(PICTURE_READS);
+    const source = readFromDisk(path);
+    expect(source).toBeDefined();
+    expect(stripComments(source ?? '')).not.toMatch(PICTURE_READS);
   });
 
   it('fires on a module that calls one', () => {
