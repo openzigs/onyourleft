@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
-import { readHistorySettings, type Config } from './config.ts';
+import { readAnalysisModelSettings, readHistorySettings, type Config } from './config.ts';
+import { startFakeModelServer } from './analysis/fake-model-server-testing.ts';
 import type { Resolver } from './history/address.ts';
 import { RETRY_PERIOD_MS } from './history/history.ts';
 import { startInstance, type InstanceOptions, type StartedInstance } from './instance.ts';
@@ -329,6 +330,29 @@ describe('migrations are a deploy step — #791 criteria 5 and 8', () => {
       timeout: 20_000,
     });
     expect(run.status).toBe(1);
+    expect(run.stderr).toContain('node src/operator/cli.ts migrate');
+  }, 60_000);
+
+  it('says in its startup log that analysis is off, and why, for a refused model address (#1096)', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    const run = spawnSync(process.execPath, [MAIN], {
+      cwd: INSTANCE,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        OYL_INSTANCE_COMMIT: COMMIT,
+        OYL_INSTANCE_PORT: '0',
+        OYL_INSTANCE_DATABASE: path,
+        OYL_INSTANCE_ANALYSIS_MODEL_URL: 'http://ollama.local:11434/v1',
+        OYL_INSTANCE_ANALYSIS_MODEL: 'scripted',
+      },
+      timeout: 20_000,
+    });
+    // It goes on to refuse the un-migrated database; the refused model
+    // address was not a reason to stop, and was said first.
+    expect(run.stderr).toContain(
+      'instance: analysis is off: OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because',
+    );
     expect(run.stderr).toContain('node src/operator/cli.ts migrate');
   }, 60_000);
 
@@ -767,6 +791,71 @@ describe('the history index on the running instance — #835', () => {
     running = undefined;
     expect(pending).toStrictEqual([]);
   }, 30_000);
+});
+
+describe('the analysis model on the running instance — #1096', () => {
+  it('builds the model connection when one is configured at a local address, and a turn reaches it', async () => {
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const port = model.baseUrl.port;
+      const { instance, lines } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.opened;
+      const said = lines.find((line) => line.includes('"event":"analysis-model"'));
+      expect(said).toContain('"state":"on"');
+      // No model name is logged.
+      expect(said).not.toContain('scripted');
+      const connection = instance.analysisModel();
+      expect(connection).toBeDefined();
+      const turn = await connection?.turn({
+        system: 's',
+        messages: [{ role: 'user', text: 'u' }],
+        tools: [],
+        maxOutputTokens: 16,
+        timeoutMilliseconds: 10_000,
+        signal: new AbortController().signal,
+      });
+      expect(turn).toMatchObject({ ok: true, text: 'A steady ride.' });
+      expect(model.paths).toStrictEqual(['/v1/chat/completions']);
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('has no model connection, and says why, when the address is refused', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance, lines } = await start(
+      path,
+      {},
+      {
+        config: {
+          analysis: readAnalysisModelSettings({
+            analysisModelUrl: 'https://models.example.com/v1',
+            analysisModel: 'scripted',
+          }),
+        },
+      },
+    );
+    await instance.opened;
+    const said = lines.find((line) => line.includes('"event":"analysis-model"'));
+    expect(said).toContain('"state":"off"');
+    expect(said).toContain('"code":"not-local"');
+    expect(instance.analysisModel()).toBeUndefined();
+  });
 });
 
 describe('a rider’s race on the running instance — #784, #785', () => {

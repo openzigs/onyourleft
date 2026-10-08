@@ -318,6 +318,27 @@ export class InviteRefusedError extends Error {
   }
 }
 
+/** The hosted model key as the store holds it: ciphertext, never the key (#1097). */
+export interface SealedHostedModelKey {
+  /** The hosted service's base URL, `https:` only (`analysis/hosted-key.ts` checks it). */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly setAt: number;
+}
+
+/** The held key, and the athlete it is held for: the operator (ADR 0046 Q9). */
+export interface HeldHostedModelKey extends SealedHostedModelKey {
+  readonly athleteId: string;
+}
+
+/** What {@link SqlStore.putHostedModelKey} did. */
+export type HostedKeyPut =
+  | { readonly outcome: 'stored' }
+  /** There is no such athlete on this instance: nothing was written. */
+  | { readonly outcome: 'no-athlete' };
+
 /** One athlete blocking another (#83). */
 export interface Block {
   /** The blocker. */
@@ -570,6 +591,24 @@ export interface SqlStore {
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
 
+  /**
+   * Hold the instance's ONE hosted model key (#1097), sealed, for `athleteId`
+   * — the operator's athlete (ADR 0046 Q9), which the caller looks up. In ONE
+   * statement that writes only if that athlete exists, so it is `no-athlete`
+   * and writes nothing otherwise. Replaces a key already held, scrubbing the
+   * old ciphertext ({@link SqlStore.clearHostedModelKey}).
+   */
+  putHostedModelKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** The held key, sealed, or `undefined`. The instance's one, so no athlete is asked for. */
+  getHostedModelKey(): Promise<HeldHostedModelKey | undefined>;
+  /**
+   * Clear the held key: `true` if there was one. With `secure_delete` on, and
+   * the write-ahead log checkpointed and truncated after, so the ciphertext
+   * is not left in a free page or the log (`docs/operating-an-instance.md`
+   * §"A hosted model key" says what can still remain).
+   */
+  clearHostedModelKey(): Promise<boolean>;
+
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
   takeChallenge(nonce: string, now: number): Promise<Take<{ readonly publicKey: string }>>;
@@ -668,6 +707,12 @@ export interface SqlStore {
   /** #776: store an item, or answer `unchanged` when the athlete already holds these exact bytes. */
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
+  /**
+   * #1098: this athlete's LIVE items of one kind, newest first — what the
+   * analysis agent's read-only tools read (`analysis/tools/`). Tombstones are
+   * never returned; at most `limit` rows.
+   */
+  listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
   /**
    * Replace a live item with its tombstone — an activity's record goes with
    * it. `false` when the athlete holds no such live item.
@@ -1261,6 +1306,30 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
     const next = queue.then(operation, operation);
     queue = next.catch(() => undefined);
     return next;
+  }
+
+  /**
+   * `operation` with SQLite's `secure_delete` on, so a deleted or replaced row
+   * is overwritten with zeros in its page rather than left in a free one; then
+   * the write-ahead log checkpointed and TRUNCATED, so the old page images it
+   * held are gone too (#1097: a cleared hosted key's ciphertext). A checkpoint
+   * another connection's open read holds back is not an error, and its result
+   * row is not read: the old page images stay in the log until SQLite next
+   * writes it over from its start (its own checkpoints are PASSIVE and never
+   * truncate), or the last connection closes (`docs/operating-an-instance.md`).
+   * With `busy_timeout` at 5 s that wait can hold this store's queue for up to
+   * about 5 s — an erasure during an `operator backup`, say — which is accepted.
+   * Inside {@link exclusive}, so no other statement on this connection runs
+   * with the setting on.
+   */
+  async function scrubbing<T>(operation: () => Promise<T>): Promise<T> {
+    await sql`pragma secure_delete = on`.execute(db);
+    try {
+      return await operation();
+    } finally {
+      await sql`pragma secure_delete = off`.execute(db);
+      await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+    }
   }
 
   return {
@@ -2062,6 +2131,21 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('item_key', '=', key)
           .executeTakeFirst();
         return row === undefined ? undefined : syncItemFrom(row);
+      }),
+
+    listLiveSyncItems: (athleteId, kind, limit) =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('sync_item')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('kind', '=', kind)
+          .where('deleted_at', 'is', null)
+          .orderBy('received_at', 'desc')
+          .orderBy('seq', 'desc')
+          .limit(Math.max(0, Math.floor(limit)))
+          .execute();
+        return rows.map(syncItemFrom);
       }),
 
     deleteSyncItem: (athleteId, kind, key, now) =>
@@ -2887,23 +2971,69 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     eraseAthlete: (athleteId) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('activity_record')
-            .select('content_sha256')
-            .where('athlete_id', '=', athleteId)
-            .execute();
-          for (const table of await athleteTablesInErasureOrder(trx)) {
-            // Every table here has `athlete_id`: the derivation refuses one that does not.
-            await trx
-              .deleteFrom(table as 'session')
+        // Scrubbed (#1097): an erased athlete's rows — a hosted model key's
+        // ciphertext among them — are not left in a free page or the log.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('activity_record')
+              .select('content_sha256')
               .where('athlete_id', '=', athleteId)
               .execute();
-          }
-          // Another athlete's block OF this one names nobody once they are gone (#83).
-          await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
-          await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
-          return held.map((row) => row.content_sha256);
+            for (const table of await athleteTablesInErasureOrder(trx)) {
+              // Every table here has `athlete_id`: the derivation refuses one that does not.
+              await trx
+                .deleteFrom(table as 'session')
+                .where('athlete_id', '=', athleteId)
+                .execute();
+            }
+            // Another athlete's block OF this one names nobody once they are gone (#83).
+            await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
+            await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
+            return held.map((row) => row.content_sha256);
+          }),
+        ),
+      ),
+
+    putHostedModelKey: (athleteId, key) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          // ONE statement: the athlete's existence and the write cannot be
+          // split by another connection erasing them in between (#1097).
+          const written = await sql<{ athlete_id: string }>`
+            insert into hosted_model_key (slot, athlete_id, url, model, iv, ciphertext, set_at)
+            select 1, id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+            from athlete where id = ${athleteId}
+            on conflict (slot) do update set
+              athlete_id = excluded.athlete_id, url = excluded.url, model = excluded.model,
+              iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+            returning athlete_id`.execute(db);
+          return written.rows.length > 0
+            ? ({ outcome: 'stored' } as const)
+            : ({ outcome: 'no-athlete' } as const);
+        }),
+      ),
+
+    getHostedModelKey: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('hosted_model_key').selectAll().executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+            };
+      }),
+
+    clearHostedModelKey: () =>
+      exclusive(() =>
+        scrubbing(async () => {
+          const result = await db.deleteFrom('hosted_model_key').executeTakeFirst();
+          return Number(result.numDeletedRows) > 0;
         }),
       ),
 

@@ -77,8 +77,8 @@ import {
   type NativeAnalysisPost,
   type NativeAnalysisReply,
 } from '../camera/http-body';
-import type { ModelStepPort, StepFinish, StepReply, StepRequest } from './model-step-port';
-import type { AnalysisStepKind } from './template';
+import type { ModelStepPort, StepFinish, StepReply, StepRequest } from '@onyourleft/analysis';
+import type { AnalysisStepKind } from '@onyourleft/analysis';
 
 /** Every field a {@link StepRequest} may have. Any other is refused. */
 export const STEP_REQUEST_FIELDS: readonly (keyof StepRequest)[] = [

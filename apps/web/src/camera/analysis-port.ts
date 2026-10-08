@@ -76,7 +76,7 @@
  */
 
 import type { CapturedFrame } from './camera-port';
-import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from './model-answer';
+import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from '@onyourleft/analysis';
 
 /**
  * The words sent for each question, verbatim.

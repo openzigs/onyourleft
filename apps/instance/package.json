@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "The self-hostable instance server (ADR 0036, ADR 0037) — a fetch-style handler, a thin Node listener, and the room server's router and workers. Two runtime dependencies: kysely and ws.",
+  "description": "The self-hostable instance server (ADR 0036, ADR 0037) \u2014 a fetch-style handler, a thin Node listener, and the room server's router and workers. Its third-party runtime dependencies: kysely, ws, and the AI SDK (ai, @ai-sdk/openai-compatible) behind src/analysis/model.ts.",
   "main": "./src/main.ts",
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.room-core.json && tsc --noEmit --project tsconfig.durable-object.json",
@@ -17,10 +17,13 @@
     "tunnel-soak": "node tools/tunnel-soak.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.65",
+    "@onyourleft/analysis": "workspace:*",
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
     "@onyourleft/physics": "workspace:*",
     "@onyourleft/protocol": "workspace:*",
+    "ai": "7.0.130",
     "kysely": "0.29.6",
     "ws": "8.22.0"
   },

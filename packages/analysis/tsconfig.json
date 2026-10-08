@@ -1,0 +1,17 @@
+{
+  // The whole package: `src/` and its tests, plus this package's Vitest config.
+  //
+  // `types: ["node"]` here and NOT in tsconfig.platform-free.json is the point
+  // of having two files, as in packages/fit: a few tests read a file off disk
+  // (the source scans, the template digests), so the test program needs
+  // `node:fs`; the modules a device and an instance both run must not. ESLint's
+  // project service resolves a file to the nearest `tsconfig.json`, so this is
+  // the config that has to cover every file in the package. The narrower
+  // program is what enforces the boundary, and `pnpm run typecheck` runs both.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

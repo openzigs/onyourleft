@@ -21,7 +21,8 @@
  *
  * ⚠️ **The matchers are in `angle-claims.ts` since #798**, which imports
  * nothing so that the model write-up screen (`write-up-screen.ts`) can ship
- * them without shipping the TypeScript compiler this file needs. The list
+ * them without shipping the TypeScript compiler this file needs. Both are in
+ * `@onyourleft/analysis` (`packages/analysis/src/screen/`) since #1094. The list
  * below is what they match; change it THERE, and both uses move together.
  *
  * 1. **A degree sign** in any text — D-3: *"The scan is for a degree sign, the
@@ -114,7 +115,7 @@ import {
   angleClaimKinds,
   decodeCharacterReferences,
   visibleText,
-} from './angle-claims';
+} from '@onyourleft/analysis';
 
 export { decodeCharacterReferences };
 

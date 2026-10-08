@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * **The run-time screen a model's write-up passes before anybody is shown it
+ * or anything keeps it** — [#798](https://github.com/openzigs/onyourleft/issues/798),
+ * epic #795, the owner's ruling 3: *"The angle and frontal-plane gate
+ * (`no-absolute-angles`) still screens the model's output at run time: a
+ * write-up that fails is not shown."*
+ *
+ * ## The same rules as the source scan, from the same module
+ *
+ * The matchers are `angle-claims.ts`'s — the ones `no-absolute-angles.ts`
+ * holds this client's source to — so a sentence the build refuses to ship is
+ * a sentence a model cannot get shown either. The HTML character references
+ * the scan decodes in JSX are decoded here too, **for matching only**: a
+ * write-up is shown as plain text, so `142&deg;` reaches a rider as eight
+ * characters, and it is withheld anyway, because a ban that errs is one a
+ * reviewer reads rather than one a rider does.
+ *
+ * ## Plain text, and nothing that renders as something else
+ *
+ * ADR 0029 D-8: model output is untrusted. What comes out of here is a string
+ * for a React text node — never markup, never a link, never a path, a URL or a
+ * command, and never anything a trainer reads. The screen itself:
+ *
+ * - **takes out** what renders as nothing or reorders what is around it —
+ *   `angle-claims.ts` §`INVISIBLE`: every default-ignorable code point and
+ *   every format character — the soft hyphen, the zero-width characters, the
+ *   directional marks, embeddings, overrides and isolates, the byte-order
+ *   mark, the tags, the variation selectors and the fillers (#815's review:
+ *   the store admits them on purpose and leaves them to this screen). Taking
+ *   them out changes no word a rider can read, and it is the text WITHOUT
+ *   them that the rules are matched against;
+ * - **writes** a carriage return, a CRLF, a line separator (U+2028) or a
+ *   paragraph separator (U+2029) as a newline — each renders as a line break
+ *   (#817's review) — and a tab as a space;
+ * - **withholds** a write-up that is not well-formed UTF-16 (a lone
+ *   surrogate, which is no character and renders as a replacement mark);
+ * - **withholds** a write-up that still holds any other control character
+ *   (C0, DEL, C1), is empty, or is longer than
+ *   {@link MAXIMUM_WRITE_UP_CHARACTERS} — the store's own bound, which the
+ *   store imports from here, so what is shown and what is kept cannot disagree.
+ *
+ * Markdown and HTML are left exactly as written: they are characters, and a
+ * text node shows them as characters.
+ *
+ * ## Withheld WHOLE, and never with the words that failed
+ *
+ * One finding withholds the whole write-up: there is no partial text, because
+ * a report with the offending sentence cut out is this client editing what a
+ * model said, and the sentences around it were written by the same model.
+ * What is returned is only the **kinds** of finding — never the matched text
+ * or what surrounds it — so a finding shown to the rider, or handed to a
+ * `rewrite` step (#811), carries no model words.
+ *
+ * ## Only this function makes a {@link ScreenedWriteUp}
+ *
+ * It is a brand, like `UntrustedText`, so an `UntrustedText` cannot be
+ * rendered or stored where a screened write-up is needed — a
+ * `@ts-expect-error` in `write-up-screen.test.ts` pins that.
+ *
+ * ## What it cannot see
+ *
+ * A claim made in words none of the rules names ("your knee bent to a right
+ * angle and a half" is not a number with a sign), a number spelled in a
+ * script whose digits NFKC does not fold, and anything outside the text. A
+ * write-up that passes has been shown to break the two rules, and no more.
+ */
+
+import type { UntrustedText } from './model-answer';
+import {
+  type AngleClaimKind,
+  angleClaimKinds,
+  decodeCharacterReferences,
+  INVISIBLE,
+} from './angle-claims';
+
+/**
+ * The longest write-up this screen shows and `packages/store` keeps, in UTF-16
+ * code units — #800, and the bound #798's runtime screen holds a write-up to.
+ *
+ * ⚠️ **Here, so there is one number.** It was declared in `packages/store`
+ * until #1094; the store now imports it from this package, and this package
+ * imports nothing from the store (ADR 0046 D-5). At most eight sections, a
+ * position section and a summary (epic #795) at a generous paragraph each is
+ * well under it; a page of a book is about 2 000.
+ */
+export const MAXIMUM_WRITE_UP_CHARACTERS = 16_000;
+
+declare const screened: unique symbol;
+
+/** A model's write-up that passed {@link screenWriteUp}: plain text, to be shown as text. */
+export type ScreenedWriteUp = string & { readonly [screened]: true };
+
+/**
+ * Why a write-up was withheld — the kind of finding, never its words. The
+ * angle kinds are `angle-claims.ts`'s; the rest are this screen's own.
+ */
+export type ScreenReason =
+  'empty' | 'too-long' | 'ill-formed' | 'control-character' | AngleClaimKind;
+
+/** A write-up that is not shown, and every kind of reason it is not. */
+export interface WithheldWriteUp {
+  readonly withheld: readonly ScreenReason[];
+}
+
+/** Every control character but a newline: C0, DEL and C1. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_BUT_NEWLINE = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+
+/**
+ * The write-up as a rider would be shown it, or every kind of reason it is
+ * withheld. Never throws.
+ */
+export function screenWriteUp(text: UntrustedText): ScreenedWriteUp | WithheldWriteUp {
+  // Before anything else: `normalize` and every `u` pattern below read a lone
+  // surrogate as if it were a character, and it is not one.
+  if (!text.isWellFormed()) {
+    return { withheld: ['ill-formed'] };
+  }
+  const shown = text
+    .normalize('NFC')
+    .replace(/\r\n?|[\u2028\u2029]/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(INVISIBLE, '')
+    .trim();
+  if (shown === '') {
+    return { withheld: ['empty'] };
+  }
+  // Refused before anything is matched, so no pattern ever runs over a text
+  // longer than the one bound every holder of a write-up agrees on.
+  if (shown.length > MAXIMUM_WRITE_UP_CHARACTERS) {
+    return { withheld: ['too-long'] };
+  }
+  const reasons = new Set<ScreenReason>();
+  if (CONTROL_BUT_NEWLINE.test(shown)) {
+    reasons.add('control-character');
+  }
+  for (const kind of [
+    ...angleClaimKinds(shown),
+    ...angleClaimKinds(decodeCharacterReferences(shown)),
+  ]) {
+    reasons.add(kind);
+  }
+  return reasons.size === 0 ? (shown as ScreenedWriteUp) : { withheld: [...reasons] };
+}
+
+/** Whether {@link screenWriteUp} let the write-up through. */
+export function passedScreen(
+  outcome: ScreenedWriteUp | WithheldWriteUp,
+): outcome is ScreenedWriteUp {
+  return typeof outcome === 'string';
+}
+
+/**
+ * A write-up read back from the store, screened AGAIN before it is shown —
+ * #805: a stored row is not trusted because the code that wrote it screened
+ * it. A row can be hand-edited, restored from an older build's export, or
+ * written by a build whose screen was weaker, so the ride's page runs every
+ * saved write-up through {@link screenWriteUp} exactly as a fresh reply is.
+ *
+ * It takes a plain `string` because that is what the store hands back, and
+ * treats it as untrusted, which is what it is.
+ */
+export function screenSavedWriteUp(text: string): ScreenedWriteUp | WithheldWriteUp {
+  return screenWriteUp(text as UntrustedText);
+}

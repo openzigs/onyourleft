@@ -11,8 +11,9 @@
 #
 # ⚠️ The context is the root, not this directory, since #780: the room core
 # imports three of this repository's packages (`packages/domain`, `physics`,
-# `protocol`), and the instance has runtime dependencies (`kysely`, `ws`) to
-# install from the lockfile. `Dockerfile.dockerignore` beside this file is
+# `protocol`), the analysis agent a fourth (`packages/analysis`, #1098), and
+# the instance has runtime dependencies (`kysely`, `ws`, and since #1096 the
+# AI SDK) to install from the lockfile. `Dockerfile.dockerignore` beside this file is
 # the context's allowlist — BuildKit reads it for this Dockerfile alone — so
 # nothing else in the repository reaches the build.
 #
@@ -40,10 +41,12 @@ COPY apps/instance/package.json apps/instance/
 COPY packages/domain/package.json packages/domain/
 COPY packages/physics/package.json packages/physics/
 COPY packages/protocol/package.json packages/protocol/
+COPY packages/analysis/package.json packages/analysis/
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter @onyourleft/instance...
 COPY packages/domain packages/domain
 COPY packages/physics packages/physics
 COPY packages/protocol packages/protocol
+COPY packages/analysis packages/analysis
 COPY apps/instance apps/instance
 
 FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6

@@ -403,6 +403,11 @@ export function confirmationTokenFixture(athleteId: string): string {
   return hexOf(`confirm-${athleteId}`);
 }
 
+/** The SHA-256 of a fixture athlete's one recovery code, as `registrationFixture` registers it. */
+export function recoveryCodeFixture(athleteId: string): string {
+  return hexOf(`recovery-${athleteId}`);
+}
+
 /**
  * A fixture athlete's registration: their first key, a recovery code, and an
  * email address waiting to be confirmed (#865) — `seedWorld` confirms it.
@@ -411,7 +416,7 @@ export function registrationFixture(athleteId: string): Registration {
   return {
     athlete: athleteFixture(athleteId),
     key: deviceKeyFixture(athleteId),
-    recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
+    recoveryCodeSha256s: [recoveryCodeFixture(athleteId)],
     recoveryEmailConfirmation: {
       tokenSha256: confirmationTokenFixture(athleteId),
       address: `${athleteId}@example.org`,

@@ -48,8 +48,8 @@
  * the controller cannot keep this one alive by name.
  */
 
-import type { SealedStep } from '../ride-analysis/sealed-step';
-import type { UntrustedText } from './model-answer';
+import type { SealedStep } from '@onyourleft/analysis';
+import type { UntrustedText } from '@onyourleft/analysis';
 
 /** What this client may ask, as a closed set. */
 export type HostedQuestion = 'connection-check';

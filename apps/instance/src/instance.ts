@@ -9,10 +9,20 @@ import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
 import { identitySettings, type Config } from './config.ts';
 import { createHandler, type Handler } from './handler.ts';
+import {
+  HOSTED_KEY_NO_SECRET,
+  HOSTED_KEY_UNREADABLE,
+  hostedKeyState,
+  importSecretKey,
+  type HostedKeyState,
+  type SecretKey,
+} from './analysis/hosted-key.ts';
+import { createLocalModel } from './analysis/model.ts';
+import type { ModelConnection } from './analysis/model-turn.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
-import { logEvent, type LogSink } from './log.ts';
+import { logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
@@ -94,6 +104,21 @@ export interface StartedInstance {
   readonly opened: Promise<void>;
   /** How many rate-limit keys — internet addresses among them — the accounts hold now (#892). */
   heldRateLimitKeys(): number;
+  /**
+   * The analysis model (#1096), once the store is open and when one is
+   * configured at a local address; `undefined` otherwise. ⚠️ **Nothing calls
+   * it yet**: the agent that runs over it (`analysis/agent.ts`, #1098) is
+   * started by #1095's job engine, which is not built.
+   */
+  analysisModel(): ModelConnection | undefined;
+  /**
+   * The hosted model key (#1097), opened with `OYL_INSTANCE_SECRET_KEY` if it
+   * can be — what `analysis/source.ts` §`modelForSource` is handed once the
+   * job engine (#1095) calls it. `none` until the store is open.
+   */
+  hostedModelKey(): Promise<HostedKeyState>;
+  /** Resolves once the hosted key's state has been logged at opening. */
+  readonly hostedKeyReported: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -135,6 +160,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let store: SqlStore | undefined;
   let identity: Identity | undefined;
   let history: History | undefined;
+  let analysisModel: ModelConnection | undefined;
+  let hostedKeyReported: Promise<void> = Promise.resolve();
+  // Imported once, non-extractable; a failed import is no secret at all.
+  const secretKey: Promise<SecretKey | undefined> =
+    server.secretKey === undefined
+      ? Promise.resolve(undefined)
+      : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
@@ -271,6 +303,35 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ? { state: 'on', model: settings.embedding.model }
         : { state: 'off', code: settings.code },
     );
+    // The analysis model (#1096, ADR 0046 D-9 source 1): off, and saying why,
+    // when no local model is configured. Its address is checked again on
+    // every turn (`analysis/model.ts`); no model name is logged.
+    const analysis = options.config.analysis;
+    analysisModel =
+      analysis.kind === 'on'
+        ? createLocalModel({ settings: analysis, resolve: options.resolve ?? systemResolver })
+        : undefined;
+    logEvent(
+      log,
+      'analysis-model',
+      analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
+    );
+    // The hosted model key (#1097): whether one is held, and whether this
+    // secret opens it. A key that will not open — a restore onto a box with
+    // another secret — is SAID, never a crash: the hosted source is then
+    // unavailable, and the local model, or none, is all there is. Never the
+    // key, its URL or its model.
+    const opened = store;
+    hostedKeyReported = (async () => {
+      const state = await hostedKeyState(opened, await secretKey);
+      logEvent(log, 'hosted-model-key', {
+        state: state.kind,
+        ...(state.kind === 'unreadable' ? { hostedKeyProblem: HOSTED_KEY_UNREADABLE } : {}),
+        ...(state.kind === 'no-secret' ? { hostedKeyProblem: HOSTED_KEY_NO_SECRET } : {}),
+      });
+    })().catch((error: unknown) => {
+      logUnhandled(log, null, error);
+    });
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -399,6 +460,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     opened,
     heldRateLimitKeys: () =>
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
+    analysisModel: () => analysisModel,
+    hostedModelKey: async () =>
+      store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),
+    hostedKeyReported: opened.then(() => hostedKeyReported),
     async stop() {
       stopping = true;
       stopSweeping();

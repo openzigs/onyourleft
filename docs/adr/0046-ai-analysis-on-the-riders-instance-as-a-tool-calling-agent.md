@@ -1021,3 +1021,29 @@ Until 2026-10-07 this section was §"Owner questions left open".
 - **A hosted job runs for a rider who never agreed to that service.** If Share mode ships without
   the consent the owner's Q10 ruling requires, or with one that does not name the endpoint, ADR 0029
   D-B and ADR 0031 D-4 are broken for every rider but the operator.
+
+## Amendments
+
+- **2026-10-08** — **The SDK is installed, and D-8's table is read against the install.**
+  [#1096](https://github.com/openzigs/onyourleft/issues/1096) pinned `ai` **7.0.130** and
+  `@ai-sdk/openai-compatible` **3.0.65** (each more than a day old, §8's `minimumReleaseAge`), and
+  pnpm resolved `@ai-sdk/provider` 4.0.24, `@ai-sdk/provider-utils` 5.0.56, `@ai-sdk/gateway`
+  4.0.106, `@vercel/oidc` 3.2.0, `zod` 4.6.5, `undici` 7.30.0, `eventsource-parser` 3.1.1,
+  `@standard-schema/spec` 1.1.0, `@workflow/serde` 4.1.0 and `json-schema` 0.4.0. The packages and
+  their licences are the table's; only the versions moved since it was read on 2026-10-04, and
+  `execa` is still not in the closure (`@vercel/oidc` is still 3.2.0). `pnpm run check:licences`
+  passed and `apps/instance/third-party.txt` lists all fourteen. **One fact the table did not
+  record**: `@ai-sdk/provider-utils` 5.0.56 ships **no licence file**, so its notice comes from a
+  reviewed entry in `apps/instance/third-party-notices.json` (the repository's own `LICENSE` at
+  the commit its tag names), which `scripts/check-third-party-notices.mjs` now reads for a server
+  as it reads `apps/web/third-party-notices.json` for the app. (#1096)
+- **2026-10-08** — **D-7's figures stand; #1098 replaced none of them, and measured no real
+  model.** The agent ([#1098](https://github.com/openzigs/onyourleft/issues/1098)) runs with 24
+  model turns, 16 tool calls, ten minutes and 40 000 tokens. Two facts about them that the table
+  does not say: under these figures the **tool-call budget binds before the step budget** — every
+  turn but the last calls a tool, so 16 calls allow at most 18 turns — and the token budget is
+  counted as what is **sent as well as answered**, because a tool-calling run re-sends the whole
+  conversation every turn (the chain's `RUN_TOKEN_BUDGET` counts only `max_tokens`).
+  `apps/instance/src/analysis/agent.ts` §`AGENT_TOKEN_BUDGET` says so; the owner may rule the
+  other reading. No figure was measured against a model an operator runs; that is still owed.
+  (#1098)

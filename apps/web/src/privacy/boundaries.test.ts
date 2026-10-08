@@ -74,7 +74,7 @@ import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 
 import { coordinatesIn, insideZone } from './boundaries';
-import { PATTERNS_ONLY } from '../ride-analysis/hosted-mask';
+import { PATTERNS_ONLY } from '@onyourleft/analysis';
 
 /** Small enough to be quick, long enough to enter a zone and leave it again. */
 const SAMPLE_COUNT = 400;
