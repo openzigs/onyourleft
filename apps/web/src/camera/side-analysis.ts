@@ -109,6 +109,7 @@ import {
   type SideShownLook,
 } from './side-live-view-port';
 import { sideSessionFrom } from './side-report';
+import type { SideSnapshotSource, SideSnapshotTaken } from './side-snapshot-port';
 import type { SideReportKeepingPort, SideReportSession } from './side-report-port';
 import type { SideCameraControlPort, SidePhoneState } from './side-pairing-port';
 
@@ -250,7 +251,7 @@ export interface SideAnalysisOptions {
 }
 
 /** The analysis of one pairing's pictures. */
-export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
+export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort, SideSnapshotSource {
   readonly #control: SideCameraControlPort;
   readonly #makeEstimator: () => SidePoseEstimator;
   readonly #references: FramingReferenceKeeping | undefined;
@@ -269,6 +270,13 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
   #referenceAsked = false;
   /** The live view: at most ONE picture, the one on screen (ADR 0044 D-1). */
   #live: SideLiveView = { picture: undefined, reference: undefined };
+  /**
+   * The bytes of the picture on {@link #live} — the SAME picture, as the JPEG
+   * the phone sent rather than the decoded bitmap — kept only so that *Save
+   * snapshot* can keep exactly what is on screen (#1063, ADR 0044 D-3). Set
+   * and cleared with the picture, so it is never a second picture.
+   */
+  #liveBytes: Uint8Array | undefined;
   #state: SideAnalysisState = {
     place: 'tablet',
     model: 'waiting',
@@ -323,6 +331,33 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
         // Nobody is looking: the picture on screen is not kept for later.
         this.#dropPicture();
       }
+    };
+  }
+
+  /**
+   * The picture on the live view now, for *Save snapshot* — #1063, ADR 0044
+   * D-3: *"the picture on screen when it was pressed, with the outline drawn
+   * over it"*. Its own copy of the bytes, the picture's size, and the outline
+   * as landmarks — never an angle (D-9). `undefined` with nothing on screen.
+   */
+  takeSideSnapshot(): SideSnapshotTaken | undefined {
+    const shown = this.#live.picture;
+    const bytes = this.#liveBytes;
+    if (shown === undefined || bytes === undefined) {
+      return undefined;
+    }
+    const { pose, pixels } = shown;
+    return {
+      bytes: bytes.slice(),
+      width: pixels.width,
+      height: pixels.height,
+      outline:
+        pose === undefined
+          ? undefined
+          : {
+              aspect: pose.aspect,
+              landmarks: pose.landmarks.map((mark) => ({ name: mark.name, x: mark.x, y: mark.y })),
+            },
     };
   }
 
@@ -406,10 +441,14 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
     // #1061: the picture back from the model only while somebody is watching
     // the live view, and only from a model that can give it (the tablet's own;
     // the rider's computer cannot, so its pictures are not shown).
-    const look: SideShownLook =
-      this.#viewers.size > 0 && canShowPicture(estimator)
-        ? await estimator.estimateSidePoseShowingPicture(picture.bytes)
-        : { outcome: await estimator.estimateSidePose(picture.bytes), pixels: undefined };
+    const showing = this.#viewers.size > 0 && canShowPicture(estimator);
+    // #1063: the bytes are handed to the model and leave this page with it
+    // (`pose-estimator.ts` transfers them), so the picture that may be shown
+    // keeps a copy of its own bytes for a snapshot — and only that picture.
+    const bytes = showing ? picture.bytes.slice() : undefined;
+    const look: SideShownLook = showing
+      ? await estimator.estimateSidePoseShowingPicture(picture.bytes)
+      : { outcome: await estimator.estimateSidePose(picture.bytes), pixels: undefined };
     const { outcome } = look;
     if (this.#state.finished) {
       look.pixels?.close();
@@ -417,7 +456,7 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
       return;
     }
     this.#record(picture, outcome);
-    this.#show(picture.sequence, look);
+    this.#show(picture.sequence, look, bytes);
     const next = this.#waiting;
     this.#waiting = undefined;
     if (next !== undefined && this.#state.model !== 'unavailable') {
@@ -468,16 +507,21 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
    * model found nobody in is shown with no outline, never with the last
    * picture's (ADR 0044 D-11: a refused answer draws none).
    */
-  #show(sequence: number, look: SideShownLook): void {
+  #show(sequence: number, look: SideShownLook, bytes: Uint8Array | undefined): void {
     const { pixels, outcome } = look;
     if (pixels === undefined) {
       return;
     }
-    if (this.#viewers.size === 0 || !showsPictures(this.#control.sideControlState().phone)) {
+    if (
+      bytes === undefined ||
+      this.#viewers.size === 0 ||
+      !showsPictures(this.#control.sideControlState().phone)
+    ) {
       pixels.close();
       return;
     }
     const before = this.#live.picture;
+    this.#liveBytes = bytes;
     this.#setLive({
       ...this.#live,
       picture: {
@@ -493,6 +537,7 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
   /** Take the picture off the live view and let it go. */
   #dropPicture(): void {
     const before = this.#live.picture;
+    this.#liveBytes = undefined;
     if (before === undefined) {
       return;
     }

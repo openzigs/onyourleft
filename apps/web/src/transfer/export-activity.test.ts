@@ -35,6 +35,7 @@ import {
   lapFor,
   rideFor,
   seedAthletes,
+  snapshotFor,
   streamSetFor,
   type StoreHarness,
 } from '@onyourleft/store/testing';
@@ -607,4 +608,28 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
       ActivityExportError,
     );
   });
+});
+
+describe('a ride exported on its own never carries its side-camera snapshot — #1063', () => {
+  // ADR 0044 D-5: *"An activity export to a third party never carries one"*,
+  // and ADR 0029 D-3. A FIT, GPX or TCX file has no field for an image, so the
+  // claim is that no byte of the picture rides along in any format.
+  for (const format of ['fit', 'gpx', 'tcx'] as const) {
+    it(`writes no byte of it into the ${format} file`, async () => {
+      const { open, ride } = await seedOutdoorRide();
+      const snapshot = snapshotFor(ATHLETE_A, ride.id, { length: 600 });
+      await open.write(async (store) => store.putCameraFrame(snapshot));
+      const { file } = await exportWithFaults(open, ride.id, format);
+      expect(file.mediaType).not.toBe('image/jpeg');
+      // A distinctive run of the picture's own bytes — past its JPEG header,
+      // which any file might share by chance — must not appear in the file.
+      const needle = Array.from(snapshot.bytes.subarray(64, 96)).join(',');
+      expect(Array.from(file.bytes).join(',')).not.toContain(needle);
+      // And the snapshot is still there afterwards: the export read nothing of
+      // it and took nothing from it.
+      await expect(
+        open.read(async (store) => store.countRideSnapshots(ATHLETE_A, ride.id)),
+      ).resolves.toBe(1);
+    });
+  }
 });

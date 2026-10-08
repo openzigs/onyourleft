@@ -164,8 +164,9 @@ export function keptSummarySentence(captured: number, kept: number): string {
  * same thing one layer down, and `assertCameraFrameRoundTrip` compares byte for
  * byte because of it.
  *
- * ⚠️ **No name, no activity, no position.** `CameraFrameRecord` has nowhere to
- * put any of them and `records.ts` argues each absence; what matters here is
+ * ⚠️ **No name, no activity, no position.** A kept frame's `activityId` is
+ * `null` (only a #1063 snapshot names a ride), and the record has nowhere for
+ * the other two and `records.ts` argues each absence; what matters here is
  * that this function does not invent one — a `name` derived from a ride, say,
  * would be a place name in a field ADR 0004 decision D binds.
  */
@@ -178,5 +179,10 @@ function recordFor(port: CameraStorePort, frame: CapturedFrame): CameraFrameReco
     width: frame.width,
     height: frame.height,
     bytes: frame.bytes,
+    // #1063: a kept frame names no ride and carries no outline; only a
+    // side-camera snapshot does (`snapshot-keeper.ts`).
+    source: 'kept',
+    activityId: null,
+    outline: null,
   };
 }

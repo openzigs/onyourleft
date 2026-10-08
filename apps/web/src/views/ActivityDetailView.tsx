@@ -87,6 +87,8 @@ import {
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
 import { SideCameraSection } from '../detail/SideCameraSection';
+import { RideSnapshotsSection } from '../detail/RideSnapshotsSection';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
 import { RaceConsentSection } from '../detail/RaceConsentSection';
 import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
@@ -164,6 +166,12 @@ export interface ActivityDetailViewProps {
    * there is no store — the box then says so and offers no control.
    */
   readonly riderText?: RiderTextPort | undefined;
+  /**
+   * This ride's side-camera snapshots (#1063), read only once the rider opens
+   * their section, or `undefined` where there is no store — and then the
+   * section is absent.
+   */
+  readonly snapshots?: RideSnapshotsPort | undefined;
 }
 
 /**
@@ -216,6 +224,7 @@ export function ActivityDetailView({
   preferences,
   writeUp,
   riderText,
+  snapshots,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -594,6 +603,13 @@ export function ActivityDetailView({
         report renders nothing here at all.
       */}
       <SideCameraSection sideCamera={sideCamera} />
+
+      {/*
+        #1063. The side camera's snapshots of this ride — counted in words and
+        CLOSED until the rider opens them; no picture is read or mounted before
+        that (ADR 0044 D-6). A ride with none renders nothing.
+      */}
+      <RideSnapshotsSection port={snapshots} activityId={activity.id} />
 
       {/*
         #804, #805. A model's write-up of this ride, on every ride's page and

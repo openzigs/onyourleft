@@ -107,6 +107,7 @@ import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { SideCameraControl } from './SideCameraControl';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 
 /**
  * What became of the picture just taken — kept, dropped, or refused a home.
@@ -151,6 +152,8 @@ export interface CameraViewProps {
    * says why it cannot be paired.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /** Where *Save snapshot* holds a picture for its ride — #1063. */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
 }
 
 /** The heading of the side camera's way in — #557. */
@@ -224,7 +227,11 @@ export const CAMERA_KEPT_VISIBLE: readonly string[] = [
   ...CAMERA_AGREED_KEPT_VISIBLE,
 ];
 
-export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
+export function CameraView({
+  controller,
+  sidePairing,
+  sideSnapshots,
+}: CameraViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <section aria-labelledby={TITLE_ID}>
@@ -233,15 +240,17 @@ export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.El
       </section>
     );
   }
-  return <Camera controller={controller} sidePairing={sidePairing} />;
+  return <Camera controller={controller} sidePairing={sidePairing} sideSnapshots={sideSnapshots} />;
 }
 
 function Camera({
   controller,
   sidePairing,
+  sideSnapshots,
 }: {
   readonly controller: CameraController;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly sideSnapshots: SideSnapshotPort | undefined;
 }): JSX.Element {
   // ⚠️ Three booleans rather than the whole state object: `useSyncExternalStore`
   // compares snapshots with `Object.is`, so a getter returning a fresh object
@@ -509,7 +518,11 @@ function Camera({
         taken for it.
       */}
       {sidePairing === undefined ? null : (
-        <SideCameraControl controller={controller} pairing={sidePairing} />
+        <SideCameraControl
+          controller={controller}
+          pairing={sidePairing}
+          snapshots={sideSnapshots}
+        />
       )}
 
       {agreed ? (

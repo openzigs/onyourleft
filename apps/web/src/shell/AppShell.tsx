@@ -69,6 +69,8 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
@@ -231,6 +233,17 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * Where *Save snapshot* holds a side-camera picture until the ride it joins
+   * is saved — #1063, `camera/snapshot-keeper.ts`. One per tab, built by
+   * `main.tsx` beside the side-camera report's keeper.
+   */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
+  /**
+   * A ride's side-camera snapshots, read only once the rider opens their
+   * section on that ride's page — #1063, `detail/ride-snapshots-port.ts`.
+   */
+  readonly rideSnapshots?: RideSnapshotsPort | undefined;
   /**
    * Other real riders — #782, #783: the room port `main.tsx` builds over the
    * instance this device is connected to. Handed to the game, which joins a
@@ -549,6 +562,8 @@ function viewFor(
           basemap={props.basemap}
           writeUp={props.rideAnalysis}
           riderText={props.riderText}
+          // #1063: the ride's side-camera snapshots, closed until opened.
+          {...(props.rideSnapshots === undefined ? {} : { snapshots: props.rideSnapshots })}
         />
       );
     case 'analysis':
@@ -607,6 +622,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1063: where Save snapshot holds a picture for its ride.
+          {...(props.sideSnapshots === undefined ? {} : { sideSnapshots: props.sideSnapshots })}
         />
       );
     case 'side-camera':

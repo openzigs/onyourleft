@@ -140,7 +140,7 @@ function headerNumber(value: number): boolean {
  * but it refuses a truncated picture, a PNG and a message of noise before any
  * of them reaches one.
  */
-function wholeJpeg(bytes: Uint8Array): boolean {
+export function wholeJpeg(bytes: Uint8Array): boolean {
   const last = bytes.length - 1;
   return (
     bytes.length >= 4 &&

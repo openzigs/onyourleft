@@ -90,6 +90,14 @@ const MINIMUM_PICTURE_MODULES = [
   'camera/shell-camera.ts',
   'camera/pose-runtime.ts',
   'camera/pose-worker.ts',
+  // #1063, ADR 0044 D-11: a side-camera snapshot is never sent to the rider's
+  // computer, a hosted model or an instance. Its modules are named here
+  // whatever their code says, so no request module may reach one.
+  'camera/side-snapshot-port.ts',
+  'camera/snapshot-keeper.ts',
+  'camera/SideSnapshotControl.tsx',
+  'detail/ride-snapshots-port.ts',
+  'detail/RideSnapshotsSection.tsx',
 ] as const;
 
 /** The hosted path (#518, #760). */

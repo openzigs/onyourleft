@@ -48,6 +48,8 @@ import type { CameraFacing } from '../camera/camera-port';
 import type { CameraController } from '../camera/session';
 import { ScanViewfinder } from '../camera/ScanViewfinder';
 import { SideLiveView } from '../camera/SideLiveView';
+import { SideSnapshotControl } from '../camera/SideSnapshotControl';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import {
   SIDE_PAIRING_END_TEXT,
@@ -97,9 +99,19 @@ const OFFERS_ON_SCREEN = new WeakMap<SideCameraControlPort, number>();
 export interface SideCameraControlProps {
   readonly controller: CameraController;
   readonly pairing: SidePairingPort;
+  /**
+   * Where *Save snapshot* holds a picture for its ride (#1063,
+   * `camera/snapshot-keeper.ts`), or `undefined` where there is no ride to
+   * keep one with — and then the control is not offered.
+   */
+  readonly snapshots?: SideSnapshotPort | undefined;
 }
 
-export function SideCameraControl({ controller, pairing }: SideCameraControlProps): JSX.Element {
+export function SideCameraControl({
+  controller,
+  pairing,
+  snapshots,
+}: SideCameraControlProps): JSX.Element {
   const [current, setCurrent] = useState<TabletSidePairing | undefined>(() => {
     // An offer this screen voided on its way out (D-4, {@link Offer}) is not
     // news on the way back in: the rider left, and "You ended the session"
@@ -160,7 +172,13 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
           )}
         </>
       ) : (
-        <Paired controller={controller} pairing={current} again={pair} busy={busy} />
+        <Paired
+          controller={controller}
+          pairing={current}
+          snapshots={snapshots}
+          again={pair}
+          busy={busy}
+        />
       )}
     </section>
   );
@@ -169,11 +187,13 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
 function Paired({
   controller,
   pairing,
+  snapshots,
   again,
   busy,
 }: {
   readonly controller: CameraController;
   readonly pairing: TabletSidePairing;
+  readonly snapshots: SideSnapshotPort | undefined;
   readonly again: () => void;
   readonly busy: boolean;
 }): JSX.Element {
@@ -209,6 +229,20 @@ function Paired({
       {pairing.liveView !== undefined &&
       (state.phone === 'framing' || state.phone === 'filming') ? (
         <SideLiveView view={pairing.liveView} controller={controller} />
+      ) : null}
+      {/*
+        #1063: one press, one picture — only beside the live view, and only
+        while it has a picture on screen (ADR 0044 D-3).
+      */}
+      {pairing.liveView !== undefined &&
+      pairing.snapshots !== undefined &&
+      snapshots !== undefined &&
+      (state.phone === 'framing' || state.phone === 'filming') ? (
+        <SideSnapshotControl
+          view={pairing.liveView}
+          source={pairing.snapshots}
+          snapshots={snapshots}
+        />
       ) : null}
     </>
   );

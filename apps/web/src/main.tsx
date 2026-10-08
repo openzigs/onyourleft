@@ -81,6 +81,9 @@ import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
+import { sideSnapshotKeeper } from './camera/snapshot-keeper';
+import type { SideSnapshotPort } from './camera/side-snapshot-port';
+import type { RideSnapshotsPort } from './detail/ride-snapshots-port';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
@@ -656,7 +659,7 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
   return gameTrainerPortOver(controller);
 }
 
-function buildTransferPort(): TransferPort | undefined {
+function buildTransferPort(heldSnapshots: SideSnapshotPort | undefined): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
   }
@@ -675,7 +678,35 @@ function buildTransferPort(): TransferPort | undefined {
     theme: themeEraser(window),
     hostedModel: hostedModelEraser(),
     instance: instanceEraser(typeof localStorage === 'undefined' ? undefined : localStorage),
+    // #1063: snapshots held in memory for a ride not yet saved go with an erase.
+    ...(heldSnapshots === undefined ? {} : { heldSnapshots }),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
+  };
+}
+
+/**
+ * A ride's side-camera snapshots, for its page — #1063, ADR 0044 D-5, D-6 and
+ * D-12. The same connection as every other port; the object URLs are the
+ * platform's own, made only once the rider opens the section; and the secure
+ * window is the camera controller's one count, so a snapshot and a live view
+ * on screen together never clear the flag early. With no camera controller
+ * there is no flag to hold, and holding it does nothing.
+ */
+function buildRideSnapshotsPort(camera: CameraController | undefined): RideSnapshotsPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    objectUrls:
+      typeof URL.createObjectURL === 'function'
+        ? {
+            create: (bytes, mediaType) =>
+              URL.createObjectURL(new Blob([bytes as BlobPart], { type: mediaType })),
+            revoke: (url) => {
+              URL.revokeObjectURL(url);
+            },
+          }
+        : undefined,
+    holdSecureWindow: () => camera?.holdSecureWindow() ?? (() => undefined),
   };
 }
 
@@ -1056,6 +1087,23 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #1063. Each side-camera snapshot, held in this tab's memory and written
+  // with the ride it joins, after that ride's save (ADR 0044 D-3) — so, like
+  // the report, it needs the ride controller, and with none there is no ride
+  // to keep one with and Save snapshot is not offered. ⚠️ Optional on
+  // `AppShell`, so leaving it out is green in `check:wiring` (§Limits' third
+  // entry): `views/SideCameraControl.test.tsx` §"#1063" drives the control
+  // with a keeper over the real link, and this line is what supplies it.
+  const sideSnapshots =
+    rideController === undefined
+      ? undefined
+      : sideSnapshotKeeper({
+          rides: rideController,
+          store: localStore(),
+          athleteId: LOCAL_ATHLETE,
+          newFrameId: () => globalThis.crypto.randomUUID(),
+          now: browserClock,
+        });
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
         // #557: the tablet stays awake while it pairs and while it is paired.
@@ -1107,6 +1155,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
+          {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
+          rideSnapshots={buildRideSnapshotsPort(camera)}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
@@ -1131,7 +1181,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
           menuSounds={menuSounds}
-          transfer={buildTransferPort()}
+          transfer={buildTransferPort(sideSnapshots)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
           rideAnalysis={rideAnalysis}
