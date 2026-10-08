@@ -117,12 +117,15 @@ function modulesUnder(directory: string): string[] {
 }
 
 /**
- * The app's half of the history index (#835, ADR 0040 D-2 item 1): the sync
- * that pushes a ride's summary to the rider's instance. Its retrieval half is
- * `ride-analysis/history.ts`, walked with the rest of that directory; the
- * instance's half is `apps/instance/src/history/no-picture.test.ts`.
+ * Every module of the app's half of an instance: the history index's sync
+ * (#835, ADR 0040 D-2 item 1), sign-in, moderation and the transport. Its
+ * retrieval half is `ride-analysis/history.ts`, walked with the rest of that
+ * directory; the instance's half is `apps/instance/src/history/no-picture.test.ts`.
+ *
+ * ⚠️ The whole directory since #1063's review, not `sync.ts` alone: a second
+ * module that sends to an instance is walked with no edit here (ADR 0044 D-11).
  */
-const HISTORY_ENTRIES = ['instance/sync.ts'] as const;
+const HISTORY_ENTRIES = modulesUnder('instance');
 
 /** Every module a model request is built from, or history is indexed from. */
 const ENTRIES = [...HOSTED_ENTRIES, ...HISTORY_ENTRIES, ...modulesUnder('ride-analysis')] as const;
@@ -185,6 +188,37 @@ describe('the module graph (#799)', () => {
       expect(picturesReached(walk.closure([entry]), FORBIDDEN)).toStrictEqual([]);
     },
   );
+});
+
+/**
+ * The store's two picture reads, and the record they return — #1063's review.
+ *
+ * An import walk cannot see a request module that is HANDED a store and calls
+ * `listRideSnapshots` through a port it declares itself: no picture module is
+ * imported. So the names themselves are refused in every module a model
+ * request or an instance push is built from (ADR 0044 D-11).
+ */
+const PICTURE_READS = /\b(?:listRideSnapshots|listCameraFrames|CameraFrameRecord)\b/u;
+
+/** The request-path modules {@link PICTURE_READS} is checked over. */
+const REQUEST_PATH = [...modulesUnder('instance'), ...modulesUnder('ride-analysis')];
+
+describe('no request module names a picture read (#1063’s review)', () => {
+  it('checks the modules it says it does', () => {
+    expect(REQUEST_PATH).toContain('instance/sync.ts');
+    expect(REQUEST_PATH).toContain('ride-analysis/input.ts');
+  });
+
+  it.each(REQUEST_PATH)('%s names no picture read and no picture record', (path) => {
+    expect(stripComments(readFromDisk(path) ?? '')).not.toMatch(PICTURE_READS);
+  });
+
+  it('fires on a module that calls one', () => {
+    expect(stripComments('const rows = await store.listRideSnapshots(owner, ride);')).toMatch(
+      PICTURE_READS,
+    );
+    expect(stripComments('type Row = CameraFrameRecord;')).toMatch(PICTURE_READS);
+  });
 });
 
 describe('the walk can fire (#799’s control)', () => {
