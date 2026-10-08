@@ -28,8 +28,10 @@
  * {@link setupBaseSender} always generates its ephemeral key pair. The A.1
  * vectors need a fixed one, so the injectable form is `hpke-testing.ts`
  * §`setupBaseSenderWithEphemeral`, which is not on `src/index.ts`
- * (`hpke-surface.test.ts` holds that with a `@ts-expect-error`) and which
- * `eslint.config.js` refuses to any module that is not a test or test support.
+ * (`hpke-surface.test.ts` holds that with a `@ts-expect-error`). This module's
+ * own `setupSender` and `encap` do take one, so `eslint.config.js` refuses an
+ * import of `hpke/hpke` from any module but `src/index.ts`, `hpke-testing.ts`
+ * and tests.
  * A sender that reused an ephemeral key would make every request to one
  * instance key share a shared secret.
  */

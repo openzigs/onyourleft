@@ -287,6 +287,14 @@ const HPKE_TESTING_IMPORT_PATTERNS = [
     message:
       'HPKE test support (an injectable ephemeral key) is for tests only (#1188, ADR 0047 D-3). Use setupBaseSender from @onyourleft/domain.',
   },
+  {
+    // `hpke.ts` exports `setupSender` and `encap`, which take an ephemeral
+    // key. Only `src/index.ts` (which re-exports the safe names),
+    // `hpke-testing.ts` and tests may name the module (#1196 review).
+    group: ['**/hpke/hpke', '**/hpke/hpke.ts', './hpke', './hpke.ts'],
+    message:
+      'hpke.ts exports the ephemeral-key-taking core (setupSender, encap). Import setupBaseSender from @onyourleft/domain instead (#1188, ADR 0047 D-3).',
+  },
 ];
 
 /** Where a test or test support lives, for the rules such files are exempt from. */
@@ -534,6 +542,13 @@ export default tseslint.config(
   {
     files: TEST_AND_TEST_SUPPORT_FILES,
     ignores: ['apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  // The two non-test modules allowed to name `hpke/hpke` (#1196 review).
+  {
+    files: ['packages/domain/src/index.ts', 'packages/domain/src/hpke/hpke-testing.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
     },

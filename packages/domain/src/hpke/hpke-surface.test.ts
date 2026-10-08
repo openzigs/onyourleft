@@ -11,9 +11,10 @@
  * `undefined` check is the second half, for a run that skips the typecheck.
  *
  * The other half of "no production module can reach it" is
- * `eslint.config.js` §`HPKE_TESTING_IMPORT_PATTERNS`: the only module that
- * carries the injection is `hpke-testing.ts`, and that rule refuses its import
- * outside a test or test support.
+ * `eslint.config.js` §`HPKE_TESTING_IMPORT_PATTERNS`: `hpke.ts` itself carries
+ * the injection (`setupSender`, `encap`), so that rule refuses an import of
+ * `hpke/hpke` or `hpke-testing` outside `index.ts`, `hpke-testing.ts` and
+ * tests.
  */
 
 import { describe, expect, it } from 'vitest';
