@@ -14,11 +14,13 @@
  * docs/agents/quality-gate.md §5's *wrong time* and *wrong layer* causes in one store.
  */
 
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
 import { activityId as activityIdOf } from './ids';
 import { fromPersistedCameraFrame, toPersistedCameraFrame } from './persisted';
+import { SCHEMA_VERSIONS, TABLE } from './schema';
 import type { PersistedCameraFrame } from './persisted';
 import {
   assertCameraFrameRoundTrip,
@@ -360,6 +362,30 @@ describe('a side-camera snapshot', () => {
     // The other ride's snapshot, and the kept frame, are untouched.
     await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
       2,
+    );
+  });
+
+  it('goes with its OWNER’s ride only: another athlete’s row naming that ride id stays (#1063’s review)', async () => {
+    // `putCameraFrame` refuses a snapshot naming another athlete's ride, so
+    // this row is written past it, raw — the case the delete's owner scope is
+    // for. A cascade by activity id alone would take B's row with A's ride.
+    const ride = await seedRide(harness, ATHLETE_A);
+    await harness.discard();
+    const raw = new Dexie(harness.databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    await raw
+      .table(TABLE.cameraFrames)
+      .put(toPersistedCameraFrame(snapshotFor(ATHLETE_B, ride.id)));
+    raw.close();
+    // The control: the row is there, under B, before the delete.
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_B))).resolves.toBe(
+      1,
+    );
+    await harness.write(async (store) => store.deleteActivity(ATHLETE_A, ride.id));
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_B))).resolves.toBe(
+      1,
     );
   });
 
