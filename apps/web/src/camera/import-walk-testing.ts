@@ -140,6 +140,13 @@ export function analysisImportsIn(
   specifier: string,
   fileName = 'module.tsx',
 ): readonly string[] | 'whole' {
+  // A module that never spells the specifier cannot refer to it, and most do
+  // not: the safety gates ask this of every source file in the client, and a
+  // whole-tree walk of each was what took the importer check past its timeout
+  // on CI (#1184's fix round).
+  if (!code.includes(specifier)) {
+    return [];
+  }
   const source = ts.createSourceFile(
     fileName,
     code,
@@ -278,6 +285,20 @@ export function analysisModuleDeclaring(name: string): string | undefined {
   return exportedBy.get(name);
 }
 
+const reachableBy = new Map<string, readonly string[]>();
+
+/** Every module `specifier`'s barrel can reach, specifier-shaped, read from disk once. */
+function everyModuleOf(specifier: string): readonly string[] {
+  let modules = reachableBy.get(specifier);
+  if (modules === undefined) {
+    modules = analysisModules(ANALYSIS_ROOT, specifier !== '@onyourleft/analysis').map((path) =>
+      path.replace(/\.ts$/, ''),
+    );
+    reachableBy.set(specifier, modules);
+  }
+  return modules;
+}
+
 /**
  * {@link specifiersIn}, and for every name imported from `@onyourleft/analysis`
  * (or `/testing`) by name, the path of the package module that declares it
@@ -291,12 +312,10 @@ export function analysisModuleDeclaring(name: string): string | undefined {
  * well for `/testing`. Conservative, as following `index.ts` in the walk is.
  */
 export function specifiersThrough(code: string, fileName = 'module.tsx'): string[] {
-  const through = Object.keys(FOLLOWED_PACKAGES).flatMap((specifier) => {
+  const through = Object.keys(FOLLOWED_PACKAGES).flatMap((specifier): readonly string[] => {
     const taken = analysisImportsIn(code, specifier, fileName);
     if (taken === 'whole') {
-      return analysisModules(ANALYSIS_ROOT, specifier !== '@onyourleft/analysis').map((path) =>
-        path.replace(/\.ts$/, ''),
-      );
+      return everyModuleOf(specifier);
     }
     return taken.flatMap((name) => {
       const module = analysisModuleDeclaring(name);
