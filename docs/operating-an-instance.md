@@ -168,10 +168,12 @@ What the agent sends the model and what it may read is in
 
 Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
 service (#1097, [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
-D-9). ⚠️ **Nothing uses it yet**: a hosted request must be masked first (#1101), so until that
-lands a job that asks for the hosted source fails `hosted_unavailable` and sends nothing. And it is
-used only for a job whose rider's device asked for it — the consent is per job, never the
-instance's.
+D-9). ⚠️ **Nothing uses it yet, for anyone — you included.** A hosted job runs only for an athlete
+whose own consent, naming the endpoint, is recorded on the instance (ADR 0046 Q10), and is refused
+before the key is read; and a hosted request must be masked first (#1101). Neither is built, so a job
+that asks for the hosted source fails `hosted_unavailable`, the key is not opened, and nothing is
+sent. And it is used only for a job whose rider's device asked for it — the source is chosen per
+job, never by the instance.
 
 **Held for you, the operator, and for nobody else yet.** The instance also hosts group rides and
 races, so it has other riders, and holding a key changes nothing about them: they register and ride
@@ -179,11 +181,18 @@ as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider onl
 held for the operator, who is, in the owner's Q9 ruling, *"the athlete whose device holds
 `OYL_INSTANCE_OWNER_KEY`, the key that already makes them moderator"*: `model-key set` looks that
 athlete up, and is refused when the variable is unset or your device has not signed in to this
-instance yet. **Only your own jobs can use it.** Another rider's job that asks for the hosted
-source fails `hosted_unavailable`, because the two things ADR 0046 requires before it may run are
-not built yet: your switch for other riders (Q13: *"Other riders get no analysis until the operator
-turns it on, whichever key they use"*), and that rider's own consent, recorded on the instance and
-naming the endpoint (Q10). Erasing your account (`DELETE /v1/account`) erases the key with it. Your
+instance yet. **No job can use it yet, yours included.** ADR 0046 Q10 binds you as it binds every
+rider: a hosted job runs only for an athlete whose own consent, recorded on the instance and naming
+the endpoint, is there, and recording that consent is not built yet — for you or anyone. Another
+rider's job is refused for a second reason as well: your switch for other riders (Q13: *"Other
+riders get no analysis until the operator turns it on, whichever key they use"*) is not built
+either. What remains of #1097 — the switch, a rider's own key, the consent, and where a pasted key
+may be typed — is #1199.
+
+**The key stays with the athlete it was set for.** It is stored against your athlete, not against
+the variable. If you change `OYL_INSTANCE_OWNER_KEY` to another athlete's device key, or your device
+key is revoked, the key does not move: run `model-key clear`, then `model-key set` again as the new
+operator. Erasing your account (`DELETE /v1/account`) erases the key with it. Your
 account export says only `"hostedModelKey": "a hosted model key is held"`; another rider's says
 `null`.
 

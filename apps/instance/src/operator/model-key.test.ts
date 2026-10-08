@@ -40,6 +40,7 @@ import {
   ATHLETE_A,
   ATHLETE_B,
   deviceKeyFixture,
+  recoveryCodeFixture,
   registrationFixture,
 } from '../store/testing/index.ts';
 
@@ -261,6 +262,30 @@ describe('the refusals of set (#1097)', () => {
     expect(refused.stderr).not.toContain(MARKER);
     expect(await databaseBytes(data.database)).not.toContain(URL_TEXT);
   });
+
+  it('refuses an OYL_INSTANCE_OWNER_KEY that has been revoked, and holds nothing', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    const store = openServingStore(data.database);
+    try {
+      // The operator's only key, revoked with their recovery code (the last-key rule).
+      expect(
+        await store.revokeDeviceKey(
+          ATHLETE_A,
+          OWNER_A,
+          1_790_000_100,
+          recoveryCodeFixture(ATHLETE_A),
+        ),
+      ).not.toBe('not_found');
+      expect((await store.findDeviceKey(OWNER_A))?.revokedAt).not.toBeNull();
+    } finally {
+      await store.close();
+    }
+    const refused = setKey(data);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('not a device key of any athlete on this instance');
+    expect(refused.stderr).not.toContain(MARKER);
+    expect(await databaseBytes(data.database)).not.toContain(URL_TEXT);
+  });
 });
 
 describe('held for the operator, on an instance with other riders (#1097, ADR 0046 Q9 and ruling 5)', () => {
@@ -344,6 +369,52 @@ describe('model-key clear (#1097)', () => {
     expect(after).not.toContain(MARKER);
     // `secure_delete` (#1097's review): a deleted row is zeroed, not left in a free page.
     expect(after).not.toContain(ciphertext);
+  });
+});
+
+describe('scrubbing a replaced or cleared key (#1097)', () => {
+  async function heldCiphertext(data: Data): Promise<string> {
+    const store = openServingStore(data.database);
+    try {
+      return Buffer.from((await store.getHostedModelKey())!.ciphertext).toString('latin1');
+    } finally {
+      await store.close();
+    }
+  }
+
+  it('replacing the key leaves no part of the old ciphertext in the database or its log', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    // A long key replaced by a short one: the row shrinks, so the start of the
+    // old cell — its ciphertext's opening bytes among them — is freed rather
+    // than written over, and only `secure_delete` zeroes it. (A LONGER
+    // replacement covers the old cell whole and would prove nothing.)
+    const long = cli(data, SET, { secret: SECRET, input: `${MARKER_KEY}${'x'.repeat(400)}\n` });
+    expect(long.status, long.stderr).toBe(0);
+    const old = (await heldCiphertext(data)).slice(0, 24);
+    expect(await databaseBytes(data.database), 'the control: it was there').toContain(old);
+
+    const replaced = cli(data, SET, { secret: SECRET, input: 'sk-short\n' });
+    expect(replaced.status, replaced.stderr).toBe(0);
+    expect(await heldCiphertext(data)).not.toContain(old);
+    expect(await databaseBytes(data.database)).not.toContain(old);
+  });
+
+  it('truncates the log on clear while another connection is open, so the ciphertext is not left in the file', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    expect(setKey(data).status).toBe(0);
+    const ciphertext = await heldCiphertext(data);
+    // Another connection held open — the running server, say — so closing the
+    // command's own connection does not checkpoint and remove the log for it.
+    const other = openServingStore(data.database);
+    try {
+      await other.getHostedModelKey();
+      expect(cli(data, ['model-key', 'clear']).report).toMatchObject({ cleared: true });
+      const after = await databaseBytes(data.database);
+      expect(after).not.toContain(ciphertext);
+      expect(after).not.toContain(MARKER);
+    } finally {
+      await other.close();
+    }
   });
 });
 

@@ -1313,8 +1313,12 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
    * is overwritten with zeros in its page rather than left in a free one; then
    * the write-ahead log checkpointed and TRUNCATED, so the old page images it
    * held are gone too (#1097: a cleared hosted key's ciphertext). A checkpoint
-   * another connection's open read holds back is not an error: the log is
-   * truncated at the next one that succeeds (`docs/operating-an-instance.md`).
+   * another connection's open read holds back is not an error, and its result
+   * row is not read: the old page images stay in the log until SQLite next
+   * writes it over from its start (its own checkpoints are PASSIVE and never
+   * truncate), or the last connection closes (`docs/operating-an-instance.md`).
+   * With `busy_timeout` at 5 s that wait can hold this store's queue for up to
+   * about 5 s — an erasure during an `operator backup`, say — which is accepted.
    * Inside {@link exclusive}, so no other statement on this connection runs
    * with the setting on.
    */

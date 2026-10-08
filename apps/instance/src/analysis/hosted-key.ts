@@ -33,16 +33,19 @@
  * `unreadable` or `no-secret` — and the instance logs
  * {@link HOSTED_KEY_UNREADABLE} and carries on with its local model, or none.
  *
- * ## Whose analysis it serves: the operator's, and nobody else's yet
+ * ## Whose analysis it serves: nobody's yet, the operator's included
  *
  * The key is held FOR the operator — ADR 0046's Q9 ruling, *"the athlete
  * whose device holds `OYL_INSTANCE_OWNER_KEY`, the key that already makes
- * them moderator"* — and `operator model-key set` looks that athlete up.
- * Other riders' use of it waits for the operator's switch (Q13: *"Other
- * riders get no analysis until the operator turns it on, whichever key they
- * use"*) and for each rider's own consent naming the endpoint (Q10), neither
- * of which is built here: `source.ts` §`modelForSource` refuses the held key
- * to every athlete but the one it is held for.
+ * them moderator"* — and `operator model-key set` looks that athlete up. But
+ * a hosted job runs only for an athlete whose own consent naming the endpoint
+ * is recorded (Q10), the operator included, and nothing records one yet; so
+ * `source.ts` §`modelForSource` refuses every athlete before the key is read.
+ * Other riders also wait for the operator's switch (Q13: *"Other riders get
+ * no analysis until the operator turns it on, whichever key they use"*).
+ * The key stays with the athlete it was set for: changing
+ * `OYL_INSTANCE_OWNER_KEY` does not move it — the operator clears it and
+ * sets it again.
  */
 
 import type { HeldHostedModelKey, SqlStore } from '../store/sql-store.ts';

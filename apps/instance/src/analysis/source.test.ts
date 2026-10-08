@@ -13,6 +13,12 @@ import { MARKER_KEY } from './hosted-key-testing.ts';
 import type { ModelConnection } from './model-turn.ts';
 import { modelForSource } from './source.ts';
 
+/** A recorded consent naming `origin` — which nothing on this tree supplies (Q10, #1199). */
+const consentTo =
+  (origin: string | undefined): ((athleteId: string) => Promise<string | undefined>) =>
+  () =>
+    Promise.resolve(origin);
+
 const LOCAL: ModelConnection = { turn: () => Promise.reject(new Error('not called')) };
 
 const HELD: HostedKeyState = {
@@ -22,6 +28,9 @@ const HELD: HostedKeyState = {
   athleteId: 'a',
   key: MARKER_KEY,
 };
+
+/** The origin a request to the held key's endpoint goes to: what a consent names. */
+const ORIGIN = 'https://models.example';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -52,6 +61,7 @@ describe('a job’s source (#1097)', () => {
       await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(state),
+        recordedConsent: consentTo(ORIGIN),
         behindMasking,
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
@@ -65,6 +75,7 @@ describe('a job’s source (#1097)', () => {
       await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
+        recordedConsent: consentTo(ORIGIN),
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
     expect(fetch).not.toHaveBeenCalled();
@@ -76,6 +87,7 @@ describe('a job’s source (#1097)', () => {
       await modelForSource('instance-hosted', 'another-rider', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
+        recordedConsent: consentTo(ORIGIN),
         behindMasking,
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
@@ -89,9 +101,51 @@ describe('a job’s source (#1097)', () => {
       await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
+        recordedConsent: consentTo(ORIGIN),
         behindMasking,
       }),
     ).toEqual({ ok: true, model: hosted });
     expect(behindMasking).toHaveBeenCalledWith(HELD);
+  });
+
+  describe('the athlete’s own recorded consent, before the key is read (ADR 0046 D-9, Q10)', () => {
+    it('on this tree, with no consent recorded, refuses the OPERATOR’s own hosted job and never reads the key', async () => {
+      const hostedKey = vi.fn(() => Promise.resolve(HELD));
+      const behindMasking = vi.fn(() => LOCAL);
+      // 'a' is the athlete the key is held for — the operator — with masking supplied.
+      expect(
+        await modelForSource('instance-hosted', 'a', { local: LOCAL, hostedKey, behindMasking }),
+      ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+      expect(hostedKey).not.toHaveBeenCalled();
+      expect(behindMasking).not.toHaveBeenCalled();
+    });
+
+    it('refuses an athlete whose consent records nothing, and never reads the key', async () => {
+      const hostedKey = vi.fn(() => Promise.resolve(HELD));
+      const recordedConsent = vi.fn(consentTo(undefined));
+      expect(
+        await modelForSource('instance-hosted', 'a', {
+          local: LOCAL,
+          hostedKey,
+          recordedConsent,
+          behindMasking: () => LOCAL,
+        }),
+      ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+      expect(recordedConsent).toHaveBeenCalledWith('a');
+      expect(hostedKey).not.toHaveBeenCalled();
+    });
+
+    it('refuses a consent that names another origin than the held key’s endpoint', async () => {
+      const behindMasking = vi.fn(() => LOCAL);
+      expect(
+        await modelForSource('instance-hosted', 'a', {
+          local: LOCAL,
+          hostedKey: () => Promise.resolve(HELD),
+          recordedConsent: consentTo('https://elsewhere.example/v1'),
+          behindMasking,
+        }),
+      ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+      expect(behindMasking).not.toHaveBeenCalled();
+    });
   });
 });
