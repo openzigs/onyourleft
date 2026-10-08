@@ -120,7 +120,7 @@ export async function wrapPrivateKey(
   const wrapped = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: new Uint8Array(instanceKeyWrapAad(binding)) },
     wrapping[binding.role],
-    new Uint8Array(pkcs8),
+    pkcs8,
   );
   return { iv, wrapped: new Uint8Array(wrapped) };
 }

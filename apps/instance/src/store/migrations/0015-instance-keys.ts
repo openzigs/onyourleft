@@ -42,6 +42,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addCheckConstraint('instance_key_serial', sql`(role = 'encryption') = (serial is not null)`)
     .modifyEnd(sql`strict`)
     .execute();
+  // One identity key, enforced: two first-time passes racing each insert one,
+  // and which would sign would then depend on hex order.
+  await sql`create unique index instance_key_one_identity on instance_key (role) where role = 'identity'`.execute(
+    db,
+  );
   await db.schema
     .createTable('instance_key_statement')
     .addColumn('key_id', 'text', (column) =>

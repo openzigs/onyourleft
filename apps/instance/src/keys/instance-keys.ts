@@ -46,6 +46,7 @@ import {
   instanceCard,
   instanceIdentityFingerprint,
   instanceIdentityRotationBytes,
+  instanceKeyId,
   instanceKeyStatementBytes,
   parseInstanceKeyStatement,
   toHex,
@@ -295,6 +296,16 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
   /** Sign a fresh statement for `key`, living {@link STATEMENT_LIFE_SECONDS} from now. */
   async function sign(identity: InstanceCryptoKey, key: InstanceKeyRow): Promise<number> {
     const { instanceOrigin } = keyed();
+    // Only a key this instance made is vouched for: its private half must open
+    // under the secret (the wrap binds role, key id and origin), and its id must
+    // be the hash of the public half the statement will carry. A row planted in
+    // the database fails one or the other.
+    if (
+      (await privateOf(key)) === undefined ||
+      (await instanceKeyId(sha256, key.publicKey)) !== key.keyId
+    ) {
+      throw new InstanceKeysUnavailable('unreadable');
+    }
     const issuedAt = options.now();
     const statement: InstanceKeyStatement = {
       purpose: INSTANCE_KEY_PURPOSE,

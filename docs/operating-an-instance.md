@@ -307,6 +307,10 @@ node src/operator/cli.ts instance-key rotate-identity [--compromised]
 node src/operator/cli.ts instance-key reset
 ```
 
+- ⚠️ **Stop the instance before `init`, `rotate`, `rotate-identity` or `reset`** (as for
+  `restore`). Each writes from a second process while the server's own timer may be running a
+  maintenance pass, and ADR 0047 D-5 has one writer. `show` only reads, and is safe on a running
+  instance.
 - `show` prints the identity key's full fingerprint and the **instance card**,
   `oyl-instance:<origin>#<52 characters>` — what the first device pins from (ADR 0047 D-6). It holds
   nothing secret, and is never truncated.

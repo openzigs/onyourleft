@@ -18,6 +18,7 @@ import {
   deviceStatementBytes,
   instanceIdentityRotationBytes,
   instanceKeyStatementBytes,
+  instanceKeyId,
   toHex,
   type DeviceStatement,
   type InstanceKeyStatement,
@@ -41,7 +42,7 @@ import {
   type ServedKeys,
 } from './instance-keys.ts';
 import { secretBytes } from './instance-keys-testing.ts';
-import { makeKey, unwrapPrivateKey, wrappingKeys, WRAP_IV_BYTES } from './wrap.ts';
+import { makeKey, sha256, unwrapPrivateKey, wrappingKeys, WRAP_IV_BYTES } from './wrap.ts';
 
 const ORIGIN = 'https://ride.example';
 const OTHER_ORIGIN = 'https://other.example';
@@ -258,6 +259,72 @@ describe('a wrap is bound to what it is (D-5)', () => {
       UNREADABLE_SENTENCE,
     );
     expect((await rows()).map((row) => row.keyId)).toEqual(before);
+  });
+});
+
+describe('a row planted in the database is never vouched for (D-5)', () => {
+  const ATTACKER = new Uint8Array(32).fill(7);
+
+  async function servedKeys(): Promise<readonly string[]> {
+    const served = await (await restart()).served().catch(() => undefined);
+    return served?.statements.map((each) => each.statement.encryptionKey) ?? [];
+  }
+
+  it('does not sign an encryption row this instance never wrapped', async () => {
+    await (await restart()).maintain();
+    const store = await fresh();
+    await store.addEncryptionKey({
+      keyId: await instanceKeyId(sha256, ATTACKER),
+      role: 'encryption',
+      publicKey: ATTACKER,
+      iv: new Uint8Array(12),
+      wrapped: new Uint8Array(48),
+      serial: T0 * 2,
+      createdAt: T0,
+      supersededAt: null,
+    });
+    await expect((await restart()).maintain()).rejects.toThrow(UNREADABLE_SENTENCE);
+    expect(await servedKeys()).not.toContain(toHex(ATTACKER));
+  });
+
+  it('does not sign a row whose key id is not the hash of its public key', async () => {
+    await (await restart()).maintain();
+    // Wrapped by this instance for the real key id, carrying a public half that is not its.
+    const real = await makeKey(await wrappingKeys(SECRET), 'encryption', ORIGIN);
+    const store = await fresh();
+    await store.addEncryptionKey({
+      keyId: real.keyId,
+      role: 'encryption',
+      publicKey: ATTACKER,
+      iv: real.iv,
+      wrapped: real.wrapped,
+      serial: T0 * 2,
+      createdAt: T0,
+      supersededAt: null,
+    });
+    await expect((await restart()).maintain()).rejects.toThrow(UNREADABLE_SENTENCE);
+    expect(await servedKeys()).not.toContain(toHex(ATTACKER));
+  });
+});
+
+describe('one identity key (D-5)', () => {
+  it('refuses a second identity row, so a racing first pass cannot make two', async () => {
+    await (await restart()).maintain();
+    const identity = (await rows()).find((row) => row.role === 'identity')!;
+    const other = await makeKey(await wrappingKeys(SECRET), 'identity', ORIGIN);
+    await expect(
+      (await fresh()).putInstanceKey({
+        keyId: other.keyId,
+        role: 'identity',
+        publicKey: other.publicKey,
+        iv: other.iv,
+        wrapped: other.wrapped,
+        serial: null,
+        createdAt: T0,
+        supersededAt: null,
+      }),
+    ).rejects.toThrow();
+    expect((await rows()).filter((row) => row.role === 'identity')).toEqual([identity]);
   });
 });
 
