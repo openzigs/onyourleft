@@ -30,7 +30,7 @@ import { metadataMarkersIn } from './frame';
 import type { RideProgress, RideProgressSource } from './side-report-keeper';
 import { MAXIMUM_HELD_SNAPSHOTS, type SideSnapshotTaken } from './side-snapshot-port';
 import { sideSnapshotKeeper, snapshotProblem } from './snapshot-keeper';
-import { cleanFrameBytes } from './testing';
+import { cleanFrameBytes, exifPastTheScanWindow } from './testing';
 
 /** A ride controller that moves when the test says, notifying as the real one does. */
 function scriptedRides(initial: Partial<RideProgress> = {}) {
@@ -344,6 +344,19 @@ describe('no metadata reaches the store (ADR 0044 D-4)', () => {
     expect(metadataMarkersIn(dirty)).toContain('Exif');
     expect(snapshotProblem(dirty)).toBe('not-clean');
     expect(snapshotProblem(cleanFrameBytes())).toBeUndefined();
+  });
+
+  it('refuses Exif placed past the signature scan’s window — #1063’s review, B2', () => {
+    const hidden = exifPastTheScanWindow();
+    expect(carriesExifOrGps(hidden)).toBe(true);
+    // The scan alone passes it; the segment walk is what refuses.
+    expect(metadataMarkersIn(hidden)).toStrictEqual([]);
+    expect(snapshotProblem(hidden)).toBe('not-clean');
+    const keeper = keeperOver(scriptedRides());
+    expect(keeper.holdSideSnapshot({ ...taken(), bytes: hidden })).toStrictEqual({
+      kind: 'refused',
+      reason: 'not-clean',
+    });
   });
 
   it('a picture carrying Exif and GPS is not kept; a clean one beside it is, and read back carries neither', async () => {

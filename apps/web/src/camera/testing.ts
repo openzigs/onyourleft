@@ -118,6 +118,9 @@ export interface ScriptedCamera {
 export function cleanFrameBytes(length = 1024): Uint8Array {
   const bytes = new Uint8Array(length);
   bytes.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00], 0);
+  // The start of the scan, straight after the JFIF segment, so the header is
+  // one `frame.ts` §`jpegMetadataSegmentsIn` can walk (#1063's review).
+  bytes.set([0xff, 0xda, 0x00, 0x02], 20);
   for (let index = 32; index < length; index += 1) {
     bytes[index] = (index * 37) % 251;
   }
@@ -125,6 +128,42 @@ export function cleanFrameBytes(length = 1024): Uint8Array {
   // (`side-link-pictures.ts` §`sidePictureFrom`, #530) reads it as whole.
   bytes.set([0xff, 0xd9], length - 2);
   return bytes;
+}
+
+/**
+ * #1063's review's probe (B2): SOI, a 5 000-byte `APP2` that is not an ICC
+ * profile, then `APP1` Exif with a GPS IFD, then a scan and EOI — Exif placed
+ * past `frame.ts` §`metadataMarkersIn`'s 4 096-byte window, which passed the
+ * snapshot save and the link before the segment walk.
+ */
+export function exifPastTheScanWindow(): Uint8Array {
+  const segment = (marker: number, payload: readonly number[]): number[] => {
+    const length = payload.length + 2;
+    return [0xff, marker, length >> 8, length & 0xff, ...payload];
+  };
+  const padding = segment(0xe2, new Array<number>(5000).fill(0x20));
+  // prettier-ignore
+  const exif = segment(0xe1, [
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08,
+    0x00, 0x01, 0x88, 0x25, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x4e, 0x00, 0x00, 0x00,
+  ]);
+  return new Uint8Array([
+    0xff,
+    0xd8,
+    ...padding,
+    ...exif,
+    0xff,
+    0xda,
+    0x00,
+    0x02,
+    0x12,
+    0x34,
+    0xff,
+    0xd9,
+  ]);
 }
 
 /** A {@link CameraPort} that does what it is told and records what it was asked. */

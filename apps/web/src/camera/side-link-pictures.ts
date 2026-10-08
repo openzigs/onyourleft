@@ -30,13 +30,15 @@
  * ends the pairing on `undefined`, as it does for an unknown control message.
  *
  * ⚠️ **It also refuses a picture carrying a metadata marker**, with
- * `frame.ts` §`metadataMarkersIn`. D-9's strip point is on the phone and an
+ * `frame.ts` §`carriesNoMetadata` — a walk of every segment before the scan
+ * (an `APP1`–`APP15` other than an ICC profile, or a `COM`, is refused) and
+ * the signature scan. D-9's strip point is on the phone and an
  * honest phone never sends one, so a picture with an Exif block in it is a
  * phone running something that is not this client, and the tablet will not
  * hold it even for the length of one inference.
  */
 
-import { metadataMarkersIn } from './frame';
+import { carriesNoMetadata } from './frame';
 
 /** The first byte of every picture this build sends and the only one it reads. */
 export const SIDE_PICTURE_VERSION = 1;
@@ -124,7 +126,7 @@ export function sidePictureFrom(data: unknown): SidePicture | undefined {
   }
   // A copy, so the picture holds only its own bytes and not the header's.
   const bytes = new Uint8Array(data.slice(SIDE_PICTURE_HEADER_BYTES));
-  if (!wholeJpeg(bytes) || metadataMarkersIn(bytes).length > 0) {
+  if (!wholeJpeg(bytes) || !carriesNoMetadata(bytes)) {
     return undefined;
   }
   return { sequence: view.getUint32(1), milliseconds: view.getUint32(5), bytes };

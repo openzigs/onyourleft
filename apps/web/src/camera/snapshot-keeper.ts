@@ -43,7 +43,9 @@
  * this file does not strip, and must not: a filter here would be a second
  * producer of image bytes, the thing `frame.ts` says there must not be. What
  * it does is refuse — {@link snapshotProblem} — bytes that are not a whole
- * JPEG or that carry a metadata marker (`frame.ts` §`metadataMarkersIn`), so
+ * JPEG or that carry a metadata segment or marker (`frame.ts`
+ * §`carriesNoMetadata`: a walk of every segment before the scan, and the
+ * signature scan), so
  * a picture that reaches here carrying an Exif block, from a phone that is not
  * running this client, is never kept. `side-link-pictures.ts` refuses the
  * same picture at the link; this is the tripwire on the save path itself.
@@ -68,7 +70,7 @@ import {
   type CameraFrameRecord,
 } from '@onyourleft/store';
 
-import { FRAME_MEDIA_TYPE, metadataMarkersIn } from './frame';
+import { carriesNoMetadata, FRAME_MEDIA_TYPE } from './frame';
 import type { RideProgressSource } from './side-report-keeper';
 import { wholeJpeg } from './side-link-pictures';
 import {
@@ -106,7 +108,7 @@ interface Held {
  * filter, and it names no marker and no offset (ADR 0029 D-8).
  */
 export function snapshotProblem(bytes: Uint8Array): 'not-clean' | undefined {
-  return wholeJpeg(bytes) && metadataMarkersIn(bytes).length === 0 ? undefined : 'not-clean';
+  return wholeJpeg(bytes) && carriesNoMetadata(bytes) ? undefined : 'not-clean';
 }
 
 /** Where a ride has got to, as far as a snapshot is concerned. @see side-report-keeper.ts */

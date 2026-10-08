@@ -144,6 +144,111 @@ export function metadataMarkersIn(bytes: Uint8Array): readonly string[] {
 }
 
 /**
+ * The ICC profile segment's identifier, which is the one `APPn` segment a
+ * picture this client stores may carry besides JFIF's `APP0`.
+ *
+ * ⚠️ **Measured, not assumed** (#1063's review, 2026-10-08): the pinned
+ * Chromium's `canvas.toBlob('image/jpeg')` writes `APP0` and then `APP2`
+ * `ICC_PROFILE` — the canvas's colour space — in both `srgb` and
+ * `display-p3`, and the Android WebView is the same Skia encoder. Refusing
+ * every `APP1`–`APP15` would therefore refuse every picture the phone sends.
+ * An ICC profile describes colour; it has no tag for a place, a time or a
+ * device, which is why this one segment is admitted and nothing else is.
+ */
+const ICC_PROFILE_IDENTIFIER = 'ICC_PROFILE\0';
+
+/**
+ * Every metadata-bearing segment in a JPEG's header, found by WALKING its
+ * segments from start-of-image to start-of-scan (#1063's review, B2), with
+ * `malformed` for a header that cannot be walked. Empty means the header holds
+ * JFIF, an ICC profile, and the tables and frame a decoder needs, and nothing
+ * else.
+ *
+ * ## Why a walk, when {@link metadataMarkersIn} is a scan
+ *
+ * A signature scan has a window, and a window is a place to stand outside: an
+ * `APP2` of five thousand bytes put the Exif block past {@link metadataMarkersIn}'s
+ * 4 096, and the picture passed. A walk has no window — it visits every
+ * segment before the scan, however long each is — and it refuses by MARKER
+ * rather than by contents, so an `APP1` is refused whatever it says inside.
+ *
+ * - `APP0` (`FFE0`, JFIF) is admitted; `APP2` only with the ICC identifier.
+ * - Every other `APP1`–`APP15` (`FFE1`–`FFEF`) is refused, by name.
+ * - `COM` (`FFFE`) is refused: a comment is free text.
+ * - A segment whose length runs past the buffer, a length under two, a byte
+ *   that is not a marker where one must be, a second start-of-image or an
+ *   end-of-image before the scan, and a header that never reaches the scan are
+ *   each `malformed` — refused, because a header this cannot walk is a header
+ *   it cannot vouch for.
+ *
+ * Used where a picture from the PHONE is held: the link's arrival check
+ * (`side-link-pictures.ts` §`sidePictureFrom`) and the snapshot's save
+ * (`snapshot-keeper.ts` §`snapshotProblem`). Names no offset (D-8).
+ */
+export function jpegMetadataSegmentsIn(bytes: Uint8Array): readonly string[] {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    return ['malformed'];
+  }
+  const found: string[] = [];
+  let at = 2;
+  for (;;) {
+    if (at + 1 >= bytes.length || bytes[at] !== 0xff) {
+      return [...found, 'malformed'];
+    }
+    const marker = bytes[at + 1] ?? 0;
+    if (marker === 0xff) {
+      // A fill byte before the marker.
+      at += 1;
+      continue;
+    }
+    if (marker === 0xda) {
+      return found;
+    }
+    if (marker === 0x00 || marker === 0xd8 || marker === 0xd9) {
+      return [...found, 'malformed'];
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      // Standalone markers carry no length.
+      at += 2;
+      continue;
+    }
+    if (at + 3 >= bytes.length) {
+      return [...found, 'malformed'];
+    }
+    const length = ((bytes[at + 2] ?? 0) << 8) | (bytes[at + 3] ?? 0);
+    const next = at + 2 + length;
+    if (length < 2 || next > bytes.length) {
+      return [...found, 'malformed'];
+    }
+    if (marker === 0xfe) {
+      found.push('COM');
+    } else if (marker >= 0xe1 && marker <= 0xef) {
+      const iccProfile =
+        marker === 0xe2 &&
+        indexOfSignature(
+          bytes.subarray(at + 4, next),
+          ICC_PROFILE_IDENTIFIER,
+          ICC_PROFILE_IDENTIFIER.length,
+        ) === 0;
+      if (!iccProfile) {
+        found.push(`APP${String(marker - 0xe0)}`);
+      }
+    }
+    at = next;
+  }
+}
+
+/**
+ * Whether a picture from the phone may be held: neither the segment walk
+ * ({@link jpegMetadataSegmentsIn}) nor the signature scan
+ * ({@link metadataMarkersIn}) finds anything. Both, because the scan also
+ * looks inside the segments the walk admits.
+ */
+export function carriesNoMetadata(bytes: Uint8Array): boolean {
+  return jpegMetadataSegmentsIn(bytes).length === 0 && metadataMarkersIn(bytes).length === 0;
+}
+
+/**
  * Where `signature` starts within the first `limit` bytes, or `-1`.
  *
  * Written out rather than going through a `TextDecoder` over the buffer: a
