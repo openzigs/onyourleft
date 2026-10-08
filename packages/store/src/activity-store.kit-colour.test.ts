@@ -32,7 +32,7 @@ import {
   type StoreHarness,
 } from './testing';
 
-/** Three athletes, from the #28 fixtures — CLAUDE.md §5. */
+/** Three athletes, from the #28 fixtures — docs/agents/quality-gate.md §5. */
 async function seeded(): Promise<StoreHarness> {
   const harness = createStoreHarness();
   await seedAthletes(harness);
@@ -235,7 +235,7 @@ describe('nothing off the palette comes back out (#623, CLAUDE.md §6)', () => {
 });
 
 /**
- * The harness's own calibration for this write path — CLAUDE.md §5.
+ * The harness's own calibration for this write path — docs/agents/store-harness.md §5.
  *
  * ⚠️ **A pair, and neither means anything alone**: the same assertion passes
  * against the real store and fails against one that writes the colour under a

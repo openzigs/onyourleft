@@ -169,7 +169,7 @@ jobs:
       # counterpart, `permissions: contents: read`, no secrets in this job,
       # `persist-credentials: false`, and GitHub's first-time-contributor
       # approval gate. Read that block on every fork pull request anyway
-      # (CLAUDE.md section 8).
+      # (docs/agents/toolchain.md section 8).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

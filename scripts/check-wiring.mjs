@@ -19,7 +19,7 @@
  *
  * In every case the unit was **correct, unit-tested, typechecked, linted and
  * shipped**. The defect was only ever in the wiring, and every gate here looks
- * *inside* a unit: CLAUDE.md §5's mutation requirement asks that a test fail
+ * *inside* a unit: docs/agents/quality-gate.md §5's mutation requirement asks that a test fail
  * without the change, and `advanceBot` had exactly that; the typechecker cannot
  * help, because ⚠️ **an exported function nobody calls and an optional
  * parameter nobody supplies are both perfectly well typed**; `no-unused-vars`

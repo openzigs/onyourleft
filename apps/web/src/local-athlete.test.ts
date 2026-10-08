@@ -112,7 +112,7 @@ describe('ensureLocalAthlete', () => {
   it('writes the row this client actually names', async () => {
     // The id and the display name, read from disk rather than from the return
     // value: an `ensureAthlete` that answered correctly and wrote nothing is
-    // CLAUDE.md §5's *wrong harness* cause, and `harness.test.ts` has the
+    // docs/agents/quality-gate.md §5's *wrong harness* cause, and `harness.test.ts` has the
     // red/green pair that proves the read-back is what notices.
     harness = createStoreHarness();
 

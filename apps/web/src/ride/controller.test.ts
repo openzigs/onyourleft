@@ -6249,7 +6249,7 @@ describe('#647 — a refused keep-alive is on the ride’s state, and clears', (
 /**
  * A save port over the REAL store, through the round-trip harness — so what
  * this block asserts is what a fresh read of IndexedDB returns, not what the
- * controller believed it wrote (CLAUDE.md §5). Each ride gets its own id, as
+ * controller believed it wrote (docs/agents/quality-gate.md §5). Each ride gets its own id, as
  * `main.tsx`'s does.
  */
 function storeSavePort(): RideSavePort {
@@ -6373,7 +6373,7 @@ describe('#1111 — the game HUD’s moving time is the recorder’s, and the sa
     // A stopped ride is no longer a ride in progress.
     expect(hud.rideMovingSeconds()).toBeUndefined();
 
-    // Read back through the store, as the library reads it (CLAUDE.md §5):
+    // Read back through the store, as the library reads it (docs/agents/quality-gate.md §5):
     // the saved activity's moving time is the figure the HUD last showed.
     const saved = await harness.read(async (store) =>
       store.getActivity(ATHLETE_A, activityId('ride-1')),

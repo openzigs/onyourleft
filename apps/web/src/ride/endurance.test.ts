@@ -41,7 +41,7 @@
  * to ~2 567 tests in a day.
  *
  * A test that can fail without a defect is worse here than elsewhere, because
- * CLAUDE.md §5 makes the **mutation list** the gate: the workflow is apply,
+ * docs/agents/quality-gate.md §5 makes the **mutation list** the gate: the workflow is apply,
  * run, read what went red, restore. One assertion that reddens on its own turns
  * every mutation run into a judgement call about whether the red is the
  * mutation or the pool, which is exactly when a real finding gets waved through

@@ -168,7 +168,7 @@ is in [`../README.md`](../README.md) §1.
 
 Every number below was corroborated across at least two of those, and none was taken from a Garmin
 SDK artefact or from GPL/AGPL prior-art source. Reading prior art to check a protocol detail is
-permitted by `CLAUDE.md` §6; copying from it is not, and nothing was copied — including the
+permitted by `docs/agents/scope-and-ip.md` §6; copying from it is not, and nothing was copied — including the
 sixteen-entry CRC nibble table, which is derivable from the polynomial and is therefore derived
 rather than transcribed.
 

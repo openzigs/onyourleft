@@ -10,7 +10,7 @@
 # file: this asks nothing of its own, as `webview-probe.mjs` does not.
 #
 # Why here and not under `scripts/`: that is the bare-clone set, and this needs
-# adb and a Pixel Tablet (CLAUDE.md section 2). Nothing in CI runs it.
+# adb and a Pixel Tablet (docs/agents/layout.md section 2). Nothing in CI runs it.
 #
 # Usage (from the host, after `adb push` to /data/local/tmp):
 #   adb shell "nohup sh /data/local/tmp/realistic-sampler.sh SECONDS 'LAYER' OUT PID [MEMINFO_AT] >/dev/null 2>&1 &"

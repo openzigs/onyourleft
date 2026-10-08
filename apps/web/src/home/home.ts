@@ -54,7 +54,7 @@
  * and never the launch.
  *
  * ⚠️ **The names.** The load metrics' familiar names are registered
- * trademarks (CLAUDE.md §6). The code says `rideLoad`, `base`, `recent` and
+ * trademarks (docs/agents/scope-and-ip.md §6). The code says `rideLoad`, `base`, `recent` and
  * `freshness`; the screen says "load", "fitness", "fatigue" and "freshness",
  * which `analysis/trend.ts` already says on the Analysis screen.
  */

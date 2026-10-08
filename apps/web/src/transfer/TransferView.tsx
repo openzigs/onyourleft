@@ -194,7 +194,7 @@ export function TransferView({
    * reads it — and a sibling's state change is not a re-render. Without this
    * counter the export panel's `useEffect` has nothing to depend on that
    * changes, so a rider who imports a ride is told, on the same screen, that
-   * there is nothing on this device to export. That is CLAUDE.md §5's "a write
+   * there is nothing on this device to export. That is docs/agents/quality-gate.md §5's "a write
    * that reports success while the read cannot see it", one layer above the
    * store: the ride is on disk and the panel next to it is describing the
    * device as empty.

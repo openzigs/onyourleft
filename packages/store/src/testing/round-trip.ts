@@ -577,7 +577,7 @@ export async function assertWorkoutRoundTrip(
  * uses.** There is no point lookup to read through (`activity-store.ts` says
  * why: a point lookup is a read a screen could be built on, and ADR 0029 D-11
  * forbids the screen), so the round trip goes through the one real consumer —
- * which is what CLAUDE.md §5 asks for anyway.
+ * which is what docs/agents/quality-gate.md §5 asks for anyway.
  *
  * @throws {RoundTripFailure}
  */

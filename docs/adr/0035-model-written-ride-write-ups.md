@@ -611,3 +611,21 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   first sends history, which changes the consent, the privacy policy and Play Data Safety together.
   D-4's screen, D-8 and the rest of D-5 are unchanged, and ADR 0040 applies D-4 to every retrieved
   write-up.
+
+- **2026-10-07** — **A write-up now runs only on the rider's instance, and the model chooses its
+  tools there.** [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) (#1093), accepted on the owner's rulings of 2026-10-04 and
+  2026-10-07, supersedes or narrows five statements here. **D-7's** *"The app decides every step;
+  the model never chooses a tool, a step or what data it gets"* is superseded on the instance: the
+  model chooses read-only tools scoped to one athlete, inside step, time and token budgets (ADR 0046
+  D-7); the template still decides the sections, the instructions, the budgets and the output shape.
+  **D-7's** *"The rider's own computer is offered first when both it and a hosted model are set
+  up"* goes with the rider's computer. **D-8's** *"Nothing is sent in the background"* is narrowed:
+  a job starts only on the rider's press and may finish while the app is closed; nothing starts
+  without a press and no notification is sent. **D-9 B** (the rider's own computer) is withdrawn,
+  and **D-9 C** (hosted, on a key the device holds) is replaced by #1104's wording, because every key
+  is now held by the instance (ADR 0046 D-9). **D-10's** *"Where each piece lands"* is redirected to
+  the sub-issues of [#1092](https://github.com/openzigs/onyourleft/issues/1092). **D-4 and D-5's
+  never-sent list are unchanged**: the screen runs on the instance before a candidate is kept and
+  again on the device before display, from one set of matchers in `@onyourleft/analysis`, and the
+  input is still built on the device under #809's exclusions (the owner's Q1 ruling). The body above
+  is not edited.

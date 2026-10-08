@@ -8,7 +8,7 @@
  * ⚠️ Every assertion here reads back through a **fresh store handle**
  * (`harness.read` discards every open connection first), because the defect
  * this package keeps hunting is a write that reports success while the read
- * cannot see it — CLAUDE.md §5.
+ * cannot see it — docs/agents/quality-gate.md §5.
  */
 
 import { kilograms, seconds, unixSeconds } from '@onyourleft/domain';

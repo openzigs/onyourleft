@@ -24,7 +24,7 @@
  * never saying the model is unavailable. {@link POSE_REPLY_DEADLINE_MILLISECONDS}
  * is that bound, and running out of it is the same failure as an `error`
  * event — the same fixed word on the screen, and nothing of any picture in it.
- * CLAUDE.md §8's rule for a Web Bluetooth promise, applied to a worker.
+ * docs/agents/web-bluetooth.md §8's rule for a Web Bluetooth promise, applied to a worker.
  */
 
 import type { SidePoseOutcome } from './side-analysis-port';

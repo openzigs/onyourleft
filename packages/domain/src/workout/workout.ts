@@ -21,7 +21,7 @@
  *
  * ## Why the names are these names
  *
- * `CLAUDE.md` §6: the familiar names for load metrics are registered marks, so
+ * `docs/agents/scope-and-ip.md` §6: the familiar names for load metrics are registered marks, so
  * this project coins plainly descriptive ones. "Share of threshold" follows
  * that discipline — it is what the number is. It is deliberately **not** the
  * percent-of-FTP spelling, and not because FTP is established as a mark (§6

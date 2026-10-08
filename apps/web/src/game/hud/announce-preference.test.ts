@@ -3,7 +3,7 @@
 /**
  * The announcement preference, kept on the DEVICE — #397, as #395 decided.
  *
- * ⚠️ **The round trip crosses the boundary.** CLAUDE.md §5's four causes —
+ * ⚠️ **The round trip crosses the boundary.** docs/agents/quality-gate.md §5's four causes —
  * wrong storage, wrong layer, wrong time, wrong harness — are why nothing here
  * asserts against the object it just wrote: a write goes through the public
  * path into a `Storage`, every handle to it is dropped, and a FRESH one over

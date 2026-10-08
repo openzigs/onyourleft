@@ -5,7 +5,7 @@
  * listener, the real store on a SQLite file and a blob store the test reads
  * directly. Every "nothing was stored" is read back from BOTH stores, on a
  * fresh connection for the database — asserting against the response alone is
- * the wrong-harness shape `CLAUDE.md` §5 names.
+ * the wrong-harness shape `docs/agents/quality-gate.md` §5 names.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';

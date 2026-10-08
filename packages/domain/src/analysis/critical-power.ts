@@ -23,7 +23,7 @@
  * ## Provenance
  *
  * The relation and the linearisation are from the published literature cited
- * above, and equations are not copyrightable (CLAUDE.md §6). GoldenCheetah
+ * above, and equations are not copyrightable (docs/agents/scope-and-ip.md §6). GoldenCheetah
  * has mature CP-model code and is **GPL-2.0**: reading it to check a formula
  * is permitted, copying from it is not, and under §3 a GPL derivation inside
  * `packages/` is fatal rather than merely awkward. Nothing here derives from

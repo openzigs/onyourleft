@@ -9,7 +9,7 @@
  * never offered the route the rider last rode. This file is the claim that it
  * does: the ride is written through the store, and Home's two reads run over
  * fresh connections (`@onyourleft/store/testing`'s `read` discards every open
- * handle first, CLAUDE.md §5).
+ * handle first, docs/agents/quality-gate.md §5).
  */
 
 import { metres, unixSeconds } from '@onyourleft/domain';
