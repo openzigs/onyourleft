@@ -42,4 +42,16 @@ export const AGENT_TOOL_DISCLOSURES: Readonly<Record<string, readonly string[]>>
   recent_rides: ['short summaries of your recent rides'],
   // Synced goals (#836): text the rider typed, which can name anything.
   goals: ['what you wrote about your goals'],
+  // ADR 0040's history index (#1099), searched with a query the model writes:
+  // at most six passages a call and three calls a run, cut from other rides'
+  // summaries, earlier write-ups (screened again) and the goals, notes and
+  // documents the rider wrote — free text that can name anything, masked but
+  // not filtered on a hosted job (#1101). Never the pose summary, a picture or
+  // a date. ⚠️ DRAFT: awaits the owner's approval on #1104.
+  history_search: [
+    'summaries of older rides',
+    'earlier write-ups',
+    'what you wrote about your goals',
+    'your notes and documents',
+  ],
 };
