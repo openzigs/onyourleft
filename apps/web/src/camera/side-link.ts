@@ -1276,8 +1276,8 @@ export class PhoneSideLink implements SideCameraLinkPort {
     }
   }
 
-  picturesWaiting(): number | undefined {
-    return this.#frames?.bufferedAmount;
+  picturesWaiting(): number {
+    return this.#frames.bufferedAmount;
   }
 
   /**

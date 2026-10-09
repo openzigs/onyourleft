@@ -635,9 +635,9 @@ describe('every picture tick is recorded — #1112', () => {
   }> {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
-      secureWindow: browserSecureWindow(),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     let held: Promise<void> | undefined;
@@ -759,9 +759,9 @@ describe('every picture tick is recorded — #1112', () => {
     timings.record({ tickAt: 5, outcome: 'sent' });
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
-      secureWindow: browserSecureWindow(),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     const link = scriptedLink();

@@ -137,11 +137,13 @@ export interface SideCameraLinkPort {
   sendPictureToTablet(picture: SidePicture): SidePictureSent;
   /**
    * How many bytes the pictures channel is still holding — its
-   * `bufferedAmount`, which {@link sendPictureToTablet} answers `busy` on —
-   * or `undefined` with no channel. #1112: read just before each picture is
-   * offered and recorded in `side-picture-timings.ts`, so a phone whose
-   * pictures are refused as `busy` says how full the channel was. A count of
-   * bytes, never any of them.
+   * `bufferedAmount`, which {@link sendPictureToTablet} answers `busy` on.
+   * The real link always has that channel (#1061/#568), so it always answers
+   * a number; `undefined` is for a double that has nothing to report, and a
+   * phone with no link asks nothing at all. #1112: read just before each
+   * picture is offered and recorded in `side-picture-timings.ts`, so a phone
+   * whose pictures are refused as `busy` says how full the channel was. A
+   * count of bytes, never any of them.
    */
   picturesWaiting(): number | undefined;
   /**
