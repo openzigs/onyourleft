@@ -9,7 +9,7 @@
  * no custom scheme and no App Link. A link opened in a browser would send the
  * token through the tunnel in plaintext, and the edge could redeem it in a
  * sealed `recover` signed with a key of its own; a custom scheme can be
- * claimed by any app on the phone (RFC 8252). `recovery-mail.test.ts` holds
+ * claimed by any app on the phone (RFC 8252). `recovery-addresses.test.ts (§"mail carries no URL")` holds
  * both bodies to that, and `docs/operating-an-instance.md` says it to a
  * mailer's author: send this text as it is.
  *

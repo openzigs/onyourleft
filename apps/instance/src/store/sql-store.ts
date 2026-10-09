@@ -992,7 +992,8 @@ export interface SqlStore {
    * Spend an email recovery token: the token is what names the athlete. Since
    * #1194 it is RE-CHECKED in the same transaction: its address must still be
    * bound to its athlete and confirmed at or before `heldSince`, or the token
-   * is spent and `unbound`.
+   * is spent and `unbound`. No production route calls this: recovery spends
+   * through `recoverAccount`, and a new route must too, not use this spender.
    */
   takeEmailRecoveryToken(
     tokenSha256: string,
@@ -2544,9 +2545,17 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .executeTakeFirst();
             if (code === undefined) return 'code_unknown';
           } else {
+            // A token mailed to THAT address, not another of the athlete's —
+            // asked before it is spent, so a wrong-address press costs nothing.
+            const mailedTo = await trx
+              .selectFrom('email_recovery_token')
+              .select('address')
+              .where('token_sha256', '=', proof.tokenSha256)
+              .where('athlete_id', '=', athleteId)
+              .executeTakeFirst();
+            if (mailedTo !== undefined && mailedTo.address !== address) return 'address_unbound';
             const taken = await takeTokenIn(trx, proof.tokenSha256, athleteId, at, heldSince);
             if (taken.outcome !== 'taken') return stepUpRefusal(taken.outcome);
-            // A token mailed to THAT address, not another of the athlete's.
             if (taken.address !== address) return 'address_unbound';
           }
           await clearAddressIn(trx, athleteId, address, at, actorKey);

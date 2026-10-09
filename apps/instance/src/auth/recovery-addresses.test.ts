@@ -474,6 +474,29 @@ describe('the invariant, route by route: a device key alone or a token alone tak
       expect((await waysBack(w, rider.athleteId)).addresses).toEqual([]);
     });
 
+    it('Clear an address, E: a token mailed to one established address cannot clear another, and is not spent by the refusal', async () => {
+      const w = await start();
+      const { rider, b, established } = await riderWithWayBack(w);
+      const other = 'other@example.org';
+      await bind(w, rider, other);
+      w.clock.ms += HOLD_MS + DAY_MS;
+      const mailedToX = await requestMail(w, established);
+      const refused = await call(w, b, 'POST', '/v1/auth/recovery-email/clear', {
+        address: other,
+        emailToken: mailedToX,
+      });
+      expect(codeIn(refused)).toBe('address_unbound');
+      expect(
+        (await waysBack(w, rider.athleteId)).addresses.map((each) => each.address).sort(),
+      ).toEqual([established, other].sort());
+      // Refused before it was spent: it still clears the address it was mailed to.
+      const own = await call(w, b, 'POST', '/v1/auth/recovery-email/clear', {
+        address: established,
+        emailToken: mailedToX,
+      });
+      expect(own.status, JSON.stringify(own.body)).toBe(204);
+    });
+
     it('The full reset, C and D: replaces the codes and clears every address — accepted residue R4', async () => {
       for (const proof of ['code', 'mail'] as const) {
         const w = await start();
