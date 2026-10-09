@@ -80,6 +80,27 @@ import { readRideInput } from './read-input';
 /** Where this device notes the jobs it started and has not seen end (#1102). Ids only. */
 export const PENDING_JOBS_STORAGE_KEY = 'oyl.analysis.pending-jobs.v1';
 
+/**
+ * What *Erase everything* does about the pending-job note: removes it. The note
+ * holds ride and job ids only, but it is on this device, so an erase takes it
+ * (`transfer/erase-device.ts` §`eraseDevice`'s `instanceAnalysis`). Deleting a
+ * single ride does NOT clear it, and the account export does not include it —
+ * `docs/privacy-policy.md` says exactly that.
+ */
+export function instanceAnalysisEraser(storage: Pick<Storage, 'removeItem'> | undefined): {
+  forget(): void;
+} {
+  return {
+    forget: () => {
+      try {
+        storage?.removeItem(PENDING_JOBS_STORAGE_KEY);
+      } catch {
+        // Storage refused: nothing more this device can do about it.
+      }
+    },
+  };
+}
+
 /** The most pending jobs noted at once: one a ride, and a rider asks about few at a time. */
 const MAXIMUM_PENDING_JOBS = 16;
 

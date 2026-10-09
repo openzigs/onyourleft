@@ -364,6 +364,8 @@ built in, suggested or named.
 
 ## A ride analysed on your instance
 
+<!-- DRAFT wording awaiting the owner's dated approval (#1104 B3, B4, B8; #880). Not approved. -->
+
 **A ride analysed on your instance, when you ask for an analysis.** When you press the button on a
 ride's page, that ride's numbers go to your instance: heart rate, cadence and power, your weight and
 watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance,
@@ -390,8 +392,8 @@ Once you have pressed it, the analysis can finish while the app is closed.
   write-up does not pass, is cancelled or does not finish, nothing is kept and an earlier write-up
   stays as it was. While it is being written, this device keeps only which job it is waiting for —
   never the ride's numbers or the model's words — so it can pick the job up when you open the ride
-  again. It goes with the ride when you delete it, is in the account export, and *Erase everything*
-  removes it.
+  again. *Erase everything* removes that note. Deleting a single ride does not, and it is not in
+  the account export; it holds only identifiers, and it is cleared when the analysis ends.
 - **If you cancel:** your instance stops the analysis at its next step, and nothing of it is saved
   on this device.
 

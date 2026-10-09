@@ -388,7 +388,9 @@ describe('a sealed stream the reader lets go of, or that falls silent (#1102)', 
       onEvent: () => undefined,
     });
     expect(result).toEqual({ outcome: 'cut', lastEventId: '1' });
-  });
+    // A 20 ms bound: a test that outlives 3 s means the idle cut is gone, and
+    // the timeout makes that a red test instead of a hung suite.
+  }, 3_000);
 
   it('keeps reading a stream whose heartbeats come within the bound', async () => {
     const played = await playInstance();

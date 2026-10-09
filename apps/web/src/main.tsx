@@ -67,7 +67,7 @@ import {
   riderModelStepSource,
 } from './camera/analysis-transport';
 import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
-import { createInstanceAnalysis } from './ride-analysis/instance-analysis';
+import { createInstanceAnalysis, instanceAnalysisEraser } from './ride-analysis/instance-analysis';
 import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
@@ -685,6 +685,9 @@ function buildTransferPort(): TransferPort | undefined {
     theme: themeEraser(window),
     hostedModel: hostedModelEraser(),
     instance: instanceEraser(typeof localStorage === 'undefined' ? undefined : localStorage),
+    instanceAnalysis: instanceAnalysisEraser(
+      typeof localStorage === 'undefined' ? undefined : localStorage,
+    ),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
