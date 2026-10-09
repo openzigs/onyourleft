@@ -33,6 +33,7 @@ const entry = (overrides: Partial<AccountChangeEntry>): AccountChangeEntry => ({
   kind: 'link_code_minted',
   actorKey: 'september',
   subjectKey: null,
+  subjectAddedAt: null,
   via: null,
   address: null,
   ...overrides,
@@ -58,10 +59,53 @@ describe('a notice (#1193 draft wording)', () => {
       'On day 900 the key added on day 200 cleared a recovery address, a@example.org. If that was not you, revoke that key.',
     );
     expect(text({ kind: 'link_code_minted' })).toBe(
-      'On day 900 the key added on day 200 minted a link code. If that was not you, revoke that key.',
+      'On day 900 the key added on day 200 made a link code. If that was not you, revoke that key.',
     );
-    expect(text({ kind: 'key_revoked', subjectKey: 'mine' })).toBe(
-      'On day 900 the key added on day 200 revoked this device. If that was not you, revoke that key.',
+    expect(text({ kind: 'key_revoked', subjectKey: 'october', subjectAddedAt: 300 })).toBe(
+      'On day 900 the key added on day 200 revoked the key added on day 300. If that was not you, revoke that key.',
+    );
+  });
+
+  it('names a revoked key by the day it was added, from the entry, and never as this device', () => {
+    // The owner's example, in the device's own calendar.
+    const noon = (month: number, date: number): number => Date.UTC(2026, month, date, 12) / 1000;
+    const keys: readonly ListedKey[] = [{ publicKey: 'september', addedAt: noon(8, 12) }];
+    expect(
+      noticeText(
+        entry({
+          at: noon(9, 3),
+          kind: 'key_revoked',
+          subjectKey: 'august',
+          subjectAddedAt: noon(7, 1),
+        }),
+        keys,
+        'mine',
+      ),
+    ).toBe(
+      'On 3 October the key added on 12 September revoked the key added on 1 August. If that was not you, revoke that key.',
+    );
+    // Even an entry naming the reading device's own key is named by its day:
+    // a revoked key reads nothing, so "this device" would be false.
+    expect(
+      noticeText(
+        entry({ kind: 'key_revoked', subjectKey: 'mine', subjectAddedAt: 100 }),
+        KEYS,
+        'mine',
+        day,
+      ),
+    ).toBe(
+      'On day 900 the key added on day 200 revoked the key added on day 100. If that was not you, revoke that key.',
+    );
+    // The day comes from the entry, not the list: a key missing from the list is still named.
+    expect(
+      noticeText(
+        entry({ kind: 'key_revoked', subjectKey: 'unlisted', subjectAddedAt: 50 }),
+        KEYS,
+        'mine',
+        day,
+      ),
+    ).toBe(
+      'On day 900 the key added on day 200 revoked the key added on day 50. If that was not you, revoke that key.',
     );
   });
 

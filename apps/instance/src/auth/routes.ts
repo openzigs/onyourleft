@@ -77,8 +77,8 @@ const accountSchema = object({
 
 const nullableString: Schema = { type: ['string', 'null'] };
 
-/** One entry of the account-change log (#1193). */
-const accountChangeSchema = object({
+/** One entry of the account-change log, as stored (#1193). */
+const ACCOUNT_CHANGE_PROPERTIES: Readonly<Record<string, Schema>> = {
   id: integer,
   at: integer,
   kind: {
@@ -97,6 +97,15 @@ const accountChangeSchema = object({
   // `link_code`, `recovery_code` or `email_token` for a key added; `null` otherwise.
   via: nullableString,
   address: nullableString,
+};
+
+/**
+ * An entry as the log route answers it: with the day its subject key was
+ * added, so a notice can name a revoked key by that day (#1193).
+ */
+const accountChangeReadSchema = object({
+  ...ACCOUNT_CHANGE_PROPERTIES,
+  subjectAddedAt: nullableInteger,
 });
 
 const STATEMENT_ERRORS = [
@@ -384,9 +393,9 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     response: {
       contentType: 'application/json',
       schema: object({
-        changes: { type: 'array', items: accountChangeSchema },
+        changes: { type: 'array', items: accountChangeReadSchema },
         acknowledgedThrough: integer,
-        notices: { type: 'array', items: accountChangeSchema },
+        notices: { type: 'array', items: accountChangeReadSchema },
       }),
     },
     handle: async (context) => json(await identityOf(context).accountChanges(callerOf(context))),

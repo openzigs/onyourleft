@@ -362,13 +362,25 @@ export function accountChangeView(entry: AccountChange): AccountChangeView {
   };
 }
 
+/**
+ * An entry as `GET /v1/auth/account-changes` answers it: the view, plus the
+ * day the SUBJECT key was added, so a notice can name a revoked key ("the key
+ * added on 1 August") from the entry alone (#1193, the owner's ruling of
+ * 2026-10-09). Read from `device_key` at read time — a revoked key's row is
+ * kept, so it is always there — and `null` for an entry with no subject.
+ */
+export interface AccountChangeRead extends AccountChangeView {
+  /** Unix seconds; `null` when the entry names no subject key. */
+  readonly subjectAddedAt: number | null;
+}
+
 /** The account-change log as one device reads it (#1193, ADR 0047 D-8). */
 export interface AccountChanges {
-  readonly changes: readonly AccountChangeView[];
+  readonly changes: readonly AccountChangeRead[];
   /** This device's mark: the highest entry id it has acknowledged, or 0. */
   readonly acknowledgedThrough: number;
   /** Entries after that mark made by a key other than this device's. */
-  readonly notices: readonly AccountChangeView[];
+  readonly notices: readonly AccountChangeRead[];
 }
 
 /** What an athlete sees of their own account (#775). */
@@ -1306,7 +1318,15 @@ export function createIdentity(options: IdentityOptions): Identity {
     },
 
     async accountChanges(caller) {
-      const changes = (await store.listAccountChanges(caller.athleteId)).map(accountChangeView);
+      const added = new Map(
+        (await store.listDeviceKeys(caller.athleteId)).map((key) => [key.publicKey, key.addedAt]),
+      );
+      const changes = (await store.listAccountChanges(caller.athleteId)).map(
+        (entry): AccountChangeRead => ({
+          ...accountChangeView(entry),
+          subjectAddedAt: entry.subjectKey === null ? null : (added.get(entry.subjectKey) ?? null),
+        }),
+      );
       const mark =
         (await store.listAccountChangeMarks(caller.athleteId)).find(
           (each) => each.deviceKey === caller.deviceKey,

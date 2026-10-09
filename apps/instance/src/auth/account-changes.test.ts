@@ -195,7 +195,35 @@ describe('every change is logged by the key that authorised it (#1193)', () => {
     expect(read.changes.every((entry) => entry.at === Math.floor(w.clock.ms / 1000))).toBe(true);
     // Another athlete's id is nowhere in it: the entry carries no athlete.
     expect(Object.keys(read.changes[0]!).sort()).toEqual(
-      ['actorKey', 'address', 'at', 'id', 'kind', 'subjectKey', 'via'].sort(),
+      ['actorKey', 'address', 'at', 'id', 'kind', 'subjectKey', 'subjectAddedAt', 'via'].sort(),
+    );
+  });
+
+  it('answers each entry with the day its subject key was added, so a revoked key can be named by it', async () => {
+    const w = await start();
+    const first = await register(w);
+    w.clock.ms += 3_600_000;
+    const second = await linked(w, first);
+    w.clock.ms += 3_600_000;
+    const third = await linked(w, first);
+    w.clock.ms += 3_600_000;
+    expect((await revoke(w, second, third.device.publicKey)).reply?.status).toBe(204);
+
+    const keys = await w.freshRead((store) => store.listDeviceKeys(first.athleteId));
+    const addedAt = (key: Key): number =>
+      keys.find((each) => each.publicKey === key.device.publicKey)!.addedAt;
+    expect(new Set([addedAt(first), addedAt(second), addedAt(third)]).size).toBe(3);
+
+    const read = await log(await freshInstance(w), first);
+    const revoked = read.changes.find((entry) => entry.kind === 'key_revoked')!;
+    expect(revoked.subjectKey).toBe(third.device.publicKey);
+    expect(revoked.subjectAddedAt).toBe(addedAt(third));
+    // An entry with no subject names no day.
+    const minted = read.changes.filter((entry) => entry.kind === 'link_code_minted');
+    expect(minted.map((entry) => entry.subjectAddedAt)).toEqual([null, null]);
+    // The notices carry it too: they are what another device is shown.
+    expect(read.notices.find((entry) => entry.kind === 'key_revoked')?.subjectAddedAt).toBe(
+      addedAt(third),
     );
   });
 
@@ -479,19 +507,38 @@ describe('the routes in scope, against attackers A, B and E (ADR 0047 D-8’s ta
       );
     });
 
-    it('cannot reach the log or its acknowledgement in plaintext at all: they are sealed-only', async () => {
-      const w = await start();
-      const rider = await register(w);
-      const read = await w.call('GET', '/v1/auth/account-changes', { token: rider.token });
-      const marked = await w.call('POST', '/v1/auth/account-changes/acknowledge', {
-        token: rider.token,
-        body: { through: 1_000 },
+    /**
+     * Column E in plaintext (#1192, #1193): the session token alone, sent with
+     * no seal at all, is refused `sealed_required` on every route in scope —
+     * mint, revoke and the device list as well as the log and its
+     * acknowledgement — and nothing is written. Read back through a FRESH
+     * store, never the one the handler used.
+     */
+    for (const [name, method, path, body] of ROUTES_IN_SCOPE) {
+      it(`${name}, E in plaintext with a valid token: \`sealed_required\`, and nothing changes`, async () => {
+        const w = await start();
+        const rider = await register(w);
+        const other = await linked(w, rider);
+        const snapshot = (): Promise<unknown> =>
+          w.freshRead(async (store) => ({
+            changes: await store.listAccountChanges(rider.athleteId),
+            marks: await store.listAccountChangeMarks(rider.athleteId),
+            codes: await store.listLinkCodes(rider.athleteId),
+            keys: await store.listDeviceKeys(rider.athleteId),
+          }));
+        const before = await snapshot();
+        const answer = await w.call(method, path(other), {
+          token: rider.token,
+          plain: true,
+          ...(body === undefined ? {} : { body }),
+        });
+        expect(answer.status).toBe(403);
+        expect(codeOf({ status: answer.status, raw: '', body: answer.body })).toBe(
+          'sealed_required',
+        );
+        expect(await snapshot()).toEqual(before);
       });
-      expect([read.status, marked.status]).toEqual([404, 404]);
-      expect(await w.freshRead((store) => store.listAccountChangeMarks(rider.athleteId))).toEqual(
-        [],
-      );
-    });
+    }
   });
 });
 

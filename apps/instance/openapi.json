@@ -1099,6 +1099,12 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "subjectAddedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -1108,7 +1114,8 @@
                           "actorKey",
                           "subjectKey",
                           "via",
-                          "address"
+                          "address",
+                          "subjectAddedAt"
                         ],
                         "additionalProperties": false
                       }
@@ -1158,6 +1165,12 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "subjectAddedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -1167,7 +1180,8 @@
                           "actorKey",
                           "subjectKey",
                           "via",
-                          "address"
+                          "address",
+                          "subjectAddedAt"
                         ],
                         "additionalProperties": false
                       }
@@ -1185,6 +1199,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -1261,6 +1278,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"

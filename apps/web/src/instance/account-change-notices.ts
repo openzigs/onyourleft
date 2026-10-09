@@ -15,6 +15,15 @@
  * A key is named the way a rider can recognise it — by the day it was added
  * ("the key added on 12 September"), or as "this device" — and never by its
  * hex, which nobody reads.
+ *
+ * ⚠️ **A revoked key is named by its day, never as "this device"** (the
+ * owner's ruling of 2026-10-09): notices are read on the rider's OTHER
+ * devices, and a revoked key cannot read anything — its sessions end with
+ * the revoke, a revoked key cannot sign in, and its row is kept, so it can
+ * never be linked again (`key_in_use`). So the reading device is never the
+ * key a revocation names, and there is no "this device" branch for it. The
+ * day comes from the entry itself (`subjectAddedAt`), not from the device
+ * list, so the notice can name it whatever list the screen holds.
  */
 
 /** One entry of the log, as `GET /v1/auth/account-changes` answers it. */
@@ -31,6 +40,8 @@ export interface AccountChangeEntry {
     | 'key_revoked';
   readonly actorKey: string;
   readonly subjectKey: string | null;
+  /** Unix seconds: the day {@link subjectKey} was added; `null` with no subject. */
+  readonly subjectAddedAt: number | null;
   readonly via: 'link_code' | 'recovery_code' | 'email_token' | null;
   readonly address: string | null;
 }
@@ -68,6 +79,14 @@ export function keyName(
 }
 
 /**
+ * How the key a revocation names is written: by the day it was added, from
+ * the entry itself. Never "this device" — see the header.
+ */
+function revokedKeyName(entry: AccountChangeEntry, day: DayFormat = formatDay): string {
+  return entry.subjectAddedAt === null ? 'a key' : `the key added on ${day(entry.subjectAddedAt)}`;
+}
+
+/**
  * One notice, in a sentence or two: what happened, when, by which key — and,
  * for anything but a key added, what to do if it was not the rider.
  */
@@ -88,11 +107,9 @@ export function noticeText(
     case 'address_cleared':
       return by(`cleared a recovery address, ${entry.address ?? 'one this app was not told'}`);
     case 'link_code_minted':
-      return by('minted a link code');
+      return by('made a link code');
     case 'key_revoked':
-      return by(
-        `revoked ${entry.subjectKey === null ? 'a key' : keyName(entry.subjectKey, keys, thisDevice, day)}`,
-      );
+      return by(`revoked ${revokedKeyName(entry, day)}`);
     case 'key_added':
       switch (entry.via) {
         case 'link_code':
