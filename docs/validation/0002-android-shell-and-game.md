@@ -3503,3 +3503,48 @@ material's maps unconditionally; and a tree's bark is now drawn in the canopy's 
 | #639 by eye | Answer |
 |---|---|
 | Do the trees look the same as before #639 (AH-639-4)? | |
+
+## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
+
+**Added 2026-10-04** by #1112. Checked with `grep '^## Part'` for a duplicate letter first — AH was
+the last, and AI was free. It changes no resistance: no trainer is needed, only the phone on its
+tripod paired to the tablet.
+
+On `main` at `a9c7f3ff` the phone sent **197 pictures in 10 minutes** (about 0.3 a second) where
+ADR 0033 D-3 asks for about five. #1112 moved the phone's JPEG encode off the page's main thread
+(`apps/web/src/camera/side-picture-encoder.ts` says why: Chromium encodes a main-thread `toBlob`
+in idle time and waits up to 4 s on Android for it) and records every picture tick on the phone in
+`window.__oylSideCameraTimings` (`apps/web/src/camera/side-picture-timings.ts`) — numbers and words
+only, no picture. What this Part settles is whether that was the phone's cause.
+
+| Step | What to do |
+|---|---|
+| AI1 | Install a **debug** APK of #1112's merge on the phone (`webview-probe.mjs` attaches only to a debug build). Pair it with the tablet and start filming from the tablet, as #554 does |
+| AI2 | With the filming sign up for **at least 2 minutes**, forward the phone's WebView (the `adb forward` lines in `apps/mobile/tools/webview-probe.mjs`' header, with the PHONE's `pidof`) and read the rate since filming began and how long that was: `node apps/mobile/tools/webview-probe.mjs 'JSON.stringify({ rate: window.__oylSideCameraTimings?.summary().sentPerSecondSinceStart, filmingMs: window.__oylSideCameraTimings?.summary().lastTickAt })'` — then the whole summary: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().summary'` |
+| AI3 | Read the last minute of ticks too, for the table below: `node apps/mobile/tools/webview-probe.mjs 'window.__oylSideCameraTimings?.snapshot().records.slice(-60)'` |
+| AI4 | On the tablet, count the pictures it received over the same session (the #554 reading) |
+
+| Reading (AI2) | Value |
+|---|---|
+| `sentPerSecondSinceStart` (designed: about 5) — **the criterion**: every accepted picture over the whole session, read with `lastTickAt` at 120 000 ms or more | |
+| `lastTickAt`, ms (how long it had been filming) | |
+| `sentPerSecond` — the last 10 seconds only, so it says what the session was doing at the end, not over 2 minutes | |
+| `ticksPerSecond` (the timer itself: 5 unless it is throttled) | |
+| `encoder` (`worker` expected; `main-thread` means the fallback ran) | |
+| `outcomes` — `still-taking`, `busy`, `no-link`, `link-not-ready`, `dropped` counts | |
+| `capture` p50 / p95, ms | |
+| `encode` p50 / p95, ms | |
+| `draw` p50 / p95, ms | |
+| `maxBufferedBefore`, bytes | |
+| `repeatedVideoFrames` (a video that stopped advancing) | |
+| `visibility` | |
+| Pictures the tablet received, and over how long (AI4) | |
+
+**Reading it.** A `sentPerSecondSinceStart` near 5 over at least 2 minutes (`lastTickAt` ≥ 120 000)
+with `encoder: worker` is #1112 confirmed. ⚠️ **Not `sentPerSecond`**: that is a 10-second window,
+so a good last ten seconds after a slow start reads as five. Many
+`still-taking` with a long `encode` is the encode still waiting. Many `busy` with a large
+`maxBufferedBefore` is the `frames` channel (ADR 0033 D-3), not the encode. A `ticksPerSecond`
+well under 5 is the timer being throttled (power management), and `visibility: hidden` says the
+WebView thinks the page is not shown. A large `repeatedVideoFrames` is a camera video that stopped
+advancing while pictures were still sent.
