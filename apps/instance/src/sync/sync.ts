@@ -209,7 +209,22 @@ export interface AccountExport {
     readonly lastUsedAt: number | null;
     readonly revokedAt: number | null;
   }[];
+  /**
+   * The FIRST recovery address bound, or `null` — kept for the version 1
+   * readers that predate a second one (#1194). Every address is in
+   * {@link AccountExport.recoveryEmails}.
+   */
   readonly recoveryEmail: string | null;
+  /**
+   * Every recovery address (#1194, ADR 0047 D-8): when it was confirmed
+   * (`null` for one bound before the hold existed) and the PUBLIC key that
+   * gave it.
+   */
+  readonly recoveryEmails: readonly {
+    readonly address: string;
+    readonly confirmedAt: number | null;
+    readonly boundByKey: string | null;
+  }[];
   /**
    * The account-change log (#1193, ADR 0047 D-8): every account-security
    * change, oldest first, with the PUBLIC key that authorised it.
@@ -484,6 +499,7 @@ export function createSync(options: SyncOptions): Sync {
         if (page.length < 500 || last === undefined) break;
         after = { receivedAt: last.receivedAt, seq: last.seq };
       }
+      const recoveryEmails = await store.listRecoveryEmails(caller.athleteId);
       const records = await store.listActivityRecords(caller.athleteId);
       const activities = [];
       for (const record of records) {
@@ -521,7 +537,12 @@ export function createSync(options: SyncOptions): Sync {
             lastUsedAt: key.lastUsedAt,
             revokedAt: key.revokedAt,
           })),
-          recoveryEmail: (await store.getRecoveryEmail(caller.athleteId))?.address ?? null,
+          recoveryEmail: recoveryEmails[0]?.address ?? null,
+          recoveryEmails: recoveryEmails.map((row) => ({
+            address: row.address,
+            confirmedAt: row.confirmedAt,
+            boundByKey: row.boundByKey,
+          })),
           accountChanges: (await store.listAccountChanges(caller.athleteId)).map(accountChangeView),
           accountChangeMarks: (await store.listAccountChangeMarks(caller.athleteId)).map(
             (mark) => ({

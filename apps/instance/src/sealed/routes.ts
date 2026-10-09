@@ -229,7 +229,22 @@ function sealedStream(
   resumedAfter: string | undefined,
 ): Response {
   const encoder = new TextEncoder();
-  let sequence = 0;
+  // An inner event with no id takes one from this count (#1207). A resumed
+  // stream counts on from the id it resumed after when that is a count, so a
+  // resumed stream's ids never repeat ones the device already holds; after an
+  // id that is not a count, an id-less event keeps that id, as SSE's own last
+  // event id does, which repeats nothing new.
+  const resumedCount =
+    resumedAfter !== undefined && /^(?:0|[1-9]\d{0,14})$/.test(resumedAfter)
+      ? Number(resumedAfter)
+      : undefined;
+  let sequence = resumedCount ?? 0;
+  const fallbackId = (): string => {
+    sequence += 1;
+    return resumedAfter === undefined || resumedCount !== undefined
+      ? String(sequence)
+      : resumedAfter;
+  };
   // The `end` event names the last id the stream carried, so a device that
   // resumes after it asks for nothing more.
   let lastId = resumedAfter ?? '0';
@@ -251,8 +266,7 @@ function sealedStream(
             }
             // `end` is the sealed stream's own; an inner event may not borrow it.
             if (event.kind === SEALED_END_KIND) throw new Error('reserved event kind');
-            sequence += 1;
-            lastId = event.id ?? String(sequence);
+            lastId = event.id ?? fallbackId();
             frame(await writer.event(lastId, event.kind, utf8Encode(event.data)));
           }
         }
@@ -400,7 +414,7 @@ export const SEALED_ROUTES: readonly Route[] = [
     operationId: 'sealedRequest',
     reaches: 'own',
     summary:
-      'A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200.',
+      'A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200. An inner body over the instance’s body limit is refused only after Open, as a sealed `payload_too_large`: the envelope’s own limit allows for the padding (D-9), so the size of what was sealed is not known before.',
     identity: true,
     errors: [
       'validation_failed',

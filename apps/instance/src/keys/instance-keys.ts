@@ -69,6 +69,7 @@ import {
   type X25519KeyPair,
 } from '@onyourleft/domain';
 
+import { logEvent, type LogSink } from '../log.ts';
 import type { InstanceKeyRow, InstanceKeyStatementRow, SqlStore } from '../store/sql-store.ts';
 import {
   makeKey,
@@ -112,9 +113,20 @@ export const NO_KEYS_SENTENCE =
 export const UNREADABLE_SENTENCE =
   'This instance’s keys cannot be unwrapped with its OYL_INSTANCE_SECRET_KEY: its operator runs `operator instance-key reset`, and every device pins again.';
 
-/** What a pass is told while another process is changing the keys (#1203). */
+/**
+ * What a pass is told while another process is changing the keys (#1203):
+ * the OPERATOR's sentence, naming a command. A device asking
+ * `GET /v1/instance/keys` meanwhile is told {@link KEYS_BUSY_DEVICE_SENTENCE}.
+ */
 export const KEYS_BUSY_SENTENCE =
   'Another process is changing this instance’s keys right now: run the command again in a moment.';
+
+/**
+ * What `GET /v1/instance/keys` answers while the keys are being changed
+ * (#1207): a rider runs no command, so this names none.
+ */
+export const KEYS_BUSY_DEVICE_SENTENCE =
+  'This instance is updating its keys right now. Try again in a moment.';
 
 /** The store members this module uses. */
 export type InstanceKeyStore = Pick<
@@ -129,6 +141,7 @@ export type InstanceKeyStore = Pick<
   | 'clearInstanceKeys'
   | 'claimIdentityKey'
   | 'takeInstanceKeyLease'
+  | 'renewInstanceKeyLease'
   | 'releaseInstanceKeyLease'
 >;
 
@@ -254,6 +267,11 @@ export interface InstanceKeysOptions {
   readonly origin: string | null;
   /** The box's clock, Unix seconds. */
   readonly now: () => number;
+  /**
+   * Where a lease that could not be given back is said (#1207). The pass's
+   * own result stands either way: the lease lapses on its own.
+   */
+  readonly log?: LogSink;
 }
 
 /** The serial a new key takes: the clock seeds it, the highest issued floors it (D-5). */
@@ -275,7 +293,8 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
   /**
    * Run `operation` holding the key lease (#1203), and give it back after —
    * also when it throws. Refused with `busy`, having written nothing, while
-   * another holds it.
+   * another holds it. A lease that cannot be given back is logged and left to
+   * lapse: the error must not replace the pass's own result (#1207).
    */
   async function leased<T>(operation: () => Promise<T>): Promise<T> {
     keyed();
@@ -286,9 +305,57 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
     try {
       return await operation();
     } finally {
-      await store.releaseInstanceKeyLease(holder);
+      try {
+        await store.releaseInstanceKeyLease(holder);
+      } catch (error) {
+        if (options.log !== undefined) {
+          logEvent(options.log, 'instance-keys', {
+            state: 'lease-not-released',
+            error:
+              error instanceof Error && /^[A-Za-z]{1,64}$/.test(error.name)
+                ? error.name
+                : 'unknown',
+          });
+        }
+      }
     }
   }
+
+  /**
+   * The FENCE (#1207): before each write, extend this process's lease, and
+   * stop with `busy` if another holder has taken it — a pass that outlived
+   * {@link KEY_LEASE_SECONDS} and lost the lease writes nothing more. Every
+   * write in this module goes through {@link writer}, never `store` directly.
+   */
+  async function fence(): Promise<void> {
+    if (!(await store.renewInstanceKeyLease(holder, options.now() + KEY_LEASE_SECONDS))) {
+      throw new InstanceKeysUnavailable('busy');
+    }
+  }
+
+  function fenced<A extends unknown[], R>(
+    write: (...args: A) => Promise<R>,
+  ): (...args: A) => Promise<R> {
+    return async (...args) => {
+      await fence();
+      return write(...args);
+    };
+  }
+
+  /** The store's writes, each behind {@link fence}. */
+  const writer = {
+    putInstanceKey: fenced((key: InstanceKeyRow) => store.putInstanceKey(key)),
+    addEncryptionKey: fenced((key: InstanceKeyRow) => store.addEncryptionKey(key)),
+    putInstanceKeyStatement: fenced((statement: InstanceKeyStatementRow, now: number) =>
+      store.putInstanceKeyStatement(statement, now),
+    ),
+    deleteInstanceKeys: fenced((keyIds: readonly string[]) => store.deleteInstanceKeys(keyIds)),
+    replaceIdentityKey: fenced((key: InstanceKeyRow, endorsement?: InstanceKeyStatementRow) =>
+      store.replaceIdentityKey(key, endorsement),
+    ),
+    clearInstanceKeys: fenced(() => store.clearInstanceKeys()),
+    claimIdentityKey: fenced((key: InstanceKeyRow) => store.claimIdentityKey(key)),
+  };
 
   function keyed(): { wrap: Promise<WrappingKeys>; instanceOrigin: string } {
     if (secret === undefined) throw new InstanceKeysUnavailable('no-secret');
@@ -386,7 +453,7 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
       notAfter: issuedAt + STATEMENT_LIFE_SECONDS,
     };
     const signature = await signWith(identity, instanceKeyStatementBytes(statement));
-    await store.putInstanceKeyStatement(
+    await writer.putInstanceKeyStatement(
       {
         keyId: key.keyId,
         kind: 'key',
@@ -420,7 +487,7 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
     if (identity === undefined) {
       // No identity key: the first start with a secret, or `instance-key init`.
       const mine = await makeIdentity();
-      if (await store.claimIdentityKey(mine.row)) {
+      if (await writer.claimIdentityKey(mine.row)) {
         identity = mine;
         made = true;
       } else {
@@ -436,11 +503,11 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
     const now = options.now();
     if (current === undefined) {
       current = await makeEncryption(highestSerial(rows));
-      await store.addEncryptionKey(current);
+      await writer.addEncryptionKey(current);
       made = true;
     } else if (now >= current.createdAt + ENCRYPTION_KEY_LIFE_SECONDS) {
       current = await makeEncryption(highestSerial(rows));
-      await store.addEncryptionKey(current);
+      await writer.addEncryptionKey(current);
       rotated = true;
     }
     let notAfter = newestNotAfter(await store.listInstanceKeyStatements(), current.keyId);
@@ -457,7 +524,7 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
         row.supersededAt !== null &&
         now >= row.supersededAt + OLD_KEY_KEPT_SECONDS,
     );
-    await store.deleteInstanceKeys(expired.map((row) => row.keyId));
+    await writer.deleteInstanceKeys(expired.map((row) => row.keyId));
     for (const row of expired) unwrapped.delete(row.keyId);
     const kept = rows.filter((row) => !expired.includes(row));
     const due = [
@@ -520,13 +587,13 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
         const identity = await identityOf(rows);
         if (identity === undefined) throw new InstanceKeysUnavailable('no-keys');
         const key = await makeEncryption(highestSerial(rows), rotation.serialAbove);
-        await store.addEncryptionKey(key);
+        await writer.addEncryptionKey(key);
         await sign(identity.key, key);
         const old =
           rotation.dropOld === true
             ? rows.filter((row) => row.role === 'encryption').map((row) => row.keyId)
             : [];
-        await store.deleteInstanceKeys(old);
+        await writer.deleteInstanceKeys(old);
         for (const keyId of old) unwrapped.delete(keyId);
         return { keyId: key.keyId, serial: key.serial ?? 0, dropped: old.length };
       }),
@@ -562,7 +629,7 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
             ),
           };
         }
-        await store.replaceIdentityKey(next.row, endorsement);
+        await writer.replaceIdentityKey(next.row, endorsement);
         unwrapped.delete(previous.row.keyId);
         // The current encryption key's statements went with the old identity: sign it again.
         const current = currentOf(rows);
@@ -573,12 +640,12 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
     reset: () =>
       leased(async () => {
         const highest = highestSerial(await store.listInstanceKeys());
-        await store.clearInstanceKeys();
+        await writer.clearInstanceKeys();
         unwrapped.clear();
         const identity = await makeIdentity();
-        await store.putInstanceKey(identity.row);
+        await writer.putInstanceKey(identity.row);
         const key = await makeEncryption(highest);
-        await store.addEncryptionKey(key);
+        await writer.addEncryptionKey(key);
         await sign(identity.key, key);
         return show();
       }),

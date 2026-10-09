@@ -55,6 +55,7 @@ export const ERROR_STATUS = {
   code_unknown: 401,
   code_used: 401,
   code_expired: 401,
+  address_unbound: 401,
   registration_closed: 403,
   sealed_required: 403,
   account_suspended: 403,
@@ -69,6 +70,8 @@ export const ERROR_STATUS = {
   last_device: 409,
   moderation_not_applicable: 409,
   address_in_use: 409,
+  address_limit: 409,
+  confirmation_superseded: 409,
   not_suspended: 409,
   job_running: 409,
   payload_too_large: 413,
@@ -142,6 +145,12 @@ const MESSAGES: Record<ErrorCode, string> = {
   key_in_use: 'That device key is already registered here.',
   last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
   address_in_use: 'That address is already the recovery address of another account here.',
+  address_limit:
+    'This account already has two recovery addresses. Clear one before adding another.',
+  confirmation_superseded:
+    'Another device’s confirmation of that address was used first, so this code no longer works.',
+  address_unbound:
+    'That code was mailed to an address that is no longer a recovery address of this account, or is still in its first week.',
   not_suspended: 'This account is not suspended. Sign in as usual.',
   job_running:
     'You already have a write-up being written on this instance. Wait for it to finish, or cancel it.',

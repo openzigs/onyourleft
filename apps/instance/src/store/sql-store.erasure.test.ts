@@ -268,7 +268,7 @@ describe('erasing an athlete (#769, #35)', () => {
       // Migration 0018's account-change log and marks (#1193): found the same way.
       expect(order).toContain('account_change');
       expect(order).toContain('account_change_mark');
-      // Migration 0019's analysis jobs and their events (#1095): found the
+      // Migration 0020's analysis jobs and their events (#1095): found the
       // same way, the events before the jobs they reference.
       expect(order).toContain('analysis_job');
       expect(order.indexOf('analysis_event')).toBeGreaterThanOrEqual(0);

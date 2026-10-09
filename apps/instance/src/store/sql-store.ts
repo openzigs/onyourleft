@@ -51,6 +51,7 @@ import type {
   ModerationLogTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
+  RecoveryEmailTable,
   ReportTable,
   PrivateRoomTable,
   ResultTable,
@@ -246,19 +247,82 @@ export interface DisplayNameChange {
   readonly changedAt: number;
 }
 
-/** An athlete's email recovery address. */
+/**
+ * One of an athlete's recovery addresses (#1194, ADR 0047 D-8): at most
+ * {@link SqlStore.confirmRecoveryEmail}'s `addressLimit` an athlete, and one
+ * athlete an address.
+ */
 export interface RecoveryEmail {
   readonly athleteId: string;
   readonly address: string;
+  /**
+   * When `/confirm` bound it, Unix seconds — it is HELD for a week from then.
+   * `null` for an address bound before migration 0019, which is established.
+   */
+  readonly confirmedAt: number | null;
+  /** The key that gave it (its binder); `null` before migration 0019. */
+  readonly boundByKey: string | null;
 }
 
-/** An email recovery link's token, as its SHA-256. */
+/**
+ * Whether an address is past its hold: bound before migration 0019, or
+ * confirmed at or before `heldSince` (now less the hold).
+ */
+export function isEstablished(
+  address: Pick<RecoveryEmail, 'confirmedAt'>,
+  heldSince: number,
+): boolean {
+  return address.confirmedAt === null || address.confirmedAt <= heldSince;
+}
+
+/** An email recovery token, as its SHA-256. */
 export interface EmailRecoveryToken {
   readonly tokenSha256: string;
   readonly athleteId: string;
   readonly expiresAt: number;
   readonly usedAt: number | null;
+  /** The address it was mailed to (#1194); `null` only for a row no migration could place. */
+  readonly address: string | null;
 }
+
+/**
+ * A step-up for a route a device key alone may not take (#1194, ADR 0047
+ * D-8): one of the athlete's recovery codes in force, or a token mailed to an
+ * ESTABLISHED address — for `/clear`, to the address being cleared.
+ */
+export type RecoveryStepUp =
+  | { readonly kind: 'code'; readonly codeSha256: string }
+  | { readonly kind: 'token'; readonly tokenSha256: string };
+
+/** Why a step-up's proof was refused. */
+export type StepUpRefusal =
+  'step_up_required' | 'code_unknown' | 'code_used' | 'code_expired' | 'address_unbound';
+
+/** What `/clear` did (#1194). */
+export type ClearOutcome = 'cleared' | 'not_found' | StepUpRefusal;
+
+/** What the full reset did (#1194). */
+export type ResetOutcome = 'reset' | StepUpRefusal;
+
+/** A `recover`, with its options, in one transaction (#1194). */
+export interface Recovery {
+  /** The key the recovering device proved it holds. */
+  readonly publicKey: string;
+  readonly at: number;
+  /** Now less the hold: an address confirmed after it is still held. */
+  readonly heldSince: number;
+  readonly proof: RecoveryStepUp;
+  /** The full reset's new codes, as their SHA-256s, when the reset is chosen. */
+  readonly resetCodeSha256s?: readonly string[];
+  /** *Revoke every other key*: each as a plain revoke, and every mailed token and link code voided. */
+  readonly revokeOtherKeys: boolean;
+}
+
+/** What a `recover` did: `unbound` when its mailed token's address is gone or still held. */
+export type RecoveryOutcome =
+  | Take<{ readonly athleteId: string }>
+  | { readonly outcome: 'unbound' }
+  | { readonly outcome: 'key_in_use' };
 
 /**
  * An address an athlete gave for email recovery, waiting for them to follow
@@ -272,13 +336,23 @@ export interface EmailConfirmation {
   readonly usedAt: number | null;
   /** The key that gave the address (#1193); `null` for a row from before migration 0018. */
   readonly requestedByKey: string | null;
+  /** When another key's confirmation of the same address bound it first (#1194). */
+  readonly supersededAt: number | null;
 }
 
 /**
- * What spending a confirmation did: {@link Take}, or `held` when another
- * athlete's confirmed address it is — refused, and nothing spent.
+ * What spending a confirmation did, in `/confirm`'s check order (#1194, ADR
+ * 0047 D-8 item 9): `unknown`, `used` or `expired`; `superseded` when another
+ * key's confirmation of the address bound it first; `held` when another
+ * athlete holds the address; `taken` — with `added` false when the address was
+ * already this athlete's, which changes nothing; or `limit` when the athlete
+ * already holds the most addresses. Nothing is spent but on `taken`.
  */
-export type ConfirmOutcome = Take<{ readonly athleteId: string }> | { readonly outcome: 'held' };
+export type ConfirmOutcome =
+  | Take<{ readonly athleteId: string; readonly added: boolean }>
+  | { readonly outcome: 'held' }
+  | { readonly outcome: 'superseded' }
+  | { readonly outcome: 'limit' };
 
 /** A new athlete, their first key and their recovery codes, written together or not at all. */
 export interface Registration {
@@ -295,7 +369,7 @@ export interface Registration {
    */
   readonly recoveryEmailConfirmation?: Omit<
     EmailConfirmation,
-    'athleteId' | 'usedAt' | 'requestedByKey'
+    'athleteId' | 'usedAt' | 'requestedByKey' | 'supersededAt'
   >;
   /** The rider confirmed they are 18 or over as they registered (#775): when. */
   readonly adultConfirmedAt?: number;
@@ -745,6 +819,11 @@ export interface SqlStore {
    * recovery codes**, whoever asks: a thief's live key revoking the rider's
    * would otherwise take the rider's way back with it (review H1).
    *
+   * Since #1194 it also clears every address that key bound which is still
+   * HELD (confirmed after `heldSince`), under the removal rule: every token
+   * mailed to it voided, and every pending confirmation of it. An established
+   * address is left alone, whoever asks.
+   *
    * ⚠️ **The last-key rule is checked HERE, in the transaction that writes
    * (#867)**: the athlete's LAST live key is revoked only when
    * `recoveryCodeSha256` is one of their unspent recovery codes — checked,
@@ -758,6 +837,7 @@ export interface SqlStore {
     at: number,
     recoveryCodeSha256: string | null,
     actorKey: string,
+    heldSince: number,
   ): Promise<RevokeOutcome>;
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
@@ -824,6 +904,13 @@ export interface SqlStore {
    * atomic statement, so two processes cannot both take it.
    */
   takeInstanceKeyLease(holder: string, now: number, expiresAt: number): Promise<boolean>;
+  /**
+   * Extend `holder`'s lease to `expiresAt` (#1207): `true` while the lease is
+   * still `holder`'s — lapsed or not, so long as nobody took it — and `false`
+   * once another holder has. A pass calls it before each write, which is what
+   * FENCES it: a pass that outlived its lease and lost it writes nothing more.
+   */
+  renewInstanceKeyLease(holder: string, expiresAt: number): Promise<boolean>;
   /** Give the lease back, if `holder` still holds it. */
   releaseInstanceKeyLease(holder: string): Promise<void>;
 
@@ -867,33 +954,84 @@ export interface SqlStore {
   ): Promise<RenameOutcome>;
   listDisplayNameChanges(athleteId: string): Promise<readonly DisplayNameChange[]>;
 
-  getRecoveryEmail(athleteId: string): Promise<RecoveryEmail | undefined>;
+  /** This athlete's recovery addresses, held and established, the first bound first (#1194). */
+  listRecoveryEmails(athleteId: string): Promise<readonly RecoveryEmail[]>;
   /**
    * An address given for recovery, waiting to be confirmed (#865). Binds
-   * nothing. ⚠️ **Replaces the athlete's earlier unconfirmed confirmation**, in
-   * the same transaction (#883), so an athlete has at most one link pending and
-   * the table cannot grow with every address they give; a link already
+   * nothing. ⚠️ **Replaces the earlier unconfirmed confirmation THE SAME KEY
+   * gave**, in the same transaction (#883, and per key since #1194, ADR 0047
+   * D-8 item 3), so one key giving an address never cancels another key's,
+   * and the table cannot grow with every address a key gives; a link already
    * followed stays, as the record that its token is spent.
    */
-  putEmailConfirmation(confirmation: Omit<EmailConfirmation, 'usedAt'>): Promise<void>;
+  putEmailConfirmation(
+    confirmation: Omit<EmailConfirmation, 'usedAt' | 'supersededAt'>,
+  ): Promise<void>;
   listEmailConfirmations(athleteId: string): Promise<readonly EmailConfirmation[]>;
   /**
-   * Spend one of THIS athlete's confirmation tokens and bind its address to
-   * them, replacing any address they had, in one transaction (#865). Another
-   * athlete's token is `unknown`. `held` — and nothing spent or bound — when
-   * the address is already another athlete's.
+   * `/confirm` (#865; #1194, ADR 0047 D-8 item 9), in ONE transaction and in
+   * this order, stopping at the first that answers: take one of THIS athlete's
+   * confirmations (another athlete's is `unknown`; one another key's bound
+   * first is `superseded`); `held` when another athlete holds the address;
+   * the no-op `taken` (`added: false`) when the address is already this
+   * athlete's; `limit` when they hold `addressLimit` addresses; otherwise the
+   * address is ADDED, held from `now`, beside whatever is bound — never
+   * replacing one — with the key that GAVE it as its binder, `address_added`
+   * logged by that key, and every other pending confirmation of the address
+   * spent as superseded.
    *
-   * Since #1193 a NEW address logs `address_added`, and the address it
-   * replaced `address_cleared`, by the key that gave it (`requestedByKey`,
-   * else `confirmingKey` for a row from before migration 0018). Confirming
-   * the address already bound logs nothing.
+   * ⚠️ The add is an insert that does NOTHING on conflict, and only a row it
+   * actually inserted is held, logged and supersedes: an upsert would re-hold
+   * the rider's own established address under whichever key gave it.
    */
   confirmRecoveryEmail(
     athleteId: string,
     tokenSha256: string,
     now: number,
     confirmingKey: string,
+    addressLimit: number,
   ): Promise<ConfirmOutcome>;
+  /**
+   * `/clear` (#1194): remove one of this athlete's addresses, by `actorKey`.
+   * A HELD address (confirmed after `heldSince`) is removed only when
+   * `actorKey` bound it; an ESTABLISHED one only with `proof` — an unspent
+   * recovery code (checked, not spent) or a token mailed to THAT address
+   * (spent). Under the removal rule, in the same transaction: every
+   * unredeemed token mailed to it voided, every pending confirmation of it
+   * voided, `address_cleared` logged.
+   */
+  clearRecoveryEmail(clearing: {
+    readonly athleteId: string;
+    readonly address: string;
+    readonly at: number;
+    readonly actorKey: string;
+    readonly heldSince: number;
+    readonly proof: RecoveryStepUp | null;
+  }): Promise<ClearOutcome>;
+  /**
+   * The full reset (#1194): with a step-up — an unspent code of this
+   * athlete's, or an unspent token mailed to one of their ESTABLISHED
+   * addresses — replace every recovery code with `newCodeSha256s`, clear
+   * every address, void every pending confirmation, mailed token and link
+   * code, and log `codes_replaced` (and each `address_cleared`) by
+   * `actorKey`, in one transaction.
+   */
+  resetRecovery(reset: {
+    readonly athleteId: string;
+    readonly at: number;
+    readonly actorKey: string;
+    readonly heldSince: number;
+    readonly proof: RecoveryStepUp;
+    readonly newCodeSha256s: readonly string[];
+  }): Promise<ResetOutcome>;
+  /**
+   * `recover` (#773; #1194): spend the code or the mailed token that names the
+   * athlete, add `publicKey`, and apply the chosen options, in ONE
+   * transaction. A token is re-checked: its address must still be bound to
+   * its athlete and past its hold, or it is spent and `unbound`. A key held
+   * already is `key_in_use`, and nothing is spent.
+   */
+  recoverAccount(recovery: Recovery): Promise<RecoveryOutcome>;
 
   /**
    * The athlete's account-change log, oldest first (#1193, ADR 0047 D-8). Only
@@ -917,11 +1055,20 @@ export interface SqlStore {
   findRecoveryEmail(address: string): Promise<RecoveryEmail | undefined>;
   putEmailRecoveryToken(token: Omit<EmailRecoveryToken, 'usedAt'>): Promise<void>;
   listEmailRecoveryTokens(athleteId: string): Promise<readonly EmailRecoveryToken[]>;
-  /** Spend an email recovery token: the token is what names the athlete. */
+  /**
+   * Spend an email recovery token: the token is what names the athlete. Since
+   * #1194 it is RE-CHECKED in the same transaction: its address must still be
+   * bound to its athlete and confirmed at or before `heldSince`, or the token
+   * is spent and `unbound`. No production route calls this: recovery spends
+   * through `recoverAccount`, and a new route must too, not use this spender.
+   */
   takeEmailRecoveryToken(
     tokenSha256: string,
     now: number,
-  ): Promise<Take<{ readonly athleteId: string }>>;
+    heldSince: number,
+  ): Promise<
+    Take<{ readonly athleteId: string; readonly address: string }> | { readonly outcome: 'unbound' }
+  >;
 
   putSession(session: Session): Promise<void>;
   /** Authentication: the token names the athlete, so this is not athlete-scoped. */
@@ -1422,6 +1569,14 @@ const emailRecoveryTokenFrom = (row: Selectable<EmailRecoveryTokenTable>): Email
   athleteId: row.athlete_id,
   expiresAt: row.expires_at,
   usedAt: row.used_at,
+  address: row.address,
+});
+
+const recoveryEmailFrom = (row: Selectable<RecoveryEmailTable>): RecoveryEmail => ({
+  athleteId: row.athlete_id,
+  address: row.address,
+  confirmedAt: row.confirmed_at,
+  boundByKey: row.bound_by_key,
 });
 
 const emailConfirmationFrom = (
@@ -1433,6 +1588,7 @@ const emailConfirmationFrom = (
   expiresAt: row.expires_at,
   usedAt: row.used_at,
   requestedByKey: row.requested_by_key,
+  supersededAt: row.superseded_at,
 });
 
 const accountChangeFrom = (row: Selectable<AccountChangeTable>): AccountChange => ({
@@ -1471,6 +1627,232 @@ async function logAccountChange(
       address: change.address ?? null,
     })
     .execute();
+}
+
+/**
+ * Remove one of an athlete's addresses under the removal rule (#1194, ADR
+ * 0047 D-8), in `trx`: the address unbound, every unredeemed token mailed to
+ * it voided, every pending confirmation of it voided, `address_cleared`
+ * logged by `actorKey`. A link code redeems no address, so none is voided.
+ */
+async function clearAddressIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  address: string,
+  at: number,
+  actorKey: string,
+): Promise<void> {
+  await trx
+    .deleteFrom('recovery_email')
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .execute();
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('address', '=', address)
+    .where('used_at', 'is', null)
+    .execute();
+  await logAccountChange(trx, { athleteId, at, kind: 'address_cleared', actorKey, address });
+}
+
+/**
+ * Revoke one key and undo what it did and nothing else (#1193, #1194): its
+ * sessions ended, the link codes it minted voided, its pending confirmation
+ * cancelled, and every address it bound that is still HELD cleared under the
+ * removal rule. An established address, and the recovery codes, are never
+ * touched. `key_revoked` is logged by `actorKey` when the key was live.
+ */
+async function revokeKeyIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  publicKey: string,
+  at: number,
+  actorKey: string,
+  heldSince: number,
+): Promise<void> {
+  const before = await trx
+    .selectFrom('device_key')
+    .select('revoked_at')
+    .where('athlete_id', '=', athleteId)
+    .where('public_key', '=', publicKey)
+    .executeTakeFirst();
+  await trx
+    .updateTable('device_key')
+    .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('public_key', '=', publicKey)
+    .execute();
+  await trx
+    .updateTable('session')
+    .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('device_key', '=', publicKey)
+    .execute();
+  await trx
+    .updateTable('link_code')
+    .set({ used_at: sql<number>`coalesce(used_at, ${at})` })
+    .where('athlete_id', '=', athleteId)
+    .where('minted_by_key', '=', publicKey)
+    .execute();
+  // Its pending confirmation is cancelled (#1193); a spent one stays, as the
+  // record that its token was used. The recovery codes are NOT touched,
+  // whoever asks (ADR 0047 D-8, review H1).
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('requested_by_key', '=', publicKey)
+    .where('used_at', 'is', null)
+    .execute();
+  if (before?.revoked_at === null) {
+    await logAccountChange(trx, {
+      athleteId,
+      at,
+      kind: 'key_revoked',
+      actorKey,
+      subjectKey: publicKey,
+    });
+  }
+  // Only a HELD address it bound (#1194): one past its hold may be the
+  // rider's only way back, and is left alone whoever asks.
+  const held = await trx
+    .selectFrom('recovery_email')
+    .select('address')
+    .where('athlete_id', '=', athleteId)
+    .where('bound_by_key', '=', publicKey)
+    .where('confirmed_at', 'is not', null)
+    .where('confirmed_at', '>', heldSince)
+    .orderBy('address')
+    .execute();
+  for (const { address } of held) await clearAddressIn(trx, athleteId, address, at, actorKey);
+}
+
+/**
+ * Void everything mailed or minted that could still add a key or bind an
+ * address (#1194, the removal rule for the reset and *revoke every other
+ * key*): every unredeemed recovery token, every pending confirmation and
+ * every unredeemed link code.
+ */
+async function voidMailedAndMintedIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  at: number,
+): Promise<void> {
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .deleteFrom('recovery_email_confirmation')
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+  await trx
+    .updateTable('link_code')
+    .set({ used_at: at })
+    .where('athlete_id', '=', athleteId)
+    .where('used_at', 'is', null)
+    .execute();
+}
+
+/**
+ * The full reset's steps (#1194): every code replaced, every address cleared,
+ * everything mailed or minted voided, `codes_replaced` logged by `actorKey`.
+ */
+async function resetIn(
+  trx: Transaction<InstanceDatabase>,
+  athleteId: string,
+  at: number,
+  actorKey: string,
+  newCodeSha256s: readonly string[],
+): Promise<void> {
+  await trx.deleteFrom('recovery_code').where('athlete_id', '=', athleteId).execute();
+  for (const codeSha256 of newCodeSha256s) {
+    await trx
+      .insertInto('recovery_code')
+      .values({ code_sha256: codeSha256, athlete_id: athleteId, created_at: at, used_at: null })
+      .execute();
+  }
+  await logAccountChange(trx, { athleteId, at, kind: 'codes_replaced', actorKey });
+  const bound = await trx
+    .selectFrom('recovery_email')
+    .select('address')
+    .where('athlete_id', '=', athleteId)
+    .orderBy('address')
+    .execute();
+  for (const { address } of bound) await clearAddressIn(trx, athleteId, address, at, actorKey);
+  await voidMailedAndMintedIn(trx, athleteId, at);
+}
+
+/**
+ * Spend a mailed token, then RE-CHECK its address (#1194, ADR 0047 D-8 item
+ * 7): still bound to the token's athlete and past its hold, or `unbound`. The
+ * token is spent either way. `athleteId` scopes the token to one athlete
+ * where the caller knows who it is; `null` lets the token name them (`recover`).
+ */
+async function takeTokenIn(
+  trx: Transaction<InstanceDatabase>,
+  tokenSha256: string,
+  athleteId: string | null,
+  now: number,
+  heldSince: number,
+): Promise<
+  | { readonly outcome: 'taken'; readonly athleteId: string; readonly address: string }
+  | { readonly outcome: 'unknown' | 'used' | 'expired' | 'unbound' }
+> {
+  let query = trx
+    .selectFrom('email_recovery_token')
+    .selectAll()
+    .where('token_sha256', '=', tokenSha256);
+  if (athleteId !== null) query = query.where('athlete_id', '=', athleteId);
+  const row = await query.executeTakeFirst();
+  const outcome = outcomeOf(row, now);
+  if (row === undefined || outcome === 'unknown') return { outcome: 'unknown' };
+  if (outcome === 'expired') return { outcome };
+  await trx
+    .updateTable('email_recovery_token')
+    .set({ used_at: sql<number>`coalesce(used_at, ${now})` })
+    .where('token_sha256', '=', tokenSha256)
+    .execute();
+  // The address is asked BEFORE whether the token was spent: a token voided
+  // by the removal of its address answers `unbound`, which is what happened
+  // to it, rather than `used`, which did not.
+  const address = row.address;
+  const bound =
+    address === null
+      ? undefined
+      : await trx
+          .selectFrom('recovery_email')
+          .select('confirmed_at')
+          .where('athlete_id', '=', row.athlete_id)
+          .where('address', '=', address)
+          .executeTakeFirst();
+  if (
+    address === null ||
+    bound === undefined ||
+    !isEstablished({ confirmedAt: bound.confirmed_at }, heldSince)
+  ) {
+    return { outcome: 'unbound' };
+  }
+  if (outcome === 'used') return { outcome };
+  return { outcome: 'taken', athleteId: row.athlete_id, address };
+}
+
+/** The step-up refusal a token's or a code's outcome is answered with. */
+function stepUpRefusal(outcome: 'unknown' | 'used' | 'expired' | 'unbound'): StepUpRefusal {
+  if (outcome === 'unbound') return 'address_unbound';
+  if (outcome === 'used') return 'code_used';
+  if (outcome === 'expired') return 'code_expired';
+  return 'code_unknown';
 }
 
 /** A single-use row's outcome, from what was read before it was spent. */
@@ -1865,7 +2247,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return inserted === undefined ? 'replayed' : 'recorded';
       }),
 
-    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256, actorKey) =>
+    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256, actorKey, heldSince) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<RevokeOutcome> => {
           const keys = await trx
@@ -1891,42 +2273,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                     .executeTakeFirst();
             if (held === undefined) return 'last_device';
           }
-          await trx
-            .updateTable('device_key')
-            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('public_key', '=', publicKey)
-            .execute();
-          await trx
-            .updateTable('session')
-            .set({ revoked_at: sql<number>`coalesce(revoked_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('device_key', '=', publicKey)
-            .execute();
-          await trx
-            .updateTable('link_code')
-            .set({ used_at: sql<number>`coalesce(used_at, ${at})` })
-            .where('athlete_id', '=', athleteId)
-            .where('minted_by_key', '=', publicKey)
-            .execute();
-          // Its pending confirmation is cancelled (#1193); a spent one stays,
-          // as the record that its token was used. The recovery codes are NOT
-          // touched, whoever asks (ADR 0047 D-8, review H1).
-          await trx
-            .deleteFrom('recovery_email_confirmation')
-            .where('athlete_id', '=', athleteId)
-            .where('requested_by_key', '=', publicKey)
-            .where('used_at', 'is', null)
-            .execute();
-          if (target.revoked_at === null) {
-            await logAccountChange(trx, {
-              athleteId,
-              at,
-              kind: 'key_revoked',
-              actorKey,
-              subjectKey: publicKey,
-            });
-          }
+          await revokeKeyIn(trx, athleteId, publicKey, at, actorKey, heldSince);
           return 'revoked';
         }),
       ),
@@ -2204,24 +2551,36 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(displayNameChangeFrom),
       ),
 
-    getRecoveryEmail: (athleteId) =>
-      exclusive(async () => {
-        const row = await db
-          .selectFrom('recovery_email')
-          .selectAll()
-          .where('athlete_id', '=', athleteId)
-          .executeTakeFirst();
-        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
-      }),
+    listRecoveryEmails: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('recovery_email')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            // An address from before migration 0019 (no time) first, then by
+            // when each was bound.
+            .orderBy(sql`confirmed_at is not null`)
+            .orderBy('confirmed_at')
+            .orderBy('address')
+            .execute()
+        ).map(recoveryEmailFrom),
+      ),
 
     putEmailConfirmation: (confirmation) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
-          await trx
-            .deleteFrom('recovery_email_confirmation')
-            .where('athlete_id', '=', confirmation.athleteId)
-            .where('used_at', 'is', null)
-            .execute();
+          // One pending confirmation per KEY (#1194, D-8 item 3): another
+          // key's is left where it is. A row from before migration 0018 has
+          // no key and is replaced by nothing.
+          if (confirmation.requestedByKey !== null) {
+            await trx
+              .deleteFrom('recovery_email_confirmation')
+              .where('athlete_id', '=', confirmation.athleteId)
+              .where('requested_by_key', '=', confirmation.requestedByKey)
+              .where('used_at', 'is', null)
+              .execute();
+          }
           await trx
             .insertInto('recovery_email_confirmation')
             .values({
@@ -2248,19 +2607,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(emailConfirmationFrom),
       ),
 
-    confirmRecoveryEmail: (athleteId, tokenSha256, now, confirmingKey) =>
+    confirmRecoveryEmail: (athleteId, tokenSha256, now, confirmingKey, addressLimit) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<ConfirmOutcome> => {
+          // 1. Take the confirmation. One that another key's confirmation of
+          // the same address superseded is told apart from an unknown code.
           const row = await trx
             .selectFrom('recovery_email_confirmation')
             .selectAll()
             .where('athlete_id', '=', athleteId)
             .where('token_sha256', '=', tokenSha256)
             .executeTakeFirst();
+          if (row?.superseded_at != null) return { outcome: 'superseded' };
           const outcome = outcomeOf(row, now);
           if (outcome !== 'spendable' || row === undefined) {
             return { outcome: outcome === 'spendable' ? 'unknown' : outcome };
           }
+          // 2. Another athlete holds the address: 0004's unique constraint
+          // on the address stays (review K5).
           const holder = await trx
             .selectFrom('recovery_email')
             .select('athlete_id')
@@ -2269,45 +2633,197 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (holder !== undefined && holder.athlete_id !== row.athlete_id) {
             return { outcome: 'held' };
           }
-          const bound = await trx
-            .selectFrom('recovery_email')
-            .select('address')
-            .where('athlete_id', '=', row.athlete_id)
-            .executeTakeFirst();
-          if (bound?.address !== row.address) {
-            // The binder is the key that GAVE the address, not the key that
-            // typed the code (ADR 0047 D-8, item 6).
-            const actorKey = row.requested_by_key ?? confirmingKey;
-            if (bound !== undefined) {
-              await logAccountChange(trx, {
-                athleteId: row.athlete_id,
-                at: now,
-                kind: 'address_cleared',
-                actorKey,
-                address: bound.address,
-              });
-            }
-            await logAccountChange(trx, {
-              athleteId: row.athlete_id,
-              at: now,
-              kind: 'address_added',
-              actorKey,
-              address: row.address,
-            });
+          // 3 before 4 (review K4): an address already bound to this athlete
+          // is never counted against the limit, so re-confirming it is the
+          // no-op success whatever is bound beside it.
+          const alreadyBound = holder !== undefined;
+          if (!alreadyBound) {
+            const count = await trx
+              .selectFrom('recovery_email')
+              .select((eb) => eb.fn.countAll<number>().as('n'))
+              .where('athlete_id', '=', row.athlete_id)
+              .executeTakeFirstOrThrow();
+            if (Number(count.n) >= addressLimit) return { outcome: 'limit' };
           }
-          await trx
+          // 5. Added, held, beside whatever is bound. The binder is the key
+          // that GAVE the address, not the key that typed the code (D-8 item
+          // 6). DO NOTHING on conflict: only a row this inserted is held,
+          // logged and supersedes the others — an upsert would re-hold the
+          // rider's own address under whichever key gave it.
+          const binder = row.requested_by_key ?? confirmingKey;
+          const inserted = await trx
             .insertInto('recovery_email')
-            .values({ athlete_id: row.athlete_id, address: row.address })
-            .onConflict((conflict) =>
-              conflict.column('athlete_id').doUpdateSet({ address: row.address }),
-            )
-            .execute();
+            .values({
+              athlete_id: row.athlete_id,
+              address: row.address,
+              confirmed_at: now,
+              bound_by_key: binder,
+            })
+            .onConflict((conflict) => conflict.columns(['athlete_id', 'address']).doNothing())
+            .returning('address')
+            .executeTakeFirst();
           await trx
             .updateTable('recovery_email_confirmation')
             .set({ used_at: now })
             .where('token_sha256', '=', tokenSha256)
             .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id };
+          if (inserted !== undefined) {
+            await logAccountChange(trx, {
+              athleteId: row.athlete_id,
+              at: now,
+              kind: 'address_added',
+              actorKey: binder,
+              address: row.address,
+            });
+            // The first taken wins (D-8 item 8): every other pending
+            // confirmation of this address, whichever key gave it, is spent.
+            await trx
+              .updateTable('recovery_email_confirmation')
+              .set({ used_at: now, superseded_at: now })
+              .where('athlete_id', '=', row.athlete_id)
+              .where('address', '=', row.address)
+              .where('used_at', 'is', null)
+              .execute();
+          }
+          return { outcome: 'taken', athleteId: row.athlete_id, added: inserted !== undefined };
+        }),
+      ),
+
+    clearRecoveryEmail: ({ athleteId, address, at, actorKey, heldSince, proof }) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ClearOutcome> => {
+          const row = await trx
+            .selectFrom('recovery_email')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('address', '=', address)
+            .executeTakeFirst();
+          if (row === undefined) return 'not_found';
+          if (!isEstablished({ confirmedAt: row.confirmed_at }, heldSince)) {
+            // A HELD address goes only for the key that bound it.
+            if (row.bound_by_key !== actorKey) return 'step_up_required';
+          } else if (proof === null) {
+            return 'step_up_required';
+          } else if (proof.kind === 'code') {
+            // Checked and not spent, as for the last key and the erase step-up.
+            const code = await trx
+              .selectFrom('recovery_code')
+              .select('code_sha256')
+              .where('athlete_id', '=', athleteId)
+              .where('code_sha256', '=', proof.codeSha256)
+              .where('used_at', 'is', null)
+              .executeTakeFirst();
+            if (code === undefined) return 'code_unknown';
+          } else {
+            // A token mailed to THAT address, not another of the athlete's —
+            // asked before it is spent, so a wrong-address press costs nothing.
+            const mailedTo = await trx
+              .selectFrom('email_recovery_token')
+              .select('address')
+              .where('token_sha256', '=', proof.tokenSha256)
+              .where('athlete_id', '=', athleteId)
+              .executeTakeFirst();
+            if (mailedTo !== undefined && mailedTo.address !== address) return 'address_unbound';
+            const taken = await takeTokenIn(trx, proof.tokenSha256, athleteId, at, heldSince);
+            if (taken.outcome !== 'taken') return stepUpRefusal(taken.outcome);
+            if (taken.address !== address) return 'address_unbound';
+          }
+          await clearAddressIn(trx, athleteId, address, at, actorKey);
+          return 'cleared';
+        }),
+      ),
+
+    resetRecovery: ({ athleteId, at, actorKey, heldSince, proof, newCodeSha256s }) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<ResetOutcome> => {
+          if (proof.kind === 'code') {
+            const code = await trx
+              .selectFrom('recovery_code')
+              .select('code_sha256')
+              .where('athlete_id', '=', athleteId)
+              .where('code_sha256', '=', proof.codeSha256)
+              .where('used_at', 'is', null)
+              .executeTakeFirst();
+            if (code === undefined) return 'code_unknown';
+          } else {
+            const taken = await takeTokenIn(trx, proof.tokenSha256, athleteId, at, heldSince);
+            if (taken.outcome !== 'taken') return stepUpRefusal(taken.outcome);
+          }
+          await resetIn(trx, athleteId, at, actorKey, newCodeSha256s);
+          return 'reset';
+        }),
+      ),
+
+    recoverAccount: (recovery) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<RecoveryOutcome> => {
+          const { publicKey, at, heldSince, proof } = recovery;
+          // Asked before the secret is spent (#861): a refusal must not cost
+          // a rider a code.
+          const inUse = await trx
+            .selectFrom('device_key')
+            .select('public_key')
+            .where('public_key', '=', publicKey)
+            .executeTakeFirst();
+          if (inUse !== undefined) return { outcome: 'key_in_use' };
+          let athleteId: string;
+          if (proof.kind === 'code') {
+            const row = await trx
+              .selectFrom('recovery_code')
+              .selectAll()
+              .where('code_sha256', '=', proof.codeSha256)
+              .executeTakeFirst();
+            const outcome = outcomeOf(row, at);
+            if (outcome !== 'spendable' || row === undefined) {
+              return { outcome: outcome === 'spendable' ? 'unknown' : outcome };
+            }
+            await trx
+              .updateTable('recovery_code')
+              .set({ used_at: at })
+              .where('code_sha256', '=', proof.codeSha256)
+              .execute();
+            athleteId = row.athlete_id;
+          } else {
+            const taken = await takeTokenIn(trx, proof.tokenSha256, null, at, heldSince);
+            if (taken.outcome !== 'taken') return { outcome: taken.outcome };
+            athleteId = taken.athleteId;
+          }
+          await trx
+            .insertInto('device_key')
+            .values({
+              public_key: publicKey,
+              athlete_id: athleteId,
+              added_at: at,
+              revoked_at: null,
+            })
+            .execute();
+          // `recover` has no session: the key it adds is the one it names (D-8).
+          await logAccountChange(trx, {
+            athleteId,
+            at,
+            kind: 'key_added',
+            actorKey: publicKey,
+            subjectKey: publicKey,
+            via: proof.kind === 'code' ? 'recovery_code' : 'email_token',
+          });
+          if (recovery.revokeOtherKeys) {
+            const others = await trx
+              .selectFrom('device_key')
+              .select('public_key')
+              .where('athlete_id', '=', athleteId)
+              .where('public_key', '!=', publicKey)
+              .where('revoked_at', 'is', null)
+              .orderBy('public_key')
+              .execute();
+            for (const other of others) {
+              await revokeKeyIn(trx, athleteId, other.public_key, at, publicKey, heldSince);
+            }
+            await voidMailedAndMintedIn(trx, athleteId, at);
+          }
+          if (recovery.resetCodeSha256s !== undefined) {
+            await resetIn(trx, athleteId, at, publicKey, recovery.resetCodeSha256s);
+          }
+          return { outcome: 'taken', athleteId };
         }),
       ),
 
@@ -2377,7 +2893,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectAll()
           .where('address', '=', address)
           .executeTakeFirst();
-        return row === undefined ? undefined : { athleteId: row.athlete_id, address: row.address };
+        return row === undefined ? undefined : recoveryEmailFrom(row);
       }),
 
     putEmailRecoveryToken: (token) =>
@@ -2389,6 +2905,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             athlete_id: token.athleteId,
             expires_at: token.expiresAt,
             used_at: null,
+            address: token.address,
           })
           .execute();
       }),
@@ -2405,25 +2922,9 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(emailRecoveryTokenFrom),
       ),
 
-    takeEmailRecoveryToken: (tokenSha256, now) =>
+    takeEmailRecoveryToken: (tokenSha256, now, heldSince) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const row = await trx
-            .selectFrom('email_recovery_token')
-            .selectAll()
-            .where('token_sha256', '=', tokenSha256)
-            .executeTakeFirst();
-          const outcome = outcomeOf(row, now);
-          if (outcome !== 'spendable' || row === undefined) {
-            return { outcome: outcome === 'spendable' ? 'unknown' : outcome } as const;
-          }
-          await trx
-            .updateTable('email_recovery_token')
-            .set({ used_at: now })
-            .where('token_sha256', '=', tokenSha256)
-            .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id } as const;
-        }),
+        db.transaction().execute((trx) => takeTokenIn(trx, tokenSha256, null, now, heldSince)),
       ),
 
     putSession: (session) =>
@@ -3958,6 +4459,17 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           )
           .executeTakeFirst();
         return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    renewInstanceKeyLease: (holder, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .updateTable('instance_key_lease')
+          .set({ expires_at: expiresAt })
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .executeTakeFirst();
+        return Number(result.numUpdatedRows) === 1;
       }),
 
     releaseInstanceKeyLease: (holder) =>

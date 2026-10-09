@@ -315,7 +315,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     operationId: 'listDevices',
     reaches: 'own',
     admitsPending: true,
-    summary: 'This athlete’s device keys: when each was added and last used, and which is asking.',
+    summary:
+      'This athlete’s device keys — when each was added and last used, and which is asking — and their recovery addresses, each with when it was confirmed, when its first-week hold ends (`null` once it recovers) and the key that gave it. What the one-off review reads (ADR 0047 D-8).',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated'],
@@ -332,10 +333,18 @@ export const IDENTITY_ROUTES: readonly Route[] = [
             thisDevice: { type: 'boolean' },
           }),
         },
+        recoveryAddresses: {
+          type: 'array',
+          items: object({
+            address: string,
+            confirmedAt: nullableInteger,
+            heldUntil: nullableInteger,
+            boundByKey: nullableString,
+          }),
+        },
       }),
     },
-    handle: async (context) =>
-      json({ devices: await identityOf(context).devices(callerOf(context)) }),
+    handle: async (context) => json(await identityOf(context).devices(callerOf(context))),
   },
   {
     method: 'POST',
@@ -444,20 +453,39 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     operationId: 'recoverAccount',
     reaches: 'own',
     summary:
-      'Add this device’s key to an athlete with a recovery code, or with an emailed token where the operator enabled email recovery, and a signed `oyl-recover-v1` statement.',
+      'Add this device’s key to an athlete with a recovery code, or with a code mailed to an established recovery address where the operator enabled email recovery, and a signed `oyl-recover-v1` statement. A mailed code is re-checked as it is spent: its address must still be bound and past its first week, or it is `address_unbound`. With `reset`, the recovery codes are replaced — the new ones answered once, here — and every recovery address, pending confirmation, mailed code and link code is cleared or voided. With `revokeOtherKeys`, every other key is revoked as a plain revoke would (each one’s held addresses cleared), and every mailed code and link code voided. All of it in one transaction.',
     identity: true,
     request: object(
-      { ...STATEMENT_PROPERTIES, recoveryCode: string, emailToken: string },
+      {
+        ...STATEMENT_PROPERTIES,
+        recoveryCode: string,
+        emailToken: string,
+        reset: { type: 'boolean' },
+        revokeOtherKeys: { type: 'boolean' },
+      },
       Object.keys(STATEMENT_PROPERTIES),
     ),
-    errors: [...STATEMENT_ERRORS, 'code_unknown', 'code_used', 'code_expired', 'key_in_use'],
-    response: { contentType: 'application/json', schema: object({ athleteId: string }) },
+    errors: [
+      ...STATEMENT_ERRORS,
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'address_unbound',
+      'key_in_use',
+    ],
+    response: {
+      contentType: 'application/json',
+      schema: object({ athleteId: string, recoveryCodes: { type: 'array', items: string } }, [
+        'athleteId',
+      ]),
+    },
     handle: async (context) =>
       answer(
-        await identityOf(context).recover(context.json, {
-          recoveryCode: context.json.recoveryCode,
-          emailToken: context.json.emailToken,
-        }),
+        await identityOf(context).recover(
+          context.json,
+          { recoveryCode: context.json.recoveryCode, emailToken: context.json.emailToken },
+          { reset: context.json.reset, revokeOtherKeys: context.json.revokeOtherKeys },
+        ),
       ),
   },
   {
@@ -467,7 +495,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     operationId: 'requestEmailRecovery',
     reaches: 'own',
     summary:
-      'Email a single-use recovery link to an address, if an athlete registered it. The same answer either way. `not_found` where the operator has not enabled email recovery.',
+      'Email a single-use recovery code — a code to type into the app, never a link — to an address, if it is an established recovery address of an athlete here (one in its first week recovers nothing). The same answer either way. `not_found` where the operator has not enabled email recovery.',
     identity: true,
     request: object({ address: string }),
     errors: ['validation_failed'],
@@ -518,7 +546,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     reaches: 'own',
     admitsPending: true,
     summary:
-      'Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.',
+      'Give an address for email recovery: a single-use code, good for 24 hours, is mailed to it — a code to type into the app, never a link — and the address recovers nothing until that code is typed in. A key has one pending confirmation at a time; another key’s is left alone. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.',
     identity: true,
     auth: 'session',
     request: object({ address: string }),
@@ -540,7 +568,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     reaches: 'own',
     admitsPending: true,
     summary:
-      'Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.',
+      'Type the code mailed to a recovery address, signed in as the athlete who gave it: the address is ADDED, held for 7 days, beside whatever is bound, and replaces none. Checked in this order, stopping at the first that answers: `code_unknown` (or `code_used`, `code_expired`), or `confirmation_superseded` when another key’s confirmation of the same address bound it first; `address_in_use` when another account holds it; success and no change when it is already this account’s; `address_limit` when two are bound; otherwise added, with the key that gave it as its binder.',
     identity: true,
     auth: 'session',
     request: object({ token: string }),
@@ -550,7 +578,9 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       'code_unknown',
       'code_used',
       'code_expired',
+      'confirmation_superseded',
       'address_in_use',
+      'address_limit',
     ],
     response: { contentType: 'none' },
     handle: async (context) => {
@@ -560,5 +590,69 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       );
       return outcome.ok ? noContent() : answer(outcome);
     },
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery-email/clear',
+    sealed: 'only',
+    operationId: 'clearRecoveryEmail',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Clear one of this athlete’s recovery addresses (ADR 0047 D-8). An address in its first week is cleared only by the key that gave it; an established one only with a step-up — one of the athlete’s recovery codes (checked, not spent), or a code mailed to THAT address. Every unredeemed code mailed to it and every pending confirmation of it are voided in the same transaction, and the clear is logged by the asking key. To replace an established address: give and confirm the new one, wait out its week, then clear the old one.',
+    identity: true,
+    auth: 'session',
+    request: object({ address: string, recoveryCode: string, emailToken: string }, ['address']),
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'step_up_required',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'address_unbound',
+    ],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const outcome = await identityOf(context).clearRecoveryEmail(callerOf(context), {
+        address: context.json.address,
+        recoveryCode: context.json.recoveryCode,
+        emailToken: context.json.emailToken,
+      });
+      return outcome.ok ? noContent() : answer(outcome);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/recovery/reset',
+    sealed: 'only',
+    operationId: 'resetRecovery',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'The full reset (ADR 0047 D-8), with a step-up — one of the athlete’s recovery codes, or a code mailed to an established recovery address — and never by a device key alone: the recovery codes are replaced, and the new ones answered here once; every recovery address is cleared; every pending confirmation, mailed code and link code is voided. One transaction, logged by the asking key and shown on every other device.',
+    identity: true,
+    auth: 'session',
+    request: object({ recoveryCode: string, emailToken: string }, []),
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'step_up_required',
+      'code_unknown',
+      'code_used',
+      'code_expired',
+      'address_unbound',
+    ],
+    response: {
+      contentType: 'application/json',
+      schema: object({ recoveryCodes: { type: 'array', items: string } }),
+    },
+    handle: async (context) =>
+      answer(
+        await identityOf(context).resetRecovery(callerOf(context), {
+          recoveryCode: context.json.recoveryCode,
+          emailToken: context.json.emailToken,
+        }),
+      ),
   },
 ];

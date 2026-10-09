@@ -86,8 +86,10 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // row: with no id the autoincrement made one, and any migration after 0004
   // read that as its `down` adding a row (#780, the first such migration).
   display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
-  recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
-  email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
+  // The columns named, so migration 0019's `confirmed_at` and `bound_by_key` are NULL (#1194).
+  recovery_email: `INSERT INTO recovery_email (athlete_id, address) VALUES ('a', 'a@example.org')`,
+  // The columns named, so migration 0019's `address` is NULL (#1194).
+  email_recovery_token: `INSERT INTO email_recovery_token (token_sha256, athlete_id, expires_at, used_at) VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
   // The columns named, so migration 0018's `requested_by_key` is NULL (#1193).
   recovery_email_confirmation: `INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at) VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
   block: `INSERT INTO block VALUES ('a', 'b', 10)`,
@@ -368,11 +370,84 @@ describe('the migrations (#769)', () => {
     expect(columns()).toContain('requested_by_key');
   });
 
-  it('takes both analysis tables away with 0019, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
+  it('migrates three athletes’ single addresses to established with 0019, and back, and up again (#1194)', async () => {
     const path = await freshPath();
     await withKysely(path, (db) => migrateToLatest(db));
     await withKysely(path, async (db) => {
-      while ((await appliedMigrations(db)).at(-1) !== '0019-analysis-jobs') {
+      while ((await appliedMigrations(db)).at(-1) !== '0018-account-changes') {
+        await migrateDownOne(db);
+      }
+    });
+    const rows = (query: string): unknown[] => {
+      const database = openDatabase(path);
+      try {
+        return database.prepare(query).all();
+      } finally {
+        database.close();
+      }
+    };
+    const exec = (statement: string): void => {
+      const database = openDatabase(path);
+      try {
+        database.exec(statement);
+      } finally {
+        database.close();
+      }
+    };
+    // Today's shape: one address each, a token mailed to it, one pending
+    // confirmation each.
+    for (const athlete of ['a', 'b', 'c']) {
+      exec(`
+        INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('${athlete}', 'A', 1, 'active');
+        INSERT INTO device_key (public_key, athlete_id, added_at, revoked_at) VALUES ('key-${athlete}', '${athlete}', 2, NULL);
+        INSERT INTO recovery_email VALUES ('${athlete}', '${athlete}@example.org');
+        INSERT INTO email_recovery_token VALUES ('${athlete.repeat(64)}', '${athlete}', 9, NULL);
+        INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at, requested_by_key)
+          VALUES ('${athlete.toUpperCase().repeat(64)}', '${athlete}', 'new-${athlete}@example.org', 10, NULL, 'key-${athlete}');
+      `);
+    }
+    const before = snapshot(path);
+    const today = rows(`SELECT * FROM recovery_email ORDER BY athlete_id`);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(rows(`SELECT * FROM recovery_email ORDER BY athlete_id`)).toEqual(
+      ['a', 'b', 'c'].map((athlete) => ({
+        athlete_id: athlete,
+        address: `${athlete}@example.org`,
+        confirmed_at: null,
+        bound_by_key: null,
+      })),
+    );
+    // Each token took its athlete's one address.
+    expect(
+      rows(`SELECT athlete_id, address FROM email_recovery_token ORDER BY athlete_id`),
+    ).toEqual(
+      ['a', 'b', 'c'].map((athlete) => ({
+        athlete_id: athlete,
+        address: `${athlete}@example.org`,
+      })),
+    );
+    const migrated = snapshot(path);
+
+    // The new shape holds what the old one cannot: a second address for `a`,
+    // which is the row documented as lost on `down`.
+    exec(`INSERT INTO recovery_email VALUES ('a', 'second-a@example.org', 50, 'key-a')`);
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = snapshot(path);
+    expect(undone.schema).toEqual(before.schema);
+    expect(undone.rows).toEqual(before.rows);
+    // The address bound before 0019 is the one kept, and every row is today's.
+    expect(rows(`SELECT * FROM recovery_email ORDER BY athlete_id`)).toEqual(today);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    expect(snapshot(path)).toEqual(migrated);
+  });
+
+  it('takes both analysis tables away with 0020, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0020-analysis-jobs') {
         await migrateDownOne(db);
       }
     });

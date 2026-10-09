@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0019 (#1095, ADR 0046 D-11): the analysis jobs and their events.
+ * Migration 0020 (#1095, ADR 0046 D-11): the analysis jobs and their events.
  *
  * - **`analysis_job`** — one post-ride write-up a device asked its instance
  *   for: whose it is, which source it runs on, the device-built input (#809's

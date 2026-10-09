@@ -118,7 +118,7 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         is the committed list the table is held to, and a
                         test world's `call` seals a marked route itself.
                         Since #1095 `src/analysis/jobs.ts` is the job
-                        engine (migration 0019, sealed-only routes, an SSE
+                        engine (migration 0020, sealed-only routes, an SSE
                         stream with `Last-Event-ID` resume and a heartbeat
                         on injected timers); docs/architecture.md
                         §"Analysis jobs — #1095" says what it keeps.
