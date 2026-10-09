@@ -90,11 +90,38 @@ describe('the Connect screen — #777, #778', () => {
     expect(said).toContain('sent each time you press Connect with a name typed');
     expect(said).toContain('keeps it only if it has not seen this device before');
     expect(said).toContain('earlier names');
-    expect(said).toContain('Nothing else of yours');
+    expect(said).toContain('Connecting itself sends no ride, route, position or heart rate');
     expect(said).not.toContain('Nothing else from this version of the app');
     // No screen removes what the instance holds: the sentence says whom to ask.
     expect(DISCONNECT_KEEPS_RIDES).toContain('ask whoever runs the instance');
     expect(DISCONNECT_KEEPS_RIDES).not.toContain('erased on the instance');
+  });
+
+  it('lists what a private room and a sync send, before Connect and kept visible — #778, #1195', async () => {
+    // Rooms shipped (#784, #785): a list that ended "nothing else" with no
+    // room in it told a rider less than the app sends. Sync's line comes
+    // before sync does (#1195 is blocked by #778).
+    const room = INSTANCE_RECEIVES.find((line) => line.includes('private room'));
+    const sync = INSTANCE_RECEIVES.find((line) => line.includes('Only if you sync'));
+    expect(room).toContain('the route of a room you make');
+    expect(room).toContain('your power and cadence while you ride in it');
+    expect(room).toContain('the weight you declare once as you join');
+    expect(sync).toContain('which needs the instance’s card');
+    expect(sync).toContain('with their positions and heart rate');
+    expect(sync).toContain('sealed on this device for the instance alone');
+    expect(sync).toContain('This version of the app does not offer Sync yet');
+    expect(INSTANCE_KEPT_VISIBLE).toContain(room);
+    expect(INSTANCE_KEPT_VISIBLE).toContain(sync);
+    const scripted = scriptedInstance();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const list = mounted.container.querySelector('[data-oyl-kept-visible] ul');
+    expect(list?.textContent).toContain(room ?? 'no room line');
+    expect(list?.textContent).toContain(sync ?? 'no sync line');
+    expect(
+      (list as Element).compareDocumentPosition(button('Connect')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('shows the names the instance holds after connecting, not the ones typed', async () => {
