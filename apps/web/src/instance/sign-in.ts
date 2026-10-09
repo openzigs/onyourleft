@@ -64,7 +64,7 @@ export interface InstanceAccount {
    * no sealed route (D-14 Q1). Changed only by the rider confirming a new card.
    */
   readonly pin?: string;
-  /** The highest key serial and its id this device has verified, and when it first saw each statement (D-5). */
+  /** The highest key serial and its id this device has verified, when it first saw each statement, and each key's newest re-signing (D-5, #1216). */
   readonly keyTrust?: InstanceKeyTrust;
   /**
    * The fingerprint the pinned key ENDORSED for its successor (D-5, D-14 Q8):
@@ -86,7 +86,10 @@ const isWholeSeconds = (value: unknown): value is number =>
 /** The stored trust, or `undefined` when it is not one this build wrote. */
 function trustField(value: unknown): InstanceKeyTrust | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { highestSerial, highestKeyId, firstVerified } = value as Record<string, unknown>;
+  const { highestSerial, highestKeyId, firstVerified, newestIssued } = value as Record<
+    string,
+    unknown
+  >;
   if (!(highestSerial === null || isWholeSeconds(highestSerial))) return undefined;
   if (!(highestKeyId === null || typeof highestKeyId === 'string')) return undefined;
   if (typeof firstVerified !== 'object' || firstVerified === null) return undefined;
@@ -96,7 +99,30 @@ function trustField(value: unknown): InstanceKeyTrust | undefined {
     if (!isWholeSeconds(at) || !isWholeSeconds(notAfter)) return undefined;
     seen[id] = { at, notAfter };
   }
-  return { highestSerial, highestKeyId, firstVerified: seen };
+  const newest: Record<string, { issuedAt: number; notAfter: number }> = {};
+  if (newestIssued === undefined) {
+    // Trust a build before #1216 wrote: every statement it verified is still
+    // in `firstVerified`, named `keyId@issuedAt`, so the newest of each key is
+    // read back from there rather than forgotten.
+    for (const [id, entry] of Object.entries(seen)) {
+      const at = id.lastIndexOf('@');
+      const keyId = id.slice(0, at);
+      const issuedAt = Number(id.slice(at + 1));
+      if (at <= 0 || !isWholeSeconds(issuedAt)) return undefined;
+      const held = newest[keyId];
+      if (held === undefined || issuedAt > held.issuedAt) {
+        newest[keyId] = { issuedAt, notAfter: entry.notAfter };
+      }
+    }
+  } else {
+    if (typeof newestIssued !== 'object' || newestIssued === null) return undefined;
+    for (const [keyId, entry] of Object.entries(newestIssued)) {
+      const { issuedAt, notAfter } = (entry ?? {}) as Record<string, unknown>;
+      if (!isWholeSeconds(issuedAt) || !isWholeSeconds(notAfter)) return undefined;
+      newest[keyId] = { issuedAt, notAfter };
+    }
+  }
+  return { highestSerial, highestKeyId, firstVerified: seen, newestIssued: newest };
 }
 
 /** Keep `account` on this device, in place of whatever was kept before. */

@@ -18,6 +18,7 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { agentEngine } from './analysis/engine.ts';
+import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
@@ -124,6 +125,18 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /**
+   * The endpoint (an ORIGIN) an athlete's own recorded hosted consent names,
+   * or `undefined` when they have none — `analysis/source.ts`
+   * §`SourceOptions.recordedConsent` (ADR 0046 D-9, Q10). ⚠️ **Nothing records
+   * a consent yet: that is #1199**, so `serve.ts` never sets this and every
+   * `instance-hosted` job on a running instance — the operator's included —
+   * fails `hosted_unavailable` before the key is opened (#1223). A test sets
+   * it to run a hosted job end to end; #1199 replaces it with the store's read.
+   */
+  readonly hostedConsent?: (athleteId: string) => Promise<string | undefined>;
+  /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
+  readonly hostedFetch?: typeof globalThis.fetch;
 }
 
 export interface StartedInstance {
@@ -520,7 +533,16 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         store,
         engine: agentEngine({
           reads: store,
-          sources: { local, hostedKey },
+          sources: {
+            local,
+            hostedKey,
+            ...(options.hostedConsent === undefined
+              ? {}
+              : { recordedConsent: options.hostedConsent }),
+            // #1223: every hosted request masked by the athlete's own guard (#1101).
+            guard: (athleteId) => readMaskingGuard(reading, athleteId),
+            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+          },
           clock: { now },
         }),
         available: async () => local !== undefined || (await hostedKey()).kind === 'held',
