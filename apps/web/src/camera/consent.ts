@@ -84,19 +84,6 @@ export const SCREENSHOT_SENTENCE =
   'In the Android app, screenshots and the app-switcher preview are blocked while a camera picture is on the screen. A browser cannot block them.';
 
 /**
- * That a side camera's picture is shown on this tablet, and to whom — #1061,
- * ADR 0044 D-1, D-6 and D-7, in the wording drafted for #1060 (PR #1121).
- *
- * ⚠️ **Narrower than #1121's draft, on purpose.** The draft also says *"and,
- * if you leave its view on, during a ride"*: that is the in-ride view, which
- * is #1062's and is not built here, so this build says only what it does. The
- * ride clause comes back with #1062, and the snapshot sentences with #1063 —
- * each in the pull request that ships what it describes (ADR 0044 D-10).
- */
-export const SHOWN_ON_TABLET_SENTENCE =
-  'A side camera’s picture is shown on this tablet while you set it up, with an outline of where it found you. Anyone who can see this tablet’s screen can see it, and anyone else in the picture is shown too.';
-
-/**
  * What is captured, where it goes, and what is kept — #382's third criterion.
  *
  * Each line is a decision in ADR 0029 rather than a reassurance:
@@ -117,15 +104,19 @@ export const SHOWN_ON_TABLET_SENTENCE =
  * 4. **what an erase cannot reach** — D-4's honest half, said **before** the
  *    rider presses anything rather than discovered afterwards.
  *
- * ⚠️ **Since #1061 a side camera's picture is SHOWN on this tablet**, and a
- * reviewer who remembers this list saying nothing of a picture on a screen is
- * reading the old file:
+ * ⚠️ **Since #1061 a side camera's picture is SHOWN on this tablet, and since #1060
+ * one can be KEPT**, and a reviewer who remembers line 3 reading *"thrown away as soon
+ * as it has been looked at"* with no other way to keep one is reading the old file.
  * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
- * supersedes ADR 0033 D-6 on that path. D-7 and D-12 ask this list for two
- * more sentences — {@link SHOWN_ON_TABLET_SENTENCE} and
- * {@link SCREENSHOT_SENTENCE} — in #1060's words (PR #1121), and they land with
- * the first build that shows a picture, which is the only order in which the
- * consent stays true.
+ * supersedes ADR 0033 D-6 on that path: the picture is shown on the tablet
+ * while the rider has the view on (D-1, D-8), anyone who can see the screen
+ * sees it (D-6, D-7), and one press of *Save snapshot* keeps one still with its
+ * ride (D-3, D-5). D-7 and D-12 ask this list for two more sentences — the
+ * picture is shown on this tablet, and {@link SCREENSHOT_SENTENCE} — and D-10
+ * says the words are #1060's, with the owner's approval. #1061 shipped a
+ * narrower interim sentence; #1060's full wording replaces it, and its pull
+ * request merges only once #1063 has landed, so the consent never describes a
+ * button the app does not have.
  *
  * ⚠️ The fourth line is short today and will get longer, and it is worth
  * knowing why it is short: the two sentences ADR 0029 D-4 writes for
@@ -139,9 +130,10 @@ export const SHOWN_ON_TABLET_SENTENCE =
 export const CONSENT_STATEMENT: readonly string[] = [
   'The camera takes still pictures of you while you ride, and only while the "Camera on" sign is showing.',
   'Nothing is sent anywhere unless you set up a computer of your own below and switch it on. Then a picture goes to that one computer, only when you press the button that sends it, and nowhere else — or, if you also switch on sending the side camera’s pictures there, every picture the side camera takes while it films.',
-  'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first. There is no setting that keeps them always.',
-  SHOWN_ON_TABLET_SENTENCE,
-  'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. A copy you have already exported is yours and is wherever you put it.',
+  'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first or, for a side camera, press "Save snapshot". There is no setting that keeps them always.',
+  'A side camera’s picture is shown on this tablet while you set it up and, if you leave its view on, during a ride, with an outline of where it found you. Anyone who can see this tablet’s screen can see it, and anyone else in the picture is shown too.',
+  'Pressing "Save snapshot" keeps that one picture with the ride it was taken in, shown only on that ride’s page once you open its section. A snapshot taken while you set up joins the next ride you save, and is thrown away if you save none. A snapshot is never sent to your computer or to any service.',
+  'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. It is in the account export, and is never put in a ride you export or share. A copy you have already exported is yours and is wherever you put it.',
   SCREENSHOT_SENTENCE,
 ];
 

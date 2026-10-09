@@ -142,15 +142,16 @@ describe('before the camera is ever on', () => {
     expect(camera.calls).toStrictEqual([]);
   });
 
-  it('says the tablet shows the picture, and what a screenshot meets — #1061', async () => {
+  it('says the tablet shows the picture and can keep a snapshot, and what a screenshot meets — #1060', async () => {
     // ADR 0044 D-1 superseded ADR 0033 D-6 on this path: the picture is SHOWN
-    // on the tablet. The sentence that said the tablet throws each away at
-    // once is false from the first build that shows one.
+    // on the tablet, and one press of "Save snapshot" keeps one. The sentence
+    // that said the tablet throws each away at once and keeps none is false
+    // from the first build that shows one, so it must not stand beside these.
     await phone();
     expect(SIDE_PICTURES_GO_SENTENCE).toContain('shows it on its screen');
     expect(SIDE_PICTURES_GO_SENTENCE).toContain('anyone who can see that screen can see it');
+    expect(SIDE_PICTURES_GO_SENTENCE).toContain('“Save snapshot”');
     expect(SIDE_PICTURES_GO_SENTENCE).not.toContain('throws it away at once');
-    expect(SIDE_PICTURES_GO_SENTENCE).not.toContain('Save snapshot');
     // D-12: the phone's own framing preview is a camera picture on a screen.
     expect(document.body.textContent).toContain(SCREENSHOT_SENTENCE);
     expect(SIDE_CAMERA_KEPT_VISIBLE).toContain(SCREENSHOT_SENTENCE);

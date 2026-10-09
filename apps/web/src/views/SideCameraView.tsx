@@ -71,23 +71,27 @@ const TITLE_ID = 'oyl-side-camera-title';
  * ADR 0033 D-3 and D-6. The consent screen changes in the pull request that
  * sends the first picture, which is the only order in which it stays true.
  *
- * ⚠️ **Since #1061 the tablet SHOWS the picture**, and a reviewer who
- * remembers *"throws it away at once"* is reading the old file:
+ * ⚠️ **Since #1060 the tablet SHOWS the picture and can KEEP one**, and a
+ * reviewer who remembers *"throws it away at once … and never the picture"* is
+ * reading the old file:
  * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
- * D-1 supersedes ADR 0033 D-6 on this path. The words are #1060's draft (PR
- * #1121) without its snapshot clause, which lands with #1063.
+ * D-1 supersedes ADR 0033 D-6 on this path, and D-3 lets one press of *Save
+ * snapshot* keep one still with its ride.
  */
 export const SIDE_PICTURES_GO_SENTENCE =
   'While it is filming, it sends about five small pictures a second to the tablet you paired it ' +
   'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
   'one and, while you have its view on, shows it on its screen with an outline of where it found ' +
   'you; anyone who can see that screen can see it. Then it throws the picture away. It keeps ' +
-  'where you were in the picture, as numbers, and never the picture.';
+  'where you were in the picture, as numbers, and never the picture, unless you press “Save ' +
+  'snapshot” on the tablet, which keeps that one picture with your ride.';
 
 /**
  * The sentences on the phone's page that are never tucked — #666, ADR 0029
  * D-5 and ADR 0033: anyone else in the room, what a lost link does, where the
- * pictures go and what is kept. `a11y/kept-visible.a11y.test.tsx` holds them.
+ * pictures go and what is kept — and, since #1060, that a screenshot of a
+ * camera picture is blocked in the Android app and not in a browser (ADR 0044
+ * D-12). `a11y/kept-visible.a11y.test.tsx` holds them.
  */
 export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
   BYSTANDER_SENTENCE,
