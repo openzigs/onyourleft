@@ -339,6 +339,38 @@ export type HostedKeyPut =
   /** There is no such athlete on this instance: nothing was written. */
   | { readonly outcome: 'no-athlete' };
 
+/**
+ * One of the instance's own keys as the store holds it (#1189, ADR 0047 D-5):
+ * the private half WRAPPED, never in clear (`keys/wrap.ts`).
+ */
+export interface InstanceKeyRow {
+  /** 16 lowercase hex: the first 8 bytes of SHA-256 over the public key. */
+  readonly keyId: string;
+  readonly role: 'identity' | 'encryption';
+  /** The raw 32-byte public key. */
+  readonly publicKey: Uint8Array;
+  readonly iv: Uint8Array;
+  readonly wrapped: Uint8Array;
+  /** An encryption key's serial; `null` for the identity key. */
+  readonly serial: number | null;
+  /** Unix seconds, by the box's clock. */
+  readonly createdAt: number;
+  /** When an encryption key's successor was made, or `null`. */
+  readonly supersededAt: number | null;
+}
+
+/** What the instance's identity key signed (#1189). Public. */
+export interface InstanceKeyStatementRow {
+  readonly keyId: string;
+  readonly kind: 'key' | 'identity-rotation';
+  readonly issuedAt: number;
+  readonly notAfter: number | null;
+  /** The signed RFC 8785 text. */
+  readonly body: string;
+  /** Lowercase hex. */
+  readonly signature: string;
+}
+
 /** One athlete blocking another (#83). */
 export interface Block {
   /** The blocker. */
@@ -608,6 +640,38 @@ export interface SqlStore {
    * §"A hosted model key" says what can still remain).
    */
   clearHostedModelKey(): Promise<boolean>;
+
+  /**
+   * The instance's own keys (#1189, ADR 0047 D-5), wrapped: every row, the
+   * identity key and every encryption key still held. Instance-wide, so no
+   * athlete is asked for.
+   */
+  listInstanceKeys(): Promise<readonly InstanceKeyRow[]>;
+  /** Everything the identity key has signed that is still kept. */
+  listInstanceKeyStatements(): Promise<readonly InstanceKeyStatementRow[]>;
+  /** Hold a new key. Refused if its id is held already. */
+  putInstanceKey(key: InstanceKeyRow): Promise<void>;
+  /**
+   * Hold a new ENCRYPTION key and, in the same transaction, mark every
+   * encryption key without a successor as superseded at `key.createdAt`.
+   */
+  addEncryptionKey(key: InstanceKeyRow): Promise<void>;
+  /** Keep a signed statement, and drop every key statement whose `notAfter` is at or before `expiredBy`. */
+  putInstanceKeyStatement(statement: InstanceKeyStatementRow, expiredBy: number): Promise<void>;
+  /**
+   * Delete keys and what was signed for them, SCRUBBED: with `secure_delete`
+   * on and the log truncated after, so a backup taken afterwards holds none of
+   * their wrapped private halves.
+   */
+  deleteInstanceKeys(keyIds: readonly string[]): Promise<void>;
+  /**
+   * Replace the identity key, scrubbed, in one transaction: the old identity
+   * key and every statement it signed gone, the new one held, and its
+   * endorsement kept when there is one.
+   */
+  replaceIdentityKey(key: InstanceKeyRow, endorsement?: InstanceKeyStatementRow): Promise<void>;
+  /** Every key and statement gone, scrubbed (`operator instance-key reset`). */
+  clearInstanceKeys(): Promise<void>;
 
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
@@ -1300,6 +1364,30 @@ export function vectorFrom(bytes: Uint8Array): Float32Array {
 }
 
 /** The store over an already-migrated database. */
+function instanceKeyValues(key: InstanceKeyRow) {
+  return {
+    key_id: key.keyId,
+    role: key.role,
+    public_key: key.publicKey,
+    iv: key.iv,
+    wrapped: key.wrapped,
+    serial: key.serial,
+    created_at: key.createdAt,
+    superseded_at: key.supersededAt,
+  };
+}
+
+function instanceKeyStatementValues(statement: InstanceKeyStatementRow) {
+  return {
+    key_id: statement.keyId,
+    kind: statement.kind,
+    issued_at: statement.issuedAt,
+    not_after: statement.notAfter,
+    body: statement.body,
+    signature: statement.signature,
+  };
+}
+
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -3035,6 +3123,112 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           const result = await db.deleteFrom('hosted_model_key').executeTakeFirst();
           return Number(result.numDeletedRows) > 0;
         }),
+      ),
+
+    listInstanceKeys: () =>
+      exclusive(async () => {
+        const rows = await db.selectFrom('instance_key').selectAll().orderBy('key_id').execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          role: row.role,
+          publicKey: row.public_key,
+          iv: row.iv,
+          wrapped: row.wrapped,
+          serial: row.serial,
+          createdAt: row.created_at,
+          supersededAt: row.superseded_at,
+        }));
+      }),
+
+    listInstanceKeyStatements: () =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('instance_key_statement')
+          .selectAll()
+          .orderBy('issued_at')
+          .orderBy('key_id')
+          .execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          kind: row.kind,
+          issuedAt: row.issued_at,
+          notAfter: row.not_after,
+          body: row.body,
+          signature: row.signature,
+        }));
+      }),
+
+    putInstanceKey: (key) =>
+      exclusive(async () => {
+        await db.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+      }),
+
+    addEncryptionKey: (key) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .updateTable('instance_key')
+            .set({ superseded_at: key.createdAt })
+            .where('role', '=', 'encryption')
+            .where('superseded_at', 'is', null)
+            .execute();
+          await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+        }),
+      ),
+
+    putInstanceKeyStatement: (statement, expiredBy) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('instance_key_statement')
+            .values(instanceKeyStatementValues(statement))
+            .execute();
+          await trx
+            .deleteFrom('instance_key_statement')
+            .where('kind', '=', 'key')
+            .where('not_after', '<=', expiredBy)
+            .execute();
+        }),
+      ),
+
+    deleteInstanceKeys: (keyIds) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          if (keyIds.length === 0) return;
+          await db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').where('key_id', 'in', keyIds).execute();
+            await trx.deleteFrom('instance_key').where('key_id', 'in', keyIds).execute();
+          });
+        }),
+      ),
+
+    replaceIdentityKey: (key, endorsement) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            // Everything the old identity key signed goes with it: a key
+            // statement it signed would not verify under the new key.
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').where('role', '=', 'identity').execute();
+            await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+            if (endorsement !== undefined) {
+              await trx
+                .insertInto('instance_key_statement')
+                .values(instanceKeyStatementValues(endorsement))
+                .execute();
+            }
+          }),
+        ),
+      ),
+
+    clearInstanceKeys: () =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').execute();
+          }),
+        ),
       ),
 
     close: () => exclusive(() => db.destroy()),

@@ -6,6 +6,7 @@ import type { InstanceProbes } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sync } from './sync/sync.ts';
 import { createServer } from 'node:net';
@@ -81,6 +82,7 @@ export async function startTestInstance(
     history?: History;
     rooms?: Rooms;
     probes?: InstanceProbes;
+    instanceKeys?: InstanceKeys;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
@@ -96,6 +98,7 @@ export async function startTestInstance(
     ...(options.history === undefined ? {} : { history: options.history }),
     ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
+    ...(options.instanceKeys === undefined ? {} : { instanceKeys: options.instanceKeys }),
   });
   const listening = await listen(handler, {
     host: '127.0.0.1',

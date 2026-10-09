@@ -69,8 +69,8 @@ services:
       # and analysis is off. No model is named here, or anywhere (ADR 0031 D-4).
       OYL_INSTANCE_ANALYSIS_MODEL_URL: ${OYL_INSTANCE_ANALYSIS_MODEL_URL:-}
       OYL_INSTANCE_ANALYSIS_MODEL: ${OYL_INSTANCE_ANALYSIS_MODEL:-}
-      # The secret a hosted model key is encrypted under (#1097): HERE and on
-      # no other service. The `backup` service below deliberately does not get
+      # The secret a hosted model key (#1097) and the instance's own keys
+      # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
       # it, so nothing that writes a snapshot holds the secret that opens the
       # key in it (docs/operating-an-instance.md, "A hosted model key").
       OYL_INSTANCE_SECRET_KEY: ${OYL_INSTANCE_SECRET_KEY:-}

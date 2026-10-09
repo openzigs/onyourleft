@@ -75,6 +75,14 @@ export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
   // key the instance cannot read. Named for that one event, so no other
   // `reason` (a moderator's, a rider's) becomes loggable by it.
   'hostedKeyProblem',
+  // #1189: what one pass over the instance's own keys did — booleans and a
+  // count — and, when it could do nothing, one of `keys/instance-keys.ts`'s
+  // fixed sentences. Never a key, a key id or a statement.
+  'made',
+  'rotated',
+  'signed',
+  'deleted',
+  'keysProblem',
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

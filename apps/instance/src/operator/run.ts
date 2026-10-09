@@ -4,6 +4,7 @@ import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
   backup,
   CommandError,
+  instanceKey,
   migrate,
   modelKeyClear,
   modelKeySet,
@@ -23,6 +24,7 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   model-key set --url https://… --model <name>   (the key on standard input)
   model-key status
   model-key clear
+  instance-key init | show | rotate [--drop-old] [--serial-above <n>] | rotate-identity [--compromised] | reset
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -50,6 +52,8 @@ export async function runCommand(
     readonly secret?: string | undefined;
     /** `OYL_INSTANCE_OWNER_KEY`: whose athlete `model-key set` holds the key for (#1097). */
     readonly ownerKey?: string | undefined;
+    /** `OYL_INSTANCE_ORIGIN`: what the instance's own keys are bound to (#1189). */
+    readonly origin?: string | undefined;
     /** Standard input, read whole: where `model-key set` takes the key from. */
     readonly readStandardInput?: () => Promise<string>;
   },
@@ -81,7 +85,10 @@ export async function runCommand(
         const force = has(args, '--force');
         const snapshot = args[0];
         if (snapshot === undefined) throw new CommandError(USAGE);
-        report = await restore(paths, snapshot, { force });
+        report = await restore(paths, snapshot, {
+          force,
+          keys: { secret: env.secret, origin: env.origin },
+        });
         break;
       }
       case 'verify':
@@ -128,6 +135,38 @@ export async function runCommand(
           report = await modelKeyStatus(paths, env.secret);
         } else if (action === 'clear' && args.length === 0) {
           report = await modelKeyClear(paths);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'instance-key': {
+        const action = args.shift();
+        const keys = { secret: env.secret, origin: env.origin };
+        if (action === 'rotate') {
+          const dropOld = has(args, '--drop-old');
+          const above = flag(args, '--serial-above');
+          if (args.length > 0) throw new CommandError(USAGE);
+          report = await instanceKey(
+            paths,
+            {
+              action,
+              dropOld,
+              ...(above === undefined
+                ? {}
+                : { serialAbove: /^[0-9]+$/.test(above) ? Number(above) : Number.NaN }),
+            },
+            keys,
+          );
+        } else if (action === 'rotate-identity') {
+          const compromised = has(args, '--compromised');
+          if (args.length > 0) throw new CommandError(USAGE);
+          report = await instanceKey(paths, { action, compromised }, keys);
+        } else if (
+          (action === 'init' || action === 'show' || action === 'reset') &&
+          args.length === 0
+        ) {
+          report = await instanceKey(paths, { action }, keys);
         } else {
           throw new CommandError(USAGE);
         }

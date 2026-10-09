@@ -18,6 +18,11 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { createLocalModel } from './analysis/model.ts';
+import {
+  createInstanceKeys,
+  InstanceKeysUnavailable,
+  type InstanceKeys,
+} from './keys/instance-keys.ts';
 import type { ModelConnection } from './analysis/model-turn.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
@@ -64,6 +69,14 @@ import type { SqlStore } from './store/sql-store.ts';
  */
 export const systemResolver: Resolver = async (hostname) =>
   (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
+
+/**
+ * The longest the instance waits between two passes over its keys (#1189):
+ * an hour, so a key the operator rotated from the command line, or a clock
+ * that moved, is picked up within it. The rule decides what a pass does; this
+ * only bounds how stale its schedule can get.
+ */
+const KEYS_RETRY_SECONDS = 3600;
 
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
@@ -119,6 +132,13 @@ export interface StartedInstance {
   hostedModelKey(): Promise<HostedKeyState>;
   /** Resolves once the hosted key's state has been logged at opening. */
   readonly hostedKeyReported: Promise<void>;
+  /**
+   * The instance's own keys (#1189), once the store is open; `undefined`
+   * before. What `/v1/sealed` (#1191) unwraps with.
+   */
+  instanceKeys(): InstanceKeys | undefined;
+  /** Resolves once the first pass over the instance's keys has run and been logged. */
+  readonly keysMaintained: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -162,6 +182,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let history: History | undefined;
   let analysisModel: ModelConnection | undefined;
   let hostedKeyReported: Promise<void> = Promise.resolve();
+  let instanceKeys: InstanceKeys | undefined;
+  let keysMaintained: Promise<void> = Promise.resolve();
+  let keysTimer: ReturnType<typeof setTimeout> | undefined;
   // Imported once, non-extractable; a failed import is no secret at all.
   const secretKey: Promise<SecretKey | undefined> =
     server.secretKey === undefined
@@ -332,6 +355,48 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     })().catch((error: unknown) => {
       logUnhandled(log, null, error);
     });
+    // The instance's own keys (#1189, ADR 0047 D-5): made on the first start
+    // with a secret, rotated, re-signed and pruned by the one rule
+    // `keys/instance-keys.ts` states — run now, before `/v1/instance/keys`
+    // answers (it waits on this first pass), and again whenever the rule
+    // says the next step falls due, by the box's clock. This process is the
+    // one writer (ADR 0037 D-5). No secret: no keys, and it says so.
+    const keys = createInstanceKeys({
+      store,
+      secret: server.secretKey,
+      origin: server.origin,
+      now: () => Math.floor(now() / 1000),
+    });
+    instanceKeys = keys;
+    const maintainKeys = async (): Promise<void> => {
+      if (stopping) return;
+      let wakeInSeconds = KEYS_RETRY_SECONDS;
+      try {
+        const done = await keys.maintain();
+        logEvent(log, 'instance-keys', {
+          state: 'ready',
+          made: done.made,
+          rotated: done.rotated,
+          signed: done.signed,
+          deleted: done.deleted,
+        });
+        wakeInSeconds = done.nextDueAt - Math.floor(now() / 1000);
+      } catch (error) {
+        if (error instanceof InstanceKeysUnavailable) {
+          logEvent(log, 'instance-keys', { state: error.code, keysProblem: error.message });
+          if (error.code !== 'unreadable') return;
+        } else {
+          logUnhandled(log, null, error);
+        }
+      }
+      if (stopping) return;
+      const delayMs = 1000 * Math.min(KEYS_RETRY_SECONDS, Math.max(1, wakeInSeconds));
+      keysTimer = setTimeout(() => {
+        keysMaintained = maintainKeys();
+      }, delayMs);
+      keysTimer.unref();
+    };
+    keysMaintained = maintainKeys();
     if (server.origin !== null) {
       identity = createIdentity({
         store,
@@ -353,7 +418,6 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         now,
       });
-      handler = createHandler({ ...handlerOptions, identity, history, rooms });
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
@@ -397,6 +461,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         stopEndingRooms();
       };
     }
+    // Replaced, not mutated (above): the accounts when there is an origin, and
+    // the instance's keys whatever there is.
+    handler = createHandler({
+      ...handlerOptions,
+      instanceKeys: keys,
+      ...(identity === undefined ? {} : { identity, history, rooms }),
+    });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
     // And again every few minutes, so a model started after the instance —
@@ -464,8 +535,11 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     hostedModelKey: async () =>
       store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),
     hostedKeyReported: opened.then(() => hostedKeyReported),
+    instanceKeys: () => instanceKeys,
+    keysMaintained: opened.then(() => keysMaintained),
     async stop() {
       stopping = true;
+      if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
       await router.stop();

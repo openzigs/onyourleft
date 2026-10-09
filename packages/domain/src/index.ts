@@ -241,6 +241,28 @@ export {
   LINK_PURPOSE,
   RECOVER_PURPOSE,
 } from './identity/device-statement';
+export type {
+  InstanceIdentityRotation,
+  InstanceKeyRole,
+  InstanceKeyStatement,
+} from './identity/instance-key-statement';
+export {
+  base32Unpadded,
+  INSTANCE_CARD_PREFIX,
+  INSTANCE_FINGERPRINT_BASE32_LENGTH,
+  INSTANCE_IDENTITY_FINGERPRINT_LABEL,
+  INSTANCE_IDENTITY_ROTATION_PURPOSE,
+  INSTANCE_KEY_ID_BYTES,
+  INSTANCE_KEY_PURPOSE,
+  INSTANCE_KEY_WRAP_PURPOSE,
+  instanceCard,
+  instanceIdentityFingerprint,
+  instanceIdentityRotationBytes,
+  instanceKeyId,
+  instanceKeyStatementBytes,
+  instanceKeyWrapAad,
+  parseInstanceKeyStatement,
+} from './identity/instance-key-statement';
 export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
 export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 

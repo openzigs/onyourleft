@@ -14,6 +14,10 @@ import {
   type TestDevice,
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
+import { createInstanceKeys } from './keys/instance-keys.ts';
+import { secretBytes } from './keys/instance-keys-testing.ts';
+import { openSqlStore } from './store/open-sql-store.ts';
+import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
@@ -425,6 +429,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
 describe('every route answers with the shape its entry declares', () => {
   let instance: TestInstance;
   let world: IdentityInstance;
+  let keysStore: StoreHarness;
+  let keysClose: () => Promise<void> = () => Promise.resolve();
   beforeAll(async () => {
     // Probes that answer as a healthy instance with metrics on, so /ready and
     // /metrics answer their success; a probe-less instance is the other half.
@@ -439,7 +445,20 @@ describe('every route answers with the shape its entry declares', () => {
         Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
       startRoom: () => Promise.resolve('started' as const),
     };
-    instance = await startTestInstance({ probes });
+    // The instance's own keys (#1189), over a store of their own, so
+    // `/v1/instance/keys` answers its success.
+    keysStore = await createStoreHarness();
+    const store = await openSqlStore(keysStore.path);
+    keysClose = () => store.close();
+    instance = await startTestInstance({
+      probes,
+      instanceKeys: createInstanceKeys({
+        store,
+        secret: secretBytes(3),
+        origin: 'https://ride.example',
+        now: () => 1_790_000_000,
+      }),
+    });
     moderator = await testDevice();
     world = await startIdentityInstance({
       emailRecovery: true,
@@ -450,6 +469,8 @@ describe('every route answers with the shape its entry declares', () => {
   afterAll(async () => {
     await instance.listening.close();
     await world.close();
+    await keysClose();
+    await keysStore.destroy();
   });
 
   const metadata = ROUTES.filter((route) => route.identity !== true);

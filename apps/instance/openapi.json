@@ -2500,6 +2500,163 @@
         }
       }
     },
+    "/v1/instance/keys": {
+      "get": {
+        "operationId": "getInstanceKeys",
+        "summary": "The instance’s Ed25519 identity key, and each in-date `oyl-instance-key-v1` statement it signed for an X25519 encryption key still held, highest `serial` first, with its signature over the statement’s RFC 8785 bytes (ADR 0047 D-4, D-5). After a planned identity rotation, the old key’s `oyl-instance-identity-rotation-v1` endorsement. Plaintext: a device trusts it by the identity key it pinned from a card (D-6). `unavailable`, naming the variable, on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identityKey": {
+                      "type": "string"
+                    },
+                    "statements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statement": {
+                            "type": "object",
+                            "properties": {
+                              "purpose": {
+                                "type": "string",
+                                "enum": [
+                                  "oyl-instance-key-v1"
+                                ]
+                              },
+                              "instanceOrigin": {
+                                "type": "string"
+                              },
+                              "keyId": {
+                                "type": "string"
+                              },
+                              "encryptionKey": {
+                                "type": "string"
+                              },
+                              "serial": {
+                                "type": "integer"
+                              },
+                              "notBefore": {
+                                "type": "integer"
+                              },
+                              "issuedAt": {
+                                "type": "integer"
+                              },
+                              "notAfter": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "purpose",
+                              "instanceOrigin",
+                              "keyId",
+                              "encryptionKey",
+                              "serial",
+                              "notBefore",
+                              "issuedAt",
+                              "notAfter"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "signature": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "statement",
+                          "signature"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "endorsements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statement": {
+                            "type": "object",
+                            "properties": {
+                              "purpose": {
+                                "type": "string",
+                                "enum": [
+                                  "oyl-instance-identity-rotation-v1"
+                                ]
+                              },
+                              "instanceOrigin": {
+                                "type": "string"
+                              },
+                              "previousIdentityKey": {
+                                "type": "string"
+                              },
+                              "identityKey": {
+                                "type": "string"
+                              },
+                              "fingerprint": {
+                                "type": "string"
+                              },
+                              "issuedAt": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "purpose",
+                              "instanceOrigin",
+                              "previousIdentityKey",
+                              "identityKey",
+                              "fingerprint",
+                              "issuedAt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "signature": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "statement",
+                          "signature"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "identityKey",
+                    "statements",
+                    "endorsements"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/athletes/{athleteId}/hide-display-name": {
       "post": {
         "operationId": "hideDisplayName",

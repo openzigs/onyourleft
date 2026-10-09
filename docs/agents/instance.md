@@ -93,7 +93,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         and checked on EVERY request (`address.ts`); a
                         refused or unset address turns the index off, never
                         the instance. `src/instance.ts` mounts it; sync does
-                        not feed it yet (above). ⚠️ Only `src/store/` may
+                        not feed it yet (above). Since #1189 it also holds
+                        `src/keys/` — the instance's Ed25519 identity key and
+                        rotating X25519 encryption key (ADR 0047 D-4, D-5),
+                        wrapped under `OYL_INSTANCE_SECRET_KEY` in migration
+                        0015's table, `GET /v1/instance/keys`, and the
+                        `instance-key` operator commands; no secret, no keys.
+                        ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
                         `apps/mobile` (`boundaries/dependencies`), and nothing
