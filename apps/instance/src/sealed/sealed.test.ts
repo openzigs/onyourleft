@@ -139,7 +139,10 @@ describe('the round trip', () => {
   it('keeps a sealed-only route out of reach of a plaintext request', async () => {
     const { world: w, counter } = await start();
     const a = await rider(w);
-    expect((await w.call('POST', '/v1/test/count', { token: a.token })).status).toBe(404);
+    // #1192: refused `sealed_required`, and nothing ran.
+    const plain = await w.call('POST', '/v1/test/count', { token: a.token, plain: true });
+    expect(plain.status).toBe(403);
+    expect(codeOf({ status: plain.status, raw: '', body: plain.body })).toBe('sealed_required');
     expect(counter.runs).toBe(0);
     const sealed = await sealedCall(w, { ...COUNT, token: a.token, signer: a.device.signingKey });
     expect(sealed.reply?.status).toBe(204);
@@ -373,13 +376,15 @@ describe('a refusal before `Open` costs no X25519', () => {
         ...DEFAULT_LIMITS,
         registrationPerAddress: { limit: 10_000, windowMs: 60_000 },
         sealedPerSession: { limit: 1, windowMs: 60_000 },
-        sessionlessSealedPerAddress: { limit: 1, windowMs: 60_000 },
+        // One for the rider's own registration, which is sealed since #1192.
+        sessionlessSealedPerAddress: { limit: 2, windowMs: 60_000 },
       },
     });
     const a = await rider(w);
+    const registered = counting.calls.x25519;
     const ok = await sealedCall(w, { ...COUNT, token: a.token, signer: a.device.signingKey });
     expect(ok.reply?.status).toBe(204);
-    expect(counting.calls.x25519).toBe(1);
+    expect(counting.calls.x25519).toBe(registered + 1);
 
     const unknown = await sealedCall(w, {
       ...COUNT,
@@ -397,7 +402,7 @@ describe('a refusal before `Open` costs no X25519', () => {
       signer: null,
     });
     expect(firstSessionless.status).toBe(200);
-    expect(counting.calls.x25519).toBe(2);
+    expect(counting.calls.x25519).toBe(registered + 2);
     const limitedSessionless = await sealedCall(w, {
       method: 'POST',
       path: '/v1/auth/recover/email',
@@ -405,7 +410,7 @@ describe('a refusal before `Open` costs no X25519', () => {
       signer: null,
     });
     expect(codeOf(limitedSessionless)).toBe('rate_limited');
-    expect(counting.calls.x25519).toBe(2);
+    expect(counting.calls.x25519).toBe(registered + 2);
   });
 });
 
@@ -488,12 +493,9 @@ describe('the body limit (D-9)', () => {
     const limit = 16_384;
     const largest = utf8Encode(JSON.stringify({ pad: 'x'.repeat(limit - 10) }));
     expect(largest.length).toBe(limit);
-    const plain = await fetch(`${w.url}/v1/sync/records`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json' },
-      body: largest,
-    });
-    expect(plain.status).not.toBe(413);
+    // Since #1192 the route is sealed-only, so the route's own answer to the
+    // largest body — a body that is no record — is what a sealed request must
+    // reach: `validation_failed`, never `payload_too_large`.
     const sealed = await sealedCall(w, {
       method: 'POST',
       path: '/v1/sync/records',
@@ -501,7 +503,8 @@ describe('the body limit (D-9)', () => {
       token: a.token,
       signer: a.device.signingKey,
     });
-    expect(sealed.reply?.status).toBe(plain.status);
+    expect(sealed.reply?.status).toBe(400);
+    expect(codeOf(sealed)).toBe('validation_failed');
     const oneMore = await sealedCall(w, {
       method: 'POST',
       path: '/v1/sync/records',
@@ -516,12 +519,14 @@ describe('the body limit (D-9)', () => {
     const counting = countingPrimitives();
     const { world: w } = await start({ sealedPrimitives: counting.primitives });
     const a = await rider(w);
+    // The rider's registration is itself sealed (#1192): count from after it.
+    const registered = counting.calls.x25519;
     const sealed = await sealFor(w, { ...COUNT, token: a.token, signer: a.device.signingKey });
     const text = JSON.stringify(sealed.envelope);
     const over = `${text}${' '.repeat(sealedEnvelopeLimit(16_384) + 1 - text.length)}`;
     const response = await sendEnvelope(w.url, over, a.token);
     expect(response.status).toBe(413);
-    expect(counting.calls.x25519).toBe(0);
+    expect(counting.calls.x25519).toBe(registered);
     const exact = `${text}${' '.repeat(sealedEnvelopeLimit(16_384) - text.length)}`;
     expect((await sendEnvelope(w.url, exact, a.token)).status).toBe(200);
   });

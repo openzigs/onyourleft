@@ -31,7 +31,9 @@
  * `CLAUDE.md` §6 lists, leaked through a status code. #36 names the case
  * "forbidden/not-found" and this is the one code for it. `registration_closed`
  * (#772) is a 403 about the INSTANCE — it registers nobody — and names no
- * athlete's resource; `account_suspended` (#83) is a 403 sent only to the
+ * athlete's resource; `sealed_required` (#1192) is a 403 about the request's
+ * FORM — this route is reached only sealed (ADR 0047 D-7) — and is sent
+ * before anything about an athlete is read; `account_suspended` (#83) is a 403 sent only to the
  * suspended athlete's own devices, about their own account. A block is never
  * a 403: a request about somebody who blocked you is `not_found` (#83).
  */
@@ -54,6 +56,7 @@ export const ERROR_STATUS = {
   code_used: 401,
   code_expired: 401,
   registration_closed: 403,
+  sealed_required: 403,
   account_suspended: 403,
   step_up_required: 403,
   registration_pending: 403,
@@ -113,6 +116,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   stale_request:
     'The request was signed too far from this instance’s clock. `instanceTime` says what it reads.',
   replayed: 'This sealed request has already been received.',
+  sealed_required:
+    'This request must be sealed to the instance’s key and signed by your device. It was not run.',
   unauthenticated: 'This needs a signed-in device.',
   wrong_purpose: 'The signature is not a statement made for this request.',
   wrong_instance: 'The signature was made for another instance.',

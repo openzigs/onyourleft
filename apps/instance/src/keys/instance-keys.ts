@@ -204,6 +204,14 @@ export interface InstanceKeysShown {
 }
 
 export interface InstanceKeys {
+  /**
+   * The operator gave this instance a secret and an origin, so it holds keys
+   * and its sealed routes are sealed (#1192, ADR 0047 D-7). `false`: no
+   * sealed routes, and every route answers in plaintext as before. ⚠️ A
+   * secret that does not open the held keys still counts: the sealed routes
+   * then fail closed rather than falling back to plaintext.
+   */
+  readonly configured: boolean;
   /** Apply the rule above, making keys if there are none. Throws {@link InstanceKeysUnavailable}. */
   maintain(): Promise<Maintenance>;
   /** Make a new encryption key now; `dropOld` deletes every other one at once (D-10). */
@@ -502,6 +510,8 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
   }
 
   return {
+    configured: secret !== undefined && origin !== null,
+
     maintain: () => remembered(leased(maintain)),
 
     rotate: (rotation = {}) =>

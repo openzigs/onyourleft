@@ -30,8 +30,11 @@ import { SEALED_PATH } from '@onyourleft/domain';
  *    method is `method_not_allowed` with an `Allow` header. A `{name}` segment
  *    matches one segment of letters, digits, `_` and `-`, and nothing else —
  *    so a value the route reads from `params` is never a path or a query. A
- *    route marked `sealed: 'only'` (#1191) is not matched here at all: it is
- *    reached only inside `POST /v1/sealed`, through {@link RouteContext.dispatch}.
+ *    route marked `sealed: 'only'` is reached only inside `POST /v1/sealed`,
+ *    through {@link RouteContext.dispatch} (#1191): on an instance that holds
+ *    keys, a plaintext request to it is `sealed_required` HERE, before its body
+ *    is read, its session looked up or anything run (#1192, ADR 0047 D-7). An
+ *    instance with no keys has no sealed routes and answers it as any other.
  * 2. **The body's size**, before anything else reads it — the route's own
  *    limit where it declares one (only `/v1/sealed` does), the instance's
  *    otherwise. A request that declares more than the limit is refused on its
@@ -259,9 +262,12 @@ function withHeaders(response: Response): Response {
 
 export function createHandler(options: HandlerOptions): Handler {
   const routes = options.routes ?? ROUTES;
-  // A plaintext request never reaches a sealed-only route (#1191), and an
-  // opened sealed request never reaches `/v1/sealed` again.
-  const plaintextRoutes = routes.filter((candidate) => candidate.sealed !== 'only');
+  // #1192 (ADR 0047 D-7): an instance with keys refuses a plaintext request to
+  // a sealed-only route; one with none has no sealed routes at all.
+  // Asked per request: a test's listener may be handed its keys once it has a port.
+  const sealsRoutes = (): boolean =>
+    options.sealed !== undefined && options.instanceKeys?.configured === true;
+  // An opened sealed request never reaches `/v1/sealed` again.
   const innerRoutes = routes.filter((candidate) => candidate.path !== SEALED_PATH);
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
@@ -289,6 +295,7 @@ export function createHandler(options: HandlerOptions): Handler {
     url: URL,
     body: Uint8Array | null,
     client: ClientInfo,
+    sealedRequest: boolean,
   ): Promise<Response> {
     const identity = options.identity;
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
@@ -340,6 +347,8 @@ export function createHandler(options: HandlerOptions): Handler {
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,
+      sealedRequest,
+      sealsRoutes: sealsRoutes(),
       dispatch: dispatchInner,
     });
   }
@@ -366,7 +375,7 @@ export function createHandler(options: HandlerOptions): Handler {
     if (body !== null && body.byteLength > options.config.bodyLimitBytes) {
       return errorResponse('payload_too_large');
     }
-    return answer(found.candidate, found.params, request, url, body, client);
+    return answer(found.candidate, found.params, request, url, body, client, true);
   }
 
   return async (request, client = { address: null }) => {
@@ -375,14 +384,19 @@ export function createHandler(options: HandlerOptions): Handler {
     let response: Response;
     try {
       const url = new URL(request.url);
-      const atPath = plaintextRoutes.flatMap((candidate) => {
+      const atPath = routes.flatMap((candidate) => {
         const params = matchPath(candidate.path, url.pathname);
         return params === undefined ? [] : [{ candidate, params }];
       });
       const found = atPath.find(({ candidate }) => candidate.method === request.method);
       const limit = found?.candidate.bodyLimit?.(options.config) ?? options.config.bodyLimitBytes;
-      const body = await boundedBody(request, limit);
-      if (body === TOO_LARGE) {
+      // #1192: refused before a byte of the body is read or anything else asked.
+      const refusedPlaintext = found?.candidate.sealed === 'only' && sealsRoutes();
+      const body = refusedPlaintext ? null : await boundedBody(request, limit);
+      if (refusedPlaintext) {
+        route = found?.candidate;
+        response = errorResponse('sealed_required');
+      } else if (body === TOO_LARGE) {
         response = errorResponse('payload_too_large');
       } else {
         route = found?.candidate;
@@ -399,7 +413,7 @@ export function createHandler(options: HandlerOptions): Handler {
             },
           });
         } else if (found !== undefined) {
-          response = await answer(found.candidate, found.params, request, url, body, client);
+          response = await answer(found.candidate, found.params, request, url, body, client, false);
         } else if (atPath.length > 0) {
           response = errorResponse('method_not_allowed', {
             headers: {

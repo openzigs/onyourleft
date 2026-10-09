@@ -1276,6 +1276,10 @@ export class PhoneSideLink implements SideCameraLinkPort {
     }
   }
 
+  picturesWaiting(): number {
+    return this.#frames.bufferedAmount;
+  }
+
   /**
    * How long a message this connection will carry — D-3's *"checks the size
    * rather than assuming it"*. The connection's own figure where it states a

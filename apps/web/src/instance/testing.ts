@@ -10,7 +10,13 @@
  * wrong one here too. It sends nothing anywhere.
  */
 
-import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT } from './instance-pin';
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, type LoadedFrom } from './instance-pin';
+
+/** A copy of the app opened from this device: sealed features are offered (#1192, ADR 0047 D-11). */
+export const LOADED_LOCALLY: LoadedFrom = { native: false, href: 'http://localhost:5173/' };
+
+/** A copy of the app a website served: no sealed feature is offered (#1192, ADR 0047 D-11). */
+export const LOADED_FROM_A_WEBSITE: LoadedFrom = { native: false, href: 'https://app.example/' };
 import type {
   CardOutcome,
   ConnectOutcome,
@@ -298,6 +304,11 @@ export function scriptedModeration(
     readonly suspended?: Readonly<Record<string, number>>;
     /** This device's pin (#1190): {@link SCRIPTED_FINGERPRINT} unless `null`, which is no card. */
     readonly pin?: string | null;
+    /**
+     * A moderator on a device that cannot seal now (#1192): `read` answers
+     * `sealed-unavailable` with this sentence.
+     */
+    readonly sealedUnavailable?: string;
   } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
@@ -383,6 +394,9 @@ export function scriptedModeration(
     read: () => {
       calls.push('read');
       if (held.standing !== 'moderator') return Promise.resolve({ kind: held.standing });
+      if (options.sealedUnavailable !== undefined) {
+        return Promise.resolve({ kind: 'sealed-unavailable', text: options.sealedUnavailable });
+      }
       return Promise.resolve({
         kind: 'moderator',
         me: held.me,

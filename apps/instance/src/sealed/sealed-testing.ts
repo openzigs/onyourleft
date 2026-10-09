@@ -25,6 +25,7 @@ import {
 } from '@onyourleft/domain';
 
 import { instanceHpkePrimitives } from '../auth/crypto.ts';
+import { InstanceKeysUnavailable } from '../keys/instance-keys.ts';
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route } from '../route-kit.ts';
@@ -33,6 +34,13 @@ import { sha256 } from './sealed.ts';
 
 /** The instance's newest encryption key, from `GET /v1/instance/keys`'s statement. */
 export async function currentKey(world: IdentityInstance): Promise<SealedInstanceKey> {
+  // The test's clock may have moved weeks since the keys were made; the
+  // instance's timer would have renewed them by now, so this does (#1192).
+  // Two sealed calls at once both ask: the one that finds the lease held
+  // (#1203) leaves the work to the other.
+  await world.instanceKeys.maintain().catch((error: unknown) => {
+    if (!(error instanceof InstanceKeysUnavailable && error.code === 'busy')) throw error;
+  });
   const served = await world.instanceKeys.served();
   const newest = served.statements.at(-1);
   if (newest === undefined) throw new Error('the instance serves no encryption key');
@@ -137,6 +145,74 @@ export async function sealedCall(
 ): Promise<SealedAnswer> {
   const sealed = await sealFor(world, options);
   return answerTo(sealed, await sendEnvelope(world.url, sealed.envelope, options.token));
+}
+
+/**
+ * One sealed call straight to the handler, from `address` — for a test of a
+ * per-address rule, which the listener on loopback cannot vary (#1192).
+ */
+export async function sealedHandlerCall(
+  world: IdentityInstance,
+  options: SealedCallOptions,
+  address: string | null,
+): Promise<SealedAnswer> {
+  const sealed = await sealFor(world, options);
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (options.token !== undefined) headers.authorization = `Bearer ${options.token}`;
+  const response = await world.instance.handler(
+    new Request(`http://instance.invalid${SEALED_PATH}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(sealed.envelope),
+    }),
+    { address },
+  );
+  return answerTo(sealed, response);
+}
+
+/**
+ * One sealed call to a RUNNING instance at `url` that states `origin` — a
+ * process the test started, not a world — sealed to the newest key it serves
+ * at `GET /v1/instance/keys`, on the wall clock (#1192). The inner status and
+ * the opened body's text.
+ */
+export async function sealedAt(
+  url: string,
+  origin: string,
+  options: {
+    readonly method: string;
+    readonly path: string;
+    readonly body?: unknown;
+    readonly token?: string;
+    readonly signer?: SigningKey;
+  },
+): Promise<{ readonly status: number; readonly text: string }> {
+  const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
+    statements: { statement: { keyId: string; encryptionKey: string } }[];
+  };
+  const newest = served.statements.at(-1)?.statement;
+  if (newest === undefined) throw new Error('the instance serves no encryption key');
+  const sealed = await sealRequest({
+    primitives: instanceHpkePrimitives,
+    sha256,
+    instanceOrigin: origin,
+    instanceKey: {
+      keyId: newest.keyId,
+      publicKey: fromHex(newest.encryptionKey, 'the encryption key', 32),
+    },
+    sessionToken: options.token ?? null,
+    method: options.method,
+    path: options.path,
+    body: options.body === undefined ? null : utf8Encode(JSON.stringify(options.body)),
+    issuedAt: Math.floor(Date.now() / 1000),
+    ...(options.signer === undefined ? {} : { signer: options.signer }),
+    minimumPadding: PAD_MINIMUM_BYTES,
+  });
+  const response = await sendEnvelope(url, sealed.envelope, options.token);
+  const raw = await response.text();
+  if (response.status !== 200) return { status: response.status, text: raw };
+  const reply = await sealed.openReply(JSON.parse(raw) as unknown);
+  return { status: reply.status, text: utf8Decode(reply.body) ?? '' };
 }
 
 /** The opened reply's error code, or the plaintext one; `undefined` for a success. */

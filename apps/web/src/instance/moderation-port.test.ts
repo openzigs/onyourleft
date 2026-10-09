@@ -20,6 +20,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstancePort, type InstanceStorage } from './instance-port';
+import { LOADED_LOCALLY } from './testing';
 import type { InstanceSend } from './instance-transport';
 import { readInstanceAccount } from './sign-in';
 import {
@@ -30,6 +31,7 @@ import {
   NOTHING_CHANGED_TEXT,
   SUSPENDED_PAGE,
   type ModerationPort,
+  type ModerationPortDependencies,
   type ModerationRead,
 } from './moderation-port';
 
@@ -40,6 +42,10 @@ interface TestDevice {
 interface ModerationInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
   readonly clock: { ms: number };
+  /** The instance's card (#1190): a new key registers only sealed (#1192). */
+  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+  /** A handler answering, as this instance, one sealed inner route (#1192). */
+  answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
   call(
     method: string,
     path: string,
@@ -100,8 +106,8 @@ interface World {
   readonly send: InstanceSend & ReturnType<typeof vi.fn>;
   /** This device's moderation port — the device the instance names as moderator. */
   readonly moderator: ModerationPort;
-  /** This device's storage, for a port over a `send` a test wraps. */
-  readonly moderatorStorage: InstanceStorage;
+  /** This device's port's dependencies, for a port over a `send` a test wraps. */
+  readonly moderatorDependencies: ModerationPortDependencies;
   /** The moderator's own id on the instance. */
   readonly me: string;
   /** Another device's port: an account waiting for approval, then an ordinary rider. */
@@ -112,14 +118,20 @@ interface World {
 
 interface Device {
   readonly storage: InstanceStorage;
+  /** What this device's moderation port is built over (#1192: it seals, so it signs). */
+  readonly dependencies: ModerationPortDependencies;
   readonly publicKey: string;
   connect(): Promise<void>;
   /** This device's own id on the instance, once connected. */
   athleteId(): string;
 }
 
-/** A device with its own store and key, not yet connected. */
-async function aDevice(send: InstanceSend, name: string): Promise<Device> {
+/** A device with its own store and key, not yet connected. `card` is the instance's, once it has started. */
+async function aDevice(
+  send: InstanceSend,
+  name: string,
+  card: () => Promise<string>,
+): Promise<Device> {
   const store = createStoreHarness();
   harnesses.push(store);
   const storage = deviceStorage();
@@ -128,18 +140,24 @@ async function aDevice(send: InstanceSend, name: string): Promise<Device> {
       await ensureLocalAthlete(open, NOW);
       return ensureDeviceSigningKey(open, LOCAL_ATHLETE);
     });
-  const port = createInstancePort({
+  const dependencies: ModerationPortDependencies = {
     storage,
-    ensureLocalAthlete: () => store.write(async (open) => ensureLocalAthlete(open, NOW)),
+    loadedFrom: LOADED_LOCALLY,
     signingKey,
     send,
     now: () => NOW * 1000,
+  };
+  const port = createInstancePort({
+    ...dependencies,
+    ensureLocalAthlete: () => store.write(async (open) => ensureLocalAthlete(open, NOW)),
   });
   return {
     storage,
+    dependencies,
     publicKey: toHex((await signingKey()).publicKey),
     connect: async () => {
-      const outcome = await port.connect(testing.TEST_ORIGIN, name);
+      // With the instance's card: a new key registers only sealed (#1192).
+      const outcome = await port.connect(testing.TEST_ORIGIN, name, await card());
       if (outcome.kind !== 'connected') throw new Error(`connect: ${JSON.stringify(outcome)}`);
     },
     athleteId: () => readInstanceAccount(storage)?.instanceAthleteId ?? '',
@@ -158,8 +176,12 @@ async function moderatedWorld(): Promise<World> {
     if (started.world === undefined) throw new Error('no instance yet');
     return started.world.instance.handler(new Request(url, init));
   });
-  const moderatorDevice = await aDevice(send, 'Moderator');
-  const waitingDevice = await aDevice(send, 'Waiting');
+  const card = async (): Promise<string> => {
+    if (started.world === undefined) throw new Error('no instance yet');
+    return (await started.world.instanceKeys.show()).card;
+  };
+  const moderatorDevice = await aDevice(send, 'Moderator', card);
+  const waitingDevice = await aDevice(send, 'Waiting', card);
   const world = await testing.startIdentityInstance({
     registration: 'approval',
     moderators: { owner: moderatorDevice.publicKey },
@@ -174,9 +196,9 @@ async function moderatedWorld(): Promise<World> {
     world: opened,
     send,
     me: moderatorDevice.athleteId(),
-    moderator: createModerationPort({ storage: moderatorDevice.storage, send }),
-    moderatorStorage: moderatorDevice.storage,
-    ordinary: createModerationPort({ storage: waitingDevice.storage, send }),
+    moderator: createModerationPort(moderatorDevice.dependencies),
+    moderatorDependencies: moderatorDevice.dependencies,
+    ordinary: createModerationPort(waitingDevice.dependencies),
     ordinaryId: waitingDevice.athleteId(),
     rider: async (displayName) => {
       opened.clock.ms += 60_000;
@@ -209,23 +231,34 @@ function logOf(read: ModerationRead) {
 
 /**
  * The moderator’s port over the real instance, except that a request for
- * `path` is answered `answer()` — a proxy's page, or a log this
- * client must not accept — without reaching the instance.
+ * `path` is answered `answer()` without reaching the route — a proxy's page,
+ * or a log this client must not accept. A plaintext route is answered as it
+ * stands; a SEALED one (#1192) is answered by the instance itself
+ * (`answeringAs`), its 200 sealed back, because nobody on the way can write a
+ * sealed answer any more.
  */
 function answeredAt(
-  { send, moderatorStorage }: World,
+  { world, moderatorDependencies }: World,
   path: string,
   answer: () => Response,
 ): ModerationPort {
+  const sealedAnswer = world.answeringAs(path, answer);
   const wrapped: InstanceSend = (url, init) =>
-    new URL(url).pathname === path ? Promise.resolve(answer()) : send(url, init);
-  return createModerationPort({ storage: moderatorStorage, send: wrapped });
+    new URL(url).pathname === path
+      ? Promise.resolve(answer())
+      : sealedAnswer(new Request(url, init));
+  return createModerationPort({ ...moderatorDependencies, send: wrapped });
 }
 
 describe('who is a moderator — #955', () => {
   it('sends nothing, and says so, on a device connected to no instance', async () => {
     const send = vi.fn() as unknown as InstanceSend;
-    const port = createModerationPort({ storage: deviceStorage(), send });
+    const port = createModerationPort({
+      storage: deviceStorage(),
+      send,
+      loadedFrom: LOADED_LOCALLY,
+      signingKey: () => Promise.reject(new Error('no key is asked for')),
+    });
     expect(await port.standing()).toBe('not-connected');
     expect(await port.read()).toEqual({ kind: 'not-connected' });
     expect(await port.decideRegistration('someone', 'approve', 'why')).toEqual({
@@ -257,9 +290,11 @@ describe('who is a moderator — #955', () => {
     'reads %s from a proxy as unreachable, never as "not a moderator"',
     async (_name, status, body, type) => {
       const world = await moderatedWorld();
+      // Who moderates is read from `GET /v1/auth/account` (#1192), in plaintext:
+      // a proxy can answer that, and it is where a proxy's page is met.
       const proxied = answeredAt(
         world,
-        '/v1/moderation/registrations',
+        '/v1/auth/account',
         () => new Response(body, { status, headers: { 'content-type': type } }),
       );
       expect(await proxied.standing()).toBe('unreachable');

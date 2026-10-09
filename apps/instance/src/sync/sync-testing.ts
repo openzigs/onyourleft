@@ -216,7 +216,12 @@ export async function riderWithRide(world: IdentityInstance) {
   return { ...rider, content: contentSha256 };
 }
 
-/** A request with the session token, and a JSON body when there is one. */
+/**
+ * A request with the session token, and a JSON body when there is one —
+ * SEALED, since every sync route is sealed-only (#1192, ADR 0047 D-7), and
+ * signed by the device the session belongs to (`IdentityInstance.request`).
+ * The answer is the inner one, opened.
+ */
 export function authorised(
   world: IdentityInstance,
   token: string,
@@ -224,12 +229,5 @@ export function authorised(
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  return fetch(`${world.url}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  return world.request(method, path, { token, ...(body === undefined ? {} : { body }) });
 }

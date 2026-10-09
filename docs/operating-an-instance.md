@@ -269,8 +269,9 @@ statement the identity key signs, at `GET /v1/instance/keys`. Devices seal reque
 second one — and `OYL_INSTANCE_ORIGIN`, which they are bound to. Both private halves are stored in
 the database wrapped with AES-256-GCM under a key derived from the secret, so a backup holds them as
 ciphertext only, and a restore keeps every device's pin. **With no secret the instance makes no
-keys**: `/v1/instance/keys` and every sealed route answer `unavailable`, naming the variable, and
-everything else is served as before. With a secret, the keys are made on the first start.
+keys**: `/v1/instance/keys` and `POST /v1/sealed` answer `unavailable`, naming the variable, and
+every route is served in plaintext as before — including the ones a keyed instance serves only
+sealed (below, #1192). With a secret, the keys are made on the first start.
 
 **The numbers, ruled by the owner (ADR 0047 D-14 Q3)**, all on the box's own clock:
 
@@ -367,6 +368,31 @@ accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); witho
   in `OYL_INSTANCE_TRUSTED_PROXIES` (the home deployment's `compose.yaml` sets both). Without them,
   one busy client uses up registration, linking and recovery for every rider. A signed-in rider's
   sealed requests are counted against their session instead — 120 a minute — and are not affected.
+
+### Which routes are sealed, and what an instance without the secret exposes
+
+**Since #1192, on an instance that holds keys, every route ADR 0047 D-7 puts in phase 1 is reached
+ONLY sealed**, and a plaintext request to one is refused `sealed_required` before its session is
+read or anything is run: minting a link code, linking, recovering and asking for a recovery mail,
+giving and confirming a recovery address, the device list and revoking a device, the account
+export and deleting the account, **every** moderator route (the queues and the log included),
+**every** sync route, and history search. Registering a new rider is sealed too: a key the
+instance has never seen is refused `sealed_required` in plaintext, while a key it already holds
+still signs in in plaintext until phase 2. `apps/instance/src/sealed/phase-one.ts` is the list, and
+`GET /openapi.json` marks each route `x-oyl-sealed`. The rider's app offers these features only
+with the instance's card, and only in the Android app or a copy opened from the rider's own
+device — never in a copy a website served (D-11).
+
+⚠️ **An instance with no `OYL_INSTANCE_SECRET_KEY` has no sealed routes.** It registers riders and
+serves every one of the routes above in plaintext, as it did before #1191, so whatever sits between
+the rider and the box — Cloudflare's edge, for the home deployment's tunnel — reads them: new
+riders' recovery codes, link codes, moderators' actions and reads, and every synced ride, write-up
+and note, and it holds the bearer token that would let it call them as the rider. The app cannot
+seal to such an instance, so the features above are not offered on it. Set the secret.
+
+**A pasted hosted-model key** (#1199) is accepted only sealed, signed by a device whose pin came from
+a card, from any address — ADR 0047 D-13 lifted the home-network-only rule when phase 1 shipped. No
+plaintext key route exists. `model-key set`, the operator command, is unchanged.
 
 ## Room close codes
 

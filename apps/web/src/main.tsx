@@ -111,6 +111,7 @@ import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import type { LoadedFrom } from './instance/instance-pin';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -754,10 +755,20 @@ function buildInstancePort(): InstancePort | undefined {
   }
   return createInstancePort({
     storage: localStorage,
+    loadedFrom: loadedFrom(),
     ensureLocalAthlete: () =>
       ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
+}
+
+/**
+ * Where this copy of the app was loaded from (#1192, ADR 0047 D-11): sealed
+ * features are offered in the Android shell and in a copy opened from this
+ * device, and in no copy a website served.
+ */
+function loadedFrom(): LoadedFrom {
+  return { native: isNativeShell(platformCapacitor()), href: globalThis.location.href };
 }
 
 /**
@@ -769,8 +780,15 @@ function buildInstancePort(): InstancePort | undefined {
  * `undefined` where there is no `localStorage` to read a sign-in from.
  */
 function buildModerationPort(): ModerationPort | undefined {
-  if (typeof localStorage === 'undefined') return undefined;
-  return createModerationPort({ storage: localStorage });
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  // Every moderator route is sealed and signed by this device's key (#1192).
+  return createModerationPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
 }
 
 /**

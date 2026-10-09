@@ -1047,3 +1047,21 @@ Until 2026-10-07 this section was §"Owner questions left open".
   `apps/instance/src/analysis/agent.ts` §`AGENT_TOKEN_BUDGET` says so; the owner may rule the
   other reading. No figure was measured against a model an operator runs; that is still owed.
   (#1098)
+- **2026-10-09** — **D-9's "until #1179 ships" clause has stopped applying.** As of
+  [#1192](https://github.com/openzigs/onyourleft/issues/1192), every phase-1 route of
+  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7 that exists in
+  the route table is reached only sealed on an instance that holds keys
+  (`apps/instance/src/sealed/phase-one.ts`). The rest of D-7's phase 1 —
+  `POST /v1/auth/recovery-email/clear`, `POST /v1/auth/recovery/reset`, the two account-changes
+  routes, and D-8's semantics — is still owed by
+  [#1193](https://github.com/openzigs/onyourleft/issues/1193) and
+  [#1194](https://github.com/openzigs/onyourleft/issues/1194), and those routes arrive sealed-only.
+  None of them carries a key, so ADR 0047 D-13's lift — the owner's D-14 Q2 ruling — holds now: a
+  pasted key may come from anywhere, but
+  only sealed, signed by a device key, from a device whose pin came from a card, and no plaintext
+  key route may exist, on the home network or anywhere else. **Nothing was removed to make that
+  so, and that is a fact of the tree, not an omission**: [#1097](https://github.com/openzigs/onyourleft/issues/1097)
+  built the operator command and no app key route, so there was no plaintext key route and no
+  home-network placement check to take off; the key routes still owed ([#1199](https://github.com/openzigs/onyourleft/issues/1199),
+  whose fourth part this lifts) are born sealed-only and are added to that list. The operator
+  command stays. (#1192)

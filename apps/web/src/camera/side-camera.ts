@@ -62,6 +62,10 @@
  *   last one has not left (`side-camera-link-port.ts` §`SidePictureSent`).
  * - **Nothing is kept.** The picture goes to the link and this object holds no
  *   reference to it afterwards, whatever the link answered (D-8).
+ *
+ * Since #1112 every tick is also recorded — what came of it and how long each
+ * stage took, numbers only — in `side-picture-timings.ts`, which a debugger
+ * reads off the phone as `window.__oylSideCameraTimings`.
  */
 
 import type { CameraProblemKind, CapturedFrame } from './camera-port';
@@ -77,6 +81,7 @@ import type {
   SideLinkCondition,
   SideLinkEvent,
 } from './side-camera-link-port';
+import type { SidePictureTimingsSink } from './side-picture-timings';
 
 /**
  * How long the phone goes on filming after it loses the tablet: **30 seconds,
@@ -190,6 +195,11 @@ export interface SideCameraSessionOptions {
   readonly after?: ((task: () => void, milliseconds: number) => () => void) | undefined;
   /** Run `task` every `milliseconds`. @returns the cancel. */
   readonly every?: ((task: () => void, milliseconds: number) => () => void) | undefined;
+  /**
+   * Where every picture tick is recorded — #1112, `side-picture-timings.ts`.
+   * Nothing is recorded without one.
+   */
+  readonly timings?: SidePictureTimingsSink | undefined;
 }
 
 /** The browser's own one-shot timer, in the shape the session wants. */
@@ -215,6 +225,7 @@ export class SideCameraSession {
   readonly #clock: () => number;
   readonly #after: (task: () => void, milliseconds: number) => () => void;
   readonly #every: (task: () => void, milliseconds: number) => () => void;
+  readonly #timings: SidePictureTimingsSink | undefined;
   readonly #listeners = new Set<() => void>();
   readonly #unsubscribe: (() => void)[] = [];
 
@@ -249,6 +260,7 @@ export class SideCameraSession {
     this.#clock = options.clock ?? Date.now;
     this.#after = options.after ?? browserAfter;
     this.#every = options.every ?? browserEvery;
+    this.#timings = options.timings;
     this.#condition = this.#link?.sideLinkCondition();
     this.#snapshot = this.#build();
     if (this.#link !== undefined) {
@@ -477,37 +489,67 @@ export class SideCameraSession {
   #startPictures(): void {
     this.#filmingSince = this.#clock();
     this.#sequence = 0;
+    this.#timings?.started();
     this.#cancelPictures = this.#every(() => {
       void this.#takePicture();
     }, PICTURE_INTERVAL_MILLISECONDS);
   }
 
-  /** One tick: a picture, if the link can take one, sent and let go. */
+  /**
+   * One tick: a picture, if the link can take one, sent and let go.
+   *
+   * #1112: every tick is recorded, including the ones that do nothing — a
+   * tick that finds the last picture still being taken used to return in
+   * silence, and a phone sending 0.3 pictures a second said nothing about why.
+   */
   async #takePicture(): Promise<void> {
-    if (this.#taking || !this.#mayPicture()) {
+    const tickAt = this.#clock() - this.#filmingSince;
+    if (this.#taking) {
+      this.#timings?.record({ tickAt, outcome: 'still-taking' });
+      return;
+    }
+    if (!this.#mayPicture()) {
+      this.#timings?.record({ tickAt, outcome: 'link-not-ready' });
       return;
     }
     this.#taking = true;
-    const milliseconds = this.#clock() - this.#filmingSince;
+    const milliseconds = tickAt;
     let frame: CapturedFrame | undefined;
     try {
       frame = await this.#camera.captureSideFrame();
     } finally {
       this.#taking = false;
     }
-    // Asked again: the link may have gone, or the session stopped, while the
-    // picture was being taken — and then it is dropped here, at once (D-5).
-    if (frame === undefined || !this.#mayPicture()) {
+    const inHand = this.#clock() - this.#filmingSince;
+    const stages = {
+      captureMilliseconds: inHand - tickAt,
+      drawMilliseconds: frame?.stages?.drawMilliseconds,
+      encodeMilliseconds: frame?.stages?.encodeMilliseconds,
+      videoFrames: frame?.stages?.videoFrames,
+      encoder: frame?.stages?.encoder,
+      bytes: frame?.bytes.length,
+    };
+    if (frame === undefined) {
+      this.#timings?.record({ tickAt, outcome: 'no-picture', ...stages });
       return;
     }
-    const sent = this.#link?.sendPictureToTablet({
-      sequence: this.#sequence,
-      milliseconds,
-      bytes: frame.bytes,
-    });
+    // Asked again: the link may have gone, or the session stopped, while the
+    // picture was being taken — and then it is dropped here, at once (D-5).
+    if (!this.#mayPicture()) {
+      this.#timings?.record({ tickAt, outcome: 'dropped', ...stages });
+      return;
+    }
+    const bufferedBefore = this.#link?.picturesWaiting();
+    const sent =
+      this.#link?.sendPictureToTablet({
+        sequence: this.#sequence,
+        milliseconds,
+        bytes: frame.bytes,
+      }) ?? 'no-link';
     if (sent === 'sent') {
       this.#sequence += 1;
     }
+    this.#timings?.record({ tickAt, outcome: sent, ...stages, bufferedBefore, sentAt: inHand });
   }
 
   #mayPicture(): boolean {

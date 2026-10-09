@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { identitySettings, readConfig } from '../config.ts';
 import { startTestInstance, TEST_COMMIT, type TestInstance } from '../instance-testing.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
+import { sealedHandlerCall } from '../sealed/sealed-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import {
@@ -63,10 +64,21 @@ async function signInFrom(
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
   const challenge = await post('/v1/auth/challenge', { publicKey: device.publicKey });
-  return post('/v1/auth/session', {
-    ...(await device.statement(challenge.body.nonce as string)),
-    ...extra,
-  });
+  // A new key registers only sealed (#1192), from the same address.
+  const sealed = await sealedHandlerCall(
+    w,
+    {
+      method: 'POST',
+      path: '/v1/auth/session',
+      body: { ...(await device.statement(challenge.body.nonce as string)), ...extra },
+      signer: device.signingKey,
+    },
+    address,
+  );
+  return {
+    status: sealed.reply?.status ?? sealed.status,
+    body: sealed.body as Record<string, unknown>,
+  };
 }
 
 describe('the default registration mode (#775; the project’s image: rulings Q5 and Q13)', () => {

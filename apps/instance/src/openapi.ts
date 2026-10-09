@@ -82,6 +82,8 @@ function operation(route: Route): Record<string, unknown> {
   }
   const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
   if (route.identity === true || route.sync === true) codes.add('unavailable');
+  // A plaintext request to a sealed route is refused before anything else (#1192).
+  if (route.sealed !== undefined) codes.add('sealed_required');
   // Several codes share a status, so a status names every code it may carry.
   const byStatus = new Map<number, ErrorCode[]>();
   for (const code of ERROR_CODES) {
@@ -109,8 +111,10 @@ function operation(route: Route): Record<string, unknown> {
     summary: route.summary,
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
-    // #1191: reachable only inside `POST /v1/sealed`; a plaintext request is `not_found`.
-    ...(route.sealed === 'only' ? { 'x-oyl-sealed': 'only' } : {}),
+    // #1191, #1192: `only` — reachable only inside `POST /v1/sealed`, and a
+    // plaintext request is `sealed_required`; `new-key` — a key the instance
+    // has not seen registers only sealed. Both on an instance holding keys.
+    ...(route.sealed === undefined ? {} : { 'x-oyl-sealed': route.sealed }),
     ...(route.request === undefined
       ? {}
       : {
