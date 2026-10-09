@@ -24,6 +24,7 @@ import {
   EMAIL_CONFIRMATION_LIFETIME_SECONDS,
   EMAIL_RECOVERY_LIFETIME_SECONDS,
   LINK_CODE_LIFETIME_SECONDS,
+  RECOVERY_ADDRESS_HOLD_SECONDS,
 } from './identity.ts';
 import {
   startIdentityInstance,
@@ -416,7 +417,7 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
     expect(offered.status).toBe(400);
     expect(JSON.stringify(offered.body)).toContain('"field":"recoveryEmail"');
     const plain = await registered(w);
-    expect(await w.freshRead((store) => store.getRecoveryEmail(plain.athleteId))).toBeUndefined();
+    expect(await w.freshRead((store) => store.listRecoveryEmails(plain.athleteId))).toEqual([]);
     expect(await w.databaseBytes()).not.toContain('anna@example.org');
     expect(
       (await w.call('POST', '/v1/auth/recover/email', { body: { address: 'anna@example.org' } }))
@@ -428,6 +429,8 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
     const w = await start({ emailRecovery: true });
     const anna = await registered(w, { recoveryEmail: 'Anna@Example.org' });
     await confirm(w, anna.token, 'anna@example.org');
+    // A new address recovers nothing for its first week (#1194).
+    w.clock.ms += (RECOVERY_ADDRESS_HOLD_SECONDS + 1) * 1000;
     const asked = await w.call('POST', '/v1/auth/recover/email', {
       body: { address: 'anna@example.org' },
     });
@@ -465,7 +468,7 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
   const confirmLink = (w: IdentityInstance, token: string, emailed: unknown) =>
     w.call('POST', '/v1/auth/recovery-email/confirm', { token, body: { token: emailed } });
   const bound = (w: IdentityInstance, athleteId: string) =>
-    w.freshRead((store) => store.getRecoveryEmail(athleteId));
+    w.freshRead(async (store) => (await store.listRecoveryEmails(athleteId))[0]);
 
   it('two athletes, one address: the one who gave it first binds nothing, the mailbox’s reader binds it, and every answer is the same', async () => {
     const w = await start({ emailRecovery: true });
@@ -509,7 +512,10 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
 
     // Anna follows her own: the address is hers, once.
     expect((await confirmLink(w, annaToken, forAnna)).status).toBe(204);
-    expect(await bound(w, annaId)).toEqual({ athleteId: annaId, address: 'anna@example.org' });
+    expect(await bound(w, annaId)).toMatchObject({
+      athleteId: annaId,
+      address: 'anna@example.org',
+    });
     expect(await bound(w, malloryId)).toBeUndefined();
     const again = await confirmLink(w, annaToken, forAnna);
     expect(again.status).toBe(401);
@@ -528,7 +534,9 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     expect(held.status).toBe(204);
     expect(await bound(w, malloryId)).toBeUndefined();
 
-    // And recovery by email now reaches Anna, and only Anna.
+    // And recovery by email reaches Anna, and only Anna, once her address is
+    // past its first week (#1194).
+    w.clock.ms += (RECOVERY_ADDRESS_HOLD_SECONDS + 1) * 1000;
     await w.call('POST', '/v1/auth/recover/email', { body: { address: 'anna@example.org' } });
     expect(w.mail).toHaveLength(1);
     const { token: recovery } = w.mail[0] as { token: string };

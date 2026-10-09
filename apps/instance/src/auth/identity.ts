@@ -114,11 +114,14 @@ import {
   OwnershipConflictError,
   type AccountChange,
   type DeviceKey,
+  isEstablished,
   type KeyAddedVia,
+  type RecoveryStepUp,
   type SessionScope,
   type SqlStore,
   type Take,
 } from '../store/sql-store.ts';
+import { confirmationMailText, recoveryMailText, type RecoveryMailText } from './recovery-mail.ts';
 import {
   isPublicKey,
   isSignature,
@@ -149,6 +152,14 @@ export const EMAIL_RECOVERY_LIFETIME_SECONDS = 30 * 60;
 export const INVITE_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 /** The life of the link that confirms a recovery address (#865). */
 export const EMAIL_CONFIRMATION_LIFETIME_SECONDS = 24 * 60 * 60;
+/**
+ * How long a newly confirmed recovery address is HELD (#1194, ADR 0047 D-8):
+ * until then it recovers nothing, steps nothing up, and revoking the key that
+ * bound it clears it. Past it, the address is established.
+ */
+export const RECOVERY_ADDRESS_HOLD_SECONDS = 7 * 24 * 60 * 60;
+/** The most recovery addresses an account holds, held or established (#1194). */
+export const RECOVERY_ADDRESS_LIMIT = 2;
 /** How many recovery codes a new athlete is shown (ruling Q1). */
 export const RECOVERY_CODE_COUNT = 10;
 /** The name a new athlete has until they choose one — and what others see of a hidden one (#83). */
@@ -257,18 +268,24 @@ export const DEFAULT_LIMITS: IdentityLimits = {
 };
 
 /**
- * How an emailed link reaches a rider. The instance has no mail transport of
+ * How a mailed code reaches a rider. The instance has no mail transport of
  * its own; an operator who enables email recovery supplies one.
+ *
+ * ⚠️ **A mailer sends `mail` as it is** (#1194, ADR 0047 D-8): the token is a
+ * code the rider TYPES into the app, and the mail holds no link of any kind —
+ * no URL on the instance's origin or any other, no custom scheme, no App
+ * Link. `docs/operating-an-instance.md` §"Email recovery" says why, and says
+ * not to route the mail through Cloudflare Email Routing.
  */
 export interface RecoveryMailer {
-  /** A recovery link: the token goes in `POST /v1/auth/recover`'s `emailToken`. */
-  send(address: string, token: string): Promise<void>;
+  /** A recovery code: the token goes in `POST /v1/auth/recover`'s `emailToken`. */
+  send(address: string, token: string, mail: RecoveryMailText): Promise<void>;
   /**
-   * The link that confirms `address` is the athlete's (#865): the token goes
-   * in `POST /v1/auth/recovery-email/confirm`, from the athlete's signed-in
-   * device. Until it does, the address recovers nothing.
+   * The code that confirms `address` (#865): the token goes in
+   * `POST /v1/auth/recovery-email/confirm`, from a device signed in as the
+   * athlete. Until it does, the address recovers nothing.
    */
-  confirm(address: string, token: string): Promise<void>;
+  confirm(address: string, token: string, mail: RecoveryMailText): Promise<void>;
 }
 
 export interface IdentityOptions {
@@ -344,6 +361,34 @@ export interface DeviceView {
   readonly revokedAt: number | null;
   /** Whether this is the device asking. */
   readonly thisDevice: boolean;
+}
+
+/**
+ * A recovery address as the device list shows it (#1194): what the one-off
+ * review asks the rider about, held or established.
+ */
+export interface RecoveryAddressView {
+  readonly address: string;
+  /** When it was confirmed; `null` for one bound before the hold existed. */
+  readonly confirmedAt: number | null;
+  /** When its hold ends, Unix seconds; `null` once it is established. */
+  readonly heldUntil: number | null;
+  /** The key that gave it; `null` for one bound before the hold existed. */
+  readonly boundByKey: string | null;
+}
+
+/** What `GET /v1/auth/devices` answers (#1194 adds the addresses). */
+export interface DevicesView {
+  readonly devices: readonly DeviceView[];
+  readonly recoveryAddresses: readonly RecoveryAddressView[];
+}
+
+/** The recovery options `recover` carries beside its secret (#1194, ADR 0047 D-8). */
+export interface RecoverOptions {
+  /** The full reset: new codes, every address cleared, everything mailed or minted voided. */
+  readonly reset?: unknown;
+  /** Revoke every other key, each as a plain revoke. */
+  readonly revokeOtherKeys?: unknown;
 }
 
 /** One account-change entry as a device is shown it (#1193). */
@@ -459,19 +504,50 @@ export interface Identity {
   ticket(caller: Caller, roomId: string, declaredMass: unknown): Promise<Outcome<MintedTicket>>;
   /** The room core's admission for one room. */
   admitterFor(roomId: string): Admit;
-  devices(caller: Caller): Promise<readonly DeviceView[]>;
+  devices(caller: Caller): Promise<DevicesView>;
   revokeDevice(caller: Caller, publicKey: string, recoveryCode: unknown): Promise<Outcome<null>>;
   mintLinkCode(caller: Caller): Promise<Outcome<{ linkCode: string; expiresAt: number }>>;
   link(statement: unknown, linkCode: unknown): Promise<Outcome<{ athleteId: string }>>;
+  /**
+   * Add a key with a recovery code or a mailed token (#773), and — #1194 —
+   * the full reset and *revoke every other key* in the same transaction. The
+   * new codes, with the reset, are answered once.
+   */
   recover(
     statement: unknown,
     proof: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
-  ): Promise<Outcome<{ athleteId: string }>>;
+    options?: RecoverOptions,
+  ): Promise<Outcome<{ athleteId: string; recoveryCodes?: readonly string[] }>>;
   requestEmailRecovery(address: unknown, client: string | null): Promise<Outcome<null>>;
-  /** Give an address for recovery: mails a link to confirm it, and binds nothing (#865). */
+  /** Give an address for recovery: mails a code to confirm it, and binds nothing (#865). */
   setRecoveryEmail(caller: Caller, address: unknown): Promise<Outcome<null>>;
-  /** Follow that link, signed in as the athlete who gave the address (#865). */
+  /**
+   * Type that code, signed in as the athlete who gave the address (#865): the
+   * address is ADDED, held, beside whatever is bound (#1194, item 9's order).
+   */
   confirmRecoveryEmail(caller: Caller, token: unknown): Promise<Outcome<null>>;
+  /**
+   * Clear one of the caller's addresses (#1194): a held one only by the key
+   * that bound it, an established one only with a step-up — a recovery code,
+   * or a code mailed to THAT address.
+   */
+  clearRecoveryEmail(
+    caller: Caller,
+    request: {
+      readonly address?: unknown;
+      readonly recoveryCode?: unknown;
+      readonly emailToken?: unknown;
+    },
+  ): Promise<Outcome<null>>;
+  /**
+   * The full reset (#1194): with a step-up — a recovery code, or a code mailed
+   * to an established address — new codes, answered once, and every address,
+   * pending confirmation, mailed token and link code cleared or voided.
+   */
+  resetRecovery(
+    caller: Caller,
+    request: { readonly recoveryCode?: unknown; readonly emailToken?: unknown },
+  ): Promise<Outcome<{ recoveryCodes: readonly string[] }>>;
   /**
    * The caller's account-change log (#1193, ADR 0047 D-8): every entry, this
    * device's mark, and the NOTICES — each entry made by a key other than the
@@ -564,10 +640,53 @@ function takeRefusal(outcome: Take<object>['outcome'], prefix: 'challenge' | 'co
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
 
+/** Fresh recovery codes, and the SHA-256s the store keeps of them. */
+async function freshRecoveryCodes(): Promise<{ codes: string[]; sha256s: string[] }> {
+  const codes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);
+  return {
+    codes,
+    sha256s: await Promise.all(codes.map((code) => sha256Hex(normalisedCode(code)))),
+  };
+}
+
+/**
+ * A step-up's proof, read: one of a recovery code or a mailed token, never
+ * both and never neither — `step_up_required` when neither was sent.
+ */
+async function stepUpOf(request: {
+  readonly recoveryCode?: unknown;
+  readonly emailToken?: unknown;
+}): Promise<Outcome<RecoveryStepUp>> {
+  const { recoveryCode, emailToken } = request;
+  if (recoveryCode !== undefined && emailToken !== undefined) {
+    return invalid('emailToken', 'must not be sent with a recoveryCode: send one of the two');
+  }
+  if (recoveryCode !== undefined) {
+    if (typeof recoveryCode !== 'string') return invalid('recoveryCode', 'must be a string');
+    return {
+      ok: true,
+      value: { kind: 'code', codeSha256: await sha256Hex(normalisedCode(recoveryCode)) },
+    };
+  }
+  if (emailToken !== undefined) {
+    if (typeof emailToken !== 'string') return invalid('emailToken', 'must be a string');
+    return { ok: true, value: { kind: 'token', tokenSha256: await sha256Hex(emailToken) } };
+  }
+  return refuse('step_up_required');
+}
+
+/** A boolean option, absent meaning `false`. */
+function flag(value: unknown, field: string): Outcome<boolean> {
+  if (value === undefined) return { ok: true, value: false };
+  return typeof value === 'boolean' ? { ok: true, value } : invalid(field, 'must be true or false');
+}
+
 export function createIdentity(options: IdentityOptions): Identity {
   const { store, origin } = options;
   const now = options.now ?? (() => Date.now());
   const seconds = (): number => Math.floor(now() / 1000);
+  /** Now less the hold: an address confirmed after this is still held (#1194). */
+  const heldSince = (): number => seconds() - RECOVERY_ADDRESS_HOLD_SECONDS;
   const limits = options.limits ?? DEFAULT_LIMITS;
   const registration = options.registration ?? DEFAULT_REGISTRATION;
   const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
@@ -833,7 +952,13 @@ export function createIdentity(options: IdentityOptions): Identity {
       // The athlete exists and their recovery codes are about to be shown for
       // the only time: a mail transport that fails must not turn that into an
       // error. They can give the address again from a signed-in device.
-      await mailer.confirm(confirmation.address, confirmation.token).catch(() => undefined);
+      await mailer
+        .confirm(
+          confirmation.address,
+          confirmation.token,
+          confirmationMailText(confirmation.token, at),
+        )
+        .catch(() => undefined);
     }
     return {
       ok: true,
@@ -1150,13 +1275,25 @@ export function createIdentity(options: IdentityOptions): Identity {
     admitterFor: (roomId) => tickets.admitterFor(roomId),
 
     async devices(caller) {
-      return (await store.listDeviceKeys(caller.athleteId)).map((key) => ({
-        publicKey: key.publicKey,
-        addedAt: key.addedAt,
-        lastUsedAt: key.lastUsedAt,
-        revokedAt: key.revokedAt,
-        thisDevice: key.publicKey === caller.deviceKey,
-      }));
+      const since = heldSince();
+      return {
+        devices: (await store.listDeviceKeys(caller.athleteId)).map((key) => ({
+          publicKey: key.publicKey,
+          addedAt: key.addedAt,
+          lastUsedAt: key.lastUsedAt,
+          revokedAt: key.revokedAt,
+          thisDevice: key.publicKey === caller.deviceKey,
+        })),
+        recoveryAddresses: (await store.listRecoveryEmails(caller.athleteId)).map((row) => ({
+          address: row.address,
+          confirmedAt: row.confirmedAt,
+          heldUntil:
+            row.confirmedAt === null || isEstablished(row, since)
+              ? null
+              : row.confirmedAt + RECOVERY_ADDRESS_HOLD_SECONDS,
+          boundByKey: row.boundByKey,
+        })),
+      };
     },
 
     async revokeDevice(caller, publicKey, recoveryCode) {
@@ -1176,6 +1313,7 @@ export function createIdentity(options: IdentityOptions): Identity {
         seconds(),
         proof,
         caller.deviceKey,
+        heldSince(),
       );
       return outcome === 'revoked' ? { ok: true, value: null } : refuse(outcome);
     },
@@ -1207,27 +1345,44 @@ export function createIdentity(options: IdentityOptions): Identity {
       return addKey(taken.athleteId, proof.value, 'link_code', taken.mintedByKey);
     },
 
-    async recover(statement, proof) {
+    async recover(statement, proof, options = {}) {
       const byEmail = proof.emailToken !== undefined;
       if (byEmail && mailer === undefined) return refuse('not_found');
       const secret = byEmail ? proof.emailToken : proof.recoveryCode;
       if (typeof secret !== 'string') {
         return invalid(byEmail ? 'emailToken' : 'recoveryCode', 'must be a string');
       }
+      const reset = flag(options.reset, 'reset');
+      if (!reset.ok) return reset;
+      const revokeOtherKeys = flag(options.revokeOtherKeys, 'revokeOtherKeys');
+      if (!revokeOtherKeys.ok) return revokeOtherKeys;
       const key = await proven(statement, RECOVER_PURPOSE);
       if (!key.ok) return key;
       if (await keyInUse(key.value)) return refuse('key_in_use');
-      const taken = byEmail
-        ? await store.takeEmailRecoveryToken(await sha256Hex(secret), seconds())
-        : await store.takeRecoveryCode(await sha256Hex(normalisedCode(secret)), seconds());
+      const fresh = reset.value ? await freshRecoveryCodes() : undefined;
+      // One transaction (#1194): the secret spent — a mailed token re-checked
+      // against its address — the key added, and the options applied, so a
+      // rider recovering from a thief leaves the thief no key to race with.
+      const taken = await store.recoverAccount({
+        publicKey: key.value,
+        at: seconds(),
+        heldSince: heldSince(),
+        proof: byEmail
+          ? { kind: 'token', tokenSha256: await sha256Hex(secret) }
+          : { kind: 'code', codeSha256: await sha256Hex(normalisedCode(secret)) },
+        revokeOtherKeys: revokeOtherKeys.value,
+        ...(fresh === undefined ? {} : { resetCodeSha256s: fresh.sha256s }),
+      });
+      if (taken.outcome === 'key_in_use') return refuse('key_in_use');
+      if (taken.outcome === 'unbound') return refuse('address_unbound');
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
-      // `recover` has no session: the key it adds is the one it names (D-8).
-      return addKey(
-        taken.athleteId,
-        key.value,
-        byEmail ? 'email_token' : 'recovery_code',
-        key.value,
-      );
+      return {
+        ok: true,
+        value: {
+          athleteId: taken.athleteId,
+          ...(fresh === undefined ? {} : { recoveryCodes: fresh.codes }),
+        },
+      };
     },
 
     async requestEmailRecovery(address, client) {
@@ -1240,16 +1395,18 @@ export function createIdentity(options: IdentityOptions): Identity {
         return refuse('rate_limited');
       }
       // The same answer whether or not the address is known, so it cannot be
-      // used to find out who rides here.
+      // used to find out who rides here. Only an ESTABLISHED address is
+      // mailed (#1194): one inside its hold recovers nothing.
       const held = await store.findRecoveryEmail(normalised);
-      if (held !== undefined) {
+      if (held !== undefined && isEstablished(held, heldSince())) {
         const token = randomToken(32);
         await store.putEmailRecoveryToken({
           tokenSha256: await sha256Hex(token),
           athleteId: held.athleteId,
           expiresAt: seconds() + EMAIL_RECOVERY_LIFETIME_SECONDS,
+          address: held.address,
         });
-        await mailer.send(held.address, token);
+        await mailer.send(held.address, token, recoveryMailText(token));
       }
       return { ok: true, value: null };
     },
@@ -1274,13 +1431,23 @@ export function createIdentity(options: IdentityOptions): Identity {
         // that nobody was sent — nor replaces the athlete's earlier one.
         // Registration swallows the same failure instead, because there the
         // athlete's recovery codes are about to be shown for the only time.
+        // Named by the day the asking key was added (review L2), so a rider
+        // with two mails at one address types their own device's code.
+        const askedBy =
+          (await store.listDeviceKeys(caller.athleteId)).find(
+            (key) => key.publicKey === caller.deviceKey,
+          )?.addedAt ?? seconds();
         try {
-          await mailer.confirm(confirmation.address, confirmation.token);
+          await mailer.confirm(
+            confirmation.address,
+            confirmation.token,
+            confirmationMailText(confirmation.token, askedBy),
+          );
         } catch {
           return refuse('internal');
         }
-        // Replaces this athlete's earlier unconfirmed link, if any, so the
-        // table holds at most one pending confirmation an athlete (#883).
+        // Replaces THIS KEY's earlier unconfirmed code, if any, so the table
+        // holds at most one pending confirmation a key (#883, #1194).
         // ⚠️ The other direction is NOT covered: if this write fails after
         // the mail went, the address holds a link the store never kept —
         // following it answers `code_unknown`, binds nothing, and this route
@@ -1309,12 +1476,57 @@ export function createIdentity(options: IdentityOptions): Identity {
         await sha256Hex(token),
         seconds(),
         caller.deviceKey,
+        RECOVERY_ADDRESS_LIMIT,
       );
+      // `added: false` — the address was already this athlete's — is the same
+      // success: no new hold, no new binder (review J2).
       if (taken.outcome === 'taken') return { ok: true, value: null };
       // Only the reader of the mailbox holds the token, so telling them the
       // address is another account's tells nobody else anything.
       if (taken.outcome === 'held') return refuse('address_in_use');
+      if (taken.outcome === 'superseded') return refuse('confirmation_superseded');
+      if (taken.outcome === 'limit') return refuse('address_limit');
       return refuse(takeRefusal(taken.outcome, 'code'));
+    },
+
+    async clearRecoveryEmail(caller, request) {
+      const given = addressOf(request.address, 'address');
+      if (!given.ok) return given;
+      // No step-up sent is a `null` proof here, not a refusal: a held address
+      // is cleared by its binder with none.
+      const sent = request.recoveryCode !== undefined || request.emailToken !== undefined;
+      const proof = sent ? await stepUpOf(request) : undefined;
+      if (proof !== undefined && !proof.ok) return proof;
+      if (proof?.ok === true && proof.value.kind === 'token' && mailer === undefined) {
+        return refuse('not_found');
+      }
+      const outcome = await store.clearRecoveryEmail({
+        athleteId: caller.athleteId,
+        address: given.value,
+        at: seconds(),
+        actorKey: caller.deviceKey,
+        heldSince: heldSince(),
+        proof: proof?.ok === true ? proof.value : null,
+      });
+      return outcome === 'cleared' ? { ok: true, value: null } : refuse(outcome);
+    },
+
+    async resetRecovery(caller, request) {
+      const proof = await stepUpOf(request);
+      if (!proof.ok) return proof;
+      if (proof.value.kind === 'token' && mailer === undefined) return refuse('not_found');
+      const fresh = await freshRecoveryCodes();
+      const outcome = await store.resetRecovery({
+        athleteId: caller.athleteId,
+        at: seconds(),
+        actorKey: caller.deviceKey,
+        heldSince: heldSince(),
+        proof: proof.value,
+        newCodeSha256s: fresh.sha256s,
+      });
+      return outcome === 'reset'
+        ? { ok: true, value: { recoveryCodes: fresh.codes } }
+        : refuse(outcome);
     },
 
     async accountChanges(caller) {

@@ -155,9 +155,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listDisplayNameChanges: {
     probe: (store, athleteId) => store.listDisplayNameChanges(athleteId),
   },
-  getRecoveryEmail: {
-    probe: async (store, athleteId) => one(await store.getRecoveryEmail(athleteId)),
-  },
+  listRecoveryEmails: { probe: (store, athleteId) => store.listRecoveryEmails(athleteId) },
   listEmailConfirmations: {
     probe: (store, athleteId) => store.listEmailConfirmations(athleteId),
   },
@@ -211,6 +209,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   putEmailRecoveryToken: { notAScopedRead: 'a write' },
   putEmailConfirmation: { notAScopedRead: 'a write' },
   confirmRecoveryEmail: { notAScopedRead: 'a write; scoping is sql-store.identity.test.ts’s' },
+  clearRecoveryEmail: {
+    notAScopedRead: 'a write; scoping is recovery-addresses.test.ts’s (three athletes)',
+  },
+  resetRecovery: {
+    notAScopedRead: 'a write; scoping is recovery-addresses.test.ts’s (three athletes)',
+  },
+  recoverAccount: {
+    notAScopedRead: 'recovery: the code or the token is what names the athlete (#773, #1194)',
+  },
   getRoom: { notAScopedRead: 'a room belongs to no athlete' },
   getRoomCourse: { notAScopedRead: 'a room’s course belongs to the room, not to an athlete' },
   listRoomResults: { notAScopedRead: 'a finish order is every rider’s, by design (ADR 0037)' },
