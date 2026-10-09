@@ -56,6 +56,9 @@ services:
       # measuring the tunnel's idle timeout only (home-machine.md, "Measuring
       # the tunnel"); remove it again afterwards.
       OYL_INSTANCE_PING_INTERVAL_MS: ${OYL_INSTANCE_PING_INTERVAL_MS:-}
+      # A quiet analysis stream's heartbeat (25 s when empty). `0` is ONLY for
+      # #1105's control measurement, never to run with (.env.example).
+      OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS: ${OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS:-}
       OYL_INSTANCE_OWNER_KEY: ${OYL_INSTANCE_OWNER_KEY:-}
       OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
