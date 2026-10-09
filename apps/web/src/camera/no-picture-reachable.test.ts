@@ -69,6 +69,7 @@ import { hostedModelDecision } from './hosted-model';
 import { CameraController } from './session';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
+import { analysisJobRequest } from '../ride-analysis/instance-job';
 import { modelServer, STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import {
   analysisModules,
@@ -158,6 +159,9 @@ describe('the module graph (#799)', () => {
     expect(ENTRIES).toContain('instance/sync.ts');
     // #802: the step port to the rider's own computer, and what it imports.
     expect(ENTRIES).toContain('ride-analysis/own-computer-step.ts');
+    // #1102: the job request to the rider's instance, and its controller.
+    expect(ENTRIES).toContain('ride-analysis/instance-job.ts');
+    expect(ENTRIES).toContain('ride-analysis/instance-analysis.ts');
     const walked = walk.closure(ENTRIES);
     for (const entry of ENTRIES) {
       expect(walked.modules, entry).toContain(entry);
@@ -328,6 +332,25 @@ describe('the body carries no picture (#799)', () => {
 
   it('measures the input’s own largest array', () => {
     expect(largest).toBe(3);
+  });
+
+  it('passes the request a write-up job sends to the rider’s instance (#1102), with a pose summary and without', () => {
+    const withPose: RideAnalysisInput = {
+      ...INPUT,
+      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
+    };
+    for (const input of [INPUT, withPose]) {
+      const body = analysisJobRequest(input, '1', 'instance-local');
+      expect(pictureBodyFaults(body, largestArrayIn(input))).toStrictEqual([]);
+    }
+  });
+
+  it('fails a job request that carried a picture (#1102’s control)', () => {
+    const body = {
+      ...analysisJobRequest(INPUT, '1', 'instance-local'),
+      frame: { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } },
+    };
+    expect(pictureBodyFaults(body, largest)).not.toStrictEqual([]);
   });
 
   it.each(Object.keys(HOSTED_PROMPTS) as HostedQuestion[])(

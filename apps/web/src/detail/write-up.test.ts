@@ -22,10 +22,14 @@ import {
   COMPUTER_SENDS,
   COMPUTER_SENDS_LEAD,
   HOSTED_SENDS,
+  INSTANCE_SENDS,
+  INSTANCE_SENDS_LEAD,
   missingSectionsText,
   shownWriteUp,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
+  WRITE_UP_NO_INSTANCE_AFTER,
+  WRITE_UP_NO_INSTANCE_BEFORE,
 } from './write-up';
 
 const read = (path: string): string =>
@@ -120,6 +124,28 @@ const RECORD: RideWriteUpRecord = {
   missingSections: [],
   writtenAt: unixSeconds(1_800_000_000),
 };
+
+/**
+ * #1104's drafts B3 and B4 as drafted on that issue on 2026-10-09, word for
+ * word. ⚠️ **Drafts awaiting the owner's approval** — the approval is a dated
+ * comment on #1104 before this ships, and a reworded approval changes the
+ * constant AND this pin in the same commit, where a reviewer sees both.
+ */
+describe('the instance paragraph and the no-instance sentence, as drafted on #1104 (#1102)', () => {
+  it('says what a job sends in B3, word for word', () => {
+    expect(`${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`).toBe(
+      "A ride analysed on your instance, when you ask for an analysis. When you press the button on a ride's page, that ride's numbers go to your instance: heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a few measurements of your riding position changed between the start and the end of filming. Never a picture. Your instance writes the analysis with a model on its own machine, and the model may look up what is already on your instance: short summaries of your recent rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the button. Once you have pressed it, the analysis can finish while the app is closed.",
+    );
+  });
+
+  it('says B4 around the Connect screen’s title, word for word', () => {
+    expect(
+      `${WRITE_UP_NO_INSTANCE_BEFORE} Connect to an instance${WRITE_UP_NO_INSTANCE_AFTER}`,
+    ).toBe(
+      'A write-up of this ride is written on an instance you connect in Connect to an instance, and without one everything else in the app works as before and the write-ups already saved here stay.',
+    );
+  });
+});
 
 describe('a saved write-up is screened again before it is shown', () => {
   it('shows a row that passes, as the text the screen hands back', () => {

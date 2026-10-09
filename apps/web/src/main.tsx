@@ -67,6 +67,9 @@ import {
   riderModelStepSource,
 } from './camera/analysis-transport';
 import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
+import { createInstanceAnalysis } from './ride-analysis/instance-analysis';
+import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
+import { jobSessionOf } from './ride-analysis/instance-job';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
@@ -110,7 +113,13 @@ import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
-import { createInstancePort, instanceEraser, type InstancePort } from './instance/instance-port';
+import {
+  createInstancePort,
+  heldInstanceSession,
+  heldSealedSession,
+  instanceEraser,
+  type InstancePort,
+} from './instance/instance-port';
 import type { LoadedFrom } from './instance/instance-pin';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createRoomPort, type RoomPort } from './net/room-port';
@@ -930,6 +939,52 @@ async function buildRideAnalysis(camera: CameraController | undefined): Promise<
 }
 
 /**
+ * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): the ONE
+ * production place it is built, so `check:wiring` reports
+ * `createInstanceAnalysis` if this goes. Over the sealed session the Connect
+ * screen keeps (#1192), through the one instance module (ADR 0036 D-3 (a)); a
+ * device signed in to nothing is told so and sends nothing.
+ *
+ * The camera's consent is read at the press, as `buildRideAnalysis` reads it.
+ * The recording is watched so the page lets go of a job while a ride is
+ * recorded (ADR 0035 D-8), and the job carries on on the instance.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildInstanceAnalysis(
+  camera: CameraController | undefined,
+  rideController: RideController | undefined,
+): InstanceAnalysisPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createInstanceAnalysis({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    connected: () => heldInstanceSession(storage) !== undefined,
+    session: async () => jobSessionOf(await sealed()),
+    cameraConsented: () => camera?.state().consent.local ?? false,
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    pending: storage,
+    ...(rideController === undefined
+      ? {}
+      : {
+          ride: {
+            inProgress: () => rideInProgress(rideController.getSnapshot().phase),
+            subscribe: (listener) => rideController.subscribe(listener),
+          },
+        }),
+  });
+}
+
+/**
  * The camera, or nothing (#382).
  *
  * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
@@ -1062,6 +1117,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // line is what supplies it.
   const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
+  // #1102: built once, after the ride controller it watches.
+  const instanceAnalysis = buildInstanceAnalysis(camera, rideController);
   // #388. Each pairing's post-ride report, saved with the ride it filmed —
   // the ride controller is what says which ride that is, which is why the
   // pairing is built after it. ⚠️ `reports` is optional too, so leaving it out
@@ -1153,6 +1210,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           library={buildLibraryPort()}
           detail={buildDetailPort()}
           rideAnalysis={rideAnalysis}
+          {...(instanceAnalysis === undefined ? {} : { instanceAnalysis })}
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}
           match={buildMatchPort()}

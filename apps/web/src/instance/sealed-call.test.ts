@@ -70,6 +70,8 @@ async function playInstance(
     advancePerRequest?: number;
     plaintextStale?: boolean;
     streamFrames?: (events: readonly string[]) => readonly string[];
+    /** #1102: the stream's body sends its frames and then stays open, sending nothing. */
+    openEnded?: boolean;
   } = {},
 ): Promise<Played> {
   const pair = await webCryptoHpkePrimitives.generateX25519KeyPair();
@@ -117,7 +119,19 @@ async function playInstance(
         }
         events.push(await writer.event(String(3), SEALED_END_KIND, new Uint8Array(0)));
         const shaped = options.streamFrames?.(events) ?? events;
-        return new Response(shaped.map((data) => `data: ${data}\n\n`).join(''), {
+        const text = shaped.map((data) => `data: ${data}\n\n`).join('');
+        if (options.openEnded === true) {
+          const body = new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              controller.enqueue(utf8Encode(text));
+            },
+          });
+          return new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          });
+        }
+        return new Response(text, {
           status: 200,
           headers: { 'content-type': 'text/event-stream' },
         });
@@ -338,6 +352,64 @@ describe('a sealed stream (D-9)', () => {
     expect(played.seen[0]?.lastEventId).toBe('2');
     expect(ids).toEqual(['3']);
     expect(result.outcome).toBe('finished');
+  });
+});
+
+describe('a sealed stream the reader lets go of, or that falls silent (#1102)', () => {
+  it('ends cut when its signal aborts, naming the last event opened', async () => {
+    const played = await playInstance({
+      openEnded: true,
+      streamFrames: (events) => events.slice(0, 2),
+    });
+    const { http } = await client(played);
+    const stop = new AbortController();
+    const ids: string[] = [];
+    const result = await http.stream('/v1/stream', {
+      token: 't',
+      signal: stop.signal,
+      onEvent: (event) => {
+        ids.push(event.id);
+        if (event.id === '2') stop.abort();
+      },
+    });
+    expect(ids).toEqual(['1', '2']);
+    expect(result).toEqual({ outcome: 'cut', lastEventId: '2' });
+  });
+
+  it('ends cut when nothing, not even a heartbeat, comes within its idle bound', async () => {
+    const played = await playInstance({
+      openEnded: true,
+      streamFrames: (events) => events.slice(0, 1),
+    });
+    const { http } = await client(played);
+    const result = await http.stream('/v1/stream', {
+      token: 't',
+      idleMilliseconds: 20,
+      onEvent: () => undefined,
+    });
+    expect(result).toEqual({ outcome: 'cut', lastEventId: '1' });
+  });
+
+  it('keeps reading a stream whose heartbeats come within the bound', async () => {
+    const played = await playInstance();
+    const { http } = await client(played);
+    const result = await http.stream('/v1/stream', {
+      token: 't',
+      idleMilliseconds: 5_000,
+      onEvent: () => undefined,
+    });
+    expect(result).toEqual({ outcome: 'finished', lastEventId: '3' });
+  });
+
+  it('hands the request itself a signal the reader’s abort aborts, so fetch stops too', async () => {
+    const played = await playInstance();
+    const { http } = await client(played);
+    const stop = new AbortController();
+    await http.stream('/v1/stream', { token: 't', signal: stop.signal, onEvent: () => undefined });
+    const signal = (played.send.mock.calls[0]?.[1] as RequestInit | undefined)?.signal;
+    expect(signal?.aborted).toBe(false);
+    stop.abort();
+    expect(signal?.aborted).toBe(true);
   });
 });
 
