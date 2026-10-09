@@ -16,7 +16,8 @@
  *   phase-1 feature, and a new key with no card is told it needs one.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { unixSeconds } from '@onyourleft/domain';
@@ -67,16 +68,23 @@ const INSTANCE = (path: string): string =>
 const NOW = unixSeconds(1_790_000_000);
 
 let phaseOne: readonly PhaseOneRoute[];
+/** "The synced history": every route `sync/routes.ts` declares, by the instance's own rule. */
+let syncFamily: readonly PhaseOneRoute[];
 let testing: IdentityTesting;
 const worlds: IdentityInstance[] = [];
 const harnesses: StoreHarness[] = [];
 
 beforeAll(async () => {
-  phaseOne = (
-    (await import(/* @vite-ignore */ INSTANCE('sealed/phase-one.ts'))) as {
-      PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[];
-    }
-  ).PHASE_ONE_SEALED_ROUTES;
+  const committed = (await import(/* @vite-ignore */ INSTANCE('sealed/phase-one.ts'))) as {
+    PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[];
+    SEALED_FAMILIES: readonly {
+      readonly row: string;
+      covers(route: { method: string; path: string; reaches: unknown }): boolean;
+    }[];
+  };
+  phaseOne = committed.PHASE_ONE_SEALED_ROUTES;
+  const family = committed.SEALED_FAMILIES.find((each) => each.row === 'The synced history');
+  syncFamily = phaseOne.filter((route) => family?.covers({ ...route, reaches: 'own' }) === true);
   testing = (await import(
     /* @vite-ignore */ INSTANCE('auth/identity-testing.ts')
   )) as IdentityTesting;
@@ -119,12 +127,54 @@ function plaintextCallsToSealedRoutes(source: string, routes: readonly PhaseOneR
   return found;
 }
 
-const CLIENT_MODULES = ['instance-port.ts', 'sign-in.ts', 'sync.ts', 'moderation-port.ts'];
+const CLIENT_MODULES = [
+  'instance-port.ts',
+  'sign-in.ts',
+  'sync.ts',
+  'sync-port.ts',
+  'moderation-port.ts',
+];
+
+/** Every non-test source file under `apps/web/src`. */
+function clientSources(): string[] {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const found: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (
+        /\.tsx?$/.test(entry.name) &&
+        !/\.test\.tsx?$|-testing\.tsx?$|\/testing\//.test(path)
+      ) {
+        found.push(path);
+      }
+    }
+  };
+  walk(root);
+  return found.map((path) => relative(root, path));
+}
 
 describe('every caller of a sealed-only route seals it (#1192, ADR 0047 D-7)', () => {
   it('reads the instance’s own committed list, and it is not empty', () => {
     expect(phaseOne.filter((route) => route.mark === 'only').length).toBeGreaterThan(20);
     expect(phaseOne.map((route) => route.path)).toContain('/v1/moderation/log');
+  });
+
+  it('no module in the client calls a sync route in plaintext (#1195)', () => {
+    // Derived from the instance's committed list: a sync route added there is
+    // scanned for here with no edit.
+    expect(syncFamily.map((route) => route.path)).toContain('/v1/sync/manifest');
+    expect(syncFamily.length).toBeGreaterThanOrEqual(13);
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const sources = clientSources();
+    expect(sources).toContain(join('instance', 'sync-port.ts'));
+    const found = sources.flatMap((path) =>
+      plaintextCallsToSealedRoutes(readFileSync(join(root, path), 'utf8'), syncFamily).map(
+        (call) => `${path}: ${call}`,
+      ),
+    );
+    expect(found).toEqual([]);
   });
 
   it.each(CLIENT_MODULES)('%s makes no plaintext call to one', (module) => {

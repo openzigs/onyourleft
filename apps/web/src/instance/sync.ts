@@ -8,11 +8,14 @@
  * ## What this module does NOT do: talk to the network
  *
  * It names no `fetch`, for `sign-in.ts`'s reason: it takes a
- * {@link SyncTransport}, and #777 — the one module `privacy/no-network.test.ts`
- * will permit to call an instance — supplies the production one after #778
- * has changed every promise about what leaves the device. Until then nothing
- * in the shipped client calls this, so a rider connected to no instance sees no
- * sync, no sync error and no request (#776's last criterion).
+ * {@link SyncTransport}, and the production one is {@link sealedSyncTransport}
+ * over `instance-transport.ts`, the one module `privacy/no-network.test.ts`
+ * permits to call an instance. Since #1195 the Instance screen calls this,
+ * through `sync-port.ts`, when the rider presses *Sync now* — and only with a
+ * card, so every request is sealed; a rider connected to no instance sees no
+ * sync, no sync error and no request (#776's last criterion). ⚠️ A reviewer
+ * who remembers "nothing in the shipped client calls this" is reading the old
+ * file.
  *
  * ## The sync base: telling a change here from a change there
  *
@@ -345,8 +348,9 @@ export interface SyncDependencies {
  * with a key only because an instance listed it. `publicKey` is 64 lowercase
  * hex, as a signed record carries it; the store refuses anything else.
  *
- * Nothing in the shipped client calls it yet, as nothing calls
- * {@link syncWithInstance}: the screen that asks is part of wiring sync in.
+ * The screen that asks is the Instance screen's sync panel (#1195,
+ * `views/SyncPanel.tsx`, through `sync-port.ts`): it calls this only from the
+ * confirmation the rider answers, never from a sync's report alone.
  */
 export async function admitDeviceKey(
   store: Pick<ActivityStore, 'putTrustedDeviceKey'>,

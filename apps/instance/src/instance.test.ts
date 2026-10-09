@@ -37,6 +37,10 @@ import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
+import { PHASE_ONE_SEALED_ROUTES, SEALED_FAMILIES } from './sealed/phase-one.ts';
+import { sealedAt } from './sealed/sealed-testing.ts';
+import { openDatabase } from './store/node-sqlite.ts';
+import { corpusFile, uploadBody } from './sync/sync-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
 const MAIN = fileURLToPath(new URL('./main.ts', import.meta.url));
@@ -1173,4 +1177,132 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     }
     expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
   }, 30_000);
+});
+
+/** A secret, so the running instance makes its keys and seals its sealed-only routes (#1189). */
+const KEYED = { secretKey: new Uint8Array(32).fill(7) };
+
+/** The synced history's rows, read on a connection the instance never used (#1195). */
+function syncRows(path: string): string {
+  const database = openDatabase(path);
+  try {
+    return JSON.stringify(
+      ['athlete', 'device_key', 'activity_record', 'sync_item', 'history_source'].map((table) => [
+        table,
+        database.prepare(`SELECT * FROM "${table}"`).all(),
+      ]),
+      (_, value: unknown) =>
+        value instanceof Uint8Array ? Buffer.from(value).toString('hex') : value,
+    );
+  } finally {
+    database.close();
+  }
+}
+
+/** Every route of the synced history on the committed sealed-only list (ADR 0047 D-7). */
+const SYNC_FAMILY = PHASE_ONE_SEALED_ROUTES.filter(
+  (route) =>
+    SEALED_FAMILIES.find((family) => family.row === 'The synced history')?.covers({
+      ...route,
+      reaches: 'own',
+    }) === true,
+);
+
+describe('sync on the running instance — #1195', () => {
+  it('serves sync sealed, and refuses every sync route in plaintext with a good token, writing nothing', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path, KEYED, { config: { bodyLimitBytes: 256 * 1024 } });
+    await instance.opened;
+    await instance.keysMaintained;
+    const device = await testDevice();
+    const challenge = (await (
+      await fetch(`${instance.url}/v1/auth/challenge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ publicKey: device.publicKey }),
+      })
+    ).json()) as { nonce: string };
+    // A new key registers only sealed on an instance holding keys (#1192).
+    const registered = await sealedAt(instance.url, TEST_ORIGIN, {
+      method: 'POST',
+      path: '/v1/auth/session',
+      body: await device.statement(challenge.nonce),
+      signer: device.signingKey,
+    });
+    expect(registered.status, registered.text).toBe(200);
+    const token = (JSON.parse(registered.text) as { sessionToken: string }).sessionToken;
+    const sealed = (method: string, route: string, body?: unknown) =>
+      sealedAt(instance.url, TEST_ORIGIN, {
+        method,
+        path: route,
+        token,
+        signer: device.signingKey,
+        ...(body === undefined ? {} : { body }),
+      });
+
+    // Served, sealed: a ride and a note go in, and the manifest reads them back.
+    const ride = await sealed(
+      'POST',
+      '/v1/sync/records',
+      await uploadBody(device, corpusFile('nominal-ride.gpx')),
+    );
+    expect(ride.status, ride.text).toBe(200);
+    const content = (JSON.parse(ride.text) as { contentSha256: string }).contentSha256;
+    expect((await sealed('POST', '/v1/sync/items/note/n1', { body: 'a note' })).status).toBe(200);
+    const manifest = await sealed('GET', '/v1/sync/manifest');
+    expect(manifest.status, manifest.text).toBe(200);
+    expect(
+      (JSON.parse(manifest.text) as { items: { kind: string }[] }).items.map((item) => item.kind),
+    ).toEqual(expect.arrayContaining(['activity', 'note']));
+
+    expect(SYNC_FAMILY.length).toBeGreaterThanOrEqual(13);
+    const before = syncRows(path);
+    const another = await uploadBody(device, corpusFile('paused-laps.fit'), 'ride-2');
+    for (const route of SYNC_FAMILY) {
+      const name = `${route.method} ${route.path}`;
+      const target = route.path
+        .replace('{content}', content)
+        .replace('{kind}', 'note')
+        .replace('{key}', 'n1');
+      const bodies: Record<string, unknown> = {
+        'POST /v1/sync/records': another,
+        'POST /v1/sync/items/{kind}/{key}': { body: 'an edge’s note' },
+        'POST /v1/sync/records/{content}/race-consent': { mayBeRaced: true },
+        'DELETE /v1/account': { recoveryCode: 'not-needed-to-be-refused' },
+      };
+      const body = bodies[name];
+      const answer = await fetch(`${instance.url}${target}`, {
+        method: route.method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      const text = await answer.text();
+      expect(answer.status, `${name}: ${text}`).toBe(403);
+      expect((JSON.parse(text) as { error: { code: string } }).error.code, name).toBe(
+        'sealed_required',
+      );
+      expect(syncRows(path) === before, name).toBe(true);
+    }
+  });
+
+  it('serves no sync at all — not even in plaintext — on an instance with no keys', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path);
+    await instance.opened;
+    const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+    const before = syncRows(path);
+    const answer = await fetch(`${instance.url}/v1/sync/items/note/n1`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'a note' }),
+    });
+    expect(answer.status).toBe(503);
+    expect(((await answer.json()) as { error: { code: string } }).error.code).toBe('unavailable');
+    expect(syncRows(path)).toBe(before);
+  });
 });
