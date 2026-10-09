@@ -52,6 +52,12 @@ import {
   TABLET_SCAN_NEEDS_CONSENT,
 } from './SideCameraControl';
 import { browserSecureWindow } from '../camera/secure-window-testing';
+import { SAVE_SNAPSHOT_LABEL, snapshotsNotKeptText } from '../camera/SideSnapshotControl';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
+import { sideSnapshotKeeper } from '../camera/snapshot-keeper';
+import type { RideProgress } from '../camera/side-report-keeper';
+import { unixSeconds } from '@onyourleft/domain';
+import { activityId, athleteId, type CameraFrameRecord } from '@onyourleft/store';
 
 let mounted: Mounted | undefined;
 
@@ -93,6 +99,8 @@ async function tablet(
     readonly analyse?: SidePairingOptions['analyse'];
     readonly camera?: Pick<ScriptedCameraOptions, 'startFails' | 'startFailsFacing' | 'holdStarts'>;
     readonly secureWindow?: SecureWindow;
+    /** #1063: where Save snapshot holds a picture. */
+    readonly snapshots?: SideSnapshotPort;
   } = {},
 ) {
   const network = sidePeerNetwork();
@@ -133,7 +141,9 @@ async function tablet(
   if (options.agreed !== false) {
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
   }
-  mounted = await mount(<SideCameraControl controller={controller} pairing={port} />);
+  mounted = await mount(
+    <SideCameraControl controller={controller} pairing={port} snapshots={options.snapshots} />,
+  );
   await settle();
   /** The phone, somewhere else, reading the offer on this tablet's screen. */
   const phoneReads = async (): Promise<PhoneSidePairing> => {
@@ -800,7 +810,9 @@ describe('the live view: the side camera’s picture with its outline — #1061,
     readonly settle: (look: SideShownLook) => void;
   }
 
-  async function watching(options: { readonly secureWindow?: SecureWindow } = {}) {
+  async function watching(
+    options: { readonly secureWindow?: SecureWindow; readonly snapshots?: SideSnapshotPort } = {},
+  ) {
     const pending: Pending[] = [];
     const shownAsked: boolean[] = [];
     const estimator: SideLiveEstimator = {
@@ -1004,6 +1016,66 @@ describe('the live view: the side camera’s picture with its outline — #1061,
     expect(order.slice(0, 2)).toStrictEqual(['hold', 'draw']);
   });
 
+  /*
+   * #1063, ADR 0044 D-3, end to end on the tablet: the phone's picture over
+   * the real link, the real analysis, the control, the real keeper. One press
+   * is one picture — the one on screen — and it is written only with its
+   * ride's save.
+   */
+  it('saves the picture on screen, once per press, and only with its ride — #1063', async () => {
+    let phase: RideProgress = {
+      phase: 'recording',
+      saveState: 'unavailable',
+      savedActivityId: undefined,
+    };
+    const listeners = new Set<() => void>();
+    const put: CameraFrameRecord[] = [];
+    const keeper = sideSnapshotKeeper({
+      rides: {
+        getSnapshot: () => phase,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      store: {
+        putCameraFrame: async (record) => {
+          put.push(record);
+          return Promise.resolve(record.id);
+        },
+      },
+      athleteId: athleteId('athlete-on-the-bike'),
+      newFrameId: () => `pressed-${String(put.length + 1)}`,
+      now: () => unixSeconds(1_760_000_000),
+    });
+    const { send, answer } = await watching({ snapshots: keeper });
+    // No picture yet: no control.
+    expect(button(SAVE_SNAPSHOT_LABEL)).toBeUndefined();
+    await send();
+    await answer(0, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+    await press(SAVE_SNAPSHOT_LABEL);
+    for (let index = 1; index < 4; index += 1) {
+      await send();
+      await answer(index, { outcome: poseAt(0.4), pixels: fakePixels({ count: 0 }) });
+    }
+    // Nothing is written while the ride is under way.
+    expect(put).toStrictEqual([]);
+    const save = (change: Partial<RideProgress>): void => {
+      phase = { ...phase, ...change };
+      for (const listener of [...listeners]) listener();
+    };
+    save({ phase: 'stopped' });
+    save({ saveState: 'saving' });
+    save({ saveState: 'saved', savedActivityId: activityId('the-ride') });
+    await settle();
+    expect(put).toHaveLength(1);
+    expect(put[0]?.activityId).toBe('the-ride');
+    expect(put[0]?.source).toBe('snapshot');
+    // The picture the phone sent, byte for byte, and the outline drawn over it.
+    expect(put[0]?.bytes).toStrictEqual(cleanFrameBytes());
+    expect(put[0]?.outline?.landmarks.length).toBeGreaterThan(0);
+  });
+
   it('makes no object URL and leaves no picture in storage — ADR 0029 D-10', async () => {
     const made: unknown[] = [];
     const original = URL.createObjectURL.bind(URL);
@@ -1088,3 +1160,16 @@ async function storedPictureBytes(): Promise<string[]> {
   }
   return found;
 }
+
+describe('snapshots a saved ride could not keep — #1063’s review', () => {
+  it('are said on this screen with no phone paired', async () => {
+    const snapshots: SideSnapshotPort = {
+      holdSideSnapshot: () => ({ kind: 'refused', reason: 'none-on-screen' }),
+      forget: () => undefined,
+      snapshotsNotKept: () => 2,
+      onSnapshotsNotKept: () => () => undefined,
+    };
+    await tablet({ snapshots });
+    expect(document.body.textContent).toContain(snapshotsNotKeptText(2));
+  });
+});

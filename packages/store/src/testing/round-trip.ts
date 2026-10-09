@@ -574,7 +574,8 @@ export async function assertWorkoutRoundTrip(
  * that file is the one thing nothing else can reconstruct.
  *
  * ⚠️ **The read is `listCameraFrames`, which is the path the account export
- * uses.** There is no point lookup to read through (`activity-store.ts` says
+ * uses** — or, for a side-camera snapshot (#1063), `listRideSnapshots`, which
+ * is the path its ride's page uses. There is no point lookup to read through (`activity-store.ts` says
  * why: a point lookup is a read a screen could be built on, and ADR 0029 D-11
  * forbids the screen), so the round trip goes through the one real consumer —
  * which is what docs/agents/quality-gate.md §5 asks for anyway.
@@ -587,7 +588,12 @@ export async function assertCameraFrameRoundTrip(
 ): Promise<CameraFrameRecord> {
   const read = await harness.roundTrip(
     async (store) => store.putCameraFrame(frame),
-    async (store) => store.listCameraFrames(frame.athleteId),
+    // #1063: a snapshot is read back the way its ride's page reads it, owner
+    // first; a kept frame the way the account export does.
+    async (store) =>
+      frame.source === 'snapshot' && frame.activityId !== null
+        ? store.listRideSnapshots(frame.athleteId, frame.activityId)
+        : store.listCameraFrames(frame.athleteId),
   );
 
   const found = read.find((each) => each.id === frame.id);
@@ -602,6 +608,15 @@ export async function assertCameraFrameRoundTrip(
   requireEqual('cameraFrame.mediaType', frame.mediaType, found.mediaType);
   requireEqual('cameraFrame.width', frame.width, found.width);
   requireEqual('cameraFrame.height', frame.height, found.height);
+  requireEqual('cameraFrame.source', frame.source, found.source);
+  requireEqual('cameraFrame.activityId', frame.activityId, found.activityId);
+  // The outline is numbers read off the picture, compared as numbers — and
+  // the message names the field, never a number (ADR 0029 D-8).
+  if (JSON.stringify(frame.outline) !== JSON.stringify(found.outline)) {
+    throw new RoundTripFailure(
+      'cameraFrame.outline: the outline that came back is not the one kept',
+    );
+  }
   requireEqual('cameraFrame.bytes.length', frame.bytes.length, found.bytes.length);
 
   for (const [index, expected] of frame.bytes.entries()) {

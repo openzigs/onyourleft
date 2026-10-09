@@ -288,6 +288,13 @@ export interface TransferPort {
    */
   readonly instance: DraftStore;
   /**
+   * The side-camera snapshots this tab holds in memory, waiting for a ride's
+   * save (#1063, `camera/snapshot-keeper.ts`), so an erase throws them away
+   * before any of them is written (ADR 0044 D-3 rule 4). `undefined` where no
+   * keeper was built — there is then nothing held to forget.
+   */
+  readonly heldSnapshots?: DraftStore | undefined;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

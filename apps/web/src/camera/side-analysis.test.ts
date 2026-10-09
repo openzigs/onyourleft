@@ -921,4 +921,72 @@ describe('the live view — #1061, ADR 0044 D-1', () => {
     expect(analysis.sideLiveView().picture).toBeUndefined();
     expect(closed.count).toBe(1);
   });
+
+  /*
+   * #1063, ADR 0044 D-3: a snapshot is the picture ON SCREEN when pressed —
+   * its own bytes, and the outline drawn over it — and nothing when there is
+   * none.
+   */
+  it('hands over the picture on screen for a snapshot: its bytes, its size and its outline', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    expect(analysis.takeSideSnapshot()).toBeUndefined();
+    analysis.onSideLiveView(() => undefined);
+    const first = link.picture();
+    // The model is handed the bytes and may take them away (a transfer), so
+    // what a snapshot keeps must not be that same array.
+    const sent = new Uint8Array(first.bytes);
+    // What a transfer to the worker does to the sender's array: it is no
+    // longer the picture (`pose-estimator.ts` transfers the buffer).
+    first.bytes.fill(0);
+    model.pending[0]?.answer({
+      outcome: { kind: 'pose', pose: pose(0.1) },
+      pixels: pixels(closed),
+    });
+    await answered();
+    const taken = analysis.takeSideSnapshot();
+    expect(taken?.bytes).toStrictEqual(sent);
+    expect(taken?.bytes).not.toBe(first.bytes);
+    expect(taken?.width).toBe(640);
+    expect(taken?.height).toBe(360);
+    expect(taken?.outline).toStrictEqual({
+      aspect: pose(0.1).aspect,
+      landmarks: pose(0.1).landmarks.map((mark) => ({ name: mark.name, x: mark.x, y: mark.y })),
+    });
+    // Two presses are two copies: neither shares the other's bytes.
+    expect(analysis.takeSideSnapshot()?.bytes).not.toBe(taken?.bytes);
+  });
+
+  it('hands over the NEWEST picture with no outline when the model found nobody in it', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    const second = link.picture();
+    const sent = new Uint8Array(second.bytes);
+    model.pending[1]?.answer({
+      outcome: { kind: 'no-rider', cause: 'said-nobody' },
+      pixels: pixels(closed),
+    });
+    await answered();
+    const taken = analysis.takeSideSnapshot();
+    expect(taken?.bytes).toStrictEqual(sent);
+    expect(taken?.outline).toBeUndefined();
+  });
+
+  it('has nothing to hand over once the picture is gone — the link lost, or nobody watching', async () => {
+    const closed = { count: 0 };
+    const { link, model, analysis } = filming();
+    const stop = analysis.onSideLiveView(() => undefined);
+    link.picture();
+    model.pending[0]?.answer({ outcome: { kind: 'pose', pose: pose() }, pixels: pixels(closed) });
+    await answered();
+    expect(analysis.takeSideSnapshot()).toBeDefined();
+    link.set({ phone: 'lost' });
+    expect(analysis.takeSideSnapshot()).toBeUndefined();
+    stop();
+    expect(analysis.takeSideSnapshot()).toBeUndefined();
+  });
 });

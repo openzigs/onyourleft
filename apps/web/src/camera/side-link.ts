@@ -210,6 +210,7 @@ import { browserAfter, browserEvery } from './side-camera';
 import type { FramingReference, FramingVerdict } from './framing';
 import type { SideAnalysisPort } from './side-analysis-port';
 import { liveViewOf } from './side-live-view-port';
+import { snapshotSourceOf } from './side-snapshot-port';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from '../game/hud/wake-lock';
 import type {
   PhoneReport,
@@ -608,6 +609,8 @@ async function offerFrom(timers: Resolved): Promise<TabletSidePairing | PairingR
     analysis,
     // #1061: the same object, when it can show its pictures (`SideAnalysis` can).
     liveView: liveViewOf(analysis),
+    // #1063: the same analysis hands over the picture on screen for a snapshot.
+    snapshots: snapshotSourceOf(analysis),
   };
 }
 

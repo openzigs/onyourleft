@@ -46,6 +46,7 @@ import {
   migrateUp,
   SCHEMA_MIGRATIONS,
   ACTIVITY_MAY_BE_RACED,
+  CAMERA_FRAME_SOURCE,
   SIDE_REPORT_POSE_SUMMARY,
   upgradeWith,
   type RecordMigration,
@@ -53,6 +54,8 @@ import {
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
 import type {
   PersistedActivity,
+  PersistedCameraFrame,
+  PersistedCameraFrameV17,
   PersistedActivityV14,
   PersistedSideCameraReport,
   PersistedSideCameraReportV12,
@@ -61,6 +64,7 @@ import {
   cameraFrameFor,
   framingReferenceFor,
   rideWriteUpFor,
+  snapshotFor,
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
@@ -248,7 +252,7 @@ describe('the same pair, applied to a database that contains rows', () => {
 });
 
 describe('the production registry', () => {
-  it('holds two record migrations, version 13’s and version 15’s, because only they changed a record’s shape', () => {
+  it('holds three record migrations, version 13’s, 15’s and 18’s, because only they changed a record’s shape', () => {
     // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
     // adds the recording stores, version 4 (#61) adds `deviceKeys` and
     // `activityRecords`, version 5 (#64) adds `segments`, and version 6 (#66)
@@ -305,8 +309,15 @@ describe('the production registry', () => {
     // gains a REQUIRED `mayBeRaced`, false. So the registry holds two.
     // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
     // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
-    expect(SCHEMA_VERSION).toBe(17);
-    expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
+    //
+    // ⚠️ Version 18 (#1063) is the third record migration: every camera frame
+    // gains a REQUIRED `source`, `activityId` and `outline`. So it holds three.
+    expect(SCHEMA_VERSION).toBe(18);
+    expect(SCHEMA_MIGRATIONS).toStrictEqual([
+      SIDE_REPORT_POSE_SUMMARY,
+      ACTIVITY_MAY_BE_RACED,
+      CAMERA_FRAME_SOURCE,
+    ]);
   });
 
   it('names a version this store declares for every migration, so each one is attached and runs', () => {
@@ -1138,5 +1149,110 @@ describe('version 16 to version 17 — #898’s trusted device keys', () => {
     expect(kept).toStrictEqual(goal);
     expect(empty).toStrictEqual([]);
     expect(read).toStrictEqual([key]);
+  });
+});
+
+describe('version 17 to version 18 — #1063’s side-camera snapshots, a record migration', () => {
+  /** Two version-17 kept frames, as they sat on disk before #1063. */
+  const v17Frame = (id: string, owner: string, salt: number): PersistedCameraFrameV17 => ({
+    id,
+    athleteId: owner,
+    capturedAt: 1_760_000_000 + salt,
+    mediaType: 'image/jpeg',
+    width: 640,
+    height: 480,
+    bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, salt, salt + 1, 0xff, 0xd9]),
+  });
+  const V17_FRAMES: readonly PersistedCameraFrameV17[] = [
+    v17Frame('frame-1', 'athlete-a', 1),
+    v17Frame('frame-2', 'athlete-b', 2),
+  ];
+
+  it('up then down returns every version-17 frame to exactly its version-17 shape', () => {
+    expect(
+      migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES)),
+    ).toStrictEqual(V17_FRAMES);
+  });
+
+  it('up makes every frame a kept one with no ride and no outline, and moves nothing else', () => {
+    expect(migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES)).toStrictEqual(
+      V17_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
+    );
+  });
+
+  it('down drops a snapshot’s ride and outline and keeps its picture — the loss its description names', () => {
+    const snapshot: PersistedCameraFrame = {
+      ...V17_FRAMES[0]!,
+      source: 'snapshot',
+      activityId: 'ride-1',
+      outline: { aspect: 1.5, landmarks: [{ name: 'knee', x: 0.5, y: 0.6 }] },
+    };
+    expect(CAMERA_FRAME_SOURCE.down(snapshot)).toStrictEqual(V17_FRAMES[0]);
+    expect(CAMERA_FRAME_SOURCE.description).toMatch(/down drops/);
+  });
+
+  it('is pure — the fixture is not mutated', () => {
+    const before = structuredClone(V17_FRAMES);
+    migrateDown(CAMERA_FRAME_SOURCE, migrateUp(CAMERA_FRAME_SOURCE, V17_FRAMES));
+    expect(V17_FRAMES).toStrictEqual(before);
+  });
+
+  it('migrates the frames on a real version-17 database, takes a snapshot after, and rolls back exactly', async () => {
+    const v17 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 17).forEach((stores, index) => {
+      v17.version(index + 1).stores(stores);
+    });
+    await v17.table(TABLE.athletes).bulkPut([
+      { id: 'athlete-a', displayName: 'A', createdAt: 1 },
+      { id: 'athlete-b', displayName: 'B', createdAt: 1 },
+    ]);
+    await v17.table(TABLE.cameraFrames).bulkPut([...V17_FRAMES]);
+    const beforeVersion = v17.backendDB().version;
+    v17.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const kept = await store.listCameraFrames(owner);
+    // A snapshot is storable on a database that predates it, against a ride.
+    const ride = {
+      id: activityId('ride-after-18'),
+      athleteId: owner,
+      name: 'After eighteen',
+      startedAt: unixSeconds(1_760_000_000),
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: seconds(600),
+      movingTime: seconds(600),
+      distance: metres(5000),
+      hasPosition: false,
+      createdAt: unixSeconds(1_760_000_600),
+      mayBeRaced: false,
+    };
+    await store.putActivity(ride);
+    const snapshot = snapshotFor(owner, ride.id);
+    await store.putCameraFrame(snapshot);
+    const snapshots = await store.listRideSnapshots(owner, ride.id);
+    store.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = (await raw
+      .table(TABLE.cameraFrames)
+      .where('id')
+      .anyOf(V17_FRAMES.map((row) => row.id))
+      .sortBy('id')) as PersistedCameraFrame[];
+    raw.close();
+
+    expect(beforeVersion).toBe(17 * 10);
+    expect(kept.map((frame) => [frame.id, frame.source, frame.activityId])).toStrictEqual([
+      ['frame-1', 'kept', null],
+    ]);
+    expect(snapshots.map((frame) => frame.id)).toStrictEqual([snapshot.id]);
+    expect(onDisk).toStrictEqual(
+      V17_FRAMES.map((row) => ({ ...row, source: 'kept', activityId: null, outline: null })),
+    );
+    // The rollback, executed against what the real upgrade wrote.
+    expect(migrateDown(CAMERA_FRAME_SOURCE, onDisk)).toStrictEqual(V17_FRAMES);
   });
 });

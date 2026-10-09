@@ -31,10 +31,13 @@ import {
   type Samples,
   type UnitSystem,
 } from '@onyourleft/store';
-import type { ReactElement } from 'react';
+import { ATHLETE_A, snapshotFor } from '@onyourleft/store/testing';
+import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { trimRadius } from '../detail/privacy';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
+import { snapshotCountText } from '../detail/RideSnapshotsSection';
 import { stubActivity, stubDetail, stubLap, type StubDetail } from '../detail/testing';
 import { CHART_POINTS } from '../detail/series';
 import {
@@ -655,5 +658,91 @@ describe('a trace is not left converted into the units the rider has left (#238)
     const summary = document.querySelector('.oyl-ride-summary')?.textContent ?? '';
     expect(summary).toContain('mi');
     expect(summary).not.toContain('km');
+  });
+});
+
+describe('a ride’s snapshots do not carry over to the next ride — #1063’s review', () => {
+  /** Two rides behind one port, each answering for its own id. */
+  function twoRides(first: StubDetail, second: StubDetail, secondId: string): StubDetail {
+    const pick = (id: string) => (id === secondId ? second : first).store;
+    return {
+      ...first,
+      store: {
+        getActivity: (owner, id) => pick(id).getActivity(owner, id),
+        setActivityMayBeRaced: (owner, id, wanted) =>
+          pick(id).setActivityMayBeRaced(owner, id, wanted),
+        getRoute: (owner, id) => first.store.getRoute(owner, id),
+        getStreamSetSummary: (owner, id) => pick(id).getStreamSetSummary(owner, id),
+        getStreamChannel: (owner, id, channel) => pick(id).getStreamChannel(owner, id, channel),
+        listLaps: (owner, id) => pick(id).listLaps(owner, id),
+        listPrivacyZones: (owner) => first.store.listPrivacyZones(owner),
+        getSideCameraReport: (owner, id) => pick(id).getSideCameraReport(owner, id),
+        getRideWriteUp: (owner, id) => pick(id).getRideWriteUp(owner, id),
+      },
+    };
+  }
+
+  it('moving from one ride’s page to another’s leaves the second ride’s section closed, and reads none of its pictures', async () => {
+    const rideB = activityId('ride-2');
+    const port = twoRides(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ hasPosition: false }),
+        channels: {},
+        laps: [],
+      }),
+      stubDetail(ATHLETE, {
+        activity: stubActivity({ id: rideB, name: 'Thursday evening', hasPosition: false }),
+        channels: {},
+        laps: [],
+      }),
+      rideB,
+    );
+    const calls: string[] = [];
+    const snapshots: RideSnapshotsPort = {
+      athleteId: ATHLETE_A,
+      store: {
+        countRideSnapshots: (_owner, ride) => {
+          calls.push(`count:${ride}`);
+          return Promise.resolve(2);
+        },
+        listRideSnapshots: (owner, ride) => {
+          calls.push(`list:${ride}`);
+          return Promise.resolve([snapshotFor(owner, ride), snapshotFor(owner, ride)]);
+        },
+        deleteRideSnapshot: () => Promise.resolve(false),
+      },
+      objectUrls: { create: () => 'blob:test/1', revoke: () => undefined },
+      holdSecureWindow: () => () => undefined,
+    };
+    const section = (): HTMLDetailsElement => {
+      const found = [...document.querySelectorAll('details')].find(
+        (each) => each.querySelector('summary')?.textContent === snapshotCountText(2),
+      );
+      if (found === undefined) throw new Error('no snapshot section');
+      return found;
+    };
+    mounted = await mount(
+      <ActivityDetailView port={port} activityId={RIDE} snapshots={snapshots} />,
+    );
+    await settle();
+    await settle();
+    await act(async () => {
+      section().open = true;
+      section().dispatchEvent(new Event('toggle'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(calls).toContain(`list:${RIDE}`);
+
+    calls.length = 0;
+    await mounted.rerender(
+      <ActivityDetailView port={port} activityId={rideB} snapshots={snapshots} />,
+    );
+    await settle();
+    await settle();
+    expect(document.body.textContent).toContain('Thursday evening');
+    expect(section().open).toBe(false);
+    expect(calls).toStrictEqual([`count:${rideB}`]);
+    expect(document.querySelectorAll('img')).toHaveLength(0);
   });
 });

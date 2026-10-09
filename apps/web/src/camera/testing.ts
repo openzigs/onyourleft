@@ -109,22 +109,72 @@ export interface ScriptedCamera {
 }
 
 /**
- * Bytes shaped like a re-encoded JPEG: a JFIF header and no metadata.
+ * Bytes shaped like a re-encoded JPEG: SOI, JFIF with no thumbnail, an 8-bit
+ * frame header, a scan header, entropy data with no `FF` in it, and EOI —
+ * every segment one `frame.ts` §`jpegMetadataSegmentsIn` admits, so the
+ * allowlist walk and the side link's whole-JPEG check (#530) both read it as a
+ * picture (#1063's review, round 2). At least 45 bytes.
  *
  * ⚠️ Not random noise, because `frame.ts` scans the first few kilobytes for
  * signatures and random bytes would produce a flaky refusal roughly one run in
  * some millions. A fixed, structured buffer has no such tail.
  */
 export function cleanFrameBytes(length = 1024): Uint8Array {
+  // prettier-ignore
+  const head = [
+    0xff, 0xd8,
+    0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00,
+    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
+  ];
+  if (length < head.length + 2) {
+    throw new Error(`a clean frame needs at least ${String(head.length + 2)} bytes`);
+  }
   const bytes = new Uint8Array(length);
-  bytes.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00], 0);
-  for (let index = 32; index < length; index += 1) {
+  bytes.set(head, 0);
+  // Entropy data: never 0xff, so it holds no marker, and not all zeroes, so a
+  // length check cannot be what passes.
+  for (let index = head.length; index < length - 2; index += 1) {
     bytes[index] = (index * 37) % 251;
   }
-  // A JPEG's end-of-image marker, so the side link's picture decoder
-  // (`side-link-pictures.ts` §`sidePictureFrom`, #530) reads it as whole.
   bytes.set([0xff, 0xd9], length - 2);
   return bytes;
+}
+
+/**
+ * #1063's review's probe (B2): SOI, a 5 000-byte `APP2` that is not an ICC
+ * profile, then `APP1` Exif with a GPS IFD, then a scan and EOI — Exif placed
+ * past `frame.ts` §`metadataMarkersIn`'s 4 096-byte window, which passed the
+ * snapshot save and the link before the segment walk.
+ */
+export function exifPastTheScanWindow(): Uint8Array {
+  const segment = (marker: number, payload: readonly number[]): number[] => {
+    const length = payload.length + 2;
+    return [0xff, marker, length >> 8, length & 0xff, ...payload];
+  };
+  const padding = segment(0xe2, new Array<number>(5000).fill(0x20));
+  // prettier-ignore
+  const exif = segment(0xe1, [
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08,
+    0x00, 0x01, 0x88, 0x25, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x4e, 0x00, 0x00, 0x00,
+  ]);
+  return new Uint8Array([
+    0xff,
+    0xd8,
+    ...padding,
+    ...exif,
+    0xff,
+    0xda,
+    0x00,
+    0x02,
+    0x12,
+    0x34,
+    0xff,
+    0xd9,
+  ]);
 }
 
 /** A {@link CameraPort} that does what it is told and records what it was asked. */
@@ -1053,7 +1103,9 @@ export function sizedFrameBytes(
   const size = [height >> 8, height & 0xff, width >> 8, width & 0xff];
   const frame = [0xff, 0xc0, 0x00, 0x11, 0x08, ...size, 0x03];
   const components = [0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
-  const scan = [0xff, 0xda, 0x00, 0x02];
+  // SOS: length 12, the three components and the spectral selection — a
+  // length `frame.ts` §`jpegMetadataSegmentsIn` holds to its contents.
+  const scan = [0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00];
   const head = [...start, ...jfif, ...density, ...before, ...frame, ...components, ...scan];
   const bytes = new Uint8Array(head.length + 64);
   bytes.set(head, 0);

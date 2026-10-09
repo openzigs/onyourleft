@@ -107,6 +107,7 @@ import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { SideCameraControl } from './SideCameraControl';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 
 /**
  * What became of the picture just taken — kept, dropped, or refused a home.
@@ -151,6 +152,8 @@ export interface CameraViewProps {
    * says why it cannot be paired.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /** Where *Save snapshot* holds a picture for its ride — #1063. */
+  readonly sideSnapshots?: SideSnapshotPort | undefined;
 }
 
 /** The heading of the side camera's way in — #557. */
@@ -224,7 +227,11 @@ export const CAMERA_KEPT_VISIBLE: readonly string[] = [
   ...CAMERA_AGREED_KEPT_VISIBLE,
 ];
 
-export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
+export function CameraView({
+  controller,
+  sidePairing,
+  sideSnapshots,
+}: CameraViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <section aria-labelledby={TITLE_ID}>
@@ -233,15 +240,17 @@ export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.El
       </section>
     );
   }
-  return <Camera controller={controller} sidePairing={sidePairing} />;
+  return <Camera controller={controller} sidePairing={sidePairing} sideSnapshots={sideSnapshots} />;
 }
 
 function Camera({
   controller,
   sidePairing,
+  sideSnapshots,
 }: {
   readonly controller: CameraController;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly sideSnapshots: SideSnapshotPort | undefined;
 }): JSX.Element {
   // ⚠️ Three booleans rather than the whole state object: `useSyncExternalStore`
   // compares snapshots with `Object.is`, so a getter returning a fresh object
@@ -330,6 +339,13 @@ function Camera({
   const [kept, setKept] = useState<number | 'unknown' | undefined>(undefined);
   /** Whether the last delete was refused by the store (#498). */
   const [deleteFailed, setDeleteFailed] = useState(false);
+  /**
+   * How many of {@link kept} are side-camera snapshots kept with a ride
+   * (#1063's review) — which the delete takes too — or `'unknown'`.
+   */
+  const [snapshotsKept, setSnapshotsKept] = useState<number | 'unknown' | undefined>(undefined);
+  /** Whether the delete has been pressed once and waits for its second press. */
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const [refusal, setRefusal] = useState<ConsentRefusal | undefined>(undefined);
   const [outcome, setOutcome] = useState<CaptureOutcome | undefined>(undefined);
 
@@ -352,7 +368,31 @@ function Camera({
       .catch(() => {
         setKept('unknown');
       });
+    void controller
+      .keptSnapshotCount()
+      .then((count) => {
+        setSnapshotsKept(count);
+      })
+      .catch(() => {
+        setSnapshotsKept('unknown');
+      });
   }, [controller]);
+
+  const deleteEverything = useCallback(() => {
+    setDeleteArmed(false);
+    setDeleteFailed(false);
+    void controller
+      .forgetKept()
+      .then(() => {
+        refreshKept();
+      })
+      .catch(() => {
+        // #498: said, and the count re-read — it is the true count that a
+        // failed delete leaves, and the rider decides by it.
+        setDeleteFailed(true);
+        refreshKept();
+      });
+  }, [controller, refreshKept]);
 
   useEffect(refreshKept, [refreshKept]);
 
@@ -509,7 +549,11 @@ function Camera({
         taken for it.
       */}
       {sidePairing === undefined ? null : (
-        <SideCameraControl controller={controller} pairing={sidePairing} />
+        <SideCameraControl
+          controller={controller}
+          pairing={sidePairing}
+          snapshots={sideSnapshots}
+        />
       )}
 
       {agreed ? (
@@ -663,7 +707,7 @@ function Camera({
               ? 'This device could not count the pictures it is holding.'
               : kept === 0
                 ? 'This device is holding no pictures.'
-                : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}.`}
+                : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}${keptSnapshotsClause(snapshotsKept)}.`}
         </p>
         {deleteFailed ? (
           // #498: a delete the store refused. The true count is re-read below,
@@ -679,25 +723,39 @@ function Camera({
           to want the pictures gone, and a control withheld for a count that
           never arrives is no control at all.
         */}
-        {kept === undefined || kept === 0 ? null : (
+        {/*
+          #1063's review: the delete takes every ride's side-camera snapshots
+          too, so while there are any (or the count is not known) it names
+          them and asks for a second press, as a ride's page does for one
+          snapshot. With none it is the one press it always was.
+        */}
+        {kept === undefined || kept === 0 ? null : deleteArmed ? (
+          <p>
+            <span>{deleteEverythingQuestion(snapshotsKept)} </span>
+            <Button variant="danger" onClick={deleteEverything}>
+              Yes, delete every picture
+            </Button>{' '}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDeleteArmed(false);
+              }}
+            >
+              Keep them
+            </Button>
+          </p>
+        ) : (
           <Button
             variant="secondary"
             onClick={() => {
-              setDeleteFailed(false);
-              void controller
-                .forgetKept()
-                .then(() => {
-                  refreshKept();
-                })
-                .catch(() => {
-                  // #498: said, and the count re-read — it is the true count
-                  // that a failed delete leaves, and the rider decides by it.
-                  setDeleteFailed(true);
-                  refreshKept();
-                });
+              if (snapshotsKept === 0) {
+                deleteEverything();
+              } else {
+                setDeleteArmed(true);
+              }
             }}
           >
-            Delete every picture on this device
+            {deleteEverythingLabel(snapshotsKept)}
           </Button>
         )}
       </section>
@@ -721,6 +779,38 @@ function Camera({
       )}
     </section>
   );
+}
+
+/** `snapshot` or `snapshots`, after a count. */
+function snapshotsWord(count: number): string {
+  return count === 1 ? 'side-camera snapshot' : 'side-camera snapshots';
+}
+
+/**
+ * What the count of pictures adds about snapshots (#1063's review): how many
+ * of them are side-camera snapshots kept with rides, or nothing. A count,
+ * never a picture (ADR 0029 D-8).
+ */
+export function keptSnapshotsClause(snapshots: number | 'unknown' | undefined): string {
+  return typeof snapshots === 'number' && snapshots > 0
+    ? `, ${String(snapshots)} of them ${snapshotsWord(snapshots)} kept with your rides`
+    : '';
+}
+
+/** The delete's name, naming the snapshots it takes too (#1063's review). */
+export function deleteEverythingLabel(snapshots: number | 'unknown' | undefined): string {
+  return typeof snapshots === 'number' && snapshots > 0
+    ? `Delete every picture on this device, including ${String(snapshots)} ${snapshotsWord(snapshots)}`
+    : 'Delete every picture on this device';
+}
+
+/** What the delete asks before its second press (#1063's review). */
+export function deleteEverythingQuestion(snapshots: number | 'unknown' | undefined): string {
+  const including =
+    typeof snapshots === 'number'
+      ? `the ${String(snapshots)} ${snapshotsWord(snapshots)} kept with your rides`
+      : 'any side-camera snapshots kept with your rides';
+  return `Delete every picture on this device, including ${including}? They cannot be brought back.`;
 }
 
 /**

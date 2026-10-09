@@ -51,6 +51,8 @@ import type { Transaction } from 'dexie';
 import type {
   PersistedActivity,
   PersistedActivityV14,
+  PersistedCameraFrame,
+  PersistedCameraFrameV17,
   PersistedSideCameraReport,
   PersistedSideCameraReportV12,
 } from './persisted';
@@ -195,6 +197,44 @@ export const ACTIVITY_MAY_BE_RACED: RecordMigration<PersistedActivityV14, Persis
 };
 
 /**
+ * Version 18 — #1063: every camera frame gains its `source`, its ride and its
+ * outline ([ADR 0044](../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-3).
+ *
+ * `up` makes every frame written at version 17 or before a `'kept'` frame
+ * with no ride and no outline. That is not a guess: a snapshot did not exist
+ * before version 18, so every row on disk is #384's per-ride keep, which never
+ * named a ride.
+ *
+ * `down` removes the three fields. ⚠️ **A snapshot written at version 18
+ * comes back as a version-17 kept frame**, which is the only kind that version
+ * knows: its ride and its outline are lost on the way back, and its picture is
+ * not. A version-17 build would count it, export it and delete it with the
+ * rest, so nothing is stranded; what is lost is that it would no longer go
+ * with its ride. The account export names each snapshot's ride, so export →
+ * downgrade → re-import keeps the record of it.
+ *
+ * Total over whatever is on disk (#815's review): it copies every key and never
+ * throws, so one odd row cannot stop the database opening.
+ */
+export const CAMERA_FRAME_SOURCE: RecordMigration<PersistedCameraFrameV17, PersistedCameraFrame> = {
+  toVersion: 18,
+  table: TABLE.cameraFrames,
+  description:
+    'gave every camera frame a source, a ride and an outline: kept, none and none for every frame written before; down drops a snapshot’s ride and outline',
+  up(before: PersistedCameraFrameV17): PersistedCameraFrame {
+    return { ...before, source: 'kept', activityId: null, outline: null };
+  },
+  down(after: PersistedCameraFrame): PersistedCameraFrameV17 {
+    const before: Partial<PersistedCameraFrame> = { ...after };
+    delete before.source;
+    delete before.activityId;
+    delete before.outline;
+    return before as PersistedCameraFrameV17;
+  },
+};
+
+/**
  * Every migration this build knows how to apply, in ascending `toVersion`.
  *
  * `ActivityStore` hands each one to Dexie as the `.upgrade()` of the version it
@@ -203,6 +243,7 @@ export const ACTIVITY_MAY_BE_RACED: RecordMigration<PersistedActivityV14, Persis
 export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [
   SIDE_REPORT_POSE_SUMMARY,
   ACTIVITY_MAY_BE_RACED,
+  CAMERA_FRAME_SOURCE,
 ];
 
 /**

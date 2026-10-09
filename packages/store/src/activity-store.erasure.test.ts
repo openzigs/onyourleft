@@ -62,6 +62,7 @@ import {
   ATHLETE_C,
   ATHLETES,
   cameraFrameFor,
+  snapshotFor,
   chunksOf,
   framingReferenceFor,
   sideCameraReportFor,
@@ -190,6 +191,9 @@ async function seedEverything(harness: StoreHarness, owner: AthleteId): Promise<
     // fixture has to put one there, or "empty afterwards" is true of a table
     // nothing ever filled.
     await store.putCameraFrame(cameraFrameFor(owner));
+    // #1063. A side-camera snapshot, kept with this rider's ride — the row a
+    // ride's page reads, and the one ADR 0044 D-5 says the erase removes.
+    await store.putCameraFrame(snapshotFor(owner, ride.id));
     // #528. Numbers read off a picture of the rider, and ADR 0029 D-4's
     // "everything derived from one" — seeded so "empty afterwards" is checked
     // against a table something filled.

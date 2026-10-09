@@ -14,10 +14,13 @@
  * docs/agents/quality-gate.md §5's *wrong time* and *wrong layer* causes in one store.
  */
 
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { StoreDecodeError, StoreReferentialError } from './errors';
+import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
+import { activityId as activityIdOf } from './ids';
 import { fromPersistedCameraFrame, toPersistedCameraFrame } from './persisted';
+import { SCHEMA_VERSIONS, TABLE } from './schema';
 import type { PersistedCameraFrame } from './persisted';
 import {
   assertCameraFrameRoundTrip,
@@ -27,8 +30,12 @@ import {
   createStoreHarness,
   resetFixtureIds,
   RoundTripFailure,
+  ATHLETE_C,
   seedAthletes,
+  seedRide,
+  snapshotFor,
   survivingFrameStoreFactory,
+  survivingSnapshotStoreFactory,
 } from './testing';
 import type { StoreHarness } from './testing';
 
@@ -256,5 +263,219 @@ describe('the harness catches a delete that reports success and removes nothing'
     } finally {
       await empty.destroy();
     }
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * #1063 — a side-camera snapshot, kept WITH its ride (ADR 0044 D-3, D-5).
+ * -------------------------------------------------------------------------- */
+
+describe('a side-camera snapshot', () => {
+  it('survives a round trip through the read its ride’s page uses, outline and all', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const snapshot = snapshotFor(ATHLETE_A, ride.id);
+    const read = await assertCameraFrameRoundTrip(harness, snapshot);
+    expect(read.source).toBe('snapshot');
+    expect(read.activityId).toBe(ride.id);
+    expect(read.outline).toStrictEqual(snapshot.outline);
+  });
+
+  it('keeps a snapshot the model found nobody in, with no outline', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const read = await assertCameraFrameRoundTrip(
+      harness,
+      snapshotFor(ATHLETE_A, ride.id, { withOutline: false }),
+    );
+    expect(read.outline).toBeNull();
+  });
+
+  it('is refused when it names no ride, a ride nobody holds, or another athlete’s ride', async () => {
+    const mine = await seedRide(harness, ATHLETE_A);
+    const theirs = await seedRide(harness, ATHLETE_B);
+    const unnamed = { ...snapshotFor(ATHLETE_A, mine.id), activityId: null };
+    await expect(
+      harness.write(async (store) => store.putCameraFrame(unnamed)),
+    ).rejects.toBeInstanceOf(StoreValidationError);
+    await expect(
+      harness.write(async (store) =>
+        store.putCameraFrame(snapshotFor(ATHLETE_A, activityIdOf('no-such-ride'))),
+      ),
+    ).rejects.toBeInstanceOf(StoreReferentialError);
+    await expect(
+      harness.write(async (store) => store.putCameraFrame(snapshotFor(ATHLETE_A, theirs.id))),
+    ).rejects.toBeInstanceOf(StoreReferentialError);
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      0,
+    );
+  });
+
+  it('refuses a kept frame that names a ride or carries an outline, and an outline off the picture', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const kept = cameraFrameFor(ATHLETE_A);
+    await expect(
+      harness.write(async (store) => store.putCameraFrame({ ...kept, activityId: ride.id })),
+    ).rejects.toBeInstanceOf(StoreValidationError);
+    const snapshot = snapshotFor(ATHLETE_A, ride.id);
+    await expect(
+      harness.write(async (store) => store.putCameraFrame({ ...kept, outline: snapshot.outline })),
+    ).rejects.toBeInstanceOf(StoreValidationError);
+    const off = {
+      ...snapshot,
+      outline: { aspect: 1, landmarks: [{ name: 'knee', x: 1.5, y: 0.5 }] },
+    };
+    const refusal = harness.write(async (store) => store.putCameraFrame(off));
+    await expect(refusal).rejects.toBeInstanceOf(StoreValidationError);
+    // The field and the constraint, never where the knee was (ADR 0029 D-8).
+    await expect(refusal).rejects.not.toThrow(/1\.5/);
+  });
+
+  it('is counted and listed per ride, oldest first, and a kept frame is in neither', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const other = await seedRide(harness, ATHLETE_A);
+    const later = snapshotFor(ATHLETE_A, ride.id, { capturedAt: 1_700_000_200 });
+    const earlier = snapshotFor(ATHLETE_A, ride.id, { capturedAt: 1_700_000_100 });
+    await harness.write(async (store) => {
+      await store.putCameraFrame(later);
+      await store.putCameraFrame(earlier);
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, other.id));
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_A));
+    });
+    const read = await harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id));
+    expect(read.map((each) => each.id)).toStrictEqual([earlier.id, later.id]);
+    await expect(
+      harness.read(async (store) => store.countRideSnapshots(ATHLETE_A, ride.id)),
+    ).resolves.toBe(2);
+  });
+
+  it('goes with its ride, in the ride’s delete, read back through a fresh connection', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const kept = await seedRide(harness, ATHLETE_A);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, ride.id));
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, kept.id));
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_A));
+    });
+    await harness.write(async (store) => store.deleteActivity(ATHLETE_A, ride.id));
+    await expect(
+      harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id)),
+    ).resolves.toStrictEqual([]);
+    // The other ride's snapshot, and the kept frame, are untouched.
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      2,
+    );
+  });
+
+  it('goes with its OWNER’s ride only: another athlete’s row naming that ride id stays (#1063’s review)', async () => {
+    // `putCameraFrame` refuses a snapshot naming another athlete's ride, so
+    // this row is written past it, raw — the case the delete's owner scope is
+    // for. A cascade by activity id alone would take B's row with A's ride.
+    const ride = await seedRide(harness, ATHLETE_A);
+    await harness.discard();
+    const raw = new Dexie(harness.databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    await raw
+      .table(TABLE.cameraFrames)
+      .put(toPersistedCameraFrame(snapshotFor(ATHLETE_B, ride.id)));
+    raw.close();
+    // The control: the row is there, under B, before the delete.
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_B))).resolves.toBe(
+      1,
+    );
+    await harness.write(async (store) => store.deleteActivity(ATHLETE_A, ride.id));
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_B))).resolves.toBe(
+      1,
+    );
+  });
+
+  it('is erased with everything else the athlete kept', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    await harness.write(async (store) => store.putCameraFrame(snapshotFor(ATHLETE_A, ride.id)));
+    await harness.write(async (store) => store.deleteAthlete(ATHLETE_A));
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      0,
+    );
+  });
+});
+
+describe('one snapshot is deleted — and the harness catches a delete that keeps it', () => {
+  it('goes GREEN against the real store: gone on a fresh read, its neighbour stays', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    const gone = snapshotFor(ATHLETE_A, ride.id);
+    const stays = snapshotFor(ATHLETE_A, ride.id);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(gone);
+      await store.putCameraFrame(stays);
+    });
+    await expect(
+      harness.write(async (store) => store.deleteRideSnapshot(ATHLETE_A, ride.id, gone.id)),
+    ).resolves.toBe(true);
+    const read = await harness.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id));
+    expect(read.map((each) => each.id)).toStrictEqual([stays.id]);
+  });
+
+  it('deletes nothing for another athlete, another ride, or a kept frame', async () => {
+    const mine = await seedRide(harness, ATHLETE_A);
+    const other = await seedRide(harness, ATHLETE_A);
+    const theirs = await seedRide(harness, ATHLETE_C);
+    const snapshot = snapshotFor(ATHLETE_C, theirs.id);
+    const kept = cameraFrameFor(ATHLETE_A);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(snapshot);
+      await store.putCameraFrame(kept);
+    });
+    await harness.write(async (store) => {
+      await expect(store.deleteRideSnapshot(ATHLETE_A, theirs.id, snapshot.id)).resolves.toBe(
+        false,
+      );
+      await expect(store.deleteRideSnapshot(ATHLETE_C, mine.id, snapshot.id)).resolves.toBe(false);
+      await expect(store.deleteRideSnapshot(ATHLETE_A, other.id, kept.id)).resolves.toBe(false);
+    });
+    await expect(
+      harness.read(async (store) => store.countRideSnapshots(ATHLETE_C, theirs.id)),
+    ).resolves.toBe(1);
+    await expect(harness.read(async (store) => store.countCameraFrames(ATHLETE_A))).resolves.toBe(
+      1,
+    );
+  });
+
+  it('goes RED against a store that reports the delete and keeps the picture', async () => {
+    const broken = createStoreHarness({ factory: survivingSnapshotStoreFactory() });
+    try {
+      await seedAthletes(broken);
+      const ride = await seedRide(broken, ATHLETE_A);
+      const snapshot = snapshotFor(ATHLETE_A, ride.id);
+      await broken.write(async (store) => store.putCameraFrame(snapshot));
+      // Every signal a caller has says it worked.
+      await expect(
+        broken.write(async (store) => store.deleteRideSnapshot(ATHLETE_A, ride.id, snapshot.id)),
+      ).resolves.toBe(true);
+      // And the picture is still there, on a connection nothing wrote on.
+      const read = await broken.read(async (store) => store.listRideSnapshots(ATHLETE_A, ride.id));
+      expect(read.map((each) => each.id)).toStrictEqual([snapshot.id]);
+    } finally {
+      await broken.destroy();
+    }
+  });
+});
+
+describe('what a snapshot row has to be to come back', () => {
+  it('refuses a source this build does not know, naming the field and not the value', () => {
+    const ride = activityIdOf('ride-x');
+    const row: PersistedCameraFrame = {
+      ...toPersistedCameraFrame(snapshotFor(ATHLETE_A, ride)),
+      source: 'burst',
+    };
+    expect(() => fromPersistedCameraFrame(row)).toThrow(StoreDecodeError);
+    expect(() => fromPersistedCameraFrame(row)).toThrow(/cameraFrame\.source/);
+  });
+
+  it('refuses a snapshot row with no ride', () => {
+    const row: PersistedCameraFrame = {
+      ...toPersistedCameraFrame(snapshotFor(ATHLETE_A, activityIdOf('ride-x'))),
+      activityId: null,
+    };
+    expect(() => fromPersistedCameraFrame(row)).toThrow(/cameraFrame\.activityId/);
   });
 });

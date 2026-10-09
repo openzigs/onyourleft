@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **17** since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **18** since #1063; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -118,7 +118,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -357,6 +357,13 @@ export const INDEX = {
   cameraFrameByAthleteAndCapturedAt: '[athleteId+capturedAt]',
   /** #384: `deleteCameraFrames`, and `deleteAthlete`'s cascade. */
   cameraFrameByAthlete: 'athleteId',
+  /**
+   * #1063: `listRideSnapshots`, `countRideSnapshots`, `deleteRideSnapshot` and
+   * `deleteActivity`'s cascade — a ride's snapshots, never without whose ride
+   * it is. A kept frame's `activityId` is `null`, which is not an IndexedDB
+   * key, so a kept frame is in no entry of this index at all.
+   */
+  cameraFrameByAthleteAndActivity: '[athleteId+activityId]',
   /**
    * #388: `getSideCameraReport` — the athlete-scoped point lookup, so there is
    * no read of a report that is not also told whose ride it is.
@@ -855,6 +862,27 @@ export const STORES_V17: Readonly<Record<string, string>> = {
   [TABLE.trustedDeviceKeys]: ['[athleteId+publicKey]', INDEX.trustedDeviceKeyByAthlete].join(', '),
 };
 
+/**
+ * Version 18 — #1063's side-camera snapshots (ADR 0044 D-3, D-5). It
+ * **re-declares `cameraFrames`** to add one index, `[athleteId+activityId]`,
+ * and it is a record migration: every row gains `source`, `activityId` and
+ * `outline` (`migrations.ts` §`CAMERA_FRAME_SOURCE`), and every row written
+ * before it is a `'kept'` frame with no ride and no outline.
+ *
+ * ⚠️ **Still no index on an activity alone, nor on `capturedAt` alone**, for
+ * {@link STORES_V10}'s reason: the only question the new index answers is
+ * "this athlete's snapshots of this ride".
+ */
+export const STORES_V18: Readonly<Record<string, string>> = {
+  // The twenty-one other stores of versions 1 to 17 are inherited unchanged.
+  [TABLE.cameraFrames]: [
+    'id',
+    INDEX.cameraFrameByAthlete,
+    INDEX.cameraFrameByAthleteAndCapturedAt,
+    INDEX.cameraFrameByAthleteAndActivity,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -873,4 +901,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V15,
   STORES_V16,
   STORES_V17,
+  STORES_V18,
 ];

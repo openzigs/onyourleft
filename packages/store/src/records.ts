@@ -897,24 +897,35 @@ export interface RouteRecord {
  * recorder's writes, the detail view's reads, the chart downsampler, the FIT
  * exporter and the account export — and each is a path ADR 0029 forbids.
  *
- * ## ⚠️ There is deliberately no `activityId`, and D-2 names one
+ * ## Two sources, and only a snapshot names a ride (#1063)
  *
- * D-2's table says a kept frame is written *"with the activity id it belongs
- * to"*, and this record has none. That is a **gap stated rather than a column
- * left null**, and the reason is that there is nothing to put in it: an
- * `ActivityRecord` exists only once a ride has been finished and saved
- * (`apps/web/src/recording/finish.ts`), and a frame is captured while the rider
- * is on the bike. A nullable foreign key that no production writer ever sets is
- * the shape `SegmentRecord` above refuses for its own source activity, and it
- * would arrive looking like a feature.
+ * ⚠️ **Until schema version 18 this record had no `activityId`**, and a
+ * reviewer who remembers this paragraph saying *"there is deliberately no
+ * `activityId`"* is reading the old file. There was nothing to put in one: an
+ * `ActivityRecord` exists only once a ride has been saved, and #384's kept
+ * frame is captured while the rider is on the bike.
  *
- * What it costs, precisely: D-2's *"deleting the activity deletes its frames in
- * the same transaction"* is **vacuous today** — `deleteActivity` cascades
- * nothing here because nothing links. The two expiries that do work are the
- * rider deleting the pictures and the rider erasing the device, and both are
- * implemented and tested. [#388](https://github.com/openzigs/onyourleft/issues/388)
- * is the first issue with a report tied to a ride; it adds the column, its
- * index and its cascade, and this paragraph is what tells it to.
+ * [ADR 0044](../../../docs/adr/0044-side-camera-live-view-and-snapshot.md) D-3
+ * adds the second source this table holds, a **snapshot**: one still the rider
+ * pressed *Save snapshot* for, on the side camera's live view. A snapshot is
+ * held in the tab's memory until its ride is saved and written only after that
+ * (`apps/web/src/camera/snapshot-keeper.ts`), so it **always** names a ride the
+ * store holds, and {@link CameraFrameRecord.source} says which kind a row is:
+ *
+ * | `source` | `activityId` | `outline` |
+ * |---|---|---|
+ * | `'kept'` — #384's per-ride keep | `null`: the gap above still stands for it | `null` |
+ * | `'snapshot'` — #1063 | the ride it was taken in, required | the outline it was shown with, or `null` |
+ *
+ * What that buys, for a snapshot only: D-2's *"deleting the activity deletes
+ * its frames in the same transaction"* is TRUE (`deleteActivity`'s cascade),
+ * and a ride's page can read its snapshots through `listRideSnapshots`, which
+ * takes the owner first. A kept frame's deletion with its ride is still
+ * vacuous, for the old reason.
+ *
+ * ⚠️ **The join is the ride and nothing finer** (ADR 0044 D-3): no offset into
+ * the ride, no reading, no lap. `capturedAt` is kept because the export's file
+ * name uses it, and nothing reads it against the ride's streams.
  *
  * ## What is NOT on this record, and each absence is a decision
  *
@@ -960,6 +971,39 @@ export interface CameraFrameRecord {
    * these is green for a reason unrelated to the picture.
    */
   readonly bytes: Uint8Array;
+  /** Which of the two kinds this row is — see the table in the module note. */
+  readonly source: CameraFrameSource;
+  /**
+   * The ride a snapshot was taken in; `null` for a kept frame, which has no
+   * ride to name. `putCameraFrame` refuses a snapshot whose ride this athlete
+   * does not hold, and a kept frame that names one.
+   */
+  readonly activityId: ActivityId | null;
+  /**
+   * The pose outline a snapshot was SHOWN with — ADR 0044 D-3: *"stored as
+   * numbers and drawn when shown"*, never burned into {@link bytes}. `null`
+   * when the model found nobody in that picture, and always `null` for a kept
+   * frame. Landmarks only: **no angle, no length and no difference** is stored
+   * with it.
+   */
+  readonly outline: CameraFrameOutlineRecord | null;
+}
+
+/** The two kinds of picture this device keeps. @see CameraFrameRecord */
+export type CameraFrameSource = 'kept' | 'snapshot';
+
+/** Every {@link CameraFrameSource}, so a decoder can refuse one it does not know. */
+export const CAMERA_FRAME_SOURCES: readonly CameraFrameSource[] = ['kept', 'snapshot'];
+
+/**
+ * The outline a snapshot was shown with: the near side's landmarks as shares
+ * of the picture, and the picture's shape — the numbers
+ * {@link FramingReferenceRecord} keeps, for the same reason (#1063).
+ */
+export interface CameraFrameOutlineRecord {
+  /** The picture's width divided by its height. */
+  readonly aspect: number;
+  readonly landmarks: readonly FramingLandmarkRecord[];
 }
 
 /**

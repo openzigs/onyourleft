@@ -651,8 +651,37 @@ export interface CameraManifest {
   readonly written: number;
   /** The files, in the order they were written. Names only — never bytes. */
   readonly files: readonly string[];
+  /**
+   * Which of {@link files} are side-camera snapshots, each named against the
+   * ride it was taken in, with the outline it was shown with — #1063, ADR 0044
+   * D-5: *"The manifest names each one against its ride"*. The ride's id and
+   * nothing finer: no offset into it and no reading (D-3).
+   */
+  readonly snapshots: readonly ManifestSnapshot[];
   /** What no activity file can hold, said in words. @see CameraManifest */
   readonly cannotCarry: string;
+}
+
+/** One side-camera snapshot in the archive — #1063. Fields, never the row. */
+export interface ManifestSnapshot {
+  /** Its file in the archive. */
+  readonly file: string;
+  /** The ride it was taken in — that ride's id, as `activities` names it. */
+  readonly ride: string;
+  /** The outline it was shown with, as shares of the picture, or `null` for none. */
+  readonly outline: {
+    readonly aspect: number;
+    readonly landmarks: readonly {
+      readonly name: string;
+      readonly x: number;
+      readonly y: number;
+    }[];
+  } | null;
+}
+
+/** What a side-camera snapshot's file is called, after its capture instant — #1063. */
+export function snapshotFileName(capturedAt: number, ordinal: number): string {
+  return `snapshot-${String(capturedAt)}-${String(ordinal)}.jpg`;
 }
 
 /** ADR 0029 D-3's sentence, in the manifest, in the rider's own archive. */
@@ -877,6 +906,7 @@ export async function exportEverything(
   // not contain.
   const keptCameraFrames = await store.countCameraFrames(athleteId);
   const cameraFiles: string[] = [];
+  const snapshots: ManifestSnapshot[] = [];
   // ⚠️ A function rather than a `const`, and not only for the typechecker's
   // sake: the signal can be aborted between any two `await`s here, so a value
   // read once is a stale answer by the time the loop below consults it.
@@ -901,13 +931,35 @@ export async function exportEverything(
       if (stopped()) {
         break;
       }
-      const name = cameraFrameFileName(frame.capturedAt, ordinal + 1);
+      // #1063: a side-camera snapshot travels as its own file like any kept
+      // picture, and the manifest names it against its ride (ADR 0044 D-5).
+      const snapshot = frame.source === 'snapshot' && frame.activityId !== null;
+      const name = snapshot
+        ? snapshotFileName(frame.capturedAt, ordinal + 1)
+        : cameraFrameFileName(frame.capturedAt, ordinal + 1);
       // ⚠️ Not inside the `try` any ride is exported in, and not guarded by
       // `ActivityExportError`: a failure to hand over a picture is not a ride
       // failing to encode, it is this client being broken, and it belongs
       // uncaught — the same call the signed record beside it makes.
       await onFile(cameraFrameFile(name, frame.bytes));
       cameraFiles.push(name);
+      if (snapshot && frame.activityId !== null) {
+        snapshots.push({
+          file: name,
+          ride: frame.activityId,
+          outline:
+            frame.outline === null
+              ? null
+              : {
+                  aspect: frame.outline.aspect,
+                  landmarks: frame.outline.landmarks.map((landmark) => ({
+                    name: landmark.name,
+                    x: landmark.x,
+                    y: landmark.y,
+                  })),
+                },
+        });
+      }
     }
   }
 
@@ -925,6 +977,7 @@ export async function exportEverything(
         kept: keptCameraFrames,
         written: cameraFiles.length,
         files: cameraFiles,
+        snapshots,
         cannotCarry: CAMERA_CANNOT_CARRY,
       },
       framingReference,

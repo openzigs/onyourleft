@@ -59,6 +59,7 @@ import type {
   RideFacts,
   AthleteRecord,
   CameraFrameRecord,
+  CameraFrameSource,
   FramingCheckRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
@@ -77,6 +78,7 @@ import type {
   WorkoutRecord,
 } from './records';
 import {
+  CAMERA_FRAME_SOURCES,
   FRAMING_CHECK_RECORDS,
   RIDE_WRITE_UP_SOURCES,
   RIDERLESS_SYNC_BASE_KINDS,
@@ -279,7 +281,12 @@ export interface PersistedWorkout {
  * arrays, and a `Blob` would make the round-trip comparison asynchronous for no
  * gain.
  */
-export interface PersistedCameraFrame {
+/**
+ * A kept camera frame as it sat on disk at schema versions 10 to 17, before
+ * #1063 gave a row its source, its ride and its outline. What
+ * `migrations.ts` §`CAMERA_FRAME_SOURCE` reads and `down` writes back.
+ */
+export interface PersistedCameraFrameV17 {
   id: string;
   athleteId: string;
   capturedAt: number;
@@ -287,6 +294,14 @@ export interface PersistedCameraFrame {
   width: number;
   height: number;
   bytes: Uint8Array;
+}
+
+/** A camera frame as it sits on disk since schema version 18 (#1063). */
+export interface PersistedCameraFrame extends PersistedCameraFrameV17 {
+  source: string;
+  /** `null` for a kept frame — and so not in the `[athleteId+activityId]` index. */
+  activityId: string | null;
+  outline: { aspect: number; landmarks: { name: string; x: number; y: number }[] } | null;
 }
 
 export interface PersistedSegment {
@@ -1262,7 +1277,66 @@ export function toPersistedCameraFrame(record: CameraFrameRecord): PersistedCame
     width: record.width,
     height: record.height,
     bytes: record.bytes,
+    source: record.source,
+    activityId: record.activityId,
+    outline:
+      record.outline === null
+        ? null
+        : {
+            aspect: record.outline.aspect,
+            landmarks: record.outline.landmarks.map((landmark) => ({
+              name: landmark.name,
+              x: landmark.x,
+              y: landmark.y,
+            })),
+          },
   };
+}
+
+/**
+ * What is wrong with a camera frame's source, ride and outline taken
+ * together, or `undefined` when nothing is — #1063.
+ *
+ * One rule for both directions, as {@link framingReferenceProblem} is: the
+ * put refuses what this names, and the decoder refuses it on the way out.
+ * A snapshot names a ride; a kept frame names none and carries no outline.
+ * The outline is held to the framing reference's own rule, because it is the
+ * same numbers.
+ *
+ * ⚠️ The message names the field and the constraint and never the value (ADR
+ * 0029 D-8): a landmark is where somebody's knee was in a photograph.
+ */
+export function cameraFrameProblem(frame: {
+  readonly source: unknown;
+  readonly activityId: unknown;
+  readonly outline: unknown;
+}): string | undefined {
+  if (!(CAMERA_FRAME_SOURCES as readonly unknown[]).includes(frame.source)) {
+    return `cameraFrame.source: must be one of ${CAMERA_FRAME_SOURCES.join(', ')}`;
+  }
+  if (frame.source === 'kept') {
+    if (frame.activityId !== null) {
+      return 'cameraFrame.activityId: a kept frame names no ride';
+    }
+    if (frame.outline !== null) {
+      return 'cameraFrame.outline: a kept frame carries no outline';
+    }
+    return undefined;
+  }
+  if (typeof frame.activityId !== 'string' || frame.activityId.length === 0) {
+    return 'cameraFrame.activityId: a snapshot must name the ride it was taken in';
+  }
+  if (frame.outline === null) {
+    return undefined;
+  }
+  if (typeof frame.outline !== 'object') {
+    return 'cameraFrame.outline: must be an outline or null';
+  }
+  const { aspect, landmarks } = frame.outline as { aspect?: unknown; landmarks?: unknown };
+  const problem = framingReferenceProblem({ aspect, landmarks });
+  return problem === undefined
+    ? undefined
+    : problem.replace(/^framingReference\./, 'cameraFrame.outline.');
 }
 
 /**
@@ -1302,6 +1376,32 @@ export function fromPersistedCameraFrame(row: PersistedCameraFrame): CameraFrame
     width: decodedNumber('cameraFrame.width', row.width),
     height: decodedNumber('cameraFrame.height', row.height),
     bytes: row.bytes,
+    ...decodedFrameLink(row),
+  };
+}
+
+/** The source, ride and outline of a frame on disk, checked by {@link cameraFrameProblem}. */
+function decodedFrameLink(
+  row: PersistedCameraFrame,
+): Pick<CameraFrameRecord, 'source' | 'activityId' | 'outline'> {
+  const problem = cameraFrameProblem(row);
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return {
+    source: row.source as CameraFrameSource,
+    activityId: row.activityId === null ? null : activityId(row.activityId),
+    outline:
+      row.outline === null
+        ? null
+        : {
+            aspect: row.outline.aspect,
+            landmarks: row.outline.landmarks.map((landmark) => ({
+              name: landmark.name,
+              x: landmark.x,
+              y: landmark.y,
+            })),
+          },
   };
 }
 

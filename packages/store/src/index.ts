@@ -30,7 +30,9 @@ export type {
   ActivitySummary,
   RideFacts,
   AthleteRecord,
+  CameraFrameOutlineRecord,
   CameraFrameRecord,
+  CameraFrameSource,
   FramingCheckRecord,
   FramingLandmarkRecord,
   FramingReferenceRecord,
@@ -60,6 +62,7 @@ export type {
   WorkoutRecord,
 } from './records';
 export {
+  CAMERA_FRAME_SOURCES,
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
   RIDE_WRITE_UP_SOURCES,
   RIDER_TEXT_KINDS,

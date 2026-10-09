@@ -24,6 +24,7 @@ import {
   routeFor,
   seedAthletes,
   signedRecordFor,
+  snapshotFor,
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
@@ -62,6 +63,7 @@ import {
   RIDER_TEXTS_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
+  snapshotFileName,
   type AccountExportCursor,
 } from './export-everything';
 import type { DownloadableFile } from './store-port';
@@ -591,7 +593,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
-      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      camera: { kept: 0, written: 0, files: [], snapshots: [], cannotCarry: 'nothing kept' },
       framingReference: undefined,
       exportedAt: 1,
     });
@@ -609,7 +611,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
-      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      camera: { kept: 0, written: 0, files: [], snapshots: [], cannotCarry: 'nothing kept' },
       framingReference: undefined,
       exportedAt: 1,
     });
@@ -903,6 +905,42 @@ describe('exporting the pictures the rider kept (#384)', () => {
     // ADR 0029 D-3 asks for this line by name.
     expect(String(camera['cannotCarry'])).toContain('a photograph of you');
     expect(camera['cannotCarry']).toBe(CAMERA_CANNOT_CARRY);
+  });
+
+  it('carries a side-camera snapshot and names it against its ride in the manifest — #1063', async () => {
+    // ADR 0044 D-5: *"The account export carries every snapshot … The manifest
+    // names each one against its ride."* Read through the real store, written
+    // through the public path.
+    const { written } = await seedLibrary(2);
+    const ride = written[1]!.ride;
+    const snapshot = snapshotFor(ATHLETE_A, ride.id);
+    await harness.write(async (store) => store.putCameraFrame(snapshot));
+
+    const { files } = await runExport();
+    const name = snapshotFileName(snapshot.capturedAt, 1);
+    const file = files.find((each) => each.fileName === name);
+    // The picture, byte for byte, as its own file.
+    expect(file?.mediaType).toBe('image/jpeg');
+    expect(file?.bytes).toStrictEqual(snapshot.bytes);
+
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+    expect(camera['kept']).toBe(1);
+    expect(camera['files']).toStrictEqual([name]);
+    expect(camera['snapshots']).toStrictEqual([
+      { file: name, ride: ride.id, outline: snapshot.outline },
+    ]);
+    // Its ride, and nothing finer: no offset into the ride and no reading
+    // (D-3). The manifest's snapshot entry has exactly these three keys.
+    expect(Object.keys((camera['snapshots'] as object[])[0] ?? {})).toStrictEqual([
+      'file',
+      'ride',
+      'outline',
+    ]);
+    // And the manifest itself never carries the picture's bytes.
+    const manifestText = new TextDecoder().decode(
+      files.find((each) => each.fileName === MANIFEST_FILE_NAME)?.bytes,
+    );
+    expect(manifestText).not.toContain('"bytes"');
   });
 
   it('says so when a rider kept none, rather than omitting the row', async () => {

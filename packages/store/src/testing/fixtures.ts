@@ -814,6 +814,40 @@ export function cameraFrameFor(
     width: overrides.width ?? 640,
     height: overrides.height ?? 480,
     bytes,
+    source: 'kept',
+    activityId: null,
+    outline: null,
+  };
+}
+
+/**
+ * A side-camera snapshot of `ride` — #1063, ADR 0044 D-3. The bytes are
+ * {@link cameraFrameFor}'s, so they differ per athlete and per snapshot, and
+ * the outline's numbers differ per athlete too, for the same reason.
+ */
+export function snapshotFor(
+  owner: AthleteId,
+  ride: ActivityId,
+  overrides: Parameters<typeof cameraFrameFor>[1] & { readonly withOutline?: boolean } = {},
+): CameraFrameRecord {
+  const frame = cameraFrameFor(owner, overrides);
+  const shift = (ATHLETES.indexOf(owner) + 1) * 0.01;
+  return {
+    ...frame,
+    id: cameraFrameId(`snapshot-${String(cameraFrameCounter)}`),
+    source: 'snapshot',
+    activityId: ride,
+    outline:
+      overrides.withOutline === false
+        ? null
+        : {
+            aspect: 16 / 9,
+            landmarks: [
+              { name: 'shoulder', x: 0.45 + shift, y: 0.3 + shift },
+              { name: 'hip', x: 0.5 + shift, y: 0.5 + shift },
+              { name: 'knee', x: 0.58 + shift, y: 0.68 + shift },
+            ],
+          },
   };
 }
 
