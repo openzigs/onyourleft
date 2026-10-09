@@ -530,7 +530,11 @@ describe('the suspended accounts — #961', () => {
     expect(
       [...(first?.items ?? []), ...(second?.items ?? [])].map((each) => each.athleteId).sort(),
     ).toEqual([...ids].sort());
-  });
+    // 51 riders signed in and suspended through the real handler: 2.49 s and
+    // 2.53 s under coverage on green `main` runs (37994349506, 37999515671),
+    // and past Vitest's default 5 s on an EPYC 9V74 (38005001301, 5.02 s).
+    // About three times the slowest figure (§4c); nothing it does is changed.
+  }, 15_000);
 
   it('still gives the queues when the suspended accounts cannot be read', async () => {
     const world = await moderatedWorld();
