@@ -38,6 +38,8 @@ import type {
   AccountChangeMarkTable,
   AccountChangeTable,
   ActivityRecordTable,
+  AnalysisEventTable,
+  AnalysisJobTable,
   AthleteTable,
   BlockTable,
   DeviceKeyTable,
@@ -722,6 +724,64 @@ export interface HistoryIndexSummary {
 }
 
 /** The storage port. */
+/** An analysis job's status (#1095). `queued` and `running` have not ended. */
+export type AnalysisJobStatus = AnalysisJobTable['status'];
+
+/** What an analysis job's stream carries (#1095). */
+export type AnalysisEventKind = AnalysisEventTable['kind'];
+
+/** An analysis job, as the store gives it back (#1095). */
+export interface AnalysisJob {
+  readonly id: string;
+  readonly athleteId: string;
+  readonly status: AnalysisJobStatus;
+  readonly source: AnalysisJobTable['source'];
+  readonly templateVersion: string;
+  readonly inputJson: string;
+  readonly candidate: string | null;
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly createdAt: number;
+  readonly endedAt: number | null;
+}
+
+/** The write-up a finished job kept (ADR 0046 D-12). */
+export interface AnalysisResult {
+  readonly jobId: string;
+  readonly athleteId: string;
+  readonly source: AnalysisJobTable['source'];
+  readonly templateVersion: string;
+  readonly endedAt: number;
+  readonly writeUp: string;
+}
+
+/** A job a device has just asked for: queued, with nothing ended. */
+export type NewAnalysisJob = Pick<
+  AnalysisJob,
+  'id' | 'athleteId' | 'source' | 'templateVersion' | 'inputJson' | 'createdAt'
+>;
+
+/** One event of a job's stream. */
+export interface AnalysisEvent {
+  readonly jobId: string;
+  readonly athleteId: string;
+  readonly seq: number;
+  readonly kind: AnalysisEventKind;
+  readonly data: string;
+  readonly at: number;
+}
+
+/** How a job ended: its status, and the `result` event that says so. */
+export interface AnalysisJobEnding {
+  readonly status: Exclude<AnalysisJobStatus, 'queued' | 'running'>;
+  readonly failure: string | null;
+  /** The screened write-up of a `succeeded` job; `null` otherwise. */
+  readonly candidate: string | null;
+  /** The `result` event's JSON. */
+  readonly data: string;
+  readonly at: number;
+}
+
 export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
   getAthlete(athleteId: string): Promise<AthleteRecord | undefined>;
@@ -1249,6 +1309,77 @@ export interface SqlStore {
   listInviteCodes(athleteId: string): Promise<readonly InviteCode[]>;
 
   /**
+   * Queue an analysis job (#1095), in ONE transaction with the check that the
+   * athlete has no job queued or running: `busy` when they have, and nothing
+   * is written.
+   */
+  createAnalysisJob(job: NewAnalysisJob): Promise<'created' | 'busy'>;
+  /** This athlete's job, or `undefined` — another athlete's job is not theirs to see. */
+  getAnalysisJob(athleteId: string, jobId: string): Promise<AnalysisJob | undefined>;
+  /** This athlete's job's events after `afterSeq`, in order, at most `limit`. */
+  listAnalysisEvents(
+    athleteId: string,
+    jobId: string,
+    afterSeq: number,
+    limit: number,
+  ): Promise<readonly AnalysisEvent[]>;
+  /**
+   * The worker's: the oldest queued job of ANY athlete, marked `running` in
+   * the same statement, or `undefined` when none is queued. Not a rider's read.
+   */
+  claimAnalysisJob(): Promise<AnalysisJob | undefined>;
+  /**
+   * Append an event to a RUNNING job: its sequence number, or `undefined`
+   * when the job is not running — cancelled, ended or erased — so nothing a
+   * cancelled job's engine says afterwards is kept.
+   */
+  appendAnalysisEvent(
+    athleteId: string,
+    jobId: string,
+    kind: Exclude<AnalysisEventKind, 'result'>,
+    data: string,
+    at: number,
+  ): Promise<number | undefined>;
+  /**
+   * End a job that has not ended, with its `result` event, in ONE transaction:
+   * the result's sequence number, or `undefined` when it had already ended
+   * (or does not exist), in which case nothing changes.
+   */
+  endAnalysisJob(
+    athleteId: string,
+    jobId: string,
+    ending: AnalysisJobEnding,
+  ): Promise<number | undefined>;
+  /**
+   * The device saved the write-up: the job's events go. The write-up itself
+   * STAYS (ADR 0046 D-12: results are kept on the instance so another device
+   * can see them), beside its job row. `job_running` for a job that has not
+   * ended, `not_found` for none of this athlete's.
+   */
+  acknowledgeAnalysisJob(
+    athleteId: string,
+    jobId: string,
+  ): Promise<'acknowledged' | 'job_running' | 'not_found'>;
+  /**
+   * The worker's, at start: every job left `queued` or `running` by an
+   * instance that stopped ends `failed` with `failure`, and a result event.
+   * Answers how many. Never re-run.
+   */
+  interruptAnalysisJobs(failure: string, data: string, at: number): Promise<number>;
+  /**
+   * Retention (ADR 0046 D-12): delete the events of every job that ended
+   * before `endedBefore`, and the job row of each that holds no write-up. A
+   * job that holds one is kept, with its write-up. Answers how many job rows
+   * were deleted.
+   */
+  pruneAnalysisJobs(endedBefore: number): Promise<number>;
+  /**
+   * This athlete's kept write-ups, oldest first (ADR 0046 D-12): the account
+   * export's, and what another device reads.
+   */
+  listAnalysisResults(athleteId: string): Promise<readonly AnalysisResult[]>;
+
+  /**
    * Remove every row this athlete owns, the athlete included (#35). Answers
    * the content hashes of the records it removed, for the caller's blob sweep.
    * The tables are read from the schema's own foreign keys at the time of the
@@ -1338,6 +1469,38 @@ const athleteFrom = (row: Selectable<AthleteTable>): AthleteRecord => ({
   adultConfirmedAt: row.adult_confirmed_at,
   activatedAt: row.activated_at,
 });
+
+const analysisJobFrom = (row: Selectable<AnalysisJobTable>): AnalysisJob => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  status: row.status,
+  source: row.source,
+  templateVersion: row.template_version,
+  inputJson: row.input_json,
+  candidate: row.candidate,
+  failure: row.failure,
+  createdAt: row.created_at,
+  endedAt: row.ended_at,
+});
+
+const analysisEventFrom = (row: Selectable<AnalysisEventTable>): AnalysisEvent => ({
+  jobId: row.job_id,
+  athleteId: row.athlete_id,
+  seq: row.seq,
+  kind: row.kind,
+  data: row.data,
+  at: row.at,
+});
+
+/** The next sequence number of a job's stream, inside `trx`. */
+async function nextAnalysisSeq(trx: Transaction<InstanceDatabase>, jobId: string): Promise<number> {
+  const last = await trx
+    .selectFrom('analysis_event')
+    .select((eb) => eb.fn.max<number | null>('seq').as('seq'))
+    .where('job_id', '=', jobId)
+    .executeTakeFirst();
+  return Number(last?.seq ?? 0) + 1;
+}
 
 const inviteCodeFrom = (row: Selectable<InviteCodeTable>): InviteCode => ({
   codeSha256: row.code_sha256,
@@ -3857,6 +4020,243 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           model: row.model,
           dimension: row.dimension,
           passages: Number(row.passages),
+        })),
+      ),
+
+    createAnalysisJob: (job) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const open = await trx
+            .selectFrom('analysis_job')
+            .select('id')
+            .where('athlete_id', '=', job.athleteId)
+            .where('status', 'in', ['queued', 'running'])
+            .executeTakeFirst();
+          if (open !== undefined) return 'busy' as const;
+          await trx
+            .insertInto('analysis_job')
+            .values({
+              id: job.id,
+              athlete_id: job.athleteId,
+              status: 'queued',
+              source: job.source,
+              template_version: job.templateVersion,
+              input_json: job.inputJson,
+              candidate: null,
+              failure: null,
+              created_at: job.createdAt,
+              ended_at: null,
+            })
+            .execute();
+          return 'created' as const;
+        }),
+      ),
+
+    getAnalysisJob: (athleteId, jobId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('analysis_job')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('id', '=', jobId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : analysisJobFrom(row);
+      }),
+
+    listAnalysisEvents: (athleteId, jobId, afterSeq, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('analysis_event')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .where('job_id', '=', jobId)
+            .where('seq', '>', afterSeq)
+            .orderBy('seq')
+            .limit(Math.max(0, Math.floor(limit)))
+            .execute()
+        ).map(analysisEventFrom),
+      ),
+
+    claimAnalysisJob: () =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const oldest = await trx
+            .selectFrom('analysis_job')
+            .selectAll()
+            .where('status', '=', 'queued')
+            .orderBy('created_at')
+            .orderBy('id')
+            .executeTakeFirst();
+          if (oldest === undefined) return undefined;
+          await trx
+            .updateTable('analysis_job')
+            .set({ status: 'running' })
+            .where('id', '=', oldest.id)
+            .where('athlete_id', '=', oldest.athlete_id)
+            .execute();
+          return analysisJobFrom({ ...oldest, status: 'running' });
+        }),
+      ),
+
+    appendAnalysisEvent: (athleteId, jobId, kind, data, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const running = await trx
+            .selectFrom('analysis_job')
+            .select('id')
+            .where('athlete_id', '=', athleteId)
+            .where('id', '=', jobId)
+            .where('status', '=', 'running')
+            .executeTakeFirst();
+          if (running === undefined) return undefined;
+          const seq = await nextAnalysisSeq(trx, jobId);
+          await trx
+            .insertInto('analysis_event')
+            .values({ job_id: jobId, athlete_id: athleteId, seq, kind, data, at })
+            .execute();
+          return seq;
+        }),
+      ),
+
+    endAnalysisJob: (athleteId, jobId, ending) =>
+      exclusive(() =>
+        // Scrubbed: a job that did not succeed keeps no section's text (D-12).
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const ended = await trx
+              .updateTable('analysis_job')
+              .set({
+                status: ending.status,
+                failure: ending.failure,
+                candidate: ending.candidate,
+                ended_at: ending.at,
+              })
+              .where('athlete_id', '=', athleteId)
+              .where('id', '=', jobId)
+              .where('status', 'in', ['queued', 'running'])
+              .executeTakeFirst();
+            if (Number(ended.numUpdatedRows) === 0) return undefined;
+            const seq = await nextAnalysisSeq(trx, jobId);
+            await trx
+              .insertInto('analysis_event')
+              .values({
+                job_id: jobId,
+                athlete_id: athleteId,
+                seq,
+                kind: 'result',
+                data: ending.data,
+                at: ending.at,
+              })
+              .execute();
+            if (ending.status !== 'succeeded') {
+              await trx
+                .deleteFrom('analysis_event')
+                .where('athlete_id', '=', athleteId)
+                .where('job_id', '=', jobId)
+                .where('kind', '=', 'section')
+                .execute();
+            }
+            return seq;
+          }),
+        ),
+      ),
+
+    acknowledgeAnalysisJob: (athleteId, jobId) =>
+      exclusive(() =>
+        // Scrubbed: the events hold the sections' text. The write-up itself is
+        // kept (ADR 0046 D-12).
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const job = await trx
+              .selectFrom('analysis_job')
+              .select('status')
+              .where('athlete_id', '=', athleteId)
+              .where('id', '=', jobId)
+              .executeTakeFirst();
+            if (job === undefined) return 'not_found' as const;
+            if (job.status === 'queued' || job.status === 'running') return 'job_running' as const;
+            await trx
+              .deleteFrom('analysis_event')
+              .where('athlete_id', '=', athleteId)
+              .where('job_id', '=', jobId)
+              .execute();
+            return 'acknowledged' as const;
+          }),
+        ),
+      ),
+
+    interruptAnalysisJobs: (failure, data, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const left = await trx
+            .selectFrom('analysis_job')
+            .select(['id', 'athlete_id'])
+            .where('status', 'in', ['queued', 'running'])
+            .execute();
+          for (const job of left) {
+            await trx
+              .updateTable('analysis_job')
+              .set({ status: 'failed', failure, candidate: null, ended_at: at })
+              .where('id', '=', job.id)
+              .where('athlete_id', '=', job.athlete_id)
+              .execute();
+            await trx
+              .insertInto('analysis_event')
+              .values({
+                job_id: job.id,
+                athlete_id: job.athlete_id,
+                seq: await nextAnalysisSeq(trx, job.id),
+                kind: 'result',
+                data,
+                at,
+              })
+              .execute();
+          }
+          return left.length;
+        }),
+      ),
+
+    pruneAnalysisJobs: (endedBefore) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const old = trx
+              .selectFrom('analysis_job')
+              .select('id')
+              .where('ended_at', 'is not', null)
+              .where('ended_at', '<', endedBefore);
+            await trx.deleteFrom('analysis_event').where('job_id', 'in', old).execute();
+            const deleted = await trx
+              .deleteFrom('analysis_job')
+              .where('ended_at', 'is not', null)
+              .where('ended_at', '<', endedBefore)
+              .where('candidate', 'is', null)
+              .executeTakeFirst();
+            return Number(deleted.numDeletedRows);
+          }),
+        ),
+      ),
+
+    listAnalysisResults: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('analysis_job')
+            .select(['id', 'athlete_id', 'source', 'template_version', 'ended_at', 'candidate'])
+            .where('athlete_id', '=', athleteId)
+            .where('status', '=', 'succeeded')
+            .where('candidate', 'is not', null)
+            .orderBy('ended_at')
+            .orderBy('id')
+            .execute()
+        ).map((row) => ({
+          jobId: row.id,
+          athleteId: row.athlete_id,
+          source: row.source,
+          templateVersion: row.template_version,
+          endedAt: row.ended_at ?? 0,
+          writeUp: row.candidate ?? '',
         })),
       ),
 

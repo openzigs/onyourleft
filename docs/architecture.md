@@ -1798,8 +1798,35 @@ the pagination parser has its first callers, the sync manifest and the activity 
 [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-7 and D-8;
 [#1096](https://github.com/openzigs/onyourleft/issues/1096) (the model connection) and
 [#1098](https://github.com/openzigs/onyourleft/issues/1098) (the agent). It lives in
-`apps/instance/src/analysis/`. ⚠️ **It has no caller yet**: the job engine that starts it, streams
-its events and keeps its result is [#1095](https://github.com/openzigs/onyourleft/issues/1095).
+`apps/instance/src/analysis/`. Its caller is the job engine,
+[#1095](https://github.com/openzigs/onyourleft/issues/1095) (`analysis/jobs.ts`, below).
+
+#### Analysis jobs — #1095
+
+ADR 0046 D-11. A device asks for a write-up with `POST /v1/analysis/jobs` (`{ input,
+templateVersion, source }`); the instance checks the body (`analysis/job-input.ts`: no picture, then
+the input's exact `RideAnalysisInput` shape and its 4 KiB budget), queues a row in `analysis_job`
+(migration 0020) and answers `202 { jobId }` at once. One worker claims the oldest queued job of any
+athlete and runs it on the engine port — the agent over `modelForSource` in production
+(`analysis/engine.ts`), a script in tests — appending each event to `analysis_event` while the job is
+`running`, then ending it with one `result` event. One job per athlete is queued or running at a
+time (`job_running`), and twelve starts an hour per athlete are allowed (`jobs.ts`
+§`DEFAULT_ANALYSIS_STARTS`).
+
+`GET /v1/analysis/jobs/{jobId}/events` is Server-Sent Events: every event after `Last-Event-ID`, then
+live, ending after `result`; a `: hb` comment at most every 25 s (`OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS`)
+keeps the tunnel open. Events are `progress` (a step, or a tool by name), `section` (screened text),
+`withdrawn` and `result`; none carries a tool's arguments or results. ⚠️ **The stream does not name
+an event `end`**: that kind is the sealed stream's own (`sealed/routes.ts`), which ends every
+re-sealed stream with it, so a plaintext stream simply closes after `result`. Every job route is
+sealed-only (ADR 0047 D-7), and `sealed/routes.ts` forwards the heartbeat comments as they are.
+
+Cancel aborts the engine's signal and ends the job `cancelled` at once, so nothing the engine says
+afterwards is appended. Ack deletes the write-up and the events. An ended job goes seven days after it
+ended (the hourly sweep), and a job a stopped instance left unended is failed `interrupted` at the
+next start, never run again. ⚠️ **ADR 0046 D-12's kept result is not this table**: the candidate is
+deleted on ack, as #1095 specifies, and the copy another device reads is the write-up the device
+syncs as an item (#776).
 
 ```mermaid
 flowchart TD

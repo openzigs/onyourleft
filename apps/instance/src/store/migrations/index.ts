@@ -35,6 +35,7 @@ import * as instanceKeyLease from './0016-instance-key-lease.ts';
 import * as sealedReplay from './0017-sealed-replay.ts';
 import * as accountChanges from './0018-account-changes.ts';
 import * as recoveryAddresses from './0019-recovery-addresses.ts';
+import * as analysisJobs from './0020-analysis-jobs.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -62,4 +63,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0017-sealed-replay': sealedReplay,
   '0018-account-changes': accountChanges,
   '0019-recovery-addresses': recoveryAddresses,
+  '0020-analysis-jobs': analysisJobs,
 };

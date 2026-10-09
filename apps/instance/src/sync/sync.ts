@@ -300,6 +300,18 @@ export interface AccountExport {
     readonly passages: number;
   }[];
   /**
+   * The write-ups the instance keeps for this athlete (ADR 0046 D-12): the
+   * screened text of each finished analysis job. The job's input and events
+   * are not here.
+   */
+  readonly analysisResults: readonly {
+    readonly jobId: string;
+    readonly source: string;
+    readonly templateVersion: string;
+    readonly endedAt: number;
+    readonly writeUp: string;
+  }[];
+  /**
    * {@link HOSTED_KEY_HELD} when the instance holds a hosted model key for
    * this athlete (#1097), and `null` when it does not. That and nothing
    * else: never the key, its service or its model.
@@ -566,6 +578,13 @@ export function createSync(options: SyncOptions): Sync {
             model: row.model,
             dimension: row.dimension,
             passages: row.passages,
+          })),
+          analysisResults: (await store.listAnalysisResults(caller.athleteId)).map((result) => ({
+            jobId: result.jobId,
+            source: result.source,
+            templateVersion: result.templateVersion,
+            endedAt: result.endedAt,
+            writeUp: result.writeUp,
           })),
           hostedModelKey:
             (await store.getHostedModelKey())?.athleteId === caller.athleteId

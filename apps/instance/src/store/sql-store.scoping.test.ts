@@ -25,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SqlStore } from './sql-store.ts';
 import {
   activityRecordFixture,
+  analysisJobIdFixture,
   ATHLETES,
   SHARED_CONTENT_SHA256,
   syncItemFixtures,
@@ -306,6 +307,50 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
   confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
+  // #1095: a job, and its events, asked for by EVERY athlete's job id as the caller.
+  getAnalysisJob: {
+    probe: async (store, athleteId) => {
+      const found: Owned[] = [];
+      for (const owner of ATHLETES) {
+        const job = await store.getAnalysisJob(athleteId, analysisJobIdFixture(owner));
+        if (job !== undefined) found.push(job);
+      }
+      return found;
+    },
+  },
+  listAnalysisEvents: {
+    probe: async (store, athleteId) =>
+      (
+        await Promise.all(
+          ATHLETES.map((owner) =>
+            store.listAnalysisEvents(athleteId, analysisJobIdFixture(owner), 0, 1000),
+          ),
+        )
+      ).flat(),
+  },
+  listAnalysisResults: {
+    probe: (store, athleteId) => store.listAnalysisResults(athleteId),
+  },
+  createAnalysisJob: {
+    notAScopedRead: 'a write; its one-job-per-athlete rule is analysis/jobs.test.ts’s',
+  },
+  claimAnalysisJob: {
+    notAScopedRead:
+      'the worker’s claim of the oldest queued job of ANY athlete; never served to a rider, and the job it answers is run as its own athlete’s (analysis/jobs.test.ts)',
+  },
+  appendAnalysisEvent: {
+    notAScopedRead: 'a write, to a running job of the named athlete only (analysis/jobs.test.ts)',
+  },
+  endAnalysisJob: {
+    notAScopedRead: 'a write; another athlete’s job is not ended (analysis/jobs.test.ts)',
+  },
+  acknowledgeAnalysisJob: {
+    notAScopedRead: 'a write; another athlete’s job is not_found (analysis/jobs.test.ts)',
+  },
+  interruptAnalysisJobs: {
+    notAScopedRead: 'the worker’s, at start: every athlete’s unended jobs, by design',
+  },
+  pruneAnalysisJobs: { notAScopedRead: 'retention: every athlete’s ended jobs, by design' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
   putHostedModelKey: {
     notAScopedRead:

@@ -7,6 +7,7 @@
  */
 
 import type { Readiness } from './readiness.ts';
+import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
@@ -97,6 +98,8 @@ export interface RouteContext {
   readonly history: History | undefined;
   /** Riders' rooms (#784, #785). Present for every route that declares `rooms`; the handler sees to it. */
   readonly rooms: Rooms | undefined;
+  /** Analysis jobs (#1095). Present for every route that declares `analysis`; the handler sees to it. */
+  readonly analysis: AnalysisJobs | undefined;
   /**
    * The instance's own keys (#1189). Absent until the store is open, and on
    * a test's handler that was handed none.
@@ -172,6 +175,11 @@ export interface Route {
    * route blobs. An instance handed none answers `unavailable` without calling it.
    */
   readonly rooms?: true;
+  /**
+   * The route needs analysis jobs (#1095). An instance handed none answers
+   * `unavailable` without calling it.
+   */
+  readonly analysis?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**
@@ -223,6 +231,11 @@ export interface Route {
   readonly request?: Schema;
   /** The error codes this route answers with beyond every route's. */
   readonly errors?: readonly ErrorCode[];
+  /**
+   * `202 Accepted` in place of `200`, for a route that starts work it does
+   * not wait for (#1095). The specification documents the status it names.
+   */
+  readonly accepted?: true;
   readonly response:
     | { readonly contentType: 'application/json'; readonly schema: Schema }
     | { readonly contentType: 'text/plain' }
@@ -230,6 +243,11 @@ export interface Route {
     | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */
     | { readonly contentType: 'none' }
+    /**
+     * Server-Sent Events (#1095): `id:`, `event:` and one `data:` line of JSON
+     * per event, and a `: hb` comment when the stream is quiet.
+     */
+    | { readonly contentType: 'text/event-stream'; readonly description: string }
     /**
      * A sealed reply (#1191): a JSON envelope `{ v, nonce, ct }`, or — when the
      * inner route streams — `text/event-stream` whose frames carry `data:` alone.

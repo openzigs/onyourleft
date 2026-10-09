@@ -40,8 +40,8 @@
  * §`hostedBehindMasking` — and only with the athlete's guard, read by
  * {@link SourceOptions.guard} after the key is opened. A guard that is
  * missing, cannot be read, or whose read throws is a request not sent:
- * `hosted_unavailable` (`source.test.ts`). The caller is the job engine
- * (#1095), which is not built yet.
+ * `hosted_unavailable` (`source.test.ts`). Its caller is the job engine
+ * (#1095, `engine.ts`).
  */
 
 import type { MaskingGuard } from '@onyourleft/analysis';

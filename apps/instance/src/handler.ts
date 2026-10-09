@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
@@ -133,6 +134,11 @@ export interface HandlerOptions {
    * `unavailable`: an instance with no accounts has no rooms to make.
    */
   readonly rooms?: Rooms;
+  /**
+   * Analysis jobs (#1095, ADR 0046 D-11). Absent, every route that needs them
+   * answers `unavailable`.
+   */
+  readonly analysis?: AnalysisJobs;
   /**
    * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
    * /v1/instance/keys` answers `unavailable`.
@@ -304,6 +310,9 @@ export function createHandler(options: HandlerOptions): Handler {
       return errorResponse('unavailable');
     }
     if (matched.rooms === true && options.rooms === undefined) return errorResponse('unavailable');
+    if (matched.analysis === true && options.analysis === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -344,6 +353,7 @@ export function createHandler(options: HandlerOptions): Handler {
       sync: options.sync,
       history: options.history,
       rooms: options.rooms,
+      analysis: options.analysis,
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,

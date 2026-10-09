@@ -268,6 +268,11 @@ describe('erasing an athlete (#769, #35)', () => {
       // Migration 0018's account-change log and marks (#1193): found the same way.
       expect(order).toContain('account_change');
       expect(order).toContain('account_change_mark');
+      // Migration 0020's analysis jobs and their events (#1095): found the
+      // same way, the events before the jobs they reference.
+      expect(order).toContain('analysis_job');
+      expect(order.indexOf('analysis_event')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('analysis_event')).toBeLessThan(order.indexOf('analysis_job'));
       const scoped = new Set<string>(order);
       for (const reference of references(harness.path)) {
         if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;

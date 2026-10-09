@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { InstanceProbes } from './route-kit.ts';
@@ -85,6 +86,9 @@ export async function startTestInstance(
     probes?: InstanceProbes;
     instanceKeys?: InstanceKeys;
     sealed?: Sealed;
+    analysis?: AnalysisJobs;
+    /** What `/metrics` would count of each response (#1095's never-logged test). */
+    observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
@@ -102,6 +106,8 @@ export async function startTestInstance(
     ...(options.probes === undefined ? {} : { probes: options.probes }),
     ...(options.instanceKeys === undefined ? {} : { instanceKeys: options.instanceKeys }),
     ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
+    ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
+    ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
   const listening = await listen(handler, {
     host: '127.0.0.1',

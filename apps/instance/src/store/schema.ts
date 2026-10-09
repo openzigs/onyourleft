@@ -447,6 +447,39 @@ export interface SealedReplayTable {
   readonly seen_at: number;
 }
 
+/**
+ * One analysis job (#1095, ADR 0046 D-11). Added by migration 0020. An ended
+ * job is deleted seven days after `ended_at` (the owner's Q5 ruling).
+ */
+export interface AnalysisJobTable {
+  readonly id: string;
+  readonly athlete_id: string;
+  readonly status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'withheld';
+  readonly source: 'instance-local' | 'instance-hosted';
+  readonly template_version: string;
+  /** The device-built ride input, checked on the way in (`analysis/job-input.ts`). */
+  readonly input_json: string;
+  /** The screened write-up, until the device acknowledges it or the job is deleted. */
+  readonly candidate: string | null;
+  /** One of `analysis/jobs.ts` §`JobFailure`, when the job failed. */
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly created_at: number;
+  readonly ended_at: number | null;
+}
+
+/** One event of a job's stream (#1095), numbered per job from 1. */
+export interface AnalysisEventTable {
+  readonly job_id: string;
+  readonly athlete_id: string;
+  readonly seq: number;
+  readonly kind: 'progress' | 'section' | 'withdrawn' | 'result';
+  /** The event's JSON. Never a tool's arguments or results. */
+  readonly data: string;
+  /** Unix milliseconds. */
+  readonly at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -479,4 +512,6 @@ export interface InstanceDatabase {
   readonly sealed_replay: SealedReplayTable;
   readonly account_change: AccountChangeTable;
   readonly account_change_mark: AccountChangeMarkTable;
+  readonly analysis_job: AnalysisJobTable;
+  readonly analysis_event: AnalysisEventTable;
 }

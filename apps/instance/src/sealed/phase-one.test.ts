@@ -204,7 +204,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{publicKey}', f.second.publicKey)
     .replace('{content}', f.content)
     .replace('{kind}', 'note')
-    .replace('{key}', 'n1');
+    .replace('{key}', 'n1')
+    .replace('{jobId}', 'job-1');
   const reason = { reason: 'Checked against the rules' };
   const bodies: Record<string, unknown> = {
     'POST /v1/auth/link-codes': {},
@@ -215,6 +216,7 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     'POST /v1/sync/records/{content}/race-consent': { mayBeRaced: true },
     'POST /v1/history/search': { query: 'hills', limit: 6, characters: 4000 },
     'POST /v1/moderation/invites': reason,
+    'POST /v1/analysis/jobs': { input: {}, templateVersion: '1', source: 'instance-local' },
   };
   const body =
     bodies[key(route)] ?? (route.path.startsWith('/v1/moderation/') ? reason : undefined);

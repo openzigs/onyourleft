@@ -31,8 +31,11 @@ import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
-import { migrateAllBut } from './store/testing/index.ts';
+import { migrateAllBut, registrationFixture } from './store/testing/index.ts';
+import { RIDE_INPUT } from './analysis/agent-testing.ts';
+import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
+import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
 import { ROOM_SWEEP_PERIOD_MS } from './rooms/rooms.ts';
 
 const INSTANCE = fileURLToPath(new URL('..', import.meta.url));
@@ -175,10 +178,16 @@ describe('the running instance forgets every rate-limited address when its windo
     // #784: the rooms' sweep is armed beside it, on the next ten-minute
     // boundary, through the same timers. Held apart here, so what follows
     // reads the rate limits' alone.
-    expect(pending).toHaveLength(2);
+    expect(pending).toHaveLength(3);
     const roomsSweep = pending.find((entry) => entry.at % ROOM_SWEEP_PERIOD_MS === 0);
     expect(roomsSweep?.at).toBe(Math.ceil(clock.ms / ROOM_SWEEP_PERIOD_MS) * ROOM_SWEEP_PERIOD_MS);
     pending.splice(pending.indexOf(roomsSweep!), 1);
+    // #1095: and the analysis jobs' hourly sweep, on the next hour.
+    const jobsSweep = pending.find((entry) => entry.at % ANALYSIS_SWEEP_PERIOD_MS === 0);
+    expect(jobsSweep?.at).toBe(
+      Math.ceil(clock.ms / ANALYSIS_SWEEP_PERIOD_MS) * ANALYSIS_SWEEP_PERIOD_MS,
+    );
+    pending.splice(pending.indexOf(jobsSweep!), 1);
     await signIn(instance.url, 'Ann Rider', Math.floor(clock.ms / 1000));
     const held = instance.heldRateLimitKeys();
     expect(held).toBeGreaterThan(1);
@@ -201,8 +210,8 @@ describe('the running instance forgets every rate-limited address when its windo
     expect(pending).toHaveLength(1);
     await instance.stop();
     running = undefined;
-    // Both sweeps are stopped: the rate limits' and the rooms'.
-    expect(cleared).toBe(2);
+    // Every sweep is stopped: the rate limits', the rooms' and the jobs'.
+    expect(cleared).toBe(3);
     expect(pending).toHaveLength(0);
   }, 30_000);
 });
@@ -855,6 +864,115 @@ describe('the analysis model on the running instance — #1096', () => {
     expect(said).toContain('"state":"off"');
     expect(said).toContain('"code":"not-local"');
     expect(instance.analysisModel()).toBeUndefined();
+  });
+});
+
+describe('analysis jobs on the running instance — #1095', () => {
+  async function postJob(url: string, token: string): Promise<Response> {
+    return fetch(`${url}/v1/analysis/jobs`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(jobBody()),
+    });
+  }
+
+  it('starts normally with no model, and answers every start analysis_off', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const { instance } = await start(path);
+    await instance.opened;
+    await instance.jobsRecovered;
+    expect((await fetch(`${instance.url}/ready`)).status).toBe(200);
+    const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+    const answer = await postJob(instance.url, sessionToken);
+    expect(answer.status).toBe(503);
+    expect(((await answer.json()) as { error: { code: string } }).error.code).toBe('analysis_off');
+  });
+
+  it('fails a job a stopped instance left running as interrupted at the next start, and never runs it', async () => {
+    const path = join(await freshDirectory(), 'instance.sqlite');
+    await migrateForDeploy(path);
+    const left = openServingStore(path);
+    await left.registerAthlete(registrationFixture('athlete-a'));
+    await left.createAnalysisJob({
+      id: 'left-running',
+      athleteId: 'athlete-a',
+      source: 'instance-local',
+      templateVersion: '1',
+      inputJson: JSON.stringify(RIDE_INPUT),
+      createdAt: 1,
+    });
+    await left.claimAnalysisJob();
+    await left.close();
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const { instance } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.jobsRecovered;
+      await instance.analysisJobs()?.idle();
+      const read = openServingStore(path);
+      try {
+        const job = await read.getAnalysisJob('athlete-a', 'left-running');
+        expect([job?.status, job?.failure]).toEqual(['failed', 'interrupted']);
+      } finally {
+        await read.close();
+      }
+      expect(model.paths).toEqual([]);
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('runs a job through the agent on the configured model, to a screened result on the stream', async () => {
+    const model = await startFakeModelServer([{ kind: 'text', text: 'A steady ride.' }]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const { instance, lines } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.jobsRecovered;
+      const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+      const answer = await postJob(instance.url, sessionToken);
+      expect(answer.status).toBe(202);
+      const { jobId } = (await answer.json()) as { jobId: string };
+      const stream = await fetch(`${instance.url}/v1/analysis/jobs/${jobId}/events`, {
+        headers: { authorization: `Bearer ${sessionToken}` },
+      });
+      const events = parseStream(await stream.text()).events;
+      expect(events.at(-1)).toEqual({
+        id: events.length,
+        kind: 'result',
+        data: { status: 'succeeded', writeUp: 'A steady ride.' },
+      });
+      expect(model.paths).toStrictEqual(['/v1/chat/completions']);
+      expect(
+        lines.some((line) => line.includes('"event":"analysis-job","state":"succeeded"')),
+      ).toBe(true);
+    } finally {
+      await model.close();
+    }
   });
 });
 
