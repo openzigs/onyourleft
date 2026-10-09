@@ -621,15 +621,47 @@ function normalisedCode(value: string): string {
  */
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-function readableCode(): string {
+/**
+ * The length of a MAILED code — a recovery code from `/recover/email` and a
+ * confirmation code from `/recovery-email` — which a rider types from the
+ * mail into the app (#1194, the owner's ruling of 2026-10-09: it replaced 43
+ * base64url characters). Twelve from {@link CODE_ALPHABET}:
+ * 12 × log2(31) = 12 × 4.954 = 59.4 bits, about 7.9 × 10^17 codes.
+ *
+ * Why that is enough for these two and not for the recovery codes (79 bits):
+ * a mailed code is single use and lives 30 minutes (recovery) or 24 hours
+ * (confirmation), and every guess is rate-limited. A recovery guess needs a
+ * fresh signed challenge, at most 60 a minute per client address
+ * (`challengePerAddress`): 1 800 guesses in a code's 30 minutes, so a million
+ * addresses guessing at once land 1.8 × 10^9 guesses, a 2.3 × 10^-9 chance per
+ * live code. A confirmation guess is scoped to the athlete who asked and
+ * goes through their sealed session, at most 120 a minute
+ * (`sealedPerSession`): 172 800 in a code's 24 hours, 2.2 × 10^-13. A
+ * recovery code lives for ever, which is why it keeps sixteen.
+ */
+const MAILED_CODE_LENGTH = 12;
+
+function readableCode(length = 16): string {
   const ceiling = 256 - (256 % CODE_ALPHABET.length);
   let code = '';
-  while (code.length < 16) {
-    for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
-      if (byte < ceiling && code.length < 16) code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+  while (code.length < length) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(length))) {
+      if (byte < ceiling && code.length < length) {
+        code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+      }
     }
   }
   return code.match(/.{4}/g)?.join('-') ?? code;
+}
+
+/**
+ * A code to mail, and the SHA-256 the store keeps of it — of the code as
+ * {@link normalisedCode} reads it, so a rider may type it in either case,
+ * with or without its hyphens or spaces, as they may a recovery code.
+ */
+async function mailedCode(): Promise<{ code: string; sha256: string }> {
+  const code = readableCode(MAILED_CODE_LENGTH);
+  return { code, sha256: await sha256Hex(normalisedCode(code)) };
 }
 
 function takeRefusal(outcome: Take<object>['outcome'], prefix: 'challenge' | 'code'): ErrorCode {
@@ -670,7 +702,10 @@ async function stepUpOf(request: {
   }
   if (emailToken !== undefined) {
     if (typeof emailToken !== 'string') return invalid('emailToken', 'must be a string');
-    return { ok: true, value: { kind: 'token', tokenSha256: await sha256Hex(emailToken) } };
+    return {
+      ok: true,
+      value: { kind: 'token', tokenSha256: await sha256Hex(normalisedCode(emailToken)) },
+    };
   }
   return refuse('step_up_required');
 }
@@ -861,10 +896,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (pairCount !== 1 || !established) return undefined;
       if (!firstLinksPerAddress.allow(address)) return undefined;
     }
-    const token = randomToken(32);
+    const mailed = await mailedCode();
     return {
-      token,
-      tokenSha256: await sha256Hex(token),
+      token: mailed.code,
+      tokenSha256: mailed.sha256,
       address,
       expiresAt: seconds() + EMAIL_CONFIRMATION_LIFETIME_SECONDS,
     };
@@ -1368,7 +1403,7 @@ export function createIdentity(options: IdentityOptions): Identity {
         at: seconds(),
         heldSince: heldSince(),
         proof: byEmail
-          ? { kind: 'token', tokenSha256: await sha256Hex(secret) }
+          ? { kind: 'token', tokenSha256: await sha256Hex(normalisedCode(secret)) }
           : { kind: 'code', codeSha256: await sha256Hex(normalisedCode(secret)) },
         revokeOtherKeys: revokeOtherKeys.value,
         ...(fresh === undefined ? {} : { resetCodeSha256s: fresh.sha256s }),
@@ -1399,9 +1434,9 @@ export function createIdentity(options: IdentityOptions): Identity {
       // mailed (#1194): one inside its hold recovers nothing.
       const held = await store.findRecoveryEmail(normalised);
       if (held !== undefined && isEstablished(held, heldSince())) {
-        const token = randomToken(32);
+        const { code: token, sha256 } = await mailedCode();
         await store.putEmailRecoveryToken({
-          tokenSha256: await sha256Hex(token),
+          tokenSha256: sha256,
           athleteId: held.athleteId,
           expiresAt: seconds() + EMAIL_RECOVERY_LIFETIME_SECONDS,
           address: held.address,
@@ -1473,7 +1508,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       // store scopes the token to the caller, so theirs is `code_unknown`.
       const taken = await store.confirmRecoveryEmail(
         caller.athleteId,
-        await sha256Hex(token),
+        await sha256Hex(normalisedCode(token)),
         seconds(),
         caller.deviceKey,
         RECOVERY_ADDRESS_LIMIT,

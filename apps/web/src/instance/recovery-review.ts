@@ -63,7 +63,8 @@ export const EMPTY_CODE_TEXT = 'Type the code from the mail.';
 
 /**
  * A code as the rider typed it, ready to send inside a sealed request — or the
- * refusal. A URL of any kind is refused: an `https:` link (an App Link
+ * refusal. It is normalised as the instance normalises a recovery code: lower
+ * case, with every hyphen and space removed. A URL of any kind is refused: an `https:` link (an App Link
  * included), any other scheme, or a bare `www.` address (D-8).
  */
 export function typedCode(
@@ -71,11 +72,15 @@ export function typedCode(
 ):
   | { readonly ok: true; readonly code: string }
   | { readonly ok: false; readonly problem: TypedCodeProblem } {
-  const code = input.trim();
-  if (code === '') return { ok: false, problem: 'empty' };
-  if (/:\/\//.test(code) || /^[a-z][a-z0-9+.-]*:/i.test(code) || /^www\./i.test(code)) {
+  const trimmed = input.trim();
+  if (trimmed === '') return { ok: false, problem: 'empty' };
+  if (/:\/\//.test(trimmed) || /^[a-z][a-z0-9+.-]*:/i.test(trimmed) || /^www\./i.test(trimmed)) {
     return { ok: false, problem: 'link' };
   }
+  // Read as the instance reads a recovery code: any case, hyphens and spaces
+  // dropped, so `ABCD-efgh jkmn` is the code mailed as `abcd-efgh-jkmn`.
+  const code = trimmed.toLowerCase().replace(/[\s-]/g, '');
+  if (code === '') return { ok: false, problem: 'empty' };
   return { ok: true, code };
 }
 
@@ -93,7 +98,7 @@ export const HOLD_TEXT =
 
 /** The pending-confirmation card, naming the device that asked (draft, review L2). */
 export function pendingCardText(address: string, askedByAddedOn: string): string {
-  return `We mailed a code to ${address}, asked for by the key added on ${askedByAddedOn}. Type the code from that mail — if two mails arrived, type the one that names this device.`;
+  return `We mailed a code to ${address}, asked for by the key added on ${askedByAddedOn}. Type the code from that mail — if two mails arrived, type the one that names the key added on ${askedByAddedOn}.`;
 }
 
 /** A held address in the list (draft). */

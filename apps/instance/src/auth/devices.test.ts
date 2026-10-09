@@ -443,7 +443,9 @@ describe('email recovery (ruling Q1): off unless the operator enables it', () =>
     const { token } = w.mail[0] as { token: string };
     expect(await w.databaseBytes()).not.toContain(token);
     const stored = await w.freshRead((store) => store.listEmailRecoveryTokens(anna.athleteId));
-    expect(stored.map((each) => each.tokenSha256)).toEqual([await sha256Hex(token)]);
+    expect(stored.map((each) => each.tokenSha256)).toEqual([
+      await sha256Hex(token.replace(/-/g, '')),
+    ]);
 
     const recover = async (emailToken: string) => {
       const device = await testDevice();
@@ -544,7 +546,7 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
       (await w.freshRead((store) => store.listEmailRecoveryTokens(annaId))).map(
         (each) => each.tokenSha256,
       ),
-    ).toEqual([await sha256Hex(recovery)]);
+    ).toEqual([await sha256Hex(recovery.replace(/-/g, ''))]);
     expect(await w.freshRead((store) => store.listEmailRecoveryTokens(malloryId))).toEqual([]);
 
     // No address and no token reaches the log.

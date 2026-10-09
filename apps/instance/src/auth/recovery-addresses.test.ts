@@ -652,7 +652,7 @@ describe('the hold: a new address recovers nothing for a week (#1194)', () => {
     expect(await requestMail(w, 'held@example.org')).toBeUndefined();
     // A code that reached it anyway — written beneath the routes, as a
     // mailer that ignored the hold would have — does not recover either.
-    const token = 'a-code-mailed-to-a-held-address';
+    const token = 'acodemailedtoaheldaddress';
     await w.freshRead(async (store) =>
       store.putEmailRecoveryToken({
         tokenSha256: await sha256Hex(token),
@@ -1031,5 +1031,34 @@ describe('scoping: three athletes (#1194)', () => {
     expect(await waysBack(w, rider.athleteId)).toEqual({ addresses: [], codes: [] });
     expect(await tokens(w, rider.athleteId)).toEqual([]);
     expect(await w.freshRead((store) => store.findRecoveryEmail(established))).toBeUndefined();
+  });
+});
+
+describe('a mailed code is typed (#1194, the owner’s ruling of 2026-10-09)', () => {
+  // The recovery codes' alphabet, grouped in fours: 12 × log2(31) = 59.4 bits.
+  const MAILED = /^[abcdefghjkmnpqrstuvwxyz23456789]{4}(-[abcdefghjkmnpqrstuvwxyz23456789]{4}){2}$/;
+
+  it('both mails carry twelve letters from the recovery codes’ alphabet, in fours — never 43 base64url', async () => {
+    const w = await start();
+    const { established } = await riderWithWayBack(w);
+    await requestMail(w, established);
+    expect(w.mail).toHaveLength(1);
+    expect(w.confirmations.length).toBeGreaterThan(0);
+    for (const mail of [...w.mail, ...w.confirmations]) expect(mail.token).toMatch(MAILED);
+  });
+
+  it('takes a mailed code as a recovery code is taken: any case, without its hyphens or with spaces', async () => {
+    const w = await start();
+    const rider = await register(w);
+    const a = await linked(w, rider);
+    const mailed = await give(w, a, 'typed@example.org');
+    const confirmed = await confirm(w, a, mailed.toUpperCase().replace(/-/g, ' '));
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(204);
+
+    const { rider: other, established } = await riderWithWayBack(w);
+    const recoveryCode = await requestMail(w, established);
+    const added = await recover(w, { emailToken: recoveryCode!.replace(/-/g, '').toUpperCase() });
+    expect(added.status, JSON.stringify(added.body)).toBe(200);
+    expect((added.body as { athleteId: string }).athleteId).toBe(other.athleteId);
   });
 });

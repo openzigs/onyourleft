@@ -13,6 +13,7 @@ import {
   accountPredatesPin,
   HOLD_TEXT,
   markReviewed,
+  pendingCardText,
   REPLACE_ADDRESS_STEPS,
   resetRequest,
   reviewDue,
@@ -48,10 +49,11 @@ describe('a mailed code is typed, never followed', () => {
     expect(typedCode(input)).toEqual({ ok: false, problem: 'link' });
   });
 
-  it('takes a code as it was typed, trimmed', () => {
-    expect(typedCode('  Xk3_9aB-cD  ')).toEqual({ ok: true, code: 'Xk3_9aB-cD' });
-    expect(typedCode('abcd-efgh-jkmn-pqrs')).toEqual({ ok: true, code: 'abcd-efgh-jkmn-pqrs' });
+  it('reads a code as the instance reads a recovery code: any case, hyphens and spaces dropped', () => {
+    expect(typedCode('  ABCD-efgh jkmn  ')).toEqual({ ok: true, code: 'abcdefghjkmn' });
+    expect(typedCode('abcd-efgh-jkmn-pqrs')).toEqual({ ok: true, code: 'abcdefghjkmnpqrs' });
     expect(typedCode('   ')).toEqual({ ok: false, problem: 'empty' });
+    expect(typedCode(' - - ')).toEqual({ ok: false, problem: 'empty' });
   });
 });
 
@@ -68,11 +70,11 @@ describe('the full reset is built only with a step-up', () => {
   it('builds the body with exactly the one step-up given, and refuses a link in its place', () => {
     expect(resetRequest({ recoveryCode: ' abcd-efgh-jkmn-pqrs ' })).toEqual({
       ok: true,
-      body: { recoveryCode: 'abcd-efgh-jkmn-pqrs' },
+      body: { recoveryCode: 'abcdefghjkmnpqrs' },
     });
-    expect(resetRequest({ emailToken: 'Xk3_9aB' })).toEqual({
+    expect(resetRequest({ emailToken: 'WXYZ-2345-6789' })).toEqual({
       ok: true,
-      body: { emailToken: 'Xk3_9aB' },
+      body: { emailToken: 'wxyz23456789' },
     });
     expect(resetRequest({ emailToken: 'https://ride.example/recover?t=Xk3' })).toEqual({
       ok: false,
@@ -162,5 +164,11 @@ describe('the drafted order and the hold sentence', () => {
 
   it('says a new address recovers nothing for a week', () => {
     expect(HOLD_TEXT).toContain('A new address recovers nothing for a week.');
+  });
+
+  it('tells a rider with two mails to type the one naming the asking key’s day — the mail never says "this device"', () => {
+    expect(pendingCardText('rider@example.org', '12 September')).toBe(
+      'We mailed a code to rider@example.org, asked for by the key added on 12 September. Type the code from that mail — if two mails arrived, type the one that names the key added on 12 September.',
+    );
   });
 });
