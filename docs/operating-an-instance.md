@@ -180,15 +180,16 @@ riders analyse.
 
 | What | Kept until |
 |---|---|
-| The job row: whose it is, its source, its status, when it was made and ended, and why it failed | seven days after the job ended (the owner's Q5 ruling), deleted by the hourly sweep |
+| The job row: whose it is, its source, its status, when it was made and ended, and why it failed | seven days after the job ended (the owner's Q5 ruling), deleted by the hourly sweep, **unless it holds a write-up**: that row stays with it |
 | The ride input the device sent: numbers and the input's own words, never a coordinate, date, name or picture | with the job row |
-| The job's events: progress (a step, or a tool by name), each screened section, withdrawals, the result | the device acknowledges the write-up, or the job row goes |
-| The write-up itself | the device acknowledges it has saved it (the screened text is deleted, with `secure_delete`), or the job row goes |
+| The job's events: progress (a step, or a tool by name), each screened section, withdrawals, the result | the device acknowledges the write-up, or seven days after the job ended. A job that did not succeed keeps no section's text from the moment it ends |
+| The write-up itself | kept (ADR 0046 D-12, the owner's ruling 8) so another device can read it, erased with the account, and included in the account export as `analysisResults` |
 
 A job that is still queued or running when the instance stops — a restart, an upgrade, a power cut —
 is ended `failed` with the failure `interrupted` at the next start, and is **never run again**: the
 rider asks again if they still want it. Each athlete may have one job queued or running at a time,
-and may start twelve an hour.
+and may start twelve an hour. There is one worker for the whole instance, so a job waits behind
+another athlete's, for up to the agent's run budget.
 
 **What the log says.** One line per change of status, `"event":"analysis-job"` with `state` (and
 `code`, the failure, when it failed). Never a job's id, its input, a tool name or any of the

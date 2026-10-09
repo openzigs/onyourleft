@@ -670,6 +670,16 @@ export interface AnalysisJob {
   readonly endedAt: number | null;
 }
 
+/** The write-up a finished job kept (ADR 0046 D-12). */
+export interface AnalysisResult {
+  readonly jobId: string;
+  readonly athleteId: string;
+  readonly source: AnalysisJobTable['source'];
+  readonly templateVersion: string;
+  readonly endedAt: number;
+  readonly writeUp: string;
+}
+
 /** A job a device has just asked for: queued, with nothing ended. */
 export type NewAnalysisJob = Pick<
   AnalysisJob,
@@ -1193,9 +1203,10 @@ export interface SqlStore {
     ending: AnalysisJobEnding,
   ): Promise<number | undefined>;
   /**
-   * The device saved the write-up: the candidate and the job's events go, and
-   * the job row stays until its retention ends. `job_running` for a job that
-   * has not ended, `not_found` for none of this athlete's.
+   * The device saved the write-up: the job's events go. The write-up itself
+   * STAYS (ADR 0046 D-12: results are kept on the instance so another device
+   * can see them), beside its job row. `job_running` for a job that has not
+   * ended, `not_found` for none of this athlete's.
    */
   acknowledgeAnalysisJob(
     athleteId: string,
@@ -1207,8 +1218,18 @@ export interface SqlStore {
    * Answers how many. Never re-run.
    */
   interruptAnalysisJobs(failure: string, data: string, at: number): Promise<number>;
-  /** Delete every job — and its events — that ended before `endedBefore`. Answers how many. */
+  /**
+   * Retention (ADR 0046 D-12): delete the events of every job that ended
+   * before `endedBefore`, and the job row of each that holds no write-up. A
+   * job that holds one is kept, with its write-up. Answers how many job rows
+   * were deleted.
+   */
   pruneAnalysisJobs(endedBefore: number): Promise<number>;
+  /**
+   * This athlete's kept write-ups, oldest first (ADR 0046 D-12): the account
+   * export's, and what another device reads.
+   */
+  listAnalysisResults(athleteId: string): Promise<readonly AnalysisResult[]>;
 
   /**
    * Remove every row this athlete owns, the athlete included (#35). Answers
@@ -3598,40 +3619,51 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     endAnalysisJob: (athleteId, jobId, ending) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const ended = await trx
-            .updateTable('analysis_job')
-            .set({
-              status: ending.status,
-              failure: ending.failure,
-              candidate: ending.candidate,
-              ended_at: ending.at,
-            })
-            .where('athlete_id', '=', athleteId)
-            .where('id', '=', jobId)
-            .where('status', 'in', ['queued', 'running'])
-            .executeTakeFirst();
-          if (Number(ended.numUpdatedRows) === 0) return undefined;
-          const seq = await nextAnalysisSeq(trx, jobId);
-          await trx
-            .insertInto('analysis_event')
-            .values({
-              job_id: jobId,
-              athlete_id: athleteId,
-              seq,
-              kind: 'result',
-              data: ending.data,
-              at: ending.at,
-            })
-            .execute();
-          return seq;
-        }),
+        // Scrubbed: a job that did not succeed keeps no section's text (D-12).
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const ended = await trx
+              .updateTable('analysis_job')
+              .set({
+                status: ending.status,
+                failure: ending.failure,
+                candidate: ending.candidate,
+                ended_at: ending.at,
+              })
+              .where('athlete_id', '=', athleteId)
+              .where('id', '=', jobId)
+              .where('status', 'in', ['queued', 'running'])
+              .executeTakeFirst();
+            if (Number(ended.numUpdatedRows) === 0) return undefined;
+            const seq = await nextAnalysisSeq(trx, jobId);
+            await trx
+              .insertInto('analysis_event')
+              .values({
+                job_id: jobId,
+                athlete_id: athleteId,
+                seq,
+                kind: 'result',
+                data: ending.data,
+                at: ending.at,
+              })
+              .execute();
+            if (ending.status !== 'succeeded') {
+              await trx
+                .deleteFrom('analysis_event')
+                .where('athlete_id', '=', athleteId)
+                .where('job_id', '=', jobId)
+                .where('kind', '=', 'section')
+                .execute();
+            }
+            return seq;
+          }),
+        ),
       ),
 
     acknowledgeAnalysisJob: (athleteId, jobId) =>
       exclusive(() =>
-        // Scrubbed: the write-up is the rider's text, and acknowledging it is
-        // the device saying the instance need not hold it any more.
+        // Scrubbed: the events hold the sections' text. The write-up itself is
+        // kept (ADR 0046 D-12).
         scrubbing(() =>
           db.transaction().execute(async (trx) => {
             const job = await trx
@@ -3646,12 +3678,6 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .deleteFrom('analysis_event')
               .where('athlete_id', '=', athleteId)
               .where('job_id', '=', jobId)
-              .execute();
-            await trx
-              .updateTable('analysis_job')
-              .set({ candidate: null })
-              .where('athlete_id', '=', athleteId)
-              .where('id', '=', jobId)
               .execute();
             return 'acknowledged' as const;
           }),
@@ -3703,10 +3729,33 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               .deleteFrom('analysis_job')
               .where('ended_at', 'is not', null)
               .where('ended_at', '<', endedBefore)
+              .where('candidate', 'is', null)
               .executeTakeFirst();
             return Number(deleted.numDeletedRows);
           }),
         ),
+      ),
+
+    listAnalysisResults: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('analysis_job')
+            .select(['id', 'athlete_id', 'source', 'template_version', 'ended_at', 'candidate'])
+            .where('athlete_id', '=', athleteId)
+            .where('status', '=', 'succeeded')
+            .where('candidate', 'is not', null)
+            .orderBy('ended_at')
+            .orderBy('id')
+            .execute()
+        ).map((row) => ({
+          jobId: row.id,
+          athleteId: row.athlete_id,
+          source: row.source,
+          templateVersion: row.template_version,
+          endedAt: row.ended_at ?? 0,
+          writeUp: row.candidate ?? '',
+        })),
       ),
 
     eraseAthlete: (athleteId) =>

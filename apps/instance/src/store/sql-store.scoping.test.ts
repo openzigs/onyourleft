@@ -321,6 +321,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
         )
       ).flat(),
   },
+  listAnalysisResults: {
+    probe: (store, athleteId) => store.listAnalysisResults(athleteId),
+  },
   createAnalysisJob: {
     notAScopedRead: 'a write; its one-job-per-athlete rule is analysis/jobs.test.ts’s',
   },

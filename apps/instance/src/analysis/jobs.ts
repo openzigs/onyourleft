@@ -25,10 +25,14 @@
  * 4. **Cancel** aborts the engine's signal AND ends the job `cancelled` at
  *    once, so nothing the engine says after the cancel is kept: the store
  *    appends only to a running job.
- * 5. **Ack**: the device saved the write-up; the candidate and the events
- *    that carried it go. An ended job and its events are deleted
+ * 5. **Ack**: the device saved the write-up; the job's events go. The
+ *    write-up itself is KEPT (ADR 0046 D-12), with its job row, for the
+ *    athlete's other devices and the account export. A job's events — and the
+ *    whole job, when it holds no write-up — are deleted
  *    {@link DEFAULT_RETENTION_MS} after it ended (the owner's Q5 ruling, 7 days)
- *    by {@link AnalysisJobs.sweep}.
+ *    by {@link AnalysisJobs.sweep}. A job that did not succeed keeps no
+ *    section's text. One worker serves every athlete, so a job can wait
+ *    behind another athlete's for up to the agent's run budget.
  * 6. **Restart**: a job a stopped instance left `queued` or `running` ends
  *    `failed`, `interrupted`, at the next start ({@link AnalysisJobs.recover}),
  *    and is never run again: a write-up the rider is no longer waiting for is
@@ -338,6 +342,15 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     logged('running');
     const controller = new AbortController();
     running.set(job.id, controller);
+    // A cancel can land between the claim and the line above, when there was
+    // no controller to abort: look again, and do not start an engine for a job
+    // that has already ended. A cancel after this line finds the controller.
+    const claimed = await store.getAnalysisJob(job.athleteId, job.id);
+    if (claimed?.status !== 'running') {
+      running.delete(job.id);
+      notify(job.id);
+      return;
+    }
     let appended: Promise<void> = Promise.resolve();
     const emit = (event: AgentEvent): void => {
       const [kind, data] = recorded(event);
@@ -569,6 +582,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       if ((await store.endAnalysisJob(caller.athleteId, id, cancelled)) !== undefined) {
         logged('cancelled');
       }
+      // Again, after the end: a worker's claim can land between the read above
+      // and the end, when there was no controller yet to abort.
+      running.get(id)?.abort();
       notify(id);
       return (await store.getAnalysisJob(caller.athleteId, id))?.status;
     },

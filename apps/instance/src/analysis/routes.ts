@@ -173,7 +173,7 @@ export const ANALYSIS_ROUTES: readonly Route[] = [
     operationId: 'acknowledgeAnalysisJob',
     reaches: 'own',
     summary:
-      'Your device has saved the write-up: the instance deletes its copy of it and the job’s events. The job row stays until its seven days are up. `job_running` for a job that has not ended.',
+      'Your device has saved the write-up: the instance deletes the job’s events and keeps the write-up (ADR 0046 D-12), beside the job row. `job_running` for a job that has not ended.',
     identity: true,
     auth: 'session',
     analysis: true,

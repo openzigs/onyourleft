@@ -437,7 +437,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
                 }
               }
             }
@@ -1071,7 +1071,7 @@
     "/v1/analysis/jobs/{jobId}/ack": {
       "post": {
         "operationId": "acknowledgeAnalysisJob",
-        "summary": "Your device has saved the write-up: the instance deletes its copy of it and the job’s events. The job row stays until its seven days are up. `job_running` for a job that has not ended.",
+        "summary": "Your device has saved the write-up: the instance deletes the job’s events and keeps the write-up (ADR 0046 D-12), beside the job row. `job_running` for a job that has not ended.",
         "parameters": [
           {
             "name": "jobId",

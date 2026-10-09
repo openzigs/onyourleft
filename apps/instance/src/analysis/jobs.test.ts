@@ -11,12 +11,14 @@
  * instance with `OYL_INSTANCE_SECRET_KEY` serves them (#1192).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Caller } from '../auth/identity.ts';
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { HttpCounters, renderMetrics } from '../metrics.ts';
 import { frames, openFrames, sealFor, sendEnvelope } from '../sealed/sealed-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
+import type { SqlStore } from '../store/sql-store.ts';
 import { createStoreHarness, registrationFixture } from '../store/testing/index.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
 import { RIDE_INPUT } from './agent-testing.ts';
@@ -407,6 +409,88 @@ describe('cancel', () => {
   });
 });
 
+describe('cancel racing the worker’s claim', () => {
+  async function raceWorld(wrap: (real: SqlStore) => SqlStore) {
+    const harness = await createStoreHarness();
+    await harness.write(async (writer) => {
+      await writer.registerAthlete(registrationFixture('athlete-a'));
+    });
+    const real = await openSqlStore(harness.path);
+    const engine = scriptedEngine();
+    const jobs = createAnalysisJobs({
+      store: wrap(real),
+      engine: engine.engine,
+      available: () => true,
+      now: () => 1_790_000_000_000,
+      timers: fakeTimers().timers,
+    });
+    const caller = { athleteId: 'athlete-a' } as Caller;
+    return {
+      jobs,
+      engine,
+      caller,
+      real,
+      async close() {
+        await jobs.stop();
+        await real.close();
+        await harness.destroy();
+      },
+    };
+  }
+
+  it('does not start the engine for a job a cancel ended between the claim and the run', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const w = await raceWorld((real) => ({
+      ...real,
+      // The claim has marked the job running but not yet handed it over.
+      claimAnalysisJob: async () => {
+        const job = await real.claimAnalysisJob();
+        await held;
+        return job;
+      },
+    }));
+    const started = await w.jobs.start(w.caller, jobBody());
+    const jobId = (started as { value: { jobId: string } }).value.jobId;
+    await vi.waitFor(async () => {
+      expect((await w.real.getAnalysisJob('athlete-a', jobId))?.status).toBe('running');
+    });
+    expect(await w.jobs.cancel(w.caller, jobId)).toBe('cancelled');
+    release();
+    await w.jobs.idle();
+    expect(w.engine.runs).toHaveLength(0);
+    await w.close();
+  });
+
+  it('aborts an engine that started after the cancel read the job as queued', async () => {
+    let lie = false;
+    const w = await raceWorld((real) => ({
+      ...real,
+      getAnalysisJob: async (athleteId, id) => {
+        const job = await real.getAnalysisJob(athleteId, id);
+        if (lie && job !== undefined) {
+          lie = false;
+          return { ...job, status: 'queued' as const };
+        }
+        return job;
+      },
+    }));
+    const started = await w.jobs.start(w.caller, jobBody());
+    const jobId = (started as { value: { jobId: string } }).value.jobId;
+    const run = await w.engine.next();
+    // The cancel's read says queued although the worker has the job: no
+    // controller was there for it to abort the first time.
+    lie = true;
+    expect(await w.jobs.cancel(w.caller, jobId)).toBe('cancelled');
+    expect(run.signal.aborted).toBe(true);
+    run.finish({ kind: 'cancelled' });
+    await w.jobs.idle();
+    await w.close();
+  });
+});
+
 describe('scoped to the session’s athlete', () => {
   it('answers 404 to B and to C on every job route for A’s job, and 200 to A', async () => {
     const { world: w, engine, riders } = await jobsWorld(3);
@@ -471,7 +555,7 @@ describe('one job at a time, and a start limit', () => {
 });
 
 describe('retention', () => {
-  it('deletes the candidate and the events on ack, and the job seven days after it ended', async () => {
+  it('keeps the write-up past ack and past the sweep, deletes the events, and exports it (ADR 0046 D-12)', async () => {
     const { world: w, engine, riders } = await jobsWorld(2);
     const [anna, ben] = riders;
     const finished = async (token: string): Promise<string> => {
@@ -484,41 +568,67 @@ describe('retention', () => {
     };
     const annas = await finished(anna!.token);
     const endedAt = w.clock.ms;
-    expect(
-      (await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, annas)))?.candidate,
-    ).toBe(WRITE_UP);
     const ack = await w.call('POST', `/v1/analysis/jobs/${annas}/ack`, {
       token: anna!.token,
       body: {},
     });
     expect(ack.status).toBe(204);
     const acked = await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, annas));
-    expect(acked?.candidate).toBeNull();
+    expect(acked?.candidate).toBe(WRITE_UP);
     expect(acked?.status).toBe('succeeded');
     expect(
       await w.freshRead((store) => store.listAnalysisEvents(anna!.athleteId, annas, 0, 100)),
     ).toEqual([]);
-    expect((await w.databaseBytes()).includes(WRITE_UP)).toBe(false);
 
     w.clock.ms += 1_000;
     const bens = await finished(ben!.token);
 
+    w.clock.ms = endedAt + DEFAULT_RETENTION_MS + 1;
+    // Past its seven days, the job's events go and the write-up stays with its row.
+    expect(await w.analysis?.sweep()).toBe(0);
+    expect(
+      (await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, annas)))?.candidate,
+    ).toBe(WRITE_UP);
+    w.clock.ms += 1_000;
+    await w.analysis?.sweep();
+    expect(
+      await w.freshRead((store) => store.listAnalysisEvents(ben!.athleteId, bens, 0, 100)),
+    ).toEqual([]);
+    const exported = await w.call('GET', '/v1/account/export', { token: anna!.token });
+    expect(
+      (exported.body as { analysisResults: { jobId: string; writeUp: string }[] }).analysisResults,
+    ).toMatchObject([{ jobId: annas, writeUp: WRITE_UP }]);
+  });
+
+  it('deletes a job that holds no write-up seven days after it ended', async () => {
+    const { world: w, engine, riders } = await jobsWorld(1);
+    const jobId = await started(w, riders[0]!.token);
+    const run = await engine.next();
+    run.finish({ kind: 'failed', why: 'engine-error' });
+    await w.analysis?.idle();
+    const endedAt = w.clock.ms;
     w.clock.ms = endedAt + DEFAULT_RETENTION_MS - 1;
     expect(await w.analysis?.sweep()).toBe(0);
     w.clock.ms = endedAt + DEFAULT_RETENTION_MS + 1;
     expect(await w.analysis?.sweep()).toBe(1);
-    expect(await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, annas))).toBe(
+    expect(await w.freshRead((store) => store.getAnalysisJob(riders[0]!.athleteId, jobId))).toBe(
       undefined,
     );
-    // Ben's ended a second later, and is a second from its own seven days.
-    expect((await w.freshRead((store) => store.getAnalysisJob(ben!.athleteId, bens)))?.status).toBe(
-      'succeeded',
+  });
+
+  it('keeps no section’s text of a job that ended withheld, cancelled or failed', async () => {
+    const { world: w, engine, riders } = await jobsWorld(1);
+    const jobId = await started(w, riders[0]!.token);
+    const run = await engine.next();
+    run.emit({ type: 'section', index: 1, text: WRITE_UP });
+    run.emit({ type: 'withdrawn' });
+    run.finish({ kind: 'withheld', reasons: [] });
+    await w.analysis?.idle();
+    const events = await w.freshRead((store) =>
+      store.listAnalysisEvents(riders[0]!.athleteId, jobId, 0, 100),
     );
-    w.clock.ms += 1_000;
-    expect(await w.analysis?.sweep()).toBe(1);
-    expect(
-      await w.freshRead((store) => store.listAnalysisEvents(ben!.athleteId, bens, 0, 100)),
-    ).toEqual([]);
+    expect(events.map((each) => each.kind)).toEqual(['withdrawn', 'result']);
+    expect((await w.databaseBytes()).includes(WRITE_UP)).toBe(false);
   });
 
   it('refuses to ack a job that has not ended', async () => {
