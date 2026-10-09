@@ -80,7 +80,7 @@ Edit `.env`:
 | Variable | Set it to |
 |---|---|
 | `OYL_INSTANCE_ORIGIN` | `https://` and the public hostname from step 3 |
-| `OYL_INSTANCE_REGISTRATION` | `approval` (you or your deputy approve each new account), `invite`, `open`, or `closed`. Left empty here it is `closed` — see [`docs/moderation.md`](../moderation.md) |
+| `OYL_INSTANCE_REGISTRATION` | `approval` (you or your deputy approve each new account), `invite`, `open`, or `closed`. Left empty here it is `closed` — see [`docs/moderation.md`](../moderation.md). ⚠️ `closed` turns away **your own** first device too: the app says the instance is not taking new riders. Set `open` while your own devices connect (`docker compose up -d instance`), then set it back |
 | `OYL_INSTANCE_OWNER_KEY`, `OYL_INSTANCE_DEPUTY_KEY` | the device keys of the two moderators, which the app shows; empty names nobody |
 | `CLOUDFLARE_TUNNEL_TOKEN` | the token from step 3 |
 | `OYL_INSTANCE_SECRET_KEY` | empty to start with. It is what a hosted model key and the instance's own keys are encrypted under — read [`operating-an-instance.md`](../operating-an-instance.md) before setting it, and keep it out of both backup folders |
