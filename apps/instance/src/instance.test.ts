@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { MASK_PLACEHOLDER } from '@onyourleft/analysis';
+import { PLANTED_DETAILS, PLANTED_GUARD, personalDetailFaults } from '@onyourleft/analysis/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
@@ -31,8 +33,13 @@ import { joinRoom, type RoomClient } from './room/node/router-testing.ts';
 import { until } from './room/node/node-room-testing.ts';
 import { readServerConfig, type ServerConfig } from './server-config.ts';
 import { migrateForDeploy, migratingMarker, openServingStore } from './store/serving.ts';
-import { migrateAllBut, registrationFixture } from './store/testing/index.ts';
+import type { SyncItemWrite } from './store/sql-store.ts';
+import { deviceKeyFixture, migrateAllBut, registrationFixture } from './store/testing/index.ts';
+import type { Caller } from './auth/identity.ts';
 import { RIDE_INPUT } from './analysis/agent-testing.ts';
+import { MASKING_ITEM_KEY, type MaskingItemBody } from './analysis/hosted.ts';
+import { secretText } from './analysis/hosted-key-testing.ts';
+import { modelKeySet } from './operator/commands.ts';
 import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
 import { ANALYSIS_SWEEP_PERIOD_MS } from './analysis/jobs.ts';
@@ -75,11 +82,13 @@ async function start(
     config?: Partial<Config>;
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
+    hosted?: Pick<InstanceOptions, 'hostedConsent' | 'hostedFetch'>;
   } = {},
 ) {
   const lines: string[] = [];
   running = await startInstance({
     ...extra.timing,
+    ...extra.hosted,
     config: testConfig({ bodyLimitBytes: 16_384, registration: 'open', ...extra.config }),
     ...(extra.resolve === undefined ? {} : { resolve: extra.resolve }),
     server: serverConfig(databasePath, overrides),
@@ -1173,4 +1182,145 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     }
     expect(existsSync(fileOf(waiting.routeSha256))).toBe(true);
   }, 30_000);
+});
+
+describe('a hosted analysis job on the running instance — #1223', () => {
+  const HOSTED = new URL('https://models.example/v1');
+  const SECRET_FILL = 7;
+  const PLANTED_TEXT = `Remember ${PLANTED_DETAILS.map((detail) => detail.text).join(' and ')} next time.`;
+
+  /** The guard as the device syncs it (`hosted.ts` §`MaskingItemBody`). */
+  const GUARD_BODY = JSON.stringify({
+    words: PLANTED_GUARD.words,
+    zones: PLANTED_GUARD.zones.map((zone) => ({
+      label: zone.label,
+      latitude: zone.centre.latitude,
+      longitude: zone.centre.longitude,
+      radius: zone.radius,
+    })),
+  } satisfies MaskingItemBody);
+
+  /** A fetch standing in for the internet: requests under the hosted base go to the fake server. */
+  function internet(baseUrl: URL) {
+    const bodies: string[] = [];
+    const base = HOSTED.href.replace(/\/+$/, '');
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      bodies.push(typeof init?.body === 'string' ? init.body : '');
+      if (!url.startsWith(`${base}/`)) return Promise.reject(new Error('another host'));
+      return globalThis.fetch(`${baseUrl.href}${url.slice(base.length)}`, init);
+    }) as typeof globalThis.fetch;
+    return { bodies, fetch };
+  }
+
+  /**
+   * An instance holding the operator's hosted key, the operator's goal
+   * carrying every planted detail and — unless `masking` is `null` — their
+   * masking item; then one `instance-hosted` job run to its end through the
+   * instance's own job engine. (Driven through `analysisJobs()` rather than
+   * HTTP: an instance with `OYL_INSTANCE_SECRET_KEY` — which opening a hosted
+   * key needs — serves the job routes sealed only, #1192, and sealing is not
+   * what this tests.)
+   */
+  async function hostedJob(options: {
+    readonly consent: boolean;
+    readonly masking: string | null;
+  }) {
+    const model = await startFakeModelServer([
+      { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
+      { kind: 'text', text: 'A steady ride.' },
+    ]);
+    const { bodies, fetch: hostedFetch } = internet(model.baseUrl);
+    const athleteId = 'athlete-a';
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const write = openServingStore(path);
+      try {
+        await write.registerAthlete(registrationFixture(athleteId));
+        const items: [SyncItemWrite['kind'], string, string][] = [
+          ['goal', 'goal-1', JSON.stringify({ text: `Goal: ${PLANTED_TEXT}` })],
+        ];
+        if (options.masking !== null) items.push(['masking', MASKING_ITEM_KEY, options.masking]);
+        for (const [index, [kind, key, body]] of items.entries()) {
+          await write.putSyncItem({
+            athleteId,
+            kind,
+            key,
+            body: new TextEncoder().encode(body),
+            digest: String(index + 1).padStart(64, '0'),
+            now: 1_790_000_000 + index,
+          });
+        }
+      } finally {
+        await write.close();
+      }
+      await modelKeySet(
+        { database: path, blobs: join(path, '..', 'blobs') },
+        {
+          url: HOSTED.href,
+          model: 'hosted-model',
+          input: 'sk-hosted-0123456789abcdef\n',
+          secret: secretText(SECRET_FILL),
+          ownerKey: deviceKeyFixture(athleteId).publicKey,
+        },
+      );
+      const { instance } = await start(
+        path,
+        { secretKey: new Uint8Array(32).fill(SECRET_FILL) },
+        {
+          hosted: options.consent
+            ? { hostedFetch, hostedConsent: () => Promise.resolve(HOSTED.origin) }
+            : { hostedFetch },
+        },
+      );
+      await instance.jobsRecovered;
+      expect((await instance.hostedModelKey()).kind).toBe('held');
+      const jobs = instance.analysisJobs();
+      if (jobs === undefined) throw new Error('no analysis jobs');
+      const caller = { athleteId } as Caller;
+      const started = await jobs.start(caller, { ...jobBody(), source: 'instance-hosted' });
+      if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+      await jobs.idle();
+      const stream = await jobs.events(caller, started.value.jobId, null);
+      const events = parseStream((await stream?.text()) ?? '').events;
+      return { events, bodies, requests: [...model.requests] };
+    } finally {
+      await model.close();
+    }
+  }
+
+  it('runs end to end with a guard and recorded consent, and every request it sends is masked', async () => {
+    const { events, bodies, requests } = await hostedJob({ consent: true, masking: GUARD_BODY });
+    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    // The tools' request and the write-up's: both through the hosted fetch, both masked.
+    expect(requests).toHaveLength(2);
+    expect(bodies).toHaveLength(2);
+    for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
+      expect(personalDetailFaults(body)).toStrictEqual([]);
+    }
+    // The goal did reach the model, masked rather than dropped.
+    const last = JSON.stringify(requests.at(-1));
+    for (const placeholder of Object.values(MASK_PLACEHOLDER)) expect(last).toContain(placeholder);
+  });
+
+  it.each([
+    ['no masking item synced', { consent: true, masking: null }],
+    ['a masking item that cannot be read', { consent: true, masking: '{"words":' }],
+    [
+      'no recorded consent — every running instance until #1199',
+      { consent: false, masking: GUARD_BODY },
+    ],
+  ])(
+    '%s: refused hosted_unavailable, and the hosted server is sent nothing',
+    async (_case, options) => {
+      const { events, bodies, requests } = await hostedJob(options);
+      expect(events.at(-1)?.data).toMatchObject({
+        status: 'failed',
+        failure: 'hosted_unavailable',
+      });
+      expect(bodies).toStrictEqual([]);
+      expect(requests).toStrictEqual([]);
+    },
+  );
 });
