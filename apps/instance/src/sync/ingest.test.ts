@@ -22,6 +22,7 @@ import {
   syncWorld,
   uploadBody,
 } from './sync-testing.ts';
+import { answerTo, sealFor, sendEnvelope } from '../sealed/sealed-testing.ts';
 import {
   contentHashOf,
   LINK_PURPOSE,
@@ -438,10 +439,24 @@ describe('ingesting a signed record (#37)', () => {
     const [rider] = setup.riders;
     const bytes = longGpx(4 * 60 * 60);
     const body = await uploadBody(rider!.device, bytes);
+    // Since #1192 the route is sealed-only. Sealing the request and opening the
+    // reply are the DEVICE's work, so they happen off the clock; what is timed
+    // is the instance's — opening the envelope, ingesting, sealing its reply —
+    // through the listener. Timing `post` whole put the test client's own
+    // HPKE over 3.3 MB on the clock and ran past 3 s on the EPYC 7763.
+    const sealed = await sealFor(world, {
+      method: 'POST',
+      path: '/v1/sync/records',
+      body,
+      token: rider!.token,
+      signer: rider!.device.signingKey,
+    });
     const started = performance.now();
-    const answer = await post(world, rider!.token, body);
+    const response = await sendEnvelope(world.url, sealed.envelope, rider!.token);
     const took = performance.now() - started;
-    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    const answer = await answerTo(sealed, response);
+    expect(answer.status, answer.raw).toBe(200);
+    expect(answer.reply?.status, JSON.stringify(answer.body)).toBe(200);
     console.log(
       `#37 budget: a 4-hour ride (${String(bytes.length)} bytes of GPX, 14 400 points) ingested in ${took.toFixed(0)} ms, against ${String(INGEST_BUDGET_MS)} ms`,
     );
@@ -455,7 +470,8 @@ describe('ingesting a signed record (#37)', () => {
  * on every point, which took about 0.1 s on a 2024 laptop — so a two-core CI
  * runner under coverage stays inside it. A FIT file of the same ride is
  * several times smaller. The figure each run measures is printed beside the
- * budget.
+ * budget. Since #1192 it is the instance's share of a SEALED request: the
+ * device's sealing and opening are off the clock.
  */
 const INGEST_BUDGET_MS = 3_000;
 
