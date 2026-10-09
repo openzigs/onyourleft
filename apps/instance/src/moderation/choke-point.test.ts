@@ -43,6 +43,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Reach, Route } from '../route-kit.ts';
 import { ROUTES } from '../routes.ts';
+import { codeOf as sealedCodeOf, sealedCall } from '../sealed/sealed-testing.ts';
 import {
   codeOf,
   startModerationWorld,
@@ -390,9 +391,10 @@ describe('a suspended rider’s way-out session reaches the export and the delet
 
   let world: ModerationWorld;
   let token: string;
+  let leaving: Rider;
   beforeAll(async () => {
     world = await startModerationWorld();
-    const leaving = await world.rider('Leaving');
+    leaving = await world.rider('Leaving');
     const suspended = await world.as(
       world.owner,
       'POST',
@@ -419,6 +421,19 @@ describe('a suspended rider’s way-out session reaches the export and the delet
   it.each(refused.map((route) => [route.operationId, route] as const))(
     '%s answers the way-out session `account_suspended`',
     async (_operation, route) => {
+      if (route.sealed === 'only') {
+        // Reachable only sealed (#1191): the same choke point, inside the envelope.
+        const sealed = await sealedCall(world, {
+          method: route.method,
+          path: route.path.replace(/\{[A-Za-z]+\}/g, 'x'),
+          token,
+          signer: leaving.device.signingKey,
+          ...(route.method === 'GET' ? {} : { body: {} }),
+        });
+        expect(sealed.reply?.status).toBe(403);
+        expect(sealedCodeOf(sealed)).toBe('account_suspended');
+        return;
+      }
       const answer = await world.call(route.method, route.path.replace(/\{[A-Za-z]+\}/g, 'x'), {
         token,
         ...(route.method === 'GET' ? {} : { body: {} }),

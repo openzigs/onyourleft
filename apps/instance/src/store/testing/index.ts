@@ -319,7 +319,12 @@ export async function seedWorld(store: SqlStore): Promise<void> {
   for (const athlete of ATHLETES) {
     await store.registerAthlete(registrationFixture(athlete));
     // Bound only by following the mailed link (#865).
-    await store.confirmRecoveryEmail(athlete, confirmationTokenFixture(athlete), 1_790_000_050);
+    await store.confirmRecoveryEmail(
+      athlete,
+      confirmationTokenFixture(athlete),
+      1_790_000_050,
+      deviceKeyFixture(athlete).publicKey,
+    );
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete, 'second-ride'));
@@ -344,12 +349,23 @@ export async function seedWorld(store: SqlStore): Promise<void> {
     await store.putHistoryIndex(historyIndexFixture(athlete));
     await store.putResult(resultFixture(athlete));
     // Migration 0004's athlete-scoped tables (#772, #773, #774), one row each.
-    await store.putLinkCode({
-      codeSha256: hexOf(`link-${athlete}`),
-      athleteId: athlete,
-      mintedByKey: deviceKeyFixture(athlete).publicKey,
-      expiresAt: 1_790_000_600,
-    });
+    await store.putLinkCode(
+      {
+        codeSha256: hexOf(`link-${athlete}`),
+        athleteId: athlete,
+        mintedByKey: deviceKeyFixture(athlete).publicKey,
+        expiresAt: 1_790_000_600,
+      },
+      1_790_000_350,
+    );
+    // Migration 0018's (#1193): the confirmation and the code above each
+    // logged an entry, and the athlete's key has acknowledged the first.
+    await store.acknowledgeAccountChanges(
+      athlete,
+      deviceKeyFixture(athlete).publicKey,
+      (await store.listAccountChanges(athlete))[0]?.id ?? 0,
+      1_790_000_360,
+    );
     await store.renameAthlete(athlete, `Renamed ${athlete}`, 1_790_000_300, FIXTURE_RENAME_LIMIT);
     await store.putEmailRecoveryToken({
       tokenSha256: hexOf(`email-${athlete}`),

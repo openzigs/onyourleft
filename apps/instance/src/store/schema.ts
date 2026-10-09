@@ -216,6 +216,34 @@ export interface RecoveryEmailConfirmationTable {
   readonly address: string;
   readonly expires_at: number;
   readonly used_at: number | null;
+  /** The key that gave the address, or `null` before migration 0018 (#1193). */
+  readonly requested_by_key: Generated<string | null>;
+}
+
+/**
+ * One account-security change (#1193, ADR 0047 D-8, migration 0018), and the
+ * device key that authorised it.
+ */
+export interface AccountChangeTable {
+  readonly id: Generated<number>;
+  readonly athlete_id: string;
+  readonly at: number;
+  readonly kind: string;
+  readonly actor_key: string;
+  /** The key added or revoked, where the change is about a key. */
+  readonly subject_key: string | null;
+  /** How a key was added: `link_code`, `recovery_code` or `email_token`. */
+  readonly via: string | null;
+  /** The address added or cleared, where the change is about one. */
+  readonly address: string | null;
+}
+
+/** How far one device has acknowledged its athlete's account-change log (#1193). */
+export interface AccountChangeMarkTable {
+  readonly athlete_id: string;
+  readonly device_key: string;
+  readonly acknowledged_through: number;
+  readonly acknowledged_at: number;
 }
 
 /** One athlete blocking another (#83): the blocker's row. */
@@ -423,4 +451,6 @@ export interface InstanceDatabase {
   readonly instance_key_statement: InstanceKeyStatementTable;
   readonly instance_key_lease: InstanceKeyLeaseTable;
   readonly sealed_replay: SealedReplayTable;
+  readonly account_change: AccountChangeTable;
+  readonly account_change_mark: AccountChangeMarkTable;
 }

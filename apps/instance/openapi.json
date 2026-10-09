@@ -428,7 +428,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
                 }
               }
             }
@@ -1015,6 +1015,250 @@
         }
       }
     },
+    "/v1/auth/account-changes": {
+      "get": {
+        "operationId": "listAccountChanges",
+        "summary": "This athlete’s account-change log (ADR 0047 D-8): every link code minted, key added or revoked and recovery address added or cleared, each with the device key that authorised it; this device’s mark; and the notices — every entry another key made since this device last acknowledged. Sealed only.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "changes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "codes_replaced",
+                              "address_added",
+                              "address_cleared",
+                              "link_code_minted",
+                              "key_added",
+                              "key_revoked"
+                            ]
+                          },
+                          "actorKey": {
+                            "type": "string"
+                          },
+                          "subjectKey": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "via": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "address": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "kind",
+                          "actorKey",
+                          "subjectKey",
+                          "via",
+                          "address"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "acknowledgedThrough": {
+                      "type": "integer"
+                    },
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "codes_replaced",
+                              "address_added",
+                              "address_cleared",
+                              "link_code_minted",
+                              "key_added",
+                              "key_revoked"
+                            ]
+                          },
+                          "actorKey": {
+                            "type": "string"
+                          },
+                          "subjectKey": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "via": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "address": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "kind",
+                          "actorKey",
+                          "subjectKey",
+                          "via",
+                          "address"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "changes",
+                    "acknowledgedThrough",
+                    "notices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/account-changes/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeAccountChanges",
+        "summary": "Mark the account-change log seen through `through`, for THIS device only: the session’s key, never one the request names. Clamped to the newest entry, and never moved backwards. Sealed only.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "through": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "through"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "acknowledgedThrough": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "acknowledgedThrough"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/auth/adult": {
       "post": {
         "operationId": "confirmAdult",
@@ -1297,7 +1541,7 @@
     "/v1/auth/devices/{publicKey}/revoke": {
       "post": {
         "operationId": "revokeDevice",
-        "summary": "Revoke one of this athlete’s device keys and its sessions. The last key needs one of the athlete’s recovery codes, which is checked and not spent.",
+        "summary": "Revoke one of this athlete’s device keys, and undo what that key did and nothing else: its sessions end, the link codes it minted are void and its pending recovery-address confirmation is cancelled. The recovery codes are never replaced. The revoke is logged by the asking key. The last key needs one of the athlete’s recovery codes, which is checked and not spent.",
         "parameters": [
           {
             "name": "publicKey",

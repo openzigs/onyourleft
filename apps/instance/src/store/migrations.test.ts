@@ -88,7 +88,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   display_name_change: `INSERT INTO display_name_change (id, athlete_id, previous_name, changed_at) VALUES (1, 'a', 'Old', 8)`,
   recovery_email: `INSERT INTO recovery_email VALUES ('a', 'a@example.org')`,
   email_recovery_token: `INSERT INTO email_recovery_token VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
-  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
+  // The columns named, so migration 0018's `requested_by_key` is NULL (#1193).
+  recovery_email_confirmation: `INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at) VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
   block: `INSERT INTO block VALUES ('a', 'b', 10)`,
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
   invite_code: `INSERT INTO invite_code VALUES ('${'8'.repeat(64)}', 'a', 13, NULL)`,
@@ -100,6 +101,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   instance_key_statement: `INSERT INTO instance_key_statement VALUES ('0123456789abcdef', 'key', 19, 172819, '{}', '${'cd'.repeat(64)}')`,
   instance_key_lease: `INSERT INTO instance_key_lease VALUES ('keys', 'holder', 20)`,
   sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
+  account_change: `INSERT INTO account_change (id, athlete_id, at, kind, actor_key, subject_key, via, address) VALUES (1, 'a', 21, 'key_added', 'key-a', 'key-a', 'link_code', NULL)`,
+  account_change_mark: `INSERT INTO account_change_mark VALUES ('a', 'key-a', 1, 22)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 
@@ -318,6 +321,49 @@ describe('the migrations (#769)', () => {
     } finally {
       read.close();
     }
+  });
+
+  it('takes the account-change log, the marks and `requested_by_key` away with 0018, rows and all, and puts them back empty (#1193)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0018-account-changes') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const columns = (): string[] => {
+      const database = openDatabase(path);
+      try {
+        return (
+          database
+            .prepare(`SELECT name FROM pragma_table_info('recovery_email_confirmation')`)
+            .all() as {
+            name: string;
+          }[]
+        ).map((each) => each.name);
+      } finally {
+        database.close();
+      }
+    };
+    const seeded = snapshot(path);
+    expect(seeded.rows.account_change).toBe(1);
+    expect(seeded.rows.account_change_mark).toBe(1);
+    expect(columns()).toContain('requested_by_key');
+
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = snapshot(path);
+    expect(undone.rows).not.toHaveProperty('account_change');
+    expect(undone.rows).not.toHaveProperty('account_change_mark');
+    expect(columns()).not.toContain('requested_by_key');
+    // Every other row stays, the confirmation the column was added to included.
+    expect(undone.rows.recovery_email_confirmation).toBe(1);
+    expect(undone.rows.device_key).toBe(seeded.rows.device_key);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    const redone = snapshot(path);
+    expect([redone.rows.account_change, redone.rows.account_change_mark]).toEqual([0, 0]);
+    expect(columns()).toContain('requested_by_key');
   });
 
   it('refuses a migration with no down, rather than letting Kysely skip it', async () => {
