@@ -20,6 +20,7 @@ import {
   instanceIdentityFingerprint,
   instanceIdentityRotationBytes,
   instanceKeyStatementBytes,
+  NO_KEY_TRUST,
   toHex,
   unixSeconds,
   type InstanceIdentityRotation,
@@ -39,6 +40,7 @@ import {
   sealedRouteGate,
 } from './instance-pin';
 import {
+  CONNECT_REFUSAL_TEXT,
   createInstancePort,
   instanceEraser,
   type InstancePortDependencies,
@@ -46,7 +48,7 @@ import {
 } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { createModerationPort, INVITE_CARD_CAUTION } from './moderation-port';
-import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from './sign-in';
+import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount, writeInstanceAccount } from './sign-in';
 import { LOADED_LOCALLY } from './testing';
 
 interface IdentityInstance {
@@ -547,5 +549,77 @@ describe('disconnecting and erasing forget the pin (#1190)', () => {
     );
     expect(keptPin(storage)).toBeUndefined();
     expect(readInstanceAccount(storage)).toBeUndefined();
+  });
+});
+
+describe('a judgement lands only on the pin it was judged against (#1207)', () => {
+  it('writes nothing, and seals nothing, when the pin was replaced while the keys were read', async () => {
+    clock.s = T0 + HOUR;
+    const by = await identity();
+    const replacement = await identity();
+    const keys = { body: await served(by, [await statement(T0)]) };
+    const inFlight: { during?: () => void } = {};
+    const inner = wire(await world(), keys);
+    const send = vi.fn(async (url: string, init: RequestInit) => {
+      if (new URL(url).pathname === '/v1/instance/keys') inFlight.during?.();
+      return inner(url, init);
+    });
+    const { port, storage } = device(send);
+    expect(await port.connect(ORIGIN, 'Anna', by.card)).toMatchObject({ kind: 'connected' });
+    // The rider confirms another card while this read is in flight.
+    const replaced = {
+      ...readInstanceAccount(storage)!,
+      pin: base32Unpadded(replacement.fingerprint),
+      keyTrust: NO_KEY_TRUST,
+    };
+    inFlight.during = () => {
+      writeInstanceAccount(storage, replaced);
+    };
+    expect(await port.keys()).toEqual({
+      kind: 'refused',
+      text: INSTANCE_KEY_TEXT.unreachable,
+      pinned: base32Unpadded(by.fingerprint),
+    });
+    // Read back: the replaced pin and its empty trust, untouched by the old judgement.
+    expect(readInstanceAccount(storage)).toEqual(replaced);
+  });
+});
+
+describe('a card offered for an address this build refuses (#1207)', () => {
+  const REFUSED_ORIGIN = 'http://ride.example';
+
+  it('answers offerCard and confirmCard with a refusal, never a throw, and keeps nothing', async () => {
+    clock.s = T0 + HOUR;
+    const by = await identity();
+    const keys = { body: await served(by, [await statement(T0)]) };
+    const storage = deviceStorage();
+    const stored = { origin: REFUSED_ORIGIN, instanceAthleteId: 'athlete-1' };
+    writeInstanceAccount(storage, stored);
+    const send = wire(await world(), keys);
+    const { port } = device(send, storage);
+    const card = `oyl-instance:${REFUSED_ORIGIN}#${base32Unpadded(by.fingerprint)}`;
+    const refused = { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable };
+    expect(await port.offerCard(card)).toEqual(refused);
+    expect(await port.confirmCard(card)).toEqual(refused);
+    expect(readInstanceAccount(storage)).toEqual(stored);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('connecting again with a different card (#1207, D-6)', () => {
+  it('is refused before any sign-in, keeping the pin, even when the instance’s keys verify under the new card', async () => {
+    clock.s = T0 + HOUR;
+    const old = await identity();
+    const { port, storage, keys, send } = await pinned(old, [await statement(T0)]);
+    const next = await identity();
+    keys.body = await served(next, [await statement(T0 + 1)]);
+    send.mockClear();
+    expect(await port.connect(ORIGIN, 'Anna', next.card)).toEqual({
+      kind: 'refused',
+      text: CONNECT_REFUSAL_TEXT.pin_differs,
+    });
+    expect(keptPin(storage)).toBe(base32Unpadded(old.fingerprint));
+    // The card was checked against the keys, and nothing else was sent.
+    expect(paths(send)).toEqual(['GET /v1/instance/keys']);
   });
 });
