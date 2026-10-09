@@ -211,6 +211,49 @@ describe('judging the keys an instance serves (#1190, ADR 0047 D-5)', () => {
     expect(await judge(forgedBody)).toEqual({ kind: 'mismatch' });
   });
 
+  it('refuses an endorsement that is not tied to the pinned key, the fingerprint or the origin', async () => {
+    const endorse = async (
+      signer: string,
+      previousLabel: string,
+      members: Partial<InstanceIdentityRotation> = {},
+    ) => {
+      const rotation: InstanceIdentityRotation = {
+        purpose: INSTANCE_IDENTITY_ROTATION_PURPOSE,
+        instanceOrigin: ORIGIN,
+        previousIdentityKey: toHex(stubPublicKey(previousLabel)),
+        identityKey: toHex(stubPublicKey('identity-2')),
+        fingerprint: base32Unpadded(await fingerprintOf('identity-2')),
+        issuedAt: T0,
+        ...members,
+      };
+      const signature = toHex(
+        await stubSigningKey(signer).sign(instanceIdentityRotationBytes(rotation)),
+      );
+      return judge(
+        await served(
+          'identity-2',
+          [await statementFor('enc-1')],
+          [{ statement: rotation, signature }],
+        ),
+      );
+    };
+
+    // Control: the pinned key's own endorsement is accepted.
+    expect((await endorse('identity', 'identity')).kind).toBe('new-card');
+    // An impostor endorsing its own key under its own previous key, validly signed.
+    expect(await endorse('impostor', 'impostor')).toEqual({ kind: 'mismatch' });
+    // Signed by the pinned key, but naming a fingerprint other than the served key's.
+    expect(
+      await endorse('identity', 'identity', {
+        fingerprint: base32Unpadded(await fingerprintOf('impostor')),
+      }),
+    ).toEqual({ kind: 'mismatch' });
+    // Signed by the pinned key, but for another origin.
+    expect(
+      await endorse('identity', 'identity', { instanceOrigin: 'https://other.example' }),
+    ).toEqual({ kind: 'mismatch' });
+  });
+
   it('never goes back: after serial 5, an answer serving only serial 4 is older, naming 5', async () => {
     const five = await statementFor('enc-5', { serial: 5 });
     const four = await statementFor('enc-4', { serial: 4 });

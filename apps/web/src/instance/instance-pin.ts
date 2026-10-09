@@ -53,7 +53,7 @@ export const INSTANCE_KEY_TEXT = {
   /** D-5 / D-14 Q8: a planned rotation was endorsed; the app stops sealing until a new card. */
   'needs-new-card':
     'Your instance has a new key. Nothing more will be sent to it until you scan its new card: ' +
-    'ask its operator for the card, and check that its fingerprint ends the same as the one below.',
+    'ask its operator for the card, and check that its whole fingerprint is the same as the one below.',
   /** D-5's expired refusal. */
   expired:
     'Your instance’s keys have expired. It may have been off for a while; it renews them when it ' +
