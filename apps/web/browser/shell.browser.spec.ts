@@ -2113,7 +2113,7 @@ async function openControls(page: Page, url = CONTROLS_PAGE, theme?: Theme): Pro
   expect(
     await page.locator('[data-oyl-native-control]').count(),
     'the native control specimens did not render — see shell-harness.tsx §NativeControls',
-  ).toBe(8);
+  ).toBe(9);
 }
 
 /** The control specimens, as {@link sharedShell} loads them. */
@@ -2256,6 +2256,82 @@ test.describe('#667 — the row target is declared, and nothing else holds it', 
       expect(row.height, `a ${row.markup} row with no floor`).toBeGreaterThan(0);
       expect(row.height, `a ${row.markup} row with no floor`).toBeLessThan(TOUCH_TARGET_PIXELS);
     }
+  });
+});
+
+/**
+ * #1207 — the instance card box (#1190) declares its 44 px target in
+ * `theme.css` (§`.oyl-instance__card-box`), and `InstanceKeys.target.a11y.test.ts`
+ * reads that declaration. This is the measured half, #316's three ways. Its
+ * three rows make it taller than 44 px as it first renders, so what the floor
+ * holds is the box a rider DRAGS smaller (`resize: vertical`): measured dragged
+ * to nothing, with the floor and without.
+ */
+async function cardBox(
+  page: Page,
+  { dragged, stripped }: { readonly dragged: boolean; readonly stripped: boolean },
+): Promise<{ readonly height: number; readonly width: number; readonly minHeight: string }> {
+  return page.evaluate(
+    ({ drag, strip }) => {
+      const box = document.querySelector<HTMLTextAreaElement>(
+        '[data-oyl-native-control="card-box"]',
+      );
+      if (box === null) throw new Error('no card box specimen — see shell-harness.tsx');
+      const before = box.style.cssText;
+      if (drag) box.style.height = '0px';
+      if (strip) box.style.minHeight = '0px';
+      const rect = box.getBoundingClientRect();
+      const measured = {
+        height: rect.height,
+        width: rect.width,
+        minHeight: getComputedStyle(box).minHeight,
+      };
+      box.style.cssText = before;
+      return measured;
+    },
+    { drag: dragged, strip: stripped },
+  );
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`#1207 — ${viewport.name} — the instance card box`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('is at least a 44×44 target as rendered, and when dragged as small as it goes', async ({
+      browser,
+    }) => {
+      const page = await sharedShell(browser, viewport, SHARED_CONTROLS);
+      for (const dragged of [false, true]) {
+        const box = await cardBox(page, { dragged, stripped: false });
+        const what = dragged ? 'dragged to nothing' : 'as rendered';
+        expect(box.height, `${what}: ${box.height.toFixed(1)}px tall`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+        expect(box.width, `${what}: ${box.width.toFixed(1)}px wide`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+      }
+    });
+  });
+}
+
+test.describe('#1207 — the card box’s target is declared, and the floor is what holds it', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('declares a 44 px minimum height', async ({ browser }) => {
+    const page = await sharedShell(browser, { width: 1280, height: 800 }, SHARED_CONTROLS);
+    const box = await cardBox(page, { dragged: false, stripped: false });
+    expect(Number.parseFloat(box.minHeight)).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+  });
+
+  test('dragged to nothing with the floor stripped off, it falls short', async ({ browser }) => {
+    // The control: without the declaration a dragged box is its padding and
+    // border, so a green case above was the floor's doing and nothing else's.
+    const page = await sharedShell(browser, { width: 1280, height: 800 }, SHARED_CONTROLS);
+    const box = await cardBox(page, { dragged: true, stripped: true });
+    expect(box.minHeight, 'the floor was not taken off, so this measures it').toBe('0px');
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.height).toBeLessThan(TOUCH_TARGET_PIXELS);
   });
 });
 

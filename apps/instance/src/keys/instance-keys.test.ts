@@ -365,6 +365,39 @@ describe('one writer at a time, and one identity key under a race (#1203, D-5)',
     ).toHaveLength(1);
   });
 
+  it('keeps one identity key when two first passes REACH the claim at once, the lease out of the way (#1207)', async () => {
+    // The test above is serialised by the lease, so it would pass with a plain
+    // insert. Here neither pass is held back: both are let past the lease and
+    // the fence, and both stop at the claim until the other has arrived, so
+    // the two claims really do run together over two connections.
+    let arrived = 0;
+    let bothHere: () => void = () => undefined;
+    const together = new Promise<void>((resolve) => {
+      bothHere = resolve;
+    });
+    const unfenced = (store: SqlStore): InstanceKeyStore => ({
+      ...store,
+      takeInstanceKeyLease: () => Promise.resolve(true),
+      renewInstanceKeyLease: () => Promise.resolve(true),
+      releaseInstanceKeyLease: () => Promise.resolve(),
+      claimIdentityKey: async (key) => {
+        arrived += 1;
+        if (arrived === 2) bothHere();
+        await together;
+        return store.claimIdentityKey(key);
+      },
+    });
+    const [a, b] = [keysOver(unfenced(await another())), keysOver(unfenced(await another()))];
+    await Promise.all([a.maintain(), b.maintain()]);
+    expect(arrived).toBe(2);
+    const [servedA, servedB] = [await a.served(), await b.served()];
+    expect(servedA.identityKey).toBe(servedB.identityKey);
+    expect(await verifies(servedA)).toBe(true);
+    expect(await verifies(servedB)).toBe(true);
+    const held = await rows();
+    expect(held.filter((row) => row.role === 'identity')).toHaveLength(1);
+  });
+
   it('signs with the identity key another pass kept first, rather than failing or making a second', async () => {
     await (await restart()).maintain();
     const [identity] = (await rows()).filter((row) => row.role === 'identity');
@@ -414,6 +447,78 @@ describe('one writer at a time, and one identity key under a race (#1203, D-5)',
     expect(rotated.serial).toBeGreaterThan(0);
     // Given back: a second process takes it at once.
     expect(await (await another()).takeInstanceKeyLease('next', clock.s, clock.s + 60)).toBe(true);
+  });
+
+  it('writes nothing more once a pass has outlived its lease and another process took it (#1207)', async () => {
+    // The pass stalls after its first read, long enough for its lease to
+    // lapse and an operator's command to take it, and then tries to write.
+    const operator = await another();
+    const store = await another();
+    let stalled = false;
+    const slow: InstanceKeyStore = {
+      ...store,
+      listInstanceKeys: async () => {
+        if (!stalled) {
+          stalled = true;
+          clock.s += 61;
+          expect(await operator.takeInstanceKeyLease('operator', clock.s, clock.s + 60)).toBe(true);
+        }
+        return store.listInstanceKeys();
+      },
+    };
+    await expect(keysOver(slow).maintain()).rejects.toThrow(KEYS_BUSY_SENTENCE);
+    expect(stalled).toBe(true);
+    expect(await store.listInstanceKeys()).toEqual([]);
+    // Still the operator's: the fenced pass gave back nothing it did not hold.
+    expect(await operator.renewInstanceKeyLease('operator', clock.s + 60)).toBe(true);
+  });
+
+  it('keeps writing past the lease’s length while nobody else takes it (#1207)', async () => {
+    // The fence extends the lease; it does not end a slow pass nobody raced.
+    const store = await fresh();
+    let stalled = false;
+    const slow: InstanceKeyStore = {
+      ...store,
+      listInstanceKeys: async () => {
+        if (!stalled) {
+          stalled = true;
+          clock.s += 61;
+        }
+        return store.listInstanceKeys();
+      },
+    };
+    expect((await keysOver(slow).maintain()).made).toBe(true);
+  });
+
+  it('keeps a pass’s own result when the lease cannot be given back, and logs it (#1207)', async () => {
+    const store = await fresh();
+    const lines: string[] = [];
+    const failing: InstanceKeyStore = {
+      ...store,
+      releaseInstanceKeyLease: () => Promise.reject(new Error('the database is locked')),
+    };
+    const over = (keyStore: InstanceKeyStore): InstanceKeys =>
+      createInstanceKeys({
+        store: keyStore,
+        secret: SECRET,
+        origin: ORIGIN,
+        now: () => clock.s,
+        log: (line) => lines.push(line),
+      });
+    expect((await over(failing).maintain()).made).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toMatchObject({
+      event: 'instance-keys',
+      state: 'lease-not-released',
+      error: 'Error',
+    });
+    expect(lines[0]).not.toContain('locked');
+    // The lease it could not give back lapses on its own.
+    clock.s += 60;
+    // A pass that throws still throws its own error, not the release's.
+    const empty: InstanceKeyStore = { ...failing, listInstanceKeys: () => Promise.resolve([]) };
+    await expect(over(empty).rotate()).rejects.toMatchObject({ code: 'no-keys' });
+    expect(lines).toHaveLength(2);
   });
 
   it('gives the lease back when a pass throws', async () => {

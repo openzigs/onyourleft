@@ -195,13 +195,29 @@ describe('what the About page claims about the network — #404, then #408', () 
     // #892's review: the browser sends its own headers too, so "nothing else"
     // alone was not true. What the code guarantees is nothing else OF YOURS.
     expect(text).toContain('your internet address and device or browser type');
-    expect(text).toContain('nothing else of yours: no ride, route, position or heart rate');
+    expect(text).toContain('nothing else of yours when you connect: no ride, route, position');
     expect(text).not.toContain('from this version of the app, nothing else');
     expect(text).not.toContain('There is no account, no analytics and no server');
     const mounted = await mount(<AboutView />);
     const link = mounted.container.querySelector('a[href="#/settings/instance"]');
     mounted.unmount();
     expect(link?.textContent).toBe('connect to an instance');
+  });
+
+  it('names what a private room and a sync send, before Sync ships — #778, #1195', async () => {
+    // Rooms shipped (#784, #785), and #1195 is blocked by #778: the page says
+    // what a room and a sync send before a rider can be surprised by either.
+    const text = (await aboutText()).replace(/\s+/g, ' ');
+    expect(text).toContain('the route of a room you make, your power and cadence while you ride');
+    expect(text).toContain('the weight you declare as you join, and a race’s result');
+    expect(text).toContain('which this version of the app does not offer yet');
+    expect(text).toContain('your rides, whole, with their positions and heart rate');
+    expect(text).toContain('sealed on this device for that instance alone');
+    expect(text).toContain('or sync them with an instance you connected to');
+    // #1215's review: the claims above are about the app as a whole, so they
+    // must not say a room's route or a sync's rides are never sent.
+    expect(text).not.toContain('transmits your rides, your heart rate or your position anywhere');
+    expect(text).toContain('a ride’s name and date go with it');
   });
 });
 

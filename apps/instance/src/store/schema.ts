@@ -196,6 +196,13 @@ export interface DisplayNameChangeTable {
 export interface RecoveryEmailTable {
   readonly athlete_id: string;
   readonly address: string;
+  /**
+   * When `/confirm` bound it, Unix seconds; `null` for an address bound
+   * before migration 0019, which is established (#1194, ADR 0047 D-8).
+   */
+  readonly confirmed_at: number | null;
+  /** The key that gave the address (its binder); `null` before migration 0019. */
+  readonly bound_by_key: string | null;
 }
 
 /** An email recovery link's token, as its SHA-256 (#773). */
@@ -204,6 +211,8 @@ export interface EmailRecoveryTokenTable {
   readonly athlete_id: string;
   readonly expires_at: number;
   readonly used_at: number | null;
+  /** The address it was mailed to (#1194, migration 0019). */
+  readonly address: string | null;
 }
 
 /**
@@ -218,6 +227,11 @@ export interface RecoveryEmailConfirmationTable {
   readonly used_at: number | null;
   /** The key that gave the address, or `null` before migration 0018 (#1193). */
   readonly requested_by_key: Generated<string | null>;
+  /**
+   * When another key's confirmation of the same address bound it first
+   * (#1194, migration 0019): this one is spent, and `confirmation_superseded`.
+   */
+  readonly superseded_at: Generated<number | null>;
 }
 
 /**

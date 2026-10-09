@@ -124,10 +124,13 @@ export interface IdentityInstance {
   readonly clock: TestClock;
   /** The database file. */
   readonly path: string;
-  /** Mail an email-recovery link would have sent, when email recovery is on. */
-  readonly mail: { address: string; token: string }[];
-  /** Mail a link confirming a recovery address would have sent (#865). */
-  readonly confirmations: { address: string; token: string }[];
+  /**
+   * Mail a recovery code would have sent, when email recovery is on — with
+   * the subject and body the instance wrote (#1194).
+   */
+  readonly mail: { address: string; token: string; subject: string; text: string }[];
+  /** Mail a code confirming a recovery address would have sent (#865, #1194). */
+  readonly confirmations: { address: string; token: string; subject: string; text: string }[];
   /**
    * POST or GET a JSON body; answers the status and the parsed body.
    *
@@ -269,8 +272,8 @@ export async function startIdentityInstance(
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
   const path = join(directory, 'instance.sqlite');
   const store = await openSqlStore(path);
-  const mail: { address: string; token: string }[] = [];
-  const confirmations: { address: string; token: string }[] = [];
+  const mail: { address: string; token: string; subject: string; text: string }[] = [];
+  const confirmations: { address: string; token: string; subject: string; text: string }[] = [];
   const {
     emailRecovery,
     storeSeenBy,
@@ -314,14 +317,14 @@ export async function startIdentityInstance(
       ...(emailRecovery === true || emailRecovery === 'failing'
         ? {
             emailRecovery: {
-              send: (address, token) => {
+              send: (address, token, written) => {
                 if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-                mail.push({ address, token });
+                mail.push({ address, token, ...written });
                 return Promise.resolve();
               },
-              confirm: (address, token) => {
+              confirm: (address, token, written) => {
                 if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-                confirmations.push({ address, token });
+                confirmations.push({ address, token, ...written });
                 return Promise.resolve();
               },
             },

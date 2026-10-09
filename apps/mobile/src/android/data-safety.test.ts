@@ -231,8 +231,13 @@ describe('the declaration filed on Play', () => {
     expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
       'which erasing the account ends the room and deletes',
     );
-    // And still never the device's own location: no GPS fix, and a ride's positions never.
-    expect(precise?.why).toContain('requests no GPS fix and never transmits a ride’s positions');
+    // Still never the device's own location: no GPS fix. A ride's positions
+    // leave only by a sync the rider presses (#778, #1195).
+    expect(precise?.why).toContain('the app requests no GPS fix');
+    expect(precise?.why).toContain(
+      'A ride’s positions leave the device only when the rider syncs with an instance',
+    );
+    expect(precise?.why).not.toContain('never transmits a ride’s positions');
   });
 
   it('gives every collected row a purpose, and no uncollected row one', () => {
@@ -338,6 +343,9 @@ describe('the declaration filed on Play', () => {
       'Health and fitness — fitness info',
       'Personal info — Name',
       'Personal info — User IDs',
+      // #778, #1195: what a sync sends.
+      'Files and docs',
+      'App activity — Other user-generated content',
       'Photos and videos',
       'Device or other IDs',
     ]);
@@ -399,7 +407,7 @@ describe('the declaration filed on Play', () => {
     expect(ids?.why).toContain('Discord id');
   });
 
-  it('sends an instance a position only as the route of a room the rider makes — #777, #784', () => {
+  it('sends an instance a position only as a room’s route or a synced ride — #777, #784, #778', () => {
     // #778: the location rule must pass with the new declaration, not be
     // deleted. Connecting sends no position; making a room sends its route.
     const precise = DATA_SAFETY_DECLARATION.find(
@@ -411,6 +419,49 @@ describe('the declaration filed on Play', () => {
     const instance = DATA_PATHS.find((path) => path.id === 'instance');
     expect(instance?.dataTypes).toContain('Location — precise location');
     expect(instance?.encryptedInTransit).toBe(true);
+  });
+
+  it('answers what a sync sends before the build that offers it — #778, #1195', () => {
+    // #1195 is blocked by #778: Play must never be told less than the app
+    // does, so every row a sync moves is answered here, before Sync ships.
+    const row = (dataType: string) =>
+      DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+    const instance = DATA_PATHS.find((path) => path.id === 'instance');
+    for (const dataType of [
+      'Location — precise location',
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'Files and docs',
+      'App activity — Other user-generated content',
+    ]) {
+      const answer = row(dataType);
+      expect(answer?.collected, dataType).toBe(true);
+      expect(answer?.optional, dataType).toBe(true);
+      expect(answer?.why, dataType).toContain('#1195');
+      expect(answer?.why, dataType).toContain('sealed on the device for that instance alone');
+      expect(answer?.why, dataType).toContain('which needs the instance’s card');
+      expect(instance?.dataTypes, dataType).toContain(dataType);
+    }
+    // The rider's own copy on an instance they chose is not a third party:
+    // the rows sync alone moves stay unshared.
+    expect(row('Files and docs')?.shared).toBe(false);
+    expect(row('App activity — Other user-generated content')?.shared).toBe(false);
+    expect(row('Files and docs')?.why).not.toContain('Nothing is uploaded');
+    expect(row('Health and fitness — health info')?.why).not.toContain(
+      'sends none of it to an instance',
+    );
+    expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
+      'everything the rider synced to it',
+    );
+    // #1215's review: a ride is sent as a FIT file this app writes, and its
+    // signed record carries the ride's name and date.
+    for (const dataType of ['Location — precise location', 'Files and docs']) {
+      const why = row(dataType)?.why ?? '';
+      expect(why, dataType).not.toContain('as the file it was recorded or imported as');
+      expect(why, dataType).toContain('a FIT file the app writes from the ride');
+    }
+    // And the location rule still passes with the new declaration (#778).
+    expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
   });
 
   it('names what a room sends and what a race publishes in the fitness row — #784, #785', () => {
