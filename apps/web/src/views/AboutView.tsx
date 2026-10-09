@@ -85,9 +85,10 @@ export function AboutView(): JSX.Element {
           <h2>Where your data lives</h2>
           <p>
             On this device. There is no account to create and no server to sign in to unless you
-            choose to connect to an instance, and nothing is uploaded — rides are recorded, stored
-            and read back locally, and they leave this device only when you export them yourself.
-            That is a deliberate choice rather than a missing feature.
+            choose to connect to an instance, and nothing is uploaded unless you sync with one —
+            rides are recorded, stored and read back locally, and they leave this device only when
+            you export them yourself, or sync them with an instance you connected to. That is a
+            deliberate choice rather than a missing feature.
           </p>
           <p>
             Your data is local, and so is the app. The first visit needs a connection, because that
@@ -152,6 +153,15 @@ export function AboutView(): JSX.Element {
             this device&rsquo;s public key, the name other riders will see if you type one, and your
             internet address and device or browser type, as any server sees them — and nothing else
             of yours: no ride, route, position or heart rate.
+          </p>
+          {/* #778, second pass: rooms shipped (#784, #785), and sync's disclosure
+            comes before sync does (#1195). `AboutView.test.tsx` pins it. */}
+          <p>
+            A private room you make or join sends that instance the route of a room you make, your
+            power and cadence while you ride, the weight you declare as you join, and a race&rsquo;s
+            result. Syncing with it — which this version of the app does not offer yet — sends your
+            rides, whole, with their positions and heart rate, and what goes with them, sealed on
+            this device for that instance alone; they stay on this device too.
           </p>
           <p>
             {/* target="_blank" so that following it inside the Android shell hands

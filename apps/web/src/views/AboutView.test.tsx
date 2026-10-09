@@ -203,6 +203,18 @@ describe('what the About page claims about the network — #404, then #408', () 
     mounted.unmount();
     expect(link?.textContent).toBe('connect to an instance');
   });
+
+  it('names what a private room and a sync send, before Sync ships — #778, #1195', async () => {
+    // Rooms shipped (#784, #785), and #1195 is blocked by #778: the page says
+    // what a room and a sync send before a rider can be surprised by either.
+    const text = (await aboutText()).replace(/\s+/g, ' ');
+    expect(text).toContain('the route of a room you make, your power and cadence while you ride');
+    expect(text).toContain('the weight you declare as you join, and a race’s result');
+    expect(text).toContain('which this version of the app does not offer yet');
+    expect(text).toContain('your rides, whole, with their positions and heart rate');
+    expect(text).toContain('sealed on this device for that instance alone');
+    expect(text).toContain('or sync them with an instance you connected to');
+  });
 });
 
 describe('what the About page says about a ride the app closed on — #411', () => {

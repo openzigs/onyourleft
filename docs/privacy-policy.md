@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-30.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-09.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -26,14 +26,17 @@ see if you type one, and — as with any server — your internet address and yo
 type. Nothing else of yours unless you **make or join a private room** — a group ride or a race
 with people you share a code with: then the route you choose for a room you make, your power and
 cadence while you ride in one, your declared weight once as you join, and a race's result go to that
-instance. It sends no ride and no heart rate to an instance. It is described under **An instance
-you connect to** below, class by class.
+instance. It sends no ride and no heart rate to an instance unless you **sync** with it: then your
+rides — whole, their positions and heart rate included — and what goes with them are sent to that
+instance, sealed on this device so that only that instance can read them. This version of the app
+does not offer *Sync* yet. It is all described under **An instance you connect to** below, class by
+class.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
 writes contains exactly **four** network calls, and each can do only the one thing described below —
 a picture, or a ride's numbers when you ask for an analysis, to a computer of your own, a direct link between your tablet and a second phone you
 paired with it, a question, or a ride's numbers when you ask for an analysis — never a picture — to a service you chose, on your own key,
-and signing in to an instance you chose to connect to. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
+and talking to an instance you chose to connect to — signing in, a private room, and what you sync. The whole thing is [open source](https://github.com/openzigs/onyourleft), so you can
 check that rather than take our word for it.
 
 **The one thing you can switch on: a picture sent to a computer of your own.** If you use the
@@ -103,7 +106,11 @@ there. It is sent to that instance and is not kept on this device.
 ## Location
 
 A ride can carry positions, and a route is a line on a map, so the app holds location data on your
-device. **A ride's positions are never transmitted** — not to us and not to anybody else. **A route
+device. **A ride's positions leave the device only if you sync your rides with an instance you
+connected to** (see **An instance you connect to**), and then only to that instance, sealed on this
+device so that nothing on the way can read them; the instance shows them to nobody else. This version
+of the app does not offer *Sync* yet. Otherwise they are never transmitted — not to us and not to
+anybody else. **A route
 is sent only if you make a private room on it** (see **An instance you connect to**), to the instance
 running the room and the riders you share its code with, and a route that starts, ends or passes
 inside one of your privacy zones is refused before anything is sent. The one
@@ -145,6 +152,9 @@ ride sent to your own computer** below).
   before anything is sent if any of it is inside one of your privacy zones — the code you type to
   join one, your power and cadence while you ride in one, the weight you declare once as you join,
   and after a race its result. See **An instance you connect to** above.
+- **What you sync with that instance, when you press *Sync*.** Your rides, whole, with their
+  positions and heart rate, and what goes with them — sealed on this device for that instance alone.
+  This version of the app does not offer *Sync* yet. See **An instance you connect to** above.
 - **A picture sent to your own computer, if you set one up and switch it on.** See **Pictures sent
   to your own computer** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
@@ -205,6 +215,19 @@ which is encrypted on the way. It refuses a plain `http://` address, before send
 the instance is on the same computer as the app (`localhost`). It will not follow a redirect
 somewhere else.
 
+**What is sealed, so that only the instance can read it.** When you paste or scan an instance's
+**card** — a line its operator gives you, which names the instance's key — this device can seal what
+it sends: encrypt it, on this device, for that instance alone, inside the encrypted connection. Then
+Cloudflare, which carries the project's instance's traffic, carries it without being able to read
+it. Everything you sync is sealed, and so are your recovery codes, the list of your devices, adding
+and removing a device, and recovering your account; none of those is offered without the card. The
+app seals only in the Android app, or in a copy of the web app loaded from your own computer,
+because a web page served from anywhere else could be changed on the way to take the seal off. What
+Cloudflare still sees, even then: that you are talking to the instance, from which internet
+address, when, how often and roughly how much; the token that tells the instance which device is
+asking; and the whole of anything that is not sealed — signing in with a device the instance
+already knows, your name there, and a room you make, join and ride in.
+
 **What each kind of data does.** The *when* in every row is **only after you connect**:
 
 | Data | What leaves the device, and to whom | When | How to delete it |
@@ -212,7 +235,7 @@ somewhere else.
 | This device's public key | sent to the instance you connected to, which keeps it on your account there, with when it was added and last used | when you press *Connect* | *Disconnect* makes this device forget the instance and ends this device's sign-in there, but the key stays on your account there. This version of the app cannot remove a device from your account: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | The name other riders see | sent to that instance each time you press *Connect* with a name typed. The instance keeps it with your account only the first time it sees this device, and ignores it after that. If your name there is ever changed, the instance also keeps each earlier name, and when it changed, with your account, for moderation | when you press *Connect* | this version of the app cannot change or remove it, or the earlier names: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
-| Your rides, including their positions | **not sent by this version of the app.** A later version that syncs rides ([#776](https://github.com/openzigs/onyourleft/issues/776)) will send a ride you choose to sync — its positions included, trimmed by your privacy zones where it is shared with anybody else — and this policy will say so, and be dated, before it does | not in this version | — |
+| What you sync: your rides, and what goes with them | **only if you sync** with the instance, which needs its card. **This version of the app does not offer *Sync* yet**; this row says what it will send, before a version that offers it does ([#1195](https://github.com/openzigs/onyourleft/issues/1195)). A sync sends each ride on this device that the instance does not hold, as the file it was recorded or imported as — every sample, **its positions and heart rate included, not trimmed by your privacy zones**, because it is your own copy — signed with this device's key; each ride's write-up and side-camera report (sentences, and the summary of how your position changed — differences, never a picture); a short summary of each ride that this device writes from its numbers, with no position, date or name in it, so that a later analysis can look back at your history; your notes on your rides, your goals and the documents you added for the analysis; and your answer to *May be raced* for each ride. All of it is sealed for that instance alone, as described above. The instance keeps it with your account, and shows none of it to another rider: no other rider is sent your rides, and none is sent a position. A sync also brings to this device what another of your devices synced there | when you press *Sync* | delete a ride, note, goal or document on this device and then sync: the instance deletes it too, its original file with it, and keeps only a mark that it was deleted, with nothing of it in the mark. *Disconnect* and erasing this device do not reach what the instance holds; to have it all erased, ask the instance's operator, as described under **Deleting what an instance holds** below |
 | In a room: power, cadence, the weight you declare, and your display name | **only if you make or join a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784), [#785](https://github.com/openzigs/onyourleft/issues/785)) — a group ride or a race on one rider's route, joined by a code they share. While you ride in one, your power and cadence go to the instance running it twice a second — never your position: the room works out where you are from your power — and the weight you declare goes once as you join, for the room to simulate you, and is not shown to anybody. The code you type to join goes once, in the request and never in an address, and the instance keeps only a fingerprint of a room's code, never the code. The other riders in the room see where you are on the room's road, and your name; never your weight or your watts. The instance keeps, with your account, which rooms you made or joined | while you ride in a room; the code, when you press *Join the room* | your power, cadence and weight are not kept after the ride; to have the list of rooms you made or joined erased, ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
 | The route of a room you make | **only if you make a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784)): the route you choose — its roads and heights, not its name and no times — goes to the instance, which shows it to the riders you share the room's code with. A route that starts, ends or passes inside one of your privacy zones is refused before anything is sent. The route is deleted from the instance when the room is over, and a room is over when a race in it has finished; when a group ride in it has had nobody in it for a minute; when a race in it was interrupted because the instance restarted; when nobody is riding in it a day after it was made, whether or not anybody ever joined it; or when you erase your account on that instance. Anybody still riding in the room when it ends rides on, but nobody else can join it | when you press *Make a room* | deleted by the instance when the room is over — within about a day of being made, unless somebody is riding in it then, and at once if you erase your account there; to have it deleted sooner, ask the instance's operator |
 | Race results | **only if you ride a private race** ([#785](https://github.com/openzigs/onyourleft/issues/785)): when you cross the line, the instance keeps your result — your place, your time, your power-to-weight over the race (watts per kilogram, W/kg) and any plausibility flag the room raised, which says only the length of time over which your power-to-weight went past the room's ceiling — visible to that race's participants only, until your account on the instance is erased. Nobody can see a race's result until every rider is across the line or out of the race, and a race interrupted because the instance restarted publishes no result. Every rider in the race sees every rider's result, flags included; beside another rider it shows power-to-weight and never watts, and this device alone shows your own watts beside your own result. Nobody sees your weight | when you cross the line | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below. The other riders' results for that race stay, and show you as "a rider", with no name and nothing of yours |
@@ -228,7 +251,11 @@ Digital Services Act's notice-and-action mechanism is in place
 
 **Disconnecting.** *Disconnect* makes this device forget the instance's address and its sign-in to
 it, and asks the instance to end that sign-in. Every ride stays on this device. What the instance
-already holds stays there.
+already holds stays there, rides you synced included.
+
+**Your rides stay on this device.** Syncing copies them to the instance; it never moves them. A ride
+the instance confirms it holds is still on this device afterwards, and a ride deleted on another of
+your devices is hidden on the instance and kept on this one.
 
 **Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
 remove a device from your account on an instance, change or remove your name there, or erase your
@@ -456,7 +483,8 @@ which ages out of what our Cloudflare account can see after 7 days.
 **Asking us to delete what we hold.** What this project holds about you is your account on the
 project's own instance, if you connected to it: its device keys, your name there and any earlier
 names, your account id and any Discord id you linked, which private rooms you made or joined, and
-your results in any race you rode there — and, while a room you made is open, its route. Erasing your account there ends every room you made and deletes its route. Email **matt@openzigs.ai** to have it
+your results in any race you rode there — and, while a room you made is open, its route — and
+everything you synced to it. Erasing your account there ends every room you made and deletes its route. Email **matt@openzigs.ai** to have it
 deleted, until the app can erase an account on an instance itself.
 
 ## Children

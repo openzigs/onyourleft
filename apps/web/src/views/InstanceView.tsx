@@ -39,11 +39,18 @@ import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
  * (#880): it is new disclosure text.
  */
 
-/** What an instance receives from this app, in this version. Kept visible. */
+/**
+ * What an instance receives from this app. Kept visible. ⚠️ Since #778's
+ * second pass it names a private room (#784, #785) and sync (#1195) too — a
+ * reviewer who remembers three lines and "nothing else" is reading the old
+ * file: rooms shipped, and sync's disclosure comes before sync does.
+ */
 export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
   'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. An instance keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
+  'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
+  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, and your goals, notes and documents. They are sealed on this device for the instance alone, and stay on this device too. This version of the app does not offer Sync yet.',
   'Nothing else of yours: connecting sends no ride, route, position or heart rate.',
 ];
 
