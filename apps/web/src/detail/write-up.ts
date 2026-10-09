@@ -131,8 +131,8 @@ export const WRITE_UP_SOURCE_TEXT: Readonly<Record<RideWriteUpSourceRecord, stri
  * instance sends, said beside the press (ADR 0046 D-6, D-7). It replaces
  * {@link COMPUTER_SENDS} when #1103 removes the own-computer path.
  *
- * ⚠️ **DRAFT, awaiting the owner's approval on #1104** — which is required
- * before the pull request that ships it merges. `write-up.test.ts` pins it.
+ * Approved by the owner on #1104 on 2026-10-09, with "summaries of older
+ * rides" added to the list. `write-up.test.ts` pins it word for word.
  */
 export const INSTANCE_SENDS_LEAD =
   'A ride analysed on your instance, when you ask for an analysis.';
@@ -144,14 +144,14 @@ export const INSTANCE_SENDS =
   'camera, it also gets how a few measurements of your riding position changed between the start ' +
   'and the end of filming. Never a picture. Your instance writes the analysis with a model on its ' +
   'own machine, and the model may look up what is already on your instance: short summaries of ' +
-  'your recent rides, what you wrote about your goals, your notes and documents, your saved ' +
-  'workouts, and earlier write-ups. Nothing is sent until you press the button. Once you have ' +
-  'pressed it, the analysis can finish while the app is closed.';
+  'your recent rides, summaries of older rides, what you wrote about your goals, your notes and ' +
+  'documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the ' +
+  'button. Once you have pressed it, the analysis can finish while the app is closed.';
 
 /**
  * #1104's B4, the ride page's no-instance sentence (ADR 0046 D-2), around a
- * link to the Connect screen whose words are that route's title. ⚠️ **DRAFT,
- * awaiting the owner's approval on #1104.**
+ * link to the Connect screen whose words are that route's title. Approved by
+ * the owner on #1104 on 2026-10-09, as written.
  */
 export const WRITE_UP_NO_INSTANCE_BEFORE =
   'A write-up of this ride is written on an instance you connect in';

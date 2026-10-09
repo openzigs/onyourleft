@@ -277,8 +277,8 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // is now sent these numbers when the rider asks for an analysis on the
     // hosted source (ruling 4 on #795; ADR 0035 D-9 C).
     //
-    // #1102 adds the instance path, on #1104's B8 (a DRAFT awaiting the
-    // owner's approval, Play's definitions re-read 2026-10-09): a ride's
+    // #1102 adds the instance path, on #1104's B8 (approved by the owner on
+    // 2026-10-09, Play's definitions re-read 2026-10-09): a ride's
     // numbers to the rider's own instance, which is not a third party, so the
     // answers do not move. B8's hosted sentence lands with the hosted instance
     // path, which this build does not offer.
