@@ -137,7 +137,8 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         is the first deploy target — built from the
                         REPOSITORY ROOT since #780, cut to an allowlist by
                         `Dockerfile.dockerignore`, with the production
-                        closure (`kysely`, `ws`, three workspace packages)
+                        closure (`kysely`, `ws`, the AI SDK, and five
+                        workspace packages — `packages/fit` since #1195)
                         installed from the lockfile;
                         `scripts/check-instance-image.sh` builds it, runs the
                         migrate step in it, and asks `/health` inside the
