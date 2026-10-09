@@ -33,12 +33,14 @@ import {
   createInstanceKeys,
   ENCRYPTION_KEY_LIFE_SECONDS,
   InstanceKeysUnavailable,
+  KEYS_BUSY_SENTENCE,
   NO_ORIGIN_SENTENCE,
   NO_SECRET_SENTENCE,
   OLD_KEY_KEPT_SECONDS,
   STATEMENT_LIFE_SECONDS,
   UNREADABLE_SENTENCE,
   type InstanceKeys,
+  type InstanceKeyStore,
   type ServedKeys,
 } from './instance-keys.ts';
 import { secretBytes } from './instance-keys-testing.ts';
@@ -325,6 +327,99 @@ describe('one identity key (D-5)', () => {
       }),
     ).rejects.toThrow();
     expect((await rows()).filter((row) => row.role === 'identity')).toEqual([identity]);
+  });
+});
+
+describe('one writer at a time, and one identity key under a race (#1203, D-5)', () => {
+  /** A store on `path` that stays open beside the others: a second process. */
+  async function another(): Promise<SqlStore> {
+    const store = await openSqlStore(path);
+    open.push(store);
+    return store;
+  }
+
+  function keysOver(store: InstanceKeyStore): InstanceKeys {
+    return createInstanceKeys({ store, secret: SECRET, origin: ORIGIN, now: () => clock.s });
+  }
+
+  it('keeps one identity key and one current encryption key when two first passes run at once over two connections', async () => {
+    const [a, b] = [keysOver(await another()), keysOver(await another())];
+    const settled = await Promise.allSettled([a.maintain(), b.maintain()]);
+    expect(settled.some((each) => each.status === 'fulfilled')).toBe(true);
+    for (const each of settled) {
+      if (each.status === 'rejected') {
+        expect(each.reason).toBeInstanceOf(InstanceKeysUnavailable);
+        expect((each.reason as InstanceKeysUnavailable).code).toBe('busy');
+      }
+    }
+    // Whichever lost tries again, as the instance's timer does, and agrees.
+    await a.maintain();
+    await b.maintain();
+    const [servedA, servedB] = [await a.served(), await b.served()];
+    expect(servedA.identityKey).toBe(servedB.identityKey);
+    expect(await verifies(servedA)).toBe(true);
+    const held = await rows();
+    expect(held.filter((row) => row.role === 'identity')).toHaveLength(1);
+    expect(
+      held.filter((row) => row.role === 'encryption' && row.supersededAt === null),
+    ).toHaveLength(1);
+  });
+
+  it('signs with the identity key another pass kept first, rather than failing or making a second', async () => {
+    await (await restart()).maintain();
+    const [identity] = (await rows()).filter((row) => row.role === 'identity');
+    const store = await fresh();
+    // This pass looked before the other one's identity key was there.
+    let looked = false;
+    const racing: InstanceKeyStore = {
+      ...store,
+      listInstanceKeys: async () => {
+        if (looked) return store.listInstanceKeys();
+        looked = true;
+        return [];
+      },
+    };
+    const done = await keysOver(racing).maintain();
+    expect(done.made).toBe(false);
+    expect((await rows()).filter((row) => row.role === 'identity')).toEqual([identity]);
+    const served = await (await restart()).served();
+    expect(served.identityKey).toBe(toHex(identity!.publicKey));
+    expect(await verifies(served)).toBe(true);
+  });
+
+  it('refuses every key-writing command while another process holds the lease, and writes nothing', async () => {
+    await (await restart()).maintain();
+    const before = await rows();
+    const statements = await (await fresh()).listInstanceKeyStatements();
+    const operator = await another();
+    const due = clock.s + ENCRYPTION_KEY_LIFE_SECONDS; // a rotation is due
+    expect(await operator.takeInstanceKeyLease('operator', clock.s, due + 60)).toBe(true);
+    const keys = await restart();
+    clock.s = due;
+    await expect(keys.maintain()).rejects.toThrow(KEYS_BUSY_SENTENCE);
+    await expect(keys.rotate()).rejects.toThrow(KEYS_BUSY_SENTENCE);
+    await expect(keys.rotateIdentity({ compromised: false })).rejects.toThrow(KEYS_BUSY_SENTENCE);
+    await expect(keys.reset()).rejects.toThrow(KEYS_BUSY_SENTENCE);
+    expect(await rows()).toEqual(before);
+    expect(await (await fresh()).listInstanceKeyStatements()).toEqual(statements);
+    // Reading takes no lease.
+    expect((await (await restart()).show()).card).toMatch(/^oyl-instance:/);
+  });
+
+  it('takes a lease whose holder died once it has lapsed, and gives its own back after a pass', async () => {
+    await (await restart()).maintain();
+    expect(await (await another()).takeInstanceKeyLease('dead', clock.s, clock.s + 60)).toBe(true);
+    clock.s += 60;
+    const rotated = await (await restart()).rotate();
+    expect(rotated.serial).toBeGreaterThan(0);
+    // Given back: a second process takes it at once.
+    expect(await (await another()).takeInstanceKeyLease('next', clock.s, clock.s + 60)).toBe(true);
+  });
+
+  it('gives the lease back when a pass throws', async () => {
+    const keys = await restart();
+    await expect(keys.rotate()).rejects.toThrow(InstanceKeysUnavailable); // no keys yet
+    expect(await (await another()).takeInstanceKeyLease('next', clock.s, clock.s + 60)).toBe(true);
   });
 });
 
