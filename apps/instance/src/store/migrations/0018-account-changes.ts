@@ -19,7 +19,10 @@
  * - **`recovery_email_confirmation.requested_by_key`** — the key that gave a
  *   pending address, so a revoke can cancel that key's confirmation and an
  *   address's binder is the key that gave it (D-8). `NULL` on a row written
- *   before this migration.
+ *   before this migration. ⚠️ Such a pending row is therefore NOT cancelled by
+ *   revoking the key that requested it, and a later confirm attributes the
+ *   address to the key that confirms it; the window is a confirmation mailed
+ *   before the upgrade and not yet used.
  *
  * Every key column is referenced as `(key, athlete_id)` against
  * `device_key`'s `(public_key, athlete_id)`, the #842 rule: one athlete's row

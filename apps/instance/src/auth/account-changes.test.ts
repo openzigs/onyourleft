@@ -556,6 +556,64 @@ describe('notices on the other devices (#1193)', () => {
   });
 });
 
+describe('the log’s smaller rules (#1193)', () => {
+  it('leaves a key’s own entries out of its notices, while its log still carries them', async () => {
+    const w = await start();
+    const rider = await register(w);
+    const other = await linked(w, rider);
+    await mint(w, rider);
+    const forRider = await log(w, rider);
+    const mintedByRider = forRider.changes.filter(
+      (each) => each.kind === 'link_code_minted' && each.actorKey === rider.device.publicKey,
+    );
+    expect(mintedByRider.length).toBeGreaterThan(0);
+    expect(forRider.notices.filter((each) => each.actorKey === rider.device.publicKey)).toEqual([]);
+    // The other device is shown the rider's entries, and none of its own.
+    const forOther = await log(w, other);
+    expect(forOther.notices.some((each) => each.actorKey === rider.device.publicKey)).toBe(true);
+    expect(forOther.notices.some((each) => each.actorKey === other.device.publicKey)).toBe(false);
+  });
+
+  it('logs an address cleared when another replaces it, and nothing when the same one is confirmed again', async () => {
+    const w = await start();
+    const rider = await register(w);
+    const confirmAddress = async (address: string): Promise<void> => {
+      const given = await sealed(w, rider, 'POST', '/v1/auth/recovery-email', { address });
+      expect(given.reply?.status, JSON.stringify(given.body)).toBe(204);
+      const token = w.confirmations.at(-1)!.token;
+      const done = await sealed(w, rider, 'POST', '/v1/auth/recovery-email/confirm', { token });
+      expect(done.reply?.status, JSON.stringify(done.body)).toBe(204);
+    };
+    const kinds = async (): Promise<string[]> =>
+      (await log(w, rider)).changes
+        .filter((each) => each.kind.startsWith('address_'))
+        .map((each) => `${each.kind} ${each.address}`);
+
+    await confirmAddress('one@example.org');
+    expect(await kinds()).toEqual(['address_added one@example.org']);
+    await confirmAddress('one@example.org');
+    expect(await kinds()).toEqual(['address_added one@example.org']);
+    await confirmAddress('two@example.org');
+    expect(await kinds()).toEqual([
+      'address_added one@example.org',
+      'address_cleared one@example.org',
+      'address_added two@example.org',
+    ]);
+  });
+
+  it('logs a revoke once: revoking an already-revoked key adds no second entry', async () => {
+    const w = await start();
+    const rider = await register(w);
+    const other = await linked(w, rider);
+    const count = async (): Promise<number> =>
+      (await log(w, rider)).changes.filter((each) => each.kind === 'key_revoked').length;
+    expect((await revoke(w, rider, other.device.publicKey)).reply?.status).toBe(204);
+    expect(await count()).toBe(1);
+    await revoke(w, rider, other.device.publicKey);
+    expect(await count()).toBe(1);
+  });
+});
+
 describe('the account export (#1193)', () => {
   it('carries the log and every device’s mark', async () => {
     const w = await start();
