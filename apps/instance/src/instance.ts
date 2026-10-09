@@ -17,6 +17,13 @@ import {
   type HostedKeyState,
   type SecretKey,
 } from './analysis/hosted-key.ts';
+import { agentEngine } from './analysis/engine.ts';
+import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
+import {
+  ANALYSIS_SWEEP_PERIOD_MS,
+  createAnalysisJobs,
+  type AnalysisJobs,
+} from './analysis/jobs.ts';
 import { createLocalModel } from './analysis/model.ts';
 import {
   createInstanceKeys,
@@ -117,6 +124,18 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /**
+   * The endpoint (an ORIGIN) an athlete's own recorded hosted consent names,
+   * or `undefined` when they have none — `analysis/source.ts`
+   * §`SourceOptions.recordedConsent` (ADR 0046 D-9, Q10). ⚠️ **Nothing records
+   * a consent yet: that is #1199**, so `serve.ts` never sets this and every
+   * `instance-hosted` job on a running instance — the operator's included —
+   * fails `hosted_unavailable` before the key is opened (#1223). A test sets
+   * it to run a hosted job end to end; #1199 replaces it with the store's read.
+   */
+  readonly hostedConsent?: (athleteId: string) => Promise<string | undefined>;
+  /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
+  readonly hostedFetch?: typeof globalThis.fetch;
 }
 
 export interface StartedInstance {
@@ -129,15 +148,21 @@ export interface StartedInstance {
   heldRateLimitKeys(): number;
   /**
    * The analysis model (#1096), once the store is open and when one is
-   * configured at a local address; `undefined` otherwise. ⚠️ **Nothing calls
-   * it yet**: the agent that runs over it (`analysis/agent.ts`, #1098) is
-   * started by #1095's job engine, which is not built.
+   * configured at a local address; `undefined` otherwise. The job engine
+   * (#1095) runs the agent (#1098) over it.
    */
   analysisModel(): ModelConnection | undefined;
   /**
+   * The analysis jobs (#1095), once the store is open on an instance with
+   * accounts; `undefined` otherwise.
+   */
+  analysisJobs(): AnalysisJobs | undefined;
+  /** Resolves once the jobs a stopped instance left unended have been failed `interrupted`. */
+  readonly jobsRecovered: Promise<void>;
+  /**
    * The hosted model key (#1097), opened with `OYL_INSTANCE_SECRET_KEY` if it
-   * can be — what `analysis/source.ts` §`modelForSource` is handed once the
-   * job engine (#1095) calls it. `none` until the store is open.
+   * can be — what `analysis/source.ts` §`modelForSource` is handed by the
+   * job engine (#1095). `none` until the store is open.
    */
   hostedModelKey(): Promise<HostedKeyState>;
   /** Resolves once the hosted key's state has been logged at opening. */
@@ -191,6 +216,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let identity: Identity | undefined;
   let history: History | undefined;
   let analysisModel: ModelConnection | undefined;
+  let analysisJobs: AnalysisJobs | undefined;
+  let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
   let keysMaintained: Promise<void> = Promise.resolve();
@@ -379,6 +406,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       secret: server.secretKey,
       origin: server.origin,
       now: () => Math.floor(now() / 1000),
+      log,
     });
     instanceKeys = keys;
     const maintainKeys = async (): Promise<void> => {
@@ -473,9 +501,58 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         options.sweepTimers,
       );
+      // #1095: analysis jobs, on the accounts' sessions. Off — every start
+      // `analysis_off` — while the instance has no model and holds no hosted
+      // key. A job a stopped instance left unended is failed `interrupted`
+      // before any new one is queued, and is never run again.
+      const reading = store;
+      const hostedKey = async (): Promise<HostedKeyState> =>
+        hostedKeyState(reading, await secretKey);
+      const local = analysisModel;
+      const jobs = createAnalysisJobs({
+        store,
+        engine: agentEngine({
+          reads: store,
+          sources: {
+            local,
+            hostedKey,
+            ...(options.hostedConsent === undefined
+              ? {}
+              : { recordedConsent: options.hostedConsent }),
+            // #1223: every hosted request masked by the athlete's own guard (#1101).
+            guard: (athleteId) => readMaskingGuard(reading, athleteId),
+            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+          },
+          clock: { now },
+        }),
+        available: async () => local !== undefined || (await hostedKey()).kind === 'held',
+        now,
+        log,
+        heartbeatMs: server.analysisHeartbeatMs,
+      });
+      analysisJobs = jobs;
+      jobsRecovered = jobs.recover().then(
+        () => undefined,
+        (error: unknown) => {
+          logUnhandled(log, null, error);
+        },
+      );
+      // Ended jobs go seven days after they ended (the owner's Q5 ruling), and
+      // the start limit's ended windows with them: once now, and every hour.
+      const sweepJobs = (): void => {
+        void jobs.sweep().catch((error: unknown) => {
+          logUnhandled(log, null, error);
+        });
+      };
+      sweepJobs();
+      const stopSweepingJobs = sweepOnBoundaries(
+        { periodMs: ANALYSIS_SWEEP_PERIOD_MS, run: sweepJobs },
+        options.sweepTimers,
+      );
       stopSweeping = () => {
         stopRateLimitSweep();
         stopEndingRooms();
+        stopSweepingJobs();
       };
     }
     // Replaced, not mutated (above): the accounts when there is an origin, and
@@ -486,7 +563,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // #1191: sealed requests need the accounts, so they come with them.
       ...(identity === undefined
         ? {}
-        : { identity, history, rooms, sealed: createSealed({ store, now }) }),
+        : {
+            identity,
+            history,
+            rooms,
+            sealed: createSealed({ store, now }),
+            ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
+          }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();
@@ -552,6 +635,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     heldRateLimitKeys: () =>
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
     analysisModel: () => analysisModel,
+    analysisJobs: () => analysisJobs,
+    jobsRecovered: opened.then(() => jobsRecovered),
     hostedModelKey: async () =>
       store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),
     hostedKeyReported: opened.then(() => hostedKeyReported),
@@ -562,6 +647,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
+      await analysisJobs?.stop();
       await router.stop();
       await listening.close();
       await history?.idle();

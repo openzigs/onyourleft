@@ -51,6 +51,7 @@ const server = readServerConfig(
     pingIntervalMs: process.env.OYL_INSTANCE_PING_INTERVAL_MS,
     metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
     secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
+    analysisHeartbeatMs: process.env.OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS,
   },
   availableParallelism(),
 );

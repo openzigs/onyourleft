@@ -25,12 +25,15 @@ import {
   INSTANCE_ACCOUNT_STORAGE_KEY,
   InstanceSignInError,
   linkThisDevice,
+  PIN_DIFFERS,
   readInstanceAccount,
   signInToInstance,
+  writeInstanceAccount,
   type InstanceAccountStorage,
   type InstanceTransport,
   type SignInDependencies,
 } from './sign-in';
+import { SCRIPTED_FINGERPRINT, SCRIPTED_NEW_FINGERPRINT } from './testing';
 
 const ORIGIN = 'https://ride.example';
 const NOW = unixSeconds(1_790_000_000);
@@ -275,5 +278,132 @@ describe('linking this device to an athlete (#773)', () => {
     for (const [, key] of exportKey.mock.calls) {
       expect(key.type).toBe('public');
     }
+  });
+});
+
+describe('a card never replaces a different pin without the rider confirming it (#1207, ADR 0047 D-6)', () => {
+  const NO_TRUST = { highestSerial: null, highestKeyId: null, firstVerified: {}, newestIssued: {} };
+
+  function pinned(): ReturnType<typeof deviceStorage> {
+    const storage = deviceStorage();
+    writeInstanceAccount(storage, {
+      origin: ORIGIN,
+      instanceAthleteId: 'athlete-1',
+      pin: SCRIPTED_FINGERPRINT,
+    });
+    return storage;
+  }
+
+  it('refuses a sign-in carrying another card for the same instance, sending nothing and keeping the pin', async () => {
+    const log: string[] = [];
+    const storage = pinned();
+    const { transport } = fakeInstance(log);
+    await expect(
+      signInToInstance({
+        ...dependencies(harness(), transport, storage, log),
+        pin: { fingerprint: SCRIPTED_NEW_FINGERPRINT, keyTrust: NO_TRUST },
+      }),
+    ).rejects.toEqual(new InstanceSignInError(PIN_DIFFERS));
+    expect(log).toEqual([]);
+    expect(readInstanceAccount(storage)?.pin).toBe(SCRIPTED_FINGERPRINT);
+  });
+
+  it('refuses a link carrying another card for the same instance before the link is sent', async () => {
+    const log: string[] = [];
+    const storage = pinned();
+    const { transport } = fakeInstance(log);
+    await expect(
+      linkThisDevice(
+        {
+          ...dependencies(harness(), transport, storage, log),
+          sealed: transport,
+          pin: { fingerprint: SCRIPTED_NEW_FINGERPRINT, keyTrust: NO_TRUST },
+        },
+        'code-1',
+      ),
+    ).rejects.toEqual(new InstanceSignInError(PIN_DIFFERS));
+    expect(log).toEqual([]);
+    expect(readInstanceAccount(storage)?.pin).toBe(SCRIPTED_FINGERPRINT);
+  });
+
+  it('signs in with the same card again, and with any card for another instance', async () => {
+    const log: string[] = [];
+    const { transport } = fakeInstance(log);
+    const same = pinned();
+    await signInToInstance({
+      ...dependencies(harness(), transport, same, log),
+      pin: { fingerprint: SCRIPTED_FINGERPRINT, keyTrust: NO_TRUST },
+    });
+    expect(readInstanceAccount(same)?.pin).toBe(SCRIPTED_FINGERPRINT);
+
+    const elsewhere = deviceStorage();
+    writeInstanceAccount(elsewhere, {
+      origin: 'https://other.example',
+      instanceAthleteId: 'athlete-9',
+      pin: SCRIPTED_FINGERPRINT,
+    });
+    await signInToInstance({
+      ...dependencies(harness(), transport, elsewhere, log),
+      pin: { fingerprint: SCRIPTED_NEW_FINGERPRINT, keyTrust: NO_TRUST },
+    });
+    expect(readInstanceAccount(elsewhere)).toMatchObject({
+      origin: ORIGIN,
+      pin: SCRIPTED_NEW_FINGERPRINT,
+    });
+  });
+});
+
+describe('stored key trust from before #1216 keeps each key’s newest re-signing (ADR 0047 D-5)', () => {
+  const KEY = '0123456789abcdef';
+
+  function stored(keyTrust: unknown): InstanceAccountStorage {
+    const storage = deviceStorage();
+    storage.setItem(
+      INSTANCE_ACCOUNT_STORAGE_KEY,
+      JSON.stringify({
+        origin: ORIGIN,
+        instanceAthleteId: 'athlete-1',
+        pin: SCRIPTED_FINGERPRINT,
+        keyTrust,
+      }),
+    );
+    return storage;
+  }
+
+  it('reads the newest issuedAt of each key back out of the statements it first verified', () => {
+    const account = readInstanceAccount(
+      stored({
+        highestSerial: 5,
+        highestKeyId: KEY,
+        firstVerified: {
+          [`${KEY}@100`]: { at: 100, notAfter: 300 },
+          [`${KEY}@200`]: { at: 200, notAfter: 400 },
+          'fedcba9876543210@50': { at: 50, notAfter: 250 },
+        },
+      }),
+    );
+    expect(account?.keyTrust?.newestIssued).toEqual({
+      [KEY]: { issuedAt: 200, notAfter: 400 },
+      fedcba9876543210: { issuedAt: 50, notAfter: 250 },
+    });
+  });
+
+  it('reads a trust this build wrote back as written, and refuses a malformed one', () => {
+    const newestIssued = { [KEY]: { issuedAt: 200, notAfter: 400 } };
+    const trust = { highestSerial: 5, highestKeyId: KEY, firstVerified: {}, newestIssued };
+    expect(readInstanceAccount(stored(trust))?.keyTrust).toEqual(trust);
+    expect(
+      readInstanceAccount(stored({ ...trust, newestIssued: { [KEY]: { issuedAt: 'x' } } }))
+        ?.keyTrust,
+    ).toBeUndefined();
+    expect(
+      readInstanceAccount(
+        stored({
+          ...trust,
+          newestIssued: undefined,
+          firstVerified: { nokey: { at: 1, notAfter: 2 } },
+        }),
+      )?.keyTrust,
+    ).toBeUndefined();
   });
 });

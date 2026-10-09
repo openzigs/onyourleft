@@ -236,11 +236,12 @@ export interface HostedModelOptions {
  * bounds it instead is that `baseUrl` is `https:` and is the only host it can
  * reach.
  *
- * ⚠️ **No production caller yet, on purpose.** A hosted request must be
- * masked first (#1101), so this is constructed only behind that seam
- * (`source.ts` §`modelForSource`); until #1101 and a recorded consent naming
- * the endpoint (ADR 0046 Q10, the operator's included) land, a job asking for
- * the hosted source fails `hosted_unavailable` and sends nothing.
+ * ⚠️ **Built only behind the masking** (#1101): `hosted.ts`
+ * §`hostedBehindMasking` is the one module that may call this
+ * (`hosted-seam.test.ts`), and only with the athlete's guard. Until a recorded
+ * consent naming the endpoint exists (ADR 0046 Q10, the operator's included,
+ * #1199) and the job engine calls it (#1095), a job asking for the hosted
+ * source fails `hosted_unavailable` and sends nothing.
  */
 export function createHostedModel(options: HostedModelOptions): ModelConnection {
   if (options.baseUrl.protocol !== 'https:') {

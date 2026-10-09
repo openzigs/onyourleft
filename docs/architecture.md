@@ -1706,7 +1706,7 @@ sequenceDiagram
 | The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
 | Items (#776's 2026-09-29 addition) | `write-up`, `ride-summary` (since #835), `side-camera-report` (the pose summary inside it), `goal`, `note`, `document` — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs write-ups, side-camera reports and ride summaries; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
-| Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), any recovery address given and its confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
+| Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), every recovery address (up to two since #1194, each with when it was confirmed and the public key that gave it) and every confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account` — only with a step-up beyond the session token (#898): one of the athlete's recovery codes, checked and not spent, or a fresh `oyl-erase-account-v1` statement signed by one of their own live keys (`src/auth/identity.ts` §`stepUp`); a suspended athlete reaches it, and the export, through a one-hour way-out session (`POST /v1/auth/leave-session`, `admitsSuspended`, migration 0012). Then: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
 | The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
 
@@ -1735,7 +1735,19 @@ sequenceDiagram
     I->>O: embed the query ("search_query: …")
     I-->>D: the CALLER's best passages of THIS model, each with a label ("Write-up of a ride 3 weeks earlier")
     D->>D: accept the shape, screen a write-up again, fence the rest as data: template v2's history step
+    Note over I: since #1099, the instance's own analysis agent asks the same search in-process
+    I->>I: history_search {query} — the JOB's athlete, ≤ 6 passages, ≤ 5 400 characters, write-ups screened again, fenced
 ```
+
+**Retrieval is a tool on the instance, not a device step** (#1099, ADR 0046 amending ADR 0040 D-8).
+The analysis agent's `history_search` tool calls the index's own search in-process
+(`History.searchFor`) with the job's athlete; its schema is a query and nothing else. It keeps
+ADR 0040's bounds (6 passages, 5 400 characters, a 2 000-character query) and three calls a run,
+screens a retrieved write-up again and leaves out one that fails (saying how many), drops any kind
+the index does not cut from, and answers *history is not available* rather than failing the run when
+the index is off or cannot be reached. On an `instance-hosted` job what it returns reaches the hosted
+model only masked (#1101, `src/analysis/hosted.ts`). The device-side step below remains until #1103
+removes the on-device runner.
 
 | Concern | Decision | Where |
 |---|---|---|
@@ -1746,6 +1758,7 @@ sequenceDiagram
 | What is never indexed | A side-camera report (the pose summary, D-2 item 1) and any item carrying a `data:` URL — looked for in every string of the PARSED body, keys included, by a scan linear in its length, with or without a media type (#918); the rider's own text is otherwise kept whole | `src/history/passages.ts` §`holdsDataUrl` |
 | One item the model will not take (#918) | Marked `failed` and gone past, so it cannot stop the sweep for every rider; tried again an hour later. A model that cannot be reached still stops the sweep, and a running instance tries again every five minutes | `src/history/history.ts` §`catchUp`, `src/instance.ts` |
 | How often it may be asked (#918) | 30 searches a minute per athlete, then `rate_limited`, counted before anything is embedded and swept at the end of its window like every other limit | `src/auth/identity.ts` §`historySearchesPerAthlete` |
+| The agent's tool (#1099) | `history_search`; the athlete is the job's, never an argument; on a hosted job its results are masked like every message (#1101) | `src/analysis/tools/history-search.ts`, `src/analysis/hosted.ts` |
 | Scoping (D-3) | The athlete is the session's; `sql-store.scoping.test.ts` probes the index's reads with three athletes, and `history.test.ts` searches as each | |
 | Export and erasure (D-10) | The export says which model built the index and how many passages, never the passages or vectors; `DELETE /v1/account` takes them with everything else | `src/sync/sync.ts` §`exportAccount` |
 | The device's half | Template version 2's history step is the ONE step a passage reaches, inside a fence no passage can close, and its note is accepted and screened before the summary is shown it. Retrieval runs before the run, on the rider's own computer's path only (a hosted step port refuses a history step until D-9's disclosures change), and an unreachable instance is a sentence, never a failed run | `packages/analysis/src/history.ts`, `template/template-v2.ts` (in `apps/web/src/ride-analysis/` until #1094), `apps/web/src/ride-analysis/ride-analysis.ts` |
@@ -1785,8 +1798,35 @@ the pagination parser has its first callers, the sync manifest and the activity 
 [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-7 and D-8;
 [#1096](https://github.com/openzigs/onyourleft/issues/1096) (the model connection) and
 [#1098](https://github.com/openzigs/onyourleft/issues/1098) (the agent). It lives in
-`apps/instance/src/analysis/`. ⚠️ **It has no caller yet**: the job engine that starts it, streams
-its events and keeps its result is [#1095](https://github.com/openzigs/onyourleft/issues/1095).
+`apps/instance/src/analysis/`. Its caller is the job engine,
+[#1095](https://github.com/openzigs/onyourleft/issues/1095) (`analysis/jobs.ts`, below).
+
+#### Analysis jobs — #1095
+
+ADR 0046 D-11. A device asks for a write-up with `POST /v1/analysis/jobs` (`{ input,
+templateVersion, source }`); the instance checks the body (`analysis/job-input.ts`: no picture, then
+the input's exact `RideAnalysisInput` shape and its 4 KiB budget), queues a row in `analysis_job`
+(migration 0020) and answers `202 { jobId }` at once. One worker claims the oldest queued job of any
+athlete and runs it on the engine port — the agent over `modelForSource` in production
+(`analysis/engine.ts`), a script in tests — appending each event to `analysis_event` while the job is
+`running`, then ending it with one `result` event. One job per athlete is queued or running at a
+time (`job_running`), and twelve starts an hour per athlete are allowed (`jobs.ts`
+§`DEFAULT_ANALYSIS_STARTS`).
+
+`GET /v1/analysis/jobs/{jobId}/events` is Server-Sent Events: every event after `Last-Event-ID`, then
+live, ending after `result`; a `: hb` comment at most every 25 s (`OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS`)
+keeps the tunnel open. Events are `progress` (a step, or a tool by name), `section` (screened text),
+`withdrawn` and `result`; none carries a tool's arguments or results. ⚠️ **The stream does not name
+an event `end`**: that kind is the sealed stream's own (`sealed/routes.ts`), which ends every
+re-sealed stream with it, so a plaintext stream simply closes after `result`. Every job route is
+sealed-only (ADR 0047 D-7), and `sealed/routes.ts` forwards the heartbeat comments as they are.
+
+Cancel aborts the engine's signal and ends the job `cancelled` at once, so nothing the engine says
+afterwards is appended. Ack deletes the write-up and the events. An ended job goes seven days after it
+ended (the hourly sweep), and a job a stopped instance left unended is failed `interrupted` at the
+next start, never run again. ⚠️ **ADR 0046 D-12's kept result is not this table**: the candidate is
+deleted on ack, as #1095 specifies, and the copy another device reads is the write-up the device
+syncs as an item (#776).
 
 ```mermaid
 flowchart TD
@@ -1810,7 +1850,8 @@ flowchart TD
 | `model-turn.ts` | the port: one model turn, its request and its **closed** failures. The agent is written against it, never against the SDK |
 | `model.ts` | the **one** module in the repository that imports `ai` and `@ai-sdk/*` (`eslint.config.js` §`AI_SDK_IMPORT_PATTERNS`). It sets the SDK's global default provider to one that throws, so a string model id never reaches the Vercel AI Gateway; checks the configured name's address on every turn (`history/address.ts`, reused) and connects to the checked address; refuses any URL but the configured base; and maps every error to a closed failure, never the server's words |
 | `agent.ts` | the loop: tools chosen by the model, the budgets (24 turns, 16 tool calls, 10 minutes, 40 000 tokens counted as sent and answered), the screen with one rewrite, streaming a section only once it has passed, `withdrawn` on a later failure, and cancel within one step |
-| `tools/` | `ride_sections`, `recent_rides` (at most 8) and `goals` (at most 4 000 characters), each validated against its own schema and reading through `reads.ts`' one method — read-only by type, and unable to spell the side-camera report's kind |
+| `tools/` | `ride_sections`, `recent_rides` (at most 8), `goals` (at most 4 000 characters) and, since #1099, `history_search` (the ADR 0040 index in-process, 6 passages, 5 400 characters, three calls a run), each validated against its own schema and reading through `reads.ts`' one method — read-only by type, and unable to spell the side-camera report's kind |
+| `hosted.ts` (#1101) | **every message of every request to a hosted model is masked here** (`@onyourleft/analysis` §`maskForHosted`): the system prompt, the ride input's first message, every tool result, every rewrite, and the model's own text and tool arguments sent back to it. The hosted connection is built here and nowhere else, and only with the athlete's guard (`hosted-seam.test.ts` walks every shipped module). The guard is the athlete's synced `masking` item (key `guard`: their words-to-mask list and privacy zones, ADR 0046 D-10), pushed and pulled through the sealed sync routes, scoped, erased and exported with the athlete; a missing or malformed one is `hosted_unavailable` and nothing is sent. A local job is never masked (ADR 0040 D-9) |
 | `fake-model-server-testing.ts` | an OpenAI-compatible server on loopback for tests: plain replies, tool calls, a malformed call, the "does not support tools" 400, a 5xx, a slow reply and a reply cut off by `length` |
 
 What holds it, test by test: `agent-safety.test.ts` walks every module's imports (no store write,

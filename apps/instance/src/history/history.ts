@@ -134,6 +134,16 @@ export interface History {
   idle(): Promise<void>;
   /** The caller's passages for `body`'s query. @see the file comment. */
   search(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<Outcome<HistorySearch>>;
+  /**
+   * The same search, in-process, for `athleteId` (#1099): the analysis
+   * agent's `history_search` tool, whose athlete is the JOB's — the
+   * device-key session that created it — never a model's argument. The
+   * request is checked exactly as {@link search}'s is.
+   */
+  searchFor(
+    athleteId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<HistorySearch>>;
   /** The export's line about the index: which model built it, and how much of it (D-10). */
   summarise(athleteId: string): Promise<readonly HistoryIndexSummary[]>;
 }
@@ -441,67 +451,73 @@ export function createHistory(options: HistoryOptions): History {
     idle: () => running ?? Promise.resolve(),
     summarise: (athleteId) => store.summariseHistoryIndex(athleteId),
 
-    search: async (caller, body) => {
-      const request = parseSearch(body);
-      if (!request.ok) return request;
-      if (embedder === undefined) return { ok: false, code: 'unavailable' };
-      const asked = await embedder.embed([request.query], 'query');
-      const [query] = asked.ok ? asked.vectors : [];
-      if (query === undefined) return { ok: false, code: 'unavailable' };
-
-      // The caller's own rows, of exactly this model, dimension and convention.
-      const candidates = await store.listHistoryPassages(
-        caller.athleteId,
-        embedder.model,
-        query.length,
-        embedder.convention,
-      );
-      const ranked = candidates
-        .filter((passage) => !(RIDE_KINDS.includes(passage.kind) && passage.key === request.rideId))
-        .map((passage) => ({ passage, score: dot(query, passage.vector) }))
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            a.passage.kind.localeCompare(b.passage.kind) ||
-            a.passage.key.localeCompare(b.passage.key) ||
-            a.passage.ordinal - b.passage.ordinal,
-        );
-
-      const chosen: typeof ranked = [];
-      let spent = 0;
-      for (const entry of ranked) {
-        if (chosen.length >= request.passages) break;
-        // Never cut to fit: a passage that would pass the budget is left out.
-        if (spent + entry.passage.text.length > request.characters) continue;
-        chosen.push(entry);
-        spent += entry.passage.text.length;
-      }
-
-      // Only the rides a chosen passage is about, and the one being written about.
-      const wanted = new Set(
-        chosen
-          .filter(({ passage }) => RIDE_KINDS.includes(passage.kind))
-          .map(({ passage }) => passage.key),
-      );
-      if (wanted.size > 0 && request.rideId !== undefined) wanted.add(request.rideId);
-      const starts =
-        wanted.size > 0
-          ? rideStarts(await store.listActivityRecords(caller.athleteId), wanted)
-          : new Map<string, number>();
-      const about = request.rideId === undefined ? undefined : starts.get(request.rideId);
-      return {
-        ok: true,
-        value: {
-          passages: chosen.map(({ passage }) => ({
-            kind: passage.kind,
-            label: labelFor(
-              passage.kind,
-              RIDE_KINDS.includes(passage.kind) ? relativeAge(starts.get(passage.key), about) : '',
-            ),
-            text: passage.text,
-          })),
-        },
-      };
-    },
+    search: (caller, body) => searchFor(caller.athleteId, body),
+    searchFor,
   };
+
+  async function searchFor(
+    athleteId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<HistorySearch>> {
+    const request = parseSearch(body);
+    if (!request.ok) return request;
+    if (embedder === undefined) return { ok: false, code: 'unavailable' };
+    const asked = await embedder.embed([request.query], 'query');
+    const [query] = asked.ok ? asked.vectors : [];
+    if (query === undefined) return { ok: false, code: 'unavailable' };
+
+    // The caller's own rows, of exactly this model, dimension and convention.
+    const candidates = await store.listHistoryPassages(
+      athleteId,
+      embedder.model,
+      query.length,
+      embedder.convention,
+    );
+    const ranked = candidates
+      .filter((passage) => !(RIDE_KINDS.includes(passage.kind) && passage.key === request.rideId))
+      .map((passage) => ({ passage, score: dot(query, passage.vector) }))
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.passage.kind.localeCompare(b.passage.kind) ||
+          a.passage.key.localeCompare(b.passage.key) ||
+          a.passage.ordinal - b.passage.ordinal,
+      );
+
+    const chosen: typeof ranked = [];
+    let spent = 0;
+    for (const entry of ranked) {
+      if (chosen.length >= request.passages) break;
+      // Never cut to fit: a passage that would pass the budget is left out.
+      if (spent + entry.passage.text.length > request.characters) continue;
+      chosen.push(entry);
+      spent += entry.passage.text.length;
+    }
+
+    // Only the rides a chosen passage is about, and the one being written about.
+    const wanted = new Set(
+      chosen
+        .filter(({ passage }) => RIDE_KINDS.includes(passage.kind))
+        .map(({ passage }) => passage.key),
+    );
+    if (wanted.size > 0 && request.rideId !== undefined) wanted.add(request.rideId);
+    const starts =
+      wanted.size > 0
+        ? rideStarts(await store.listActivityRecords(athleteId), wanted)
+        : new Map<string, number>();
+    const about = request.rideId === undefined ? undefined : starts.get(request.rideId);
+    return {
+      ok: true,
+      value: {
+        passages: chosen.map(({ passage }) => ({
+          kind: passage.kind,
+          label: labelFor(
+            passage.kind,
+            RIDE_KINDS.includes(passage.kind) ? relativeAge(starts.get(passage.key), about) : '',
+          ),
+          text: passage.text,
+        })),
+      },
+    };
+  }
 }

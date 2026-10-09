@@ -209,7 +209,22 @@ export interface AccountExport {
     readonly lastUsedAt: number | null;
     readonly revokedAt: number | null;
   }[];
+  /**
+   * The FIRST recovery address bound, or `null` — kept for the version 1
+   * readers that predate a second one (#1194). Every address is in
+   * {@link AccountExport.recoveryEmails}.
+   */
   readonly recoveryEmail: string | null;
+  /**
+   * Every recovery address (#1194, ADR 0047 D-8): when it was confirmed
+   * (`null` for one bound before the hold existed) and the PUBLIC key that
+   * gave it.
+   */
+  readonly recoveryEmails: readonly {
+    readonly address: string;
+    readonly confirmedAt: number | null;
+    readonly boundByKey: string | null;
+  }[];
   /**
    * The account-change log (#1193, ADR 0047 D-8): every account-security
    * change, oldest first, with the PUBLIC key that authorised it.
@@ -283,6 +298,18 @@ export interface AccountExport {
     readonly model: string;
     readonly dimension: number;
     readonly passages: number;
+  }[];
+  /**
+   * The write-ups the instance keeps for this athlete (ADR 0046 D-12): the
+   * screened text of each finished analysis job. The job's input and events
+   * are not here.
+   */
+  readonly analysisResults: readonly {
+    readonly jobId: string;
+    readonly source: string;
+    readonly templateVersion: string;
+    readonly endedAt: number;
+    readonly writeUp: string;
   }[];
   /**
    * {@link HOSTED_KEY_HELD} when the instance holds a hosted model key for
@@ -472,6 +499,7 @@ export function createSync(options: SyncOptions): Sync {
         if (page.length < 500 || last === undefined) break;
         after = { receivedAt: last.receivedAt, seq: last.seq };
       }
+      const recoveryEmails = await store.listRecoveryEmails(caller.athleteId);
       const records = await store.listActivityRecords(caller.athleteId);
       const activities = [];
       for (const record of records) {
@@ -509,7 +537,12 @@ export function createSync(options: SyncOptions): Sync {
             lastUsedAt: key.lastUsedAt,
             revokedAt: key.revokedAt,
           })),
-          recoveryEmail: (await store.getRecoveryEmail(caller.athleteId))?.address ?? null,
+          recoveryEmail: recoveryEmails[0]?.address ?? null,
+          recoveryEmails: recoveryEmails.map((row) => ({
+            address: row.address,
+            confirmedAt: row.confirmedAt,
+            boundByKey: row.boundByKey,
+          })),
           accountChanges: (await store.listAccountChanges(caller.athleteId)).map(accountChangeView),
           accountChangeMarks: (await store.listAccountChangeMarks(caller.athleteId)).map(
             (mark) => ({
@@ -545,6 +578,13 @@ export function createSync(options: SyncOptions): Sync {
             model: row.model,
             dimension: row.dimension,
             passages: row.passages,
+          })),
+          analysisResults: (await store.listAnalysisResults(caller.athleteId)).map((result) => ({
+            jobId: result.jobId,
+            source: result.source,
+            templateVersion: result.templateVersion,
+            endedAt: result.endedAt,
+            writeUp: result.writeUp,
           })),
           hostedModelKey:
             (await store.getHostedModelKey())?.athleteId === caller.athleteId

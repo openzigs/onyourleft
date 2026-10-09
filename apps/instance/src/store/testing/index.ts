@@ -313,6 +313,34 @@ export function historyIndexFixture(athleteId: string): HistoryIndexWrite {
   };
 }
 
+/** The id of a fixture athlete's analysis job (#1095). */
+export function analysisJobIdFixture(athleteId: string): string {
+  return `analysis-job-of-${athleteId}`;
+}
+
+/** A job for `athleteId` that ran and ended `succeeded`, with a progress event and its result. */
+export async function seedAnalysisJob(store: SqlStore, athleteId: string): Promise<void> {
+  const id = analysisJobIdFixture(athleteId);
+  await store.createAnalysisJob({
+    id,
+    athleteId,
+    source: 'instance-local',
+    templateVersion: '1',
+    inputJson: '{}',
+    createdAt: 1_790_000_800_000,
+  });
+  const claimed = await store.claimAnalysisJob();
+  if (claimed?.id !== id) throw new Error('another job was queued before this fixture’s');
+  await store.appendAnalysisEvent(athleteId, id, 'progress', '{"step":1}', 1_790_000_801_000);
+  await store.endAnalysisJob(athleteId, id, {
+    status: 'succeeded',
+    failure: null,
+    candidate: `Write-up of ${athleteId}`,
+    data: '{"status":"succeeded"}',
+    at: 1_790_000_802_000,
+  });
+}
+
 /** Every athlete-scoped row the schema has, for all three athletes. */
 export async function seedWorld(store: SqlStore): Promise<void> {
   await store.putRoom(SHARED_ROOM);
@@ -324,6 +352,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       confirmationTokenFixture(athlete),
       1_790_000_050,
       deviceKeyFixture(athlete).publicKey,
+      2,
     );
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
@@ -371,6 +400,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
       expiresAt: 1_790_000_900,
+      address: `${athlete}@example.org`,
     });
     // Migration 0007's (#83): each blocks both others, and reports the one after
     // them. Both, so erasing one athlete — which also removes the blocks OF
@@ -390,6 +420,8 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       reason: `Report by ${athlete}`,
       createdAt: 1_790_000_500,
     });
+    // Migration 0020's (#1095): a job that ran, with a progress event and its result.
+    await seedAnalysisJob(store, athlete);
   }
   // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
   await store.createPrivateRoom({

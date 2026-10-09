@@ -276,6 +276,7 @@ describe('the refusals of set (#1097)', () => {
           1_790_000_100,
           recoveryCodeFixture(ATHLETE_A),
           OWNER_A,
+          0,
         ),
       ).not.toBe('not_found');
       expect((await store.findDeviceKey(OWNER_A))?.revokedAt).not.toBeNull();

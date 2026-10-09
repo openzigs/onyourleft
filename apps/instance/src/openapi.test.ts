@@ -19,8 +19,11 @@ import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
-import { sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
+import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
+import { jobBody } from './analysis/jobs-testing.ts';
+import type { AnalysisEngine } from './analysis/jobs.ts';
+import type { ScreenedWriteUp } from '@onyourleft/analysis';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
@@ -204,7 +207,56 @@ async function sealedSend(
   });
 }
 
+/** An engine that writes every ride up at once (#1095): the routes' shapes, not the agent's, are checked here. */
+const INSTANT_ENGINE: AnalysisEngine = {
+  run: (_job, _signal, emit) => {
+    emit({ type: 'progress', step: 1 });
+    return Promise.resolve({ kind: 'written', writeUp: 'A steady ride.' as ScreenedWriteUp });
+  },
+};
+
+/** A rider with a job that has run to its end: their session and the job's id. */
+async function finishedJob(
+  world: IdentityInstance,
+): Promise<{ device: TestDevice; token: string; jobId: string }> {
+  const rider = await signedIn(world);
+  const answer = await world.call('POST', '/v1/analysis/jobs', {
+    token: rider.token,
+    body: jobBody(),
+  });
+  await world.analysis?.idle();
+  return { ...rider, jobId: (answer.body as { jobId: string }).jobId };
+}
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  startAnalysisJob: async (world) =>
+    send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
+  getAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'GET', `/v1/analysis/jobs/${jobId}`, token);
+  },
+  streamAnalysisJob: async (world) => {
+    const { device, token, jobId } = await finishedJob(world);
+    const sealed = await sealFor(world, {
+      path: `/v1/analysis/jobs/${jobId}/events`,
+      token,
+      signer: device.signingKey,
+    });
+    const response = await sendEnvelope(world.url, sealed.envelope, token);
+    const opened = await openFrames(sealed, frames(await response.text()));
+    return new Response(opened.events.map((each) => each.kind).join('\n'), {
+      status: response.status,
+      headers: { 'content-type': response.headers.get('content-type') ?? '' },
+    });
+  },
+  cancelAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'POST', `/v1/analysis/jobs/${jobId}/cancel`, token, {});
+  },
+  acknowledgeAnalysisJob: async (world) => {
+    const { token, jobId } = await finishedJob(world);
+    return send(world, 'POST', `/v1/analysis/jobs/${jobId}/ack`, token, {});
+  },
   listAccountChanges: (world) => sealedSend(world, 'GET', '/v1/auth/account-changes'),
   acknowledgeAccountChanges: (world) =>
     sealedSend(world, 'POST', '/v1/auth/account-changes/acknowledge', { through: 0 }),
@@ -398,6 +450,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
         purpose: RECOVER_PURPOSE,
       })),
       recoveryCode: code,
+      // The full reset (#1194), so the answer's optional new codes are checked too.
+      reset: true,
     });
   },
   startRoom: async (world) =>
@@ -447,6 +501,26 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
     const mailed = world.confirmations.at(-1)?.token;
     return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
+  },
+  clearRecoveryEmail: async (world) => {
+    const { token } = await signedIn(world);
+    await world.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'dee@example.org' },
+    });
+    const mailed = world.confirmations.at(-1)?.token;
+    await world.call('POST', '/v1/auth/recovery-email/confirm', { token, body: { token: mailed } });
+    // Held, and cleared by the key that bound it (#1194).
+    return send(world, 'POST', '/v1/auth/recovery-email/clear', token, {
+      address: 'dee@example.org',
+    });
+  },
+  resetRecovery: async (world) => {
+    const session = await world.signIn(await testDevice());
+    const [code] = session.body.recoveryCodes as string[];
+    return send(world, 'POST', '/v1/auth/recovery/reset', session.body.sessionToken as string, {
+      recoveryCode: code,
+    });
   },
   ...SYNC_HAPPY_CALLS,
   searchHistory: async (world) => {
@@ -501,6 +575,7 @@ describe('every route answers with the shape its entry declares', () => {
       emailRecovery: true,
       probes,
       moderators: { owner: moderator.publicKey },
+      analysis: { engine: INSTANT_ENGINE, available: () => true },
     });
   });
   afterAll(async () => {
@@ -552,14 +627,19 @@ describe('every route answers with the shape its entry declares', () => {
         route.response.contentType === 'sealed'
       ) {
         const body: unknown = await response.json();
-        expect(response.status, JSON.stringify(body)).toBe(200);
+        expect(response.status, JSON.stringify(body)).toBe(route.accepted === true ? 202 : 200);
         expect(violations(body, route.response.schema)).toEqual([]);
       } else if (route.response.contentType === 'application/octet-stream') {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('application/octet-stream');
         expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      } else if (route.response.contentType === 'text/event-stream') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('text/event-stream');
+        // The opened events' kinds, in order: the stream ran to its result.
+        expect((await response.text()).split('\n')).toEqual(['progress', 'result', 'end']);
       } else {
-        throw new Error('an identity route answers JSON, bytes or nothing');
+        throw new Error('an identity route answers JSON, bytes, a stream or nothing');
       }
     },
   );

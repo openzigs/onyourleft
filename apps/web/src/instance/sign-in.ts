@@ -64,7 +64,7 @@ export interface InstanceAccount {
    * no sealed route (D-14 Q1). Changed only by the rider confirming a new card.
    */
   readonly pin?: string;
-  /** The highest key serial and its id this device has verified, and when it first saw each statement (D-5). */
+  /** The highest key serial and its id this device has verified, when it first saw each statement, and each key's newest re-signing (D-5, #1216). */
   readonly keyTrust?: InstanceKeyTrust;
   /**
    * The fingerprint the pinned key ENDORSED for its successor (D-5, D-14 Q8):
@@ -86,7 +86,10 @@ const isWholeSeconds = (value: unknown): value is number =>
 /** The stored trust, or `undefined` when it is not one this build wrote. */
 function trustField(value: unknown): InstanceKeyTrust | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { highestSerial, highestKeyId, firstVerified } = value as Record<string, unknown>;
+  const { highestSerial, highestKeyId, firstVerified, newestIssued } = value as Record<
+    string,
+    unknown
+  >;
   if (!(highestSerial === null || isWholeSeconds(highestSerial))) return undefined;
   if (!(highestKeyId === null || typeof highestKeyId === 'string')) return undefined;
   if (typeof firstVerified !== 'object' || firstVerified === null) return undefined;
@@ -96,7 +99,30 @@ function trustField(value: unknown): InstanceKeyTrust | undefined {
     if (!isWholeSeconds(at) || !isWholeSeconds(notAfter)) return undefined;
     seen[id] = { at, notAfter };
   }
-  return { highestSerial, highestKeyId, firstVerified: seen };
+  const newest: Record<string, { issuedAt: number; notAfter: number }> = {};
+  if (newestIssued === undefined) {
+    // Trust a build before #1216 wrote: every statement it verified is still
+    // in `firstVerified`, named `keyId@issuedAt`, so the newest of each key is
+    // read back from there rather than forgotten.
+    for (const [id, entry] of Object.entries(seen)) {
+      const at = id.lastIndexOf('@');
+      const keyId = id.slice(0, at);
+      const issuedAt = Number(id.slice(at + 1));
+      if (at <= 0 || !isWholeSeconds(issuedAt)) return undefined;
+      const held = newest[keyId];
+      if (held === undefined || issuedAt > held.issuedAt) {
+        newest[keyId] = { issuedAt, notAfter: entry.notAfter };
+      }
+    }
+  } else {
+    if (typeof newestIssued !== 'object' || newestIssued === null) return undefined;
+    for (const [keyId, entry] of Object.entries(newestIssued)) {
+      const { issuedAt, notAfter } = (entry ?? {}) as Record<string, unknown>;
+      if (!isWholeSeconds(issuedAt) || !isWholeSeconds(notAfter)) return undefined;
+      newest[keyId] = { issuedAt, notAfter };
+    }
+  }
+  return { highestSerial, highestKeyId, firstVerified: seen, newestIssued: newest };
 }
 
 /** Keep `account` on this device, in place of whatever was kept before. */
@@ -173,7 +199,9 @@ export interface SignInDependencies {
   /**
    * The pin to keep with the account, from a card this sign-in was verified
    * against (#1190). Without it a same-origin pin already held is kept; a new
-   * origin's account holds none.
+   * origin's account holds none. ⚠️ It never REPLACES a different pin held for
+   * the same origin (#1207): that is refused `pin_differs` before anything is
+   * sent, because only the rider confirming a new card replaces a pin (D-6).
    */
   readonly pin?: { readonly fingerprint: string; readonly keyTrust: InstanceKeyTrust };
 }
@@ -214,11 +242,29 @@ async function signedStatement(
   return { ...statement, signature: toHex(await key.sign(deviceStatementBytes(statement))) };
 }
 
+/** The code {@link refuseUnconfirmedPin} refuses with. Not an instance's: the device's own. */
+export const PIN_DIFFERS = 'pin_differs';
+
+/**
+ * Refuse a sign-in or a link whose card would replace a DIFFERENT pin this
+ * device holds for the same origin (#1207, ADR 0047 D-6): the confirm-new-card
+ * step is the only way a pin changes. Checked before anything is sent.
+ */
+function refuseUnconfirmedPin(dependencies: SignInDependencies): void {
+  const offered = dependencies.pin?.fingerprint;
+  if (offered === undefined) return;
+  const held = readInstanceAccount(dependencies.storage);
+  if (held?.origin === dependencies.origin && held.pin !== undefined && held.pin !== offered) {
+    throw new InstanceSignInError(PIN_DIFFERS);
+  }
+}
+
 /** Sign this device in to an instance, registering it there if the instance has never seen its key. */
 export async function signInToInstance(
   dependencies: SignInDependencies,
   registration: { readonly displayName?: string } = {},
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
@@ -274,6 +320,7 @@ export async function linkThisDevice(
   dependencies: SignInDependencies & { readonly sealed: InstanceTransport },
   linkCode: string,
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, LINK_PURPOSE);

@@ -11,6 +11,7 @@
  */
 
 import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
+import { DEFAULT_HEARTBEAT_MS, MAXIMUM_HEARTBEAT_MS } from './analysis/jobs.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
 
 export interface RawServerConfig {
@@ -23,6 +24,7 @@ export interface RawServerConfig {
   readonly pingIntervalMs?: string | undefined;
   readonly metricsToken?: string | undefined;
   readonly secretKey?: string | undefined;
+  readonly analysisHeartbeatMs?: string | undefined;
 }
 
 export interface ServerConfig {
@@ -49,6 +51,12 @@ export interface ServerConfig {
    * under (#1097, `analysis/hosted-key.ts`), or `undefined` when it is unset.
    */
   readonly secretKey: Uint8Array | undefined;
+  /**
+   * How often a quiet analysis job stream writes a heartbeat (#1095): 25 s
+   * unless the operator sets another, `0` for none — ONLY for #1105's control,
+   * which measures the tunnel cutting a stream that has none.
+   */
+  readonly analysisHeartbeatMs: number;
 }
 
 export type ServerConfigResult =
@@ -126,6 +134,23 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     }
   }
 
+  let analysisHeartbeatMs = DEFAULT_HEARTBEAT_MS;
+  if (present(raw.analysisHeartbeatMs)) {
+    const text = raw.analysisHeartbeatMs.trim();
+    const value = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+    if (
+      !Number.isInteger(value) ||
+      (value !== 0 && value < 1_000) ||
+      value > MAXIMUM_HEARTBEAT_MS
+    ) {
+      problems.push(
+        `OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS must be 0 (no heartbeat) or a whole number of milliseconds from 1000 to ${String(MAXIMUM_HEARTBEAT_MS)}: a slower heartbeat is too close to the tunnel's idle cut.`,
+      );
+    } else {
+      analysisHeartbeatMs = value;
+    }
+  }
+
   let metricsToken: string | undefined;
   if (present(raw.metricsToken)) {
     const text = raw.metricsToken.trim();
@@ -161,6 +186,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       pingIntervalMs,
       metricsToken,
       secretKey: secret.kind === 'ok' ? secret.bytes : undefined,
+      analysisHeartbeatMs,
     },
   };
 }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **The analysis agent's tools** — #1098, ADR 0046 D-7. Three in this issue:
- * `ride_sections`, `recent_rides` and `goals` (history search is #1099 and
- * workouts #1100).
+ * **The analysis agent's tools** — #1098, ADR 0046 D-7: `ride_sections`,
+ * `recent_rides` and `goals`, and since #1099 `history_search`
+ * (`history-search.ts`). Workouts are #1100.
  *
  * Every tool is:
  *
@@ -37,7 +37,8 @@ import {
 
 import { holdsDataUrl } from '../../history/passages.ts';
 import type { ToolSpec } from '../model-turn.ts';
-import type { AnalysisReads, ReadItem } from './reads.ts';
+import { HISTORY_SEARCH } from './history-search.ts';
+import type { AnalysisHistory, AnalysisReads, ReadItem } from './reads.ts';
 
 /** What every tool runs against: the job's, never the model's. */
 export interface ToolContext {
@@ -46,6 +47,18 @@ export interface ToolContext {
   /** The device-built input of the asked-about ride (ADR 0046 D-6). */
   readonly input: RideAnalysisInput;
   readonly reads: AnalysisReads;
+  /**
+   * The history index (#1099), or `undefined` when the instance has none —
+   * no embedding model configured, or its address refused (ADR 0040 D-6).
+   * `history_search` then answers that history is not available.
+   */
+  readonly history?: AnalysisHistory | undefined;
+  /**
+   * The synced activity id of the asked-about ride, when the job names one
+   * (#1095): left out of its own history, and what each retrieved ride's
+   * relative age is measured from (ADR 0040 D-2).
+   */
+  readonly rideId?: string | undefined;
 }
 
 /** A tool's checked arguments, or why they were refused. */
@@ -54,6 +67,12 @@ type Checked<T> =
 
 export interface AgentTool<T = unknown> {
   readonly spec: ToolSpec;
+  /**
+   * The most times one run may call this tool, when it has its own cap inside
+   * the run's tool-call budget (`agent.ts` §`AgentBudgets`): a further call is refused, and
+   * the model is shown why. `undefined` for no cap of its own.
+   */
+  readonly maximumCalls?: number;
   validate(input: unknown): Checked<T>;
   run(context: ToolContext, args: T): Promise<string>;
 }
@@ -239,9 +258,13 @@ export const GOALS: AgentTool<Readonly<Record<string, number | undefined>>> = {
   },
 };
 
+/** A tool of any argument shape, as the agent holds them. */
+export type AnyAgentTool = AgentTool<Readonly<Record<string, unknown>>>;
+
 /** Every tool the agent has, and no other. */
-export const AGENT_TOOLS: readonly AgentTool<Readonly<Record<string, number | undefined>>>[] = [
+export const AGENT_TOOLS: readonly AnyAgentTool[] = [
   RIDE_SECTIONS,
   RECENT_RIDES,
   GOALS,
+  HISTORY_SEARCH,
 ];
