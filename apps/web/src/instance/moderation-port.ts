@@ -67,6 +67,7 @@
 
 import { heldInstanceSession, type InstanceStorage } from './instance-port';
 import type { InstanceAnswer, InstanceSend } from './instance-transport';
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, sealedRouteGate } from './instance-pin';
 import { readInstanceAccount } from './sign-in';
 
 /** An athlete id as the instance mints and accepts one (`moderation.ts` §`ATHLETE_ID`). */
@@ -218,7 +219,38 @@ export interface ModerationPort {
     reason: string,
     reportId?: number,
   ): Promise<ModerationOutcome>;
+  /**
+   * Make an invitation for a new rider (#1190, ADR 0047 D-6 source 3), with
+   * THIS device's card beside the code. The card is composed from this
+   * device's own pin, never taken from the instance's answer; with no pin there
+   * is no invitation (D-14 Q1).
+   */
+  mintInvite(reason: string): Promise<InviteOutcome>;
 }
+
+/** An invitation as the share sheet shows it (#1190). */
+export type InviteOutcome =
+  | {
+      readonly kind: 'minted';
+      /** The card and the code as one line: what the QR code carries and the rider is sent. */
+      readonly invite: string;
+      /** The card, composed from this device's own pin. */
+      readonly card: string;
+      readonly inviteCode: string;
+      /** Unix seconds. */
+      readonly expiresAt: number;
+    }
+  | { readonly kind: 'refused'; readonly text: string };
+
+/**
+ * Said on the share sheet, where an invitation leaves this device (ADR 0047
+ * D-6): an invitation's card is only as trustworthy as the channel it travels
+ * through. ⚠️ **Placeholder draft**: #1194 owns this sentence's wording.
+ */
+export const INVITE_CARD_CAUTION =
+  'This invitation carries the instance’s card. Whoever carries the invitation to the new rider ' +
+  'could change the card on the way, so send it by a channel you trust, or show it to them in ' +
+  'person.';
 
 export interface ModerationPortDependencies {
   readonly storage: InstanceStorage;
@@ -421,6 +453,9 @@ function acceptedReason(reason: string): string | undefined {
   return trimmed === '' || [...trimmed].length > MAXIMUM_MODERATION_REASON ? undefined : trimmed;
 }
 
+/** An invite code as `apps/instance` mints them: four groups of four. */
+const INVITE_CODE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/;
+
 /** The production {@link ModerationPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createModerationPort(dependencies: ModerationPortDependencies): ModerationPort {
   const held = () => heldInstanceSession(dependencies.storage, dependencies.send);
@@ -572,6 +607,49 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         reason,
         reportId === undefined ? {} : { reportId },
       );
+    },
+
+    mintInvite: async (reason) => {
+      // ⚠️ The card is composed HERE, from this device's own pin (D-6
+      // source 3): never from anything the instance answers below.
+      const account = readInstanceAccount(dependencies.storage);
+      const gate = sealedRouteGate(account);
+      const card = cardFromPin(account);
+      if (gate.kind !== 'open' || card === undefined) {
+        return {
+          kind: 'refused',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
+      const accepted = acceptedReason(reason);
+      if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
+      const connection = held();
+      if (connection === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
+      }
+      try {
+        const answer = await connection.http.call('POST', '/v1/moderation/invites', {
+          token: connection.token,
+          body: { reason: accepted },
+        });
+        const refused = outcomeOf(answer);
+        if (refused.kind === 'refused') return refused;
+        const body = record(answer.body);
+        const inviteCode =
+          typeof body?.inviteCode === 'string' ? body.inviteCode.toLowerCase() : '';
+        if (!INVITE_CODE.test(inviteCode) || !isTime(body?.expiresAt)) {
+          return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+        }
+        return {
+          kind: 'minted',
+          invite: codeWithCard(card, inviteCode),
+          card,
+          inviteCode,
+          expiresAt: body.expiresAt,
+        };
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
     },
   };
 }

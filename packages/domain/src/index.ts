@@ -263,6 +263,23 @@ export {
   instanceKeyWrapAad,
   parseInstanceKeyStatement,
 } from './identity/instance-key-statement';
+export type {
+  InstanceCardParse,
+  InstanceCardProblem,
+  InstanceCardRead,
+  InstanceKeysVerdict,
+  InstanceKeyTrust,
+  JudgeInstanceKeysInput,
+} from './identity/instance-pin';
+export {
+  base32UnpaddedDecode,
+  fingerprintsEqual,
+  judgeInstanceKeys,
+  NO_KEY_TRUST,
+  parseInstanceCard,
+  STATEMENT_TRUST_CAP_SECONDS,
+  statementId,
+} from './identity/instance-pin';
 export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
 export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 

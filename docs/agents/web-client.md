@@ -450,7 +450,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         session token and the address are kept on the DEVICE,
                         not the athlete row (ADR 0020 D-2's question, answered
                         the other way in the port's header). The screen is
-                        `views/InstanceView.tsx` at `#/settings/instance`
+                        `views/InstanceView.tsx` at `#/settings/instance`.
+                        Since #1190 `instance-pin.ts` holds the device's PIN on
+                        the instance's identity key, taken only from an
+                        instance card pasted in the app (never a registered
+                        URL scheme — `no-url-handler.test.ts`), judged by
+                        `@onyourleft/domain` §`judgeInstanceKeys`;
+                        `sealedRouteGate` is the gate every phase-1 feature
+                        asks, and the card on the link-code screen and in an
+                        invitation is `cardFromPin`, never an instance answer
     src/net/            a race room, from the client's side (#782) —
                         `room-port.ts` (the port and `createRoomPort`, which
                         only `main.tsx` names), `room-session.ts` (the hello
