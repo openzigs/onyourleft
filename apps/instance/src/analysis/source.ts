@@ -22,9 +22,11 @@
  * operator is an athlete, so their own jobs need it too. The check is
  * {@link SourceOptions.recordedConsent}, asked BEFORE
  * {@link SourceOptions.hostedKey}; nothing records a consent on this tree
- * (Q10 is #1199), so nothing supplies it and every athlete’s
- * `instance-hosted` job — the operator's too — fails `hosted_unavailable`
- * without the key being opened (`source.test.ts`).
+ * (Q10 is #1199), so nothing supplies it on a running instance
+ * (`instance.ts` §`InstanceOptions.hostedConsent`, which `serve.ts` never
+ * sets) and every athlete’s `instance-hosted` job — the operator's too —
+ * fails `hosted_unavailable` without the key being opened (`source.test.ts`,
+ * `instance.test.ts` §"#1223").
  *
  * ⚠️ **The held key serves the athlete it is held for, and nobody else.**
  * That is the operator (ADR 0046 Q9, `operator model-key set`). Every other
