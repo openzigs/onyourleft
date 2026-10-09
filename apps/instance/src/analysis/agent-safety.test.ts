@@ -112,6 +112,7 @@ const ANALYSIS_MODULES = shippedUnder(HERE);
 describe('the tools are read-only and reach no network (ADR 0046 D-7)', () => {
   it('walks every tool module, and finds nothing they may not reach', () => {
     expect(TOOL_MODULES.map((path) => relative(HERE, path)).sort()).toStrictEqual([
+      'tools/history-search.ts',
       'tools/reads.ts',
       'tools/tools.ts',
     ]);
