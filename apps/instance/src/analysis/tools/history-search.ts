@@ -30,8 +30,8 @@
  *   or a search that throws, the call answers {@link HISTORY_UNAVAILABLE} and
  *   the run goes on (D-8).
  *
- * ⚠️ **Not offered on an `instance-hosted` job** until #1101 masks what a
- * hosted model is sent (`tools.ts` §`UNMASKED_ONLY_TOOLS`).
+ * On an `instance-hosted` job what it returns reaches the hosted model only
+ * masked (#1101): the connection masks every tool result (`hosted.ts`).
  */
 
 import { passedScreen, screenWriteUp, type UntrustedText } from '@onyourleft/analysis';

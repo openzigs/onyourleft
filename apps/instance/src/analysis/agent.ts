@@ -7,9 +7,8 @@
  * walls it cannot move:
  *
  * - **The tools** are `tools/tools.ts`' four, read-only and scoped to the
- *   job's athlete; an `instance-hosted` job is offered only those that read
- *   no free text until #1101 masks what a hosted model is sent
- *   (`tools.ts` §`toolsFor`). A call to any other name — a `set_resistance`, say — is a
+ *   job's athlete, offered on either source: what a hosted model is sent is
+ *   masked by the connection it is handed (`hosted.ts`, #1101). A call to any other name — a `set_resistance`, say — is a
  *   tool error the model is shown; nothing a reply says adds a tool, widens a
  *   bound, moves the model's address or reaches a network path (the set is a
  *   constant, and `agent-safety.test.ts` walks the imports).
@@ -59,9 +58,8 @@ import type {
   ToolCallRequest,
   ToolResultText,
 } from './model-turn.ts';
-import type { AnalysisSource } from './source.ts';
 import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
-import { toolsFor, type AnyAgentTool, type ToolContext } from './tools/tools.ts';
+import { AGENT_TOOLS, type AnyAgentTool, type ToolContext } from './tools/tools.ts';
 
 /** The most model turns one run may take (ADR 0046 D-7). */
 export const AGENT_MODEL_CALLS = 24;
@@ -161,8 +159,6 @@ export type AgentOutcome =
 export interface AgentJob {
   readonly athleteId: string;
   readonly input: RideAnalysisInput;
-  /** Which model the job runs on: it decides which tools are offered (`tools.ts` §`toolsFor`). */
-  readonly source: AnalysisSource;
   /** The synced activity id of the asked-about ride, when the job names one (#1099). */
   readonly rideId?: string;
 }
@@ -302,9 +298,8 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
   const { job, model, reads, history, clock, signal, emit } = options;
   const template = options.template ?? ANALYSIS_AGENT_TEMPLATE_V1;
   const budgets: AgentBudgets = { ...AGENT_BUDGETS, ...options.budgets };
-  const offered = toolsFor(job.source);
-  const tools = new Map(offered.map((tool) => [tool.spec.name, tool] as const));
-  const specs = offered.map((tool) => tool.spec);
+  const tools = new Map(AGENT_TOOLS.map((tool) => [tool.spec.name, tool] as const));
+  const specs = AGENT_TOOLS.map((tool) => tool.spec);
   const context: ToolContext = {
     athleteId: job.athleteId,
     input: job.input,

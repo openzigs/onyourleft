@@ -78,7 +78,7 @@ interface Ran {
 async function run(model: ScriptedModel, overrides: Partial<AgentOptions> = {}): Promise<Ran> {
   const events: AgentEvent[] = [];
   const outcome = await runAnalysisAgent({
-    job: { athleteId: A, input: RIDE_INPUT, source: 'instance-local' },
+    job: { athleteId: A, input: RIDE_INPUT },
     model,
     reads: store,
     clock: movableClock(),
@@ -327,7 +327,6 @@ describe('the budgets: each limit is hit, the run fails with its reason, and kee
       job: {
         athleteId: A,
         input: { ...RIDE_INPUT, templateVersion: huge },
-        source: 'instance-local',
       },
       template: {
         id: 't',
@@ -511,7 +510,7 @@ describe('end to end through the fake model server and the real connection (no n
       });
       const events: AgentEvent[] = [];
       const outcome = await runAnalysisAgent({
-        job: { athleteId: A, input: RIDE_INPUT, source: 'instance-local' },
+        job: { athleteId: A, input: RIDE_INPUT },
         model,
         reads: store,
         clock: movableClock(),
@@ -534,7 +533,7 @@ describe('end to end through the fake model server and the real connection (no n
     const server = await startFakeModelServer([WITHOUT_TOOLS_REPLY]);
     try {
       const outcome = await runAnalysisAgent({
-        job: { athleteId: A, input: RIDE_INPUT, source: 'instance-local' },
+        job: { athleteId: A, input: RIDE_INPUT },
         model: createLocalModel({
           settings: { baseUrl: server.baseUrl, model: 'scripted' },
           resolve: () => Promise.resolve(['127.0.0.1']),
@@ -558,7 +557,7 @@ describe('end to end through the fake model server and the real connection (no n
     try {
       const controller = new AbortController();
       const pending = runAnalysisAgent({
-        job: { athleteId: A, input: RIDE_INPUT, source: 'instance-local' },
+        job: { athleteId: A, input: RIDE_INPUT },
         model: createLocalModel({
           settings: { baseUrl: server.baseUrl, model: 'scripted' },
           resolve: () => Promise.resolve(['127.0.0.1']),

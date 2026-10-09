@@ -5310,7 +5310,8 @@
                               "side-camera-report",
                               "goal",
                               "note",
-                              "document"
+                              "document",
+                              "masking"
                             ]
                           },
                           "key": {

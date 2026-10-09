@@ -592,6 +592,7 @@ export const SYNC_KINDS: readonly SyncKind[] = [
   'goal',
   'note',
   'document',
+  'masking',
 ];
 
 /** One thing an athlete synced, or its tombstone (#776). */
