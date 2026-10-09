@@ -6,8 +6,9 @@
  * A tool-calling loop in which **the model chooses its own tools**, inside
  * walls it cannot move:
  *
- * - **The tools** are `tools/tools.ts`' three, read-only and scoped to the
- *   job's athlete. A call to any other name — a `set_resistance`, say — is a
+ * - **The tools** are `tools/tools.ts`' four, read-only and scoped to the
+ *   job's athlete, offered on either source: what a hosted model is sent is
+ *   masked by the connection it is handed (`hosted.ts`, #1101). A call to any other name — a `set_resistance`, say — is a
  *   tool error the model is shown; nothing a reply says adds a tool, widens a
  *   bound, moves the model's address or reaches a network path (the set is a
  *   constant, and `agent-safety.test.ts` walks the imports).
@@ -57,8 +58,8 @@ import type {
   ToolCallRequest,
   ToolResultText,
 } from './model-turn.ts';
-import type { AnalysisReads } from './tools/reads.ts';
-import { AGENT_TOOLS, type AgentTool, type ToolContext } from './tools/tools.ts';
+import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
+import { AGENT_TOOLS, type AnyAgentTool, type ToolContext } from './tools/tools.ts';
 
 /** The most model turns one run may take (ADR 0046 D-7). */
 export const AGENT_MODEL_CALLS = 24;
@@ -158,6 +159,8 @@ export type AgentOutcome =
 export interface AgentJob {
   readonly athleteId: string;
   readonly input: RideAnalysisInput;
+  /** The synced activity id of the asked-about ride, when the job names one (#1099). */
+  readonly rideId?: string;
 }
 
 /** Milliseconds on a clock that only moves forward. */
@@ -169,6 +172,8 @@ export interface AgentOptions {
   readonly job: AgentJob;
   readonly model: ModelConnection;
   readonly reads: AnalysisReads;
+  /** The history index (#1099), or `undefined` when the instance has none. */
+  readonly history?: AnalysisHistory | undefined;
   readonly clock: AgentClock;
   /** The job's: aborting it cancels the run. */
   readonly signal: AbortSignal;
@@ -263,13 +268,22 @@ function sectionsOf(text: string): readonly string[] {
 /** The result a tool call gets: its fenced data, or an error the model is shown. */
 async function runCall(
   call: ToolCallRequest,
-  tools: ReadonlyMap<string, AgentTool<Readonly<Record<string, number | undefined>>>>,
+  tools: ReadonlyMap<string, AnyAgentTool>,
   context: ToolContext,
-): Promise<{ readonly text: string; readonly known: AgentTool | undefined }> {
+  called: Map<string, number>,
+): Promise<{ readonly text: string; readonly known: AnyAgentTool | undefined }> {
   const known = tools.get(call.toolName);
   const names = [...tools.keys()].join(', ');
   if (known === undefined) {
     return { text: `Error: there is no such tool. The tools are ${names}.`, known: undefined };
+  }
+  const times = (called.get(known.spec.name) ?? 0) + 1;
+  called.set(known.spec.name, times);
+  if (known.maximumCalls !== undefined && times > known.maximumCalls) {
+    return {
+      text: `Error: ${known.spec.name} may be called at most ${String(known.maximumCalls)} times in one write-up.`,
+      known,
+    };
   }
   if (call.invalid === true) {
     return { text: 'Error: the arguments were not one JSON object.', known };
@@ -281,12 +295,19 @@ async function runCall(
 
 /** Run the agent over one job. Every way it can end is an {@link AgentOutcome}; it never throws for a model's doing. */
 export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutcome> {
-  const { job, model, reads, clock, signal, emit } = options;
+  const { job, model, reads, history, clock, signal, emit } = options;
   const template = options.template ?? ANALYSIS_AGENT_TEMPLATE_V1;
   const budgets: AgentBudgets = { ...AGENT_BUDGETS, ...options.budgets };
   const tools = new Map(AGENT_TOOLS.map((tool) => [tool.spec.name, tool] as const));
   const specs = AGENT_TOOLS.map((tool) => tool.spec);
-  const context: ToolContext = { athleteId: job.athleteId, input: job.input, reads };
+  const context: ToolContext = {
+    athleteId: job.athleteId,
+    input: job.input,
+    reads,
+    history,
+    rideId: job.rideId,
+  };
+  const called = new Map<string, number>();
   const started = clock.now();
   const messages: AgentMessage[] = [{ role: 'user', text: template.firstMessage(job.input) }];
   const fixedCharacters = template.system.length + JSON.stringify(specs).length;
@@ -338,7 +359,7 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
         if (clock.now() - started >= budgets.milliseconds) return failed('out-of-time');
         if (toolCalls >= budgets.toolCalls) return failed('out-of-tool-calls');
         toolCalls += 1;
-        const { text, known } = await runCall(call, tools, context);
+        const { text, known } = await runCall(call, tools, context, called);
         emit(
           known === undefined
             ? { type: 'progress', step: modelCalls }

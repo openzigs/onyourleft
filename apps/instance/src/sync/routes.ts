@@ -101,7 +101,16 @@ const activityProperties = { contentSha256: string, receivedAt: integer, claims:
 
 const kindSchema: Schema = {
   type: 'string',
-  enum: ['activity', 'write-up', 'ride-summary', 'side-camera-report', 'goal', 'note', 'document'],
+  enum: [
+    'activity',
+    'write-up',
+    'ride-summary',
+    'side-camera-report',
+    'goal',
+    'note',
+    'document',
+    'masking',
+  ],
 };
 
 export const SYNC_ROUTES: readonly Route[] = [

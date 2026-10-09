@@ -112,6 +112,7 @@ const ANALYSIS_MODULES = shippedUnder(HERE);
 describe('the tools are read-only and reach no network (ADR 0046 D-7)', () => {
   it('walks every tool module, and finds nothing they may not reach', () => {
     expect(TOOL_MODULES.map((path) => relative(HERE, path)).sort()).toStrictEqual([
+      'tools/history-search.ts',
       'tools/reads.ts',
       'tools/tools.ts',
     ]);
@@ -182,7 +183,14 @@ describe('nothing the agent is made of reaches a trainer, or a network but the o
     const reachingSdk = ANALYSIS_MODULES.filter((path) =>
       reach([path], onDisk).bare.some((specifier) => /^ai$|^@ai-sdk\//.test(specifier)),
     ).map((path) => relative(HERE, path));
-    expect(reachingSdk).toStrictEqual(['model.ts']);
+    // hosted.ts reaches it only THROUGH model.ts: it builds the hosted
+    // connection behind the masking (#1101), and names no SDK itself.
+    expect(reachingSdk).toStrictEqual(['hosted.ts', 'model.ts']);
+    expect(
+      ANALYSIS_MODULES.filter((path) =>
+        specifiers(onDisk(path)).some((specifier) => /^ai$|^@ai-sdk\//.test(specifier)),
+      ).map((path) => relative(HERE, path)),
+    ).toStrictEqual(['model.ts']);
   });
 });
 

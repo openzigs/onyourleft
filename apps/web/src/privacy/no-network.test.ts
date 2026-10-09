@@ -1438,9 +1438,9 @@ describe('the instance is disclosed, class by class — #778', () => {
       "this device's public key",
       'the name other riders see',
       'your internet address',
-      // What it does not send yet, each named rather than left out.
-      'your rides, including their positions',
-      'not sent by this version of the app',
+      // #1195's sync, named before a version offers it (#778's second pass).
+      'what you sync: your rides, and what goes with them',
+      'this version of the app does not offer sync yet',
       'power, cadence, the weight you declare, and your display name',
       // #784: a room's route — refused in a privacy zone, deleted when the room is over.
       'the route of a room you make',
@@ -1472,6 +1472,59 @@ describe('the instance is disclosed, class by class — #778', () => {
     ]) {
       expect(section, phrase).toContain(phrase);
     }
+  });
+
+  it('says what a sync sends, sealed, untrimmed, and how it is deleted — before Sync ships (#1195)', () => {
+    // #1195 is blocked by #778: the policy names every class a sync sends
+    // (`instance/sync.ts` §"The rules, thing by thing") before the first
+    // build that sends one. The `normalised` text is lower-cased.
+    for (const phrase of [
+      'only if you sync with the instance, which needs its card',
+      'its positions and heart rate included, not trimmed by your privacy zones',
+      "signed with this device's key",
+      "each ride's write-up and side-camera report",
+      'with no position, date or name in it',
+      'your notes on your rides, your goals and the documents you added for the analysis',
+      'your answer to may be raced for each ride',
+      'all of it is sealed for that instance alone',
+      'shows none of it to another rider',
+      'delete a ride, note, goal or document on this device and then sync: the instance deletes it too',
+      // ADR 0047 D-7 and D-11: what is sealed, and what Cloudflare still sees.
+      'everything you sync is sealed',
+      'what cloudflare still sees, even then',
+      // ADR 0036 D-3: the device stays canonical.
+      'syncing copies them to the instance; it never moves them',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+    // #1215's review: what a sync sends is a FIT file re-encoded from the
+    // stored streams plus a signed record whose claims carry the ride's name
+    // and date (`instance/sync.ts` §`pushRide`, §`claimsOf`), and a deletion
+    // leaves a fingerprint of the file with when it was received.
+    for (const phrase of [
+      'a file this device writes from the ride',
+      "a signed record that carries the ride's name, when it started and its time zone",
+      'its elapsed and moving time, its distance and its average power',
+      'a fingerprint of the file and when the instance received it',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+    // The owner's ruling of 2026-10-09 on #1215: an imported GPX or TCX ride
+    // is sent as a FIT file as well, matching Data Safety and `sync.ts`.
+    expect(section).toContain(
+      'a ride imported from a gpx or tcx file is sent as a fit file too, not as the original',
+    );
+    expect(section).not.toContain('sent as that kind of file too');
+    expect(section).not.toContain('as the file it was recorded or imported as');
+    expect(section).not.toContain('nothing of it in the mark');
+    // The old "not sent" row is gone, and the Location section no longer
+    // says a ride's positions are never transmitted, flat.
+    expect(section).not.toContain('not sent by this version of the app');
+    const location = normalised(policySection(policy, 'Location'));
+    expect(location).toContain(
+      "a ride's positions leave the device only if you sync your rides with an instance you",
+    );
+    expect(location).not.toContain("a ride's positions are never transmitted");
   });
 
   it('says when the name is sent and when it is kept, and that earlier names are kept — #892 review', () => {
