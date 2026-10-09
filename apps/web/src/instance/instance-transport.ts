@@ -560,14 +560,22 @@ export function sealedInstance(
     }
   }
 
-  /** A whole answer: a plaintext refusal as it is, or the sealed reply opened. */
+  /**
+   * A whole answer: a plaintext refusal as it is (only a non-200 can be one —
+   * the instance answers a sealed 200 or a plaintext refusal before Open), or
+   * the sealed reply opened. A 200 that is not a sealed reply, or a reply that
+   * does not open, can only be the edge's, so it is no answer.
+   */
   async function whole(sealed: SealedRequest, response: Response, limit: number) {
     const body = parsed(new TextDecoder().decode(await boundedBytes(response, limit)));
-    if (response.status !== 200 || !isSealedReply(body)) {
-      return { status: response.status, body, sealed: false };
+    if (response.status !== 200) return { status: response.status, body, sealed: false };
+    if (!isSealedReply(body)) throw new InstanceUnreachableError('no-answer');
+    try {
+      const reply = await sealed.openReply(body);
+      return { status: reply.status, body: parsed(utf8Decode(reply.body) ?? ''), sealed: true };
+    } catch {
+      throw new InstanceUnreachableError('no-answer');
     }
-    const reply = await sealed.openReply(body);
-    return { status: reply.status, body: parsed(utf8Decode(reply.body) ?? ''), sealed: true };
   }
 
   /**

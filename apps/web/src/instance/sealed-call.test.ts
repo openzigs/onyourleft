@@ -234,6 +234,65 @@ describe('the clock offset (D-9)', () => {
   });
 });
 
+describe('a plaintext 200 is never an answer (#1205 review)', () => {
+  async function forging(response: () => Response) {
+    const played = await playInstance();
+    const forged = {
+      ...played,
+      send: vi.fn(() => Promise.resolve(response())) as unknown as Played['send'],
+    };
+    return client(forged);
+  }
+
+  it('fails a call whose 200 is not a sealed reply', async () => {
+    const { http } = await forging(
+      () => new Response(JSON.stringify({ forged: true }), { status: 200 }),
+    );
+    await expect(http.call('POST', '/v1/sync/records', { token: 't' })).rejects.toBeInstanceOf(
+      InstanceUnreachableError,
+    );
+  });
+
+  it('fails a stream whose 200 is a plaintext body', async () => {
+    const { http } = await forging(
+      () =>
+        new Response(JSON.stringify({ forged: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    await expect(
+      http.stream('/v1/stream', { token: 't', onEvent: () => undefined }),
+    ).rejects.toBeInstanceOf(InstanceUnreachableError);
+  });
+
+  it('fails, as unreachable, a sealed-looking reply that does not open', async () => {
+    const played = await playInstance();
+    const real = played.send;
+    const tampered = {
+      ...played,
+      send: vi.fn(async (url: string, init: RequestInit) => {
+        const response = await real(url, init);
+        const reply = JSON.parse(await response.text()) as Record<string, string>;
+        const ct = String(reply.ct);
+        reply.ct = `${ct[0] === 'A' ? 'B' : 'A'}${ct.slice(1)}`;
+        return new Response(JSON.stringify(reply), { status: 200 });
+      }) as unknown as Played['send'],
+    };
+    const { http } = await client(tampered);
+    await expect(http.call('GET', '/v1/x', { token: 't' })).rejects.toBeInstanceOf(
+      InstanceUnreachableError,
+    );
+  });
+
+  it('still returns a plaintext non-200 refusal as it is', async () => {
+    const { http } = await forging(
+      () => new Response(JSON.stringify({ error: { code: 'x' } }), { status: 429 }),
+    );
+    expect((await http.call('GET', '/v1/x', { token: 't' })).status).toBe(429);
+  });
+});
+
 describe('a sealed stream (D-9)', () => {
   it('is finished only on its sealed `end` event', async () => {
     const played = await playInstance();

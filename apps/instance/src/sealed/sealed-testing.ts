@@ -178,7 +178,7 @@ export interface Counter {
 /** The production table, plus a sealed-only counter and two sealed-only streams. */
 export function testRoutes(counter: Counter): readonly Route[] {
   const encoder = new TextEncoder();
-  const stream = (cut: boolean): Route['handle'] => {
+  const stream = (cut: boolean, endAt?: number): Route['handle'] => {
     return ({ request }) => {
       let id = Number(request.headers.get('last-event-id') ?? '0');
       // One event per pull, so an event sent before the cut has been read
@@ -192,7 +192,9 @@ export function testRoutes(counter: Counter): readonly Route[] {
             controller.close();
           } else {
             controller.enqueue(
-              encoder.encode(`event: section\nid: ${String(id)}\ndata: part ${String(id)}\n\n`),
+              encoder.encode(
+                `event: ${id === endAt ? 'end' : 'section'}\nid: ${String(id)}\ndata: part ${String(id)}\n\n`,
+              ),
             );
           }
         },
@@ -239,6 +241,18 @@ export function testRoutes(counter: Counter): readonly Route[] {
       sealed: 'only',
       response: { contentType: 'text/plain' },
       handle: stream(true),
+    },
+    {
+      method: 'GET',
+      path: '/v1/test/stream-end-then-cut',
+      operationId: 'testStreamEndThenCut',
+      reaches: 'own',
+      summary: 'An inner event named end, then an error. Test-only.',
+      identity: true,
+      auth: 'session',
+      sealed: 'only',
+      response: { contentType: 'text/plain' },
+      handle: stream(true, 2),
     },
     {
       method: 'POST',

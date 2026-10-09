@@ -224,6 +224,8 @@ function sealedStream(
       try {
         if (inner.body !== null) {
           for await (const event of innerEvents(inner.body as ReadableStream<Uint8Array>)) {
+            // `end` is the sealed stream's own; an inner event may not borrow it.
+            if (event.kind === SEALED_END_KIND) throw new Error('reserved event kind');
             sequence += 1;
             lastId = event.id ?? String(sequence);
             frame(await writer.event(lastId, event.kind, utf8Encode(event.data)));

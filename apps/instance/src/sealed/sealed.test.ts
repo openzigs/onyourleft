@@ -590,6 +590,19 @@ describe('streams (D-9)', () => {
     expect(opened.events.map((event) => event.kind)).toEqual(['section', 'section']);
   });
 
+  it('never lets an inner event named `end` stand for the stream finishing', async () => {
+    const { world: w } = await start();
+    const a = await rider(w);
+    const sealed = await sealFor(w, {
+      path: '/v1/test/stream-end-then-cut',
+      token: a.token,
+      signer: a.device.signingKey,
+    });
+    const raw = await (await sendEnvelope(w.url, sealed.envelope, a.token)).text();
+    const opened = await openFrames(sealed, frames(raw));
+    expect(opened.events.map((event) => event.kind)).not.toContain('end');
+  });
+
   it('resumes with a NEW sealed request naming the last event id opened', async () => {
     const { world: w } = await start();
     const a = await rider(w);
