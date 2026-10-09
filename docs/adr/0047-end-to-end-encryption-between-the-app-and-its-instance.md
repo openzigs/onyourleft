@@ -1508,3 +1508,27 @@ made it Accepted.
 | #776, #881, #37, #38, #777 | Phase 1: every sync route is sealed-only from the day `instance.ts` hands the handler a sync, so sync is never served in plaintext (D-7, Q7) |
 | #835 | `POST /v1/history/search` is sealed-only (D-7) |
 | `apps/web/src/privacy/no-network.test.ts` | Unchanged: sealing goes through `instance-transport.ts`, the one module, and adds no network call |
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-09** — **D-5's 48-hour cap now holds per KEY, not per statement** (#1216, the owner's
+  ruling of 2026-10-09 on #1207's review finding). D-5 says a device trusts a statement until its
+  `notAfter` or 48 hours after the device first verified it. As built (#1190), "a statement" meant
+  one re-signing (`keyId@issuedAt`), and the instance re-signs the current key daily, so an edge
+  holding re-signings this device never saw — while it was away — could serve them one after
+  another, newest first, and each started 48 hours of its own. **A device now also remembers the
+  newest `issuedAt` it has verified for each key, and never trusts a statement for that key signed
+  earlier** (`packages/domain/src/identity/instance-pin.ts` §`judgeInstanceKeys`,
+  `InstanceKeyTrust.newestIssued`, kept until that statement's `notAfter`). Two `issuedAt`s are
+  compared with each other, never with the device's clock, so D-5's clock rule is unchanged, and
+  the daily re-signing a device does see is still trusted each day. Trust a build before #1216
+  stored is read back with each key's newest taken from the statements it had already verified
+  (`apps/web/src/instance/sign-in.ts` §`trustField`). ⚠️ **What it does not change**: an edge that
+  serves its held re-signings oldest first still gets each one's 48 hours, because each is newer
+  than the last; what bounds that run is the newest held statement's own `notAfter`, which the
+  instance sets at its `issuedAt` plus 48 hours — the bound D-5 already states. The rule removes
+  the out-of-order replay and makes that bound not depend on how the instance chose `notAfter`. It
+  still cannot make a device trust a key the identity key never signed, nor take it below the
+  highest serial it has seen.
