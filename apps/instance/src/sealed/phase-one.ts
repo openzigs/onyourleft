@@ -10,8 +10,8 @@
  * marking one nobody decided) needs an edit here as well, where a reviewer
  * reads it beside the ADR.
  *
- * `apps/web`'s `instance/no-plaintext-twin.test.ts` reads this same list (by
- * a computed `import()`, test code only) and fails if any client module calls
+ * `apps/web/src/instance/sealed-routes.test.ts` reads this same list (by a
+ * computed `import()`, test code only) and fails if any client module calls
  * one of these paths through the plaintext transport.
  *
  * ## What D-7 names and is not here yet
@@ -35,6 +35,8 @@
  * so the list is a list; {@link SEALED_FAMILIES} is what makes a NEW route in
  * either module red until it is marked and added.
  */
+
+import { SYNC_ROUTES } from '../sync/routes.ts';
 
 /** How a phase-1 route is sealed: `only`, or — `POST /v1/auth/session` alone — for a new key. */
 export type PhaseOneMark = 'only' | 'new-key';
@@ -106,17 +108,28 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
 
 /**
  * The module-wide rows of D-7, as a rule over the table: a route here must be
- * marked `only`, whatever this list says. The account export and deletion are
- * `sync/routes.ts`'s too, and are on the list above.
+ * marked `only`, whatever this list says.
+ *
+ * "The synced history" is MEMBERSHIP of `sync/routes.ts` §`SYNC_ROUTES`, not a
+ * path prefix: D-7 says "every route `sync/routes.ts` declares", and that
+ * module declares routes outside `/v1/sync/` and `/v1/activities` — the
+ * account export and deletion under `/v1/account` — which a prefix rule let
+ * escape.
  */
 export const SEALED_FAMILIES: readonly {
   readonly row: string;
-  readonly covers: (route: { readonly path: string; readonly reaches: unknown }) => boolean;
+  readonly covers: (route: {
+    readonly method: string;
+    readonly path: string;
+    readonly reaches: unknown;
+  }) => boolean;
 }[] = [
   { row: 'Every moderator route', covers: (route) => route.reaches === 'moderation' },
   {
     row: 'The synced history',
     covers: (route) =>
-      route.path.startsWith('/v1/sync/') || route.path.startsWith('/v1/activities'),
+      SYNC_ROUTES.some(
+        (declared) => declared.method === route.method && declared.path === route.path,
+      ),
   },
 ];

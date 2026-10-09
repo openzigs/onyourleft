@@ -1048,10 +1048,16 @@ Until 2026-10-07 this section was §"Owner questions left open".
   other reading. No figure was measured against a model an operator runs; that is still owed.
   (#1098)
 - **2026-10-09** — **D-9's "until #1179 ships" clause has stopped applying.** Phase 1 of
-  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) shipped in
-  [#1192](https://github.com/openzigs/onyourleft/issues/1192): every route D-7 lists is reached only
-  sealed on an instance that holds keys (`apps/instance/src/sealed/phase-one.ts`), so ADR 0047
-  D-13's lift — the owner's D-14 Q2 ruling — now holds: a pasted key may come from anywhere, but
+  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) has NOT all shipped:
+  as of [#1192](https://github.com/openzigs/onyourleft/issues/1192) every phase-1 route D-7 lists
+  that exists in the route table is reached only sealed on an instance that holds keys
+  (`apps/instance/src/sealed/phase-one.ts`). The rest of D-7's phase 1 —
+  `POST /v1/auth/recovery-email/clear`, `POST /v1/auth/recovery/reset`, the two account-changes
+  routes, and D-8's semantics — is still owed by
+  [#1193](https://github.com/openzigs/onyourleft/issues/1193) and
+  [#1194](https://github.com/openzigs/onyourleft/issues/1194), and those routes arrive sealed-only.
+  None of them carries a key, so ADR 0047 D-13's lift — the owner's D-14 Q2 ruling — holds now: a
+  pasted key may come from anywhere, but
   only sealed, signed by a device key, from a device whose pin came from a card, and no plaintext
   key route may exist, on the home network or anywhere else. **Nothing was removed to make that
   so, and that is a fact of the tree, not an omission**: [#1097](https://github.com/openzigs/onyourleft/issues/1097)

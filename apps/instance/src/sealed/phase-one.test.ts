@@ -93,13 +93,19 @@ describe('the route table is the list (#1192, ADR 0047 D-7)', () => {
     expect(listDisagreements(extra, PHASE_ONE_SEALED_ROUTES)).toEqual([
       "GET /v1/blocks: marked only, not on D-7's list",
     ]);
-    // A new sync route added unmarked AND unlisted is still caught, by its family.
-    const newSync = [
-      ...ROUTES,
-      { method: 'GET' as const, path: '/v1/sync/new-thing', reaches: 'own' as const },
-    ];
-    expect(listDisagreements(newSync, PHASE_ONE_SEALED_ROUTES)).toEqual([
-      'GET /v1/sync/new-thing: "The synced history" is sealed-only, and this route is not',
+    // A route `sync/routes.ts` declares, unmarked AND unlisted, is still caught by
+    // its family — even under `/v1/account`, outside `/v1/sync/` and
+    // `/v1/activities`, which a path-prefix rule let escape (#1211's review).
+    const accountUnmarked = ROUTES.map((route) =>
+      route.method === 'DELETE' && route.path === '/v1/account'
+        ? { ...route, sealed: undefined }
+        : route,
+    );
+    const accountUnlisted = PHASE_ONE_SEALED_ROUTES.filter(
+      (route) => !(route.method === 'DELETE' && route.path === '/v1/account'),
+    );
+    expect(listDisagreements(accountUnmarked, accountUnlisted)).toEqual([
+      'DELETE /v1/account: "The synced history" is sealed-only, and this route is not',
     ]);
   });
 });
