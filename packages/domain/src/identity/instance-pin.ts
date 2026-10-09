@@ -31,6 +31,14 @@
  *    verified it, whichever is earlier** (D-5). `serial`, `notBefore` and an
  *    `issuedAt` in the device's future are never compared with the device's
  *    clock.
+ * 3a. **Per key, never an older re-signing** (#1216, ADR 0047's amendment of
+ *    2026-10-09): the device remembers the newest `issuedAt` it has verified
+ *    for each key, and a statement for that key signed earlier is not trusted.
+ *    Without it every re-signing was its own statement with its own 48 hours,
+ *    so an edge holding re-signings this device never saw could hand them out
+ *    one after another, newest first, and restart the clock each time. Now a
+ *    run of held re-signings is worth no more than the newest of them. Two
+ *    `issuedAt`s are compared with each other, never with the device's clock.
  * 4. **No going back**: the device seals only to the trusted statement with
  *    the highest serial, and never below the highest serial (and its key id)
  *    it has ever verified. A re-signed statement for the same key and serial
@@ -158,6 +166,16 @@ export interface InstanceKeyTrust {
   readonly firstVerified: Readonly<
     Record<string, { readonly at: number; readonly notAfter: number }>
   >;
+  /**
+   * The newest `issuedAt` this device has verified for each key, by key id,
+   * with that statement's `notAfter` (#1216). A statement for the key signed
+   * before it is never trusted. Kept until that `notAfter` has passed: the
+   * instance gives a later re-signing a later `notAfter`, so by then every
+   * older one is out of date too.
+   */
+  readonly newestIssued: Readonly<
+    Record<string, { readonly issuedAt: number; readonly notAfter: number }>
+  >;
 }
 
 /** A device that has verified nothing yet. */
@@ -165,6 +183,7 @@ export const NO_KEY_TRUST: InstanceKeyTrust = {
   highestSerial: null,
   highestKeyId: null,
   firstVerified: {},
+  newestIssued: {},
 };
 
 /** One statement's name in {@link InstanceKeyTrust.firstVerified}: its key and when it was signed. */
@@ -343,10 +362,30 @@ export async function judgeInstanceKeys(
       firstVerified[id] = { at: now, notAfter: statement.notAfter };
     }
   }
+  // The newest re-signing this device has verified of each key (#1216).
+  const newestIssued: Record<string, { issuedAt: number; notAfter: number }> = {};
+  for (const [keyId, newest] of Object.entries(input.trust.newestIssued)) {
+    if (newest.notAfter > now) {
+      newestIssued[keyId] = { issuedAt: newest.issuedAt, notAfter: newest.notAfter };
+    }
+  }
+  for (const statement of verified) {
+    const held = newestIssued[statement.keyId];
+    if (statement.notAfter > now && (held === undefined || statement.issuedAt > held.issuedAt)) {
+      newestIssued[statement.keyId] = {
+        issuedAt: statement.issuedAt,
+        notAfter: statement.notAfter,
+      };
+    }
+  }
   const trusted = (statement: InstanceKeyStatement): boolean => {
     const seen = firstVerified[statementId(statement)];
+    const newest = newestIssued[statement.keyId];
     return (
-      seen !== undefined && now < statement.notAfter && now < seen.at + STATEMENT_TRUST_CAP_SECONDS
+      seen !== undefined &&
+      now < statement.notAfter &&
+      now < seen.at + STATEMENT_TRUST_CAP_SECONDS &&
+      (newest === undefined || statement.issuedAt >= newest.issuedAt)
     );
   };
 
@@ -357,7 +396,7 @@ export async function judgeInstanceKeys(
     statement.serial > highestSerial ||
     (statement.serial === highestSerial && statement.keyId === highestKeyId);
 
-  const remembered = { highestSerial, highestKeyId, firstVerified };
+  const remembered = { highestSerial, highestKeyId, firstVerified, newestIssued };
   const candidates = verified.filter((statement) => notBack(statement) && trusted(statement));
   if (candidates.length === 0) {
     const anyTrusted = verified.some(trusted);
@@ -373,6 +412,6 @@ export async function judgeInstanceKeys(
   return {
     kind: 'trusted',
     statement: best,
-    trust: { highestSerial: best.serial, highestKeyId: best.keyId, firstVerified },
+    trust: { highestSerial: best.serial, highestKeyId: best.keyId, firstVerified, newestIssued },
   };
 }
