@@ -10,12 +10,15 @@
  * wrong one here too. It sends nothing anywhere.
  */
 
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT } from './instance-pin';
 import type {
+  CardOutcome,
   ConnectOutcome,
   DevicesOutcome,
   InstanceDevice,
   InstancePort,
   InstanceState,
+  KeysOutcome,
 } from './instance-port';
 import {
   NOTHING_CHANGED_TEXT,
@@ -41,8 +44,16 @@ export interface ScriptedInstance {
     displayName: string;
     sourceUrl: string | null;
     devices: readonly InstanceDevice[];
+    /** The pinned fingerprint, 52 base32 characters, or `undefined` for a device with no card (#1190). */
+    pin: string | undefined;
   };
 }
+
+/** A fingerprint a scripted card carries: 52 base32 characters, padding bits clear. */
+export const SCRIPTED_FINGERPRINT = `${'ABCD'.repeat(12)}EFGA`;
+
+/** A second one, for the confirm-new-card screen. */
+export const SCRIPTED_NEW_FINGERPRINT = `${'WXYZ'.repeat(12)}234A`;
 
 /** Two devices, one of them this one — the shape `GET /v1/auth/devices` answers. */
 export const SCRIPTED_DEVICES: readonly InstanceDevice[] = [
@@ -68,6 +79,12 @@ export interface ScriptedInstanceOptions {
   readonly connectAnswer?: ConnectOutcome;
   /** What `current` answers when connected, when not a plain `connected`. */
   readonly state?: InstanceState;
+  /** The pin the device starts with (#1190); none unless given. */
+  readonly pin?: string;
+  /** What `keys` answers when pinned, when not a plain `trusted`. */
+  readonly keys?: KeysOutcome;
+  /** What `offerCard` answers, when not what the held pin implies. */
+  readonly cardAnswer?: CardOutcome;
 }
 
 export function scriptedInstance(options: ScriptedInstanceOptions = {}): ScriptedInstance {
@@ -82,6 +99,7 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
       sourceUrl:
         'https://github.com/openzigs/onyourleft/tree/0123456789abcdef0123456789abcdef01234567',
       devices: SCRIPTED_DEVICES,
+      pin: options.pin,
     },
     port: {
       current: () => {
@@ -106,6 +124,65 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
           if (displayName.trim() !== '') scripted.held.displayName = displayName.trim();
         }
         return Promise.resolve(answer);
+      },
+      link: (offer) => {
+        calls.push(`link ${offer}`);
+        const answer = options.connectAnswer ?? { kind: 'connected' };
+        if (answer.kind === 'connected') scripted.held.connected = true;
+        return Promise.resolve(answer);
+      },
+      keys: () => {
+        calls.push('keys');
+        const { pin } = scripted.held;
+        const answer: KeysOutcome =
+          pin === undefined
+            ? { kind: 'no-card', text: INSTANCE_KEY_TEXT['needs-card'] }
+            : (options.keys ?? { kind: 'trusted', pinned: pin, serial: 1_790_000_000 });
+        return Promise.resolve(answer);
+      },
+      offerCard: (card) => {
+        calls.push(`offerCard ${card}`);
+        const offered = card.trim().split('#')[1] ?? '';
+        if (options.cardAnswer !== undefined) return Promise.resolve(options.cardAnswer);
+        const { pin } = scripted.held;
+        if (pin === undefined || pin === offered) {
+          scripted.held.pin = offered;
+          return Promise.resolve({ kind: 'pinned' } as const);
+        }
+        return Promise.resolve({
+          kind: 'confirm',
+          text: INSTANCE_KEY_TEXT['confirm-new-card'],
+          pinned: pin,
+          offered,
+        } as const);
+      },
+      confirmCard: (card) => {
+        calls.push(`confirmCard ${card}`);
+        scripted.held.pin = card.trim().split('#')[1] ?? '';
+        return Promise.resolve({ kind: 'pinned' } as const);
+      },
+      linkCode: () => {
+        calls.push('linkCode');
+        const { held } = scripted;
+        const card = cardFromPin(
+          held.pin === undefined
+            ? undefined
+            : { origin: held.origin, instanceAthleteId: 'scripted', pin: held.pin },
+        );
+        if (card === undefined) {
+          return Promise.resolve({
+            kind: 'unavailable',
+            text: INSTANCE_KEY_TEXT['needs-card'],
+          } as const);
+        }
+        const linkCode = 'abcd-efgh-jkmn-pqrs';
+        return Promise.resolve({
+          kind: 'shown',
+          offer: codeWithCard(card, linkCode),
+          card,
+          linkCode,
+          expiresAt: 1_790_000_300,
+        } as const);
       },
       devices: () => {
         calls.push('devices');
@@ -219,6 +296,8 @@ export function scriptedModeration(
     readonly empty?: boolean;
     /** Accounts suspended from the start: id to when, in Unix seconds (#961). */
     readonly suspended?: Readonly<Record<string, number>>;
+    /** This device's pin (#1190): {@link SCRIPTED_FINGERPRINT} unless `null`, which is no card. */
+    readonly pin?: string | null;
   } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
@@ -364,6 +443,30 @@ export function scriptedModeration(
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
+    },
+    mintInvite: (reason) => {
+      calls.push(`mintInvite ${reason}`);
+      const pin = options.pin === undefined ? SCRIPTED_FINGERPRINT : options.pin;
+      const card = cardFromPin(
+        pin === null
+          ? undefined
+          : { origin: 'https://ride.example', instanceAthleteId: SCRIPTED_MODERATOR, pin },
+      );
+      if (card === undefined) {
+        return Promise.resolve({ kind: 'refused', text: INSTANCE_KEY_TEXT['needs-card'] } as const);
+      }
+      if (reason.trim() === '') {
+        return Promise.resolve({ kind: 'refused', text: 'Give a reason.' } as const);
+      }
+      const inviteCode = 'wxyz-2345-abcd-efgh';
+      logged('mint_invite', null, null, reason.trim());
+      return Promise.resolve({
+        kind: 'minted',
+        invite: codeWithCard(card, inviteCode),
+        card,
+        inviteCode,
+        expiresAt: 1_790_604_800,
+      } as const);
     },
   };
   return { port, calls, held };

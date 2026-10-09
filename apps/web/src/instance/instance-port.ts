@@ -43,7 +43,15 @@
  * what the instance says.
  */
 
-import { checkDisplayName, type SigningKey } from '@onyourleft/domain';
+import {
+  checkDisplayName,
+  NO_KEY_TRUST,
+  parseInstanceCard,
+  type Sha256,
+  type SignatureVerifier,
+  type SigningKey,
+} from '@onyourleft/domain';
+import { webCryptoSha256, webCryptoVerifier } from '@onyourleft/store';
 
 import { ADDRESS_REFUSAL_TEXT, instanceAddress } from './address';
 import {
@@ -53,10 +61,27 @@ import {
   type InstanceSend,
 } from './instance-transport';
 import {
+  cardFromPin,
+  cardRefusalText,
+  checkCard,
+  codeWithCard,
+  INSTANCE_KEY_TEXT,
+  judgeWithReread,
+  olderKeyText,
+  readCodeWithCard,
+  sealedRouteGate,
+  type PinCrypto,
+  type ServedKeysReader,
+} from './instance-pin';
+import {
   INSTANCE_ACCOUNT_STORAGE_KEY,
   InstanceSignInError,
+  linkThisDevice,
   readInstanceAccount,
   signInToInstance,
+  writeInstanceAccount,
+  type InstanceAccount,
+  type SignInDependencies,
 } from './sign-in';
 
 /**
@@ -124,6 +149,49 @@ export type ConnectOutcome =
     }
   | { readonly kind: 'refused'; readonly text: string };
 
+/** What this device makes of its instance's keys now (#1190, ADR 0047 D-5, D-6). */
+export type KeysOutcome =
+  /** Signed in with only an address: no pin, so no sealed route (D-14 Q1). */
+  | { readonly kind: 'no-card'; readonly text: string }
+  /** The pinned key endorsed a new one: no sealed route until a card carrying `expected` (D-14 Q8). */
+  | {
+      readonly kind: 'needs-new-card';
+      readonly text: string;
+      readonly pinned: string;
+      readonly expected: string;
+    }
+  /** The keys verify under the pin, and this is the key a sealed request would go to. */
+  | { readonly kind: 'trusted'; readonly pinned: string; readonly serial: number }
+  /** Refused, loudly, with the pin unchanged: a mismatch, an expired key, an older key. */
+  | { readonly kind: 'refused'; readonly text: string; readonly pinned: string };
+
+/** What happens to a card the rider offers on a device already signed in (#1190, D-6). */
+export type CardOutcome =
+  /** Kept: this device had no pin, and the instance's keys verify under the card. */
+  | { readonly kind: 'pinned' }
+  /** It differs from the pin: shown with both fingerprints, kept only on {@link InstancePort.confirmCard}. */
+  | {
+      readonly kind: 'confirm';
+      readonly text: string;
+      readonly pinned: string;
+      readonly offered: string;
+    }
+  | { readonly kind: 'refused'; readonly text: string };
+
+/** A link code for another device, with THIS device's card beside it (#773, D-6 source 2). */
+export type LinkCodeOutcome =
+  | {
+      readonly kind: 'shown';
+      /** The code and the card as one line: what the QR code carries. */
+      readonly offer: string;
+      /** The card, composed from this device's own pin. */
+      readonly card: string;
+      readonly linkCode: string;
+      /** Unix seconds. */
+      readonly expiresAt: number;
+    }
+  | { readonly kind: 'unavailable'; readonly text: string };
+
 export type DevicesOutcome =
   | { readonly kind: 'listed'; readonly devices: readonly InstanceDevice[] }
   | { readonly kind: 'unavailable'; readonly text: string };
@@ -141,7 +209,21 @@ export interface InstancePort {
    * review). The policy and the screen say exactly this. An address
    * {@link instanceAddress} refuses sends nothing.
    */
-  connect(address: string, displayName: string): Promise<ConnectOutcome>;
+  connect(address: string, displayName: string, card?: string): Promise<ConnectOutcome>;
+  /**
+   * Add THIS device to the athlete whose other device shows `offer` — a link
+   * code and that device's card, one line (#773, #1190). The card is checked
+   * against the instance's keys BEFORE anything is sent, and pinned.
+   */
+  link(offer: string): Promise<ConnectOutcome>;
+  /** What this device makes of the instance's keys, judged against its pin (#1190). */
+  keys(): Promise<KeysOutcome>;
+  /** Offer a card on a device already signed in: pinned if it had none, else asked to confirm. */
+  offerCard(card: string): Promise<CardOutcome>;
+  /** The rider confirmed a card that differs from the pin: check it again, and replace the pin. */
+  confirmCard(card: string): Promise<CardOutcome>;
+  /** A link code for another device, shown with this device's card (#773, D-6). */
+  linkCode(): Promise<LinkCodeOutcome>;
   /** This athlete's devices on the instance (#773). */
   devices(): Promise<DevicesOutcome>;
   /**
@@ -168,6 +250,9 @@ export interface InstancePortDependencies {
   readonly send?: InstanceSend | undefined;
   /** Unix milliseconds. */
   readonly now?: () => number;
+  /** SHA-256 and Ed25519 verification for the pin (#1190). WebCrypto's unless a test says otherwise. */
+  readonly sha256?: Sha256;
+  readonly verifier?: SignatureVerifier;
 }
 
 /**
@@ -191,6 +276,16 @@ export const CONNECT_REFUSAL_TEXT = {
     'A name other riders see must be 1 to 32 characters, with no control or invisible ' +
     'characters.',
   other: 'The instance refused to sign this device in.',
+  'bad-offer':
+    'That is not a code from another device. It starts oyl-instance: and ends with a code like ' +
+    'abcd-efgh-jkmn-pqrs; paste the whole line.',
+} as const;
+
+/** What the link-code screen says when no code can be shown. Draft wording (#880). */
+export const LINK_CODE_UNAVAILABLE_TEXT = {
+  'signed-out':
+    'The instance no longer accepts this device’s sign-in. Disconnect and connect again.',
+  'no-answer': 'The instance did not answer, so no code could be made.',
 } as const;
 
 /** What the rider is told when the device list cannot be read. */
@@ -313,9 +408,42 @@ export function heldInstanceSession(
   }
 }
 
+/** `GET /v1/instance/keys` at `http`: its body, or `undefined` when nothing usable answered. */
+function servedKeysAt(http: InstanceHttp): ServedKeysReader {
+  return async () => {
+    try {
+      const answer = await http.call('GET', '/v1/instance/keys');
+      return answer.status === 200 ? answer.body : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 /** The production {@link InstancePort}: `main.tsx` builds it, and nothing else in the client. */
 export function createInstancePort(dependencies: InstancePortDependencies): InstancePort {
   const { storage } = dependencies;
+  const crypto: PinCrypto = {
+    sha256: dependencies.sha256 ?? webCryptoSha256,
+    verifier: dependencies.verifier ?? webCryptoVerifier,
+    now: dependencies.now ?? (() => Date.now()),
+  };
+
+  /** What signing in to `origin` needs, over `http`. */
+  const signIn = (origin: string, http: InstanceHttp): SignInDependencies => ({
+    origin,
+    transport: { post: async (path, body) => http.call('POST', path, { body }) },
+    storage,
+    ensureLocalAthlete: dependencies.ensureLocalAthlete,
+    signingKey: dependencies.signingKey,
+    ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+  });
+
+  /** The account this device holds, if it is still for `origin`. */
+  const accountAt = (origin: string): InstanceAccount | undefined => {
+    const account = readInstanceAccount(storage);
+    return account?.origin === origin ? account : undefined;
+  };
 
   /** The instance and the token this device holds, or `undefined` for neither. */
   const held = (): HeldInstanceSession | undefined =>
@@ -357,10 +485,15 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       }
     },
 
-    connect: async (address, displayName) => {
+    connect: async (address, displayName, card) => {
       const decision = instanceAddress(address);
       if (decision.kind === 'refused') {
         return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+      }
+      const cardText = card?.trim() ?? '';
+      if (cardText !== '') {
+        const parsed = parseInstanceCard(cardText, decision.origin);
+        if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
       }
       const typedName = displayName.trim();
       let name: string | undefined;
@@ -371,15 +504,16 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       }
       try {
         const http = instanceHttp(decision.origin, dependencies.send);
+        // The card is checked BEFORE anything else is sent: a mismatch sends
+        // nothing more and keeps nothing (D-6).
+        let pin: SignInDependencies['pin'];
+        if (cardText !== '') {
+          const checked = await checkCard(cardText, decision.origin, servedKeysAt(http), crypto);
+          if (checked.kind === 'refused') return checked;
+          pin = { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust };
+        }
         const signedIn = await signInToInstance(
-          {
-            origin: decision.origin,
-            transport: { post: async (path, body) => http.call('POST', path, { body }) },
-            storage,
-            ensureLocalAthlete: dependencies.ensureLocalAthlete,
-            signingKey: dependencies.signingKey,
-            ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
-          },
+          { ...signIn(decision.origin, http), ...(pin === undefined ? {} : { pin }) },
           name === undefined ? {} : { displayName: name },
         );
         storage.setItem(
@@ -394,6 +528,203 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         };
       } catch (error) {
         return { kind: 'refused', text: refusalFor(error) };
+      }
+    },
+
+    link: async (offer) => {
+      const read = readCodeWithCard(offer);
+      if (read === undefined) return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-offer'] };
+      const parsed = parseInstanceCard(read.card);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      const decision = instanceAddress(parsed.card.origin);
+      if (decision.kind === 'refused') {
+        return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+      }
+      if (decision.origin !== parsed.card.origin) {
+        return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-offer'] };
+      }
+      try {
+        const http = instanceHttp(decision.origin, dependencies.send);
+        const checked = await checkCard(read.card, decision.origin, servedKeysAt(http), crypto);
+        if (checked.kind === 'refused') return checked;
+        const signedIn = await linkThisDevice(
+          {
+            ...signIn(decision.origin, http),
+            pin: { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust },
+          },
+          read.code,
+        );
+        storage.setItem(
+          INSTANCE_SESSION_STORAGE_KEY,
+          JSON.stringify({ origin: decision.origin, token: signedIn.sessionToken }),
+        );
+        return { kind: 'connected' };
+      } catch (error) {
+        return { kind: 'refused', text: refusalFor(error) };
+      }
+    },
+
+    keys: async () => {
+      const account = readInstanceAccount(storage);
+      const gate = sealedRouteGate(account);
+      if (account === undefined || gate.kind === 'needs-card') {
+        return { kind: 'no-card', text: INSTANCE_KEY_TEXT['needs-card'] };
+      }
+      const pinned = account.pin ?? '';
+      if (gate.kind === 'needs-new-card') {
+        return { kind: 'needs-new-card', text: gate.text, pinned, expected: gate.expected };
+      }
+      let http: InstanceHttp;
+      try {
+        http = instanceHttp(account.origin, dependencies.send);
+      } catch {
+        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
+      }
+      const verdict = await judgeWithReread(
+        servedKeysAt(http),
+        account.origin,
+        pinned,
+        account.keyTrust ?? NO_KEY_TRUST,
+        crypto,
+      );
+      if (verdict === 'unreachable') {
+        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
+      }
+      // What is remembered moves only forward, and the pin never moves here.
+      const held = accountAt(account.origin);
+      if (held === undefined) {
+        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
+      }
+      switch (verdict.kind) {
+        case 'mismatch':
+          return { kind: 'refused', text: INSTANCE_KEY_TEXT.mismatch, pinned };
+        case 'new-card':
+          writeInstanceAccount(storage, { ...held, expectedFingerprint: verdict.fingerprint });
+          return {
+            kind: 'needs-new-card',
+            text: INSTANCE_KEY_TEXT['needs-new-card'],
+            pinned,
+            expected: verdict.fingerprint,
+          };
+        case 'older':
+          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+          return { kind: 'refused', text: olderKeyText(verdict.highestSerial), pinned };
+        case 'expired':
+          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+          return { kind: 'refused', text: INSTANCE_KEY_TEXT.expired, pinned };
+        case 'trusted':
+          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+          return { kind: 'trusted', pinned, serial: verdict.statement.serial };
+      }
+    },
+
+    offerCard: async (card) => {
+      const account = readInstanceAccount(storage);
+      if (account === undefined) {
+        return { kind: 'refused', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+      }
+      const parsed = parseInstanceCard(card, account.origin);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      const offered = parsed.card.fingerprintText;
+      if (account.pin === offered && account.expectedFingerprint === undefined) {
+        return { kind: 'pinned' };
+      }
+      if (account.expectedFingerprint !== undefined && offered !== account.expectedFingerprint) {
+        return { kind: 'refused', text: INSTANCE_KEY_TEXT['not-the-endorsed-card'] };
+      }
+      const checked = await checkCard(
+        card,
+        account.origin,
+        servedKeysAt(instanceHttp(account.origin, dependencies.send)),
+        crypto,
+        account.keyTrust ?? NO_KEY_TRUST,
+      );
+      if (checked.kind === 'refused') return checked;
+      if (account.pin === undefined) {
+        writeInstanceAccount(storage, {
+          ...account,
+          pin: checked.fingerprint,
+          keyTrust: checked.keyTrust,
+        });
+        return { kind: 'pinned' };
+      }
+      // A card that differs from the pin is never kept here: the rider confirms it.
+      return {
+        kind: 'confirm',
+        text: INSTANCE_KEY_TEXT['confirm-new-card'],
+        pinned: account.pin,
+        offered,
+      };
+    },
+
+    confirmCard: async (card) => {
+      const account = readInstanceAccount(storage);
+      if (account === undefined) {
+        return { kind: 'refused', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+      }
+      const parsed = parseInstanceCard(card, account.origin);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      if (
+        account.expectedFingerprint !== undefined &&
+        parsed.card.fingerprintText !== account.expectedFingerprint
+      ) {
+        return { kind: 'refused', text: INSTANCE_KEY_TEXT['not-the-endorsed-card'] };
+      }
+      const checked = await checkCard(
+        card,
+        account.origin,
+        servedKeysAt(instanceHttp(account.origin, dependencies.send)),
+        crypto,
+        account.keyTrust ?? NO_KEY_TRUST,
+      );
+      if (checked.kind === 'refused') return checked;
+      writeInstanceAccount(storage, {
+        origin: account.origin,
+        instanceAthleteId: account.instanceAthleteId,
+        pin: checked.fingerprint,
+        keyTrust: checked.keyTrust,
+      });
+      return { kind: 'pinned' };
+    },
+
+    linkCode: async () => {
+      const connection = held();
+      const account = readInstanceAccount(storage);
+      if (connection === undefined || account === undefined) {
+        return { kind: 'unavailable', text: LINK_CODE_UNAVAILABLE_TEXT['signed-out'] };
+      }
+      const gate = sealedRouteGate(account);
+      // ⚠️ The card is composed HERE, from this device's own pin (D-6): never
+      // from anything the instance answers below.
+      const card = cardFromPin(account);
+      if (gate.kind !== 'open' || card === undefined) {
+        return {
+          kind: 'unavailable',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
+      try {
+        const answer = await connection.http.call('POST', '/v1/auth/link-codes', {
+          token: connection.token,
+          body: {},
+        });
+        if (answer.status === 401) {
+          return { kind: 'unavailable', text: LINK_CODE_UNAVAILABLE_TEXT['signed-out'] };
+        }
+        const body = answer.body as { linkCode?: unknown; expiresAt?: unknown } | null;
+        const linkCode = typeof body?.linkCode === 'string' ? body.linkCode.toLowerCase() : '';
+        const expiresAt = body?.expiresAt;
+        const offer = codeWithCard(card, linkCode);
+        if (
+          answer.status !== 200 ||
+          readCodeWithCard(offer) === undefined ||
+          typeof expiresAt !== 'number'
+        ) {
+          return { kind: 'unavailable', text: LINK_CODE_UNAVAILABLE_TEXT['no-answer'] };
+        }
+        return { kind: 'shown', offer, card, linkCode, expiresAt };
+      } catch {
+        return { kind: 'unavailable', text: LINK_CODE_UNAVAILABLE_TEXT['no-answer'] };
       }
     },
 

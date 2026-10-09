@@ -4790,6 +4790,27 @@ select.oyl-input {
 }
 
 /*
+ * An instance card (#1190) is one word of seventy-odd characters, and a link
+ * line is that and a code: each breaks anywhere rather than widen a 320 px
+ * page. The box a card is pasted into takes the width it is given up to a
+ * reading measure, and declares the 44 px touch target (SC 2.5.5) rather than
+ * arriving at it.
+ */
+.oyl-instance__card,
+.oyl-instance__fingerprint {
+  overflow-wrap: anywhere;
+}
+
+.oyl-instance__card-box {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 40rem;
+  min-height: 2.75rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page

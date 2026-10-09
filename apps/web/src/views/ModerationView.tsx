@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
+import { PairingCode } from '../camera/PairingCode';
 import { Button } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import {
+  INVITE_CARD_CAUTION,
   isConflict,
   MAXIMUM_MODERATION_REASON,
+  type InviteOutcome,
   type AccountAction,
   type ModerationList,
   type ModerationLogEntry,
@@ -538,6 +541,72 @@ function AnAccount({
   );
 }
 
+/** What an invitation's QR code is for: its accessible name (#1190). */
+export const INVITE_PICTURE_LABEL = 'Invitation and the instance’s card, for the new rider';
+
+/**
+ * Inviting a rider (#1190, ADR 0047 D-6 source 3): the code and THIS device's
+ * card as one line and one QR code, and the caution that the card is only as
+ * trustworthy as the channel the invitation travels through.
+ */
+function Invite({ port }: { readonly port: ModerationPort }): JSX.Element {
+  const reasonId = useId();
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<InviteOutcome | undefined>(undefined);
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-invite">
+      <h2 id="oyl-moderation-invite">Invite a rider</h2>
+      <p className="oyl-moderation__reason">
+        <label htmlFor={reasonId}>Reason for the log</label>{' '}
+        <input
+          className="oyl-input"
+          id={reasonId}
+          maxLength={MAXIMUM_MODERATION_REASON}
+          value={reason}
+          onChange={(event) => {
+            setReason(event.target.value);
+          }}
+        />
+      </p>
+      <Button
+        variant="secondary"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void port.mintInvite(reason).then((minted) => {
+            setBusy(false);
+            setOutcome(minted);
+          });
+        }}
+      >
+        Make an invitation
+      </Button>
+      {outcome === undefined ? null : outcome.kind === 'refused' ? (
+        <StatusMessage tone="warning" label="No invitation" live>
+          {outcome.text}
+        </StatusMessage>
+      ) : (
+        <div>
+          <KeptVisible>
+            <StatusMessage tone="warning" label="Before you send it">
+              {INVITE_CARD_CAUTION}
+            </StatusMessage>
+          </KeptVisible>
+          <p>
+            Send the new rider this line. It works once, until{' '}
+            {new Date(outcome.expiresAt * 1000).toISOString().slice(0, 10)}.
+          </p>
+          <p>
+            <code className="oyl-instance__card">{outcome.invite}</code>
+          </p>
+          <PairingCode code={outcome.invite} label={INVITE_PICTURE_LABEL} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Log({
   me,
   log,
@@ -713,6 +782,7 @@ export function ModerationView({
         onDone={onDone}
       />
       <AnAccount port={port} onDone={onDone} />
+      <Invite port={port} />
       <Log
         me={state.me}
         log={state.log}
