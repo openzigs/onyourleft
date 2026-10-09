@@ -1509,6 +1509,12 @@ describe('the instance is disclosed, class by class — #778', () => {
     ]) {
       expect(section, phrase).toContain(phrase);
     }
+    // The owner's ruling of 2026-10-09 on #1215: an imported GPX or TCX ride
+    // is sent as a FIT file as well, matching Data Safety and `sync.ts`.
+    expect(section).toContain(
+      'a ride imported from a gpx or tcx file is sent as a fit file too, not as the original',
+    );
+    expect(section).not.toContain('sent as that kind of file too');
     expect(section).not.toContain('as the file it was recorded or imported as');
     expect(section).not.toContain('nothing of it in the mark');
     // The old "not sent" row is gone, and the Location section no longer
