@@ -163,10 +163,19 @@ interface InnerEvent {
   readonly data: string;
 }
 
-/** The inner stream's events, parsed as the SSE specification reads them. */
-async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<InnerEvent> {
+/** A comment line of the inner stream: a heartbeat, which carries nothing (#1095). */
+const HEARTBEAT = Symbol('heartbeat');
+
+/**
+ * The inner stream's events, parsed as the SSE specification reads them, and
+ * {@link HEARTBEAT} for each comment line — which the specification has a
+ * reader ignore, and which the tunnel needs to see so it does not cut a quiet
+ * stream.
+ */
+async function* innerEvents(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<InnerEvent | typeof HEARTBEAT> {
   const decoder = new TextDecoder();
-  const reader = body.getReader();
   let buffered = '';
   let id: string | undefined;
   let kind = 'message';
@@ -184,7 +193,10 @@ async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<In
           data = [];
           continue;
         }
-        if (line.startsWith(':')) continue;
+        if (line.startsWith(':')) {
+          yield HEARTBEAT;
+          continue;
+        }
         const colon = line.indexOf(':');
         const field = colon === -1 ? line : line.slice(0, colon);
         const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
@@ -205,6 +217,11 @@ async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<In
  * else, and a sealed `end` event once the inner stream has finished. A stream
  * that fails part-way stops WITHOUT `end`, which is how the device tells it
  * was cut.
+ *
+ * A comment line of the inner stream goes through as `: hb` (#1095): it
+ * carries nothing, and without it a quiet job stream is cut by the tunnel's
+ * idle timeout. A device that goes away cancels the inner stream too, so the
+ * inner route's heartbeat and its wait for events stop with it.
  */
 function sealedStream(
   writer: SealedReplyWriter,
@@ -216,14 +233,22 @@ function sealedStream(
   // The `end` event names the last id the stream carried, so a device that
   // resumes after it asks for nothing more.
   let lastId = resumedAfter ?? '0';
+  const reader =
+    inner.body === null ? undefined : (inner.body as ReadableStream<Uint8Array>).getReader();
+  let cancelled = false;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const frame = (line: string): void => {
         controller.enqueue(encoder.encode(`data: ${line}\n\n`));
       };
       try {
-        if (inner.body !== null) {
-          for await (const event of innerEvents(inner.body as ReadableStream<Uint8Array>)) {
+        if (reader !== undefined) {
+          for await (const event of innerEvents(reader)) {
+            if (cancelled) return;
+            if (event === HEARTBEAT) {
+              controller.enqueue(encoder.encode(': hb\n\n'));
+              continue;
+            }
             // `end` is the sealed stream's own; an inner event may not borrow it.
             if (event.kind === SEALED_END_KIND) throw new Error('reserved event kind');
             sequence += 1;
@@ -231,11 +256,16 @@ function sealedStream(
             frame(await writer.event(lastId, event.kind, utf8Encode(event.data)));
           }
         }
+        if (cancelled) return;
         frame(await writer.event(lastId, SEALED_END_KIND, new Uint8Array(0)));
         controller.close();
       } catch {
-        controller.close();
+        if (!cancelled) controller.close();
       }
+    },
+    async cancel() {
+      cancelled = true;
+      await reader?.cancel().catch(() => undefined);
     },
   });
   return new Response(stream, {

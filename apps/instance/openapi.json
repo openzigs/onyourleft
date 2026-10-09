@@ -872,6 +872,393 @@
         }
       }
     },
+    "/v1/analysis/jobs": {
+      "post": {
+        "operationId": "startAnalysisJob",
+        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "A `RideAnalysisInput` (#809)."
+                  },
+                  "templateVersion": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  }
+                },
+                "required": [
+                  "input",
+                  "templateVersion",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "jobId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/job_running"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "description": "One of `unavailable`, `analysis_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analysis/jobs/{jobId}": {
+      "get": {
+        "operationId": "getAnalysisJob",
+        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-malformed`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "withheld"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "integer"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "failure": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "createdAt",
+                    "endedAt",
+                    "failure"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/jobs/{jobId}/ack": {
+      "post": {
+        "operationId": "acknowledgeAnalysisJob",
+        "summary": "Your device has saved the write-up: the instance deletes its copy of it and the job’s events. The job row stays until its seven days are up. `job_running` for a job that has not ended.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/job_running"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/jobs/{jobId}/cancel": {
+      "post": {
+        "operationId": "cancelAnalysisJob",
+        "summary": "Cancel your job: it ends `cancelled` at once and its engine is stopped at its next step; nothing it says afterwards is kept. 202 with the status afterwards — a job that had already ended keeps its own.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "withheld"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/jobs/{jobId}/events": {
+      "get": {
+        "operationId": "streamAnalysisJob",
+        "summary": "Your job's events as Server-Sent Events, every one after `Last-Event-ID` and then live, ending after `result`. A heartbeat comment at most every 25 s on an instance with the default setting.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/athletes/{athleteId}": {
       "get": {
         "operationId": "getAthlete",
@@ -5481,6 +5868,7 @@
                   "moderation_not_applicable",
                   "address_in_use",
                   "not_suspended",
+                  "job_running",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -5492,7 +5880,8 @@
                   "record_key_revoked",
                   "rate_limited",
                   "internal",
-                  "unavailable"
+                  "unavailable",
+                  "analysis_off"
                 ]
               },
               "message": {
@@ -5832,6 +6221,16 @@
           }
         }
       },
+      "job_running": {
+        "description": "`job_running` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
         "content": {
@@ -5944,6 +6343,16 @@
       },
       "unavailable": {
         "description": "`unavailable` (503), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "analysis_off": {
+        "description": "`analysis_off` (503), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

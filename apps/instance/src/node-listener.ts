@@ -77,6 +77,9 @@ async function send(response: Response, outgoing: ServerResponse): Promise<void>
     headers[name] = value;
   });
   outgoing.writeHead(response.status, headers);
+  // A stream is answered at once (#1095): Node holds the head back until the
+  // first byte of body, and a job stream may have nothing to say for a while.
+  if ((headers['content-type'] ?? '').startsWith('text/event-stream')) outgoing.flushHeaders();
   if (response.body === null) {
     outgoing.end();
     return;

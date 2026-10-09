@@ -22,7 +22,8 @@
  * - the hosted-model key routes and the hosted-consent routes (#1199 — #1097
  *   built the operator command and no app route, so there was no plaintext
  *   key route to remove and no home-network check to lift);
- * - masking push and pull (#1101) and every analysis job route (#1095);
+ * - masking push and pull (#1101). Every analysis job route (#1095) is born
+ *   sealed and listed below;
  * - `POST /v1/auth/recovery-email/clear` and `POST /v1/auth/recovery/reset`
  *   (#1194). #1193's two account-change routes are born sealed and listed
  *   below.
@@ -48,6 +49,9 @@ export interface PhaseOneRoute {
   /** The D-7 row it is transcribed from. */
   readonly row: string;
 }
+
+/** D-7's row for every job route (#1095). */
+const JOB_ROW = 'Each analysis job’s input, every SSE event’s text, the result, resume and cancel';
 
 const only = (method: PhaseOneRoute['method'], path: string, row: string): PhaseOneRoute => ({
   method,
@@ -107,6 +111,12 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/activities/{content}/streams', 'The synced history'),
   // History search (ADR 0040).
   only('POST', '/v1/history/search', 'History search'),
+  // Analysis jobs (#1095, ADR 0046 D-11): born sealed.
+  only('POST', '/v1/analysis/jobs', JOB_ROW),
+  only('GET', '/v1/analysis/jobs/{jobId}', JOB_ROW),
+  only('GET', '/v1/analysis/jobs/{jobId}/events', JOB_ROW),
+  only('POST', '/v1/analysis/jobs/{jobId}/cancel', JOB_ROW),
+  only('POST', '/v1/analysis/jobs/{jobId}/ack', JOB_ROW),
 ];
 
 /**

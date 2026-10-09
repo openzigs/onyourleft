@@ -38,7 +38,7 @@
  * {@link SourceOptions.behindMasking} — the seam #1101 supplies. Until it
  * lands nothing supplies it, and `instance-hosted` fails `hosted_unavailable`
  * whatever key is held (`source.test.ts`). Its caller is the job engine
- * (#1095), which is not built yet either.
+ * (#1095, `engine.ts`).
  */
 
 import type { HostedKeyState } from './hosted-key.ts';

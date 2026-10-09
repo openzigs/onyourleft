@@ -103,6 +103,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
   account_change: `INSERT INTO account_change (id, athlete_id, at, kind, actor_key, subject_key, via, address) VALUES (1, 'a', 21, 'key_added', 'key-a', 'key-a', 'link_code', NULL)`,
   account_change_mark: `INSERT INTO account_change_mark VALUES ('a', 'key-a', 1, 22)`,
+  analysis_job: `INSERT INTO analysis_job VALUES ('job-a', 'a', 'succeeded', 'instance-local', '1', '{}', 'A ride.', NULL, 23, 24)`,
+  analysis_event: `INSERT INTO analysis_event VALUES ('job-a', 'a', 1, 'result', '{}', 24)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 
@@ -364,6 +366,46 @@ describe('the migrations (#769)', () => {
     const redone = snapshot(path);
     expect([redone.rows.account_change, redone.rows.account_change_mark]).toEqual([0, 0]);
     expect(columns()).toContain('requested_by_key');
+  });
+
+  it('takes both analysis tables away with 0019, rows and all, read from sqlite_schema, and puts them back empty (#1095)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0019-analysis-jobs') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const named = (): string[] => {
+      const database = openDatabase(path);
+      try {
+        return (
+          database
+            .prepare(`SELECT name FROM sqlite_schema WHERE name LIKE 'analysis_%' ORDER BY name`)
+            .all() as { name: string }[]
+        ).map((each) => each.name);
+      } finally {
+        database.close();
+      }
+    };
+    expect(named()).toEqual([
+      'analysis_event',
+      'analysis_job',
+      'analysis_job_by_athlete',
+      'analysis_job_by_status',
+    ]);
+    const seeded = snapshot(path);
+    expect([seeded.rows.analysis_job, seeded.rows.analysis_event]).toEqual([1, 1]);
+
+    await withKysely(path, (db) => migrateDownOne(db));
+    expect(named()).toEqual([]);
+    expect(snapshot(path).rows.athlete).toBe(seeded.rows.athlete);
+
+    await withKysely(path, (db) => migrateUpOne(db));
+    const redone = snapshot(path);
+    expect(named()).toHaveLength(4);
+    expect([redone.rows.analysis_job, redone.rows.analysis_event]).toEqual([0, 0]);
   });
 
   it('refuses a migration with no down, rather than letting Kysely skip it', async () => {

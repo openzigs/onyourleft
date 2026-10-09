@@ -77,8 +77,17 @@ function operation(route: Route): Record<string, unknown> {
             }
           : route.response.contentType === 'application/octet-stream'
             ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
-            : { 'text/plain': { schema: { type: 'string' } } };
-    responses['200'] = { description: 'OK', content: success };
+            : route.response.contentType === 'text/event-stream'
+              ? {
+                  'text/event-stream': {
+                    schema: { type: 'string', description: route.response.description },
+                  },
+                }
+              : { 'text/plain': { schema: { type: 'string' } } };
+    responses[route.accepted === true ? '202' : '200'] = {
+      description: route.accepted === true ? 'Accepted' : 'OK',
+      content: success,
+    };
   }
   const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
   if (route.identity === true || route.sync === true) codes.add('unavailable');
