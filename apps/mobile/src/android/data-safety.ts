@@ -219,8 +219,8 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //
     // ⚠️ **Re-read by #778 for sync (#1195), and the answer is unchanged —
     // the WORDS changed.** A reviewer who remembers "never transmits a ride's
-    // positions" is reading the old file: a sync sends each ride as the file
-    // it was recorded or imported as, positions included and untrimmed (it is
+    // positions" is reading the old file: a sync sends each ride as a FIT
+    // file the app writes from the ride (even an imported GPX or TCX), positions included and untrimmed (it is
     // the rider's own copy), to the instance the rider connected to — sealed
     // for that instance alone (ADR 0047 D-7), and shown by it to nobody else.
     // Still `shared: false` and optional: nothing syncs until the rider
@@ -232,7 +232,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix. A ride’s positions leave the device only when the rider syncs with an instance they connected to (#1195): the ride goes to that instance as the file it was recorded or imported as, positions included and not trimmed by privacy zones, because it is the rider’s own copy, sealed on the device for that instance alone (ADR 0047), which shows it to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card. The one route that leaves the device is one the rider chooses to make a private room on (#784): its positions and heights — not its name, and no times — go to the instance the rider connected to, which shows it to the riders the maker shares the room’s code with and deletes it when the room is over: a race finished, a group ride empty for a minute, a race interrupted by the instance restarting, nobody riding in it a day after it was made, or the maker erasing their account there. A route that starts, ends or passes inside one of the rider’s privacy zones is refused before anything is sent. Connecting to an instance (#777) sends no position of its own. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The map tile request is the other location signal: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device; the app requests no GPS fix. A ride’s positions leave the device only when the rider syncs with an instance they connected to (#1195): the ride goes to that instance as a FIT file the app writes from the ride, positions included and not trimmed by privacy zones, because it is the rider’s own copy, with a signed record carrying the ride’s name, start time and time zone, times, distance and average power, sealed on the device for that instance alone (ADR 0047), which shows it to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card. The one route that leaves the device is one the rider chooses to make a private room on (#784): its positions and heights — not its name, and no times — go to the instance the rider connected to, which shows it to the riders the maker shares the room’s code with and deletes it when the room is over: a race finished, a group ride empty for a minute, a race interrupted by the instance restarting, nobody riding in it a day after it was made, or the maker erasing their account there. A route that starts, ends or passes inside one of the rider’s privacy zones is refused before anything is sent. Connecting to an instance (#777) sends no position of its own. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. The map tile request is the other location signal: which part of the map it asks for is handled while the request is served and not kept, and what is kept is the IP address, answered under approximate location',
   },
   {
     // ⚠️ **Re-answered by #804, and the answer CHANGED — collected: true.** A
@@ -339,7 +339,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'FIT, GPX and TCX files are read and written on the device at the athlete’s own request (#51). When the rider syncs with an instance they connected to (#1195), each ride’s file — the one it was recorded or imported as — and the documents the rider added for the analysis (#836) go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account and shows them to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card',
+    why: 'FIT, GPX and TCX files are read and written on the device at the athlete’s own request (#51). When the rider syncs with an instance they connected to (#1195), each ride’s file — a FIT file the app writes from the ride, with a signed record carrying its name and date — and the documents the rider added for the analysis (#836) go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account and shows them to no other rider. Nothing syncs until the rider presses Sync, which needs the instance’s card',
   },
   {
     dataType: 'App activity',

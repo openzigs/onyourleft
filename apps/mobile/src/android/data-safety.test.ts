@@ -453,6 +453,13 @@ describe('the declaration filed on Play', () => {
     expect(DATA_SAFETY_SECTION_ANSWERS.deletionRequests.why).toContain(
       'everything the rider synced to it',
     );
+    // #1215's review: a ride is sent as a FIT file this app writes, and its
+    // signed record carries the ride's name and date.
+    for (const dataType of ['Location — precise location', 'Files and docs']) {
+      const why = row(dataType)?.why ?? '';
+      expect(why, dataType).not.toContain('as the file it was recorded or imported as');
+      expect(why, dataType).toContain('a FIT file the app writes from the ride');
+    }
     // And the location rule still passes with the new declaration (#778).
     expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
   });

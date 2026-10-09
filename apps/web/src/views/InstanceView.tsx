@@ -49,9 +49,9 @@ export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
   'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. An instance keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
+  'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
   'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, and your goals, notes and documents. They are sealed on this device for the instance alone, and stay on this device too. This version of the app does not offer Sync yet.',
-  'Nothing else of yours: connecting sends no ride, route, position or heart rate.',
 ];
 
 export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';

@@ -1497,6 +1497,20 @@ describe('the instance is disclosed, class by class — #778', () => {
     ]) {
       expect(section, phrase).toContain(phrase);
     }
+    // #1215's review: what a sync sends is a FIT file re-encoded from the
+    // stored streams plus a signed record whose claims carry the ride's name
+    // and date (`instance/sync.ts` §`pushRide`, §`claimsOf`), and a deletion
+    // leaves a fingerprint of the file with when it was received.
+    for (const phrase of [
+      'a file this device writes from the ride',
+      "a signed record that carries the ride's name, when it started and its time zone",
+      'its elapsed and moving time, its distance and its average power',
+      'a fingerprint of the file and when the instance received it',
+    ]) {
+      expect(section, phrase).toContain(phrase);
+    }
+    expect(section).not.toContain('as the file it was recorded or imported as');
+    expect(section).not.toContain('nothing of it in the mark');
     // The old "not sent" row is gone, and the Location section no longer
     // says a ride's positions are never transmitted, flat.
     expect(section).not.toContain('not sent by this version of the app');

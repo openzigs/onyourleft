@@ -90,7 +90,7 @@ describe('the Connect screen — #777, #778', () => {
     expect(said).toContain('sent each time you press Connect with a name typed');
     expect(said).toContain('keeps it only if it has not seen this device before');
     expect(said).toContain('earlier names');
-    expect(said).toContain('Nothing else of yours');
+    expect(said).toContain('Connecting itself sends no ride, route, position or heart rate');
     expect(said).not.toContain('Nothing else from this version of the app');
     // No screen removes what the instance holds: the sentence says whom to ask.
     expect(DISCONNECT_KEEPS_RIDES).toContain('ask whoever runs the instance');
