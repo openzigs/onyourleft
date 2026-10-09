@@ -60,7 +60,7 @@ import {
 } from '@onyourleft/domain';
 
 import { verifyEd25519 } from '../auth/crypto.ts';
-import type { Caller, Outcome } from '../auth/identity.ts';
+import { accountChangeView, type Caller, type Outcome } from '../auth/identity.ts';
 import { BLOB_KEY, type BlobStore } from '../blob/blob-store.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
@@ -210,6 +210,25 @@ export interface AccountExport {
     readonly revokedAt: number | null;
   }[];
   readonly recoveryEmail: string | null;
+  /**
+   * The account-change log (#1193, ADR 0047 D-8): every account-security
+   * change, oldest first, with the PUBLIC key that authorised it.
+   */
+  readonly accountChanges: readonly {
+    readonly id: number;
+    readonly at: number;
+    readonly kind: string;
+    readonly actorKey: string;
+    readonly subjectKey: string | null;
+    readonly via: string | null;
+    readonly address: string | null;
+  }[];
+  /** How far each of the athlete's devices has acknowledged that log (#1193). */
+  readonly accountChangeMarks: readonly {
+    readonly deviceKey: string;
+    readonly acknowledgedThrough: number;
+    readonly acknowledgedAt: number;
+  }[];
   readonly activities: readonly {
     readonly contentSha256: string;
     readonly recordSha256: string;
@@ -491,6 +510,14 @@ export function createSync(options: SyncOptions): Sync {
             revokedAt: key.revokedAt,
           })),
           recoveryEmail: (await store.getRecoveryEmail(caller.athleteId))?.address ?? null,
+          accountChanges: (await store.listAccountChanges(caller.athleteId)).map(accountChangeView),
+          accountChangeMarks: (await store.listAccountChangeMarks(caller.athleteId)).map(
+            (mark) => ({
+              deviceKey: mark.deviceKey,
+              acknowledgedThrough: mark.acknowledgedThrough,
+              acknowledgedAt: mark.acknowledgedAt,
+            }),
+          ),
           activities,
           items,
           results: (await store.listResults(caller.athleteId)).map((result) => ({

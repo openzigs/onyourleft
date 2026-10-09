@@ -265,6 +265,9 @@ describe('erasing an athlete (#769, #35)', () => {
       // Migration 0010's history index (#835, ADR 0040 D-10): found the same way.
       expect(order).toContain('history_source');
       expect(order).toContain('history_passage');
+      // Migration 0018's account-change log and marks (#1193): found the same way.
+      expect(order).toContain('account_change');
+      expect(order).toContain('account_change_mark');
       const scoped = new Set<string>(order);
       for (const reference of references(harness.path)) {
         if (!scoped.has(reference.table) || !scoped.has(reference.parent)) continue;

@@ -72,7 +72,13 @@ async function run(): Promise<void> {
     try {
       outcomes.push(
         job.operation === 'revoke'
-          ? await store.revokeDeviceKey(athleteId, `key-${job.side}-of-${athleteId}`, 50, null)
+          ? await store.revokeDeviceKey(
+              athleteId,
+              `key-${job.side}-of-${athleteId}`,
+              50,
+              null,
+              `key-${job.side}-of-${athleteId}`,
+            )
           : await store.renameAthlete(athleteId, `Side ${job.side}`, 100, {
               count: 3,
               windowSeconds: 86_400,

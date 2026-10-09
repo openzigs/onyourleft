@@ -143,6 +143,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listResults: { probe: (store, athleteId) => store.listResults(athleteId) },
   listRecoveryCodes: { probe: (store, athleteId) => store.listRecoveryCodes(athleteId) },
   listLinkCodes: { probe: (store, athleteId) => store.listLinkCodes(athleteId) },
+  // Migration 0018's (#1193): the log and the marks, seeded for all three.
+  listAccountChanges: {
+    probe: async (store, athleteId) =>
+      (await store.listAccountChanges(athleteId)).map((entry) => ({ athleteId: entry.athleteId })),
+  },
+  listAccountChangeMarks: { probe: (store, athleteId) => store.listAccountChangeMarks(athleteId) },
+  acknowledgeAccountChanges: {
+    notAScopedRead: 'a write; scoping is account-changes.test.ts’s',
+  },
   listDisplayNameChanges: {
     probe: (store, athleteId) => store.listDisplayNameChanges(athleteId),
   },

@@ -23,9 +23,9 @@
  *   built the operator command and no app route, so there was no plaintext
  *   key route to remove and no home-network check to lift);
  * - masking push and pull (#1101) and every analysis job route (#1095);
- * - `POST /v1/auth/recovery-email/clear`, `POST /v1/auth/recovery/reset`,
- *   `GET /v1/auth/account-changes` and
- *   `POST /v1/auth/account-changes/acknowledge` (#1193, #1194).
+ * - `POST /v1/auth/recovery-email/clear` and `POST /v1/auth/recovery/reset`
+ *   (#1194). #1193's two account-change routes are born sealed and listed
+ *   below.
  *
  * ## The families
  *
@@ -74,6 +74,9 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/auth/recovery-email/confirm', 'Confirming a recovery address'),
   only('POST', '/v1/auth/devices/{publicKey}/revoke', 'Revoking a device key'),
   only('GET', '/v1/auth/devices', 'The device list'),
+  // The account-change log (#1193, ADR 0047 D-8): born sealed.
+  only('GET', '/v1/auth/account-changes', 'The account-change log'),
+  only('POST', '/v1/auth/account-changes/acknowledge', 'Acknowledging the account-change log'),
   // Moderators (#83, #775): every route, reads included.
   only('POST', '/v1/moderation/invites', 'Minting an invite'),
   only('POST', '/v1/moderation/athletes/{athleteId}/suspend', 'Every other moderator action'),

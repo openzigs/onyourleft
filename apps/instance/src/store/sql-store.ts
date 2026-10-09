@@ -35,6 +35,8 @@
 
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
+  AccountChangeMarkTable,
+  AccountChangeTable,
   ActivityRecordTable,
   AthleteTable,
   BlockTable,
@@ -266,6 +268,8 @@ export interface EmailConfirmation {
   readonly address: string;
   readonly expiresAt: number;
   readonly usedAt: number | null;
+  /** The key that gave the address (#1193); `null` for a row from before migration 0018. */
+  readonly requestedByKey: string | null;
 }
 
 /**
@@ -287,7 +291,10 @@ export interface Registration {
    * registration — somebody else's included — is usable for recovery by
    * nobody until the mailbox's reader follows the link.
    */
-  readonly recoveryEmailConfirmation?: Omit<EmailConfirmation, 'athleteId' | 'usedAt'>;
+  readonly recoveryEmailConfirmation?: Omit<
+    EmailConfirmation,
+    'athleteId' | 'usedAt' | 'requestedByKey'
+  >;
   /** The rider confirmed they are 18 or over as they registered (#775): when. */
   readonly adultConfirmedAt?: number;
   /**
@@ -443,6 +450,53 @@ export type ModerationOutcome =
 /** What revoking a device key did (#867). */
 export type RevokeOutcome = 'revoked' | 'not_found' | 'last_device';
 
+/** What an account-change entry records (#1193, migration 0018). */
+export type AccountChangeKind =
+  | 'codes_replaced'
+  | 'address_added'
+  | 'address_cleared'
+  | 'link_code_minted'
+  | 'key_added'
+  | 'key_revoked';
+
+/** How a key was added (#1193). */
+export type KeyAddedVia = 'link_code' | 'recovery_code' | 'email_token';
+
+/**
+ * One account-security change (#1193, ADR 0047 D-8), and the device key that
+ * authorised it: the key whose sealed, signed request made it; for a key
+ * added with a link code, the key that MINTED the code; for a key added by
+ * `recover`, the key it added.
+ */
+export interface AccountChange {
+  readonly id: number;
+  readonly athleteId: string;
+  readonly at: number;
+  readonly kind: AccountChangeKind;
+  readonly actorKey: string;
+  /** The key added or revoked. */
+  readonly subjectKey: string | null;
+  readonly via: KeyAddedVia | null;
+  /** The address added or cleared. */
+  readonly address: string | null;
+}
+
+/** How far one device has acknowledged the log (#1193). */
+export interface AccountChangeMark {
+  readonly athleteId: string;
+  readonly deviceKey: string;
+  /** The highest entry id this device has acknowledged. */
+  readonly acknowledgedThrough: number;
+  readonly acknowledgedAt: number;
+}
+
+/** A key added with a link code or by `recover`, logged with the key it adds (#1193). */
+export interface KeyAddition {
+  readonly via: KeyAddedVia;
+  /** The key that authorised it: the code's minter, or for `recover` the key added. */
+  readonly actorKey: string;
+}
+
 /** How many times a display name may change, and over how long (#774, #867). */
 export interface RenameLimit {
   readonly count: number;
@@ -597,7 +651,12 @@ export interface SqlStore {
   putAthlete(athlete: Athlete): Promise<void>;
   getAthlete(athleteId: string): Promise<AthleteRecord | undefined>;
 
-  putDeviceKey(key: DeviceKeyWrite): Promise<void>;
+  /**
+   * Hold a key for an athlete. With `addition` — a key added with a link code
+   * or by `recover` — the account-change log gains its `key_added` entry in
+   * the same transaction (#1193).
+   */
+  putDeviceKey(key: DeviceKeyWrite, addition?: KeyAddition): Promise<void>;
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
   /** Authentication: the key is what names the athlete, so this is not athlete-scoped. */
   findDeviceKey(publicKey: string): Promise<DeviceKey | undefined>;
@@ -619,6 +678,13 @@ export interface SqlStore {
    * Revoke one of this athlete's keys, and every session and unspent link
    * code it holds. `not_found` when the athlete holds no such key.
    *
+   * Since #1193 (ADR 0047 D-8) it undoes what that key did and nothing else,
+   * in the one transaction: its sessions ended, the link codes it MINTED
+   * voided, its pending recovery-address confirmation cancelled, and a
+   * `key_revoked` entry naming `actorKey` logged. ⚠️ It **never replaces the
+   * recovery codes**, whoever asks: a thief's live key revoking the rider's
+   * would otherwise take the rider's way back with it (review H1).
+   *
    * ⚠️ **The last-key rule is checked HERE, in the transaction that writes
    * (#867)**: the athlete's LAST live key is revoked only when
    * `recoveryCodeSha256` is one of their unspent recovery codes — checked,
@@ -631,6 +697,7 @@ export interface SqlStore {
     publicKey: string,
     at: number,
     recoveryCodeSha256: string | null,
+    actorKey: string,
   ): Promise<RevokeOutcome>;
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
@@ -716,10 +783,14 @@ export interface SqlStore {
   /** Spend a recovery code, whoever's it is: the code is what names the athlete. */
   takeRecoveryCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
 
-  putLinkCode(code: Omit<LinkCode, 'usedAt'>): Promise<void>;
+  /** Mint a link code, and log `link_code_minted` by its minter at `at`, together (#1193). */
+  putLinkCode(code: Omit<LinkCode, 'usedAt'>, at: number): Promise<void>;
   listLinkCodes(athleteId: string): Promise<readonly LinkCode[]>;
-  /** Spend a link code: the code is what names the athlete. */
-  takeLinkCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+  /** Spend a link code: the code is what names the athlete, and its minter the key that allowed it. */
+  takeLinkCode(
+    codeSha256: string,
+    now: number,
+  ): Promise<Take<{ readonly athleteId: string; readonly mintedByKey: string }>>;
 
   /**
    * Change a display name, keeping the old one in the audit trail.
@@ -751,12 +822,37 @@ export interface SqlStore {
    * them, replacing any address they had, in one transaction (#865). Another
    * athlete's token is `unknown`. `held` — and nothing spent or bound — when
    * the address is already another athlete's.
+   *
+   * Since #1193 a NEW address logs `address_added`, and the address it
+   * replaced `address_cleared`, by the key that gave it (`requestedByKey`,
+   * else `confirmingKey` for a row from before migration 0018). Confirming
+   * the address already bound logs nothing.
    */
   confirmRecoveryEmail(
     athleteId: string,
     tokenSha256: string,
     now: number,
+    confirmingKey: string,
   ): Promise<ConfirmOutcome>;
+
+  /**
+   * The athlete's account-change log, oldest first (#1193, ADR 0047 D-8). Only
+   * the store's writes add to it, each in the transaction of its change.
+   */
+  listAccountChanges(athleteId: string): Promise<readonly AccountChange[]>;
+  /** Every device's mark in that log, for the account export. */
+  listAccountChangeMarks(athleteId: string): Promise<readonly AccountChangeMark[]>;
+  /**
+   * Move ONE device's mark to `through` (#1193): clamped to the athlete's
+   * newest entry, and never backwards. Keyed by athlete AND key, so it moves
+   * no other device's mark and no other athlete's. Answers the mark after.
+   */
+  acknowledgeAccountChanges(
+    athleteId: string,
+    deviceKey: string,
+    through: number,
+    at: number,
+  ): Promise<number>;
   /** Email recovery: the address is what names the athlete. */
   findRecoveryEmail(address: string): Promise<RecoveryEmail | undefined>;
   putEmailRecoveryToken(token: Omit<EmailRecoveryToken, 'usedAt'>): Promise<void>;
@@ -1173,7 +1269,46 @@ const emailConfirmationFrom = (
   address: row.address,
   expiresAt: row.expires_at,
   usedAt: row.used_at,
+  requestedByKey: row.requested_by_key,
 });
+
+const accountChangeFrom = (row: Selectable<AccountChangeTable>): AccountChange => ({
+  id: row.id,
+  athleteId: row.athlete_id,
+  at: row.at,
+  kind: row.kind as AccountChangeKind,
+  actorKey: row.actor_key,
+  subjectKey: row.subject_key,
+  via: row.via as KeyAddedVia | null,
+  address: row.address,
+});
+
+const accountChangeMarkFrom = (row: Selectable<AccountChangeMarkTable>): AccountChangeMark => ({
+  athleteId: row.athlete_id,
+  deviceKey: row.device_key,
+  acknowledgedThrough: row.acknowledged_through,
+  acknowledgedAt: row.acknowledged_at,
+});
+
+/** One log entry, written in the transaction `trx` makes the change in (#1193). */
+async function logAccountChange(
+  trx: Transaction<InstanceDatabase>,
+  change: Omit<AccountChange, 'id' | 'subjectKey' | 'via' | 'address'> &
+    Partial<Pick<AccountChange, 'subjectKey' | 'via' | 'address'>>,
+): Promise<void> {
+  await trx
+    .insertInto('account_change')
+    .values({
+      athlete_id: change.athleteId,
+      at: change.at,
+      kind: change.kind,
+      actor_key: change.actorKey,
+      subject_key: change.subjectKey ?? null,
+      via: change.via ?? null,
+      address: change.address ?? null,
+    })
+    .execute();
+}
 
 /** A single-use row's outcome, from what was read before it was spent. */
 function outcomeOf(
@@ -1484,7 +1619,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return row === undefined ? undefined : athleteFrom(row);
       }),
 
-    putDeviceKey: (key) =>
+    putDeviceKey: (key, addition) =>
       exclusive(async () => {
         await db.transaction().execute(async (trx) => {
           const held = await trx
@@ -1510,6 +1645,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               }),
             )
             .execute();
+          if (addition !== undefined) {
+            await logAccountChange(trx, {
+              athleteId: key.athleteId,
+              at: key.addedAt,
+              kind: 'key_added',
+              actorKey: addition.actorKey,
+              subjectKey: key.publicKey,
+              via: addition.via,
+            });
+          }
         });
       }),
 
@@ -1557,7 +1702,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return inserted === undefined ? 'replayed' : 'recorded';
       }),
 
-    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256) =>
+    revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256, actorKey) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<RevokeOutcome> => {
           const keys = await trx
@@ -1601,6 +1746,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .where('athlete_id', '=', athleteId)
             .where('minted_by_key', '=', publicKey)
             .execute();
+          // Its pending confirmation is cancelled (#1193); a spent one stays,
+          // as the record that its token was used. The recovery codes are NOT
+          // touched, whoever asks (ADR 0047 D-8, review H1).
+          await trx
+            .deleteFrom('recovery_email_confirmation')
+            .where('athlete_id', '=', athleteId)
+            .where('requested_by_key', '=', publicKey)
+            .where('used_at', 'is', null)
+            .execute();
+          if (target.revoked_at === null) {
+            await logAccountChange(trx, {
+              athleteId,
+              at,
+              kind: 'key_revoked',
+              actorKey,
+              subjectKey: publicKey,
+            });
+          }
           return 'revoked';
         }),
       ),
@@ -1676,6 +1839,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 address: confirmation.address,
                 expires_at: confirmation.expiresAt,
                 used_at: null,
+                requested_by_key: key.publicKey,
               })
               .execute();
           }
@@ -1770,18 +1934,26 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         }),
       ),
 
-    putLinkCode: (code) =>
+    putLinkCode: (code, at) =>
       exclusive(async () => {
-        await db
-          .insertInto('link_code')
-          .values({
-            code_sha256: code.codeSha256,
-            athlete_id: code.athleteId,
-            minted_by_key: code.mintedByKey,
-            expires_at: code.expiresAt,
-            used_at: null,
-          })
-          .execute();
+        await db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('link_code')
+            .values({
+              code_sha256: code.codeSha256,
+              athlete_id: code.athleteId,
+              minted_by_key: code.mintedByKey,
+              expires_at: code.expiresAt,
+              used_at: null,
+            })
+            .execute();
+          await logAccountChange(trx, {
+            athleteId: code.athleteId,
+            at,
+            kind: 'link_code_minted',
+            actorKey: code.mintedByKey,
+          });
+        });
       }),
 
     listLinkCodes: (athleteId) =>
@@ -1813,7 +1985,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .set({ used_at: now })
             .where('code_sha256', '=', codeSha256)
             .execute();
-          return { outcome: 'taken', athleteId: row.athlete_id } as const;
+          return {
+            outcome: 'taken',
+            athleteId: row.athlete_id,
+            mintedByKey: row.minted_by_key,
+          } as const;
         }),
       ),
 
@@ -1891,6 +2067,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               address: confirmation.address,
               expires_at: confirmation.expiresAt,
               used_at: null,
+              requested_by_key: confirmation.requestedByKey,
             })
             .execute();
         }),
@@ -1908,7 +2085,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(emailConfirmationFrom),
       ),
 
-    confirmRecoveryEmail: (athleteId, tokenSha256, now) =>
+    confirmRecoveryEmail: (athleteId, tokenSha256, now, confirmingKey) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<ConfirmOutcome> => {
           const row = await trx
@@ -1929,6 +2106,32 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           if (holder !== undefined && holder.athlete_id !== row.athlete_id) {
             return { outcome: 'held' };
           }
+          const bound = await trx
+            .selectFrom('recovery_email')
+            .select('address')
+            .where('athlete_id', '=', row.athlete_id)
+            .executeTakeFirst();
+          if (bound?.address !== row.address) {
+            // The binder is the key that GAVE the address, not the key that
+            // typed the code (ADR 0047 D-8, item 6).
+            const actorKey = row.requested_by_key ?? confirmingKey;
+            if (bound !== undefined) {
+              await logAccountChange(trx, {
+                athleteId: row.athlete_id,
+                at: now,
+                kind: 'address_cleared',
+                actorKey,
+                address: bound.address,
+              });
+            }
+            await logAccountChange(trx, {
+              athleteId: row.athlete_id,
+              at: now,
+              kind: 'address_added',
+              actorKey,
+              address: row.address,
+            });
+          }
           await trx
             .insertInto('recovery_email')
             .values({ athlete_id: row.athlete_id, address: row.address })
@@ -1942,6 +2145,65 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .where('token_sha256', '=', tokenSha256)
             .execute();
           return { outcome: 'taken', athleteId: row.athlete_id };
+        }),
+      ),
+
+    listAccountChanges: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('account_change')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('id')
+            .execute()
+        ).map(accountChangeFrom),
+      ),
+
+    listAccountChangeMarks: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('account_change_mark')
+            .selectAll()
+            .where('athlete_id', '=', athleteId)
+            .orderBy('device_key')
+            .execute()
+        ).map(accountChangeMarkFrom),
+      ),
+
+    acknowledgeAccountChanges: (athleteId, deviceKey, through, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const newest = await trx
+            .selectFrom('account_change')
+            .select((eb) => eb.fn.max<number | null>('id').as('id'))
+            .where('athlete_id', '=', athleteId)
+            .executeTakeFirst();
+          const mark = Math.max(0, Math.min(through, Number(newest?.id ?? 0)));
+          await trx
+            .insertInto('account_change_mark')
+            .values({
+              athlete_id: athleteId,
+              device_key: deviceKey,
+              acknowledged_through: mark,
+              acknowledged_at: at,
+            })
+            .onConflict((conflict) =>
+              conflict.columns(['athlete_id', 'device_key']).doUpdateSet({
+                // Never backwards: an older acknowledgement arriving late moves nothing.
+                acknowledged_through: sql<number>`max(account_change_mark.acknowledged_through, excluded.acknowledged_through)`,
+                acknowledged_at: at,
+              }),
+            )
+            .execute();
+          const after = await trx
+            .selectFrom('account_change_mark')
+            .select('acknowledged_through')
+            .where('athlete_id', '=', athleteId)
+            .where('device_key', '=', deviceKey)
+            .executeTakeFirstOrThrow();
+          return after.acknowledged_through;
         }),
       ),
 

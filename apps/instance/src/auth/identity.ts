@@ -112,7 +112,9 @@ import type { Admit } from '../room/core/room.ts';
 import {
   InviteRefusedError,
   OwnershipConflictError,
+  type AccountChange,
   type DeviceKey,
+  type KeyAddedVia,
   type SessionScope,
   type SqlStore,
   type Take,
@@ -344,6 +346,43 @@ export interface DeviceView {
   readonly thisDevice: boolean;
 }
 
+/** One account-change entry as a device is shown it (#1193). */
+export type AccountChangeView = Omit<AccountChange, 'athleteId'>;
+
+/** An entry as a device and the export show it: everything but the athlete, who is asking. */
+export function accountChangeView(entry: AccountChange): AccountChangeView {
+  return {
+    id: entry.id,
+    at: entry.at,
+    kind: entry.kind,
+    actorKey: entry.actorKey,
+    subjectKey: entry.subjectKey,
+    via: entry.via,
+    address: entry.address,
+  };
+}
+
+/**
+ * An entry as `GET /v1/auth/account-changes` answers it: the view, plus the
+ * day the SUBJECT key was added, so a notice can name a revoked key ("the key
+ * added on 1 August") from the entry alone (#1193, the owner's ruling of
+ * 2026-10-09). Read from `device_key` at read time — a revoked key's row is
+ * kept, so it is always there — and `null` for an entry with no subject.
+ */
+export interface AccountChangeRead extends AccountChangeView {
+  /** Unix seconds; `null` when the entry names no subject key. */
+  readonly subjectAddedAt: number | null;
+}
+
+/** The account-change log as one device reads it (#1193, ADR 0047 D-8). */
+export interface AccountChanges {
+  readonly changes: readonly AccountChangeRead[];
+  /** This device's mark: the highest entry id it has acknowledged, or 0. */
+  readonly acknowledgedThrough: number;
+  /** Entries after that mark made by a key other than this device's. */
+  readonly notices: readonly AccountChangeRead[];
+}
+
 /** What an athlete sees of their own account (#775). */
 export interface Account {
   readonly athleteId: string;
@@ -433,6 +472,21 @@ export interface Identity {
   setRecoveryEmail(caller: Caller, address: unknown): Promise<Outcome<null>>;
   /** Follow that link, signed in as the athlete who gave the address (#865). */
   confirmRecoveryEmail(caller: Caller, token: unknown): Promise<Outcome<null>>;
+  /**
+   * The caller's account-change log (#1193, ADR 0047 D-8): every entry, this
+   * device's mark, and the NOTICES — each entry made by a key other than the
+   * caller's since the caller's device last acknowledged.
+   */
+  accountChanges(caller: Caller): Promise<AccountChanges>;
+  /**
+   * Move the CALLER's device's mark to `through` (#1193): the session's key,
+   * never a key the request names, so no key can mark a notice seen for
+   * another device.
+   */
+  acknowledgeAccountChanges(
+    caller: Caller,
+    through: unknown,
+  ): Promise<Outcome<{ acknowledgedThrough: number }>>;
   /**
    * Forget every rate-limit key — an internet address, a public key, an email
    * address — whose window has ended (#892's review). The Node adapter runs it
@@ -598,9 +652,16 @@ export function createIdentity(options: IdentityOptions): Identity {
   async function addKey(
     athleteId: string,
     publicKey: string,
+    via: KeyAddedVia,
+    actorKey: string,
   ): Promise<Outcome<{ athleteId: string }>> {
     try {
-      await store.putDeviceKey({ publicKey, athleteId, addedAt: seconds(), revokedAt: null });
+      // Logged in the store's own transaction, so a key is never added
+      // without the entry every other device is shown (#1193).
+      await store.putDeviceKey(
+        { publicKey, athleteId, addedAt: seconds(), revokedAt: null },
+        { via, actorKey },
+      );
     } catch (error) {
       // The store checks ownership in its own transaction, so a key linked
       // twice at once is refused there; it is the same refusal, not a 500.
@@ -1106,19 +1167,32 @@ export function createIdentity(options: IdentityOptions): Identity {
       // two keys at once each see two, and leave the athlete with none.
       const proof =
         typeof recoveryCode === 'string' ? await sha256Hex(normalisedCode(recoveryCode)) : null;
-      const outcome = await store.revokeDeviceKey(caller.athleteId, publicKey, seconds(), proof);
+      // Undoes what that key did and nothing else (#1193, ADR 0047 D-8): the
+      // store voids the codes it minted and its pending confirmation, logs the
+      // revoke by the CALLER's key, and never replaces the recovery codes.
+      const outcome = await store.revokeDeviceKey(
+        caller.athleteId,
+        publicKey,
+        seconds(),
+        proof,
+        caller.deviceKey,
+      );
       return outcome === 'revoked' ? { ok: true, value: null } : refuse(outcome);
     },
 
     async mintLinkCode(caller) {
       const linkCode = readableCode();
-      const expiresAt = seconds() + LINK_CODE_LIFETIME_SECONDS;
-      await store.putLinkCode({
-        codeSha256: await sha256Hex(normalisedCode(linkCode)),
-        athleteId: caller.athleteId,
-        mintedByKey: caller.deviceKey,
-        expiresAt,
-      });
+      const at = seconds();
+      const expiresAt = at + LINK_CODE_LIFETIME_SECONDS;
+      await store.putLinkCode(
+        {
+          codeSha256: await sha256Hex(normalisedCode(linkCode)),
+          athleteId: caller.athleteId,
+          mintedByKey: caller.deviceKey,
+          expiresAt,
+        },
+        at,
+      );
       return { ok: true, value: { linkCode, expiresAt } };
     },
 
@@ -1129,7 +1203,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (await keyInUse(proof.value)) return refuse('key_in_use');
       const taken = await store.takeLinkCode(await sha256Hex(normalisedCode(linkCode)), seconds());
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
-      return addKey(taken.athleteId, proof.value);
+      // Named by the key that MINTED the code: that is the key that allowed it.
+      return addKey(taken.athleteId, proof.value, 'link_code', taken.mintedByKey);
     },
 
     async recover(statement, proof) {
@@ -1146,7 +1221,13 @@ export function createIdentity(options: IdentityOptions): Identity {
         ? await store.takeEmailRecoveryToken(await sha256Hex(secret), seconds())
         : await store.takeRecoveryCode(await sha256Hex(normalisedCode(secret)), seconds());
       if (taken.outcome !== 'taken') return refuse(takeRefusal(taken.outcome, 'code'));
-      return addKey(taken.athleteId, key.value);
+      // `recover` has no session: the key it adds is the one it names (D-8).
+      return addKey(
+        taken.athleteId,
+        key.value,
+        byEmail ? 'email_token' : 'recovery_code',
+        key.value,
+      );
     },
 
     async requestEmailRecovery(address, client) {
@@ -1210,6 +1291,7 @@ export function createIdentity(options: IdentityOptions): Identity {
           athleteId: caller.athleteId,
           address: confirmation.address,
           expiresAt: confirmation.expiresAt,
+          requestedByKey: caller.deviceKey,
         });
       }
       return { ok: true, value: null };
@@ -1226,12 +1308,47 @@ export function createIdentity(options: IdentityOptions): Identity {
         caller.athleteId,
         await sha256Hex(token),
         seconds(),
+        caller.deviceKey,
       );
       if (taken.outcome === 'taken') return { ok: true, value: null };
       // Only the reader of the mailbox holds the token, so telling them the
       // address is another account's tells nobody else anything.
       if (taken.outcome === 'held') return refuse('address_in_use');
       return refuse(takeRefusal(taken.outcome, 'code'));
+    },
+
+    async accountChanges(caller) {
+      const added = new Map(
+        (await store.listDeviceKeys(caller.athleteId)).map((key) => [key.publicKey, key.addedAt]),
+      );
+      const changes = (await store.listAccountChanges(caller.athleteId)).map(
+        (entry): AccountChangeRead => ({
+          ...accountChangeView(entry),
+          subjectAddedAt: entry.subjectKey === null ? null : (added.get(entry.subjectKey) ?? null),
+        }),
+      );
+      const mark =
+        (await store.listAccountChangeMarks(caller.athleteId)).find(
+          (each) => each.deviceKey === caller.deviceKey,
+        )?.acknowledgedThrough ?? 0;
+      return {
+        changes,
+        acknowledgedThrough: mark,
+        notices: changes.filter((entry) => entry.id > mark && entry.actorKey !== caller.deviceKey),
+      };
+    },
+
+    async acknowledgeAccountChanges(caller, through) {
+      if (typeof through !== 'number' || !Number.isSafeInteger(through) || through < 0) {
+        return invalid('through', 'must be a whole number, 0 or more');
+      }
+      const acknowledgedThrough = await store.acknowledgeAccountChanges(
+        caller.athleteId,
+        caller.deviceKey,
+        through,
+        seconds(),
+      );
+      return { ok: true, value: { acknowledgedThrough } };
     },
   };
 }

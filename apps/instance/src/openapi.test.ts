@@ -19,7 +19,7 @@ import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
-import { sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
+import { sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
@@ -178,7 +178,36 @@ async function pendingAthlete(world: IdentityInstance): Promise<string> {
   return athleteId;
 }
 
+/**
+ * A sealed-only route's call (#1191): sealed, signed by the session's key, and
+ * the INNER answer handed back as a plain response, so its body is checked
+ * against the route's own schema rather than the envelope's.
+ */
+async function sealedSend(
+  world: IdentityInstance,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const { device, token } = await signedIn(world);
+  const answer = await sealedCall(world, {
+    method,
+    path,
+    token,
+    signer: device.signingKey,
+    ...(body === undefined ? {} : { body }),
+  });
+  if (answer.reply === undefined) throw new Error(`not sealed: ${answer.raw}`);
+  return new Response(JSON.stringify(answer.body), {
+    status: answer.reply.status,
+    headers: { 'content-type': answer.reply.contentType },
+  });
+}
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  listAccountChanges: (world) => sealedSend(world, 'GET', '/v1/auth/account-changes'),
+  acknowledgeAccountChanges: (world) =>
+    sealedSend(world, 'POST', '/v1/auth/account-changes/acknowledge', { through: 0 }),
   getAccount: async (world) =>
     send(world, 'GET', '/v1/auth/account', (await signedIn(world)).token),
   confirmAdult: async (world) =>
@@ -536,7 +565,9 @@ describe('every route answers with the shape its entry declares', () => {
   );
 
   it('answers `unavailable` from every identity route on an instance with no accounts', async () => {
-    for (const route of identity) {
+    // A sealed-only route is not reachable in plaintext at all (#1191): on an
+    // instance with no accounts it is `/v1/sealed` that answers `unavailable`.
+    for (const route of identity.filter((each) => each.sealed !== 'only')) {
       const response = await fetch(`${instance.url}${route.path.replace(/\{[A-Za-z]+\}/g, 'x')}`, {
         method: route.method,
         headers: { 'content-type': 'application/json' },

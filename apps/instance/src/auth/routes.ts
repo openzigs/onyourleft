@@ -75,6 +75,39 @@ const accountSchema = object({
   }),
 });
 
+const nullableString: Schema = { type: ['string', 'null'] };
+
+/** One entry of the account-change log, as stored (#1193). */
+const ACCOUNT_CHANGE_PROPERTIES: Readonly<Record<string, Schema>> = {
+  id: integer,
+  at: integer,
+  kind: {
+    type: 'string',
+    enum: [
+      'codes_replaced',
+      'address_added',
+      'address_cleared',
+      'link_code_minted',
+      'key_added',
+      'key_revoked',
+    ],
+  },
+  actorKey: string,
+  subjectKey: nullableString,
+  // `link_code`, `recovery_code` or `email_token` for a key added; `null` otherwise.
+  via: nullableString,
+  address: nullableString,
+};
+
+/**
+ * An entry as the log route answers it: with the day its subject key was
+ * added, so a notice can name a revoked key by that day (#1193).
+ */
+const accountChangeReadSchema = object({
+  ...ACCOUNT_CHANGE_PROPERTIES,
+  subjectAddedAt: nullableInteger,
+});
+
 const STATEMENT_ERRORS = [
   'validation_failed',
   'wrong_purpose',
@@ -312,7 +345,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
     reaches: 'own',
     admitsPending: true,
     summary:
-      'Revoke one of this athlete’s device keys and its sessions. The last key needs one of the athlete’s recovery codes, which is checked and not spent.',
+      'Revoke one of this athlete’s device keys, and undo what that key did and nothing else: its sessions end, the link codes it minted are void and its pending recovery-address confirmation is cancelled. The recovery codes are never replaced. The revoke is logged by the asking key. The last key needs one of the athlete’s recovery codes, which is checked and not spent.',
     identity: true,
     auth: 'session',
     request: object({ recoveryCode: string }, []),
@@ -344,6 +377,50 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       schema: object({ linkCode: string, expiresAt: integer }),
     },
     handle: async (context) => answer(await identityOf(context).mintLinkCode(callerOf(context))),
+  },
+  {
+    method: 'GET',
+    path: '/v1/auth/account-changes',
+    operationId: 'listAccountChanges',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'This athlete’s account-change log (ADR 0047 D-8): every link code minted, key added or revoked and recovery address added or cleared, each with the device key that authorised it; this device’s mark; and the notices — every entry another key made since this device last acknowledged. Sealed only.',
+    identity: true,
+    auth: 'session',
+    sealed: 'only',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        changes: { type: 'array', items: accountChangeReadSchema },
+        acknowledgedThrough: integer,
+        notices: { type: 'array', items: accountChangeReadSchema },
+      }),
+    },
+    handle: async (context) => json(await identityOf(context).accountChanges(callerOf(context))),
+  },
+  {
+    method: 'POST',
+    path: '/v1/auth/account-changes/acknowledge',
+    operationId: 'acknowledgeAccountChanges',
+    reaches: 'own',
+    admitsPending: true,
+    summary:
+      'Mark the account-change log seen through `through`, for THIS device only: the session’s key, never one the request names. Clamped to the newest entry, and never moved backwards. Sealed only.',
+    identity: true,
+    auth: 'session',
+    sealed: 'only',
+    request: object({ through: integer }),
+    errors: ['validation_failed', 'unauthenticated'],
+    response: { contentType: 'application/json', schema: object({ acknowledgedThrough: integer }) },
+    handle: async (context) =>
+      answer(
+        await identityOf(context).acknowledgeAccountChanges(
+          callerOf(context),
+          context.json.through,
+        ),
+      ),
   },
   {
     method: 'POST',
