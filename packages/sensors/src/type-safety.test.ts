@@ -14,7 +14,7 @@
  * value — a power of 210 that was never validated, a heart rate read off a
  * power measurement — which is what makes the compile error worth having.
  *
- * Verified the way CLAUDE.md §5 requires: by removing the brand or the type from
+ * Verified the way docs/agents/quality-gate.md §5 requires: by removing the brand or the type from
  * the declaration under test and confirming the suite goes red with TS2578,
  * against a clean working tree. The mutation list is in the pull request.
  */

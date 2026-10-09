@@ -122,7 +122,7 @@ export interface CapacitorBlePort {
    * The plugin's `getDevices(ids)` takes the ids to look up, so the caller has
    * to have kept them. That is the adapter's business, not this seam's.
    *
-   * @unwired nothing reconnects silently, on either platform. CLAUDE.md §8:
+   * @unwired nothing reconnects silently, on either platform. docs/agents/web-bluetooth.md §8:
    * *"there is no silent reconnect that is shippable in 2026 … do not build
    * automatic reconnection"*. This is the call that would serve one when the
    * product decides to have it.
@@ -188,7 +188,7 @@ export interface CapacitorBlePort {
    *
    * ⚠️ It is here on purpose and it is not dead weight. `packages/sensors/
    * web-bluetooth/src/gatt.ts` does exactly this for the same reason, and
-   * CLAUDE.md §4b records why: with the unsafe call *absent* from the port,
+   * docs/agents/project-state.md §4b records why: with the unsafe call *absent* from the port,
    * swapping the safe write for it would be a one-word edit that no test could
    * see, because the port would have to grow the method in the same commit and
    * a reviewer would read that as ordinary. With it present and provably

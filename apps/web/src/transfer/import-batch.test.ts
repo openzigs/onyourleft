@@ -7,7 +7,7 @@
  * round-trip harness, whose `read` discards every open handle before it opens
  * another. So "the ride imported" means a fresh IndexedDB connection can see
  * it, not that the object the importer just built has the fields it was given —
- * which is CLAUDE.md §5's fourth cause of a write that reports success while
+ * which is docs/agents/quality-gate.md §5's fourth cause of a write that reports success while
  * the read cannot see it, and the one a naive test cannot tell apart from
  * success.
  *
@@ -26,6 +26,8 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
+
+import { needsLoadSummary } from '../analysis/summary';
 
 import { webCryptoDigest } from './browser';
 import { corpusSource } from './corpus';
@@ -240,6 +242,19 @@ describe('importActivityFiles — the facts badges are earned from (#947)', () =
     expect(summary?.rideFacts?.ascent).toBeGreaterThan(0);
     expect(summary?.rideFacts?.workoutFinished).toBeUndefined();
     expect(summary?.rideFacts?.ghostRaced).toBeUndefined();
+  });
+});
+
+describe('importActivityFiles — a ride with nothing to work a load out from (#1084)', () => {
+  it('is stored marked, and a fresh read sees no load and nothing left to work out', async () => {
+    // Five seconds of heart rate and no power: shorter than the smoothing
+    // window, so no pass could ever give it a load.
+    const open = await openSeeded();
+    await run(open, [bytesSource('brief.gpx', syntheticGpx(3))]);
+    const [summary] = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(summary?.loadCoveredTime).toBe(0);
+    expect(summary?.effortWeightedHeartRate).toBeUndefined();
+    expect(summary === undefined ? undefined : needsLoadSummary(summary)).toBe(false);
   });
 });
 

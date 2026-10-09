@@ -17,7 +17,7 @@
  * latent defect. `setAthleteThresholds` used to rebuild the athlete row from a
  * hand-written list of three fields, so it silently erased `mass` — and would
  * have erased `units`. The write it was *about* succeeded and the read for it
- * agreed, which is why nothing noticed: it is CLAUDE.md §5's "a write that
+ * agreed, which is why nothing noticed: it is docs/agents/quality-gate.md §5's "a write that
  * reports success while the read cannot see it" applied to the field nobody
  * was looking at.
  */
@@ -39,7 +39,7 @@ import { DEFAULT_UNIT_SYSTEM, parseUnitSystem } from './unit-system';
 
 /**
  * ⚠️ **Three athletes, from the #28 fixtures, not two hand-written ones.**
- * CLAUDE.md §5: two cannot distinguish "scoped correctly" from "returns
+ * docs/agents/quality-gate.md §5: two cannot distinguish "scoped correctly" from "returns
  * everything the requester is connected to".
  */
 async function seeded(): Promise<StoreHarness> {
@@ -240,7 +240,7 @@ describe('a stored value outside the two falls back rather than failing the row'
 });
 
 /**
- * The harness's own calibration for this write path — CLAUDE.md §5's rule that
+ * The harness's own calibration for this write path — docs/agents/store-harness.md §5's rule that
  * *"if you add a write path to `packages/store`, the fakes have to account for
  * it"*.
  *

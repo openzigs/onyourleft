@@ -27,7 +27,7 @@
  * event. They are **not** the same event for `index.html` or for anything in
  * `public/`: the manifest, the icons and the HTML document all keep their names
  * for ever. A version derived from names alone would leave a rider's browser
- * holding yesterday's `index.html` with no way to notice — CLAUDE.md §5's
+ * holding yesterday's `index.html` with no way to notice — docs/agents/quality-gate.md §5's
  * dominant defect, at the outermost layer. So every entry contributes its
  * content digest.
  */

@@ -21,7 +21,7 @@
  * `apps/web/public/licences/third-party.txt`, which Vite copies into `dist`
  * — so it is served beside the app, precached by the service worker like
  * everything else in `public/`, and inside the APK because the APK carries
- * `dist` (CLAUDE.md §4h). One document with four parts:
+ * `dist` (docs/agents/game.md §4h). One document with four parts:
  *
  * 1. every package in the app's **distributed** closure, with its name,
  *    version, licence expression and the **verbatim** text of every
@@ -52,7 +52,7 @@
  *   Gradle, so shape (a) would still have needed a committed input.
  *
  * The price is the one `credits/source.ts` names about a generated, committed
- * file: a second copy of a source of truth. That is exactly what CLAUDE.md §4k
+ * file: a second copy of a source of truth. That is exactly what docs/agents/generated-and-cost-gates.md §4k
  * gates, and this checker is that gate's shape — **including its own
  * `pnpm install --frozen-lockfile` first**, for #298's reason: a regenerate-
  * and-diff over a `node_modules` nobody checked against the lockfile proves
@@ -61,7 +61,7 @@
  *
  * ## The closure is the union, not `--filter @onyourleft/web`
  *
- * ⚠️ `pnpm licenses list --filter` does not follow workspace links (CLAUDE.md
+ * ⚠️ `pnpm licenses list --filter` does not follow workspace links (docs/agents/licence-gates.md
  * §4g): `dexie` reaches the app only through `@onyourleft/store`, and a
  * notices file built from `--filter @onyourleft/web` alone would leave it out.
  * So the closure is the union of every workspace package's `--prod` closure,
@@ -271,7 +271,16 @@ function normalised(text) {
  * manifest names, because `pnpm licenses list --filter` does not follow a
  * workspace link (the reason `distributedUnion` is a union at all).
  */
-export const SERVERS = [{ directory: 'apps/instance', document: 'apps/instance/third-party.txt' }];
+export const SERVERS = [
+  {
+    directory: 'apps/instance',
+    document: 'apps/instance/third-party.txt',
+    // #1096: the server's own reviewed list of packages that ship no licence
+    // file — `apps/web/third-party-notices.json`'s `noLicenceFile`, for a
+    // server. Optional: with none, such a package is NOT003.
+    inputs: 'apps/instance/third-party-notices.json',
+  },
+];
 
 const isServer = (directory) => SERVERS.some((server) => server.directory === directory);
 
@@ -425,10 +434,15 @@ function serverPackages(root, server) {
 /**
  * A server's own notices document, or the problems that stop it being built.
  *
- * Deliberately stricter than the app's: there is no reviewed list of packages
- * that ship no licence file, so one of those is NOT003 until somebody adds a
- * server's equivalent of `apps/web/third-party-notices.json` — which is a
- * decision to make with the package in front of you, not a default.
+ * A package that ships no licence file is NOT003 unless the server's own
+ * reviewed list (`server.inputs`, #1096) has an entry for it at its installed
+ * version saying where its notice comes from: `upstream` text read from the
+ * project's own repository at a named commit, and optionally `licenceText`,
+ * the canonical text this repository pins, reproduced once at the end. That
+ * is the app's `noLicenceFile` shape, narrowed to the two kinds a server has
+ * needed; an entry naming a package that is not in the closure, or that ships
+ * its own licence file now, is stale (NOT004). With no list at all, every such
+ * package is NOT003, as before.
  */
 export function renderServerNotices(root, server) {
   const packages = serverPackages(root, server);
@@ -445,13 +459,65 @@ export function renderServerNotices(root, server) {
   }
   const problems = [];
   const entries = [];
+  const reviewedList =
+    server.inputs !== undefined && existsSync(join(root, server.inputs))
+      ? (readJson(root, server.inputs).noLicenceFile ?? {})
+      : {};
+  const appendices = new Set();
+  const inClosure = new Set();
   for (const dependency of union) {
+    const key = `${dependency.name}@${dependency.version}`;
+    inClosure.add(key);
     const files = licenceFiles(dependency.directory);
-    if (files.length === 0) {
+    const reviewed = reviewedList[key];
+    if (files.length > 0 && reviewed !== undefined) {
       problems.push(
-        `NOT003 ${dependency.name}@${dependency.version} ships no LICENSE, LICENCE, COPYING or ` +
-          `NOTICE file (looked in ${dependency.directory ?? '(pnpm gave no path)'}), and ` +
-          `${server.directory} has no reviewed list saying where its notice comes from.`,
+        `NOT004 ${key} ships its own licence file now (${files.join(', ')}), so its reviewed ` +
+          `entry in ${server.inputs} is stale.`,
+      );
+      continue;
+    }
+    if (files.length === 0) {
+      if (reviewed === undefined) {
+        problems.push(
+          `NOT003 ${key} ships no LICENSE, LICENCE, COPYING or ` +
+            `NOTICE file (looked in ${dependency.directory ?? '(pnpm gave no path)'}), and ` +
+            `${server.directory} has no reviewed list saying where its notice comes from.`,
+        );
+        continue;
+      }
+      const sections = [];
+      if (reviewed.upstream !== undefined) {
+        sections.push({
+          heading: `from ${reviewed.upstream.url}, read ${reviewed.upstream.read} (the package ships no licence text)`,
+          text: normalised(reviewed.upstream.text),
+        });
+      }
+      if (reviewed.licenceText !== undefined) {
+        if (licenceText(root, reviewed.licenceText) === undefined) {
+          problems.push(
+            `NOT005 ${key} asks for the text of ${reviewed.licenceText}, which this generator does not hold.`,
+          );
+          continue;
+        }
+        appendices.add(reviewed.licenceText);
+        sections.push({
+          heading: `${reviewed.licenceText}`,
+          text: `The full text of ${reviewed.licenceText} is reproduced once, at the end of this document.`,
+        });
+      }
+      if (sections.length === 0) {
+        problems.push(`NOT004 ${key}: its reviewed entry in ${server.inputs} supplies no text.`);
+        continue;
+      }
+      entries.push(
+        entry({
+          name: dependency.name,
+          version: dependency.version,
+          licence: dependency.licence || '(none declared)',
+          part: 'in the instance',
+          sections,
+        }),
       );
       continue;
     }
@@ -468,7 +534,27 @@ export function renderServerNotices(root, server) {
       }),
     );
   }
+  for (const key of Object.keys(reviewedList)) {
+    if (!inClosure.has(key)) {
+      problems.push(
+        `NOT004 ${key} has a reviewed entry in ${server.inputs} and is not in ` +
+          `${server.directory}'s closure at that version.`,
+      );
+    }
+  }
   if (problems.length > 0) return { problems };
+  const appendixText = [...appendices]
+    .sort(byCodePoint)
+    .map((licence) =>
+      [
+        SEPARATOR,
+        `Appendix: ${licence}`,
+        `(${LICENCE_TEXTS[licence]} in this instance's source repository)`,
+        '',
+        licenceText(root, licence),
+        '',
+      ].join('\n'),
+    );
   const document = [
     'THIRD-PARTY SOFTWARE IN THIS ON YOUR LEFT INSTANCE',
     '',
@@ -489,6 +575,7 @@ export function renderServerNotices(root, server) {
       : ['  (none — the instance runs on Node alone)']),
     '',
     ...entries,
+    ...appendixText,
   ].join('\n');
   return { problems: [], document, packages: union.length };
 }
@@ -1112,7 +1199,7 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
     );
     for (const problem of result.problems) console.error(`  - ${problem}`);
     console.error(
-      `\nSee CLAUDE.md §4g and scripts/check-third-party-notices.mjs. Root: ${relative(process.cwd(), root) || '.'}`,
+      `\nSee docs/agents/licence-gates.md §4g and scripts/check-third-party-notices.mjs. Root: ${relative(process.cwd(), root) || '.'}`,
     );
     process.exit(1);
   }

@@ -118,6 +118,256 @@ stopped instance's database — loses nothing: the next start makes it again fro
 ⚠️ **Nothing is measured on the owner's box yet**: the ingest rate (passages a second) and one
 query's time, CPU-only and on a GPU if present, are owed by #835.
 
+## Analysis model
+
+With `OYL_INSTANCE_ANALYSIS_MODEL_URL` and `OYL_INSTANCE_ANALYSIS_MODEL` set, the instance can
+reach a model for the post-ride write-up's agent
+([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-8, D-9;
+#1096). ⚠️ **Nothing starts a job yet**: the agent runs from the job engine, #1095, which is not
+built, so today the setting only checks the address and makes the connection ready.
+
+**Running Ollama beside the instance, in Compose.** The home deployment's `ollama` service serves
+the history index and the analysis model both. Set `COMPOSE_PROFILES=analysis` (or
+`history,analysis`) in `.env`, start it once with `docker compose up -d ollama`, pull the model you
+chose with `docker compose exec ollama ollama pull <model>`, and set:
+
+```
+OYL_INSTANCE_ANALYSIS_MODEL_URL=http://ollama:11434/v1
+OYL_INSTANCE_ANALYSIS_MODEL=<the model you pulled>
+```
+
+**No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
+default, and an address with no model name leaves analysis off and says so. Two things to check of
+the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
+and a model whose server answers *"does not support tools"* fails every job with a sentence saying
+so — there is no fallback (ADR 0046 D-7). **Its licence must be one ADR 0031 D-2 admits**, as
+ADR 0040 D-5 requires of any model these documents would name. And give Ollama a context window
+larger than its default of 4 096 tokens (its `OLLAMA_CONTEXT_LENGTH`): a tool-calling run re-sends
+the whole conversation every turn, and Ollama cuts an over-long prompt silently, from the front,
+where the instructions are.
+
+**The address rule** is the history index's (ADR 0040 D-6, `history/address.ts`): loopback,
+`localhost`, a private, link-local, shared or unique-local address, or a single-label name such as a
+Compose service. A public name and a `.local` name are refused when the configuration is read, and
+analysis stays off. Where a name resolves to is checked again on **every** request, and the request
+goes to the address that was checked. ⚠️ **Never publish Ollama's port, or point the tunnel at
+it**: its API has no authentication.
+
+| You see | It means |
+|---|---|
+| `"event":"analysis-model","state":"on"` at start | the model connection is ready. The model's name is not logged |
+| `"event":"analysis-model","state":"off","code":"not-set"` | no address is set: analysis is off, and nothing else changes |
+| `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
+| `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"` | the setting is malformed; standard error says which |
+
+What the agent sends the model and what it may read is in
+[`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
+
+## A hosted model key
+
+Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
+service (#1097, [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
+D-9). ⚠️ **Nothing uses it yet, for anyone — you included.** A hosted job runs only for an athlete
+whose own consent, naming the endpoint, is recorded on the instance (ADR 0046 Q10), and is refused
+before the key is read; and a hosted request must be masked first (#1101). Neither is built, so a job
+that asks for the hosted source fails `hosted_unavailable`, the key is not opened, and nothing is
+sent. And it is used only for a job whose rider's device asked for it — the source is chosen per
+job, never by the instance.
+
+**Held for you, the operator, and for nobody else yet.** The instance also hosts group rides and
+races, so it has other riders, and holding a key changes nothing about them: they register and ride
+as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*. The key is
+held for the operator, who is, in the owner's Q9 ruling, *"the athlete whose device holds
+`OYL_INSTANCE_OWNER_KEY`, the key that already makes them moderator"*: `model-key set` looks that
+athlete up, and is refused when the variable is unset or your device has not signed in to this
+instance yet. **No job can use it yet, yours included.** ADR 0046 Q10 binds you as it binds every
+rider: a hosted job runs only for an athlete whose own consent, recorded on the instance and naming
+the endpoint, is there, and recording that consent is not built yet — for you or anyone. Another
+rider's job is refused for a second reason as well: your switch for other riders (Q13: *"Other
+riders get no analysis until the operator turns it on, whichever key they use"*) is not built
+either. What remains of #1097 — the switch, a rider's own key, the consent, and where a pasted key
+may be typed — is #1199.
+
+**The key stays with the athlete it was set for.** It is stored against your athlete, not against
+the variable. If you change `OYL_INSTANCE_OWNER_KEY` to another athlete's device key, or your device
+key is revoked, the key does not move: run `model-key clear`, then `model-key set` again as the new
+operator. Erasing your account (`DELETE /v1/account`) erases the key with it. Your
+account export says only `"hostedModelKey": "a hosted model key is held"`; another rider's says
+`null`.
+
+**The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
+bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
+
+```
+openssl rand -base64 32
+```
+
+Every write draws a fresh nonce, and the athlete, the URL and the model are bound into the
+encryption, so an edited URL in the database makes the key unreadable rather than sending it
+somewhere new, and an edited athlete makes it unreadable rather than somebody else's. The server and
+the operator's commands both read the variable; a value that is not 32 bytes of base64 stops the
+server starting.
+
+```
+printf '%s' "$KEY" | node src/operator/cli.ts model-key set --url https://… --model <name>
+node src/operator/cli.ts model-key status    # url, model, "a key is held", whether this secret opens it
+node src/operator/cli.ts model-key clear
+```
+
+On the home deployment (#807) the variable goes in the `.env` beside `compose.yaml`
+(`instance.env.example` lists it), and `compose.yaml` hands it to the `instance` service and to no
+other: the `backup` service never sees it. Run the commands in that service, with `-T` so the key
+reaches standard input through the pipe:
+
+```
+printf '%s' "$KEY" | docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key set --url https://… --model <name>
+docker compose run --rm --no-deps -T instance node src/operator/cli.ts model-key status
+```
+
+`set` reads the key from **standard input and nowhere else**: a key given as an argument is refused,
+because `ps` and a shell's history would show it. The URL must be `https:`, with no user name,
+query or fragment; it is the only host the hosted model may reach. The key is never logged, never
+in `/metrics`, never in an error and never in `status`.
+
+**What a backup holds.** `operator backup` copies the database with `VACUUM INTO`, so a snapshot
+holds the key's **ciphertext only**. Keep the secret out of the backup's destination: a snapshot and
+its secret together are the key. A snapshot restored onto a box with a different secret — or none —
+leaves the key unreadable, and the instance says so and carries on with its local model, or none:
+
+| You see | It means |
+|---|---|
+| `"event":"hosted-model-key","state":"none"` | no key is held |
+| `…"state":"held"` | a key is held and this secret opens it |
+| `…"state":"unreadable","hostedKeyProblem":"the hosted key cannot be read with this secret"` | restored under another secret: set the key again, or put the old secret back |
+| `…"state":"no-secret"` | a key is held and `OYL_INSTANCE_SECRET_KEY` is not set |
+
+**What clearing leaves.** `model-key clear`, replacing a key with `set`, and erasing the account all
+run with SQLite's `secure_delete` on, so the old ciphertext is overwritten with zeros in the
+database file rather than left in a free page, and then checkpoint and truncate the write-ahead log,
+which held copies of the old pages. ⚠️ Two copies are beyond that: **a snapshot taken while the key
+was held** still holds its ciphertext, and opens with the secret, so delete those snapshots or
+rotate the secret; and if another connection (the running server, when the command is run beside it) is reading at
+that moment, the truncation does not happen and the log's old pages stay until SQLite next writes
+the log over from its start. Neither is the key in clear.
+
+**Rotating the secret.** There is no re-encryption command, because the key itself is the thing to
+re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with
+the key (which seals it under the new secret), and start the instance. Snapshots taken before then
+need the old secret to read their key; the rest of a snapshot needs no secret at all.
+
+## The instance's keys
+
+An instance holds two long-term keys of its own (#1189,
+[ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-4, D-5): an
+**identity** key (Ed25519), which riders' devices pin and which only signs, and an **encryption**
+key (X25519), which devices seal requests to. The encryption key is published only inside a
+statement the identity key signs, at `GET /v1/instance/keys`. Devices seal requests to it at
+`POST /v1/sealed` (#1191, below); the app's pin is #1190.
+
+**They need `OYL_INSTANCE_SECRET_KEY`**, the same secret a hosted model key uses (above) — never a
+second one — and `OYL_INSTANCE_ORIGIN`, which they are bound to. Both private halves are stored in
+the database wrapped with AES-256-GCM under a key derived from the secret, so a backup holds them as
+ciphertext only, and a restore keeps every device's pin. **With no secret the instance makes no
+keys**: `/v1/instance/keys` and every sealed route answer `unavailable`, naming the variable, and
+everything else is served as before. With a secret, the keys are made on the first start.
+
+**The numbers, ruled by the owner (ADR 0047 D-14 Q3)**, all on the box's own clock:
+
+| | |
+|---|---|
+| a new encryption key | every **30 days**, made by the running server |
+| a statement for the current key | lives **48 hours**, and is signed again once fewer than 24 hours are left — about daily |
+| an old key's private half | kept **7 days** after its successor is made, then **deleted** — gone from the database and from every backup taken afterwards |
+| a key's serial | `max(now, the highest serial ever issued + 1)` |
+
+At start, before it serves its keys, the instance rotates if the current key is past its 30 days and
+signs a fresh statement if none is in date — so a box that was off for days comes back serving
+statements that verify. It logs what it did:
+
+| You see | It means |
+|---|---|
+| `"event":"instance-keys","state":"ready",…` | the keys are in date; `made`, `rotated`, `signed` and `deleted` say what this pass did |
+| `…"state":"no-secret"` | `OYL_INSTANCE_SECRET_KEY` is not set: no keys, no sealed routes |
+| `…"state":"no-origin"` | `OYL_INSTANCE_ORIGIN` is not set |
+| `…"state":"unreadable"` | this secret does not open the keys held — restored under another secret, or the origin changed |
+| `…"state":"busy"` | an `instance-key` command is changing the keys this moment; the instance tries again in five seconds |
+
+⚠️ **The box's clock must be set by NTP** (ADR 0047 D-9). A statement's `notAfter` is the box's
+time, so a clock running ahead lengthens how long a superseded key's statement is still believed. A
+home machine running Docker already keeps its clock this way; check it does.
+
+**The commands**, run where the secret and the origin are set (on the home deployment, in the
+`instance` service, as for `model-key`):
+
+```
+node src/operator/cli.ts instance-key init                     # make the keys now, if there are none
+node src/operator/cli.ts instance-key show                     # the fingerprint and the instance card
+node src/operator/cli.ts instance-key rotate [--drop-old] [--serial-above <n>]
+node src/operator/cli.ts instance-key rotate-identity [--compromised]
+node src/operator/cli.ts instance-key reset
+```
+
+- **Every command is safe on a running instance.** `init`, `rotate`, `rotate-identity` and `reset`
+  write from a second process, so each first takes the database's **key lease** — the same one the
+  instance's own maintenance pass takes — and gives it back when it is done (ADR 0047 D-5 has one
+  writer at a time). While the instance is in the middle of a pass, a command is refused, writing
+  nothing, with *"Another process is changing this instance’s keys right now: run the command again
+  in a moment."* — run it again. While a command holds the lease the instance logs
+  `"event":"instance-keys","state":"busy"` and tries again five seconds later. A lease whose holder
+  died is free after 60 seconds. `show` only reads, and takes no lease.
+- `show` prints the identity key's full fingerprint and the **instance card**,
+  `oyl-instance:<origin>#<52 characters>` — what the first device pins from (ADR 0047 D-6). It holds
+  nothing secret, and is never truncated.
+- `rotate` makes a new encryption key now. `--drop-old` also deletes every older one at once: the
+  answer to a suspected leak of the encryption key. `--serial-above <n>` issues a key whose serial is
+  above `n` — the number a rider's app names when it was offered an older key than it has seen (a
+  restore from before a key the box made while its clock ran ahead).
+- `rotate-identity` makes a new identity key and deletes the old one. Planned, the old key signs an
+  endorsement of the new one; `--compromised`, nothing does. **Either way every device pins again
+  from the new card** (D-14 Q8).
+- `reset` deletes every key and makes new ones. **Every device pins again.**
+
+⚠️ **A lost operator secret loses the keys.** Without it neither private half can be unwrapped: the
+instance logs `unreadable` and serves no keys. The remedy is a new secret and `instance-key reset`,
+after which **every device must pin again from the new card**, and every hosted model key must be
+set again. Keep the secret somewhere other than the backups, and somewhere you will not lose it.
+
+**A restore rotates the encryption key** as its last step, once the data is checked and in place:
+a snapshot from before the latest rotation would otherwise bring back a key older than one every
+device has already seen. The identity key comes back unchanged, so every pin holds. `restore`
+reports what it did under `keys`; with no secret set it says so and restores the data all the same.
+
+## Sealed requests
+
+`POST /v1/sealed` (#1191, [ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)
+D-8, D-9) is the one endpoint a sealed request arrives at: the inner method, path and body travel
+inside the ciphertext, signed by the device's key, and the answer goes back sealed. It needs the
+accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); without either it answers
+`unavailable`. Three things about it are the operator's:
+
+- ⚠️ **The box's clock must be set by NTP, and right to within two minutes.** A sealed request signed
+  more than **120 seconds** from the box's clock is refused `stale_request`, and nothing runs. The
+  app re-signs once with the box's time and remembers the difference, so a phone a few minutes off
+  costs one extra round trip; but a box whose own clock wanders makes **every** sealed request fail,
+  revoking a device and recovering an account included, and the app then tells the rider *"Your
+  instance's clock looks wrong; ask its operator to check it."* A home machine running Docker keeps
+  its clock by NTP already; check it does.
+- **The clock rule, stated once.** Each request carries its signing time (`issuedAt`), checked
+  against the box's clock with **120 s** either way; and the SHA-256 of each request's ephemeral key
+  is kept in the database for **10 minutes**, so the same request sent again is refused `replayed`
+  without running — across a restart too, because the record is a table (`sealed_replay`, migration
+  0017), not memory. Its rows name no athlete, and rows older than ten minutes are deleted as new
+  ones arrive.
+- ⚠️ **The per-client limit needs `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and a trusted proxy, or it is
+  one shared bucket.** A sealed request with no session (registering, linking, recovering) is
+  counted against the client's address before the instance does any cryptography — 30 a minute.
+  Behind `cloudflared` every request arrives from the tunnel's address, so the limit is per rider
+  only when the instance is told to read `cf-connecting-ip` and the tunnel's address is loopback or
+  in `OYL_INSTANCE_TRUSTED_PROXIES` (the home deployment's `compose.yaml` sets both). Without them,
+  one busy client uses up registration, linking and recovery for every rider. A signed-in rider's
+  sealed requests are counted against their session instead — 120 a minute — and are not affected.
+
 ## Room close codes
 
 A room's socket is closed with a code that says why (`apps/instance/src/room/close-codes.ts`),
@@ -167,6 +417,10 @@ whose database is not the one its manifest describes. After copying it **checks 
 — SQLite's integrity check, every table's row count and the blob count against the manifest, and
 every blob's content against its name — and fails loudly if anything differs. `verify` prints the
 same counts for the data in place, which is what to compare on a second machine.
+
+It then **rotates the instance's encryption key** ("The instance's keys", above), which needs
+`OYL_INSTANCE_SECRET_KEY` and `OYL_INSTANCE_ORIGIN`. `deploy.sh`'s rollback restores in the
+`backup` service, which holds no secret, and so rotates afterwards in the `instance` service.
 
 A restore has been **performed** in a test, not only written: `apps/instance/src/operator/commands.test.ts`
 backs up a populated instance while it is open and writing, restores the snapshot into an empty

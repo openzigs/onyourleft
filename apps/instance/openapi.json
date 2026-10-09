@@ -428,7 +428,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
                 }
               }
             }
@@ -2500,6 +2500,163 @@
         }
       }
     },
+    "/v1/instance/keys": {
+      "get": {
+        "operationId": "getInstanceKeys",
+        "summary": "The instance’s Ed25519 identity key, and each in-date `oyl-instance-key-v1` statement it signed for an X25519 encryption key still held, highest `serial` first, with its signature over the statement’s RFC 8785 bytes (ADR 0047 D-4, D-5). After a planned identity rotation, the old key’s `oyl-instance-identity-rotation-v1` endorsement. Plaintext: a device trusts it by the identity key it pinned from a card (D-6). `unavailable`, naming the variable, on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identityKey": {
+                      "type": "string"
+                    },
+                    "statements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statement": {
+                            "type": "object",
+                            "properties": {
+                              "purpose": {
+                                "type": "string",
+                                "enum": [
+                                  "oyl-instance-key-v1"
+                                ]
+                              },
+                              "instanceOrigin": {
+                                "type": "string"
+                              },
+                              "keyId": {
+                                "type": "string"
+                              },
+                              "encryptionKey": {
+                                "type": "string"
+                              },
+                              "serial": {
+                                "type": "integer"
+                              },
+                              "notBefore": {
+                                "type": "integer"
+                              },
+                              "issuedAt": {
+                                "type": "integer"
+                              },
+                              "notAfter": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "purpose",
+                              "instanceOrigin",
+                              "keyId",
+                              "encryptionKey",
+                              "serial",
+                              "notBefore",
+                              "issuedAt",
+                              "notAfter"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "signature": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "statement",
+                          "signature"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "endorsements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statement": {
+                            "type": "object",
+                            "properties": {
+                              "purpose": {
+                                "type": "string",
+                                "enum": [
+                                  "oyl-instance-identity-rotation-v1"
+                                ]
+                              },
+                              "instanceOrigin": {
+                                "type": "string"
+                              },
+                              "previousIdentityKey": {
+                                "type": "string"
+                              },
+                              "identityKey": {
+                                "type": "string"
+                              },
+                              "fingerprint": {
+                                "type": "string"
+                              },
+                              "issuedAt": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "purpose",
+                              "instanceOrigin",
+                              "previousIdentityKey",
+                              "identityKey",
+                              "fingerprint",
+                              "issuedAt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "signature": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "statement",
+                          "signature"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "identityKey",
+                    "statements",
+                    "endorsements"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/athletes/{athleteId}/hide-display-name": {
       "post": {
         "operationId": "hideDisplayName",
@@ -2858,7 +3015,7 @@
     "/v1/moderation/log": {
       "get": {
         "operationId": "getModerationLog",
-        "summary": "Every moderator action, oldest first. Append-only.",
+        "summary": "Every moderator action, NEWEST first, a page at a time (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. Append-only.",
         "security": [
           {
             "session": []
@@ -2916,15 +3073,25 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "entries"
+                    "entries",
+                    "next"
                   ],
                   "additionalProperties": false
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
@@ -3365,6 +3532,89 @@
           },
           "409": {
             "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/suspended": {
+      "get": {
+        "operationId": "listSuspendedAthletes",
+        "summary": "Every suspended account, most recently suspended first (#961): `?limit=` (1–200, default 50) and `?cursor=` from the page before.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "athleteId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "suspendedAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "athleteId",
+                          "displayName",
+                          "suspendedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -3989,6 +4239,109 @@
           },
           "403": {
             "$ref": "#/components/responses/not_eligible"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sealed": {
+      "post": {
+        "operationId": "sealedRequest",
+        "summary": "A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer"
+                  },
+                  "keyId": {
+                    "type": "string"
+                  },
+                  "enc": {
+                    "type": "string"
+                  },
+                  "ct": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "v",
+                  "keyId",
+                  "enc",
+                  "ct"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "v": {
+                      "type": "integer"
+                    },
+                    "nonce": {
+                      "type": "string"
+                    },
+                    "ct": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "v",
+                    "nonce",
+                    "ct"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "When the inner route streams: frames of one `data:` line each — the first `{ \"v\": 1, \"nonce\", \"ct\" }`, then `{ \"ct\" }` — never an `event:` or `id:` field, ending with a sealed `end` event."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "One of `validation_failed`, `instance_key_unknown`, `sealed_unopened`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -4698,6 +5051,8 @@
                 "type": "string",
                 "enum": [
                   "validation_failed",
+                  "instance_key_unknown",
+                  "sealed_unopened",
                   "unauthenticated",
                   "wrong_purpose",
                   "wrong_instance",
@@ -4705,6 +5060,7 @@
                   "challenge_used",
                   "challenge_expired",
                   "bad_signature",
+                  "stale_request",
                   "key_revoked",
                   "code_unknown",
                   "code_used",
@@ -4718,6 +5074,7 @@
                   "not_found",
                   "method_not_allowed",
                   "key_in_use",
+                  "replayed",
                   "last_device",
                   "moderation_not_applicable",
                   "address_in_use",
@@ -4775,6 +5132,26 @@
     "responses": {
       "validation_failed": {
         "description": "`validation_failed` (400), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "instance_key_unknown": {
+        "description": "`instance_key_unknown` (400), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "sealed_unopened": {
+        "description": "`sealed_unopened` (400), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {
@@ -4845,6 +5222,16 @@
       },
       "bad_signature": {
         "description": "`bad_signature` (401), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "stale_request": {
+        "description": "`stale_request` (401), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {
@@ -4975,6 +5362,16 @@
       },
       "key_in_use": {
         "description": "`key_in_use` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "replayed": {
+        "description": "`replayed` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

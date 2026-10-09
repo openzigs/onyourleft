@@ -48,6 +48,15 @@
  * cannot tell a moderator which of the two it was, and a typed id that exists
  * reads exactly like one that does not.
  *
+ * ## Two lists a page at a time — #961
+ *
+ * The log and the suspended accounts are read a page at a time
+ * ({@link MODERATION_LOG_PAGE}, {@link SUSPENDED_PAGE}), newest first, each
+ * with the instance's opaque `next` cursor, which {@link ModerationPort.moreLog}
+ * and {@link ModerationPort.moreSuspended} hand back unread. Until #961 the log
+ * was one answer of every action ever logged, read under the 2 MiB a room's
+ * route may take; a page is read under the ordinary 256 KiB.
+ *
  * ## A report about yourself — #905
  *
  * The instance refuses a moderator deciding a report about themselves, and
@@ -58,7 +67,7 @@
 
 import { heldInstanceSession, type InstanceStorage } from './instance-port';
 import type { InstanceAnswer, InstanceSend } from './instance-transport';
-import { MAXIMUM_ROOM_ROUTE_ANSWER_BYTES } from './instance-transport';
+import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, sealedRouteGate } from './instance-pin';
 import { readInstanceAccount } from './sign-in';
 
 /** An athlete id as the instance mints and accepts one (`moderation.ts` §`ATHLETE_ID`). */
@@ -101,6 +110,30 @@ export interface ModerationLogEntry {
   readonly at: number;
 }
 
+/** One suspended account (#961). */
+export interface SuspendedAccount {
+  readonly athleteId: string;
+  readonly displayName: string;
+  /** Unix seconds. */
+  readonly suspendedAt: number;
+}
+
+/** One page of a moderators' list, and the instance's cursor for the next — `null` at the end. */
+export interface ModerationList<T> {
+  readonly items: readonly T[];
+  readonly next: string | null;
+}
+
+/**
+ * How many log entries one page asks for. 25 of the longest the instance keeps
+ * — a 1000-character reason, every character escaped — is well under the
+ * transport's 256 KiB.
+ */
+export const MODERATION_LOG_PAGE = 25;
+
+/** How many suspended accounts one page asks for. */
+export const SUSPENDED_PAGE = 50;
+
 /** Whether this device's account moderates its instance. */
 export type ModerationStanding =
   'moderator' | 'not-moderator' | 'not-connected' | 'signed-out' | 'unreachable';
@@ -114,11 +147,18 @@ export type ModerationRead =
       readonly registrations: readonly PendingRegistration[];
       readonly reports: readonly OpenReport[];
       /**
-       * `undefined` when the log could not be read — too large, a row this
-       * client does not accept, or no answer — while the two queues could.
-       * The log is read on its own so that it cannot take the queues with it.
+       * The first page of the suspended accounts (#961), or `undefined` when
+       * it could not be read while the queues could — read on its own, as the
+       * log is.
        */
-      readonly log: readonly ModerationLogEntry[] | undefined;
+      readonly suspended: ModerationList<SuspendedAccount> | undefined;
+      /**
+       * The log's first page, NEWEST first (#961). `undefined` when it could
+       * not be read — too large, a row this client does not accept, or no
+       * answer — while the two queues could. The log is read on its own so
+       * that it cannot take the queues with it.
+       */
+      readonly log: ModerationList<ModerationLogEntry> | undefined;
     };
 
 /** What a moderator may do to an account, by the instance's own names. */
@@ -152,8 +192,15 @@ export const MODERATION_REFUSAL_TEXT = {
 export interface ModerationPort {
   /** Whether this device's account moderates its instance — one request, or none. */
   standing(): Promise<ModerationStanding>;
-  /** Everything the screen lists: the approval queue, the report queue and the log. */
+  /**
+   * Everything the screen lists: the approval queue, the report queue, and
+   * the first page of the suspended accounts and of the log.
+   */
   read(): Promise<ModerationRead>;
+  /** The log's next page, after `cursor` — `undefined` when it could not be read (#961). */
+  moreLog(cursor: string): Promise<ModerationList<ModerationLogEntry> | undefined>;
+  /** The suspended accounts' next page, after `cursor` — `undefined` likewise (#961). */
+  moreSuspended(cursor: string): Promise<ModerationList<SuspendedAccount> | undefined>;
   /** Approve or refuse an account awaiting approval. */
   decideRegistration(
     athleteId: string,
@@ -172,7 +219,38 @@ export interface ModerationPort {
     reason: string,
     reportId?: number,
   ): Promise<ModerationOutcome>;
+  /**
+   * Make an invitation for a new rider (#1190, ADR 0047 D-6 source 3), with
+   * THIS device's card beside the code. The card is composed from this
+   * device's own pin, never taken from the instance's answer; with no pin there
+   * is no invitation (D-14 Q1).
+   */
+  mintInvite(reason: string): Promise<InviteOutcome>;
 }
+
+/** An invitation as the share sheet shows it (#1190). */
+export type InviteOutcome =
+  | {
+      readonly kind: 'minted';
+      /** The card and the code as one line: what the QR code carries and the rider is sent. */
+      readonly invite: string;
+      /** The card, composed from this device's own pin. */
+      readonly card: string;
+      readonly inviteCode: string;
+      /** Unix seconds. */
+      readonly expiresAt: number;
+    }
+  | { readonly kind: 'refused'; readonly text: string };
+
+/**
+ * Said on the share sheet, where an invitation leaves this device (ADR 0047
+ * D-6): an invitation's card is only as trustworthy as the channel it travels
+ * through. ⚠️ **Placeholder draft**: #1194 owns this sentence's wording.
+ */
+export const INVITE_CARD_CAUTION =
+  'This invitation carries the instance’s card. Whoever carries the invitation to the new rider ' +
+  'could change the card on the way, so send it by a channel you trust, or show it to them in ' +
+  'person.';
 
 export interface ModerationPortDependencies {
   readonly storage: InstanceStorage;
@@ -281,6 +359,24 @@ function logEntryFrom(value: unknown): ModerationLogEntry | undefined {
   };
 }
 
+function suspendedFrom(value: unknown): SuspendedAccount | undefined {
+  const row = record(value);
+  const name = text(row?.displayName, MAXIMUM_SHOWN_NAME);
+  if (
+    row === undefined ||
+    !isId(row.athleteId) ||
+    name === undefined ||
+    UNSHOWABLE.test(name) ||
+    !isTime(row.suspendedAt)
+  ) {
+    return undefined;
+  }
+  return { athleteId: row.athleteId, displayName: name, suspendedAt: row.suspendedAt };
+}
+
+/** A cursor as `pagination.ts` writes one: base64url, and short. */
+const CURSOR = /^[A-Za-z0-9_-]{1,1024}$/;
+
 /** Every row of `field` in an answer, or `undefined` when any row is not one. */
 function rows<T>(
   answer: InstanceAnswer,
@@ -291,6 +387,19 @@ function rows<T>(
   if (answer.status !== 200 || !Array.isArray(list)) return undefined;
   const read = list.map(each);
   return read.some((row) => row === undefined) ? undefined : (read as T[]);
+}
+
+/** A page of `field` and its `next` cursor, or `undefined` when either is not as the instance writes them. */
+function page<T>(
+  answer: InstanceAnswer,
+  field: string,
+  each: (value: unknown) => T | undefined,
+): ModerationList<T> | undefined {
+  const items = rows(answer, field, each);
+  const next = record(answer.body)?.next;
+  if (items === undefined) return undefined;
+  if (next === null) return { items, next: null };
+  return typeof next === 'string' && CURSOR.test(next) ? { items, next } : undefined;
 }
 
 function errorCode(answer: InstanceAnswer): unknown {
@@ -344,6 +453,9 @@ function acceptedReason(reason: string): string | undefined {
   return trimmed === '' || [...trimmed].length > MAXIMUM_MODERATION_REASON ? undefined : trimmed;
 }
 
+/** An invite code as `apps/instance` mints them: four groups of four. */
+const INVITE_CODE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/;
+
 /** The production {@link ModerationPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createModerationPort(dependencies: ModerationPortDependencies): ModerationPort {
   const held = () => heldInstanceSession(dependencies.storage, dependencies.send);
@@ -391,6 +503,36 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     }
   }
 
+  /** One page of a moderators' list: `undefined` on any answer but a page, signed-out included. */
+  async function readPage<T>(
+    path: string,
+    limit: number,
+    cursor: string | undefined,
+    field: string,
+    each: (value: unknown) => T | undefined,
+  ): Promise<ModerationList<T> | undefined> {
+    if (cursor !== undefined && !CURSOR.test(cursor)) return undefined;
+    const connection = held();
+    if (connection === undefined) return undefined;
+    try {
+      return page(
+        await connection.http.call('GET', path, {
+          token: connection.token,
+          query: { limit: String(limit), ...(cursor === undefined ? {} : { cursor }) },
+        }),
+        field,
+        each,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  const logPage = (cursor?: string) =>
+    readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, 'entries', logEntryFrom);
+  const suspendedPage = (cursor?: string) =>
+    readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, 'items', suspendedFrom);
+
   return {
     standing: async () => {
       const probed = await probe();
@@ -404,24 +546,18 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       const connection = held();
       if (me === undefined || connection === undefined) return { kind: 'not-connected' };
       try {
-        const [reports, log] = await Promise.all([
+        // The log and the suspended accounts are each read as a section of
+        // their own (#957's review): one that cannot be read, or holds a row
+        // this client does not accept, is `undefined`, and the queues are
+        // still shown.
+        const [reports, suspended, log] = await Promise.all([
           connection.http.call('GET', '/v1/moderation/reports', { token: connection.token }),
-          // The log is every action the instance ever logged, in one answer:
-          // the largest this module reads (`instance-transport.ts`). It is
-          // read as a section of its own (#957's review): a log past that
-          // bound, or with one row this client does not accept, is `undefined`
-          // and the queues are still shown.
-          connection.http
-            .call('GET', '/v1/moderation/log', {
-              token: connection.token,
-              maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
-            })
-            .catch(() => undefined),
+          suspendedPage(),
+          logPage(),
         ]);
-        if (reports.status === 401 || log?.status === 401) return { kind: 'signed-out' };
+        if (reports.status === 401) return { kind: 'signed-out' };
         const registrationRows = rows(probed.answer, 'registrations', registrationFrom);
         const reportRows = rows(reports, 'reports', reportFrom);
-        const logRows = log === undefined ? undefined : rows(log, 'entries', logEntryFrom);
         if (registrationRows === undefined || reportRows === undefined) {
           return { kind: 'unreachable' };
         }
@@ -430,12 +566,16 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
           me,
           registrations: registrationRows,
           reports: reportRows,
-          log: logRows,
+          suspended,
+          log,
         };
       } catch {
         return { kind: 'unreachable' };
       }
     },
+
+    moreLog: async (cursor) => logPage(cursor),
+    moreSuspended: async (cursor) => suspendedPage(cursor),
 
     decideRegistration: async (athleteId, decision, reason) => {
       const typed = athleteId.trim();
@@ -467,6 +607,49 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         reason,
         reportId === undefined ? {} : { reportId },
       );
+    },
+
+    mintInvite: async (reason) => {
+      // ⚠️ The card is composed HERE, from this device's own pin (D-6
+      // source 3): never from anything the instance answers below.
+      const account = readInstanceAccount(dependencies.storage);
+      const gate = sealedRouteGate(account);
+      const card = cardFromPin(account);
+      if (gate.kind !== 'open' || card === undefined) {
+        return {
+          kind: 'refused',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
+      const accepted = acceptedReason(reason);
+      if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
+      const connection = held();
+      if (connection === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
+      }
+      try {
+        const answer = await connection.http.call('POST', '/v1/moderation/invites', {
+          token: connection.token,
+          body: { reason: accepted },
+        });
+        const refused = outcomeOf(answer);
+        if (refused.kind === 'refused') return refused;
+        const body = record(answer.body);
+        const inviteCode =
+          typeof body?.inviteCode === 'string' ? body.inviteCode.toLowerCase() : '';
+        if (!INVITE_CODE.test(inviteCode) || !isTime(body?.expiresAt)) {
+          return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+        }
+        return {
+          kind: 'minted',
+          invite: codeWithCard(card, inviteCode),
+          card,
+          inviteCode,
+          expiresAt: body.expiresAt,
+        };
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
     },
   };
 }

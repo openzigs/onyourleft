@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **What the analysis agent's tools may read, and nothing else** — #1098,
+ * ADR 0046 D-7.
+ *
+ * Read-only by TYPE, the way `ErgSink` is a `Pick` of the trainer control
+ * (`packages/sensors`): the store is handed to the tools as an
+ * {@link AnalysisReads}, which has one method and it reads. No tool module
+ * can name a write, because the object it holds has none to name — and no
+ * tool module imports the store at all (`tools-reach.test.ts` walks them).
+ *
+ * The kinds are narrowed too: a tool can ask for a `ride-summary` or a `goal`
+ * and for nothing else, so the side-camera report — which carries the pose
+ * summary (ADR 0033 D-3; ADR 0040 D-2 item 1) — is not a kind any tool can
+ * spell.
+ */
+
+/** The synced kinds a tool may read (ADR 0046 D-7's table). */
+export type ToolReadKind = 'ride-summary' | 'goal';
+
+/** One synced item, as a tool is allowed to see it: its bytes, and nothing that names it. */
+export interface ReadItem {
+  readonly body: Uint8Array | null;
+}
+
+/** The one read the tools have. `SqlStore` satisfies it as it stands. */
+export interface AnalysisReads {
+  /** This athlete's live items of `kind`, newest first, at most `limit`. */
+  listLiveSyncItems(
+    athleteId: string,
+    kind: ToolReadKind,
+    limit: number,
+  ): Promise<readonly ReadItem[]>;
+}

@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
   hudReadings,
@@ -22,6 +23,8 @@ import {
 } from './fields';
 import { atStartLine } from '../simulation';
 import {
+  MAX_SIMULATED_GRADE_PERCENT,
+  SIMULATION_SETPOINT_INTERVAL_SECONDS,
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
@@ -862,6 +865,49 @@ describe('the trainer status line — #373', () => {
   it('does not claim the trainer is holding the gradient', () => {
     expect(trainerLine({ gradePercent: 7.5, writes: 3 })).not.toContain('olding');
   });
+
+  /**
+   * #1120. Without anchor positioning the upright layout gives up 7 rem of the
+   * trainer line's width (`theme.css` §"#1111 UPRIGHT, WITHOUT ANCHOR
+   * POSITIONING"), so at 360 px the line has 214 px of the actions panel's 326,
+   * and its 6–7 px margin over the leaning rider (360×752, sounds and a side
+   * camera, the CI runner's fonts) rests on the line wrapping to TWO lines: a
+   * third puts the actions panel about 19 px into the rider's box.
+   *
+   * ⚠️ **An estimate, not a measurement** — no Vitest suite here lays out text.
+   * The width per character is the one the CI runner measured for
+   * `Trainer: simulating 0.9% (1 sent)`, 262 px over 33 characters, and the
+   * wrap is greedy at word boundaries as a browser's is. The browser gate
+   * (`ride.browser.spec.ts`, `withoutAnchors`) is the measurement; this is what
+   * fails on save when somebody lengthens the sentence.
+   *
+   * The longest sentence is the steepest grade a trainer is sent, negative, and
+   * 99 999 writes — over 27 hours at one write a second.
+   */
+  it('wraps to at most two lines in the space the upright layout leaves it without anchors — #1120', () => {
+    const PIXELS_PER_CHARACTER = 262 / 33;
+    const LINE_PIXELS = 326 - 7 * 16;
+    const MOST_WRITES = 99_999;
+    expect(MOST_WRITES * SIMULATION_SETPOINT_INTERVAL_SECONDS).toBeGreaterThan(24 * 60 * 60);
+
+    const longest = trainerLine({
+      gradePercent: -MAX_SIMULATED_GRADE_PERCENT,
+      writes: MOST_WRITES,
+    });
+    const lines: string[] = [];
+    for (const word of longest.split(' ')) {
+      const last = lines.at(-1);
+      const joined = last === undefined ? word : `${last} ${word}`;
+      if (last !== undefined && joined.length * PIXELS_PER_CHARACTER <= LINE_PIXELS) {
+        lines[lines.length - 1] = joined;
+      } else {
+        lines.push(word);
+      }
+    }
+
+    expect(longest.length * PIXELS_PER_CHARACTER).toBeLessThan(2 * LINE_PIXELS);
+    expect(lines.length).toBeLessThanOrEqual(2);
+  });
 });
 
 /**
@@ -901,6 +947,8 @@ describe('which readings are drawn large (#423)', () => {
       'speed',
       'gradient',
       'remaining',
+      // #1111: secondary, beside the distance to go. @see ReadingTier
+      'movingTime',
       'gap-bot',
       'gap-ghost',
       'wind',
@@ -981,5 +1029,64 @@ describe('the room on the HUD — #783', () => {
     expect(reading?.detail).toBe('behind you, 3.2 W/kg');
     const text = `${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
     expect(text).not.toMatch(/\d\s*W(?!\/kg)\b/);
+  });
+});
+
+describe('the ride’s moving time — #1111', () => {
+  const movingTime = (input: HudInput) =>
+    hudReadings(input).find((reading) => reading.key === MOVING_TIME_KEY);
+
+  it('shows the recorder’s moving time as h:mm:ss from the first second', () => {
+    expect(movingTime({ ...baseInput(), movingSeconds: 65 })).toEqual({
+      key: MOVING_TIME_KEY,
+      label: 'Moving',
+      value: '0:01:05',
+      unit: '',
+      stale: false,
+    });
+    expect(movingTime({ ...baseInput(), movingSeconds: 3725 })?.value).toBe('1:02:05');
+  });
+
+  it('is the figure it is handed and nothing the simulation counted — no second clock', () => {
+    // The simulation has been riding for ten minutes; the recorder says 65 s
+    // moving (a pause, an auto-pause). The HUD quotes the recorder.
+    const base = baseInput();
+    const input: HudInput = {
+      ...base,
+      state: { ...base.state, elapsed: seconds(600) },
+      movingSeconds: 65,
+    };
+    expect(movingTime(input)?.value).toBe('0:01:05');
+  });
+
+  it('shows a dash, and no sensor lost, where nothing is being recorded', () => {
+    for (const movingSeconds of [undefined, Number.NaN]) {
+      expect(movingTime({ ...baseInput(), movingSeconds })).toEqual({
+        key: MOVING_TIME_KEY,
+        label: 'Moving',
+        value: NO_READING,
+        unit: '',
+        stale: false,
+      });
+    }
+  });
+
+  it('is set at the word size past ten hours, and at the number size up to then', () => {
+    // 9:59:59 is the widest figure the layout is measured at (`theme.css`
+    // never breaks a time), so it is a number; one second later it is a digit
+    // wider and takes #259's smaller size.
+    expect(movingTime({ ...baseInput(), movingSeconds: 35_999 })?.word).toBeUndefined();
+    const ten = movingTime({ ...baseInput(), movingSeconds: 36_000 });
+    expect(ten?.value).toBe('10:00:00');
+    expect(ten?.word).toBe(true);
+    expect(movingTime({ ...baseInput(), movingSeconds: 360_000 })?.word).toBe(true);
+    expect(movingTime({ ...baseInput(), movingSeconds: undefined })?.word).toBeUndefined();
+  });
+
+  it('is always present, beside the distance to go, in the secondary tier', () => {
+    const keys = hudReadings(baseInput()).map((reading) => reading.key);
+    expect(keys.indexOf(MOVING_TIME_KEY)).toBe(keys.indexOf('remaining') + 1);
+    const field = movingTime({ ...baseInput(), movingSeconds: 1 });
+    expect(field === undefined ? undefined : readingTier(field)).toBe('secondary');
   });
 });

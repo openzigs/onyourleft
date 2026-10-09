@@ -39,6 +39,8 @@
 /** Every code this instance can send, and the HTTP status each one is sent with. */
 export const ERROR_STATUS = {
   validation_failed: 400,
+  instance_key_unknown: 400,
+  sealed_unopened: 400,
   unauthenticated: 401,
   wrong_purpose: 401,
   wrong_instance: 401,
@@ -46,6 +48,7 @@ export const ERROR_STATUS = {
   challenge_used: 401,
   challenge_expired: 401,
   bad_signature: 401,
+  stale_request: 401,
   key_revoked: 401,
   code_unknown: 401,
   code_used: 401,
@@ -59,6 +62,7 @@ export const ERROR_STATUS = {
   not_found: 404,
   method_not_allowed: 405,
   key_in_use: 409,
+  replayed: 409,
   last_device: 409,
   moderation_not_applicable: 409,
   address_in_use: 409,
@@ -103,6 +107,12 @@ export interface ErrorBody {
  */
 const MESSAGES: Record<ErrorCode, string> = {
   validation_failed: 'The request is not valid. Each field named in `fields` says why.',
+  instance_key_unknown:
+    'This instance does not hold that encryption key. Fetch its keys again and seal to a current one.',
+  sealed_unopened: 'The sealed request did not open under this instance’s key and this session.',
+  stale_request:
+    'The request was signed too far from this instance’s clock. `instanceTime` says what it reads.',
+  replayed: 'This sealed request has already been received.',
   unauthenticated: 'This needs a signed-in device.',
   wrong_purpose: 'The signature is not a statement made for this request.',
   wrong_instance: 'The signature was made for another instance.',
@@ -150,14 +160,25 @@ export const JSON_TYPE = 'application/json; charset=utf-8';
 export interface ErrorOptions {
   readonly fields?: readonly FieldProblem[];
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * A fixed sentence of the caller's own module in place of the code's, for an
+   * `unavailable` that has to name what is missing — the instance's keys name
+   * `OYL_INSTANCE_SECRET_KEY` (#1189). ⚠️ Never a value from the request:
+   * "What a message may say" above binds it as it binds every message here.
+   */
+  readonly message?: string;
 }
 
 /** The body for a code. Exported so the specification and the tests read the same shape. */
-export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): ErrorBody {
+export function errorBody(
+  code: ErrorCode,
+  fields?: readonly FieldProblem[],
+  message?: string,
+): ErrorBody {
   return {
     error: {
       code,
-      message: MESSAGES[code],
+      message: message ?? MESSAGES[code],
       ...(code === 'validation_failed' ? { fields: fields ?? [] } : {}),
     },
   };
@@ -165,7 +186,7 @@ export function errorBody(code: ErrorCode, fields?: readonly FieldProblem[]): Er
 
 /** An error response in the one shape, with the status its code is sent with. */
 export function errorResponse(code: ErrorCode, options: ErrorOptions = {}): Response {
-  return new Response(JSON.stringify(errorBody(code, options.fields)), {
+  return new Response(JSON.stringify(errorBody(code, options.fields, options.message)), {
     status: ERROR_STATUS[code],
     headers: { 'content-type': JSON_TYPE, ...options.headers },
   });

@@ -375,7 +375,9 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
         'generator.\n',
     );
     for (const problem of result.problems) console.error(`  - ${problem}`);
-    console.error('\nSee CLAUDE.md §4k and scripts/check-capacitor-generated.mjs §Limits.');
+    console.error(
+      '\nSee docs/agents/generated-and-cost-gates.md §4k and scripts/check-capacitor-generated.mjs §Limits.',
+    );
     process.exit(1);
   }
 

@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_HOST, DEFAULT_PORT, readConfig, readHistorySettings } from './config.ts';
+import {
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  readAnalysisModelSettings,
+  readConfig,
+  readHistorySettings,
+} from './config.ts';
 
 const COMMIT = 'fedcba9876543210fedcba9876543210fedcba98';
 
@@ -26,6 +32,11 @@ describe('readConfig', () => {
           kind: 'off',
           code: 'not-set',
           reason: 'OYL_INSTANCE_EMBEDDING_URL is not set, so no embedding model is configured.',
+        },
+        analysis: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
         },
         name: null,
       },
@@ -233,5 +244,74 @@ describe('the history index’s settings (#835, ADR 0040 D-5, D-6)', () => {
     });
     expect(whole.ok).toBe(true);
     expect(whole.ok && whole.config.history.kind).toBe('off');
+  });
+});
+
+describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
+  it('is off, saying nothing is set, with no address', () => {
+    expect(readAnalysisModelSettings({})).toMatchObject({ kind: 'off', code: 'not-set' });
+    expect(readAnalysisModelSettings({ analysisModelUrl: ' ', analysisModel: 'm' }).kind).toBe(
+      'off',
+    );
+  });
+
+  it('takes a Compose service name, a loopback or a private literal, with its path', () => {
+    for (const [url, href] of [
+      ['http://ollama:11434/v1', 'http://ollama:11434/v1'],
+      ['http://ollama:11434/v1/', 'http://ollama:11434/v1'],
+      ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:11434/v1'],
+      ['http://localhost:11434/v1', 'http://localhost:11434/v1'],
+      ['http://192.168.1.20:11434/v1', 'http://192.168.1.20:11434/v1'],
+      ['http://[fd00::7]:11434/v1', 'http://[fd00::7]:11434/v1'],
+    ] as const) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm:7b' });
+      expect(settings.kind === 'on' && settings.baseUrl.href, url).toBe(href);
+      expect(settings.kind === 'on' && settings.model).toBe('m:7b');
+    }
+  });
+
+  it('refuses a public name and a .local name at reading, and says why', () => {
+    for (const url of [
+      'https://models.example.com/v1',
+      'http://ollama.local:11434/v1',
+      'http://8.8.8.8/v1',
+    ]) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' });
+      expect(settings, url).toMatchObject({ kind: 'off', code: 'not-local' });
+      expect(settings.kind === 'off' && settings.reason).toContain('ADR 0046 D-9');
+    }
+  });
+
+  it('has NO default model: an address with no model is off, and says so', () => {
+    const settings = readAnalysisModelSettings({ analysisModelUrl: 'http://ollama:11434/v1' });
+    expect(settings).toMatchObject({ kind: 'off', code: 'no-model' });
+    expect(settings.kind === 'off' && settings.reason).toContain('There is no default');
+  });
+
+  it('refuses a URL with credentials, a query or a fragment, a non-HTTP scheme, and a bad model name', () => {
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://u:p@ollama/v1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-base-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://ollama/v1?x=1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-base-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'ftp://ollama/v1', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-a-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'not a url', analysisModel: 'm' }),
+    ).toMatchObject({ code: 'not-a-url' });
+    expect(
+      readAnalysisModelSettings({ analysisModelUrl: 'http://ollama/v1', analysisModel: 'a b' }),
+    ).toMatchObject({ code: 'bad-model' });
+  });
+
+  it('never stops the instance starting: readConfig is ok with analysis refused', () => {
+    const result = readConfig({
+      commit: 'fedcba9876543210fedcba9876543210fedcba98',
+      analysisModelUrl: 'https://models.example.com/v1',
+      analysisModel: 'm',
+    });
+    expect(result.ok && result.config.analysis.kind).toBe('off');
   });
 });

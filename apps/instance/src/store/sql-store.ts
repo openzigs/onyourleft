@@ -318,6 +318,59 @@ export class InviteRefusedError extends Error {
   }
 }
 
+/** The hosted model key as the store holds it: ciphertext, never the key (#1097). */
+export interface SealedHostedModelKey {
+  /** The hosted service's base URL, `https:` only (`analysis/hosted-key.ts` checks it). */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly setAt: number;
+}
+
+/** The held key, and the athlete it is held for: the operator (ADR 0046 Q9). */
+export interface HeldHostedModelKey extends SealedHostedModelKey {
+  readonly athleteId: string;
+}
+
+/** What {@link SqlStore.putHostedModelKey} did. */
+export type HostedKeyPut =
+  | { readonly outcome: 'stored' }
+  /** There is no such athlete on this instance: nothing was written. */
+  | { readonly outcome: 'no-athlete' };
+
+/**
+ * One of the instance's own keys as the store holds it (#1189, ADR 0047 D-5):
+ * the private half WRAPPED, never in clear (`keys/wrap.ts`).
+ */
+export interface InstanceKeyRow {
+  /** 16 lowercase hex: the first 8 bytes of SHA-256 over the public key. */
+  readonly keyId: string;
+  readonly role: 'identity' | 'encryption';
+  /** The raw 32-byte public key. */
+  readonly publicKey: Uint8Array;
+  readonly iv: Uint8Array;
+  readonly wrapped: Uint8Array;
+  /** An encryption key's serial; `null` for the identity key. */
+  readonly serial: number | null;
+  /** Unix seconds, by the box's clock. */
+  readonly createdAt: number;
+  /** When an encryption key's successor was made, or `null`. */
+  readonly supersededAt: number | null;
+}
+
+/** What the instance's identity key signed (#1189). Public. */
+export interface InstanceKeyStatementRow {
+  readonly keyId: string;
+  readonly kind: 'key' | 'identity-rotation';
+  readonly issuedAt: number;
+  readonly notAfter: number | null;
+  /** The signed RFC 8785 text. */
+  readonly body: string;
+  /** Lowercase hex. */
+  readonly signature: string;
+}
+
 /** One athlete blocking another (#83). */
 export interface Block {
   /** The blocker. */
@@ -548,8 +601,20 @@ export interface SqlStore {
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
   /** Authentication: the key is what names the athlete, so this is not athlete-scoped. */
   findDeviceKey(publicKey: string): Promise<DeviceKey | undefined>;
-  /** Record that one of this athlete's keys signed in. */
+  /** Record that one of this athlete's keys signed in, or signed a sealed request (#1191). */
   touchDeviceKey(athleteId: string, publicKey: string, at: number): Promise<void>;
+  /**
+   * Record a sealed request's `enc` (#1191, ADR 0047 D-9): `recorded` the
+   * first time it is seen, `replayed` every time after, for as long as it is
+   * kept. The check and the record are ONE statement — an insert that does
+   * nothing on the primary key — so two identical requests at once cannot
+   * both be `recorded`. Rows seen before `forgetBefore` are deleted first.
+   */
+  recordSealedRequest(
+    encSha256: string,
+    at: number,
+    forgetBefore: number,
+  ): Promise<'recorded' | 'replayed'>;
   /**
    * Revoke one of this athlete's keys, and every session and unspent link
    * code it holds. `not_found` when the athlete holds no such key.
@@ -569,6 +634,71 @@ export interface SqlStore {
   ): Promise<RevokeOutcome>;
   /** A new athlete with their first key and recovery codes, in one transaction (#772). */
   registerAthlete(registration: Registration): Promise<void>;
+
+  /**
+   * Hold the instance's ONE hosted model key (#1097), sealed, for `athleteId`
+   * — the operator's athlete (ADR 0046 Q9), which the caller looks up. In ONE
+   * statement that writes only if that athlete exists, so it is `no-athlete`
+   * and writes nothing otherwise. Replaces a key already held, scrubbing the
+   * old ciphertext ({@link SqlStore.clearHostedModelKey}).
+   */
+  putHostedModelKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** The held key, sealed, or `undefined`. The instance's one, so no athlete is asked for. */
+  getHostedModelKey(): Promise<HeldHostedModelKey | undefined>;
+  /**
+   * Clear the held key: `true` if there was one. With `secure_delete` on, and
+   * the write-ahead log checkpointed and truncated after, so the ciphertext
+   * is not left in a free page or the log (`docs/operating-an-instance.md`
+   * §"A hosted model key" says what can still remain).
+   */
+  clearHostedModelKey(): Promise<boolean>;
+
+  /**
+   * The instance's own keys (#1189, ADR 0047 D-5), wrapped: every row, the
+   * identity key and every encryption key still held. Instance-wide, so no
+   * athlete is asked for.
+   */
+  listInstanceKeys(): Promise<readonly InstanceKeyRow[]>;
+  /** Everything the identity key has signed that is still kept. */
+  listInstanceKeyStatements(): Promise<readonly InstanceKeyStatementRow[]>;
+  /** Hold a new key. Refused if its id is held already. */
+  putInstanceKey(key: InstanceKeyRow): Promise<void>;
+  /**
+   * Hold a new ENCRYPTION key and, in the same transaction, mark every
+   * encryption key without a successor as superseded at `key.createdAt`.
+   */
+  addEncryptionKey(key: InstanceKeyRow): Promise<void>;
+  /** Keep a signed statement, and drop every key statement whose `notAfter` is at or before `expiredBy`. */
+  putInstanceKeyStatement(statement: InstanceKeyStatementRow, expiredBy: number): Promise<void>;
+  /**
+   * Delete keys and what was signed for them, SCRUBBED: with `secure_delete`
+   * on and the log truncated after, so a backup taken afterwards holds none of
+   * their wrapped private halves.
+   */
+  deleteInstanceKeys(keyIds: readonly string[]): Promise<void>;
+  /**
+   * Replace the identity key, scrubbed, in one transaction: the old identity
+   * key and every statement it signed gone, the new one held, and its
+   * endorsement kept when there is one.
+   */
+  replaceIdentityKey(key: InstanceKeyRow, endorsement?: InstanceKeyStatementRow): Promise<void>;
+  /** Every key and statement gone, scrubbed (`operator instance-key reset`). */
+  clearInstanceKeys(): Promise<void>;
+  /**
+   * Hold a new IDENTITY key unless one is held already (#1203): `true` when
+   * this one was kept, `false` when another pass got there first — one
+   * atomic insert, so two processes racing their first pass keep one.
+   */
+  claimIdentityKey(key: InstanceKeyRow): Promise<boolean>;
+  /**
+   * Take the lease on changing the instance's keys for `holder` until
+   * `expiresAt` (#1203, migration 0016): `true` when it is now `holder`'s,
+   * `false` when someone else holds it and it has not lapsed at `now`. One
+   * atomic statement, so two processes cannot both take it.
+   */
+  takeInstanceKeyLease(holder: string, now: number, expiresAt: number): Promise<boolean>;
+  /** Give the lease back, if `holder` still holds it. */
+  releaseInstanceKeyLease(holder: string): Promise<void>;
 
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
@@ -668,6 +798,12 @@ export interface SqlStore {
   /** #776: store an item, or answer `unchanged` when the athlete already holds these exact bytes. */
   putSyncItem(item: SyncItemWrite): Promise<'stored' | 'unchanged'>;
   getSyncItem(athleteId: string, kind: SyncKind, key: string): Promise<SyncItem | undefined>;
+  /**
+   * #1098: this athlete's LIVE items of one kind, newest first — what the
+   * analysis agent's read-only tools read (`analysis/tools/`). Tombstones are
+   * never returned; at most `limit` rows.
+   */
+  listLiveSyncItems(athleteId: string, kind: SyncKind, limit: number): Promise<readonly SyncItem[]>;
   /**
    * Replace a live item with its tombstone — an activity's record goes with
    * it. `false` when the athlete holds no such live item.
@@ -837,6 +973,23 @@ export interface SqlStore {
   logRefusedAction(action: ModerationAction): Promise<number>;
   /** The moderation log, oldest first. */
   listModerationLog(): Promise<readonly ModerationLogEntry[]>;
+  /**
+   * One page of the moderation log, NEWEST first (#961): at most `limit`
+   * entries whose id is below `beforeId`, or the newest when it is `undefined`.
+   */
+  listModerationLogPage(
+    beforeId: number | undefined,
+    limit: number,
+  ): Promise<readonly ModerationLogEntry[]>;
+  /**
+   * One page of the suspended accounts, most recently suspended first (#961):
+   * at most `limit` of them after the (suspendedAt, id) position `after`, in
+   * that order, or the first when it is `undefined`.
+   */
+  listSuspendedAthletes(
+    after: { readonly suspendedAt: number; readonly id: string } | undefined,
+    limit: number,
+  ): Promise<readonly AthleteRecord[]>;
 
   /** Record that the athlete confirmed they are 18 or over (#775). The first date is kept. */
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
@@ -1238,12 +1391,60 @@ export function vectorFrom(bytes: Uint8Array): Float32Array {
 }
 
 /** The store over an already-migrated database. */
+function instanceKeyValues(key: InstanceKeyRow) {
+  return {
+    key_id: key.keyId,
+    role: key.role,
+    public_key: key.publicKey,
+    iv: key.iv,
+    wrapped: key.wrapped,
+    serial: key.serial,
+    created_at: key.createdAt,
+    superseded_at: key.supersededAt,
+  };
+}
+
+function instanceKeyStatementValues(statement: InstanceKeyStatementRow) {
+  return {
+    key_id: statement.keyId,
+    kind: statement.kind,
+    issued_at: statement.issuedAt,
+    not_after: statement.notAfter,
+    body: statement.body,
+    signature: statement.signature,
+  };
+}
+
 export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
   let queue: Promise<unknown> = Promise.resolve();
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const next = queue.then(operation, operation);
     queue = next.catch(() => undefined);
     return next;
+  }
+
+  /**
+   * `operation` with SQLite's `secure_delete` on, so a deleted or replaced row
+   * is overwritten with zeros in its page rather than left in a free one; then
+   * the write-ahead log checkpointed and TRUNCATED, so the old page images it
+   * held are gone too (#1097: a cleared hosted key's ciphertext). A checkpoint
+   * another connection's open read holds back is not an error, and its result
+   * row is not read: the old page images stay in the log until SQLite next
+   * writes it over from its start (its own checkpoints are PASSIVE and never
+   * truncate), or the last connection closes (`docs/operating-an-instance.md`).
+   * With `busy_timeout` at 5 s that wait can hold this store's queue for up to
+   * about 5 s — an erasure during an `operator backup`, say — which is accepted.
+   * Inside {@link exclusive}, so no other statement on this connection runs
+   * with the setting on.
+   */
+  async function scrubbing<T>(operation: () => Promise<T>): Promise<T> {
+    await sql`pragma secure_delete = on`.execute(db);
+    try {
+      return await operation();
+    } finally {
+      await sql`pragma secure_delete = off`.execute(db);
+      await sql`pragma wal_checkpoint(TRUNCATE)`.execute(db);
+    }
   }
 
   return {
@@ -1342,6 +1543,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('athlete_id', '=', athleteId)
           .where('public_key', '=', publicKey)
           .execute();
+      }),
+
+    recordSealedRequest: (encSha256, at, forgetBefore) =>
+      exclusive(async () => {
+        await db.deleteFrom('sealed_replay').where('seen_at', '<', forgetBefore).execute();
+        const inserted = await db
+          .insertInto('sealed_replay')
+          .values({ enc_sha256: encSha256, seen_at: at })
+          .onConflict((conflict) => conflict.column('enc_sha256').doNothing())
+          .returning('enc_sha256')
+          .executeTakeFirst();
+        return inserted === undefined ? 'replayed' : 'recorded';
       }),
 
     revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256) =>
@@ -2047,6 +2260,21 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return row === undefined ? undefined : syncItemFrom(row);
       }),
 
+    listLiveSyncItems: (athleteId, kind, limit) =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('sync_item')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .where('kind', '=', kind)
+          .where('deleted_at', 'is', null)
+          .orderBy('received_at', 'desc')
+          .orderBy('seq', 'desc')
+          .limit(Math.max(0, Math.floor(limit)))
+          .execute();
+        return rows.map(syncItemFrom);
+      }),
+
     deleteSyncItem: (athleteId, kind, key, now) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
@@ -2621,6 +2849,29 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ),
       ),
 
+    listModerationLogPage: (beforeId, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('moderation_log').selectAll();
+        if (beforeId !== undefined) query = query.where('id', '<', beforeId);
+        return (await query.orderBy('id', 'desc').limit(limit).execute()).map(moderationLogFrom);
+      }),
+
+    listSuspendedAthletes: (after, limit) =>
+      exclusive(async () => {
+        let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
+        if (after !== undefined) {
+          query = query.where((row) =>
+            row.or([
+              row('suspended_at', '<', after.suspendedAt),
+              row.and([row('suspended_at', '=', after.suspendedAt), row('id', '<', after.id)]),
+            ]),
+          );
+        }
+        return (
+          await query.orderBy('suspended_at', 'desc').orderBy('id', 'desc').limit(limit).execute()
+        ).map(athleteFrom);
+      }),
+
     confirmAdult: (athleteId, at) =>
       exclusive(async () => {
         const updated = await db
@@ -2847,25 +3098,214 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     eraseAthlete: (athleteId) =>
       exclusive(() =>
-        db.transaction().execute(async (trx) => {
-          const held = await trx
-            .selectFrom('activity_record')
-            .select('content_sha256')
-            .where('athlete_id', '=', athleteId)
-            .execute();
-          for (const table of await athleteTablesInErasureOrder(trx)) {
-            // Every table here has `athlete_id`: the derivation refuses one that does not.
-            await trx
-              .deleteFrom(table as 'session')
+        // Scrubbed (#1097): an erased athlete's rows — a hosted model key's
+        // ciphertext among them — are not left in a free page or the log.
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            const held = await trx
+              .selectFrom('activity_record')
+              .select('content_sha256')
               .where('athlete_id', '=', athleteId)
               .execute();
-          }
-          // Another athlete's block OF this one names nobody once they are gone (#83).
-          await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
-          await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
-          return held.map((row) => row.content_sha256);
+            for (const table of await athleteTablesInErasureOrder(trx)) {
+              // Every table here has `athlete_id`: the derivation refuses one that does not.
+              await trx
+                .deleteFrom(table as 'session')
+                .where('athlete_id', '=', athleteId)
+                .execute();
+            }
+            // Another athlete's block OF this one names nobody once they are gone (#83).
+            await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
+            await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
+            return held.map((row) => row.content_sha256);
+          }),
+        ),
+      ),
+
+    putHostedModelKey: (athleteId, key) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          // ONE statement: the athlete's existence and the write cannot be
+          // split by another connection erasing them in between (#1097).
+          const written = await sql<{ athlete_id: string }>`
+            insert into hosted_model_key (slot, athlete_id, url, model, iv, ciphertext, set_at)
+            select 1, id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+            from athlete where id = ${athleteId}
+            on conflict (slot) do update set
+              athlete_id = excluded.athlete_id, url = excluded.url, model = excluded.model,
+              iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+            returning athlete_id`.execute(db);
+          return written.rows.length > 0
+            ? ({ outcome: 'stored' } as const)
+            : ({ outcome: 'no-athlete' } as const);
         }),
       ),
+
+    getHostedModelKey: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('hosted_model_key').selectAll().executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+            };
+      }),
+
+    clearHostedModelKey: () =>
+      exclusive(() =>
+        scrubbing(async () => {
+          const result = await db.deleteFrom('hosted_model_key').executeTakeFirst();
+          return Number(result.numDeletedRows) > 0;
+        }),
+      ),
+
+    listInstanceKeys: () =>
+      exclusive(async () => {
+        const rows = await db.selectFrom('instance_key').selectAll().orderBy('key_id').execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          role: row.role,
+          publicKey: row.public_key,
+          iv: row.iv,
+          wrapped: row.wrapped,
+          serial: row.serial,
+          createdAt: row.created_at,
+          supersededAt: row.superseded_at,
+        }));
+      }),
+
+    listInstanceKeyStatements: () =>
+      exclusive(async () => {
+        const rows = await db
+          .selectFrom('instance_key_statement')
+          .selectAll()
+          .orderBy('issued_at')
+          .orderBy('key_id')
+          .execute();
+        return rows.map((row) => ({
+          keyId: row.key_id,
+          kind: row.kind,
+          issuedAt: row.issued_at,
+          notAfter: row.not_after,
+          body: row.body,
+          signature: row.signature,
+        }));
+      }),
+
+    putInstanceKey: (key) =>
+      exclusive(async () => {
+        await db.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+      }),
+
+    addEncryptionKey: (key) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .updateTable('instance_key')
+            .set({ superseded_at: key.createdAt })
+            .where('role', '=', 'encryption')
+            .where('superseded_at', 'is', null)
+            .execute();
+          await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+        }),
+      ),
+
+    putInstanceKeyStatement: (statement, expiredBy) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('instance_key_statement')
+            .values(instanceKeyStatementValues(statement))
+            .execute();
+          await trx
+            .deleteFrom('instance_key_statement')
+            .where('kind', '=', 'key')
+            .where('not_after', '<=', expiredBy)
+            .execute();
+        }),
+      ),
+
+    deleteInstanceKeys: (keyIds) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          if (keyIds.length === 0) return;
+          await db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').where('key_id', 'in', keyIds).execute();
+            await trx.deleteFrom('instance_key').where('key_id', 'in', keyIds).execute();
+          });
+        }),
+      ),
+
+    replaceIdentityKey: (key, endorsement) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            // Everything the old identity key signed goes with it: a key
+            // statement it signed would not verify under the new key.
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').where('role', '=', 'identity').execute();
+            await trx.insertInto('instance_key').values(instanceKeyValues(key)).execute();
+            if (endorsement !== undefined) {
+              await trx
+                .insertInto('instance_key_statement')
+                .values(instanceKeyStatementValues(endorsement))
+                .execute();
+            }
+          }),
+        ),
+      ),
+
+    clearInstanceKeys: () =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            await trx.deleteFrom('instance_key_statement').execute();
+            await trx.deleteFrom('instance_key').execute();
+          }),
+        ),
+      ),
+
+    claimIdentityKey: (key) =>
+      exclusive(async () => {
+        // The partial unique index `instance_key_one_identity` (0015) is the
+        // guard: a second identity row is a conflict, and a conflict keeps
+        // nothing rather than throwing.
+        const result = await db
+          .insertInto('instance_key')
+          .values(instanceKeyValues({ ...key, role: 'identity' }))
+          .onConflict((conflict) => conflict.doNothing())
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    takeInstanceKeyLease: (holder, now, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .insertInto('instance_key_lease')
+          .values({ name: 'keys', holder, expires_at: expiresAt })
+          .onConflict((conflict) =>
+            conflict
+              .column('name')
+              .doUpdateSet({ holder, expires_at: expiresAt })
+              .where('instance_key_lease.expires_at', '<=', now),
+          )
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    releaseInstanceKeyLease: (holder) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('instance_key_lease')
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .execute();
+      }),
 
     close: () => exclusive(() => db.destroy()),
   };

@@ -10,7 +10,7 @@
  * ## Why this is not "encode it twice and compare"
  *
  * Because that compares a function with itself and passes for ever —
- * `CLAUDE.md` §5's *"the test asserted against the object it just
+ * `docs/agents/quality-gate.md` §5's *"the test asserted against the object it just
  * constructed"*, one level up. What makes byte-identity true today is
  * **structural**: ADR 0008 D-1 chose Capacitor for web UI reuse, and
  * `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so the
@@ -176,7 +176,7 @@ describe('one input stream, one set of FIT bytes', () => {
 
 describe('the mobile shell ships this build, which is why the bytes match', () => {
   it('points webDir at apps/web’s build output', () => {
-    // ⚠️ The load-bearing fact. `apps/mobile/README.md` §4 and CLAUDE.md §4h
+    // ⚠️ The load-bearing fact. `apps/mobile/README.md` §4 and docs/agents/game.md §4h
     // both rest on it: an encoder under `apps/mobile/src` would typecheck, test
     // green, and never be copied into the APK.
     expect(mobileFile('capacitor.config.ts')).toMatch(/webDir:\s*['"]\.\.\/web\/dist['"]/);

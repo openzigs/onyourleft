@@ -196,7 +196,7 @@ describe('the Reset trap is closed by the type', () => {
     // ⚠️ The guarantee is that `ErgSink` is `Pick<TrainerControl,
     // 'setTargetPower'>`, so these are compile errors rather than a comment
     // asking nicely. Widen the type and TS2578 fires on the unused directives,
-    // which is CLAUDE.md §5's stated mutation for a compile-time guard.
+    // which is docs/agents/quality-gate.md §5's stated mutation for a compile-time guard.
     const machine = scriptedSink();
     const sink: ErgSink = machine.sink;
 

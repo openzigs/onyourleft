@@ -79,6 +79,7 @@ import {
   resolvedInsets,
   type Insets,
 } from './insets';
+import { NIGHTLY } from './nightly';
 
 interface Viewport {
   readonly name: string;
@@ -297,11 +298,34 @@ function hasSideBySideRows(seen: SectionsLayout): boolean {
   return seen.columns >= 2 && rows.filter((row) => row.length >= 2).length >= 2;
 }
 
+/**
+ * That the page holds what a "one column" or "no faults" reading is about — #1132's
+ * review (N1). Fewer than two columns and no row faults are both true of a `main`
+ * with nothing in it, which is what a page still showing its `Suspense` fallback
+ * is: three cases passed over exactly that. Every `sections` route lays out two or
+ * more sections (Segments, the fewest, has 2 in landscape), except Devices, which
+ * has none and is read by its garage, so it must have cards.
+ */
+function expectSomethingToCount(seen: SectionsLayout, label: string): void {
+  if (seen.garageRow === null) {
+    expect(seen.counted, `${label}: no sections to count`).toBeGreaterThanOrEqual(2);
+  } else {
+    expect(seen.garageRow, `${label}: no garage cards to count`).toBeGreaterThanOrEqual(1);
+  }
+}
+
 function hashOf(route: RouteDefinition): string {
   return `#${route.path}`;
 }
 
-test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
+/*
+ * The two #1014 describes below run NIGHTLY since #1137, on the owner's ruling
+ * of 2026-10-05 (`nightly.ts`). What stays required on these screens: #1014's
+ * detail panes and #1026's row balance (below them), the first control above
+ * the fold both ways up on the tablet (`controls-first`), and reflow at 320 px
+ * and on a phone (`reflow`).
+ */
+test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: NIGHTLY }, () => {
   test('the walk finds the screens #1014 names', () => {
     expect(SECTIONS.map((route) => route.id).sort()).toEqual([
       'about',
@@ -379,6 +403,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
     for (const route of SECTIONS) {
       const seen = await layoutAt(page, hashOf(route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
       expect(seen.columns, `${route.id}: columns on a phone`).toBeLessThanOrEqual(1);
     }
   });
@@ -388,6 +413,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
     for (const route of SECTIONS) {
       const seen = await layoutAt(page, hashOf(route), 'main');
       expect(seen.h1, `${route.id} did not render its own page`).toBe(route.title);
+      expectSomethingToCount(seen, route.id);
       expect(
         seen.viewportWidth - seen.mainRight,
         `${route.id}: main reached the edge without the layout`,
@@ -401,7 +427,7 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', () => {
   });
 });
 
-test.describe('#1014 — the sections are read across, in rows', () => {
+test.describe('#1014 — the sections are read across, in rows', { tag: NIGHTLY }, () => {
   for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT]) {
     test(`row-major at ${viewport.name}, and fails under the first cut's columns`, async ({
       page: grid,
@@ -416,6 +442,8 @@ test.describe('#1014 — the sections are read across, in rows', () => {
         const before = await layoutAt(columns, hashOf(route), 'main');
         expect(now.h1, `${route.id} did not render its own page`).toBe(route.title);
         expect(before.h1, `${route.id} did not render its own page (control)`).toBe(route.title);
+        expectSomethingToCount(now, route.id);
+        expectSomethingToCount(before, `${route.id} (control)`);
         const beforeFaults = rowMajorFaults(before);
         report.push(
           `  ${route.id}: page ${String(Math.round(before.pageHeight))} → ` +

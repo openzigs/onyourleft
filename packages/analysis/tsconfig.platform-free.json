@@ -1,0 +1,19 @@
+{
+  // Every module the package ships, with no platform surface at all: `lib` is
+  // ES2024 and `types` is empty, exactly as packages/domain does it (ADR 0046
+  // D-5, docs/agents/lint-boundaries.md §4d). The same runner, templates,
+  // screen and mask run on a rider's device and on their instance, so a
+  // `document`, a `process`, a `fetch` or a `node:fs` import here is a compile
+  // error. `@onyourleft/store` cannot be imported either: it needs the DOM lib.
+  //
+  // Tests are left to tsconfig.json: they run under
+  // Node and some of them read files. `vitest.config.ts` imports nothing, for
+  // the reason packages/domain/vitest.config.ts records at length.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

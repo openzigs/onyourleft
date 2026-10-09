@@ -77,9 +77,9 @@ import {
   type HostedRequest,
 } from './hosted-port';
 import { boundedText } from './http-body';
-import { maskForHosted, type MaskingGuard } from '../ride-analysis/hosted-mask';
+import { maskForHosted, type MaskingGuard } from '@onyourleft/analysis';
 import { isTextOnlyStep } from '../ride-analysis/own-computer-step';
-import { isSealedStep } from '../ride-analysis/sealed-step';
+import { isSealedStep } from '@onyourleft/analysis';
 
 /** The most a model may write back, in tokens — asked for, not trusted. */
 export const MAXIMUM_HOSTED_ANSWER_TOKENS = 64;

@@ -10,6 +10,7 @@
  * reads every variable by name, so `scripts/check-env-example.sh` sees each.
  */
 
+import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
 
 export interface RawServerConfig {
@@ -21,6 +22,7 @@ export interface RawServerConfig {
   readonly metrics?: string | undefined;
   readonly pingIntervalMs?: string | undefined;
   readonly metricsToken?: string | undefined;
+  readonly secretKey?: string | undefined;
 }
 
 export interface ServerConfig {
@@ -42,6 +44,11 @@ export interface ServerConfig {
   readonly pingIntervalMs: number;
   /** The bearer token `/metrics` requires. Set whenever `metrics` is on. */
   readonly metricsToken: string | undefined;
+  /**
+   * `OYL_INSTANCE_SECRET_KEY`'s 32 bytes: what the hosted model key is sealed
+   * under (#1097, `analysis/hosted-key.ts`), or `undefined` when it is unset.
+   */
+  readonly secretKey: Uint8Array | undefined;
 }
 
 export type ServerConfigResult =
@@ -135,6 +142,11 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     );
   }
 
+  // The key-encryption key for a hosted model key (#1097). Unset is not a
+  // problem — no key can then be read, and the instance says so if one is held.
+  const secret = readSecretKey(raw.secretKey);
+  if (secret.kind === 'malformed') problems.push(SECRET_KEY_MALFORMED);
+
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -148,6 +160,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       maxBufferedBytes: DEFAULT_MAXIMUM_BUFFERED_BYTES,
       pingIntervalMs,
       metricsToken,
+      secretKey: secret.kind === 'ok' ? secret.bytes : undefined,
     },
   };
 }

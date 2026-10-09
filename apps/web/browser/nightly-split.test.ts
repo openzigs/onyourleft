@@ -22,7 +22,13 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import config from '../playwright.config';
+import config, {
+  CHROMIUM_PART_MS,
+  CHROMIUM_WORKERS,
+  GAME_PART_MS,
+  GATE_BUDGET_MS,
+  GATE_STEP_MS,
+} from '../playwright.config';
 
 import { NIGHTLY, NIGHTLY_CHECKS } from './nightly';
 
@@ -133,10 +139,12 @@ describe('the browser gate is split into a required run and a nightly one — #8
     }
   });
 
-  it('reads no DEFAULT-world load from a nightly describe, so the world every rider gets stays required — #878’s review', () => {
-    // A nightly describe is about the realistic world (nightly.ts). One that
-    // reads the plain load (`game.html` with no query) is asserting something
-    // about the DEFAULT world, which then reaches main unchecked: #878's first
+  it('reads no DEFAULT-world game load from a nightly describe, so the game every rider gets stays required — #878’s review', () => {
+    // A nightly describe in `game.browser.spec.ts` is about the realistic
+    // world (nightly.ts; the default-world entries there, #1076's and
+    // #1137's, are other specs and owner's exceptions). One that reads the
+    // plain load (`game.html` with no query) is asserting something about the
+    // DEFAULT world's game, which then reaches main unchecked: #878's first
     // cut did exactly that with #501's shader-compile case and D-7's "the
     // default world fetches none of the realistic set". Those halves belong in
     // a required describe, where the plain load is already paid for.
@@ -163,6 +171,47 @@ describe('the browser gate is split into a required run and a nightly one — #8
     );
     expect(projectsOf(scripts['test:browser:nightly'])).toEqual(['nightly']);
   });
+
+  it('runs the chromium project on its workers and stop, then the game project alone on its stop, and fails if either fails — #1128', () => {
+    const script = String(
+      (JSON.parse(read(BROWSER, '..', 'package.json')) as { scripts: Record<string, string> })
+        .scripts['test:browser'],
+    );
+    const runs = [...script.matchAll(/playwright test ([^;&]+)/g)].map((match) =>
+      String(match[1]).trim(),
+    );
+    expect(runs).toEqual([
+      `--project chromium --workers ${String(CHROMIUM_WORKERS)} --global-timeout ${String(CHROMIUM_PART_MS)}`,
+      `--project game --global-timeout ${String(GAME_PART_MS)} --output browser/dist/test-results/game`,
+    ]);
+    // The two stops sit inside the config's own backstop (#1128's review: no
+    // longer equal to it, because 840 s did not fit inside the job).
+    expect(CHROMIUM_PART_MS + GAME_PART_MS).toBeLessThanOrEqual(GATE_BUDGET_MS);
+    // A failed build ends the step before either run starts.
+    expect(script).toMatch(
+      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test --project chromium /,
+    );
+    // The game run is not skipped when the chromium run fails (`;`, not
+    // `&&`), and the step fails when EITHER did.
+    expect(script).toContain('; chromium=$?; playwright test --project game');
+    expect(script).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
+  });
+
+  it('bounds the required gate’s step from outside, inside what the job has left — #1128’s review', () => {
+    const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
+    const step = /^ +- name: Browser gate\n((?: {8}.+\n)+)/m.exec(rules)?.[1] ?? '';
+    const seconds = GATE_STEP_MS / 1000;
+    expect(step).toContain(
+      `run: timeout --verbose --kill-after=10s ${String(seconds)}s pnpm run test:browser\n`,
+    );
+    const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
+    // The step's own stop is behind the wrapper and its kill, never in front.
+    expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
+    // ...and the step's stop ends inside the job's, from the latest start the
+    // 7763 has shown (707 s) with the coverage steps (4 s) after it.
+    const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
+    expect(707 + minutes * 60 + 4).toBeLessThan(job * 60);
+  });
 });
 
 describe('the nightly workflow runs what left the required job, and cannot pass for it — #866', () => {
@@ -180,7 +229,10 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   it('leaves the required job running the gate and the covered suite', () => {
     const commands = runCommands(rules);
     expect(commands).toEqual(
-      expect.arrayContaining(['pnpm run test:coverage', 'pnpm run test:browser']),
+      expect.arrayContaining([
+        'pnpm run test:coverage',
+        'timeout --verbose --kill-after=10s 765s pnpm run test:browser',
+      ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');
   });

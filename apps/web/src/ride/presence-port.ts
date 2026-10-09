@@ -11,7 +11,7 @@
  *
  * ## Why this is a `*-port.ts`
  *
- * CLAUDE.md §4j: the suffix is what puts a seam under `check:wiring`'s
+ * docs/agents/wiring-gate.md §4j: the suffix is what puts a seam under `check:wiring`'s
  * `WIRE003`. The ride controller's recorder is what calls
  * {@link RiderPresencePort.riderPresence}; delete that and the method on this
  * interface is called by no production declaration, which is a red build

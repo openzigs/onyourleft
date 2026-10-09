@@ -22,7 +22,7 @@
  * ## Why it is here rather than under `scripts/`
  *
  * `scripts/` is the bare-clone set: bash and coreutils, no install, no network,
- * no device (CLAUDE.md §2 and §4a). This needs `adb`, a physical phone with
+ * no device (docs/agents/layout.md §2 and docs/agents/commands.md §4a). This needs `adb`, a physical phone with
  * developer options on, and a debuggable build — it can never be a repository
  * check, and putting it there would put something in `scripts/` that nobody can
  * run and `check:repo` does not call. It sits beside the Android project whose

@@ -45,7 +45,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
-import { BYSTANDER_SENTENCE, CONSENT_REFUSAL_TEXT } from '../camera/consent';
+import { BYSTANDER_SENTENCE, CONSENT_REFUSAL_TEXT, SCREENSHOT_SENTENCE } from '../camera/consent';
 import { FRAMING_VERDICT_TEXT } from '../camera/framing';
 import { FramingPreview } from '../camera/FramingPreview';
 import type { CameraController } from '../camera/session';
@@ -71,12 +71,19 @@ const TITLE_ID = 'oyl-side-camera-title';
  * Where this phone's pictures go, said before its camera is ever on — #530,
  * ADR 0033 D-3 and D-6. The consent screen changes in the pull request that
  * sends the first picture, which is the only order in which it stays true.
+ *
+ * ⚠️ **Since #1061 the tablet SHOWS the picture**, and a reviewer who
+ * remembers *"throws it away at once"* is reading the old file:
+ * [ADR 0044](../../../../docs/adr/0044-side-camera-live-view-and-snapshot.md)
+ * D-1 supersedes ADR 0033 D-6 on this path. The words are #1060's draft (PR
+ * #1121) without its snapshot clause, which lands with #1063.
  */
 export const SIDE_PICTURES_GO_SENTENCE =
   'While it is filming, it sends about five small pictures a second to the tablet you paired it ' +
   'with — directly, over your own Wi-Fi, encrypted — and nowhere else. The tablet looks at each ' +
-  'one and throws it away at once. It keeps where you were in the picture, as numbers, and never ' +
-  'the picture.';
+  'one and, while you have its view on, shows it on its screen with an outline of where it found ' +
+  'you; anyone who can see that screen can see it. Then it throws the picture away. It keeps ' +
+  'where you were in the picture, as numbers, and never the picture.';
 
 /**
  * The sentences on the phone's page that are never tucked — #666, ADR 0029
@@ -91,6 +98,9 @@ export const SIDE_CAMERA_KEPT_VISIBLE: readonly string[] = [
   'While you set it up, it shows you its own picture so you can line the bike up.',
   'That picture is not kept.',
   'This phone keeps nothing about you once the session ends',
+  // #1061, ADR 0044 D-12: the phone's own framing preview is a camera picture
+  // on a screen, so what a screenshot of it meets is never tucked.
+  SCREENSHOT_SENTENCE,
 ];
 
 /**
@@ -345,6 +355,7 @@ function SessionScreen({
                 This phone keeps nothing about you once the session ends — no picture, no outline,
                 no record of the session.
               </li>
+              <li>{SCREENSHOT_SENTENCE}</li>
             </ul>
             <StatusMessage tone="warning" label="Anyone else in the room">
               {BYSTANDER_SENTENCE}

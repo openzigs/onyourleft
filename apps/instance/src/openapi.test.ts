@@ -14,7 +14,12 @@ import {
   type TestDevice,
 } from './auth/identity-testing.ts';
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
+import { createInstanceKeys } from './keys/instance-keys.ts';
+import { secretBytes } from './keys/instance-keys-testing.ts';
+import { openSqlStore } from './store/open-sql-store.ts';
+import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
+import { sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
@@ -254,6 +259,14 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
   },
   hideDisplayName: (world) => moderatorAction(world, 'hide-display-name'),
+  listSuspendedAthletes: async (world) => {
+    const target = await anotherAthlete(world);
+    const token = await moderatorToken(world);
+    await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
+      reason: 'Cheating',
+    });
+    return send(world, 'GET', '/v1/moderation/suspended', token);
+  },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
 
@@ -328,6 +341,15 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       },
     });
     return send(world, 'POST', `/v1/auth/devices/${second.publicKey}/revoke`, token, {});
+  },
+  sealedRequest: async (world) => {
+    const { device, token } = await signedIn(world);
+    const sealed = await sealFor(world, {
+      path: '/v1/auth/session',
+      token,
+      signer: device.signingKey,
+    });
+    return sendEnvelope(world.url, sealed.envelope, token);
   },
   createLinkCode: async (world) =>
     send(world, 'POST', '/v1/auth/link-codes', (await signedIn(world)).token),
@@ -417,6 +439,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
 describe('every route answers with the shape its entry declares', () => {
   let instance: TestInstance;
   let world: IdentityInstance;
+  let keysStore: StoreHarness;
+  let keysClose: () => Promise<void> = () => Promise.resolve();
   beforeAll(async () => {
     // Probes that answer as a healthy instance with metrics on, so /ready and
     // /metrics answer their success; a probe-less instance is the other half.
@@ -431,7 +455,20 @@ describe('every route answers with the shape its entry declares', () => {
         Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
       startRoom: () => Promise.resolve('started' as const),
     };
-    instance = await startTestInstance({ probes });
+    // The instance's own keys (#1189), over a store of their own, so
+    // `/v1/instance/keys` answers its success.
+    keysStore = await createStoreHarness();
+    const store = await openSqlStore(keysStore.path);
+    keysClose = () => store.close();
+    instance = await startTestInstance({
+      probes,
+      instanceKeys: createInstanceKeys({
+        store,
+        secret: secretBytes(3),
+        origin: 'https://ride.example',
+        now: () => 1_790_000_000,
+      }),
+    });
     moderator = await testDevice();
     world = await startIdentityInstance({
       emailRecovery: true,
@@ -442,6 +479,8 @@ describe('every route answers with the shape its entry declares', () => {
   afterAll(async () => {
     await instance.listening.close();
     await world.close();
+    await keysClose();
+    await keysStore.destroy();
   });
 
   const metadata = ROUTES.filter((route) => route.identity !== true);
@@ -481,7 +520,10 @@ describe('every route answers with the shape its entry declares', () => {
       if (route.response.contentType === 'none') {
         expect(response.status, await response.clone().text()).toBe(204);
         expect(await response.text()).toBe('');
-      } else if (route.response.contentType === 'application/json') {
+      } else if (
+        route.response.contentType === 'application/json' ||
+        route.response.contentType === 'sealed'
+      ) {
         const body: unknown = await response.json();
         expect(response.status, JSON.stringify(body)).toBe(200);
         expect(violations(body, route.response.schema)).toEqual([]);

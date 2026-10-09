@@ -45,7 +45,7 @@ import {
 } from './testing';
 
 /**
- * ⚠️ **Three athletes, from the #28 fixtures.** CLAUDE.md §5: two cannot
+ * ⚠️ **Three athletes, from the #28 fixtures.** docs/agents/quality-gate.md §5: two cannot
  * distinguish "scoped correctly" from "returns everything the requester is
  * connected to".
  */
@@ -262,7 +262,7 @@ describe('a stored effort’s frozen mass does not follow the athlete’s (#325,
 });
 
 /**
- * The harness's own calibration for this write path — CLAUDE.md §5's rule that
+ * The harness's own calibration for this write path — docs/agents/store-harness.md §5's rule that
  * a new write path in `packages/store` ships with a fake proving the harness
  * catches its failure.
  *

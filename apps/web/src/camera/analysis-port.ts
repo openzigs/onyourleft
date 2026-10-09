@@ -35,7 +35,7 @@
  *
  * ## Why this is a `*-port.ts`, and the half of the wiring the gate cannot see
  *
- * CLAUDE.md §4j: `check:wiring` watches every `*-port.ts` under `apps/`, and
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches every `*-port.ts` under `apps/`, and
  * `WIRE003` reports a method declared here that no production declaration
  * calls. `camera/` is in no watched directory, so without the suffix a correct,
  * tested transport that nothing called would be invisible — #278's defect.
@@ -76,7 +76,7 @@
  */
 
 import type { CapturedFrame } from './camera-port';
-import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from './model-answer';
+import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from '@onyourleft/analysis';
 
 /**
  * The words sent for each question, verbatim.

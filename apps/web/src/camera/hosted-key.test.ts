@@ -28,11 +28,12 @@ import { hostedModelPort, type HostedSend } from './hosted-transport';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
 import { hostedStepPort } from '../ride-analysis/hosted-step';
-import type { RideAnalysisInput } from '../ride-analysis/input';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 import { STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import { askFailureText } from '../ride-analysis/ride-analysis';
-import { runAnalysis } from '../ride-analysis/runner';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { runAnalysis } from '@onyourleft/analysis';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
@@ -115,6 +116,7 @@ describe('no log line carries it', () => {
       key: KEY,
     }).model;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(model, { guard: patternsOnlyGuard, send }),
@@ -184,6 +186,7 @@ describe('no log line, failure or sentence carries it through a ride analysis (#
       key: KEY,
     }).model;
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(model, { guard: patternsOnlyGuard, send }),

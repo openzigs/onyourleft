@@ -8,7 +8,7 @@
  * of the app before Home painted. Each navigation group is now one module under
  * `shell/lazy/` that `AppShell` loads with a literal `import()` — literal
  * because `check:wiring` follows a literal specifier and cannot follow any
- * other (CLAUDE.md §4j) — and this file is what turns one of its exports into a
+ * other (docs/agents/wiring-gate.md §4j) — and this file is what turns one of its exports into a
  * component.
  *
  * ## What a rider sees while it loads, and when it cannot

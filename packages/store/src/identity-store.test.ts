@@ -5,7 +5,7 @@
  * rides.
  *
  * Everything here goes through `@onyourleft/store/testing` rather than a naive
- * write-then-read, for the reason CLAUDE.md section 5 gives. The signed-record
+ * write-then-read, for the reason docs/agents/quality-gate.md section 5 gives. The signed-record
  * assertion ends in a **verification** rather than a comparison — see
  * `assertSignedRecordRoundTrip`, and `roundedClaimStoreFactory`, which is the
  * fake that shows why.

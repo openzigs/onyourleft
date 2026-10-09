@@ -16,7 +16,7 @@
  */
 
 import type { AnalysisSend } from '../camera/http-body';
-import type { RunnerClock } from './runner';
+import type { RunnerClock } from '@onyourleft/analysis';
 
 /** Planted in every reply, outside the field the runner reads. */
 export const REPLY_MARKER = 'RAW-REPLY-MARKER-804';

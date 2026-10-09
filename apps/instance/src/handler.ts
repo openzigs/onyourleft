@@ -7,9 +7,12 @@ import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
 import type { ClientInfo, InstanceProbes } from './route-kit.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
+import { SEALED_PATH } from '@onyourleft/domain';
 
 /**
  * The instance, as ONE fetch-style function: `Request → Response` (#767,
@@ -23,15 +26,20 @@ import { ROUTES, type Route } from './routes.ts';
  *
  * ## The order a request is answered in
  *
- * 1. **The body's size**, before anything else reads it. A request that
- *    declares more than the limit is refused on its `content-length`; one that
- *    declares nothing is read up to the limit and refused at the first byte
- *    past it — never buffered whole first. So a stranger cannot make the
- *    instance hold an unbounded upload in memory by leaving the header off.
- * 2. **The route**, by path: none is `not_found`; a path with no route for the
+ * 1. **The route**, by path: none is `not_found`; a path with no route for the
  *    method is `method_not_allowed` with an `Allow` header. A `{name}` segment
  *    matches one segment of letters, digits, `_` and `-`, and nothing else —
- *    so a value the route reads from `params` is never a path or a query.
+ *    so a value the route reads from `params` is never a path or a query. A
+ *    route marked `sealed: 'only'` (#1191) is not matched here at all: it is
+ *    reached only inside `POST /v1/sealed`, through {@link RouteContext.dispatch}.
+ * 2. **The body's size**, before anything else reads it — the route's own
+ *    limit where it declares one (only `/v1/sealed` does), the instance's
+ *    otherwise. A request that declares more than the limit is refused on its
+ *    `content-length`; one that declares nothing is read up to the limit and
+ *    refused at the first byte past it — never buffered whole first. So a
+ *    stranger cannot make the instance hold an unbounded upload in memory by
+ *    leaving the header off. Matching the route first reads no body: a path
+ *    is all it needs.
  * 3. **What the route declares it needs** (#772): the instance's accounts
  *    (`unavailable` when this instance was given none), a signed-in session
  *    (`unauthenticated`, with `WWW-Authenticate: Bearer`) — one that is not
@@ -122,6 +130,16 @@ export interface HandlerOptions {
    * `unavailable`: an instance with no accounts has no rooms to make.
    */
   readonly rooms?: Rooms;
+  /**
+   * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
+   * /v1/instance/keys` answers `unavailable`.
+   */
+  readonly instanceKeys?: InstanceKeys;
+  /**
+   * Sealed requests (#1191, ADR 0047 D-9): the replay record, the clock and
+   * the HPKE port. Absent, `POST /v1/sealed` answers `unavailable`.
+   */
+  readonly sealed?: Sealed;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -241,6 +259,10 @@ function withHeaders(response: Response): Response {
 
 export function createHandler(options: HandlerOptions): Handler {
   const routes = options.routes ?? ROUTES;
+  // A plaintext request never reaches a sealed-only route (#1191), and an
+  // opened sealed request never reaches `/v1/sealed` again.
+  const plaintextRoutes = routes.filter((candidate) => candidate.sealed !== 'only');
+  const innerRoutes = routes.filter((candidate) => candidate.path !== SEALED_PATH);
   const now = options.now ?? (() => performance.now());
   const specification = openApiDocument(routes);
 
@@ -315,8 +337,36 @@ export function createHandler(options: HandlerOptions): Handler {
       sync: options.sync,
       history: options.history,
       rooms: options.rooms,
+      instanceKeys: options.instanceKeys,
       probes: options.probes,
+      sealed: options.sealed,
+      dispatch: dispatchInner,
     });
+  }
+
+  /**
+   * An opened sealed request's inner request (#1191): matched against the same
+   * table, its body held to the instance's ordinary limit, and answered by
+   * {@link answer} with every check the route declares.
+   */
+  async function dispatchInner(
+    request: Request,
+    body: Uint8Array | null,
+    client: ClientInfo,
+  ): Promise<Response> {
+    const url = new URL(request.url);
+    const atPath = innerRoutes.flatMap((candidate) => {
+      const params = matchPath(candidate.path, url.pathname);
+      return params === undefined ? [] : [{ candidate, params }];
+    });
+    const found = atPath.find(({ candidate }) => candidate.method === request.method);
+    if (found === undefined) {
+      return atPath.length > 0 ? errorResponse('method_not_allowed') : errorResponse('not_found');
+    }
+    if (body !== null && body.byteLength > options.config.bodyLimitBytes) {
+      return errorResponse('payload_too_large');
+    }
+    return answer(found.candidate, found.params, request, url, body, client);
   }
 
   return async (request, client = { address: null }) => {
@@ -325,15 +375,16 @@ export function createHandler(options: HandlerOptions): Handler {
     let response: Response;
     try {
       const url = new URL(request.url);
-      const body = await boundedBody(request, options.config.bodyLimitBytes);
+      const atPath = plaintextRoutes.flatMap((candidate) => {
+        const params = matchPath(candidate.path, url.pathname);
+        return params === undefined ? [] : [{ candidate, params }];
+      });
+      const found = atPath.find(({ candidate }) => candidate.method === request.method);
+      const limit = found?.candidate.bodyLimit?.(options.config) ?? options.config.bodyLimitBytes;
+      const body = await boundedBody(request, limit);
       if (body === TOO_LARGE) {
         response = errorResponse('payload_too_large');
       } else {
-        const atPath = routes.flatMap((candidate) => {
-          const params = matchPath(candidate.path, url.pathname);
-          return params === undefined ? [] : [{ candidate, params }];
-        });
-        const found = atPath.find(({ candidate }) => candidate.method === request.method);
         route = found?.candidate;
         if (found === undefined && request.method === 'OPTIONS' && atPath.length > 0) {
           // #777: a CORS preflight. The header says why this is safe.

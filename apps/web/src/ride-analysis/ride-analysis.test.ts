@@ -33,8 +33,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { endpointDecision, type AnalysisEndpoint } from '../camera/analysis-endpoint';
 import { riderModelStepPort } from '../camera/analysis-transport';
 import { SOURCE_ROOT } from '../camera/import-walk-testing';
-import type { UntrustedText } from '../camera/model-answer';
-import { screenWriteUp, type ScreenedWriteUp } from '../camera/write-up-screen';
+import type { UntrustedText } from '@onyourleft/analysis';
+import { screenWriteUp, type ScreenedWriteUp } from '@onyourleft/analysis';
 import { stripComments } from '../units/no-inline-units';
 import { hostedModelDecision } from '../camera/hosted-model';
 import { hostedModelPort } from '../camera/hosted-transport';
@@ -42,7 +42,7 @@ import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import { hostedStepPort } from './hosted-step';
 import { modelServer, REPLY_MARKER, STILL_CLOCK, type ModelServer } from './model-server-testing';
-import type { ModelStepPort } from './model-step-port';
+import type { ModelStepPort } from '@onyourleft/analysis';
 import {
   ASK_FAILURE_TEXT,
   askFailureText,
@@ -54,9 +54,10 @@ import {
   type ScreenedRideWriteUp,
 } from './ride-analysis';
 import type { AskOutcome, AskProgress } from './ride-analysis-port';
-import { RUN_FAILURE_TEXT } from './runner';
-import { CURRENT_ANALYSIS_TEMPLATE } from './template';
-import { patternsOnlyGuard } from './personal-details-testing';
+import { RUN_FAILURE_TEXT } from '@onyourleft/analysis';
+import { CURRENT_ANALYSIS_TEMPLATE } from '@onyourleft/analysis';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const ADDRESS = 'http://192.168.1.20:8080';
 const MODEL = 'text-7b';
@@ -396,6 +397,7 @@ describe('the pose summary goes only with camera consent (owner ruling 5)', () =
       key: 'fixture-hosted-key-DO-NOT-LEAK',
     }).model;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(service, { guard: patternsOnlyGuard, send: server.send }),

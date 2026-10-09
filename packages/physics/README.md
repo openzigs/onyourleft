@@ -31,7 +31,7 @@ exists to avoid.
 
 ### Nothing here was copied from prior art
 
-[CLAUDE.md §6](../../CLAUDE.md) draws the line and this is the package where it bites:
+[docs/agents/scope-and-ip.md §6](../../docs/agents/scope-and-ip.md) draws the line and this is the package where it bites:
 
 > Facts are not copyrightable: a physical constant or an equation from a published paper carries no
 > such restriction. **An implementation of it does.**
@@ -315,7 +315,7 @@ acceptance criteria, and a model that reads a wall clock instead of taking the e
 parameter is precisely the frame-rate coupling those criteria exist against — and it is invisible in
 a green suite, because the numbers still look like numbers. **Elapsed time arrives as a `Seconds`.**
 
-Both gates were checked together with a probe file, per [CLAUDE.md §4d](../../CLAUDE.md), and the
+Both gates were checked together with a probe file, per [docs/agents/lint-boundaries.md §4d](../../docs/agents/lint-boundaries.md), and the
 probe is what the paragraph above rests on: `window`, `process`, `fetch`, `indexedDB`, `node:fs` and
 `events` each produced *both* a TypeScript error and a lint error; `Date.now()` and `Math.random()`
 produced **only** the lint error.

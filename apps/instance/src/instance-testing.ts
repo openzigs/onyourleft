@@ -6,8 +6,12 @@ import type { InstanceProbes } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
+import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
+import { createServer } from 'node:net';
+
 import { listen, type Listening } from './node-listener.ts';
 
 /**
@@ -16,6 +20,30 @@ import { listen, type Listening } from './node-listener.ts';
  *
  * Test support, never shipped: nothing under `src/` but a test imports it.
  */
+
+/**
+ * A free loopback port, chosen by the operating system and let go, for a test
+ * that must know its instance's origin before the instance listens (a device
+ * signs the origin, so it has to name the port).
+ *
+ * ⚠️ Never a port drawn at random (#954): one drawn from 30 000–50 000 lands
+ * in Linux's ephemeral range (32 768–60 999), where every other test worker's
+ * outbound sockets take their ports, and on a busy runner it was taken —
+ * `listen EADDRINUSE`. The operating system hands out a port nothing holds.
+ */
+export async function freeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => {
+        resolve(port);
+      });
+    });
+  });
+}
 
 export const TEST_COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
@@ -32,6 +60,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     clientAddressHeader: null,
     trustedProxies: [],
     history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
+    analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
     name: null,
     ...overrides,
   };
@@ -54,6 +83,8 @@ export async function startTestInstance(
     history?: History;
     rooms?: Rooms;
     probes?: InstanceProbes;
+    instanceKeys?: InstanceKeys;
+    sealed?: Sealed;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
@@ -69,6 +100,8 @@ export async function startTestInstance(
     ...(options.history === undefined ? {} : { history: options.history }),
     ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
+    ...(options.instanceKeys === undefined ? {} : { instanceKeys: options.instanceKeys }),
+    ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
   });
   const listening = await listen(handler, {
     host: '127.0.0.1',

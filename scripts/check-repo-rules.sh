@@ -28,12 +28,12 @@
 #   ADR003  an ADR's "## Amendments" section is single, last, dated, and in
 #           date order -- and no unclosed fence hides it
 #   ADR004  an ADR declares Status, Context, Decision and Consequences --
-#           CLAUDE.md section 7's sentence, which nothing enforced (#416)
+#           docs/agents/conventions.md section 7's sentence, which nothing enforced (#416)
 #   SPIKE001 no two spike write-ups share a number (#493). A SIBLING of ADR001
 #           rather than a widening of it: a spike is never renumbered, so the
 #           remedy sentence differs
 #   SPIKE002 every spike filename is NNNN-kebab-case.md -- ADR002 for the
-#           directory CLAUDE.md section 7 gives the same convention (#493)
+#           directory docs/agents/conventions.md section 7 gives the same convention (#493)
 #   SPIKE003 docs/spikes/ is there and holds a write-up, so the two rules above
 #           cannot pass over an empty or renamed directory (#493)
 #   REL001  no signing key material is committed anywhere (#95)
@@ -58,6 +58,14 @@
 #   ASSET008 every vector or animation file under apps/ or packages/ -- an
 #           `.svg`, `.lottie` or `.riv`, or a Lottie `.json` -- is named in
 #           ASSETS.toml, text or not (#937)
+#   AGENT001 every topic file under docs/agents/ is named in the root
+#           CLAUDE.md, so no agent instruction sits where the index cannot
+#           send anybody
+#   AGENT002 the root CLAUDE.md stays an index: at most 15 KiB, because every
+#           agent session loads it whole on every turn (48 KiB until #1170)
+#   AGENT003 an area CLAUDE.md anywhere below the root stays short: at most
+#           8 KiB, because Claude Code loads it whenever a session works
+#           beneath it (#1170)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -331,7 +339,7 @@ check_manifests "${ROOT}/apps" "AGPL-3.0-or-later"
 # ADR 0001: "A package that does not do both is AGPL by default." The path rule
 # does not replace the per-package file, it backs it up.
 #
-# Both trees, not only packages/. CLAUDE.md section 3 says "each package still
+# Both trees, not only packages/. docs/agents/licence-boundary.md section 3 says "each package still
 # carries its own LICENSE file AND a matching license manifest field -- belt and
 # braces", and it says it of apps/ as well. Checking only one tree meant deleting
 # apps/web/LICENSE failed nothing.
@@ -627,9 +635,9 @@ if [ -d "${ROOT}/docs/adr" ]; then
   check_adr_amendments
 fi
 
-# --- ADR004: an ADR declares the four sections CLAUDE.md section 7 requires ---
+# --- ADR004: an ADR declares the four sections docs/agents/conventions.md section 7 requires ---
 #
-# CLAUDE.md section 7: *"ADRs: docs/adr/NNNN-kebab-case.md, with **Status,
+# docs/agents/conventions.md section 7: *"ADRs: docs/adr/NNNN-kebab-case.md, with **Status,
 # Context, Decision, Consequences**"*. Until #416 that sentence was enforced by
 # nothing. ADR001 checks numbers, ADR002 checks filenames and ADR003 checks the
 # shape of an Amendments section -- all three are about numbering and
@@ -761,7 +769,7 @@ check_adr_sections() {
         fi
         hint="${ADR_STATUS_HINT}"
       fi
-      report ADR004 "docs/adr/${base}: no '${section}' section; CLAUDE.md section 7 requires Status, Context, Decision and Consequences in every ADR, as a '## ${section}' heading${hint}"
+      report ADR004 "docs/adr/${base}: no '${section}' section; docs/agents/conventions.md section 7 requires Status, Context, Decision and Consequences in every ADR, as a '## ${section}' heading${hint}"
     done
   done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
 }
@@ -791,7 +799,7 @@ fi
 #   0006   two branches running in parallel on 2026-09-22 each took 0006
 #
 # And it is STRICTLY WORSE than the ADR case ADR001 exists for. An ADR that
-# collides can be renumbered before it merges; CLAUDE.md section 7 says of a
+# collides can be renumbered before it merges; docs/agents/conventions.md section 7 says of a
 # spike "Do not renumber one", full stop, so a collision discovered after merge
 # has no cheap repair at all.
 #
@@ -836,7 +844,7 @@ check_spikes() {
     found=$((found + 1))
     base="$(basename "${spike}")"
     if ! grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$' <<< "${base}"; then
-      report SPIKE002 "${SPIKE_DIR}/${base}: filename must be NNNN-kebab-case.md (CLAUDE.md section 7)"
+      report SPIKE002 "${SPIKE_DIR}/${base}: filename must be NNNN-kebab-case.md (docs/agents/conventions.md section 7)"
       continue
     fi
     number="${base%%-*}"
@@ -844,7 +852,7 @@ check_spikes() {
       *" ${number}:"*)
         rest="${seen_pairs#* "${number}":}"
         first="${rest%% *}"
-        report SPIKE001 "${SPIKE_DIR}/${first} and ${SPIKE_DIR}/${base} share spike number ${number}; the one that has not merged yet must take the next free number -- a spike is NEVER renumbered once it lands (CLAUDE.md section 7), so neither of these may be renumbered if both have. See the spike table in docs/architecture.md" ;;
+        report SPIKE001 "${SPIKE_DIR}/${first} and ${SPIKE_DIR}/${base} share spike number ${number}; the one that has not merged yet must take the next free number -- a spike is NEVER renumbered once it lands (docs/agents/conventions.md section 7), so neither of these may be renumbered if both have. See the spike table in docs/architecture.md" ;;
       *)
         seen_pairs="${seen_pairs}${number}:${base} " ;;
     esac
@@ -941,14 +949,14 @@ check_no_key_material
 #
 # ⚠️ Checked here rather than in Gradle, and that is the point of the criterion.
 # A Gradle assertion fails for whoever runs a build -- and CI does not build
-# Android at all (CLAUDE.md section 4c). A rule that only fires inside a build
+# Android at all (docs/agents/ci.md section 4c). A rule that only fires inside a build
 # nobody runs is a rule that never fires. This one runs on a bare clone, in the
 # same CI step as every other repository rule.
 #
 # ⚠️ It reads every Gradle file under the Android project, not variables.gradle
 # alone, and #95 is where that changed. The rule used to open ONE file, take the
 # FIRST `targetSdkVersion` in it, and `return 0` the moment that file was
-# absent -- which is the #142 shape (CLAUDE.md section 4e): a selector ASSERTED
+# absent -- which is the #142 shape (docs/agents/accessibility.md section 4e): a selector ASSERTED
 # to exist rather than discovered, failing closed against editing the value it
 # names and open against every other way the number reaches the build. Three
 # regressions were green under it, and each is now a fixture:
@@ -1102,7 +1110,7 @@ check_android_target_sdk
 # amount of state machinery can tell that apart from a section somebody meant.
 # What #229 removes is the case where the region never ends and the file reports
 # clean regardless. Full validation needs `xmllint`, which is a tool rather than
-# coreutils, and this is the bare-clone gate -- CLAUDE.md section 4a: *bash and
+# coreutils, and this is the bare-clone gate -- docs/agents/commands.md section 4a: *bash and
 # coreutils only, no install, no network*. A narrow rule that always runs is
 # worth more than a broad one that is skipped wherever the tool is missing.
 # Whether to ALSO add `xmllint` as a CI step, on the `shellcheck` precedent, is
@@ -1516,7 +1524,7 @@ ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 # ADR 0043, #991. The SIL Open Font License 1.1, admitted for a FONT FILE under
 # `apps/` and for nothing else -- not a picture, not a model, not a file under
 # `packages/`. Most free display faces are OFL, and until #991 a bundled
-# display face could only be Apache-2.0 or CC0 (CLAUDE.md §2 on the map's
+# display face could only be Apache-2.0 or CC0 (docs/agents/web-client.md §2 on the map's
 # Roboto, pinned at v2.138 for exactly this reason).
 #
 # ⚠️ Matched on the identifier by EQUALITY, like every set here, so
@@ -1530,7 +1538,7 @@ ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 ASSET_LICENCES_FONT="OFL-1.1"
 ASSET_FONT_FILES="woff2 woff ttf otf"
 
-# `shasum` is what CLAUDE.md §4a documents and what macOS ships; `sha256sum` is
+# `shasum` is what docs/agents/commands.md §4a documents and what macOS ships; `sha256sum` is
 # what the GNU coreutils on the CI runner ship. The same pair, and the same
 # order, as check-licence-hashes.sh -- a second spelling of "take a digest"
 # would be a second thing to keep in step.
@@ -2044,6 +2052,64 @@ check_assets() {
 
 ASSET_NAMED_COUNT=0
 check_assets
+
+# --- AGENT001 / AGENT002: the root CLAUDE.md is an index ----------------------
+#
+# CLAUDE.md was one file of about 650 KB until 2026-10-05, and every agent
+# session -- and every subagent it dispatched -- loaded all of it, on every
+# turn. It is now an index of the rules every task needs, with everything else
+# MOVED into topic files under docs/agents/ that an agent reads when its work
+# reaches that area. Two things keep that true, and both are checkable by path:
+#
+#   AGENT001  a topic file the index does not name is an instruction no agent
+#             will be sent to read -- worse than a long index, because it looks
+#             written down and is never read
+#   AGENT002  an index that grows back is the old cost arriving one paragraph at
+#             a time; 48 KiB is the ceiling, about 12 000 tokens. New text goes
+#             in the topic file whose area it is, and the index gets a line
+#             ⚠️ 15 KiB since #1170 (about 3 800 tokens), when the root became
+#             the always-on rules and a map, and everything else moved out
+#   AGENT003  an area CLAUDE.md (apps/web/, apps/instance/, apps/mobile/,
+#             packages/, or any other CLAUDE.md below the root, at any depth and
+#             in any directory -- scripts/, docs/, .github/ as much as apps/) is
+#             loaded by Claude Code whenever a session works beneath it, so it
+#             is the same cost one directory down: 8 KiB each, and the detail
+#             goes in the topic file it points at. The walk is every other
+#             rule's (GENERATED pruned), not apps/ and packages/ alone: an area
+#             file anywhere else used to be held to no budget at all
+#
+# Both are skipped where there is nothing to check: a tree with no
+# docs/agents/ has no topic files, and one with no CLAUDE.md has no index.
+AGENT_INDEX="CLAUDE.md"
+AGENT_DIR="docs/agents"
+AGENT_INDEX_MAX_BYTES=15360
+AGENT_AREA_MAX_BYTES=8192
+
+if [ -d "${ROOT}/${AGENT_DIR}" ]; then
+  while IFS= read -r topic_file; do
+    topic_rel="${topic_file#"${ROOT}"/}"
+    if [ ! -f "${ROOT}/${AGENT_INDEX}" ]; then
+      report AGENT001 "${topic_rel}: there is no ${AGENT_INDEX} to name it, so no agent is sent to read it"
+    elif ! grep -qF -- "](${topic_rel})" "${ROOT}/${AGENT_INDEX}"; then
+      report AGENT001 "${topic_rel}: not linked from ${AGENT_INDEX}; add it to the topic map there with a line saying when to read it, or no agent will"
+    fi
+  done < <(find "${ROOT}/${AGENT_DIR}" -type f -name '*.md' | LC_ALL=C sort)
+fi
+
+if [ -f "${ROOT}/${AGENT_INDEX}" ]; then
+  index_bytes="$(wc -c < "${ROOT}/${AGENT_INDEX}" | tr -d ' ')"
+  if [ "${index_bytes}" -gt "${AGENT_INDEX_MAX_BYTES}" ]; then
+    report AGENT002 "${AGENT_INDEX}: ${index_bytes} bytes, over the ${AGENT_INDEX_MAX_BYTES}-byte (15 KB) budget for the index every agent session loads; put the detail in the relevant topic file under ${AGENT_DIR}/ or the area CLAUDE.md, and add at most a one-line pointer to the index"
+  fi
+fi
+
+while IFS= read -r area_file; do
+  [ "${area_file}" = "${ROOT}/${AGENT_INDEX}" ] && continue
+  area_bytes="$(wc -c < "${area_file}" | tr -d ' ')"
+  if [ "${area_bytes}" -gt "${AGENT_AREA_MAX_BYTES}" ]; then
+    report AGENT003 "${area_file#"${ROOT}"/}: ${area_bytes} bytes, over the ${AGENT_AREA_MAX_BYTES}-byte (8 KB) budget for an area CLAUDE.md, which every session working beneath it loads; move the detail into a topic file under ${AGENT_DIR}/ and point at it"
+  fi
+done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name CLAUDE.md -print | LC_ALL=C sort)
 
 # --- Result -------------------------------------------------------------------
 

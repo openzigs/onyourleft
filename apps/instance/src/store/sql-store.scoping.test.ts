@@ -97,6 +97,17 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       return found;
     },
   },
+  listLiveSyncItems: {
+    // Every kind the fixtures carry, asked as the caller (#1098's tool reads).
+    probe: async (store, athleteId) =>
+      (
+        await Promise.all(
+          syncItemFixtures(athleteId).map((item) =>
+            store.listLiveSyncItems(athleteId, item.kind, 1000),
+          ),
+        )
+      ).flat(),
+  },
   listActivityRecords: { probe: (store, athleteId) => store.listActivityRecords(athleteId) },
   // #835, ADR 0040 D-3 and OWASP LLM08:2025's partitioning: the history index.
   // Each passage is labelled with its source's key, which names its owner, so
@@ -179,6 +190,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'email recovery: the token is what names the athlete (#773)',
   },
   touchDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  recordSealedRequest: {
+    notAScopedRead: 'a write over sealed requests’ `enc`s, which name no athlete (#1191)',
+  },
   revokeDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   revokeSession: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   registerAthlete: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },
@@ -262,6 +276,12 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
+  listModerationLogPage: {
+    notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
+  },
+  listSuspendedAthletes: {
+    notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
+  },
   putBlock: { notAScopedRead: 'a write' },
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
   putReport: { notAScopedRead: 'a write' },
@@ -271,6 +291,34 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
   eraseAthlete: { notAScopedRead: 'erasure: sql-store.erasure.test.ts' },
+  putHostedModelKey: {
+    notAScopedRead:
+      'the operator’s write, for the operator’s athlete (sql-store.hosted-key.test.ts)',
+  },
+  getHostedModelKey: {
+    notAScopedRead:
+      'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
+  },
+  clearHostedModelKey: { notAScopedRead: 'a write: the operator’s, not a rider’s' },
+  listInstanceKeys: {
+    notAScopedRead:
+      'the instance’s own keys (#1189), wrapped; read by the instance and the operator command, never served to a rider, and naming no athlete',
+  },
+  listInstanceKeyStatements: {
+    notAScopedRead:
+      'what the instance signed about its own keys (#1189): public, the same for every caller, naming no athlete',
+  },
+  putInstanceKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  addEncryptionKey: { notAScopedRead: 'a write: the instance’s own key, naming no athlete' },
+  putInstanceKeyStatement: { notAScopedRead: 'a write: a public statement, naming no athlete' },
+  deleteInstanceKeys: { notAScopedRead: 'a write: the instance’s own keys' },
+  replaceIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  clearInstanceKeys: { notAScopedRead: 'a write: the operator’s reset' },
+  claimIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  takeInstanceKeyLease: {
+    notAScopedRead: 'a write: who may change the instance’s own keys, naming no athlete',
+  },
+  releaseInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   close: { notAScopedRead: 'not a read' },
 };
 

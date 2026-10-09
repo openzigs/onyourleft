@@ -219,7 +219,7 @@ export function attachWorker(scope: WorkerScope, options: WorkerOptions): void {
         // matters here — one failed asset rejects the whole thing, so the
         // worker never reaches `installed` holding a cache that is missing the
         // renderer. A half-populated precache is the "wrong storage" cause of
-        // CLAUDE.md §5's defect shape, and it would report success.
+        // docs/agents/quality-gate.md §5's defect shape, and it would report success.
         await cache.addAll([...urls]);
       })(),
     );

@@ -36,6 +36,8 @@ const http = readConfig({
   embeddingModel: process.env.OYL_INSTANCE_EMBEDDING_MODEL,
   embeddingDocumentPrefix: process.env.OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX,
   embeddingQueryPrefix: process.env.OYL_INSTANCE_EMBEDDING_QUERY_PREFIX,
+  analysisModelUrl: process.env.OYL_INSTANCE_ANALYSIS_MODEL_URL,
+  analysisModel: process.env.OYL_INSTANCE_ANALYSIS_MODEL,
   name: process.env.OYL_INSTANCE_NAME,
 });
 const server = readServerConfig(
@@ -48,6 +50,7 @@ const server = readServerConfig(
     metrics: process.env.OYL_INSTANCE_METRICS,
     pingIntervalMs: process.env.OYL_INSTANCE_PING_INTERVAL_MS,
     metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
+    secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
   },
   availableParallelism(),
 );
@@ -62,6 +65,12 @@ if (!http.ok || !server.ok) {
 // refused embedding address is said here, whole, and the instance goes on.
 if (http.config.history.kind === 'off' && http.config.history.code !== 'not-set') {
   process.stderr.write(`instance: the history index is off: ${http.config.history.reason}\n`);
+}
+
+// Nor is the analysis model (#1096, ADR 0046 D-9): a refused address, or an
+// address with no model named, is said here and analysis stays off.
+if (http.config.analysis.kind === 'off' && http.config.analysis.code !== 'not-set') {
+  process.stderr.write(`instance: analysis is off: ${http.config.analysis.reason}\n`);
 }
 
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');

@@ -656,6 +656,8 @@ describe('your own best crossing the line (#259)', () => {
       gameRideEnded: (outcome) => {
         handed.push(outcome);
       },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
     };
     mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
     await settle();
@@ -683,6 +685,110 @@ describe('your own best crossing the line (#259)', () => {
     mounted?.unmount();
     mounted = undefined;
     expect(handed).toEqual(['beaten', 'not-beaten']);
+  });
+});
+
+describe('the ride’s moving time on the HUD — #1111', () => {
+  /**
+   * ⚠️ `HudPanel`'s `movingSeconds` is an optional prop threaded through JSX,
+   * which `check:wiring` cannot follow (docs/agents/wiring-gate.md §4j §Limits) — so this drives
+   * the real `GameView` and reads the HUD, rather than trusting that the port
+   * method being called means the field shows what it returned.
+   */
+  it('shows the recorder’s figure from the port, and nothing the simulation counted', async () => {
+    let recorded: number | undefined = 65;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => recorded,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    // Ten seconds of frames: the simulation's clock runs, the field does not —
+    // the recorder (paused, say) has not moved, so neither does the HUD.
+    await pump(600);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    recorded = 3725;
+    await pump(2);
+    expect(hudField('Moving')).toBe('1:02:05');
+
+    // No recording under the ride: a dash, and no "Sensor lost".
+    recorded = undefined;
+    await pump(2);
+    expect(hudField('Moving')).toBe(NO_READING);
+  });
+});
+
+describe('the ride’s moving time while the GAME is paused — #1111’s review', () => {
+  /**
+   * The game's *Pause* stops the render loop and does NOT pause the recording,
+   * which goes on counting until its own auto-pause. A figure read only on the
+   * tick's render froze at the press. The HUD re-renders when the controller
+   * says it changed (`trainer-port.ts` §`GameTrainerPort.watchRide`).
+   */
+  it('keeps agreeing with the recorder while no frame is drawn', async () => {
+    let recorded = 65;
+    const listeners = new Set<() => void>();
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => recorded,
+      watchRide: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    const pause = queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+      (button) => button.textContent === 'Pause',
+    );
+    await clickThrough(pause);
+    expect(pause?.textContent).toBe('Resume');
+    // What a browser's `cancelAnimationFrame` does, which this file's stub
+    // does not: the frame the paused loop had already asked for never comes.
+    pending.length = 0;
+
+    // The recorder counts on — the rider is still pedalling. The precondition:
+    // the game really is paused, so no frame re-renders the HUD, and without
+    // the subscription the field would stay where the press left it.
+    recorded = 75;
+    await pump(60);
+    expect(hudField('Moving')).toBe('0:01:05');
+
+    // The controller tells its subscribers on its own tick.
+    await act(async () => {
+      for (const listener of [...listeners]) listener();
+      await Promise.resolve();
+    });
+    expect(hudField('Moving')).toBe('0:01:15');
+
+    // And it stops telling the HUD once the game is gone.
+    mounted.unmount();
+    mounted = undefined;
+    expect(listeners.size).toBe(0);
   });
 });
 
@@ -1155,7 +1261,7 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
   // runners, a job over 1 000 s) — 49 % of that default. 8 s is about three times the slowest, so a
   // slow-down is red, and so is a case left waiting on something that never settles. A loop that
-  // never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+  // never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('draws every animation frame at the top two rungs, then 30, 24 and 20 a second — #482', async () => {
     const frames = await startRiding({ pacer: false });
     const drawnPerMeasure = async (): Promise<number> => {
@@ -1579,7 +1685,7 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
     // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
     // runners, a job over 1 000 s) — 60 % of that default. 10 s is about three times the slowest,
     // so a slow-down is red, and so is a case left waiting on something that never settles. A loop
-    // that never yields is caught only by the job’s own stop (CLAUDE.md §4c).
+    // that never yields is caught only by the job’s own stop (docs/agents/ci.md §4c).
     it('climbs one rung, not all of them, on one cool reading', async () => {
       const port = settable(0.95);
       await startRiding({ pacer: false, thermal: port });

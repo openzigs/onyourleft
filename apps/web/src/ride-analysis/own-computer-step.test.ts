@@ -22,11 +22,12 @@ import {
   type NativeAnalysisRequest,
 } from '../camera/analysis-transport';
 import { capturedFrame } from '../camera/frame';
-import type { SideSessionSummary } from '../camera/side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
+import { analysisModules, ANALYSIS_ROOT } from '../camera/import-walk-testing';
 import { cleanFrameBytes } from '../camera/testing';
 import { stripComments } from '../units/no-inline-units';
-import { rideAnalysisInput, type RideAnalysisInput } from './input';
-import type { ModelStepPort, StepReply, StepRequest } from './model-step-port';
+import { rideAnalysisInput, type RideAnalysisInput } from '@onyourleft/analysis';
+import type { ModelStepPort, StepReply, StepRequest } from '@onyourleft/analysis';
 import {
   finishOf,
   HINT_REFUSED_STATUSES,
@@ -35,7 +36,7 @@ import {
   STEP_REQUEST_FIELDS,
   stepRequestBody,
 } from './own-computer-step';
-import { runAnalysis, type RunnerClock } from './runner';
+import { runAnalysis, type RunnerClock } from '@onyourleft/analysis';
 
 // --- Fixtures -------------------------------------------------------------------
 
@@ -706,7 +707,8 @@ function productionSources(): readonly string[] {
     }
   };
   walk(SOURCE_ROOT);
-  return found;
+  // #1094: and every module of `@onyourleft/analysis`, where the runner moved.
+  return [...found, ...analysisModules()];
 }
 
 /** The names that start a ride analysis or build the thing that sends it. */
@@ -720,7 +722,7 @@ const SENDS_A_RIDE = /(?<![\w$])(?:runAnalysis|riderModelStepPort|ownComputerSte
  * opening its page must stay out of this list.
  */
 const MAY_START_A_RUN: readonly string[] = [
-  join('ride-analysis', 'runner.ts'),
+  `${ANALYSIS_ROOT}/runner.ts`,
   join('ride-analysis', 'own-computer-step.ts'),
   join('ride-analysis', 'ride-analysis.ts'),
   join('camera', 'analysis-transport.ts'),

@@ -16,7 +16,7 @@
  *
  * ## Why a `*-port.ts`, and the names
  *
- * CLAUDE.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
  * that no production code calls is a red `WIRE003`. The names are distinctive
  * (`sideLinkCondition`, `onSideLinkEvent`, `reportToTablet`, `endSideLink`)
  * for `camera-port.ts`' measured reason: an ordinary name like `close` or

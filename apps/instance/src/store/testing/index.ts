@@ -9,7 +9,7 @@
  *
  * `read()` closes every store this harness has opened before it opens
  * another, so no read can be served by the connection that wrote: the
- * "wrong harness" cause of `CLAUDE.md` §5's defect shape is not expressible
+ * "wrong harness" cause of `docs/agents/quality-gate.md` §5's defect shape is not expressible
  * here. The database is a FILE in a fresh temporary directory, because an
  * in-memory database cannot be reopened and a reopen is the whole point.
  *
@@ -179,7 +179,7 @@ export async function assertAthleteRoundTrip(
 //
 // Two athletes cannot tell "scoped correctly" from "returns everything the
 // caller is not"; the third is what separates a filter from an exclusion
-// (`CLAUDE.md` §5).
+// (`docs/agents/quality-gate.md` §5).
 
 export const ATHLETE_A = 'athlete-a';
 export const ATHLETE_B = 'athlete-b';
@@ -403,6 +403,11 @@ export function confirmationTokenFixture(athleteId: string): string {
   return hexOf(`confirm-${athleteId}`);
 }
 
+/** The SHA-256 of a fixture athlete's one recovery code, as `registrationFixture` registers it. */
+export function recoveryCodeFixture(athleteId: string): string {
+  return hexOf(`recovery-${athleteId}`);
+}
+
 /**
  * A fixture athlete's registration: their first key, a recovery code, and an
  * email address waiting to be confirmed (#865) — `seedWorld` confirms it.
@@ -411,7 +416,7 @@ export function registrationFixture(athleteId: string): Registration {
   return {
     athlete: athleteFixture(athleteId),
     key: deviceKeyFixture(athleteId),
-    recoveryCodeSha256s: [hexOf(`recovery-${athleteId}`)],
+    recoveryCodeSha256s: [recoveryCodeFixture(athleteId)],
     recoveryEmailConfirmation: {
       tokenSha256: confirmationTokenFixture(athleteId),
       address: `${athleteId}@example.org`,

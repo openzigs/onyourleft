@@ -14,7 +14,7 @@
  *
  * ## Why a `*-port.ts`
  *
- * CLAUDE.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
+ * docs/agents/wiring-gate.md §4j: `check:wiring` watches every `*-port.ts`, so a method here
  * that no production code calls is a red `WIRE003`. That matters for the half
  * a unit test cannot see: an analysis that computed a report and handed it to
  * nothing would pass every test of the report and save no sentence. ⚠️ The
@@ -24,7 +24,7 @@
  */
 
 import type { SideReport } from './side-report';
-import type { SideSessionSummary } from './side-session-summary';
+import type { SideSessionSummary } from '@onyourleft/analysis';
 
 /** One pairing's report, on its way to the ride it filmed. */
 export interface SideReportSession {

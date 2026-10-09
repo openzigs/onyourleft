@@ -66,7 +66,7 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  *
  * **Blocks are added one at a time and listed in order.** A workout is built
  * up rather than typed into one box, because the alternative is a text format,
- * and there is no workout file format — ADR 0009 and CLAUDE.md §6 record why,
+ * and there is no workout file format — ADR 0009 and docs/agents/scope-and-ip.md §6 record why,
  * and #202 is the issue that settles it.
  *
  * **Colour carries nothing.** A block's kind is a word in its own cell, for
@@ -638,27 +638,15 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                 Build a workout
               </h2>
 
-              <h3>This workout</h3>
-              {blocks.length === 0 ? (
-                <p>No blocks yet. Add one below.</p>
-              ) : (
-                <ol>
-                  {blocks.map((block, index) => (
-                    <li key={`${block.kind}-${String(index)}`}>
-                      {blockText(block)}{' '}
-                      <Button
-                        variant="secondary"
-                        type="button"
-                        onClick={() => {
-                          onRemoveBlock(index);
-                        }}
-                      >
-                        Remove block {String(index + 1)}
-                      </Button>
-                    </li>
-                  ))}
-                </ol>
-              )}
+              {/*
+            #1087: *Save workout*, its name and the line a save writes come
+            FIRST, above the block list, so the builder's one primary does not
+            move down with every block. Below the list it was about 120 px
+            under the fold on a phone with four blocks, and 66 px above it on
+            the owner's tablet in landscape, 16 px over the 50 px floor, which a
+            fifth block would have spent (`controls-first.browser.spec.ts`
+            §"#1050"). A rider names and saves what the list below holds.
+          */}
               <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
                 <p>
                   <label htmlFor="workout-name">Name</label>
@@ -692,13 +680,32 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                 </StatusMessage>
               )}
 
+              <h3>This workout</h3>
+              {blocks.length === 0 ? (
+                <p>No blocks yet. Add one below.</p>
+              ) : (
+                <ol>
+                  {blocks.map((block, index) => (
+                    <li key={`${block.kind}-${String(index)}`}>
+                      {blockText(block)}{' '}
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        onClick={() => {
+                          onRemoveBlock(index);
+                        }}
+                      >
+                        Remove block {String(index + 1)}
+                      </Button>
+                    </li>
+                  ))}
+                </ol>
+              )}
               {/*
-            #1050: the chart goes BELOW *Save workout* and the line a save
-            writes, for the saved workout's reason above (#1043): drawn
-            between the list and the form it moved the builder's one primary
-            down by its 6rem, and on the owner's tablet in landscape, with a
-            block of each kind, that put *Save workout* under the browser
-            gate's 50 px floor (`controls-first.browser.spec.ts` §"#1050").
+            #1050: the chart goes BELOW *Save workout*, for the saved
+            workout's reason above (#1043): drawn above the form it moved the
+            builder's one primary down by its 6rem. Since #1087 the form is
+            above the list too, and the chart follows the list it draws.
           */}
               <WorkoutBlockChart blocks={blocks} />
 
@@ -875,8 +882,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
               </p>
               <form aria-label="Import a workout" onSubmit={(event) => void onImport(event)}>
                 <p>
-                  <label htmlFor="workout-file">Workout file</label>
-                  <FileDrop hint="Or drop a workout file here">
+                  <label htmlFor="workout-file" id="workout-file-label">
+                    Workout file
+                  </label>
+                  <FileDrop hint="Or drop a workout file here" labelId="workout-file-label">
                     <input
                       id="workout-file"
                       name="file"

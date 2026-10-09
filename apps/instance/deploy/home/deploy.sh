@@ -81,6 +81,13 @@ rollback() {
     OYL_INSTANCE_IMAGE="${image}" compose run --rm --no-deps --entrypoint node backup \
       src/operator/cli.ts restore "/backups/pre-deploy/${snapshot}" --force ||
       die 'the restore failed: the data is as the failed deploy left it. See docs/operating-an-instance.md, "Restore".'
+    # A restore ends by rotating the instance's encryption key (#1189, ADR
+    # 0047 D-5). The `backup` service holds no secret, so it is done here, in
+    # the `instance` service that does; an instance with no keys, or a build
+    # from before them, says so and the rollback carries on.
+    OYL_INSTANCE_IMAGE="${image}" compose run --rm --no-deps -T instance node \
+      src/operator/cli.ts instance-key rotate ||
+      say 'the encryption key was not rotated after the restore (no keys, or no secret): see docs/operating-an-instance.md, "The instance'"'"'s keys".'
   fi
   start "${image}" || die "${image} did not come back ready either: see docker compose logs instance."
   OYL_INSTANCE_IMAGE="${image}" compose up -d tunnel backup

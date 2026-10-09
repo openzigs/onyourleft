@@ -9,7 +9,7 @@
  * Narrowed to three methods rather than taking `ActivityStore`, for
  * `transfer/store-port.ts`'s reason: a test then hands the same code the
  * round-trip harness's store, so an assertion reads back on **a connection this
- * process never wrote through**. CLAUDE.md §5 calls that the fourth cause of a
+ * process never wrote through**. docs/agents/quality-gate.md §5 calls that the fourth cause of a
  * write that reports success while the read cannot see it, and it is the one a
  * naive test cannot detect.
  *
@@ -30,7 +30,7 @@
  * to a file the rider asked for rather than to a screen.
  *
  * ⚠️ **A `*-port.ts`, so `check:wiring`'s `WIRE003` watches every method**
- * (CLAUDE.md §4j). All three have a production caller: `keep.ts` writes,
+ * (docs/agents/wiring-gate.md §4j). All three have a production caller: `keep.ts` writes,
  * `views/CameraView.tsx` counts and deletes. Delete any one of them and the
  * gate goes red naming it — the mutation list in this pull request records the
  * run.

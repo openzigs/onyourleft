@@ -14,7 +14,8 @@ import { hostedModelDecision, type HostedModel } from './hosted-model';
 import { hostedModelPort, type HostedSend } from './hosted-transport';
 import { CameraController } from './session';
 import { manualSchedule, scriptedCamera } from './testing';
-import { patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
+import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
@@ -48,6 +49,7 @@ function controllerWith(send: HostedSend, analysisSend?: AnalysisSend): CameraCo
     switchedOn: true,
   }).endpoint;
   return new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     analysis: () => riderAnalysisPort(local, { send: analysisSend }),
@@ -83,6 +85,7 @@ describe('consenting to local analysis does not enable the hosted model', () => 
       hostedModelPort(service(), { guard: patternsOnlyGuard, send: answering() }),
     );
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: lookUp,
@@ -104,6 +107,7 @@ describe('the hosted model’s own consent', () => {
     const send = answering();
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(service(), { guard: patternsOnlyGuard, send }),
@@ -119,6 +123,7 @@ describe('the hosted model’s own consent', () => {
 
   it('says not-configured when nothing is saved, after consent', async () => {
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
       hosted: () => hostedModelPort(undefined, { guard: patternsOnlyGuard }),

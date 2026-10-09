@@ -44,7 +44,7 @@
  * `game/` already reaches into `ride/` (`game/sensors.ts`) while nothing in
  * `ride/` or `workout/` imports `game/`. A module in `ride/` with no imports
  * of its own is therefore reachable from all three without a cycle, and it is
- * inside the wiring gate's watched set (CLAUDE.md §4j).
+ * inside the wiring gate's watched set (docs/agents/wiring-gate.md §4j).
  *
  * ⚠️ **Never thrown on a release.** A Stop is resistance let go of, and nothing
  * holds it back (`ride/controller.ts` §`releaseTrainer`).

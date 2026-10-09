@@ -35,7 +35,7 @@ const trainer = device('trainer', ['power', 'cadence', 'speed', 'trainer-control
 const cadenceSensor = device('cadence-sensor', ['cadence']);
 
 describe('the budget', () => {
-  it('is three, the number CLAUDE.md section 8 says to design against', () => {
+  it('is three, the number docs/agents/web-bluetooth.md section 8 says to design against', () => {
     expect(MAX_RECOMMENDED_CONCURRENT_CONNECTIONS).toBe(3);
   });
 });

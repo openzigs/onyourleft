@@ -9,7 +9,7 @@
  * on the counters rather than on how long anything took.
  */
 
-import { beatsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
+import { beatsPerMinute, localDay, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
@@ -82,14 +82,23 @@ describe('loadFitnessHistory — the read budget', () => {
     expect(port.listReads[0]?.limit).toBe(4);
   });
 
-  it('reads oldest first, so a truncation drops old history and not recent form', async () => {
+  it('keeps the NEWEST rides, so a truncation drops old history and not recent form — #1130', async () => {
     // The averages build forward from the first ride, so the recent end is the
-    // part that must survive.
-    const port = stubAnalysis(OWNER, [summarised('old', 0), summarised('new', 30)]);
+    // part that must survive. Until #1130 this asserted the read was
+    // ascending, which kept the OLDEST rides and dropped the recent form.
+    const port = stubAnalysis(OWNER, [
+      summarised('old', 0),
+      summarised('middle', 10),
+      summarised('new', 30),
+    ]);
 
-    await loadFitnessHistory(port);
+    const history = await loadFitnessHistory(port, 2);
 
-    expect(port.listReads[0]?.direction).toBe('ascending');
+    expect(history.truncated).toBe(true);
+    expect(history.ridesCounted).toBe(2);
+    // Drawn in start order, from the middle ride to the newest.
+    expect(history.points[0]?.day).toBe(localDay(unixSeconds(START + 10 * DAY), 'UTC'));
+    expect(history.points.at(-1)?.day).toBe(localDay(unixSeconds(START + 30 * DAY), 'UTC'));
   });
 
   it('defaults to the stated bound', async () => {
@@ -202,7 +211,25 @@ describe('backfillLoadSummaries — the explicit act', () => {
     expect(port.summaryWrites).toHaveLength(2);
   });
 
-  it('counts a ride it cannot summarise as skipped, so the remainder can reach zero', async () => {
+  it('works out the oldest first OF THE RIDES THE CHART READS — the newest window — #1130', async () => {
+    const rides = Array.from({ length: 5 }, (_unused, index) =>
+      unsummarised(`ride-${String(index)}`, index),
+    );
+    const port = stubAnalysis(OWNER, rides);
+
+    await backfillLoadSummaries(port, 2);
+
+    // The chart's own window, so a rider past the bound can fill it in…
+    expect(port.listReads[0]).toMatchObject({
+      orderBy: 'startedAt',
+      direction: 'descending',
+      limit: HISTORY_ACTIVITY_LIMIT,
+    });
+    // …and, inside it, oldest first.
+    expect(port.summaryWrites).toEqual([activityId('ride-0'), activityId('ride-1')]);
+  });
+
+  it('counts a ride it cannot summarise as having nothing to work out, so the remainder can reach zero', async () => {
     // A ride shorter than the smoothing window will never produce a summary.
     // Retrying it forever would make the control never finish, and a control
     // that never finishes is one a rider learns to ignore.
@@ -219,7 +246,7 @@ describe('backfillLoadSummaries — the explicit act', () => {
     const outcome = await backfillLoadSummaries(port);
 
     expect(outcome.computed).toBe(0);
-    expect(outcome.skipped).toBe(1);
+    expect(outcome.nothingToWorkOut).toBe(1);
     expect(outcome.remaining).toBe(0);
   });
 
@@ -303,7 +330,7 @@ describe('#1070 — a power channel that read 0 W is no basis for a load', () =>
     expect(history.bases).toEqual(['heartRate']);
   });
 
-  it('skips an all-zero power ride with no strap, and writes nothing', async () => {
+  it('marks an all-zero power ride with no strap as having nothing to work out — #1084', async () => {
     const port = stubAnalysis(OWNER, [
       unsummarised('zero', 0, { power: Array.from({ length: 600 }, () => watts(0)) }),
     ]);
@@ -311,8 +338,13 @@ describe('#1070 — a power channel that read 0 W is no basis for a load', () =>
     const outcome = await backfillLoadSummaries(port);
 
     expect(outcome.computed).toBe(0);
-    expect(outcome.skipped).toBe(1);
-    expect(port.summaryWrites).toEqual([]);
+    expect(outcome.nothingToWorkOut).toBe(1);
+    // The marker, not a summary: no basis, a load covering no time.
+    expect(port.summaryWrites).toEqual(['zero']);
+    const history = await loadFitnessHistory(port);
+    expect(history.ridesCounted).toBe(0);
+    expect(history.ridesWithoutSummary).toBe(0);
+    expect(history.ridesWithNoLoad).toBe(1);
   });
 
   it('still reads only power for a ride whose power gave a summary', async () => {
@@ -325,5 +357,108 @@ describe('#1070 — a power channel that read 0 W is no basis for a load', () =>
     await backfillLoadSummaries(port);
 
     expect(port.channelReads).toEqual(['real:power']);
+  });
+});
+
+describe('#1084 — a ride that can never have a load is found once, not on every pass', () => {
+  /** A ride stored before #1084 with nothing a load could come from. */
+  function nothingIn(id: string, offset: number, extra: Partial<StubAnalysisRide> = {}) {
+    return unsummarised(id, offset, {
+      power: Array.from({ length: 5 }, () => watts(200)),
+      ...extra,
+    });
+  }
+
+  it('decodes and counts it on the first pass only', async () => {
+    const port = stubAnalysis(OWNER, [nothingIn('brief', 0), unsummarised('real', 1)]);
+
+    const first = await backfillLoadSummaries(port);
+    expect(first).toEqual({ computed: 1, nothingToWorkOut: 1, noStreamsYet: 0, remaining: 0 });
+    const decodedOnce = port.channelReads.length;
+
+    const second = await backfillLoadSummaries(port);
+    expect(second).toEqual({ computed: 0, nothingToWorkOut: 0, noStreamsYet: 0, remaining: 0 });
+    // Nothing was decoded again: the marked ride is not selected.
+    expect(port.channelReads).toHaveLength(decodedOnce);
+  });
+
+  it('leaves a ride with no stream set unmarked, so a save still in progress is looked at again', async () => {
+    // ADR 0027: a tab on an older bundle writes a bare activity row, then its
+    // streams. A pass between the two must not mark the ride for ever.
+    const saving: StubAnalysisRide = {
+      activity: stubActivity({
+        id: activityId('saving'),
+        startedAt: unixSeconds(START),
+        startedAtTimeZone: 'UTC',
+      }),
+    };
+    // Mutable: the stub reads this list on every call, so replacing the entry
+    // is the streams landing.
+    const rides: StubAnalysisRide[] = [saving];
+    const port = stubAnalysis(OWNER, rides);
+
+    const first = await backfillLoadSummaries(port);
+    expect(first).toEqual({ computed: 0, nothingToWorkOut: 0, noStreamsYet: 1, remaining: 0 });
+    expect(port.summaryWrites).toEqual([]);
+    const between = await loadFitnessHistory(port);
+    expect(between.ridesWithNoLoad).toBe(0);
+    expect(between.ridesWithoutSummary).toBe(1);
+
+    // The older tab's streams land; the next pass works the ride out.
+    rides[0] = { ...saving, power: Array.from({ length: 600 }, () => watts(200)) };
+    const second = await backfillLoadSummaries(port);
+    expect(second).toEqual({ computed: 1, nothingToWorkOut: 0, noStreamsYet: 0, remaining: 0 });
+    expect((await loadFitnessHistory(port)).ridesCounted).toBe(1);
+  });
+
+  it('does not let rides with no stream set use up the batch', async () => {
+    const bare = (id: string, offset: number): StubAnalysisRide => ({
+      activity: stubActivity({
+        id: activityId(id),
+        startedAt: unixSeconds(START + offset * DAY),
+        startedAtTimeZone: 'UTC',
+      }),
+    });
+    const port = stubAnalysis(OWNER, [bare('a', 0), bare('b', 1), unsummarised('real', 2)]);
+
+    const outcome = await backfillLoadSummaries(port, 1);
+
+    expect(outcome).toEqual({ computed: 1, nothingToWorkOut: 0, noStreamsYet: 2, remaining: 0 });
+  });
+
+  it('works a stale 0 W ride out from its strap, and marks one with no strap', async () => {
+    const stale = (id: string, offset: number, extra: Partial<StubAnalysisRide> = {}) => ({
+      activity: stubActivity({
+        id: activityId(id),
+        startedAt: unixSeconds(START + offset * DAY),
+        startedAtTimeZone: 'UTC',
+        effortWeightedPower: watts(0),
+        loadCoveredTime: seconds(600),
+      }),
+      power: Array.from({ length: 600 }, () => watts(0)),
+      ...extra,
+    });
+    const port = stubAnalysis(OWNER, [
+      stale('strap', 0, { heartRate: Array.from({ length: 600 }, () => beatsPerMinute(150)) }),
+      stale('bare', 1),
+    ]);
+
+    const outcome = await backfillLoadSummaries(port);
+    const history = await loadFitnessHistory(port);
+
+    expect(outcome).toEqual({ computed: 1, nothingToWorkOut: 1, noStreamsYet: 0, remaining: 0 });
+    expect(history.ridesCounted).toBe(1);
+    expect(history.ridesWithNoLoad).toBe(1);
+    expect(history.ridesWithoutSummary).toBe(0);
+    expect((await backfillLoadSummaries(port)).nothingToWorkOut).toBe(0);
+  });
+
+  it('still offers to work out a ride nobody has looked at yet', async () => {
+    const port = stubAnalysis(OWNER, [unsummarised('later', 0)]);
+
+    const history = await loadFitnessHistory(port);
+
+    expect(history.ridesWithoutSummary).toBe(1);
+    expect(history.ridesWithNoLoad).toBe(0);
   });
 });

@@ -95,6 +95,11 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   sync_item: `INSERT INTO sync_item (seq, athlete_id, kind, item_key, digest, body, received_at, deleted_at) VALUES (1, 'a', 'write-up', 'ride-1', '${'9'.repeat(64)}', x'7b7d', 14, NULL)`,
   history_source: `INSERT INTO history_source VALUES ('a', 'write-up', 'ride-1', '${'9'.repeat(64)}', 'm', 'c', 'indexed', 1, 15)`,
   history_passage: `INSERT INTO history_passage VALUES ('a', 'write-up', 'ride-1', 0, 'A ride.', 'm', 2, 'c', x'0000803f00000000')`,
+  hosted_model_key: `INSERT INTO hosted_model_key VALUES (1, 'a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 18)`,
+  instance_key: `INSERT INTO instance_key VALUES ('0123456789abcdef', 'encryption', x'${'ab'.repeat(32)}', x'000102030405060708090a0b', x'ffee', 1790000000, 19, NULL)`,
+  instance_key_statement: `INSERT INTO instance_key_statement VALUES ('0123456789abcdef', 'key', 19, 172819, '{}', '${'cd'.repeat(64)}')`,
+  instance_key_lease: `INSERT INTO instance_key_lease VALUES ('keys', 'holder', 20)`,
+  sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 
@@ -212,7 +217,7 @@ describe('the migrations (#769)', () => {
    * migration's `down` and `up`, which is more than the fresh file asked of
    * them, not less. Seeding twice adds nothing (`FIXTURE_ROWS`).
    *
-   * ⚠️ **Its timeout is judged against CI under coverage** (CLAUDE.md §4c).
+   * ⚠️ **Its timeout is judged against CI under coverage** (docs/agents/ci.md §4c).
    * Before the walk, on `Tests and coverage report`: 505–993 ms on 34 of 38
    * green runs read on 2026-10-01 (36843950489 to 36882904839), then 1 140,
    * 1 829, 2 775 and 3 293 ms (36849145949, 36881644356, 36877000180,

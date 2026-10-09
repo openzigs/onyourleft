@@ -102,7 +102,7 @@ import {
   type RideController,
   type RideSavePort,
 } from './controller';
-import { gameTrainerFrom } from '../game/trainer-port';
+import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
 
@@ -127,6 +127,7 @@ import type {
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera, stillRoom } from '../camera/testing';
 import { PRESENCE_CHECK_MILLISECONDS } from '../camera/presence';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 const TRAINER = deviceId('kickr');
 const STRAP = deviceId('strap');
@@ -5369,6 +5370,7 @@ describe('#390 — a trainer holding a target at an empty bike', () => {
     // The camera's clock is the bench's, once there is a bench.
     let benchSeconds = (): number => 0;
     const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: scriptedCamera({ luminance: () => stillRoom() }).port,
       schedule: timers.schedule,
       clock: () => benchSeconds() * 1000,
@@ -6247,7 +6249,7 @@ describe('#647 — a refused keep-alive is on the ride’s state, and clears', (
 /**
  * A save port over the REAL store, through the round-trip harness — so what
  * this block asserts is what a fresh read of IndexedDB returns, not what the
- * controller believed it wrote (CLAUDE.md §5). Each ride gets its own id, as
+ * controller believed it wrote (docs/agents/quality-gate.md §5). Each ride gets its own id, as
  * `main.tsx`'s does.
  */
 function storeSavePort(): RideSavePort {
@@ -6316,6 +6318,70 @@ describe('#548 — canStartNewRide, the one rule the screen and the controller s
       canStartNewRide({ phase, stopping: false, storage: 'ok', saveState: 'saved' }),
     );
     expect(phases).toEqual([false, false, false]);
+  });
+});
+
+describe('#1111 — the game HUD’s moving time is the recorder’s, and the saved ride’s', () => {
+  it('climbs while riding, holds through a pause and an auto-pause, and is what the activity saves', async () => {
+    // The port `main.tsx` builds over this controller — the HUD's ONLY source
+    // for the figure (`GameView` reads `rideMovingSeconds()` every frame).
+    let presence: RiderPresence = 'present';
+    const rig = benchWith({
+      rideSave: storeSavePort(),
+      presence: { riderPresence: () => presence },
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    // Nothing recorded yet: no moving time to quote.
+    expect(hud.rideMovingSeconds()).toBeUndefined();
+
+    await rig.controller.start();
+    await ride(rig, 10);
+    const riding = hud.rideMovingSeconds() ?? 0;
+    expect(riding).toBeGreaterThan(0);
+    expect(riding).toBe(rig.controller.getSnapshot().movingSeconds);
+
+    // The rider's Pause: the ride's clock runs on, the moving time does not.
+    await rig.controller.pause();
+    await ride(rig, 8);
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    expect(rig.controller.getSnapshot().elapsedSeconds).toBeGreaterThan(riding);
+    expect(hud.rideMovingSeconds()).toBe(riding);
+
+    await rig.controller.resume();
+    await ride(rig, 6);
+    const resumed = hud.rideMovingSeconds() ?? 0;
+    expect(resumed).toBeGreaterThan(riding);
+
+    // The recorder's own auto-pause (#390's path): nobody on the bike.
+    presence = 'absent';
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 3);
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    const autoPaused = hud.rideMovingSeconds() ?? 0;
+    await ride(rig, 7);
+    expect(hud.rideMovingSeconds()).toBe(autoPaused);
+
+    presence = 'present';
+    await ride(rig, 4);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    const last = hud.rideMovingSeconds() ?? 0;
+    expect(last).toBeGreaterThan(autoPaused);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    // A stopped ride is no longer a ride in progress.
+    expect(hud.rideMovingSeconds()).toBeUndefined();
+
+    // Read back through the store, as the library reads it (docs/agents/quality-gate.md §5):
+    // the saved activity's moving time is the figure the HUD last showed.
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.movingTime).toBe(last);
+    // And it is not the elapsed time — the pauses are what the test is about.
+    expect(saved?.elapsedTime).toBeGreaterThan(last);
+    rig.controller.dispose();
   });
 });
 

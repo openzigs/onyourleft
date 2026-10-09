@@ -13,7 +13,8 @@
  *   letters on the light header, the dark palette's ink on the dark one), it
  *   decoded, and it is the 24 px the header's line was laid out for;
  * - the banner is still named "On Your Left";
- * - About draws exactly one logo, the palette's own, decoded.
+ * - About draws exactly one logo, the palette's own, decoded — and since #972
+ *   it is the only logo in the markup and the only one the page fetched.
  *
  * ⚠️ **The control** takes the switch's dark-palette selectors out through the
  * CSSOM and requires the dark page to draw the LIGHT wordmark — navy letters on
@@ -80,13 +81,25 @@ test.describe('#965 — the owner’s wordmark and logo, in both palettes', () =
       expect(seen.height).toBe(24);
     });
 
-    test(`About draws the ${scheme} logo, and only it`, async ({ page }) => {
+    test(`About draws the ${scheme} logo, and fetches only it — #972`, async ({ page }) => {
+      const requested: string[] = [];
+      page.on('request', (request) => {
+        if (/\/logo-(light|dark)-[^/]+\.webp$/.test(request.url())) requested.push(request.url());
+      });
       await open(page, scheme, '#/about');
       await page.waitForSelector('.oyl-brand-logo__image', { state: 'attached' });
+      // ONE picture in the markup, not two with one hidden (#972).
+      await expect(page.locator('.oyl-brand-logo__image')).toHaveCount(1);
       await loaded(page, '.oyl-brand-logo__image');
       const seen = await drawn(page, '.oyl-brand-logo__image');
       expect(seen.sources).toHaveLength(1);
-      expect(seen.sources[0]).toMatch(new RegExp(`/logo-${scheme}-[^/]+\\.png$`));
+      // The page asked for the palette's file and not the other one. The
+      // service worker's precache is a different client and is not counted:
+      // `page.on('request')` hears this page's requests only.
+      expect(requested).toEqual([
+        expect.stringMatching(new RegExp(`/logo-${scheme}-[^/]+\\.webp$`)),
+      ]);
+      expect(seen.sources[0]).toMatch(new RegExp(`/logo-${scheme}-[^/]+\\.webp$`));
       expect(seen.decoded).toBe(true);
       expect(seen.width).toBeGreaterThan(100);
       expect(seen.width).toBeLessThanOrEqual(256);
@@ -122,7 +135,7 @@ test.describe('#965 — the owner’s wordmark and logo, in both palettes', () =
       }
       return count;
     });
-    expect(removed, 'the dark palette’s brand rules were not found').toBe(3);
+    expect(removed, 'the dark palette’s brand rules were not found').toBe(2);
     // The light picture was `display: none` until now: give the engine the
     // frames it takes to lay it out (and, on a loaded runner, to decode it).
     await expect

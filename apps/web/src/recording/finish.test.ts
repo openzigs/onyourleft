@@ -32,6 +32,8 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { hasNoLoadToWorkOut, needsLoadSummary } from '../analysis/summary';
+
 import { rideName, rideToSave, saveFinishedRide, type RideSaveStore } from './finish';
 
 const ACTIVITY = toActivityId('ride-1');
@@ -309,3 +311,30 @@ function storeOf(): RideSaveStore {
     deleteActivity: () => Promise.resolve(true),
   };
 }
+
+describe('#1084 — a ride with nothing to work a load out from is saved as such', () => {
+  it('reads back, through a fresh handle, as a ride with no load rather than one to work out', async () => {
+    // Ten seconds is shorter than the smoothing window, so no load can ever
+    // come from it: the row carries the marker from the moment it is written.
+    await seedAthletes(harness);
+    await harness.write(async (store) => saveFinishedRide(store, rideToSave(input())));
+    const read = await harness.read(async (store) =>
+      (await store.listActivitySummaries(ATHLETE_A)).find((each) => each.id === ACTIVITY),
+    );
+    expect(read?.loadCoveredTime).toBe(0);
+    expect(read?.effortWeightedPower).toBeUndefined();
+    expect(read?.effortWeightedHeartRate).toBeUndefined();
+    expect(read === undefined ? undefined : hasNoLoadToWorkOut(read)).toBe(true);
+    expect(read === undefined ? undefined : needsLoadSummary(read)).toBe(false);
+  });
+
+  it('saves a ride long enough for a load with the load, not the marker', () => {
+    const long = series({
+      sampleCount: 600,
+      channels: { power: Array.from({ length: 600 }, () => watts(200)) },
+    });
+    const finished = rideToSave(input({ series: long }));
+    expect(finished?.activity.effortWeightedPower).toBe(200);
+    expect(finished?.activity.loadCoveredTime).toBe(600);
+  });
+});

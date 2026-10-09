@@ -53,7 +53,7 @@ describe('the bounds a realistic instance’s tint is drawn inside — #621', ()
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36395959573 (the slower of the two
   // runners, a job over 1 000 s) — 61 % of that default. 10 s is about three times the slowest, so
   // a slow-down is red. It is not a hang guard: this case is synchronous and Vitest cannot
-  // interrupt one, so a genuine hang is caught only by the job’s own stop (CLAUDE.md §4c).
+  // interrupt one, so a genuine hang is caught only by the job’s own stop (docs/agents/ci.md §4c).
   it('keeps every tint inside its bound, and uses most of it', () => {
     for (const bound of [FOLIAGE_TINT, MASONRY_TINT]) {
       let widest = { hueDegrees: 0, saturation: 0, brightness: 0 };

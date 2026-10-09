@@ -34,7 +34,7 @@
 // What it costs, so the next reader knows: a stray *production* import of this
 // module would fail at bundle time rather than at lint or typecheck, because
 // Vite never reaches it today. `pnpm run build` is what catches that, which is
-// why CLAUDE.md §4a says a green typecheck is not a green build.
+// why docs/agents/commands.md §4a says a green typecheck is not a green build.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 

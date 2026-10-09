@@ -27,7 +27,7 @@
 import type { RideWriteUpRecord, RideWriteUpSourceRecord } from '@onyourleft/store';
 
 import { HOSTED_CONSENT } from '../camera/hosted-model';
-import { passedScreen, screenSavedWriteUp, type ScreenedWriteUp } from '../camera/write-up-screen';
+import { passedScreen, screenSavedWriteUp, type ScreenedWriteUp } from '@onyourleft/analysis';
 
 /**
  * ADR 0035 D-9 A, the framing shown above every write-up — the owner's

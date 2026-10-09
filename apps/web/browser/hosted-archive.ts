@@ -26,7 +26,7 @@
  * `scripts/check-doc-links.sh` refuses to resolve an `https:` target: a gate
  * that needs the network is a gate that fails on an aeroplane, in a container
  * behind an egress proxy, and on the morning somebody else's CDN has a bad
- * hour. CLAUDE.md §4a's bare-clone posture is the same posture.
+ * hour. docs/agents/commands.md §4a's bare-clone posture is the same posture.
  *
  * **The cost is the shape this repository distrusts most**: a block that is
  * skipped by default is a block that can rot without anybody noticing, and a

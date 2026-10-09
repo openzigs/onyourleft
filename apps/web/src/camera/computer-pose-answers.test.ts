@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { UntrustedText } from './model-answer';
+import type { UntrustedText } from '@onyourleft/analysis';
 import { sidePoseFromAnswer } from './computer-pose';
 import {
   ISSUE_761_BLANK_ANSWERS,

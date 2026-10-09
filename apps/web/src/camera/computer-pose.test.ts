@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ANALYSIS_PROMPTS, type AnalysisPort, type AnalysisRequest } from './analysis-port';
-import type { AnalysisCall, AnalysisOutcome, UntrustedText } from './model-answer';
+import type { AnalysisCall, AnalysisOutcome, UntrustedText } from '@onyourleft/analysis';
 import {
   COMPUTER_POSE_DEADLINE_MILLISECONDS,
   computerPoseEstimator,

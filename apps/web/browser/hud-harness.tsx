@@ -38,7 +38,7 @@
  * That shipped, and passed every gate this repository has:
  *
  * - `test:a11y` renders the panel into **jsdom**, which performs no layout and
- *   resolves no custom property (CLAUDE.md §4e). It cannot measure a pixel.
+ *   resolves no custom property (docs/agents/accessibility.md §4e). It cannot measure a pixel.
  * - `hud-value-size.test.ts` reads `theme.css` as a **file** and compares type
  *   sizes against constants copied out of a measurement somebody took by hand.
  *   That is a comparison against a previous reading, not against a browser.
@@ -95,7 +95,7 @@
  * ## The live region — #401
  *
  * ⚠️ **The fast suite cannot see the one thing most likely to make the whole
- * announcement epic say nothing.** jsdom loads no stylesheet (CLAUDE.md §4e),
+ * announcement epic say nothing.** jsdom loads no stylesheet (docs/agents/accessibility.md §4e),
  * and no live region announces while it is hidden (Roselli, 2026-01-14) — so
  * a region that `display: none` reached from a stylesheet, a media query or a
  * utility class would pass every `.a11y.test` there is while the rider heard
@@ -415,6 +415,13 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * consequence for what the gate can claim.
  */
 /**
+ * A moving time of 9:59:59 on every panel — #1111. The widest figure a ride
+ * under ten hours shows (`h:mm:ss` from the first second, tabular digits), so
+ * "no value overflows its track" is measured with the new field at its widest.
+ */
+const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
+
+/**
  * The one piece of geometry here that is this file's — see the header.
  *
  * `position: relative` puts the stage in the flow, so six of them stack; the
@@ -443,6 +450,7 @@ function Harness(): JSX.Element {
               state={STATE}
               cadence={{ value: 92, live: true }}
               heartRate={{ value: 168, live: true }}
+              movingSeconds={MOVING_SECONDS}
               chases={[BOT_GAP, ghostChase(outcome)]}
               paused={false}
               onPause={() => undefined}
@@ -464,6 +472,7 @@ function Harness(): JSX.Element {
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
             chases={[BOT_GAP, ghostChase('level')]}
             paused={false}
             onPause={() => undefined}

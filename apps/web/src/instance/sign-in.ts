@@ -34,11 +34,13 @@
 
 import {
   AUTH_PURPOSE,
+  base32UnpaddedDecode,
   deviceStatementBytes,
   LINK_PURPOSE,
   toHex,
   unixSeconds,
   type DevicePurpose,
+  type InstanceKeyTrust,
   type SigningKey,
 } from '@onyourleft/domain';
 
@@ -55,6 +57,54 @@ export interface InstanceAccount {
   readonly origin: string;
   /** The athlete id the INSTANCE gave, which is not the local athlete's. */
   readonly instanceAthleteId: string;
+  /**
+   * The instance identity key's whole fingerprint, 52 base32 characters, as
+   * the card the rider scanned or pasted wrote it (#1190, ADR 0047 D-6) — or
+   * absent: a device that signed in with only an address holds no pin and uses
+   * no sealed route (D-14 Q1). Changed only by the rider confirming a new card.
+   */
+  readonly pin?: string;
+  /** The highest key serial and its id this device has verified, and when it first saw each statement (D-5). */
+  readonly keyTrust?: InstanceKeyTrust;
+  /**
+   * The fingerprint the pinned key ENDORSED for its successor (D-5, D-14 Q8):
+   * the app stops sealing and asks for a card carrying exactly this one.
+   */
+  readonly expectedFingerprint?: string;
+}
+
+/** A 52-character base32 fingerprint that decodes to 32 bytes, or `undefined`. */
+function fingerprintField(value: unknown): string | undefined {
+  return typeof value === 'string' && base32UnpaddedDecode(value, 32) !== undefined
+    ? value
+    : undefined;
+}
+
+const isWholeSeconds = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/** The stored trust, or `undefined` when it is not one this build wrote. */
+function trustField(value: unknown): InstanceKeyTrust | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { highestSerial, highestKeyId, firstVerified } = value as Record<string, unknown>;
+  if (!(highestSerial === null || isWholeSeconds(highestSerial))) return undefined;
+  if (!(highestKeyId === null || typeof highestKeyId === 'string')) return undefined;
+  if (typeof firstVerified !== 'object' || firstVerified === null) return undefined;
+  const seen: Record<string, { at: number; notAfter: number }> = {};
+  for (const [id, entry] of Object.entries(firstVerified)) {
+    const { at, notAfter } = (entry ?? {}) as Record<string, unknown>;
+    if (!isWholeSeconds(at) || !isWholeSeconds(notAfter)) return undefined;
+    seen[id] = { at, notAfter };
+  }
+  return { highestSerial, highestKeyId, firstVerified: seen };
+}
+
+/** Keep `account` on this device, in place of whatever was kept before. */
+export function writeInstanceAccount(
+  storage: InstanceAccountStorage,
+  account: InstanceAccount,
+): void {
+  storage.setItem(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify(account));
 }
 
 /** What this module needs of `localStorage`. */
@@ -75,10 +125,21 @@ export function readInstanceAccount(storage: InstanceAccountStorage): InstanceAc
     return undefined;
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined;
-  const { origin, instanceAthleteId } = parsed as Record<string, unknown>;
-  return typeof origin === 'string' && typeof instanceAthleteId === 'string'
-    ? { origin, instanceAthleteId }
-    : undefined;
+  const { origin, instanceAthleteId, pin, keyTrust, expectedFingerprint } = parsed as Record<
+    string,
+    unknown
+  >;
+  if (typeof origin !== 'string' || typeof instanceAthleteId !== 'string') return undefined;
+  const heldPin = fingerprintField(pin);
+  const trust = trustField(keyTrust);
+  const expected = fingerprintField(expectedFingerprint);
+  return {
+    origin,
+    instanceAthleteId,
+    ...(heldPin === undefined ? {} : { pin: heldPin }),
+    ...(heldPin === undefined || trust === undefined ? {} : { keyTrust: trust }),
+    ...(heldPin === undefined || expected === undefined ? {} : { expectedFingerprint: expected }),
+  };
 }
 
 /** Why signing in did not work: the instance's own error code, or a transport failure. */
@@ -100,6 +161,12 @@ export interface SignInDependencies {
   readonly signingKey: () => Promise<SigningKey>;
   /** Unix milliseconds. */
   readonly now?: () => number;
+  /**
+   * The pin to keep with the account, from a card this sign-in was verified
+   * against (#1190). Without it a same-origin pin already held is kept; a new
+   * origin's account holds none.
+   */
+  readonly pin?: { readonly fingerprint: string; readonly keyTrust: InstanceKeyTrust };
 }
 
 export interface SignedIn {
@@ -158,11 +225,24 @@ export async function signInToInstance(
   ) {
     throw new InstanceSignInError(codeOf(answer.body));
   }
-  const account: InstanceAccount = {
+  const held = readInstanceAccount(dependencies.storage);
+  const kept =
+    dependencies.pin !== undefined
+      ? { pin: dependencies.pin.fingerprint, keyTrust: dependencies.pin.keyTrust }
+      : held?.origin === dependencies.origin && held.pin !== undefined
+        ? {
+            pin: held.pin,
+            ...(held.keyTrust === undefined ? {} : { keyTrust: held.keyTrust }),
+            ...(held.expectedFingerprint === undefined
+              ? {}
+              : { expectedFingerprint: held.expectedFingerprint }),
+          }
+        : {};
+  writeInstanceAccount(dependencies.storage, {
     origin: dependencies.origin,
     instanceAthleteId: body.athleteId,
-  };
-  dependencies.storage.setItem(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify(account));
+    ...kept,
+  });
   return {
     sessionToken: body.sessionToken,
     instanceAthleteId: body.athleteId,

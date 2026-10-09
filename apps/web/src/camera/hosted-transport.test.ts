@@ -25,10 +25,11 @@ import {
   type HostedSend,
 } from './hosted-transport';
 import { cleanFrameBytes } from './testing';
-import type { StepRequest } from '../ride-analysis/model-step-port';
-import { sealStep, type SealedStep } from '../ride-analysis/sealed-step';
-import { PLANTED_GUARD, patternsOnlyGuard } from '../ride-analysis/personal-details-testing';
-import { PATTERNS_ONLY, type MaskingGuard } from '../ride-analysis/hosted-mask';
+import type { StepRequest } from '@onyourleft/analysis';
+import type { SealedStep } from '@onyourleft/analysis';
+import { sealStep } from '@onyourleft/analysis/testing';
+import { PLANTED_GUARD, patternsOnlyGuard } from '@onyourleft/analysis/testing';
+import { PATTERNS_ONLY, type MaskingGuard } from '@onyourleft/analysis';
 
 const KEY = 'fixture-hosted-key-DO-NOT-LEAK-0123456789';
 
@@ -157,7 +158,7 @@ describe('a picture cannot reach it', () => {
     const { send } = recordingSend(() => modelReply('ready'));
     const port = hostedModelPort(saved(), { guard: patternsOnlyGuard, send });
     // The TYPE half. Deleting the excess property turns this directive into
-    // `TS2578: Unused '@ts-expect-error'`, which is CLAUDE.md §5's mutation.
+    // `TS2578: Unused '@ts-expect-error'`, which is docs/agents/quality-gate.md §5's mutation.
     // @ts-expect-error — a hosted request is a question name and nothing else.
     const call = port?.sendHostedQuestion({ question: 'connection-check', frame });
     call?.cancel();
@@ -388,7 +389,7 @@ describe('only a step the runner sealed is sent (#803)', () => {
       data: undefined as unknown as ImageData,
     };
     // The TYPE half. Each directive goes `TS2578: Unused '@ts-expect-error'`
-    // if `HostedRequest` stops taking only a sealed step (CLAUDE.md §5).
+    // if `HostedRequest` stops taking only a sealed step (docs/agents/quality-gate.md §5).
     // @ts-expect-error — a step the caller wrote is not a sealed step.
     port?.sendHostedQuestion({ step: STEP }).cancel();
     // @ts-expect-error — nor is a caller's own string.

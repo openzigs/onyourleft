@@ -17,11 +17,12 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
-    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test --project chromium --project game",
+    "test:browser": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --workers 3 --global-timeout 720000; chromium=$?; playwright test --project game --global-timeout 85000 --output browser/dist/test-results/game; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]",
     "test:browser:nightly": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
+    "@onyourleft/analysis": "workspace:*",
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
     "@onyourleft/mobile": "workspace:*",
@@ -31,9 +32,9 @@
     "@onyourleft/store": "workspace:*",
     "@radix-ui/react-alert-dialog": "1.1.23",
     "jsqr": "1.4.0",
-    "lucide-react": "1.48.0",
-    "maplibre-gl": "6.11.2",
-    "motion": "13.5.1",
+    "lucide-react": "1.52.0",
+    "maplibre-gl": "6.12.0",
+    "motion": "14.0.0",
     "pmtiles": "4.5.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -52,10 +53,10 @@
     "@vitejs/plugin-react": "6.1.1",
     "fake-indexeddb": "6.2.5",
     "fit-file-parser": "6.1.2",
-    "jsdom": "30.0.1",
+    "jsdom": "30.1.2",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
-    "vite": "8.3.0",
+    "vite": "8.3.2",
     "vitest": "4.1.11"
   }
 }

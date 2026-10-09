@@ -272,7 +272,7 @@ FENCE='```'
 DOLLAR='$'
 
 # A minimal well-formed Apache-2.0 leaf package.
-# The four sections CLAUDE.md section 7 requires, which ADR004 checks for
+# The four sections docs/agents/conventions.md section 7 requires, which ADR004 checks for
 # (#416). Fourteen lines, ending in a blank one.
 #
 # Every fixture below that has to pass carries them, because ADR004 reads every
@@ -367,7 +367,7 @@ rm "${fixture_root}/packages/domain/LICENSE"
 assert_violation "leaf package without its own LICENSE is rejected" LIC004 \
   "packages/domain: no LICENSE file"
 
-# Both trees. CLAUDE.md section 3 says "each package" carries its own LICENSE and
+# Both trees. docs/agents/licence-boundary.md section 3 says "each package" carries its own LICENSE and
 # means apps/ too; until this case existed, deleting apps/web/LICENSE outright
 # failed nothing at all.
 new_fixture
@@ -916,7 +916,7 @@ new_fixture
 } > "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_clean "balanced fences are not reported, however many"
 
-# --- ADR004: the four sections CLAUDE.md section 7 requires (#416) -----------
+# --- ADR004: the four sections docs/agents/conventions.md section 7 requires (#416) -----------
 #
 # The rule exists because that sentence was enforced by nothing: deleting
 # `- **Status**: Accepted` from a real ADR left the checker reporting clean at
@@ -1120,7 +1120,7 @@ assert_violation "two differently-named spikes at one number are rejected" SPIKE
 # `find | sort`, so the file it reaches second is whichever slug sorts later,
 # which carries no information at all about which one is new. A message naming
 # one file would be wrong about half the time -- and its wrong half would name
-# the MERGED spike, which CLAUDE.md section 7 forbids renumbering outright.
+# the MERGED spike, which docs/agents/conventions.md section 7 forbids renumbering outright.
 # Twice, so that neither sort order is the one that happens to pass.
 
 new_fixture
@@ -2961,6 +2961,69 @@ write_script \
   "n=0; printf '%s' \"\${#n}\" ${P} grep -c x || :" \
   "printf '%s' a ${P} grep -v q || :"
 assert_clean "a here-string, a comment, \`|| grep -q\`, and a grep without -q all pass"
+
+# --- AGENT001 / AGENT002: the root CLAUDE.md is an index ----------------------
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+printf '# CLAUDE.md\n\n| [docs/agents/ci.md](docs/agents/ci.md) | CI |\n' > "${fixture_root}/CLAUDE.md"
+assert_clean "a topic file the index links passes"
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+printf '# Topic\n' > "${fixture_root}/docs/agents/orphan.md"
+printf '# CLAUDE.md\n\n[ci](docs/agents/ci.md), and docs/agents/orphan.md in prose only\n' > "${fixture_root}/CLAUDE.md"
+assert_violation "a topic file the index does not LINK is AGENT001" AGENT001 \
+  "docs/agents/orphan.md: not linked from CLAUDE.md"
+
+new_fixture
+mkdir -p "${fixture_root}/docs/agents"
+printf '# Topic\n' > "${fixture_root}/docs/agents/ci.md"
+assert_violation "a topic file with no index at all is AGENT001" AGENT001 \
+  "docs/agents/ci.md: there is no CLAUDE.md"
+
+new_fixture
+head -c 15360 /dev/zero | tr '\0' 'x' > "${fixture_root}/CLAUDE.md"
+assert_clean "an index of exactly 15 KiB passes"
+
+new_fixture
+head -c 15361 /dev/zero | tr '\0' 'x' > "${fixture_root}/CLAUDE.md"
+assert_violation "an index one byte over 15 KiB is AGENT002" AGENT002 \
+  "CLAUDE.md: 15361 bytes"
+
+# AGENT003 (#1170): an area CLAUDE.md is loaded whenever a session works
+# beneath it, so each has a budget of its own -- anywhere below the root, at
+# any depth, and not inside node_modules, which is not ours to keep short.
+new_fixture
+mkdir -p "${fixture_root}/apps/web" "${fixture_root}/packages"
+head -c 8192 /dev/zero | tr '\0' 'x' > "${fixture_root}/apps/web/CLAUDE.md"
+head -c 8192 /dev/zero | tr '\0' 'x' > "${fixture_root}/packages/CLAUDE.md"
+assert_clean "area CLAUDE.md files of exactly 8 KiB pass"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/web"
+head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/apps/web/CLAUDE.md"
+assert_violation "an area CLAUDE.md one byte over 8 KiB is AGENT003" AGENT003 \
+  "apps/web/CLAUDE.md: 8193 bytes"
+
+new_fixture
+mkdir -p "${fixture_root}/packages/sensors/web-bluetooth"
+head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/packages/sensors/web-bluetooth/CLAUDE.md"
+assert_violation "a NARROWER area CLAUDE.md under packages/ is held to 8 KiB too" AGENT003 \
+  "packages/sensors/web-bluetooth/CLAUDE.md: 8193 bytes"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/web/node_modules/somebody"
+head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/apps/web/node_modules/somebody/CLAUDE.md"
+assert_clean "a CLAUDE.md inside node_modules is not an area file"
+
+new_fixture
+mkdir -p "${fixture_root}/scripts/fixtures"
+head -c 8193 /dev/zero | tr '\0' 'x' > "${fixture_root}/scripts/fixtures/CLAUDE.md"
+assert_violation "a CLAUDE.md outside apps/ and packages/ is held to 8 KiB too" AGENT003 \
+  "scripts/fixtures/CLAUDE.md: 8193 bytes"
 
 # --- The real repository is NOT checked here (#1076) ---------------------------
 #

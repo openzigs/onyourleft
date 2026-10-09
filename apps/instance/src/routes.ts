@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { IDENTITY_ROUTES } from './auth/routes.ts';
+import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
 import { ROOM_ROUTES } from './rooms/routes.ts';
+import { SEALED_ROUTES } from './sealed/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
@@ -193,6 +195,8 @@ export const ROUTES: readonly Route[] = [
       });
     },
   },
+  ...INSTANCE_KEY_ROUTES,
+  ...SEALED_ROUTES,
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,

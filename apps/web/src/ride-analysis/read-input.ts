@@ -19,8 +19,8 @@ import type {
   StreamSet,
 } from '@onyourleft/store';
 
-import type { SideSessionSummary } from '../camera/side-session-summary';
-import { rideAnalysisInput, type RideAnalysisInput } from './input';
+import type { SideSessionSummary } from '@onyourleft/analysis';
+import { rideAnalysisInput, type RideAnalysisInput } from '@onyourleft/analysis';
 
 /** What reading a ride's input reads. `ActivityStore` satisfies it as it stands. */
 export interface RideInputStore {

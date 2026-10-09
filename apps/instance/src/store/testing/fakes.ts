@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Deliberately broken stores, one per cause of `CLAUDE.md` §5's defect shape
+ * Deliberately broken stores, one per cause of `docs/agents/quality-gate.md` §5's defect shape
  * (#769). Each reports success and each loses the write a different way; the
  * round trip in `index.ts` must go RED against every one of them
  * (`harness.test.ts`), which is what shows it can.

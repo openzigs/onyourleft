@@ -51,21 +51,22 @@ import { SOURCE_ROOT } from '../camera/import-walk-testing';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import { stripComments } from '../units/no-inline-units';
-import { readMaskingGuard } from './hosted-mask';
+import { readMaskingGuard } from '@onyourleft/analysis';
 import { hostedStepPort } from './hosted-step';
-import type { RideAnalysisInput } from './input';
+import type { RideAnalysisInput } from '@onyourleft/analysis';
 import { modelServer, STILL_CLOCK } from './model-server-testing';
-import type { ModelStepPort, StepRequest } from './model-step-port';
+import type { ModelStepPort, StepRequest } from '@onyourleft/analysis';
 import {
   personalDetailFaults,
   PLANTED_DETAILS,
   PLANTED_GUARD,
   plantedFreeText,
   plantedVariants,
-} from './personal-details-testing';
+} from '@onyourleft/analysis/testing';
 import { createRideAnalysis, PREVIEW_FAILURE_TEXT } from './ride-analysis';
-import { runAnalysis } from './runner';
-import { CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from './template';
+import { runAnalysis } from '@onyourleft/analysis';
+import { CURRENT_ANALYSIS_TEMPLATE, type AnalysisTemplate } from '@onyourleft/analysis';
+import { browserSecureWindow } from '../camera/secure-window-testing';
 
 type Body = Readonly<Record<string, unknown>>;
 
@@ -120,6 +121,7 @@ function hostedOver(send: (url: string, init: RequestInit) => Promise<Response>)
     key: 'fixture-hosted-key',
   }).model;
   const camera = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
     hosted: () =>

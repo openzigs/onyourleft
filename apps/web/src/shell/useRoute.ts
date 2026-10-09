@@ -7,7 +7,7 @@
  * consequence here is that the browser already does the navigating, so there is
  * nothing left for a router to do beyond telling React that the fragment moved.
  * `react-router` is listed in ADR 0005 and is not installed
- * (CLAUDE.md §4b); adding it to render four static views would be a dependency,
+ * (docs/agents/project-state.md §4b); adding it to render four static views would be a dependency,
  * a licence check and a lockfile entry in exchange for the twenty lines below.
  * The decision is recorded in the pull request for #48 and is a cheap one to
  * reverse — `useRoute()` is the only thing the shell imports.

@@ -19,7 +19,7 @@
  *
  * In every case the unit was **correct, unit-tested, typechecked, linted and
  * shipped**. The defect was only ever in the wiring, and every gate here looks
- * *inside* a unit: CLAUDE.md §5's mutation requirement asks that a test fail
+ * *inside* a unit: docs/agents/quality-gate.md §5's mutation requirement asks that a test fail
  * without the change, and `advanceBot` had exactly that; the typechecker cannot
  * help, because ⚠️ **an exported function nobody calls and an optional
  * parameter nobody supplies are both perfectly well typed**; `no-unused-vars`
@@ -138,7 +138,7 @@
  * declaration: on the tree #438 was measured on, it found three.
  *
  * The success line counts the two populations apart. The options #438 weighed,
- * and why a sibling module outside `WATCHED_PREFIXES` lost, are CLAUDE.md §4j.
+ * and why a sibling module outside `WATCHED_PREFIXES` lost, are docs/agents/wiring-gate.md §4j.
  *
  * Usage: node scripts/check-wiring.mjs [--root <dir>]
  */
@@ -151,7 +151,7 @@ import ts from 'typescript';
  * Where the defects of #278 were, and where a new one would be.
  *
  * The client's own seams, not the libraries underneath. A library export with
- * no consumer is a much larger and much noisier question — CLAUDE.md §4b
+ * no consumer is a much larger and much noisier question — docs/agents/project-state.md §4b
  * records that `packages/physics` has no production consumer for most of what
  * it exports, by design — and a rule reporting those would be the
  * allowlist-that-grows this one exists to avoid. ⚠️ The cost is stated rather
@@ -187,6 +187,18 @@ const WATCHED_PREFIXES = [
 const WATCHED_SUFFIX = /-port\.ts$/;
 
 /**
+ * Where a `*-port.ts` is watched: under `apps/`, and — since #1094 moved the
+ * ride analysis's `model-step-port.ts` out of `apps/web` — in
+ * `packages/analysis`, so the move took nothing out of this gate's sight.
+ * Not `packages/` at large, for the reason `TRAINER_COMMAND_SEAM` gives.
+ *
+ * ⚠️ **Asserted to exist**, as `WATCHED_PREFIXES` is ({@link missingPortRoots},
+ * #1184's review): renaming `packages/analysis` would otherwise take its ports
+ * out of the watched set with the success line none the wiser.
+ */
+const PORT_ROOTS = ['apps/', 'packages/analysis/'];
+
+/**
  * The trainer-command seam: the one place this gate reaches into `packages/`.
  *
  * ## Why the limit above could not simply stand — #363
@@ -206,7 +218,7 @@ const WATCHED_SUFFIX = /-port\.ts$/;
  * WIRE002 to every non-test source under `packages/` reports **171 findings**
  * over 180 files — 39 modules nothing imports (the whole of
  * `packages/fit/tools/`, the #44 simulator, seven `vitest.config.ts`) and 132
- * exports nothing names. That is the noise CLAUDE.md §4b records as *by
+ * exports nothing names. That is the noise docs/agents/project-state.md §4b records as *by
  * design*, it is not a population anybody can clear, and a rule nobody can
  * clear gets an allowlist — which is how a rule stops firing.
  *
@@ -673,7 +685,8 @@ export function isWatched(relativePath) {
   if (!/\.tsx?$/.test(relativePath) || isTestSupport(relativePath)) return false;
   return (
     WATCHED_PREFIXES.some((prefix) => relativePath.startsWith(prefix)) ||
-    (relativePath.startsWith('apps/') && WATCHED_SUFFIX.test(relativePath)) ||
+    (PORT_ROOTS.some((root) => relativePath.startsWith(root)) &&
+      WATCHED_SUFFIX.test(relativePath)) ||
     TRAINER_COMMAND_SEAM.includes(relativePath)
   );
 }
@@ -682,7 +695,8 @@ export function isWatched(relativePath) {
  * Whether a watched file's **interface methods** are checked as well as its
  * exports — WIRE003.
  *
- * A `*-port.ts` under `apps/`, and every module of the trainer-command seam.
+ * A `*-port.ts` under `apps/` or `packages/analysis/`, and every module of the
+ * trainer-command seam.
  * The second is what makes #362 reportable at all: both of #90's halves were
  * *imported* by production code through the protocol barrel, so WIRE001 was
  * silent and WIRE002 was silent, and the only rule that could see it was the
@@ -700,13 +714,26 @@ function hasPortMethods(relativePath) {
  * `riding/` and the walk below simply finds nothing under the old prefix: every
  * rule then passes over an empty population and the success line says every
  * watched seam is reachable, having read none. That is #142's shape exactly
- * (CLAUDE.md §4e, where a directory-name filter silently dropped a third of the
+ * (docs/agents/accessibility.md §4e, where a directory-name filter silently dropped a third of the
  * accessibility suite), one gate later — so a prefix whose directory is not
  * there is a failure, and moving a watched directory means editing this file in
  * the same commit.
  */
 export function missingPrefixes(root) {
   return WATCHED_PREFIXES.filter((prefix) => {
+    const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
+    return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
+/**
+ * The entries of {@link PORT_ROOTS} that name no directory in `root` — a
+ * hard failure for {@link missingPrefixes}' reason (#1184's review): a root
+ * renamed away leaves every `*-port.ts` under it unwatched, and the gate
+ * green over a population it never read.
+ */
+export function missingPortRoots(root) {
+  return PORT_ROOTS.filter((prefix) => {
     const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
     return !existsSync(dir) || !statSync(dir).isDirectory();
   });
@@ -977,6 +1004,14 @@ export function wiringProblems(root) {
         'mode #142 shipped. Move the prefix with the directory.',
     );
   }
+  const missingRoots = missingPortRoots(root);
+  if (missingRoots.length > 0) {
+    throw new Error(
+      `port root missing: ${missingRoots.join(', ')}. PORT_ROOTS names it and nothing on disk ` +
+        'does, so every *-port.ts that moved with it would go unwatched — the failure mode #142 ' +
+        'shipped. Move the root with the directory.',
+    );
+  }
   const missingSeam = missingSeamFiles(root);
   if (missingSeam.length > 0 && missingSeam.length < TRAINER_COMMAND_SEAM.length) {
     throw new Error(
@@ -1180,7 +1215,7 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
   if (result.problems.length > 0) {
     console.error('check-wiring: something is built, tested, and wired to nothing.\n');
     for (const problem of result.problems) console.error(`  - ${problem}`);
-    console.error('\nSee CLAUDE.md §4j and scripts/check-wiring.mjs §Limits.');
+    console.error('\nSee docs/agents/wiring-gate.md §4j and scripts/check-wiring.mjs §Limits.');
     process.exit(1);
   }
   // ⚠️ Both counts, and the watched one first. A success line naming only the

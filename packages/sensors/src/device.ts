@@ -15,7 +15,7 @@
  *
  * That is why `DeviceIdentity` pairs the id with the `TransportId` that issued
  * it, and why `sameDevice` compares **both**. Comparing on the id alone is the
- * defect CLAUDE.md §5 describes in its other form — a query matching on an
+ * defect docs/agents/quality-gate.md §5 describes in its other form — a query matching on an
  * entity id without the column that scopes it. It passes every single-platform
  * test in the suite, because within one platform the transport is always the
  * same.

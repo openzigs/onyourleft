@@ -26,6 +26,7 @@ import {
 import type { SideLinkCondition } from './side-camera-link-port';
 import { SidePictureTimings } from './side-picture-timings';
 import { manualSchedule, scriptedCamera, scriptedLink, virtualTime } from './testing';
+import { browserSecureWindow } from './secure-window-testing';
 
 /** A session over a real controller, with consent already given. */
 async function filming(options: { readonly condition?: SideLinkCondition } = {}): Promise<{
@@ -37,6 +38,7 @@ async function filming(options: { readonly condition?: SideLinkCondition } = {})
 }> {
   const camera = scriptedCamera();
   const controller = new CameraController({
+    secureWindow: browserSecureWindow(),
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
@@ -163,6 +165,7 @@ describe('the 30 seconds after the link is lost', () => {
   it('applies while framing too, because the camera is on then as well', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -217,6 +220,7 @@ describe('who can start and stop it', () => {
   it('films only when the tablet says start, and only from framing', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -279,6 +283,7 @@ describe('who can start and stop it', () => {
   it('turns a camera that arrives after the session ended straight back off', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -298,6 +303,7 @@ describe('who can start and stop it', () => {
     // told the tablet so, with nothing left listening to stop it.
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -316,6 +322,7 @@ describe('who can start and stop it', () => {
   it('opens no camera the rider has not agreed to', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -329,6 +336,7 @@ describe('who can start and stop it', () => {
   it('works unpaired for framing, with no countdown and nothing to report to', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -402,6 +410,7 @@ describe('taking a link after the camera is on — #529', () => {
   async function framingUnpaired() {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -482,6 +491,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
   it('takes none while framing, before the tablet says start', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -528,6 +538,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
   it('takes one picture at a time: a slow one makes the next ticks wait, not queue', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -566,6 +577,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
   it('times each picture from the start of filming, not from when the phone was switched on', async () => {
     const camera = scriptedCamera();
     const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
@@ -625,6 +637,7 @@ describe('every picture tick is recorded — #1112', () => {
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
+      secureWindow: browserSecureWindow(),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     let held: Promise<void> | undefined;
@@ -748,6 +761,7 @@ describe('every picture tick is recorded — #1112', () => {
     const controller = new CameraController({
       port: camera.port,
       schedule: manualSchedule().schedule,
+      secureWindow: browserSecureWindow(),
     });
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     const link = scriptedLink();

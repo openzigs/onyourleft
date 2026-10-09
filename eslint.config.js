@@ -88,7 +88,7 @@ const spdxHeader = (content) => ({
  * bare specifier**, never a relative one, so `./x` and `../x` cannot be a
  * builtin under any resolution. A bare `import 'constants'` is still an error,
  * and so is `node:constants` through the group above — checked with a probe
- * file, both spellings, which is the rule CLAUDE.md §4d states for anything
+ * file, both spellings, which is the rule docs/agents/lint-boundaries.md §4d states for anything
  * touching these gates.
  *
  * ⚠️ The slashless negations alone were **one axis short** (#163): gitignore
@@ -170,6 +170,25 @@ const BLE_LIBRARY_IMPORT_PATTERNS = [
 ];
 
 /**
+ * What `packages/analysis` may not name on top of the shared list (ADR 0046
+ * D-5, #1094): the store, which carries Dexie and the DOM lib, and any model
+ * SDK or schema library — the package holds the rules, the instance holds the
+ * engine that calls a model.
+ */
+const ANALYSIS_IMPORT_PATTERNS = [
+  {
+    group: ['@onyourleft/store', '@onyourleft/store/*'],
+    message:
+      'packages/analysis does not depend on the store (ADR 0046 D-5): restate the fields it reads as a structural type, as input.ts and hosted-mask.ts do.',
+  },
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*', 'zod', 'zod/*', 'openai', '@anthropic-ai/*'],
+    message:
+      'No model SDK or schema library enters packages/analysis (ADR 0046 D-5): the package holds the rules, the instance holds the engine.',
+  },
+];
+
+/**
  * Globals a platform-isolated package may not name.
  *
  * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
@@ -234,6 +253,60 @@ const platformIsolation = (extraPatterns = []) => ({
 });
 
 /**
+ * The AI SDK, by name (#1096, ADR 0046 D-8): `apps/instance/src/analysis/model.ts`
+ * is the ONE module in the repository that may import it — and its own test,
+ * which can show the gateway guard holds only by calling the SDK. See the
+ * block that uses this.
+ */
+const AI_SDK_IMPORT_PATTERNS = [
+  {
+    group: ['ai', 'ai/*', '@ai-sdk/*'],
+    message:
+      'Only apps/instance/src/analysis/model.ts may import the AI SDK (#1096, ADR 0046 D-8). Write against the ModelConnection port in model-turn.ts.',
+  },
+];
+
+/**
+ * HPKE's test support, by name (#1188, ADR 0047 D-3). `hpke-testing.ts` is
+ * the one module that lets a caller choose an HPKE ephemeral key — RFC 9180's
+ * vectors need it, and a production sender that reused one would give every
+ * request to an instance key one shared secret. So no module may import it
+ * but a test or test support (the block after the AI SDK's lifts it for
+ * those). `src/index.ts` does not export it either, which
+ * `packages/domain/src/hpke/hpke-surface.test.ts` holds with
+ * `@ts-expect-error`.
+ */
+const HPKE_TESTING_IMPORT_PATTERNS = [
+  {
+    group: [
+      '@onyourleft/domain/hpke-testing',
+      'hpke-testing',
+      'hpke-testing.ts',
+      '**/hpke-testing',
+    ],
+    message:
+      'HPKE test support (an injectable ephemeral key) is for tests only (#1188, ADR 0047 D-3). Use setupBaseSender from @onyourleft/domain.',
+  },
+  {
+    // `hpke.ts` exports `setupSender` and `encap`, which take an ephemeral
+    // key. Only `src/index.ts` (which re-exports the safe names),
+    // `hpke-testing.ts` and tests may name the module (#1196 review).
+    group: ['**/hpke/hpke', '**/hpke/hpke.ts', './hpke', './hpke.ts'],
+    message:
+      'hpke.ts exports the ephemeral-key-taking core (setupSender, encap). Import setupBaseSender from @onyourleft/domain instead (#1188, ADR 0047 D-3).',
+  },
+];
+
+/** Where a test or test support lives, for the rules such files are exempt from. */
+const TEST_AND_TEST_SUPPORT_FILES = [
+  '**/*.test.{ts,tsx}',
+  '**/*.spec.ts',
+  '**/*-testing.ts',
+  '**/testing/**/*.{ts,tsx}',
+  '**/testing.ts',
+];
+
+/**
  * The instance's SQL driver and query builder, by name (#769). Only
  * `apps/instance/src/store/` may import them — see the block that uses this.
  */
@@ -253,6 +326,8 @@ const SQL_DRIVER_IMPORT_PATTERNS = [
  */
 const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/main.ts',
+  // The AI SDK's one module (#1096, ADR 0046 D-8): the SDK is a Node package.
+  'apps/instance/src/analysis/model.ts',
   'apps/instance/src/serve.ts',
   'apps/instance/src/node-listener.ts',
   'apps/instance/src/operator/cli.ts',
@@ -440,6 +515,58 @@ export default tseslint.config(
     },
   },
 
+  // --- The AI SDK is named in ONE module (#1096, ADR 0046 D-8) --------------
+  // The core `no-restricted-imports`, not typescript-eslint's, because the
+  // blocks below set that one per directory and flat config keeps the last
+  // setting of a rule: on the core rule this block is the only setting except
+  // `packages/sensors/protocol`'s, which carries these patterns in its own list.
+  // Everywhere — `packages/`, `apps/web`, `apps/mobile`, the rest of
+  // `apps/instance`, the scripts — but the one module and its test. Probed: an
+  // `import { generateText } from 'ai'` in `analysis/agent.ts` is an error.
+  //
+  // ⚠️ Since #1188 the same rule also carries HPKE_TESTING_IMPORT_PATTERNS, so
+  // three blocks set it: this one (both lists), the next (tests and test
+  // support: the AI SDK's list alone) and `model.ts`'s (HPKE's alone).
+  // Probed: `import … from '@onyourleft/domain/hpke-testing'` in
+  // `apps/instance/src/auth/crypto.ts` is an error, in `hpke.test.ts` it is not.
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [...AI_SDK_IMPORT_PATTERNS, ...HPKE_TESTING_IMPORT_PATTERNS] },
+      ],
+    },
+  },
+  {
+    files: TEST_AND_TEST_SUPPORT_FILES,
+    ignores: ['apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  // The three non-test modules allowed to name `hpke/hpke` (#1196 review, #1191).
+  {
+    // `sealed/sealed.ts` (#1191) composes the public `setupBaseSender`,
+    // `setupBaseRecipient`, `sealReply` and `openReply`, and names neither
+    // `setupSender` nor `encap`.
+    files: [
+      'packages/domain/src/index.ts',
+      'packages/domain/src/hpke/hpke-testing.ts',
+      'packages/domain/src/sealed/sealed.ts',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
+    },
+  },
+  {
+    files: ['apps/instance/src/analysis/model.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: HPKE_TESTING_IMPORT_PATTERNS }],
+    },
+  },
+
   // --- packages/domain depends on no platform API at all ---------------------
   // `.tsx` is included even though a package that renders is already a design
   // error: the header block above already covers `packages/**/*.{ts,tsx}`, and
@@ -478,7 +605,7 @@ export default tseslint.config(
   // paragraph replaces asked for. `vitest.config.ts` is named explicitly
   // because it is part of the platform-free program's neighbourhood and a
   // `defineConfig` import there is precisely how the closure was broken once
-  // before (CLAUDE.md section 4d).
+  // before (docs/agents/lint-boundaries.md section 4d).
   {
     files: ['packages/sensors/src/**/*.{ts,tsx}', 'packages/sensors/vitest.config.ts'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
@@ -519,6 +646,10 @@ export default tseslint.config(
         'error',
         {
           patterns: [
+            // #1096: this block replaces the AI SDK block above for these
+            // files, so it carries its patterns — and #1188's.
+            ...AI_SDK_IMPORT_PATTERNS,
+            ...HPKE_TESTING_IMPORT_PATTERNS,
             {
               group: ['**/web-bluetooth/**', '../web-bluetooth/*', '../../web-bluetooth/*'],
               message:
@@ -575,6 +706,27 @@ export default tseslint.config(
   {
     files: ['packages/protocol/**/*.{ts,tsx}'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- packages/analysis is the write-up's core, and platform-free -----------
+  // #1094, ADR 0046 D-5. The runner, the templates, the screen and the mask run
+  // on a rider's device and on their instance, so they take packages/domain's
+  // isolation; `packages/analysis/tsconfig.platform-free.json` is the closure
+  // and this is the fast duplicate. On top of it: the store (Dexie and the DOM
+  // lib — the shapes the core reads are restated structurally) and any model
+  // SDK, which belongs to the instance's engine and never to the rules (D-5).
+  // The tests run under Node and read files, so they take only the second
+  // half, as the Durable Object adapter's tests do above.
+  {
+    files: ['packages/analysis/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...ANALYSIS_IMPORT_PATTERNS]),
+  },
+  {
+    files: ['packages/analysis/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
+    },
   },
 
   // --- packages/physics is pure computation, and pure means deterministic -----
@@ -881,7 +1033,7 @@ export default tseslint.config(
   // --- Device tooling --------------------------------------------------------
   // `apps/mobile/tools/` is the same case one directory over and is deliberately
   // NOT under `scripts/`: it needs `adb` and a physical phone, so it could never
-  // be a bare-clone repository check (#410, CLAUDE.md §2). It runs on Node, and
+  // be a bare-clone repository check (#410, docs/agents/layout.md §2). It runs on Node, and
   // it needs two globals `scripts/` does not — `fetch` and `WebSocket` are how
   // it speaks the DevTools protocol through an adb forward.
   //

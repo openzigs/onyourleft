@@ -241,6 +241,45 @@ export {
   LINK_PURPOSE,
   RECOVER_PURPOSE,
 } from './identity/device-statement';
+export type {
+  InstanceIdentityRotation,
+  InstanceKeyRole,
+  InstanceKeyStatement,
+} from './identity/instance-key-statement';
+export {
+  base32Unpadded,
+  INSTANCE_CARD_PREFIX,
+  INSTANCE_FINGERPRINT_BASE32_LENGTH,
+  INSTANCE_IDENTITY_FINGERPRINT_LABEL,
+  INSTANCE_IDENTITY_ROTATION_PURPOSE,
+  INSTANCE_KEY_ID_BYTES,
+  INSTANCE_KEY_PURPOSE,
+  INSTANCE_KEY_WRAP_PURPOSE,
+  instanceCard,
+  instanceIdentityFingerprint,
+  instanceIdentityRotationBytes,
+  instanceKeyId,
+  instanceKeyStatementBytes,
+  instanceKeyWrapAad,
+  parseInstanceKeyStatement,
+} from './identity/instance-key-statement';
+export type {
+  InstanceCardParse,
+  InstanceCardProblem,
+  InstanceCardRead,
+  InstanceKeysVerdict,
+  InstanceKeyTrust,
+  JudgeInstanceKeysInput,
+} from './identity/instance-pin';
+export {
+  base32UnpaddedDecode,
+  fingerprintsEqual,
+  judgeInstanceKeys,
+  NO_KEY_TRUST,
+  parseInstanceCard,
+  STATEMENT_TRUST_CAP_SECONDS,
+  statementId,
+} from './identity/instance-pin';
 export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
 export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 
@@ -281,6 +320,100 @@ export {
   verifyActivityRecord,
   verifyRecordSignature,
 } from './identity/record';
+
+// --- HPKE between the app and its instance (#1188, ADR 0047) ---------------
+//
+// RFC 9180, suite X25519 / HKDF-SHA256 / AES-128-GCM, `mode_base`, and ADR
+// 0047 D-2's reply keys — written once against a six-member primitives port
+// (`hpke/primitives.ts`) that `packages/store` and `apps/instance` implement
+// over `crypto.subtle`. `hpke/hpke-testing.ts` (the injected ephemeral key,
+// and the RFC vectors) is deliberately NOT exported here; it is reached only
+// as `@onyourleft/domain/hpke-testing`, from tests.
+
+export type { HpkeRefusal } from './hpke/errors';
+export { HpkeError } from './hpke/errors';
+export type { HpkePrimitives, X25519KeyPair } from './hpke/primitives';
+export type {
+  HpkeRecipientContext,
+  HpkeReplyOpener,
+  HpkeReplySealer,
+  HpkeSenderContext,
+} from './hpke/hpke';
+export {
+  HPKE_AEAD_ID,
+  HPKE_KDF_ID,
+  HPKE_KEM_ID,
+  HPKE_MESSAGE_LIMIT,
+  HPKE_MODE_BASE,
+  HPKE_RESPONSE_LABEL,
+  HPKE_RESPONSE_NONCE_BYTES,
+  openReply,
+  sealReply,
+  setupBaseRecipient,
+  setupBaseSender,
+  X25519_KEY_BYTES,
+} from './hpke/hpke';
+
+// --- Sealed requests between the app and its instance (#1191, ADR 0047 D-8, D-9)
+//
+// The envelope, the AAD, the `oyl-sealed-request-v1` statement, the padding
+// and the framing, and both halves of sealing and opening, written once over
+// the HPKE port above so the device and the instance run the same lines.
+
+export type {
+  OpenedSealedReply,
+  OpenedSealedRequest,
+  ParsedEnvelope,
+  SealedBinding,
+  SealedEnvelope,
+  SealedEvent,
+  SealedInstanceKey,
+  SealedRefusal,
+  SealedReplyWriter,
+  SealedRequest,
+  SealedRequestStatement,
+  SealedStreamOpener,
+  SealRequestInput,
+} from './sealed/sealed';
+export {
+  decodeFrame,
+  encodeFrame,
+  EVENT_PAD_STEP_BYTES,
+  fromBase64url,
+  isLowerHex32,
+  MAXIMUM_FRAME_HEADER_BYTES,
+  openSealedRequest,
+  pad,
+  PAD_MINIMUM_BYTES,
+  PAD_POWER_CEILING_BYTES,
+  padEvent,
+  paddedEventLength,
+  paddedLength,
+  parseSealedEnvelope,
+  PASTED_KEY_PAD_BYTES,
+  SEALED_AAD_PURPOSE,
+  SEALED_CLOCK_NOTICE_SECONDS,
+  SEALED_END_KIND,
+  SEALED_FRESHNESS_SECONDS,
+  SEALED_INFO,
+  SEALED_PATH,
+  SEALED_REPLAY_SECONDS,
+  SEALED_REQUEST_PURPOSE,
+  SEALED_TAG_BYTES,
+  SEALED_VERSION,
+  sealedBodySha256,
+  sealedEnvelopeLimit,
+  SealedError,
+  sealedReplyWriter,
+  sealedRequestAad,
+  sealedRequestStatementBytes,
+  sealedResponseAad,
+  sealRequest,
+  sessionTokenSha256,
+  toBase64url,
+  unpad,
+  utf8Decode,
+} from './sealed/sealed';
 
 // --- Analysis (#75) ---------------------------------------------------------
 //
@@ -357,7 +490,7 @@ export {
 
 // --- Fitness and fatigue over a history (#77) ---------------------------------
 //
-// ⚠️ `CTL`, `ATL` and `TSB` are reported registered trademarks — see CLAUDE.md §6
+// ⚠️ `CTL`, `ATL` and `TSB` are reported registered trademarks — see docs/agents/scope-and-ip.md §6
 // and the header of `analysis/fitness.ts`. These names are our own: `base` is
 // the slow average, `recent` the fast one, `freshness` the gap. Do not rename
 // them to the initialisms.

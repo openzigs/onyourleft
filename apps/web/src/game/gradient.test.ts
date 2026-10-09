@@ -465,3 +465,103 @@ describe('a correction walks the trainer, however long since the last write — 
     expect(Math.abs((trainer.written[1]?.grade ?? 0) - climbing)).toBeLessThanOrEqual(1 + 1e-9);
   });
 });
+
+describe('a fault during a correction keeps the bound — #932', () => {
+  /**
+   * A trainer that refuses the writes `refuse` names (zero-based) and
+   * confirms the rest — or, with `hold`, leaves that one unanswered until the
+   * test settles it.
+   */
+  function faultyTrainer(refuse: ReadonlySet<number>, hold?: number) {
+    const written: SimulationParameters[] = [];
+    let settle: ((refused: Error) => void) | undefined;
+    const control: GradientTrainer = {
+      setSimulationParameters: async (parameters) => {
+        const index = written.length;
+        written.push(parameters);
+        if (index === hold) {
+          return new Promise<void>((_resolve, reject) => {
+            settle = reject;
+          });
+        }
+        if (refuse.has(index)) {
+          return Promise.reject(new SensorError('control-rejected', 'operation-failed'));
+        }
+        return Promise.resolve();
+      },
+      letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
+    };
+    return {
+      control,
+      written,
+      refuseHeld: (): void => settle?.(new Error('the write timed out')),
+    };
+  }
+
+  it('steps the write after a refused one at most 1 % from the last confirmed grade', async () => {
+    // Writes 0 (the climb, 4 %), 1 and 2 (the walk down) are confirmed; 3 is refused.
+    const trainer = faultyTrainer(new Set([3]));
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    session.sample(seconds(0), 300);
+    await drain();
+    // A room moves the rider onto the descent: the road is −4 %, 8 % away.
+    for (let at = 1; at <= 5; at += 1) {
+      session.sample(seconds(at), 1_500, true);
+      await drain();
+    }
+    const grades = trainer.written.map((parameters) => Number(parameters.grade));
+    expect(grades.length).toBeGreaterThanOrEqual(5);
+    expect(grades[0]).toBeCloseTo(4, 1);
+    const lastConfirmed = grades[2] ?? Number.NaN;
+    // The write after the refused one walks on from what the trainer holds.
+    expect(Math.abs((grades[4] ?? Number.NaN) - lastConfirmed)).toBeLessThanOrEqual(1 + 1e-9);
+    // And every write the trainer could have been on is a step from the last.
+    for (let index = 1; index < grades.length; index += 1) {
+      const from = index === 4 ? lastConfirmed : (grades[index - 1] ?? Number.NaN);
+      expect(Math.abs((grades[index] ?? Number.NaN) - from)).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it('keeps the bound when the refusal comes after the correction has ended', async () => {
+    // The correction is one sample; the walk after it is owed. Write 2 is refused.
+    const trainer = faultyTrainer(new Set([2]));
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    session.sample(seconds(0), 300);
+    await drain();
+    session.sample(seconds(1), 1_500, true);
+    await drain();
+    for (let at = 2; at <= 4; at += 1) {
+      session.sample(seconds(at), 1_500 + at);
+      await drain();
+    }
+    const grades = trainer.written.map((parameters) => Number(parameters.grade));
+    expect(grades.length).toBeGreaterThanOrEqual(4);
+    expect(Math.abs((grades[3] ?? Number.NaN) - (grades[1] ?? Number.NaN))).toBeLessThanOrEqual(
+      1 + 1e-9,
+    );
+  });
+
+  it('does not put a write walked from the refused grade on the trainer', async () => {
+    // Write 1 is left unanswered while the walk carries on into the waiting
+    // slot; then it times out. What is written next must still be a step from
+    // the 4 % the trainer confirmed.
+    const trainer = faultyTrainer(new Set(), 1);
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    session.sample(seconds(0), 300);
+    await drain();
+    for (let at = 1; at <= 4; at += 1) {
+      session.sample(seconds(at), 1_500, true);
+      await drain();
+    }
+    expect(trainer.written).toHaveLength(2);
+    trainer.refuseHeld();
+    await drain();
+    session.sample(seconds(5), 1_500, true);
+    await drain();
+    const grades = trainer.written.map((parameters) => Number(parameters.grade));
+    expect(grades[0]).toBeCloseTo(4, 1);
+    for (const grade of grades.slice(2)) {
+      expect(Math.abs(grade - (grades[0] ?? Number.NaN))).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+});
