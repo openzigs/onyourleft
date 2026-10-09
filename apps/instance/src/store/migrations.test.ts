@@ -98,6 +98,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   hosted_model_key: `INSERT INTO hosted_model_key VALUES (1, 'a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 18)`,
   instance_key: `INSERT INTO instance_key VALUES ('0123456789abcdef', 'encryption', x'${'ab'.repeat(32)}', x'000102030405060708090a0b', x'ffee', 1790000000, 19, NULL)`,
   instance_key_statement: `INSERT INTO instance_key_statement VALUES ('0123456789abcdef', 'key', 19, 172819, '{}', '${'cd'.repeat(64)}')`,
+  instance_key_lease: `INSERT INTO instance_key_lease VALUES ('keys', 'holder', 20)`,
   sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };

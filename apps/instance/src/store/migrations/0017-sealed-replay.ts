@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0016 (#1191, ADR 0047 D-9): the sealed requests the instance has
+ * Migration 0017 (#1191, ADR 0047 D-9): the sealed requests the instance has
  * seen.
  *
  * - **`sealed_replay`** — the SHA-256 of each sealed request's `enc`, and when

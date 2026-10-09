@@ -36,6 +36,20 @@
  * clock only seeds it, so a clock put back still issues a higher one — and
  * `notBefore`, `issuedAt` and `notAfter` are the clock as it is (D-5, review
  * G2).
+ *
+ * ## One writer at a time (#1203)
+ *
+ * The running instance's timer and an operator's `instance-key` command are
+ * two processes over one database. Every pass that WRITES a key —
+ * {@link InstanceKeys.maintain}, `rotate`, `rotateIdentity`, `reset` — first
+ * takes the database's key lease (migration 0016) for
+ * {@link KEY_LEASE_SECONDS}, and gives it back when it is done (§`leased`).
+ * While another holds it the pass writes nothing and is refused with
+ * {@link KEYS_BUSY_SENTENCE}; the instance tries again a few seconds later,
+ * and an operator runs the command again. Reading — `show`, `served`,
+ * `encryptionKey` — takes no lease. The identity key is also claimed with a
+ * guarded insert (`SqlStore.claimIdentityKey`), so a pass that finds another's
+ * identity key already there signs with that one rather than making a second.
  */
 
 import {
@@ -78,6 +92,13 @@ export const RESIGN_BELOW_SECONDS = DAY_SECONDS;
 /** An old private half is kept 7 days after its successor exists, then deleted (D-5). */
 export const OLD_KEY_KEPT_SECONDS = 7 * DAY_SECONDS;
 
+/**
+ * How long a key pass may hold the lease before another may take it (#1203):
+ * a pass takes milliseconds, so this only bounds how long a process that died
+ * holding it keeps the keys from being changed.
+ */
+export const KEY_LEASE_SECONDS = 60;
+
 /** What every answer says when the operator secret is not set. Names the variable. */
 export const NO_SECRET_SENTENCE =
   'This instance has no keys and no sealed routes: OYL_INSTANCE_SECRET_KEY is not set.';
@@ -91,6 +112,10 @@ export const NO_KEYS_SENTENCE =
 export const UNREADABLE_SENTENCE =
   'This instance’s keys cannot be unwrapped with its OYL_INSTANCE_SECRET_KEY: its operator runs `operator instance-key reset`, and every device pins again.';
 
+/** What a pass is told while another process is changing the keys (#1203). */
+export const KEYS_BUSY_SENTENCE =
+  'Another process is changing this instance’s keys right now: run the command again in a moment.';
+
 /** The store members this module uses. */
 export type InstanceKeyStore = Pick<
   SqlStore,
@@ -102,13 +127,19 @@ export type InstanceKeyStore = Pick<
   | 'deleteInstanceKeys'
   | 'replaceIdentityKey'
   | 'clearInstanceKeys'
+  | 'claimIdentityKey'
+  | 'takeInstanceKeyLease'
+  | 'releaseInstanceKeyLease'
 >;
+
+/** Why the instance's keys cannot be used or changed now. */
+export type InstanceKeysProblem = 'no-secret' | 'no-origin' | 'no-keys' | 'unreadable' | 'busy';
 
 /** Why the instance has no usable keys. A fixed sentence each, never a key. */
 export class InstanceKeysUnavailable extends Error {
   override readonly name = 'InstanceKeysUnavailable';
-  readonly code: 'no-secret' | 'no-origin' | 'no-keys' | 'unreadable';
-  constructor(code: 'no-secret' | 'no-origin' | 'no-keys' | 'unreadable') {
+  readonly code: InstanceKeysProblem;
+  constructor(code: InstanceKeysProblem) {
     super(
       code === 'no-secret'
         ? NO_SECRET_SENTENCE
@@ -116,7 +147,9 @@ export class InstanceKeysUnavailable extends Error {
           ? NO_ORIGIN_SENTENCE
           : code === 'no-keys'
             ? NO_KEYS_SENTENCE
-            : UNREADABLE_SENTENCE,
+            : code === 'busy'
+              ? KEYS_BUSY_SENTENCE
+              : UNREADABLE_SENTENCE,
     );
     this.code = code;
   }
@@ -228,6 +261,26 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
   /** Unwrapped private halves, by key id: a key id's material never changes. */
   const unwrapped = new Map<string, InstanceCryptoKey>();
   let firstMaintenance: Promise<Maintenance> | undefined;
+  /** This process's name on the key lease. */
+  const holder = crypto.randomUUID();
+
+  /**
+   * Run `operation` holding the key lease (#1203), and give it back after —
+   * also when it throws. Refused with `busy`, having written nothing, while
+   * another holds it.
+   */
+  async function leased<T>(operation: () => Promise<T>): Promise<T> {
+    keyed();
+    const now = options.now();
+    if (!(await store.takeInstanceKeyLease(holder, now, now + KEY_LEASE_SECONDS))) {
+      throw new InstanceKeysUnavailable('busy');
+    }
+    try {
+      return await operation();
+    } finally {
+      await store.releaseInstanceKeyLease(holder);
+    }
+  }
 
   function keyed(): { wrap: Promise<WrappingKeys>; instanceOrigin: string } {
     if (secret === undefined) throw new InstanceKeysUnavailable('no-secret');
@@ -358,9 +411,17 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
     let identity = await identityOf(rows);
     if (identity === undefined) {
       // No identity key: the first start with a secret, or `instance-key init`.
-      identity = await makeIdentity();
-      await store.putInstanceKey(identity.row);
-      made = true;
+      const mine = await makeIdentity();
+      if (await store.claimIdentityKey(mine.row)) {
+        identity = mine;
+        made = true;
+      } else {
+        // Another pass kept one first: sign with that one, never make a second.
+        unwrapped.delete(mine.row.keyId);
+        rows = await store.listInstanceKeys();
+        identity = await identityOf(rows);
+        if (identity === undefined) throw new InstanceKeysUnavailable('no-keys');
+      }
     }
     let current = currentOf(rows);
     let rotated = false;
@@ -441,78 +502,82 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
   }
 
   return {
-    maintain: () => remembered(maintain()),
+    maintain: () => remembered(leased(maintain)),
 
-    async rotate(rotation = {}) {
-      const rows = await store.listInstanceKeys();
-      const identity = await identityOf(rows);
-      if (identity === undefined) throw new InstanceKeysUnavailable('no-keys');
-      const key = await makeEncryption(highestSerial(rows), rotation.serialAbove);
-      await store.addEncryptionKey(key);
-      await sign(identity.key, key);
-      const old =
-        rotation.dropOld === true
-          ? rows.filter((row) => row.role === 'encryption').map((row) => row.keyId)
-          : [];
-      await store.deleteInstanceKeys(old);
-      for (const keyId of old) unwrapped.delete(keyId);
-      return { keyId: key.keyId, serial: key.serial ?? 0, dropped: old.length };
-    },
+    rotate: (rotation = {}) =>
+      leased(async () => {
+        const rows = await store.listInstanceKeys();
+        const identity = await identityOf(rows);
+        if (identity === undefined) throw new InstanceKeysUnavailable('no-keys');
+        const key = await makeEncryption(highestSerial(rows), rotation.serialAbove);
+        await store.addEncryptionKey(key);
+        await sign(identity.key, key);
+        const old =
+          rotation.dropOld === true
+            ? rows.filter((row) => row.role === 'encryption').map((row) => row.keyId)
+            : [];
+        await store.deleteInstanceKeys(old);
+        for (const keyId of old) unwrapped.delete(keyId);
+        return { keyId: key.keyId, serial: key.serial ?? 0, dropped: old.length };
+      }),
 
-    async rotateIdentity(rotation) {
-      const { instanceOrigin } = keyed();
-      const rows = await store.listInstanceKeys();
-      const previous = await identityOf(rows);
-      if (previous === undefined) throw new InstanceKeysUnavailable('no-keys');
-      const next = await makeIdentity();
-      let endorsement: InstanceKeyStatementRow | undefined;
-      if (!rotation.compromised) {
-        const identityKey = toHex(next.row.publicKey);
-        const statement: InstanceIdentityRotation = {
-          purpose: INSTANCE_IDENTITY_ROTATION_PURPOSE,
-          instanceOrigin,
-          previousIdentityKey: toHex(previous.row.publicKey),
-          identityKey,
-          fingerprint: base32Unpadded(
-            await instanceIdentityFingerprint(sha256, instanceOrigin, identityKey),
-          ),
-          issuedAt: options.now(),
-        };
-        endorsement = {
-          keyId: next.row.keyId,
-          kind: 'identity-rotation',
-          issuedAt: statement.issuedAt,
-          notAfter: null,
-          body: canonicalJson({ ...statement }),
-          signature: toHex(await signWith(previous.key, instanceIdentityRotationBytes(statement))),
-        };
-      }
-      await store.replaceIdentityKey(next.row, endorsement);
-      unwrapped.delete(previous.row.keyId);
-      // The current encryption key's statements went with the old identity: sign it again.
-      const current = currentOf(rows);
-      if (current !== undefined) await sign(next.key, current);
-      return show();
-    },
+    rotateIdentity: (rotation) =>
+      leased(async () => {
+        const { instanceOrigin } = keyed();
+        const rows = await store.listInstanceKeys();
+        const previous = await identityOf(rows);
+        if (previous === undefined) throw new InstanceKeysUnavailable('no-keys');
+        const next = await makeIdentity();
+        let endorsement: InstanceKeyStatementRow | undefined;
+        if (!rotation.compromised) {
+          const identityKey = toHex(next.row.publicKey);
+          const statement: InstanceIdentityRotation = {
+            purpose: INSTANCE_IDENTITY_ROTATION_PURPOSE,
+            instanceOrigin,
+            previousIdentityKey: toHex(previous.row.publicKey),
+            identityKey,
+            fingerprint: base32Unpadded(
+              await instanceIdentityFingerprint(sha256, instanceOrigin, identityKey),
+            ),
+            issuedAt: options.now(),
+          };
+          endorsement = {
+            keyId: next.row.keyId,
+            kind: 'identity-rotation',
+            issuedAt: statement.issuedAt,
+            notAfter: null,
+            body: canonicalJson({ ...statement }),
+            signature: toHex(
+              await signWith(previous.key, instanceIdentityRotationBytes(statement)),
+            ),
+          };
+        }
+        await store.replaceIdentityKey(next.row, endorsement);
+        unwrapped.delete(previous.row.keyId);
+        // The current encryption key's statements went with the old identity: sign it again.
+        const current = currentOf(rows);
+        if (current !== undefined) await sign(next.key, current);
+        return show();
+      }),
 
-    async reset() {
-      keyed();
-      const highest = highestSerial(await store.listInstanceKeys());
-      await store.clearInstanceKeys();
-      unwrapped.clear();
-      const identity = await makeIdentity();
-      await store.putInstanceKey(identity.row);
-      const key = await makeEncryption(highest);
-      await store.addEncryptionKey(key);
-      await sign(identity.key, key);
-      return show();
-    },
+    reset: () =>
+      leased(async () => {
+        const highest = highestSerial(await store.listInstanceKeys());
+        await store.clearInstanceKeys();
+        unwrapped.clear();
+        const identity = await makeIdentity();
+        await store.putInstanceKey(identity.row);
+        const key = await makeEncryption(highest);
+        await store.addEncryptionKey(key);
+        await sign(identity.key, key);
+        return show();
+      }),
 
     show,
 
     async served() {
       keyed();
-      await (firstMaintenance ?? remembered(maintain()));
+      await (firstMaintenance ?? remembered(leased(maintain)));
       const now = options.now();
       const rows = await store.listInstanceKeys();
       const identity = rows.find((row) => row.role === 'identity');

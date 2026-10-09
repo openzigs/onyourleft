@@ -291,6 +291,7 @@ statements that verify. It logs what it did:
 | `…"state":"no-secret"` | `OYL_INSTANCE_SECRET_KEY` is not set: no keys, no sealed routes |
 | `…"state":"no-origin"` | `OYL_INSTANCE_ORIGIN` is not set |
 | `…"state":"unreadable"` | this secret does not open the keys held — restored under another secret, or the origin changed |
+| `…"state":"busy"` | an `instance-key` command is changing the keys this moment; the instance tries again in five seconds |
 
 ⚠️ **The box's clock must be set by NTP** (ADR 0047 D-9). A statement's `notAfter` is the box's
 time, so a clock running ahead lengthens how long a superseded key's statement is still believed. A
@@ -307,10 +308,14 @@ node src/operator/cli.ts instance-key rotate-identity [--compromised]
 node src/operator/cli.ts instance-key reset
 ```
 
-- ⚠️ **Stop the instance before `init`, `rotate`, `rotate-identity` or `reset`** (as for
-  `restore`). Each writes from a second process while the server's own timer may be running a
-  maintenance pass, and ADR 0047 D-5 has one writer. `show` only reads, and is safe on a running
-  instance.
+- **Every command is safe on a running instance.** `init`, `rotate`, `rotate-identity` and `reset`
+  write from a second process, so each first takes the database's **key lease** — the same one the
+  instance's own maintenance pass takes — and gives it back when it is done (ADR 0047 D-5 has one
+  writer at a time). While the instance is in the middle of a pass, a command is refused, writing
+  nothing, with *"Another process is changing this instance’s keys right now: run the command again
+  in a moment."* — run it again. While a command holds the lease the instance logs
+  `"event":"instance-keys","state":"busy"` and tries again five seconds later. A lease whose holder
+  died is free after 60 seconds. `show` only reads, and takes no lease.
 - `show` prints the identity key's full fingerprint and the **instance card**,
   `oyl-instance:<origin>#<52 characters>` — what the first device pins from (ADR 0047 D-6). It holds
   nothing secret, and is never truncated.
@@ -352,7 +357,7 @@ accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); witho
   against the box's clock with **120 s** either way; and the SHA-256 of each request's ephemeral key
   is kept in the database for **10 minutes**, so the same request sent again is refused `replayed`
   without running — across a restart too, because the record is a table (`sealed_replay`, migration
-  0016), not memory. Its rows name no athlete, and rows older than ten minutes are deleted as new
+  0017), not memory. Its rows name no athlete, and rows older than ten minutes are deleted as new
   ones arrive.
 - ⚠️ **The per-client limit needs `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and a trusted proxy, or it is
   one shared bucket.** A sealed request with no session (registering, linking, recovering) is

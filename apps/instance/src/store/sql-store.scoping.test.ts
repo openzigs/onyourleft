@@ -314,6 +314,11 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   deleteInstanceKeys: { notAScopedRead: 'a write: the instance’s own keys' },
   replaceIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
   clearInstanceKeys: { notAScopedRead: 'a write: the operator’s reset' },
+  claimIdentityKey: { notAScopedRead: 'a write: the instance’s own identity key' },
+  takeInstanceKeyLease: {
+    notAScopedRead: 'a write: who may change the instance’s own keys, naming no athlete',
+  },
+  releaseInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   close: { notAScopedRead: 'not a read' },
 };
 

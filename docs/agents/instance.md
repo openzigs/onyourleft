@@ -99,11 +99,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         wrapped under `OYL_INSTANCE_SECRET_KEY` in migration
                         0015's table, `GET /v1/instance/keys`, and the
                         `instance-key` operator commands; no secret, no keys.
+                        Since #1203 every pass that writes a key — the
+                        instance's timer or an operator command — holds
+                        migration 0016's key lease, and is refused `busy`
+                        while another process does.
                         Since #1191 it also holds `src/sealed/` —
                         `POST /v1/sealed` (ADR 0047 D-8, D-9): opened, the
                         device signature checked under the SESSION's key,
                         120 s freshness, a durable replay record (migration
-                        0016), and the inner request dispatched through the
+                        0017), and the inner request dispatched through the
                         same route table; a route marked `sealed: 'only'` is
                         reachable no other way. The envelope, AAD, padding
                         and framing are `packages/domain/src/sealed/`.

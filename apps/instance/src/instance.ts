@@ -79,6 +79,13 @@ export const systemResolver: Resolver = async (hostname) =>
  */
 const KEYS_RETRY_SECONDS = 3600;
 
+/**
+ * How soon a key pass tries again when an operator's `instance-key` command
+ * holds the key lease (#1203): long enough for the command to finish, which
+ * takes milliseconds.
+ */
+const KEYS_BUSY_RETRY_MS = 5_000;
+
 /** The instance will not start, and says why — with the command that fixes it. */
 export class InstanceRefusal extends Error {
   override readonly name = 'InstanceRefusal';
@@ -94,6 +101,8 @@ export interface InstanceOptions {
   readonly now?: () => number;
   /** How often a waiting instance looks at the migration again. */
   readonly migrationPollMs?: number;
+  /** How soon a key pass tries again while the key lease is held elsewhere (#1203): 5 s unless a test says otherwise. */
+  readonly keysBusyRetryMs?: number;
   /** How the embedding model's name is resolved: {@link systemResolver} unless a test says otherwise. */
   readonly resolve?: Resolver;
   /** The timers the rate-limit sweep runs on (#892) — Node's own unless a test's. */
@@ -360,8 +369,11 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     // with a secret, rotated, re-signed and pruned by the one rule
     // `keys/instance-keys.ts` states — run now, before `/v1/instance/keys`
     // answers (it waits on this first pass), and again whenever the rule
-    // says the next step falls due, by the box's clock. This process is the
-    // one writer (ADR 0037 D-5). No secret: no keys, and it says so.
+    // says the next step falls due, by the box's clock. A pass holds the key
+    // lease while it writes, so an operator's `instance-key` command and this
+    // timer are never two writers at once (#1203); a pass that finds the
+    // lease held tries again in a few seconds. No secret: no keys, and it
+    // says so.
     const keys = createInstanceKeys({
       store,
       secret: server.secretKey,
@@ -372,6 +384,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     const maintainKeys = async (): Promise<void> => {
       if (stopping) return;
       let wakeInSeconds = KEYS_RETRY_SECONDS;
+      let busy = false;
       try {
         const done = await keys.maintain();
         logEvent(log, 'instance-keys', {
@@ -385,13 +398,16 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       } catch (error) {
         if (error instanceof InstanceKeysUnavailable) {
           logEvent(log, 'instance-keys', { state: error.code, keysProblem: error.message });
-          if (error.code !== 'unreadable') return;
+          busy = error.code === 'busy';
+          if (!busy && error.code !== 'unreadable') return;
         } else {
           logUnhandled(log, null, error);
         }
       }
       if (stopping) return;
-      const delayMs = 1000 * Math.min(KEYS_RETRY_SECONDS, Math.max(1, wakeInSeconds));
+      const delayMs = busy
+        ? (options.keysBusyRetryMs ?? KEYS_BUSY_RETRY_MS)
+        : 1000 * Math.min(KEYS_RETRY_SECONDS, Math.max(1, wakeInSeconds));
       keysTimer = setTimeout(() => {
         keysMaintained = maintainKeys();
       }, delayMs);
