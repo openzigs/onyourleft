@@ -99,6 +99,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         wrapped under `OYL_INSTANCE_SECRET_KEY` in migration
                         0015's table, `GET /v1/instance/keys`, and the
                         `instance-key` operator commands; no secret, no keys.
+                        Since #1203 every pass that writes a key — the
+                        instance's timer or an operator command — holds
+                        migration 0016's key lease, and is refused `busy`
+                        while another process does.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

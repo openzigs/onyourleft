@@ -29,6 +29,7 @@ import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import { authorised, syncWorld } from '../sync/sync-testing.ts';
 import {
   createInstanceKeys,
+  KEYS_BUSY_SENTENCE,
   NO_SECRET_SENTENCE,
   type InstanceKeysShown,
   type ServedKeys,
@@ -76,7 +77,12 @@ function secretOf(text: string): Uint8Array {
 /** A running instance over `data`, every log line kept, on `clock`. */
 async function serve(
   data: Data,
-  options: { secret?: string; metricsToken?: string; clock?: { ms: number } } = {},
+  options: {
+    secret?: string;
+    metricsToken?: string;
+    clock?: { ms: number };
+    keysBusyRetryMs?: number;
+  } = {},
 ) {
   const read = readServerConfig(
     {
@@ -101,6 +107,7 @@ async function serve(
     notices: 'notices',
     log: (line) => lines.push(line),
     migrationPollMs: 50,
+    ...(options.keysBusyRetryMs === undefined ? {} : { keysBusyRetryMs: options.keysBusyRetryMs }),
     ...(clock === undefined ? {} : { now: () => clock.ms }),
   });
   await running.opened;
@@ -192,6 +199,65 @@ describe('an instance with an operator secret (#1189)', () => {
     expect(keys.statements[0]!.statement.notAfter * 1000).toBeGreaterThan(clock.ms);
     expect(keys.statements[0]!.statement.issuedAt * 1000).toBe(clock.ms);
     expect(await verifiesAll(keys)).toBe(true);
+  });
+});
+
+describe('an operator command beside a running instance (#1203, D-5)', () => {
+  it('rotates from a second process while the instance serves, and the instance serves the new key', async () => {
+    const data = await freshData();
+    const { instance } = await serve(data, { secret: SECRET });
+    const environment = { secret: SECRET, origin: TEST_ORIGIN };
+    const rotated = await instanceKey(data, { action: 'rotate', dropOld: false }, environment);
+    const keys = (await servedKeys(instance.url)).body as ServedKeys;
+    expect(keys.statements[0]!.statement.keyId).toBe((rotated as { keyId: string }).keyId);
+    expect(await verifiesAll(keys)).toBe(true);
+  });
+
+  it('is refused, naming why and writing nothing, while another process holds the key lease', async () => {
+    const data = await freshData();
+    const environment = { secret: SECRET, origin: TEST_ORIGIN };
+    await instanceKey(data, { action: 'init' }, environment);
+    const before = await keyRows(data);
+    const store = openServingStore(data.database);
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      expect(await store.takeInstanceKeyLease('the-instance', now, now + 60)).toBe(true);
+      for (const action of [
+        { action: 'init' } as const,
+        { action: 'rotate', dropOld: true } as const,
+        { action: 'rotate-identity', compromised: false } as const,
+        { action: 'reset' } as const,
+      ]) {
+        await expect(instanceKey(data, action, environment)).rejects.toThrow(KEYS_BUSY_SENTENCE);
+      }
+      expect(await keyRows(data)).toEqual(before);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('makes its keys once the lease is given back, trying again on its own', async () => {
+    const data = await freshData();
+    const store = openServingStore(data.database);
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      expect(await store.takeInstanceKeyLease('operator', now, now + 60)).toBe(true);
+    } finally {
+      await store.close();
+    }
+    const { instance, lines } = await serve(data, { secret: SECRET, keysBusyRetryMs: 50 });
+    expect(lines.some((line) => line.includes('"state":"busy"'))).toBe(true);
+    expect(await keyRows(data)).toEqual([]);
+    const releasing = openServingStore(data.database);
+    try {
+      await releasing.releaseInstanceKeyLease('operator');
+    } finally {
+      await releasing.close();
+    }
+    await expect
+      .poll(() => lines.some((line) => line.includes('"state":"ready"')), { timeout: 5_000 })
+      .toBe(true);
+    expect(await verifiesAll((await servedKeys(instance.url)).body as ServedKeys)).toBe(true);
   });
 });
 

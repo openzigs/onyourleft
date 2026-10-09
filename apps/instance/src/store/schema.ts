@@ -367,6 +367,21 @@ export interface InstanceKeyStatementTable {
   readonly signature: string;
 }
 
+/**
+ * Who is changing the instance's keys (#1203, ADR 0047 D-5). Added by
+ * migration 0016. One row at most, `name` always `'keys'`: held by one
+ * maintenance pass or one operator command at a time, and free once
+ * `expires_at` has passed, so a holder that died does not hold the keys for
+ * ever.
+ */
+export interface InstanceKeyLeaseTable {
+  readonly name: 'keys';
+  /** A random id the holding process chose for itself. */
+  readonly holder: string;
+  /** When the lease lapses, by the box's clock, Unix seconds. */
+  readonly expires_at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -395,4 +410,5 @@ export interface InstanceDatabase {
   readonly hosted_model_key: HostedModelKeyTable;
   readonly instance_key: InstanceKeyTable;
   readonly instance_key_statement: InstanceKeyStatementTable;
+  readonly instance_key_lease: InstanceKeyLeaseTable;
 }

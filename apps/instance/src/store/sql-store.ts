@@ -672,6 +672,21 @@ export interface SqlStore {
   replaceIdentityKey(key: InstanceKeyRow, endorsement?: InstanceKeyStatementRow): Promise<void>;
   /** Every key and statement gone, scrubbed (`operator instance-key reset`). */
   clearInstanceKeys(): Promise<void>;
+  /**
+   * Hold a new IDENTITY key unless one is held already (#1203): `true` when
+   * this one was kept, `false` when another pass got there first — one
+   * atomic insert, so two processes racing their first pass keep one.
+   */
+  claimIdentityKey(key: InstanceKeyRow): Promise<boolean>;
+  /**
+   * Take the lease on changing the instance's keys for `holder` until
+   * `expiresAt` (#1203, migration 0016): `true` when it is now `holder`'s,
+   * `false` when someone else holds it and it has not lapsed at `now`. One
+   * atomic statement, so two processes cannot both take it.
+   */
+  takeInstanceKeyLease(holder: string, now: number, expiresAt: number): Promise<boolean>;
+  /** Give the lease back, if `holder` still holds it. */
+  releaseInstanceKeyLease(holder: string): Promise<void>;
 
   putChallenge(challenge: Challenge): Promise<void>;
   /** Spend a nonce: `taken` once, `used` after, `expired` from `expiresAt` on. */
@@ -3230,6 +3245,43 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           }),
         ),
       ),
+
+    claimIdentityKey: (key) =>
+      exclusive(async () => {
+        // The partial unique index `instance_key_one_identity` (0015) is the
+        // guard: a second identity row is a conflict, and a conflict keeps
+        // nothing rather than throwing.
+        const result = await db
+          .insertInto('instance_key')
+          .values(instanceKeyValues({ ...key, role: 'identity' }))
+          .onConflict((conflict) => conflict.doNothing())
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    takeInstanceKeyLease: (holder, now, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .insertInto('instance_key_lease')
+          .values({ name: 'keys', holder, expires_at: expiresAt })
+          .onConflict((conflict) =>
+            conflict
+              .column('name')
+              .doUpdateSet({ holder, expires_at: expiresAt })
+              .where('instance_key_lease.expires_at', '<=', now),
+          )
+          .executeTakeFirst();
+        return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    releaseInstanceKeyLease: (holder) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('instance_key_lease')
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .execute();
+      }),
 
     close: () => exclusive(() => db.destroy()),
   };
