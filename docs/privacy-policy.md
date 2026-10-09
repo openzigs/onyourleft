@@ -392,8 +392,9 @@ Once you have pressed it, the analysis can finish while the app is closed.
   write-up does not pass, is cancelled or does not finish, nothing is kept and an earlier write-up
   stays as it was. While it is being written, this device keeps only which job it is waiting for —
   never the ride's numbers or the model's words — so it can pick the job up when you open the ride
-  again. *Erase everything* removes that note. Deleting a single ride does not, and it is not in
-  the account export; it holds only identifiers, and it is cleared when the analysis ends.
+  again. That note is not in the account export, because it only lists analyses still in
+  progress; it is removed when the analysis ends, when you delete the ride, or when you use *Erase
+  everything*.
 - **If you cancel:** your instance stops the analysis at its next step, and nothing of it is saved
   on this device.
 

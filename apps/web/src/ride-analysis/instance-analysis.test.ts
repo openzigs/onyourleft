@@ -29,11 +29,13 @@ import {
   instanceFailureText,
   MAXIMUM_RECONNECTS,
   PENDING_JOBS_STORAGE_KEY,
+  pendingJobForgetter,
   reconnectDelayMilliseconds,
   type InstanceAnalysisOptions,
   type PendingJobStorage,
 } from './instance-analysis';
 import type { InstanceJobView } from './instance-analysis-port';
+import { forgettingOnDelete } from '../library/store-port';
 import {
   failedWith,
   progress,
@@ -519,3 +521,86 @@ async function until(done: () => boolean): Promise<void> {
   }
   throw new Error('never happened');
 }
+
+describe('a ride deleted takes its pending job with it (#1102)', () => {
+  /** A job started, then the page left: the note holds it, as after an app closed mid-job. */
+  async function leftPending(
+    scripted: ScriptedJobs,
+    storage: ReturnType<typeof memoryStorage>,
+    id: ActivityId,
+  ): Promise<void> {
+    scripted.holdAfter = 1;
+    const leaving = new AbortController();
+    const asked = controller(scripted, { pending: storage }).ask(
+      id,
+      'instance-local',
+      () => undefined,
+      leaving.signal,
+    );
+    await until(() => storage.items.has(PENDING_JOBS_STORAGE_KEY) && scripted.streams() === 1);
+    leaving.abort();
+    await asked;
+  }
+
+  it('is never followed again once the library has deleted the ride, through the real store', async () => {
+    const id = await seededRide();
+    const storage = memoryStorage();
+    const scripted = scriptedJobs([section(1, 'First part.')]);
+    await leftPending(scripted, storage, id);
+    expect(controller(scripted, { pending: storage }).pendingJob(id)).toBe(true);
+
+    const library = forgettingOnDelete(writer, [pendingJobForgetter(storage)]);
+    expect(await library.deleteActivity(ATHLETE_A, id)).toBe(true);
+    expect(await harness.read(async (reader) => reader.getActivity(ATHLETE_A, id))).toBeUndefined();
+
+    const reopened = controller(scripted, { pending: storage });
+    expect(reopened.pendingJob(id)).toBe(false);
+    const streamsBefore = scripted.streams();
+    expect(await reopened.followAgain(id, () => undefined, live())).toStrictEqual({
+      kind: 'detached',
+    });
+    expect(scripted.streams()).toBe(streamsBefore);
+    expect(storage.items.has(PENDING_JOBS_STORAGE_KEY)).toBe(false);
+  });
+
+  it('takes only that ride’s entry, and keeps the others', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      PENDING_JOBS_STORAGE_KEY,
+      JSON.stringify({
+        gone: { jobId: 'j1', source: 'instance-local', includedPose: false },
+        kept: { jobId: 'j2', source: 'instance-local', includedPose: false },
+      }),
+    );
+    pendingJobForgetter(storage).forgetRide('gone' as ActivityId);
+    expect(JSON.parse(storage.items.get(PENDING_JOBS_STORAGE_KEY) ?? '{}')).toStrictEqual({
+      kept: { jobId: 'j2', source: 'instance-local', includedPose: false },
+    });
+  });
+
+  it('removes a note it cannot read, and leaves no note where there was none', () => {
+    const storage = memoryStorage();
+    pendingJobForgetter(storage).forgetRide('any' as ActivityId);
+    expect(storage.items.has(PENDING_JOBS_STORAGE_KEY)).toBe(false);
+    storage.setItem(PENDING_JOBS_STORAGE_KEY, '{not json');
+    pendingJobForgetter(storage).forgetRide('any' as ActivityId);
+    expect(storage.items.has(PENDING_JOBS_STORAGE_KEY)).toBe(false);
+  });
+
+  it('keeps the job when the delete threw, because the ride may still be there', async () => {
+    const id = await seededRide();
+    const storage = memoryStorage();
+    const scripted = scriptedJobs([section(1, 'First part.')]);
+    await leftPending(scripted, storage, id);
+    const refusing = forgettingOnDelete(
+      {
+        listActivitySummaries: async () => Promise.resolve([]),
+        getActivity: async () => Promise.resolve(undefined),
+        deleteActivity: async () => Promise.reject(new Error('refused')),
+      },
+      [pendingJobForgetter(storage)],
+    );
+    await expect(refusing.deleteActivity(ATHLETE_A, id)).rejects.toThrow('refused');
+    expect(controller(scripted, { pending: storage }).pendingJob(id)).toBe(true);
+  });
+});

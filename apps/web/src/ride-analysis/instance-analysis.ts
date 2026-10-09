@@ -84,7 +84,8 @@ export const PENDING_JOBS_STORAGE_KEY = 'oyl.analysis.pending-jobs.v1';
  * What *Erase everything* does about the pending-job note: removes it. The note
  * holds ride and job ids only, but it is on this device, so an erase takes it
  * (`transfer/erase-device.ts` §`eraseDevice`'s `instanceAnalysis`). Deleting a
- * single ride does NOT clear it, and the account export does not include it —
+ * single ride takes that ride's entry ({@link pendingJobForgetter}). The account
+ * export does not include it: it lists only jobs in flight, by id —
  * `docs/privacy-policy.md` says exactly that.
  */
 export function instanceAnalysisEraser(storage: Pick<Storage, 'removeItem'> | undefined): {
@@ -96,6 +97,49 @@ export function instanceAnalysisEraser(storage: Pick<Storage, 'removeItem'> | un
         storage?.removeItem(PENDING_JOBS_STORAGE_KEY);
       } catch {
         // Storage refused: nothing more this device can do about it.
+      }
+    },
+  };
+}
+
+/**
+ * What deleting a ride does about the pending-job note: takes that ride's entry
+ * out, so a job asked about a ride that is gone is never followed again — a
+ * page opened afterwards finds nothing pending, and {@link
+ * InstanceAnalysisPort.followAgain} answers `detached`. Handed to the library's
+ * delete by `main.tsx` (`library/store-port.ts` §`forgettingOnDelete`).
+ *
+ * A note that cannot be read is removed whole: it could not be resumed from
+ * anyway (`readPending` reads it as empty).
+ */
+export function pendingJobForgetter(storage: PendingJobStorage | undefined): {
+  forgetRide(activityId: ActivityId): void;
+} {
+  return {
+    forgetRide: (activityId) => {
+      if (storage === undefined) return;
+      try {
+        const noted = storage.getItem(PENDING_JOBS_STORAGE_KEY);
+        if (noted === null) return;
+        const parsed = JSON.parse(noted) as unknown;
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          storage.removeItem(PENDING_JOBS_STORAGE_KEY);
+          return;
+        }
+        const jobs = { ...(parsed as Record<string, unknown>) };
+        if (!Object.hasOwn(jobs, activityId)) return;
+        delete jobs[activityId];
+        if (Object.keys(jobs).length === 0) {
+          storage.removeItem(PENDING_JOBS_STORAGE_KEY);
+        } else {
+          storage.setItem(PENDING_JOBS_STORAGE_KEY, JSON.stringify(jobs));
+        }
+      } catch {
+        try {
+          storage.removeItem(PENDING_JOBS_STORAGE_KEY);
+        } catch {
+          // Storage refused: nothing more this device can do about it.
+        }
       }
     },
   };

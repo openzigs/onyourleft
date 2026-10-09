@@ -67,7 +67,11 @@ import {
   riderModelStepSource,
 } from './camera/analysis-transport';
 import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
-import { createInstanceAnalysis, instanceAnalysisEraser } from './ride-analysis/instance-analysis';
+import {
+  createInstanceAnalysis,
+  instanceAnalysisEraser,
+  pendingJobForgetter,
+} from './ride-analysis/instance-analysis';
 import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
@@ -107,7 +111,7 @@ import type { WorkoutPort } from './workouts/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
-import type { LibraryPort } from './library/store-port';
+import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
@@ -382,7 +386,14 @@ async function buildPlatform(
  * the transfer port and the recorder rather than opening a second.
  */
 function buildLibraryPort(): LibraryPort {
-  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+  // #1102: a ride deleted here takes its entry in the pending-job note with it,
+  // so a job asked about it is never followed again.
+  return {
+    store: forgettingOnDelete(localStore(), [
+      pendingJobForgetter(typeof localStorage === 'undefined' ? undefined : localStorage),
+    ]),
+    athleteId: LOCAL_ATHLETE,
+  };
 }
 
 /**
