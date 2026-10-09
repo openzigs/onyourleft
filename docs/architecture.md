@@ -1745,9 +1745,9 @@ The analysis agent's `history_search` tool calls the index's own search in-proce
 ADR 0040's bounds (6 passages, 5 400 characters, a 2 000-character query) and three calls a run,
 screens a retrieved write-up again and leaves out one that fails (saying how many), drops any kind
 the index does not cut from, and answers *history is not available* rather than failing the run when
-the index is off or cannot be reached. It is not offered on an `instance-hosted` job until #1101
-masks what a hosted model is sent. The device-side step below remains until #1103 removes the
-on-device runner.
+the index is off or cannot be reached. On an `instance-hosted` job what it returns reaches the hosted
+model only masked (#1101, `src/analysis/hosted.ts`). The device-side step below remains until #1103
+removes the on-device runner.
 
 | Concern | Decision | Where |
 |---|---|---|
@@ -1758,7 +1758,7 @@ on-device runner.
 | What is never indexed | A side-camera report (the pose summary, D-2 item 1) and any item carrying a `data:` URL — looked for in every string of the PARSED body, keys included, by a scan linear in its length, with or without a media type (#918); the rider's own text is otherwise kept whole | `src/history/passages.ts` §`holdsDataUrl` |
 | One item the model will not take (#918) | Marked `failed` and gone past, so it cannot stop the sweep for every rider; tried again an hour later. A model that cannot be reached still stops the sweep, and a running instance tries again every five minutes | `src/history/history.ts` §`catchUp`, `src/instance.ts` |
 | How often it may be asked (#918) | 30 searches a minute per athlete, then `rate_limited`, counted before anything is embedded and swept at the end of its window like every other limit | `src/auth/identity.ts` §`historySearchesPerAthlete` |
-| The agent's tool (#1099) | `history_search`, offered to an `instance-local` job only until #1101; the athlete is the job's, never an argument | `src/analysis/tools/history-search.ts`, `src/analysis/tools/tools.ts` §`toolsFor` |
+| The agent's tool (#1099) | `history_search`; the athlete is the job's, never an argument; on a hosted job its results are masked like every message (#1101) | `src/analysis/tools/history-search.ts`, `src/analysis/hosted.ts` |
 | Scoping (D-3) | The athlete is the session's; `sql-store.scoping.test.ts` probes the index's reads with three athletes, and `history.test.ts` searches as each | |
 | Export and erasure (D-10) | The export says which model built the index and how many passages, never the passages or vectors; `DELETE /v1/account` takes them with everything else | `src/sync/sync.ts` §`exportAccount` |
 | The device's half | Template version 2's history step is the ONE step a passage reaches, inside a fence no passage can close, and its note is accepted and screened before the summary is shown it. Retrieval runs before the run, on the rider's own computer's path only (a hosted step port refuses a history step until D-9's disclosures change), and an unreachable instance is a sentence, never a failed run | `packages/analysis/src/history.ts`, `template/template-v2.ts` (in `apps/web/src/ride-analysis/` until #1094), `apps/web/src/ride-analysis/ride-analysis.ts` |
@@ -1823,7 +1823,8 @@ flowchart TD
 | `model-turn.ts` | the port: one model turn, its request and its **closed** failures. The agent is written against it, never against the SDK |
 | `model.ts` | the **one** module in the repository that imports `ai` and `@ai-sdk/*` (`eslint.config.js` §`AI_SDK_IMPORT_PATTERNS`). It sets the SDK's global default provider to one that throws, so a string model id never reaches the Vercel AI Gateway; checks the configured name's address on every turn (`history/address.ts`, reused) and connects to the checked address; refuses any URL but the configured base; and maps every error to a closed failure, never the server's words |
 | `agent.ts` | the loop: tools chosen by the model, the budgets (24 turns, 16 tool calls, 10 minutes, 40 000 tokens counted as sent and answered), the screen with one rewrite, streaming a section only once it has passed, `withdrawn` on a later failure, and cancel within one step |
-| `tools/` | `ride_sections`, `recent_rides` (at most 8) and `goals` (at most 4 000 characters), each validated against its own schema and reading through `reads.ts`' one method — read-only by type, and unable to spell the side-camera report's kind |
+| `tools/` | `ride_sections`, `recent_rides` (at most 8), `goals` (at most 4 000 characters) and, since #1099, `history_search` (the ADR 0040 index in-process, 6 passages, 5 400 characters, three calls a run), each validated against its own schema and reading through `reads.ts`' one method — read-only by type, and unable to spell the side-camera report's kind |
+| `hosted.ts` (#1101) | **every message of every request to a hosted model is masked here** (`@onyourleft/analysis` §`maskForHosted`): the system prompt, the ride input's first message, every tool result, every rewrite, and the model's own text and tool arguments sent back to it. The hosted connection is built here and nowhere else, and only with the athlete's guard (`hosted-seam.test.ts` walks every shipped module). The guard is the athlete's synced `masking` item (key `guard`: their words-to-mask list and privacy zones, ADR 0046 D-10), pushed and pulled through the sealed sync routes, scoped, erased and exported with the athlete; a missing or malformed one is `hosted_unavailable` and nothing is sent. A local job is never masked (ADR 0040 D-9) |
 | `fake-model-server-testing.ts` | an OpenAI-compatible server on loopback for tests: plain replies, tool calls, a malformed call, the "does not support tools" 400, a 5xx, a slow reply and a reply cut off by `length` |
 
 What holds it, test by test: `agent-safety.test.ts` walks every module's imports (no store write,

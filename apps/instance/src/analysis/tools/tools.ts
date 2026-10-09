@@ -37,7 +37,6 @@ import {
 
 import { holdsDataUrl } from '../../history/passages.ts';
 import type { ToolSpec } from '../model-turn.ts';
-import type { AnalysisSource } from '../source.ts';
 import { HISTORY_SEARCH } from './history-search.ts';
 import type { AnalysisHistory, AnalysisReads, ReadItem } from './reads.ts';
 
@@ -269,17 +268,3 @@ export const AGENT_TOOLS: readonly AnyAgentTool[] = [
   GOALS,
   HISTORY_SEARCH,
 ];
-
-/**
- * The tools that read free text the rider wrote, and so are NOT offered on an
- * `instance-hosted` job until everything a hosted model is sent is masked
- * (#1101): history reaches a hosted model only through that masking.
- */
-export const UNMASKED_ONLY_TOOLS: ReadonlySet<string> = new Set([HISTORY_SEARCH.spec.name]);
-
-/** The tools a job on `source` is offered. */
-export function toolsFor(source: AnalysisSource): readonly AnyAgentTool[] {
-  return source === 'instance-hosted'
-    ? AGENT_TOOLS.filter((tool) => !UNMASKED_ONLY_TOOLS.has(tool.spec.name))
-    : AGENT_TOOLS;
-}

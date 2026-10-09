@@ -38,7 +38,7 @@ import {
   HISTORY_UNAVAILABLE,
 } from './history-search.ts';
 import type { AnalysisHistory } from './reads.ts';
-import { toolsFor, type ToolContext } from './tools.ts';
+import type { ToolContext } from './tools.ts';
 
 const ATHLETES = ['athlete-a', 'athlete-b', 'athlete-c'] as const;
 const [A] = ATHLETES;
@@ -103,7 +103,7 @@ async function run(
   overrides: Partial<AgentOptions> = {},
 ): Promise<AgentOutcome> {
   return runAnalysisAgent({
-    job: { athleteId: A, input: RIDE_INPUT, source: 'instance-local' },
+    job: { athleteId: A, input: RIDE_INPUT },
     model,
     reads: store,
     history,
@@ -399,30 +399,6 @@ describe('the index off or unreachable: the run goes on without it (ADR 0040 D-6
     await indexed();
     const result = await searched('century training', { history: make() });
     expect(result).toContain(HISTORY_UNAVAILABLE);
-    expect(result).not.toContain(riderLabel('athlete-a'));
-  });
-});
-
-describe('the hosted path (#1101 not yet landed)', () => {
-  it('is not offered on an instance-hosted job, and a call to it is no such tool', async () => {
-    expect(toolsFor('instance-hosted').map((tool) => tool.spec.name)).not.toContain(
-      'history_search',
-    );
-    expect(toolsFor('instance-local').map((tool) => tool.spec.name)).toContain('history_search');
-    await indexed();
-    const model = scriptedModel(
-      calls(['history_search', { query: 'century training' }]),
-      text(PASSING_WRITE_UP),
-    );
-    const outcome = await run(model, {
-      job: { athleteId: A, input: RIDE_INPUT, source: 'instance-hosted' },
-    });
-    expect(outcome.kind).toBe('written');
-    for (const request of model.requests) {
-      expect(request.tools.map((tool) => tool.name)).not.toContain('history_search');
-    }
-    const [result] = toolResults(model);
-    expect(result).toContain('there is no such tool');
     expect(result).not.toContain(riderLabel('athlete-a'));
   });
 });

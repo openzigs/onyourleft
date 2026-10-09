@@ -288,7 +288,19 @@ export interface InviteCodeTable {
 
 /** What kind of thing a sync item is (#37, #776). */
 export type SyncKind =
-  'activity' | 'write-up' | 'ride-summary' | 'side-camera-report' | 'goal' | 'note' | 'document';
+  | 'activity'
+  | 'write-up'
+  | 'ride-summary'
+  | 'side-camera-report'
+  | 'goal'
+  | 'note'
+  | 'document'
+  /**
+   * The rider's masking data — their words-to-mask list and their privacy
+   * zones — for masking what a hosted model is sent (#1101, ADR 0046 D-10).
+   * Never indexed and never readable by an analysis tool.
+   */
+  | 'masking';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {

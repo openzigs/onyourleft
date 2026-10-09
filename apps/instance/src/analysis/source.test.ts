@@ -2,11 +2,13 @@
 
 /**
  * Which model a job runs on (#1097): the job's own source and nothing else,
- * and — until #1101's masking seam lands — NO hosted request at all, whatever
- * key is held. #1101 replaces the "sends nothing" case with the masked path.
+ * and (#1101) a hosted model only behind the athlete's masking guard — a
+ * guard that is missing or cannot be read is a request not sent.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { PLANTED_GUARD } from '@onyourleft/analysis/testing';
 
 import type { HostedKeyState } from './hosted-key.ts';
 import { MARKER_KEY } from './hosted-key-testing.ts';
@@ -62,13 +64,14 @@ describe('a job’s source (#1097)', () => {
         local: LOCAL,
         hostedKey: () => Promise.resolve(state),
         recordedConsent: consentTo(ORIGIN),
+        guard: () => Promise.resolve(PLANTED_GUARD),
         behindMasking,
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
     expect(behindMasking).not.toHaveBeenCalled();
   });
 
-  it('on this tree, with a key held and no masking seam, fails a hosted job and sends nothing', async () => {
+  it('with a key held and no masking seam, fails a hosted job and sends nothing', async () => {
     const fetch = vi.fn(() => Promise.reject(new Error('nothing may be sent')));
     vi.stubGlobal('fetch', fetch);
     expect(
@@ -76,9 +79,45 @@ describe('a job’s source (#1097)', () => {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
         recordedConsent: consentTo(ORIGIN),
+        guard: () => Promise.resolve(PLANTED_GUARD),
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  describe('a missing or unreadable guard is a request not sent (#1101)', () => {
+    it.each<[string, { guard?: () => Promise<typeof PLANTED_GUARD | undefined> }]>([
+      ['no guard reader at all', {}],
+      ['the athlete has no guard that can be read', { guard: () => Promise.resolve(undefined) }],
+      ['the read throws', { guard: () => Promise.reject(new Error('disk')) }],
+    ])('%s', async (_why, guardOption) => {
+      const fetch = vi.fn(() => Promise.reject(new Error('nothing may be sent')));
+      vi.stubGlobal('fetch', fetch);
+      const behindMasking = vi.fn(() => LOCAL);
+      expect(
+        await modelForSource('instance-hosted', 'a', {
+          local: LOCAL,
+          hostedKey: () => Promise.resolve(HELD),
+          recordedConsent: consentTo(ORIGIN),
+          behindMasking,
+          ...guardOption,
+        }),
+      ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+      expect(behindMasking).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('a local job reads no guard: its model gets the full text (ADR 0040 D-9)', async () => {
+      const guard = vi.fn(() => Promise.resolve(PLANTED_GUARD));
+      expect(
+        await modelForSource('instance-local', 'a', {
+          local: LOCAL,
+          hostedKey: () => Promise.resolve(HELD),
+          guard,
+        }),
+      ).toEqual({ ok: true, model: LOCAL });
+      expect(guard).not.toHaveBeenCalled();
+    });
   });
 
   it('refuses the held key to any athlete but the one it is held for, even with masking (ADR 0046 Q9, Q13)', async () => {
@@ -88,24 +127,28 @@ describe('a job’s source (#1097)', () => {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
         recordedConsent: consentTo(ORIGIN),
+        guard: () => Promise.resolve(PLANTED_GUARD),
         behindMasking,
       }),
     ).toEqual({ ok: false, failure: 'hosted_unavailable' });
     expect(behindMasking).not.toHaveBeenCalled();
   });
 
-  it('builds the hosted model only behind the masking seam, handed the opened key — the control', async () => {
+  it('builds the hosted model only behind the masking seam, handed the opened key and the athlete’s guard — the control', async () => {
     const hosted: ModelConnection = { turn: () => Promise.reject(new Error('not called')) };
     const behindMasking = vi.fn(() => hosted);
+    const guard = vi.fn(() => Promise.resolve(PLANTED_GUARD));
     expect(
       await modelForSource('instance-hosted', 'a', {
         local: LOCAL,
         hostedKey: () => Promise.resolve(HELD),
         recordedConsent: consentTo(ORIGIN),
+        guard,
         behindMasking,
       }),
     ).toEqual({ ok: true, model: hosted });
-    expect(behindMasking).toHaveBeenCalledWith(HELD);
+    expect(guard).toHaveBeenCalledWith('a');
+    expect(behindMasking).toHaveBeenCalledWith(HELD, PLANTED_GUARD);
   });
 
   describe('the athlete’s own recorded consent, before the key is read (ADR 0046 D-9, Q10)', () => {
@@ -114,7 +157,12 @@ describe('a job’s source (#1097)', () => {
       const behindMasking = vi.fn(() => LOCAL);
       // 'a' is the athlete the key is held for — the operator — with masking supplied.
       expect(
-        await modelForSource('instance-hosted', 'a', { local: LOCAL, hostedKey, behindMasking }),
+        await modelForSource('instance-hosted', 'a', {
+          local: LOCAL,
+          hostedKey,
+          guard: () => Promise.resolve(PLANTED_GUARD),
+          behindMasking,
+        }),
       ).toEqual({ ok: false, failure: 'hosted_unavailable' });
       expect(hostedKey).not.toHaveBeenCalled();
       expect(behindMasking).not.toHaveBeenCalled();
@@ -128,6 +176,7 @@ describe('a job’s source (#1097)', () => {
           local: LOCAL,
           hostedKey,
           recordedConsent,
+          guard: () => Promise.resolve(PLANTED_GUARD),
           behindMasking: () => LOCAL,
         }),
       ).toEqual({ ok: false, failure: 'hosted_unavailable' });
@@ -142,6 +191,7 @@ describe('a job’s source (#1097)', () => {
           local: LOCAL,
           hostedKey: () => Promise.resolve(HELD),
           recordedConsent: consentTo('https://elsewhere.example/v1'),
+          guard: () => Promise.resolve(PLANTED_GUARD),
           behindMasking,
         }),
       ).toEqual({ ok: false, failure: 'hosted_unavailable' });
