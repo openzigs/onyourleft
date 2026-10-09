@@ -49,7 +49,12 @@ import {
   geographicPosition,
   type GeographicPosition,
 } from '@onyourleft/domain';
-import { maskForHosted, parseMaskedWords, type MaskingGuard } from '@onyourleft/analysis';
+import {
+  maskForHosted,
+  parseMaskedWords,
+  tidyMaskedWord,
+  type MaskingGuard,
+} from '@onyourleft/analysis';
 
 import { createHostedModel } from './model.ts';
 import type { AgentMessage, ModelConnection, ToolCallRequest } from './model-turn.ts';
@@ -126,7 +131,17 @@ export function parseMaskingItem(text: string): MaskingGuard | undefined {
     }
     zones.push({ centre, radius, label: zone.label });
   }
-  return { words: parseMaskedWords(body.words), zones };
+  const words = parseMaskedWords(body.words);
+  // parseMaskedWords drops an over-long word and everything past the cap; for a
+  // privacy list a dropped word is sent in the clear, so refuse the whole item
+  // unless only blanks and case-insensitive repeats were dropped.
+  const distinct = new Set(
+    (body.words as readonly string[])
+      .map((word) => tidyMaskedWord(word).toLocaleLowerCase('en'))
+      .filter((word) => word !== ''),
+  );
+  if (words.length !== distinct.size) return undefined;
+  return { words, zones };
 }
 
 /**

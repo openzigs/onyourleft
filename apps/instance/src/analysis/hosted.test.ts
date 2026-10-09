@@ -411,6 +411,20 @@ describe('the masking item', () => {
     expect(parseMaskingItem(text)).toBeUndefined();
   });
 
+  it('refuses the whole item when a word would be dropped, and accepts a blank or a repeat', () => {
+    const longWord = 'a'.repeat(81);
+    expect(
+      parseMaskingItem(JSON.stringify({ words: ['Anneliese', longWord], zones: [] })),
+    ).toBeUndefined();
+    const many = Array.from({ length: 201 }, (_unused, index) => `word${String(index)}`);
+    expect(parseMaskingItem(JSON.stringify({ words: many, zones: [] }))).toBeUndefined();
+    expect(
+      parseMaskingItem(
+        JSON.stringify({ words: ['Priya', ' ', 'priya', 'Acacia  Avenue'], zones: [] }),
+      ),
+    ).toStrictEqual({ words: ['Priya', 'Acacia Avenue'], zones: [] });
+  });
+
   it('is never indexed, so no history search can return it', async () => {
     await plant(A, 'masking', MASKING_ITEM_KEY, itemBody(PLANTED_GUARD));
     await history.catchUp();
