@@ -105,6 +105,14 @@ export interface RouteContext {
   readonly probes: InstanceProbes | undefined;
   /** Sealed requests' replay record, clock and HPKE port (#1191). Absent on a handler handed none. */
   readonly sealed: Sealed | undefined;
+  /** This request arrived inside `POST /v1/sealed`, opened and its signature checked (#1192). */
+  readonly sealedRequest: boolean;
+  /**
+   * This instance holds keys, so its sealed routes are sealed (#1192, ADR 0047
+   * D-7): `false` on an instance with no `OYL_INSTANCE_SECRET_KEY`, which
+   * answers them in plaintext as before.
+   */
+  readonly sealsRoutes: boolean;
   /**
    * Dispatch an opened sealed request's INNER request through the same route
    * table (#1191, ADR 0047 D-9): the path matched, the method checked, the
@@ -187,13 +195,23 @@ export interface Route {
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
   /**
-   * `'only'`: the route is reachable ONLY inside a sealed request (#1191,
-   * ADR 0047 D-9) — `POST /v1/sealed` dispatches to it, and a plaintext
-   * request to its path is `not_found`, as though it were not there.
-   * `openapi.json` documents the mark as `x-oyl-sealed: only`. Which routes
-   * carry it is #1192's.
+   * Whether the route is reached sealed (#1191, #1192, ADR 0047 D-7, D-9).
+   *
+   * - `'only'`: ONLY inside a sealed request — `POST /v1/sealed` dispatches to
+   *   it, and a plaintext request to its path is refused `sealed_required`
+   *   before anything else is looked at: no session is read, no body parsed,
+   *   nothing run.
+   * - `'new-key'`: `POST /v1/auth/session` alone. A key the instance already
+   *   holds signs in in plaintext until phase 2; a key it has not seen is
+   *   refused `sealed_required` in plaintext and registers only sealed.
+   *
+   * Both hold only on an instance that holds keys
+   * ({@link RouteContext.sealsRoutes}): one with no `OYL_INSTANCE_SECRET_KEY`
+   * has no sealed routes and answers these in plaintext as before (D-7).
+   * `openapi.json` documents the mark as `x-oyl-sealed`, and
+   * `sealed/phase-one.ts` is the committed list the table is held to.
    */
-  readonly sealed?: 'only';
+  readonly sealed?: 'only' | 'new-key';
   /**
    * The largest body this route reads, from the instance's configuration —
    * `config.bodyLimitBytes` unless a route declares its own. Only

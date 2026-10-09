@@ -106,10 +106,12 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/session',
+    // #1192: a key this instance has not seen registers only sealed (ADR 0047 D-7).
+    sealed: 'new-key',
     operationId: 'createSession',
     reaches: 'own',
     summary:
-      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. New registrations are rate-limited per client address.',
+      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. On an instance that holds keys, an unseen key registers ONLY inside a sealed request: in plaintext it is `sealed_required` and nothing is written; a key the instance holds still signs in in plaintext. New registrations are rate-limited per client address.',
     identity: true,
     request: object(
       {
@@ -165,6 +167,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
             confirmsAdult: context.json.confirmsAdult,
           },
           context.client.address,
+          { mayRegister: context.sealedRequest || !context.sealsRoutes },
         ),
       ),
   },
@@ -275,6 +278,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/auth/devices',
+    sealed: 'only',
     operationId: 'listDevices',
     reaches: 'own',
     admitsPending: true,
@@ -303,6 +307,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/devices/{publicKey}/revoke',
+    sealed: 'only',
     operationId: 'revokeDevice',
     reaches: 'own',
     admitsPending: true,
@@ -325,6 +330,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/link-codes',
+    sealed: 'only',
     operationId: 'createLinkCode',
     reaches: 'own',
     admitsPending: true,
@@ -342,6 +348,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/link',
+    sealed: 'only',
     operationId: 'linkDevice',
     reaches: 'own',
     summary:
@@ -356,6 +363,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/recover',
+    sealed: 'only',
     operationId: 'recoverAccount',
     reaches: 'own',
     summary:
@@ -378,6 +386,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/recover/email',
+    sealed: 'only',
     operationId: 'requestEmailRecovery',
     reaches: 'own',
     summary:
@@ -427,6 +436,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/recovery-email',
+    sealed: 'only',
     operationId: 'setRecoveryEmail',
     reaches: 'own',
     admitsPending: true,
@@ -448,6 +458,7 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/recovery-email/confirm',
+    sealed: 'only',
     operationId: 'confirmRecoveryEmail',
     reaches: 'own',
     admitsPending: true,

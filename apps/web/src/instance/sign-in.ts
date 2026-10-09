@@ -153,7 +153,16 @@ export class InstanceSignInError extends Error {
 export interface SignInDependencies {
   /** The instance's origin, exactly as the instance states it. */
   readonly origin: string;
+  /** Plaintext: the challenge, and signing a key the instance already holds in. */
   readonly transport: InstanceTransport;
+  /**
+   * SEALED to the instance's key and signed by this device's (#1192, ADR 0047
+   * D-7): registering a key the instance has not seen, and linking, go here and
+   * nowhere else. Absent — no card, or a copy of the app loaded from a
+   * website (D-11) — a new key is refused `sealed_required` and a link is not
+   * attempted.
+   */
+  readonly sealed?: InstanceTransport;
   readonly storage: InstanceAccountStorage;
   /** Makes sure the local athlete row exists — `ensureLocalAthlete`, bound. */
   readonly ensureLocalAthlete: () => Promise<unknown>;
@@ -213,7 +222,11 @@ export async function signInToInstance(
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
-  const answer = await dependencies.transport.post('/v1/auth/session', {
+  // Sealed whenever this device can seal, so a registration's recovery codes
+  // cross the edge only as ciphertext; in plaintext only a key the instance
+  // already holds signs in (ADR 0047 D-7, until phase 2).
+  const session = dependencies.sealed ?? dependencies.transport;
+  const answer = await session.post('/v1/auth/session', {
     ...statement,
     ...(registration.displayName === undefined ? {} : { displayName: registration.displayName }),
   });
@@ -258,13 +271,14 @@ export async function signInToInstance(
  * then sign in. The key that signs is this device's own; nothing is copied.
  */
 export async function linkThisDevice(
-  dependencies: SignInDependencies,
+  dependencies: SignInDependencies & { readonly sealed: InstanceTransport },
   linkCode: string,
 ): Promise<SignedIn> {
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, LINK_PURPOSE);
-  const answer = await dependencies.transport.post('/v1/auth/link', { ...statement, linkCode });
+  // Sealed-only (#1192): the code crosses the edge only as ciphertext.
+  const answer = await dependencies.sealed.post('/v1/auth/link', { ...statement, linkCode });
   if (answer.status !== 200) throw new InstanceSignInError(codeOf(answer.body));
   return signInToInstance(dependencies);
 }

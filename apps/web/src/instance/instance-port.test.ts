@@ -29,9 +29,12 @@ import {
 } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
+import { LOADED_LOCALLY } from './testing';
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
+  /** The instance's keys (#1189): its card, which a new rider registers with (#1192). */
+  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   /** The listener's own `http://127.0.0.1:<port>`. */
   readonly url: string;
   call(
@@ -76,6 +79,14 @@ async function instance(options: Parameters<IdentityTesting['startIdentityInstan
   return world;
 }
 
+/**
+ * The instance's card, as its operator hands it over (#1190): a new key
+ * registers only sealed (#1192), and a device seals only with a card.
+ */
+async function cardOf(world: IdentityInstance): Promise<string> {
+  return (await world.instanceKeys.show()).card;
+}
+
 /** `localStorage` as a map that outlives the port reading it: a reload keeps it. */
 function deviceStorage(): InstanceStorage & { readonly map: Map<string, string> } {
   const map = new Map<string, string>();
@@ -106,6 +117,7 @@ function device(send: InstanceSend, storage = deviceStorage()) {
   const log: string[] = [];
   const dependencies: InstancePortDependencies = {
     storage,
+    loadedFrom: LOADED_LOCALLY,
     ensureLocalAthlete: () =>
       store.write(async (open) => {
         log.push('ensureLocalAthlete');
@@ -146,8 +158,8 @@ describe('signing in, and what is shown after a reload — #777', () => {
     const world = await instance();
     const send = wire(world);
     const first = device(send);
-    const outcome = await first.port.connect(testing.TEST_ORIGIN, 'Anna');
-    expect(outcome.kind).toBe('connected');
+    const outcome = await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    expect(outcome.kind, JSON.stringify(outcome)).toBe('connected');
     expect(outcome.kind === 'connected' ? outcome.recoveryCodes : []).toHaveLength(10);
 
     // The reload: a new port over nothing but what the device kept.
@@ -174,14 +186,14 @@ describe('signing in, and what is shown after a reload — #777', () => {
   it('says the instance has no name rather than inventing one', async () => {
     const world = await instance({ config: { name: null } });
     const { port } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, '');
+    await port.connect(testing.TEST_ORIGIN, '', await cardOf(world));
     expect(await port.current()).toMatchObject({ kind: 'connected', instanceName: null });
   });
 
   it('lists this athlete’s devices, this one among them (#773)', async () => {
     const world = await instance();
     const { port } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const listed = await port.devices();
     expect(listed.kind).toBe('listed');
     expect(listed.kind === 'listed' ? listed.devices : []).toEqual([
@@ -195,7 +207,9 @@ describe('signing in, and what is shown after a reload — #777', () => {
     // Three devices, each its own key and so its own athlete on the instance.
     const riders = [device(send), device(send), device(send)];
     for (const rider of riders) {
-      expect((await rider.port.connect(testing.TEST_ORIGIN, '')).kind).toBe('connected');
+      expect((await rider.port.connect(testing.TEST_ORIGIN, '', await cardOf(world))).kind).toBe(
+        'connected',
+      );
     }
     const keys = await Promise.all(
       riders.map(async (rider) => {
@@ -212,7 +226,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
   it('says so when the instance no longer accepts the session', async () => {
     const world = await instance();
     const { port, storage } = device(wire(world));
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const token = heldToken(storage);
     expect((await world.call('DELETE', '/v1/auth/session', { token })).status).toBe(204);
     expect(await port.current()).toEqual({ kind: 'signed-out', origin: testing.TEST_ORIGIN });
@@ -221,7 +235,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
   it('names the refusal of an instance that is not taking new riders', async () => {
     const world = await instance({ registration: 'closed' });
     const { port, storage } = device(wire(world));
-    expect(await port.connect(testing.TEST_ORIGIN, 'Anna')).toEqual({
+    expect(await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world))).toEqual({
       kind: 'refused',
       text: CONNECT_REFUSAL_TEXT.registration_closed,
     });
@@ -244,7 +258,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
     const send: InstanceSend = (url, init) =>
       up ? real(url, init) : Promise.reject(new TypeError('offline'));
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     up = false;
     expect(await port.current()).toEqual({ kind: 'unreachable', origin: testing.TEST_ORIGIN });
     expect(await port.devices()).toMatchObject({ kind: 'unavailable' });
@@ -264,7 +278,7 @@ describe('signing in, and what is shown after a reload — #777', () => {
       return real(url, init);
     };
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     expect(await port.current()).toMatchObject({ sourceUrl: null, instanceName: null });
   });
 });
@@ -277,10 +291,12 @@ describe('what is sent, and what is kept — #892 review', () => {
     const world = await instance();
     const send = wire(world);
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     await port.disconnect();
     send.mockClear();
 
+    // No card this time: a key the instance holds signs in in plaintext (#1192),
+    // so the body the instance was sent is readable here.
     await port.connect(testing.TEST_ORIGIN, 'Brigid');
     const sessionBodies = send.mock.calls
       .filter(([url]) => String(url).endsWith('/v1/auth/session'))
@@ -302,7 +318,9 @@ describe('what is sent, and what is kept — #892 review', () => {
       url.startsWith(second.url) ? toSecond(url, init) : toFirst(url, init);
     const storage = deviceStorage();
     const { port } = device(send, storage);
-    expect((await port.connect(testing.TEST_ORIGIN, 'Anna')).kind).toBe('connected');
+    expect((await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(first))).kind).toBe(
+      'connected',
+    );
     const firstToken = heldToken(storage);
     expect(firstToken).not.toBe('');
 
@@ -314,7 +332,7 @@ describe('what is sent, and what is kept — #892 review', () => {
         throw new DOMException('full', 'QuotaExceededError');
       setItem(key, value);
     };
-    expect((await port.connect(second.url, 'Anna')).kind).toBe('refused');
+    expect((await port.connect(second.url, 'Anna', await cardOf(second))).kind).toBe('refused');
     expect(JSON.parse(storage.map.get(INSTANCE_ACCOUNT_STORAGE_KEY) ?? '{}')).toMatchObject({
       origin: second.url,
     });
@@ -340,7 +358,7 @@ describe('disconnecting — #777', () => {
     const before = await count();
     expect(before).toBe(3);
 
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const token = heldToken(storage);
     expect(token).not.toBe('');
     expect(storage.map.has(INSTANCE_ACCOUNT_STORAGE_KEY)).toBe(true);
@@ -363,7 +381,7 @@ describe('disconnecting — #777', () => {
     const send: InstanceSend = (url, init) =>
       up ? real(url, init) : Promise.reject(new TypeError('offline'));
     const { port, storage } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     up = false;
     await port.disconnect();
     expect(storage.map.size).toBe(0);

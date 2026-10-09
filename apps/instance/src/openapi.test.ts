@@ -126,13 +126,11 @@ function send(
   token?: string,
   body?: unknown,
 ) {
-  return fetch(`${world.url}${path}`, {
-    method,
-    headers: {
-      ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  // A sealed route (#1192) is called sealed, and its INNER answer is what the
+  // route's entry declares: `IdentityInstance.request` seals and opens it.
+  return world.request(method, path, {
+    ...(token === undefined ? {} : { token }),
+    ...(body === undefined ? {} : { body }),
   });
 }
 

@@ -136,6 +136,9 @@ async function signIn(address: string, name: string): Promise<ConnectOutcome> {
   const store = openActivityStore(`room-gate-${name}`);
   const instance = createInstancePort({
     storage: localStorage,
+    // Served from loopback (ADR 0047 D-11). The room gate's instance holds no
+    // keys, so it registers in plaintext and nothing here seals (#1192).
+    loadedFrom: { native: false, href: location.href },
     ensureLocalAthlete: () => ensureLocalAthlete(store, unixSeconds(Math.floor(Date.now() / 1000))),
     signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
   });

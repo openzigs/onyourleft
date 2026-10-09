@@ -31,6 +31,7 @@ import {
 } from '../analysis/hosted-key.ts';
 import { MARKER, MARKER_KEY, secretText } from '../analysis/hosted-key-testing.ts';
 import { TEST_ORIGIN, testDevice, type IdentityInstance } from '../auth/identity-testing.ts';
+import { sealedAt } from '../sealed/sealed-testing.ts';
 import { authorised, syncWorld } from '../sync/sync-testing.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { testConfig } from '../instance-testing.ts';
@@ -463,7 +464,13 @@ async function signIn(url: string) {
   ) as {
     nonce: string;
   };
-  return post(url, '/v1/auth/session', await device.statement(challenge.nonce));
+  // A new key registers only sealed on an instance holding keys (#1192).
+  return sealedAt(url, TEST_ORIGIN, {
+    method: 'POST',
+    path: '/v1/auth/session',
+    body: await device.statement(challenge.nonce),
+    signer: device.signingKey,
+  });
 }
 
 describe('a running instance holding a key (#1097)', () => {

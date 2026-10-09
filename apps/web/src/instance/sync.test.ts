@@ -21,10 +21,18 @@
 
 import { fileURLToPath } from 'node:url';
 
-import { kilograms, toHex, unixSeconds, type ActivityClaims } from '@onyourleft/domain';
+import {
+  fromHex,
+  kilograms,
+  toHex,
+  unixSeconds,
+  type ActivityClaims,
+  type SigningKey,
+} from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   ensureDeviceSigningKey,
+  webCryptoHpkePrimitives,
   webCryptoSha256,
   webCryptoVerifier,
   type ActivityId,
@@ -42,10 +50,17 @@ import { orderedRows, PAGE_SIZE } from '../library/rows';
 import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
+import {
+  createInstanceClock,
+  sealedInstance,
+  type InstanceSend,
+  type SealedInstance,
+} from './instance-transport';
 import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign-in';
 import {
   admitDeviceKey,
   athleteKeysFrom,
+  sealedSyncTransport,
   syncWithInstance,
   type SyncDependencies,
   type SyncTransport,
@@ -123,13 +138,45 @@ afterEach(async () => {
 
 const NOW = unixSeconds(1_790_000_000);
 
-/** `fetch` against the instance, with this device's session once it has one. */
-function transports(url: string) {
+/**
+ * `fetch` against the instance, with this device's session once it has one.
+ * The challenge and a known key's sign-in go in plaintext (`auth`); a new
+ * key's registration, a link (`sealed`) and every sync route (`sync`) go
+ * SEALED (#1192): through the client's own `sealedInstance`, to the newest
+ * key the instance serves, signed by this device's key.
+ */
+function transports(url: string, signingKey: () => Promise<SigningKey>) {
   let token: string | undefined;
+  const origin = instanceTesting.TEST_ORIGIN;
+  const clock = createInstanceClock();
   const headers = (json: boolean): Record<string, string> => ({
     ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
     ...(json ? { 'content-type': 'application/json' } : {}),
   });
+  // The instance answers at `url`; it states, and is sealed to, `origin`.
+  const send: InstanceSend = (target, init) => fetch(target.replace(origin, url), init);
+  const instance = async (): Promise<SealedInstance> => {
+    const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
+      statements: { statement: { keyId: string; encryptionKey: string } }[];
+    };
+    const newest = served.statements.at(-1)?.statement;
+    if (newest === undefined) throw new Error('the instance serves no encryption key');
+    return sealedInstance(
+      origin,
+      {
+        instanceKey: {
+          keyId: newest.keyId,
+          publicKey: fromHex(newest.encryptionKey, 'the encryption key', 32),
+        },
+        signingKey: await signingKey(),
+        primitives: webCryptoHpkePrimitives,
+        sha256: webCryptoSha256,
+        clock,
+        now: () => NOW * 1000,
+      },
+      send,
+    );
+  };
   const auth: InstanceTransport = {
     post: async (path, body) => {
       const response = await fetch(`${url}${path}`, {
@@ -140,23 +187,21 @@ function transports(url: string) {
       return { status: response.status, body: (await response.json()) as unknown };
     },
   };
+  const sealed: InstanceTransport = {
+    post: async (path, body) => (await instance()).call('POST', path, { body }),
+  };
+  const held = (): string => {
+    if (token === undefined) throw new Error('this device holds no session yet');
+    return token;
+  };
   const sync: SyncTransport = {
-    json: async (method, path, body) => {
-      const response = await fetch(`${url}${path}`, {
-        method,
-        headers: headers(body !== undefined),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-      const text = await response.text();
-      return { status: response.status, body: text === '' ? null : (JSON.parse(text) as unknown) };
-    },
-    bytes: async (path) => {
-      const response = await fetch(`${url}${path}`, { headers: headers(false) });
-      return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
-    },
+    json: async (method, path, body) =>
+      sealedSyncTransport(await instance(), held()).json(method, path, body),
+    bytes: async (path) => sealedSyncTransport(await instance(), held()).bytes(path),
   };
   return {
     auth,
+    sealed,
     sync,
     setToken: (value: string) => {
       token = value;
@@ -179,7 +224,9 @@ function device(url: string): Device {
   const map = new Map<string, string>();
   return {
     harness,
-    transport: transports(url),
+    transport: transports(url, () =>
+      harness.write((store) => ensureDeviceSigningKey(store, LOCAL_ATHLETE, { now: () => NOW })),
+    ),
     account: {
       getItem: (key) => map.get(key) ?? null,
       setItem: (key, value) => void map.set(key, value),
@@ -191,6 +238,8 @@ function signInDependencies(origin: string, on: Device) {
   return {
     origin,
     transport: on.transport.auth,
+    // A new key registers, and a device links, only sealed (#1192).
+    sealed: on.transport.sealed,
     storage: on.account,
     ensureLocalAthlete: () => on.harness.write((store) => ensureLocalAthlete(store, NOW)),
     signingKey: () =>
@@ -201,7 +250,7 @@ function signInDependencies(origin: string, on: Device) {
 
 function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDependencies {
   return {
-    transport: on.transport.sync,
+    sealed: on.transport.sync,
     store,
     athleteId: LOCAL_ATHLETE,
     signingKey: () => ensureDeviceSigningKey(store as never, LOCAL_ATHLETE, { now: () => NOW }),
@@ -454,7 +503,7 @@ describe('two-way sync through the real instance (#776)', () => {
       },
     };
     const report = await b.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b, store), transport: tampering }),
+      syncWithInstance({ ...syncDependencies(b, store), sealed: tampering }),
     );
     expect(report.pulled).toBe(0);
     expect(report.failures).toEqual([
@@ -469,7 +518,7 @@ describe('two-way sync through the real instance (#776)', () => {
         Promise.resolve({ status: 200, bytes: syncTesting.corpusFile('paused-laps.fit') }),
     };
     const swapped = await b.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b, store), transport: swapping }),
+      syncWithInstance({ ...syncDependencies(b, store), sealed: swapping }),
     );
     expect(swapped.failures).toEqual([
       expect.objectContaining({ kind: 'activity', reason: 'content-mismatch' }),
@@ -933,7 +982,7 @@ describe('what a device will not take from an instance (#898)', () => {
       const report = await b.on.harness.write((store) =>
         syncWithInstance({
           ...syncDependencies(b.on, store),
-          transport: lying,
+          sealed: lying,
           athleteKeys: () => athleteKeysFrom(lying),
         }),
       );
@@ -1007,7 +1056,7 @@ describe('what a device will not take from an instance (#898)', () => {
         },
       };
       const report = await b.on.harness.write((store) =>
-        syncWithInstance({ ...syncDependencies(b.on, store), transport: lying }),
+        syncWithInstance({ ...syncDependencies(b.on, store), sealed: lying }),
       );
       expect(report.failures).toEqual([
         expect.objectContaining({ kind: 'activity', reason: 'not-your-key' }),
@@ -1095,7 +1144,7 @@ describe('a push whose answer was lost (#901)', () => {
     };
     await expect(
       a.on.harness.write((store) =>
-        syncWithInstance({ ...syncDependencies(a.on, store), transport: losing }),
+        syncWithInstance({ ...syncDependencies(a.on, store), sealed: losing }),
       ),
     ).rejects.toThrow(/dropped/);
     expect(
@@ -1127,7 +1176,7 @@ describe('a push whose answer was lost (#901)', () => {
           : honest.json(method, path, body),
     };
     const first = await a.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(a.on, store), transport: refusing }),
+      syncWithInstance({ ...syncDependencies(a.on, store), sealed: refusing }),
     );
     expect(first).toMatchObject({
       pushed: 0,
@@ -1384,7 +1433,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
       },
     };
     const failed = await b.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b.on, store), transport: failingOnce }),
+      syncWithInstance({ ...syncDependencies(b.on, store), sealed: failingOnce }),
     );
     expect(failed.failures).toEqual([
       expect.objectContaining({ kind: 'goal', reason: 'internal' }),
@@ -1412,7 +1461,7 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
           : honest.json(method, path, body),
     };
     const report = await b.on.harness.write((store) =>
-      syncWithInstance({ ...syncDependencies(b.on, store), transport: unreadable }),
+      syncWithInstance({ ...syncDependencies(b.on, store), sealed: unreadable }),
     );
     expect(report.failures).toEqual([
       expect.objectContaining({ kind: 'goal', reason: 'internal' }),

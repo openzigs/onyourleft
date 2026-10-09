@@ -19,7 +19,6 @@ import {
   instanceCard,
   instanceIdentityFingerprint,
   instanceIdentityRotationBytes,
-  instanceKeyId,
   instanceKeyStatementBytes,
   toHex,
   unixSeconds,
@@ -28,7 +27,7 @@ import {
 } from '@onyourleft/domain';
 import { ensureDeviceSigningKey, webCryptoSha256 } from '@onyourleft/store';
 import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { eraseDevice } from '../transfer/erase-device';
@@ -42,21 +41,31 @@ import {
 import {
   createInstancePort,
   instanceEraser,
-  INSTANCE_SESSION_STORAGE_KEY,
   type InstancePortDependencies,
   type InstanceStorage,
 } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { createModerationPort, INVITE_CARD_CAUTION } from './moderation-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from './sign-in';
+import { LOADED_LOCALLY } from './testing';
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
+  /** The instance's own keys (#1189): its encryption key is what a sealed request opens under. */
+  readonly instanceKeys: {
+    served(): Promise<{
+      readonly statements: readonly {
+        readonly statement: { readonly keyId: string; readonly encryptionKey: string };
+      }[];
+    }>;
+  };
   close(): Promise<void>;
 }
 interface IdentityTesting {
   readonly TEST_ORIGIN: string;
-  startIdentityInstance(): Promise<IdentityInstance>;
+  startIdentityInstance(options?: {
+    moderators?: { readonly owner: string };
+  }): Promise<IdentityInstance>;
 }
 const INSTANCE_TESTING = new URL('../../../instance/src/auth/identity-testing.ts', import.meta.url)
   .href;
@@ -71,6 +80,18 @@ const harnesses: StoreHarness[] = [];
 beforeAll(async () => {
   testing = (await import(/* @vite-ignore */ INSTANCE_TESTING)) as IdentityTesting;
   ORIGIN = testing.TEST_ORIGIN;
+});
+
+/**
+ * Each test's instance, started first (#1192): the statements this file's own
+ * identities sign name ITS encryption key, so a sealed request a device makes
+ * after pinning one of those identities opens on the instance. What the pin
+ * judges is the identity's signature; what the instance opens with is its key.
+ */
+let current: IdentityInstance;
+beforeEach(async () => {
+  current = await testing.startIdentityInstance();
+  worlds.push(current);
 });
 afterEach(async () => {
   for (const world of worlds.splice(0)) await world.close();
@@ -104,14 +125,15 @@ async function identity(): Promise<Identity> {
 async function statement(
   serial: number,
   members: Partial<InstanceKeyStatement> = {},
-  label = `key-${String(serial)}`,
 ): Promise<InstanceKeyStatement> {
-  const encryptionKey = new Uint8Array(await webCryptoSha256(new TextEncoder().encode(label)));
+  // The instance's real encryption key (#1192), signed for by this file's identity.
+  const real = (await current.instanceKeys.served()).statements.at(-1)?.statement;
+  if (real === undefined) throw new Error('the instance serves no encryption key');
   return {
     purpose: INSTANCE_KEY_PURPOSE,
     instanceOrigin: ORIGIN,
-    keyId: await instanceKeyId(webCryptoSha256, encryptionKey),
-    encryptionKey: toHex(encryptionKey),
+    keyId: real.keyId,
+    encryptionKey: real.encryptionKey,
     serial,
     notBefore: T0,
     issuedAt: T0,
@@ -167,6 +189,7 @@ function device(send: InstanceSend, storage = deviceStorage()) {
   harnesses.push(store);
   const dependencies: InstancePortDependencies = {
     storage,
+    loadedFrom: LOADED_LOCALLY,
     ensureLocalAthlete: () =>
       store.write(async (open) => ensureLocalAthlete(open, unixSeconds(T0))),
     signingKey: () => store.write(async (open) => ensureDeviceSigningKey(open, LOCAL_ATHLETE)),
@@ -186,10 +209,9 @@ function keptPin(storage: { readonly map: Map<string, string> }): string | undef
 const paths = (send: ReturnType<typeof wire>): string[] =>
   send.mock.calls.map(([url, init]) => `${init.method ?? 'GET'} ${new URL(url).pathname}`);
 
-async function world() {
-  const started = await testing.startIdentityInstance();
-  worlds.push(started);
-  return started;
+/** This test's instance, already started (`beforeEach`). */
+function world(): Promise<IdentityInstance> {
+  return Promise.resolve(current);
 }
 
 /** A device signed in with `card`, its pin kept. */
@@ -268,10 +290,16 @@ describe('no card, no sealed route (#1190, D-14 Q1)', () => {
     const by = await identity();
     const keys = { body: await served(by, [await statement(T0)]) };
     const send = wire(await world(), keys);
-    const { port, storage } = device(send);
+    const { port, storage, dependencies } = device(send);
+    // Signed in with only an address: this device's key is new, and a new key
+    // registers only sealed (#1192) — so it registers through the instance's
+    // own keys here, as another device of the rider's could have, and the
+    // address-only sign-in is the one that follows.
+    expect(await port.connect(ORIGIN, 'Anna', by.card)).toMatchObject({ kind: 'connected' });
+    await port.disconnect();
     expect(await port.connect(ORIGIN, 'Anna')).toMatchObject({ kind: 'connected' });
     expect(keptPin(storage)).toBeUndefined();
-    expect(sealedRouteGate(readInstanceAccount(storage))).toEqual({
+    expect(sealedRouteGate(readInstanceAccount(storage), LOADED_LOCALLY)).toEqual({
       kind: 'needs-card',
       text: INSTANCE_KEY_TEXT['needs-card'],
     });
@@ -280,7 +308,7 @@ describe('no card, no sealed route (#1190, D-14 Q1)', () => {
       kind: 'unavailable',
       text: INSTANCE_KEY_TEXT['needs-card'],
     });
-    const moderation = createModerationPort({ storage, send });
+    const moderation = createModerationPort(dependencies);
     expect(await moderation.mintInvite('A friend')).toEqual({
       kind: 'refused',
       text: INSTANCE_KEY_TEXT['needs-card'],
@@ -294,7 +322,12 @@ describe('no card, no sealed route (#1190, D-14 Q1)', () => {
     const by = await identity();
     const keys = { body: await served(by, [await statement(T0)]) };
     const { port, storage } = device(wire(await world(), keys));
+    // Registered with the card (a new key registers only sealed, #1192), then
+    // signed in again with only the address, which keeps no pin.
+    await port.connect(ORIGIN, 'Anna', by.card);
+    await port.disconnect();
     await port.connect(ORIGIN, 'Anna');
+    expect(keptPin(storage)).toBeUndefined();
     expect(await port.offerCard(by.card)).toEqual({ kind: 'pinned' });
     expect(keptPin(storage)).toBe(base32Unpadded(by.fingerprint));
   });
@@ -339,7 +372,9 @@ describe('never a silent re-pin (#1190, D-6, D-14 Q8)', () => {
     });
     // The pin did not move on the endorsement; sealing stops.
     expect(keptPin(storage)).toBe(base32Unpadded(old.fingerprint));
-    expect(sealedRouteGate(readInstanceAccount(storage)).kind).toBe('needs-new-card');
+    expect(sealedRouteGate(readInstanceAccount(storage), LOADED_LOCALLY).kind).toBe(
+      'needs-new-card',
+    );
     expect(await port.linkCode()).toMatchObject({ kind: 'unavailable' });
 
     // A card that is not the endorsed one changes nothing.
@@ -359,7 +394,7 @@ describe('never a silent re-pin (#1190, D-6, D-14 Q8)', () => {
     // Confirmed: replaced, and sealing may resume.
     expect(await port.confirmCard(next.card)).toEqual({ kind: 'pinned' });
     expect(keptPin(storage)).toBe(base32Unpadded(next.fingerprint));
-    expect(sealedRouteGate(readInstanceAccount(storage)).kind).toBe('open');
+    expect(sealedRouteGate(readInstanceAccount(storage), LOADED_LOCALLY).kind).toBe('open');
     expect(await port.keys()).toMatchObject({ kind: 'trusted' });
   });
 });
@@ -461,36 +496,32 @@ describe('the card a device shows is composed from its own pin (#1190, D-6)', ()
     expect(paths(send).slice(before)).toEqual(['GET /v1/instance/keys']);
   });
 
-  it('puts THIS device’s card in an invitation, whatever the instance answers', async () => {
+  it('puts THIS device’s card in an invitation: the card from its own pin, the code from the instance', async () => {
+    // Since #1192 the invitation is minted SEALED, so its answer is the
+    // instance's and nobody on the way can plant a card in it; what is held
+    // here is that the card beside the code is the device's own.
     clock.s = T0 + HOUR;
     const by = await identity();
-    const planted = instanceCard(ORIGIN, (await identity()).fingerprint);
-    const storage = deviceStorage();
-    storage.map.set(
-      INSTANCE_ACCOUNT_STORAGE_KEY,
-      JSON.stringify({
-        origin: ORIGIN,
-        instanceAthleteId: 'a',
-        pin: base32Unpadded(by.fingerprint),
-      }),
-    );
-    storage.map.set(INSTANCE_SESSION_STORAGE_KEY, JSON.stringify({ origin: ORIGIN, token: 't' }));
-    const send = vi.fn(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({ inviteCode: 'wxyz-2345-abcd-efgh', expiresAt: T0, card: planted }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      ),
-    );
-    const minted = await createModerationPort({ storage, send }).mintInvite('A friend');
-    expect(minted).toEqual({
-      kind: 'minted',
-      invite: codeWithCard(by.card, 'wxyz-2345-abcd-efgh'),
-      card: by.card,
-      inviteCode: 'wxyz-2345-abcd-efgh',
-      expiresAt: T0,
+    const keys: { body: unknown } = { body: undefined };
+    let routed = current;
+    const routing: InstanceSend = (url, init) => wire(routed, keys)(url, init);
+    const owner = device(routing);
+    await owner.dependencies.ensureLocalAthlete();
+    const ownerKey = toHex((await owner.dependencies.signingKey()).publicKey);
+    // An instance whose owner moderator is this device's key.
+    current = await testing.startIdentityInstance({ moderators: { owner: ownerKey } });
+    worlds.push(current);
+    routed = current;
+    keys.body = await served(by, [await statement(T0)]);
+    expect(await owner.port.connect(ORIGIN, 'Owner', by.card)).toMatchObject({
+      kind: 'connected',
     });
+    const minted = await createModerationPort(owner.dependencies).mintInvite('A friend');
+    expect(minted.kind).toBe('minted');
+    if (minted.kind !== 'minted') return;
+    expect(minted.card).toBe(by.card);
+    expect(minted.card).toBe(cardFromPin(readInstanceAccount(owner.storage)));
+    expect(minted.invite).toBe(codeWithCard(by.card, minted.inviteCode));
     expect(INVITE_CARD_CAUTION).toMatch(/channel/);
   });
 });

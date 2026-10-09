@@ -34,10 +34,10 @@ afterEach(async () => {
 const WEEK = 7 * 24 * 60 * 60;
 
 async function put(rider: Rider, kind: string, key: string, body: unknown): Promise<number> {
-  const response = await fetch(`${world!.url}/v1/sync/items/${kind}/${key}`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${rider.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ body: typeof body === 'string' ? body : JSON.stringify(body) }),
+  // Sealed (#1192): every sync route is sealed-only.
+  const response = await world!.request('POST', `/v1/sync/items/${kind}/${key}`, {
+    token: rider.token,
+    body: { body: typeof body === 'string' ? body : JSON.stringify(body) },
   });
   return response.status;
 }
@@ -49,10 +49,10 @@ async function search(
   status: number;
   body: { passages?: { kind: string; label: string; text: string }[] };
 }> {
-  const response = await fetch(`${world!.url}/v1/history/search`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${rider.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+  // Sealed (#1192): history search is sealed-only.
+  const response = await world!.request('POST', '/v1/history/search', {
+    token: rider.token,
+    body,
   });
   return { status: response.status, body: (await response.json()) as never };
 }
@@ -195,10 +195,7 @@ describe('keeping the index (ADR 0040 D-1, D-4, D-7)', () => {
     embedder.embed = async (texts, purpose) => {
       if (deleteDuringEmbed && purpose === 'document') {
         deleteDuringEmbed = false;
-        await fetch(`${world!.url}/v1/sync/items/note/n1`, {
-          method: 'DELETE',
-          headers: { authorization: `Bearer ${anna.token}` },
-        });
+        await world!.request('DELETE', '/v1/sync/items/note/n1', { token: anna.token });
       }
       return original(texts, purpose);
     };
@@ -503,11 +500,8 @@ describe('asking it (ADR 0040 D-3, D-8)', () => {
   it('refuses a request with no session', async () => {
     const made = await syncWorld(0);
     world = made.world;
-    const response = await fetch(`${world.url}/v1/history/search`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(ask('x')),
-    });
+    // Sealed with no session, it is not one of the sessionless routes.
+    const response = await world.request('POST', '/v1/history/search', { body: ask('x') });
     expect(response.status).toBe(401);
   });
 
@@ -641,7 +635,8 @@ describe('how often it may be asked — #918 item 3', () => {
     world.identity.sweepRateLimits();
     const before = world.identity.heldRateLimitKeys();
     expect((await search(anna, ask('hills'))).status).toBe(200);
-    expect(world.identity.heldRateLimitKeys()).toBe(before + 1);
+    // The search's key, and the session's sealed-request count it came through (#1192).
+    expect(world.identity.heldRateLimitKeys()).toBe(before + 2);
     // Swept on its own window's boundary, as every limit is.
     expect(windowMs % world.identity.rateLimitSweepPeriodMs).toBe(0);
     world.clock.ms += windowMs;
@@ -660,19 +655,15 @@ describe('erase and export (ADR 0040 D-10)', () => {
     await put(bea, 'note', 'n1', { text: 'Bea’s tempo note.' });
     await world.history.idle();
 
-    await fetch(`${world.url}/v1/sync/items/note/n1`, {
-      method: 'DELETE',
-      headers: { authorization: `Bearer ${anna.token}` },
-    });
+    await world.request('DELETE', '/v1/sync/items/note/n1', { token: anna.token });
     expect(
       (await search(anna, ask('tempo'))).body.passages?.map((each) => each.text),
     ).toStrictEqual(['Anna’s tempo goal.']);
 
-    const erased = await fetch(`${world.url}/v1/account`, {
-      method: 'DELETE',
-      headers: { authorization: `Bearer ${anna.token}`, 'content-type': 'application/json' },
+    const erased = await world.request('DELETE', '/v1/account', {
+      token: anna.token,
       // The step-up deleting an account needs (#898).
-      body: JSON.stringify({ recoveryCode: anna.recoveryCodes[0] }),
+      body: { recoveryCode: anna.recoveryCodes[0] },
     });
     expect(erased.status).toBe(204);
     const left = await world.freshRead(async (store) => ({
@@ -689,9 +680,7 @@ describe('erase and export (ADR 0040 D-10)', () => {
     const [anna] = made.riders as [Rider];
     await put(anna, 'note', 'n1', { text: 'A secret-ish note about my knee.' });
     await world.history.idle();
-    const response = await fetch(`${world.url}/v1/account/export`, {
-      headers: { authorization: `Bearer ${anna.token}` },
-    });
+    const response = await world.request('GET', '/v1/account/export', { token: anna.token });
     const exported = (await response.json()) as {
       historyIndex: unknown;
       notIncluded: string[];

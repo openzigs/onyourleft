@@ -22,7 +22,14 @@ import {
   syncWorld,
   uploadBody,
 } from './sync-testing.ts';
-import { contentHashOf, LINK_PURPOSE, signActivityRecord, toHex } from '@onyourleft/domain';
+import {
+  contentHashOf,
+  LINK_PURPOSE,
+  SEALED_PATH,
+  sealedEnvelopeLimit,
+  signActivityRecord,
+  toHex,
+} from '@onyourleft/domain';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -338,7 +345,30 @@ describe('ingesting a signed record (#37)', () => {
       return { stream, pulled: () => pulled };
     }
 
+    // Since #1192 the route is sealed-only, so a body reaches it only inside
+    // `POST /v1/sealed`, whose envelope limit is the ordinary limit sealed
+    // (`sealedEnvelopeLimit`): that is the read these two now measure.
+    const envelopeLimit = sealedEnvelopeLimit(16_384);
+
     it('with no length declared, reading stops at the first chunk past the limit', async () => {
+      const setup = await syncWorld(1, { bodyLimitBytes: 16_384 });
+      world = setup.world;
+      const [rider] = setup.riders;
+      const body = counted(64 * 1024 * 1024, 4096);
+      const response = await world.instance.handler(
+        new Request(`${world.url}${SEALED_PATH}`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${rider!.token}`, 'content-type': 'application/json' },
+          body: body.stream,
+          duplex: 'half',
+        }),
+      );
+      expect(response.status).toBe(413);
+      // 4 KiB chunks: at most one past the limit, plus the one the stream had queued ahead.
+      expect(body.pulled()).toBeLessThanOrEqual(envelopeLimit + 3 * 4096);
+    });
+
+    it('in plaintext, reads not one byte of it: the route is refused `sealed_required` first', async () => {
       const setup = await syncWorld(1, { bodyLimitBytes: 16_384 });
       world = setup.world;
       const [rider] = setup.riders;
@@ -351,10 +381,12 @@ describe('ingesting a signed record (#37)', () => {
           duplex: 'half',
         }),
       );
-      expect(response.status).toBe(413);
-      // 16 KiB limit in this world, 4 KiB chunks: at most one past the limit,
-      // plus the one the stream had queued ahead.
-      expect(body.pulled()).toBeLessThanOrEqual(16_384 + 3 * 4096);
+      expect(response.status).toBe(403);
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+        'sealed_required',
+      );
+      // At most the chunk the stream queued ahead of any read.
+      expect(body.pulled()).toBeLessThanOrEqual(4096);
     });
 
     it('with a length over the limit declared, nothing is read at all', async () => {
@@ -363,7 +395,7 @@ describe('ingesting a signed record (#37)', () => {
       const [rider] = setup.riders;
       const body = counted(64 * 1024 * 1024, 4096);
       const response = await world.instance.handler(
-        new Request(`${world.url}/v1/sync/records`, {
+        new Request(`${world.url}${SEALED_PATH}`, {
           method: 'POST',
           headers: {
             authorization: `Bearer ${rider!.token}`,
@@ -392,10 +424,7 @@ describe('ingesting a signed record (#37)', () => {
     const anna_ = await world.freshRead((store) => store.getActivityRecord(anna!.athleteId, sha));
     const ben_ = await world.freshRead((store) => store.getActivityRecord(ben!.athleteId, sha));
     expect(anna_?.signedRecord).not.toEqual(ben_?.signedRecord);
-    const file = (token: string) =>
-      fetch(`${world!.url}/v1/sync/files/${sha}`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
+    const file = (token: string) => world!.request('GET', `/v1/sync/files/${sha}`, { token });
     expect((await file(anna!.token)).status).toBe(200);
     expect(new Uint8Array(await (await file(ben!.token)).arrayBuffer())).toEqual(bytes);
     const stranger = await file(cara!.token);

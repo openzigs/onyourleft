@@ -111,6 +111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         same route table; a route marked `sealed: 'only'` is
                         reachable no other way. The envelope, AAD, padding
                         and framing are `packages/domain/src/sealed/`.
+                        Since #1192 every ADR 0047 D-7 phase-1 route is
+                        marked, and a plaintext request to one is
+                        `sealed_required` on an instance that holds keys
+                        (none: plaintext as before); `sealed/phase-one.ts`
+                        is the committed list the table is held to, and a
+                        test world's `call` seals a marked route itself.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

@@ -221,10 +221,17 @@ import {
 } from '@onyourleft/store';
 
 import { exportActivity } from '../transfer/export-activity';
+import { MAXIMUM_ROOM_ROUTE_ANSWER_BYTES, type SealedInstance } from './instance-transport';
 import { importActivityFiles } from '../transfer/import-batch';
 import type { TransferStore } from '../transfer/store-port';
 
-/** One request to the instance, with this device's session already attached. */
+/**
+ * One request to the instance, with this device's session already attached —
+ * SEALED (#1192): every sync route is sealed-only (ADR 0047 D-7, the owner's
+ * D-14 Q7 ruling), so the one production transport is
+ * {@link sealedSyncTransport}, and a plaintext one would be refused
+ * `sealed_required` by any instance that holds keys.
+ */
 export interface SyncTransport {
   /** A JSON request: the status and the parsed body. */
   json(
@@ -234,6 +241,40 @@ export interface SyncTransport {
   ): Promise<{ readonly status: number; readonly body: unknown }>;
   /** A request answered with bytes: the status and the bytes. */
   bytes(path: string): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
+}
+
+/**
+ * The sealed {@link SyncTransport} over `instance`, with `token` as the
+ * session (#1192): every request signed by this device's key and sealed to
+ * the instance's, and every answer opened.
+ */
+export function sealedSyncTransport(instance: SealedInstance, token: string): SyncTransport {
+  /**
+   * The manifest's `?limit=…&cursor=…` as a structured query: a sealed call
+   * takes a plain path and encodes its query itself, after the path is checked.
+   */
+  const split = (path: string): { path: string; query?: Record<string, string> } => {
+    const at = path.indexOf('?');
+    return at === -1
+      ? { path }
+      : {
+          path: path.slice(0, at),
+          query: Object.fromEntries(new URLSearchParams(path.slice(at + 1))),
+        };
+  };
+  return {
+    json: async (method, path, body) => {
+      const target = split(path);
+      return instance.call(method, target.path, {
+        token,
+        ...(target.query === undefined ? {} : { query: target.query }),
+        ...(body === undefined ? {} : { body }),
+      });
+    },
+    bytes: async (path) =>
+      // An original file can be large: a room route's ceiling, not a JSON answer's.
+      instance.bytes(path, { token, maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES }),
+  };
 }
 
 /** What sync needs of the local store: the transfer screen's port, and fourteen writes and reads. */
@@ -258,7 +299,7 @@ export type SyncStore = TransferStore &
   >;
 
 export interface SyncDependencies {
-  readonly transport: SyncTransport;
+  readonly sealed: SyncTransport;
   readonly store: SyncStore;
   readonly athleteId: AthleteId;
   /**
@@ -339,8 +380,8 @@ export interface AthleteKey {
  * {@link SyncDependencies.athleteKeys} is meant to be bound to. Throws when the
  * instance does not answer with a list, so nothing is pulled on a guess.
  */
-export async function athleteKeysFrom(transport: SyncTransport): Promise<readonly AthleteKey[]> {
-  const answer = await transport.json('GET', '/v1/auth/devices');
+export async function athleteKeysFrom(sealed: SyncTransport): Promise<readonly AthleteKey[]> {
+  const answer = await sealed.json('GET', '/v1/auth/devices');
   const rows = (answer.body as { devices?: unknown } | null)?.devices;
   if (answer.status !== 200 || !Array.isArray(rows))
     throw new InstanceSyncError(codeOf(answer.body));
@@ -441,11 +482,11 @@ const hex = async (bytes: Uint8Array, sha256: Sha256): Promise<string> =>
   toHex(await sha256(bytes));
 
 /** The instance's whole manifest for this athlete, tombstones included. */
-async function readManifest(transport: SyncTransport): Promise<ManifestEntry[]> {
+async function readManifest(sealed: SyncTransport): Promise<ManifestEntry[]> {
   const entries: ManifestEntry[] = [];
   let cursor: string | null = null;
   do {
-    const answer = await transport.json(
+    const answer = await sealed.json(
       'GET',
       `/v1/sync/manifest?limit=200${cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`}`,
     );
@@ -489,7 +530,7 @@ const keyOf = (kind: string, key: string): string => `${kind}\u0000${key}`;
  * See the module header for the rule, thing by thing.
  */
 export async function syncWithInstance(dependencies: SyncDependencies): Promise<SyncReport> {
-  const { transport, store, athleteId, sha256 } = dependencies;
+  const { sealed, store, athleteId, sha256 } = dependencies;
   const failures: SyncFailure[] = [];
   let pulled = 0;
   let pushed = 0;
@@ -518,7 +559,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let textsDeletedOnInstance = 0;
   let textConflicts = 0;
 
-  const manifest = await readManifest(transport);
+  const manifest = await readManifest(sealed);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
   const base = new Map(
     (await store.listSyncBase(athleteId)).map((row) => [keyOf(row.kind, row.key), row]),
@@ -572,7 +613,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       // Synced before, and not on this device now: the rider deleted it HERE.
       // Delete it there — its items first, so a failure part way leaves the
       // ride for the next sync to finish rather than orphaned items.
-      const outcome = await deleteRideOnInstance(transport, entry.key, rideOf(known));
+      const outcome = await deleteRideOnInstance(sealed, entry.key, rideOf(known));
       if (outcome === 'deleted') {
         deletedOnInstance += 1;
         await forgetRide(entry.key, rideOf(known));
@@ -710,11 +751,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       }
       // Changed here, never synced, or gone from the instance: this device's
       // copy is canonical (ADR 0036 D-3), so it is what the instance keeps.
-      const answer = await transport.json(
-        'POST',
-        `/v1/sync/items/${kind}/${encodeURIComponent(id)}`,
-        { body },
-      );
+      const answer = await sealed.json('POST', `/v1/sync/items/${kind}/${encodeURIComponent(id)}`, {
+        body,
+      });
       if (answer.status === 200) {
         itemsPushed += 1;
         await remember({ kind, key: id, activityId: id, localDigest, remoteDigest: localDigest });
@@ -780,7 +819,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       }
       continue;
     }
-    const answer = await transport.json('POST', `/v1/sync/records/${content}/race-consent`, {
+    const answer = await sealed.json('POST', `/v1/sync/records/${content}/race-consent`, {
       mayBeRaced: local,
     });
     if (answer.status === 200) {
@@ -811,7 +850,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     const body = await dependencies.rideSummary(id);
     if (body === undefined) continue;
     if (remoteDigest === (await hex(utf8(body), sha256))) continue;
-    const answer = await transport.json(
+    const answer = await sealed.json(
       'POST',
       `/v1/sync/items/${SUMMARY_KIND}/${encodeURIComponent(id)}`,
       { body },
@@ -896,7 +935,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         if (remoteDigest !== known.remoteDigest) {
           return pullText(kind, key, remoteDigest, activityId);
         }
-        const answer = await transport.json(
+        const answer = await sealed.json(
           'DELETE',
           `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
         );
@@ -937,11 +976,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
     // Changed here, never synced, or gone from the instance: this device's
     // copy is canonical (ADR 0036 D-3).
-    const answer = await transport.json(
-      'POST',
-      `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
-      { body },
-    );
+    const answer = await sealed.json('POST', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`, {
+      body,
+    });
     if (answer.status !== 200) return codeOf(answer.body);
     await remember({ kind, key, activityId, localDigest, remoteDigest: localDigest });
     return keptBoth ? 'kept-both' : 'pushed';
@@ -959,7 +996,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     key: string,
     local: RiderTextRecord,
   ): Promise<string> {
-    const answer = await transport.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
+    const answer = await sealed.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
     if (answer.status !== 200) return codeOf(answer.body);
     try {
       const body = JSON.parse((answer.body as { body: string }).body) as {
@@ -1011,7 +1048,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     remoteDigest: string,
     activityId: ActivityId | null,
   ): Promise<string> {
-    const answer = await transport.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
+    const answer = await sealed.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
     if (answer.status !== 200) return codeOf(answer.body);
     let kept: RiderTextRecord;
     try {
@@ -1100,7 +1137,7 @@ const SUMMARY_KIND = 'ride-summary';
  * or the instance's error code.
  */
 async function deleteRideOnInstance(
-  transport: SyncTransport,
+  sealed: SyncTransport,
   content: string,
   activity: string,
 ): Promise<string> {
@@ -1108,10 +1145,7 @@ async function deleteRideOnInstance(
     ...[...ITEM_KINDS, SUMMARY_KIND, 'note'].map((each) => [each, activity] as const),
     ['activity', content] as const,
   ]) {
-    const answer = await transport.json(
-      'DELETE',
-      `/v1/sync/items/${kind}/${encodeURIComponent(key)}`,
-    );
+    const answer = await sealed.json('DELETE', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
     if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
       return codeOf(answer.body);
     }
@@ -1128,11 +1162,8 @@ async function pullItem(
   kind: ItemKind,
   activity: ActivityId,
 ): Promise<string> {
-  const { transport, store, athleteId } = dependencies;
-  const answer = await transport.json(
-    'GET',
-    `/v1/sync/items/${kind}/${encodeURIComponent(activity)}`,
-  );
+  const { sealed, store, athleteId } = dependencies;
+  const answer = await sealed.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(activity)}`);
   if (answer.status !== 200) return codeOf(answer.body);
   try {
     const body = JSON.parse((answer.body as { body: string }).body) as object;
@@ -1174,10 +1205,10 @@ async function pullRide(
   /** Told a key the instance listed and this device has not admitted. */
   unadmitted: (publicKey: string) => void,
 ): Promise<{ readonly activityId: ActivityId } | string> {
-  const { transport, store, athleteId, sha256, verifier } = dependencies;
-  const recordAnswer = await transport.json('GET', `/v1/sync/records/${content}`);
+  const { sealed, store, athleteId, sha256, verifier } = dependencies;
+  const recordAnswer = await sealed.json('GET', `/v1/sync/records/${content}`);
   if (recordAnswer.status !== 200) return codeOf(recordAnswer.body);
-  const fileAnswer = await transport.bytes(`/v1/sync/files/${content}`);
+  const fileAnswer = await sealed.bytes(`/v1/sync/files/${content}`);
   if (fileAnswer.status !== 200) return 'file-not-found';
 
   // Before anything is written (ADR 0014 D-6, #776's third criterion).
@@ -1248,7 +1279,7 @@ async function pushRide(
   /** Told the content hash just BEFORE it is sent (#901). */
   pending: (content: string) => Promise<void>,
 ): Promise<{ readonly content: string } | string> {
-  const { transport, store, athleteId, sha256 } = dependencies;
+  const { sealed, store, athleteId, sha256 } = dependencies;
   const kept = await store.getActivityRecord(athleteId, id);
   if (kept !== undefined && onInstance.has(toHex(parseContentHash(kept.record.contentHash)))) {
     return 'held';
@@ -1284,7 +1315,7 @@ async function pushRide(
   const content = toHex(parseContentHash(contentHash));
   if (onInstance.has(content)) return 'held';
   await pending(content);
-  const answer = await transport.json('POST', '/v1/sync/records', {
+  const answer = await sealed.json('POST', '/v1/sync/records', {
     record,
     file: toBase64(bytes),
   });

@@ -14,9 +14,16 @@ import {
   instanceCard,
   instanceIdentityFingerprint,
   instanceKeyId,
+  openSealedRequest,
+  parseSealedEnvelope,
+  sealedReplyWriter,
+  sessionTokenSha256,
+  toHex,
+  utf8Encode,
   type Sha256,
   type SignatureVerifier,
 } from '@onyourleft/domain';
+import { webCryptoHpkePrimitives } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { groupedFingerprint, INSTANCE_KEY_TEXT } from '../instance/instance-pin';
@@ -28,6 +35,7 @@ import {
 import { INVITE_CARD_CAUTION } from '../instance/moderation-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
+  LOADED_LOCALLY,
   SCRIPTED_FINGERPRINT,
   SCRIPTED_NEW_FINGERPRINT,
   scriptedInstance,
@@ -153,16 +161,20 @@ describe('the link-code screen shows the PINNED card, not the instance’s (#119
       setItem: (key, value) => void map.set(key, value),
       removeItem: (key) => void map.delete(key),
     };
-    const encryptionKey = new Uint8Array(32).fill(3);
+    // A real X25519 key, because the link code is minted SEALED (#1192): this
+    // stand-in opens the request and seals its answer back, as the instance
+    // does — and plants a card in it, which only an instance could now do.
+    const pair = await webCryptoHpkePrimitives.generateX25519KeyPair();
+    const keyId = await instanceKeyId(sha256, pair.publicKey);
     const statement = {
       purpose: INSTANCE_KEY_PURPOSE,
       instanceOrigin: ORIGIN,
-      keyId: await instanceKeyId(sha256, encryptionKey),
-      encryptionKey: '03'.repeat(32),
+      keyId,
+      encryptionKey: toHex(pair.publicKey),
       serial: 1,
-      notBefore: 1,
-      issuedAt: 1,
-      notAfter: 4_000_000_000,
+      notBefore: 1_789_999_000,
+      issuedAt: 1_789_999_000,
+      notAfter: 1_790_100_000,
     };
     const json = (body: unknown) =>
       Promise.resolve(
@@ -171,25 +183,64 @@ describe('the link-code screen shows the PINNED card, not the instance’s (#119
           headers: { 'content-type': 'application/json' },
         }),
       );
+    const devicePair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign']);
     const port = createInstancePort({
       storage,
+      loadedFrom: LOADED_LOCALLY,
       ensureLocalAthlete: () => Promise.resolve(),
-      signingKey: () => Promise.reject(new Error('not asked')),
+      signingKey: async () => ({
+        algorithm: 'Ed25519',
+        publicKey: new Uint8Array(await crypto.subtle.exportKey('raw', devicePair.publicKey)),
+        sign: async (message) =>
+          new Uint8Array(
+            await crypto.subtle.sign('Ed25519', devicePair.privateKey, new Uint8Array(message)),
+          ),
+      }),
       sha256,
       verifier,
       now: () => 1_790_000_000_000,
-      send: (url) =>
-        new URL(url).pathname === '/v1/instance/keys'
-          ? json({
-              identityKey,
-              statements: [{ statement, signature: 'bb'.repeat(64) }],
-              endorsements: [],
-            })
-          : json({ linkCode: 'abcd-efgh-jkmn-pqrs', expiresAt: 1_790_000_300, card: planted }),
+      send: async (url, init) => {
+        if (new URL(url).pathname === '/v1/instance/keys') {
+          return json({
+            identityKey,
+            statements: [{ statement, signature: 'bb'.repeat(64) }],
+            endorsements: [],
+          });
+        }
+        const envelope = parseSealedEnvelope(
+          JSON.parse(init.body as string) as Record<string, unknown>,
+        );
+        if (envelope === undefined) throw new Error('not sealed');
+        const binding = {
+          instanceOrigin: ORIGIN,
+          keyId,
+          tokenSha256: await sessionTokenSha256(sha256, 't'),
+        };
+        const opened = await openSealedRequest(webCryptoHpkePrimitives, pair, envelope, binding);
+        const writer = await sealedReplyWriter(webCryptoHpkePrimitives, opened.context, binding);
+        return json(
+          await writer.reply(
+            200,
+            'application/json',
+            utf8Encode(
+              JSON.stringify({
+                linkCode: 'abcd-efgh-jkmn-pqrs',
+                expiresAt: 1_790_000_300,
+                card: planted,
+              }),
+            ),
+          ),
+        );
+      },
     });
     mounted = await mount(<InstanceKeys port={port} />);
     await settle();
     await press('Add another device');
+    // A sealed call does real cryptography, which no fixed number of ticks waits
+    // out (#1192): wait for the answer, a bounded number of times.
+    for (let tick = 0; tick < 200 && !text().includes('abcd-efgh-jkmn-pqrs'); tick += 1) {
+      await settle();
+    }
     expect(text()).toContain(`${pinned} abcd-efgh-jkmn-pqrs`);
     expect(text()).not.toContain(planted);
   });
