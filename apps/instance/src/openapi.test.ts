@@ -398,6 +398,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
         purpose: RECOVER_PURPOSE,
       })),
       recoveryCode: code,
+      // The full reset (#1194), so the answer's optional new codes are checked too.
+      reset: true,
     });
   },
   startRoom: async (world) =>
@@ -447,6 +449,26 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
     const mailed = world.confirmations.at(-1)?.token;
     return send(world, 'POST', '/v1/auth/recovery-email/confirm', token, { token: mailed });
+  },
+  clearRecoveryEmail: async (world) => {
+    const { token } = await signedIn(world);
+    await world.call('POST', '/v1/auth/recovery-email', {
+      token,
+      body: { address: 'dee@example.org' },
+    });
+    const mailed = world.confirmations.at(-1)?.token;
+    await world.call('POST', '/v1/auth/recovery-email/confirm', { token, body: { token: mailed } });
+    // Held, and cleared by the key that bound it (#1194).
+    return send(world, 'POST', '/v1/auth/recovery-email/clear', token, {
+      address: 'dee@example.org',
+    });
+  },
+  resetRecovery: async (world) => {
+    const session = await world.signIn(await testDevice());
+    const [code] = session.body.recoveryCodes as string[];
+    return send(world, 'POST', '/v1/auth/recovery/reset', session.body.sessionToken as string, {
+      recoveryCode: code,
+    });
   },
   ...SYNC_HAPPY_CALLS,
   searchHistory: async (world) => {

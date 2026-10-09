@@ -324,6 +324,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       confirmationTokenFixture(athlete),
       1_790_000_050,
       deviceKeyFixture(athlete).publicKey,
+      2,
     );
     await store.putSession(sessionFixture(athlete));
     await store.putActivityRecord(activityRecordFixture(athlete));
@@ -371,6 +372,7 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       tokenSha256: hexOf(`email-${athlete}`),
       athleteId: athlete,
       expiresAt: 1_790_000_900,
+      address: `${athlete}@example.org`,
     });
     // Migration 0007's (#83): each blocks both others, and reports the one after
     // them. Both, so erasing one athlete — which also removes the blocks OF
