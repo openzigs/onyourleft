@@ -173,7 +173,9 @@ export interface SignInDependencies {
   /**
    * The pin to keep with the account, from a card this sign-in was verified
    * against (#1190). Without it a same-origin pin already held is kept; a new
-   * origin's account holds none.
+   * origin's account holds none. ⚠️ It never REPLACES a different pin held for
+   * the same origin (#1207): that is refused `pin_differs` before anything is
+   * sent, because only the rider confirming a new card replaces a pin (D-6).
    */
   readonly pin?: { readonly fingerprint: string; readonly keyTrust: InstanceKeyTrust };
 }
@@ -214,11 +216,29 @@ async function signedStatement(
   return { ...statement, signature: toHex(await key.sign(deviceStatementBytes(statement))) };
 }
 
+/** The code {@link refuseUnconfirmedPin} refuses with. Not an instance's: the device's own. */
+export const PIN_DIFFERS = 'pin_differs';
+
+/**
+ * Refuse a sign-in or a link whose card would replace a DIFFERENT pin this
+ * device holds for the same origin (#1207, ADR 0047 D-6): the confirm-new-card
+ * step is the only way a pin changes. Checked before anything is sent.
+ */
+function refuseUnconfirmedPin(dependencies: SignInDependencies): void {
+  const offered = dependencies.pin?.fingerprint;
+  if (offered === undefined) return;
+  const held = readInstanceAccount(dependencies.storage);
+  if (held?.origin === dependencies.origin && held.pin !== undefined && held.pin !== offered) {
+    throw new InstanceSignInError(PIN_DIFFERS);
+  }
+}
+
 /** Sign this device in to an instance, registering it there if the instance has never seen its key. */
 export async function signInToInstance(
   dependencies: SignInDependencies,
   registration: { readonly displayName?: string } = {},
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
@@ -274,6 +294,7 @@ export async function linkThisDevice(
   dependencies: SignInDependencies & { readonly sealed: InstanceTransport },
   linkCode: string,
 ): Promise<SignedIn> {
+  refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, LINK_PURPOSE);

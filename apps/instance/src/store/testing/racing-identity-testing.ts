@@ -7,7 +7,9 @@
  *
  * For each athlete in turn it meets the other thread at a barrier and then
  * either revokes one of the athlete's last two keys or renames them into the
- * last slot of the window — so the two threads' transactions start together,
+ * last slot of the window — or, for `redeem` (#1194), side 0 redeems a token
+ * mailed to the athlete's established address while side 1 clears that
+ * address with a recovery code — so the two threads' transactions start together,
  * on two connections to one file. It posts back every outcome and every error.
  *
  * `deferred` is the CONTROL: the same store over a connection whose
@@ -27,7 +29,7 @@ export interface RaceJob {
   readonly path: string;
   readonly side: 0 | 1;
   readonly count: number;
-  readonly operation: 'revoke' | 'rename';
+  readonly operation: 'revoke' | 'rename' | 'redeem';
   readonly deferred: boolean;
   /** One slot per athlete: each side adds one, and both go once it reads two. */
   readonly gate: SharedArrayBuffer;
@@ -60,6 +62,44 @@ function connection(): DatabaseSync {
   } as unknown as DatabaseSync;
 }
 
+/**
+ * The racing redemption's token, code and address, per athlete.
+ * `sql-store.concurrency.test.ts` seeds the same three with its own copy of
+ * this: importing a value from this file would run the racer.
+ */
+function redeemFixture(athleteId: string): {
+  tokenSha256: string;
+  codeSha256: string;
+  address: string;
+} {
+  const hex = (prefix: string): string =>
+    `${prefix}${athleteId.replace(/\D/g, '').padStart(6, '0')}`.padEnd(64, '0');
+  return {
+    tokenSha256: hex('aa'),
+    codeSha256: hex('cc'),
+    address: `${athleteId}@example.org`,
+  };
+}
+
+/** Side 0 redeems the mailed token at 50; side 1 clears its address at 60. */
+async function redeemOrClear(
+  store: ReturnType<typeof createSqlStore>,
+  athleteId: string,
+): Promise<string> {
+  const fixture = redeemFixture(athleteId);
+  if (job.side === 0) {
+    return (await store.takeEmailRecoveryToken(fixture.tokenSha256, 50, 10)).outcome;
+  }
+  return store.clearRecoveryEmail({
+    athleteId,
+    address: fixture.address,
+    at: 60,
+    actorKey: `key-1-of-${athleteId}`,
+    heldSince: 10,
+    proof: { kind: 'code', codeSha256: fixture.codeSha256 },
+  });
+}
+
 async function run(): Promise<void> {
   const store = createSqlStore(
     new Kysely<InstanceDatabase>({
@@ -71,18 +111,21 @@ async function run(): Promise<void> {
     meet(index);
     try {
       outcomes.push(
-        job.operation === 'revoke'
-          ? await store.revokeDeviceKey(
-              athleteId,
-              `key-${job.side}-of-${athleteId}`,
-              50,
-              null,
-              `key-${job.side}-of-${athleteId}`,
-            )
-          : await store.renameAthlete(athleteId, `Side ${job.side}`, 100, {
-              count: 3,
-              windowSeconds: 86_400,
-            }),
+        job.operation === 'redeem'
+          ? await redeemOrClear(store, athleteId)
+          : job.operation === 'revoke'
+            ? await store.revokeDeviceKey(
+                athleteId,
+                `key-${job.side}-of-${athleteId}`,
+                50,
+                null,
+                `key-${job.side}-of-${athleteId}`,
+                0,
+              )
+            : await store.renameAthlete(athleteId, `Side ${job.side}`, 100, {
+                count: 3,
+                windowSeconds: 86_400,
+              }),
       );
     } catch (error) {
       outcomes.push('error');
