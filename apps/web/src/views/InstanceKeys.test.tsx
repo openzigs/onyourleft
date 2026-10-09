@@ -24,6 +24,7 @@ import {
   type SignatureVerifier,
 } from '@onyourleft/domain';
 import { webCryptoHpkePrimitives } from '@onyourleft/store';
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { groupedFingerprint, INSTANCE_KEY_TEXT } from '../instance/instance-pin';
@@ -67,7 +68,14 @@ function button(name: string): HTMLButtonElement {
 }
 
 async function press(name: string): Promise<void> {
-  button(name).click();
+  const pressed = button(name);
+  // Inside act, with the port's answer, so React does not warn (#1207).
+  await act(async () => {
+    pressed.click();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
   await settle();
 }
 
