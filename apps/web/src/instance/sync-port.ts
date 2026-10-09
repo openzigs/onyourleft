@@ -48,7 +48,7 @@
  * A manifest that is not answered still stops the run — there is nothing to
  * sync against — and says so.
  *
- * ⚠️ **Every sentence here is DRAFT wording for the owner to approve** (#1195).
+ * Every sentence here is the wording the owner approved on 2026-10-09 (#1195).
  */
 
 import { isHexOfLength, toHex, unixSeconds } from '@onyourleft/domain';
@@ -117,7 +117,7 @@ export interface SyncPort {
 }
 
 /**
- * What the rider is told when a sync could not run. ⚠️ Draft wording (#1195).
+ * What the rider is told when a sync could not run.
  */
 export const SYNC_REFUSAL_TEXT = {
   'no-answer':

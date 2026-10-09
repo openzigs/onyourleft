@@ -25,25 +25,25 @@ import { keyFingerprint, type SyncOutcome, type SyncPort } from '../instance/syn
  * {@link SyncPort.admitKey} is called from the confirmation dialog's own
  * confirm and from nowhere else, and the dialog opens on *Keep it untrusted*.
  *
- * ⚠️ **Every sentence here is DRAFT wording for the owner to approve** (#1195).
+ * Every sentence here is the wording the owner approved on 2026-10-09 (#1195).
  */
 
-/** The panel's heading. Draft wording (#1195). */
+/** The panel's heading. */
 export const SYNC_HEADING = 'Sync';
 
-/** What the control does, said beside it. Draft wording (#1195). */
+/** What the control does, said beside it. */
 export const SYNC_LEAD =
   'Sync sends this device’s rides, and what goes with them, to this instance, sealed for it ' +
   'alone, and brings back what your other devices sent there. Everything stays on this device ' +
   'too, and a ride you deleted here is deleted there, never brought back.';
 
-/** The control. Draft wording (#1195). */
+/** The control. */
 export const SYNC_CONTROL_LABEL = 'Sync now';
 
-/** While it runs. Draft wording (#1195). */
+/** While it runs. */
 export const SYNC_RUNNING_TEXT = 'Syncing…';
 
-/** The partial-failure sentence. Draft wording (#1195). */
+/** The partial-failure sentence. */
 export function syncFailuresText(count: number): string {
   return count === 1
     ? 'One thing did not sync. Nothing on this device was changed by it, and the next sync tries it again.'
@@ -51,7 +51,7 @@ export function syncFailuresText(count: number): string {
         'next sync tries them again.';
 }
 
-/** The key question's heading and lead. Draft wording (#1195). */
+/** The key question's heading and lead. */
 export const KEYS_HEADING = 'Rides signed by a device this one does not know';
 export const KEYS_LEAD =
   'Another device signed rides on your account, and this device has not been told it is yours, ' +
@@ -69,7 +69,7 @@ export const ADMIT_CONFIRM_BODY =
   'device at the next sync.';
 export const ADMITTED_TEXT = 'Trusted. Sync again to bring its rides to this device.';
 
-/** One line per count that is not nothing: what the last sync did. Draft wording (#1195). */
+/** One line per count that is not nothing: what the last sync did. */
 export function syncReportLines(report: SyncReport): readonly string[] {
   const lines: string[] = [];
   const count = (n: number, one: string, many: string): string =>
