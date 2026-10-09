@@ -437,7 +437,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
                 }
               }
             }
@@ -1498,7 +1498,7 @@
     "/v1/auth/devices": {
       "get": {
         "operationId": "listDevices",
-        "summary": "This athlete’s device keys: when each was added and last used, and which is asking.",
+        "summary": "This athlete’s device keys — when each was added and last used, and which is asking — and their recovery addresses, each with when it was confirmed, when its first-week hold ends (`null` once it recovers) and the key that gave it. What the one-off review reads (ADR 0047 D-8).",
         "security": [
           {
             "session": []
@@ -1549,10 +1549,47 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "recoveryAddresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "address": {
+                            "type": "string"
+                          },
+                          "confirmedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "heldUntil": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "boundByKey": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "address",
+                          "confirmedAt",
+                          "heldUntil",
+                          "boundByKey"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "devices"
+                    "devices",
+                    "recoveryAddresses"
                   ],
                   "additionalProperties": false
                 }
@@ -2017,7 +2054,7 @@
     "/v1/auth/recover": {
       "post": {
         "operationId": "recoverAccount",
-        "summary": "Add this device’s key to an athlete with a recovery code, or with an emailed token where the operator enabled email recovery, and a signed `oyl-recover-v1` statement.",
+        "summary": "Add this device’s key to an athlete with a recovery code, or with a code mailed to an established recovery address where the operator enabled email recovery, and a signed `oyl-recover-v1` statement. A mailed code is re-checked as it is spent: its address must still be bound and past its first week, or it is `address_unbound`. With `reset`, the recovery codes are replaced — the new ones answered once, here — and every recovery address, pending confirmation, mailed code and link code is cleared or voided. With `revokeOtherKeys`, every other key is revoked as a plain revoke would (each one’s held addresses cleared), and every mailed code and link code voided. All of it in one transaction.",
         "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
@@ -2049,6 +2086,12 @@
                   },
                   "emailToken": {
                     "type": "string"
+                  },
+                  "reset": {
+                    "type": "boolean"
+                  },
+                  "revokeOtherKeys": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -2074,6 +2117,12 @@
                   "properties": {
                     "athleteId": {
                       "type": "string"
+                    },
+                    "recoveryCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -2088,7 +2137,7 @@
             "$ref": "#/components/responses/validation_failed"
           },
           "401": {
-            "description": "One of `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `code_unknown`, `code_used`, `code_expired`, in the one error shape.",
+            "description": "One of `wrong_purpose`, `wrong_instance`, `challenge_unknown`, `challenge_used`, `challenge_expired`, `bad_signature`, `code_unknown`, `code_used`, `code_expired`, `address_unbound`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2127,7 +2176,7 @@
     "/v1/auth/recover/email": {
       "post": {
         "operationId": "requestEmailRecovery",
-        "summary": "Email a single-use recovery link to an address, if an athlete registered it. The same answer either way. `not_found` where the operator has not enabled email recovery.",
+        "summary": "Email a single-use recovery code — a code to type into the app, never a link — to an address, if it is an established recovery address of an athlete here (one in its first week recovers nothing). The same answer either way. `not_found` where the operator has not enabled email recovery.",
         "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
@@ -2182,7 +2231,7 @@
     "/v1/auth/recovery-email": {
       "post": {
         "operationId": "setRecoveryEmail",
-        "summary": "Give an address for email recovery: a single-use link, good for 24 hours, is mailed to it, and the address recovers nothing until that link is followed. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.",
+        "summary": "Give an address for email recovery: a single-use code, good for 24 hours, is mailed to it — a code to type into the app, never a link — and the address recovers nothing until that code is typed in. A key has one pending confirmation at a time; another key’s is left alone. The same answer whether or not the address is already held. `rate_limited` when this athlete has given addresses too often this hour; `internal` when the mail could not be sent, and then nothing is stored. `not_found` where the operator has not enabled email recovery.",
         "security": [
           {
             "session": []
@@ -2242,10 +2291,93 @@
         }
       }
     },
+    "/v1/auth/recovery-email/clear": {
+      "post": {
+        "operationId": "clearRecoveryEmail",
+        "summary": "Clear one of this athlete’s recovery addresses (ADR 0047 D-8). An address in its first week is cleared only by the key that gave it; an established one only with a step-up — one of the athlete’s recovery codes (checked, not spent), or a code mailed to THAT address. Every unredeemed code mailed to it and every pending confirmation of it are voided in the same transaction, and the clear is logged by the asking key. To replace an established address: give and confirm the new one, wait out its week, then clear the old one.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string"
+                  },
+                  "recoveryCode": {
+                    "type": "string"
+                  },
+                  "emailToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "description": "One of `unauthenticated`, `code_unknown`, `code_used`, `code_expired`, `address_unbound`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "One of `sealed_required`, `step_up_required`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/auth/recovery-email/confirm": {
       "post": {
         "operationId": "confirmRecoveryEmail",
-        "summary": "Follow the link mailed to a recovery address, signed in as the athlete who gave it: the address is bound, replacing any earlier one. `address_in_use` when it is already another account’s.",
+        "summary": "Type the code mailed to a recovery address, signed in as the athlete who gave it: the address is ADDED, held for 7 days, beside whatever is bound, and replaces none. Checked in this order, stopping at the first that answers: `code_unknown` (or `code_used`, `code_expired`), or `confirmation_superseded` when another key’s confirmation of the same address bound it first; `address_in_use` when another account holds it; success and no change when it is already this account’s; `address_limit` when two are bound; otherwise added, with the key that gave it as its binder.",
         "security": [
           {
             "session": []
@@ -2298,7 +2430,111 @@
             "$ref": "#/components/responses/method_not_allowed"
           },
           "409": {
-            "$ref": "#/components/responses/address_in_use"
+            "description": "One of `address_in_use`, `address_limit`, `confirmation_superseded`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/auth/recovery/reset": {
+      "post": {
+        "operationId": "resetRecovery",
+        "summary": "The full reset (ADR 0047 D-8), with a step-up — one of the athlete’s recovery codes, or a code mailed to an established recovery address — and never by a device key alone: the recovery codes are replaced, and the new ones answered here once; every recovery address is cleared; every pending confirmation, mailed code and link code is voided. One transaction, logged by the asking key and shown on every other device.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "recoveryCode": {
+                    "type": "string"
+                  },
+                  "emailToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recoveryCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "recoveryCodes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "description": "One of `unauthenticated`, `code_unknown`, `code_used`, `code_expired`, `address_unbound`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "One of `sealed_required`, `step_up_required`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -4633,7 +4869,7 @@
     "/v1/sealed": {
       "post": {
         "operationId": "sealedRequest",
-        "summary": "A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200.",
+        "summary": "A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200. An inner body over the instance’s body limit is refused only after Open, as a sealed `payload_too_large`: the envelope’s own limit allows for the padding (D-9), so the size of what was sealed is not known before.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5466,6 +5702,7 @@
                   "code_unknown",
                   "code_used",
                   "code_expired",
+                  "address_unbound",
                   "registration_closed",
                   "sealed_required",
                   "account_suspended",
@@ -5480,6 +5717,8 @@
                   "last_device",
                   "moderation_not_applicable",
                   "address_in_use",
+                  "address_limit",
+                  "confirmation_superseded",
                   "not_suspended",
                   "payload_too_large",
                   "file_type_unsupported",
@@ -5682,6 +5921,16 @@
           }
         }
       },
+      "address_unbound": {
+        "description": "`address_unbound` (401), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "registration_closed": {
         "description": "`registration_closed` (403), in the one error shape.",
         "content": {
@@ -5814,6 +6063,26 @@
       },
       "address_in_use": {
         "description": "`address_in_use` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "address_limit": {
+        "description": "`address_limit` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "confirmation_superseded": {
+        "description": "`confirmation_superseded` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

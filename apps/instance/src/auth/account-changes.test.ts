@@ -621,7 +621,7 @@ describe('the log’s smaller rules (#1193)', () => {
     expect(forOther.notices.some((each) => each.actorKey === other.device.publicKey)).toBe(false);
   });
 
-  it('logs an address cleared when another replaces it, and nothing when the same one is confirmed again', async () => {
+  it('logs each address added, clears none when another is confirmed beside it (#1194), and logs nothing when the same one is confirmed again', async () => {
     const w = await start();
     const rider = await register(w);
     const confirmAddress = async (address: string): Promise<void> => {
@@ -643,7 +643,6 @@ describe('the log’s smaller rules (#1193)', () => {
     await confirmAddress('two@example.org');
     expect(await kinds()).toEqual([
       'address_added one@example.org',
-      'address_cleared one@example.org',
       'address_added two@example.org',
     ]);
   });

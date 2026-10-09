@@ -379,6 +379,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       secret: server.secretKey,
       origin: server.origin,
       now: () => Math.floor(now() / 1000),
+      log,
     });
     instanceKeys = keys;
     const maintainKeys = async (): Promise<void> => {

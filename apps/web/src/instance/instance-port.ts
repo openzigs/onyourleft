@@ -87,6 +87,7 @@ import {
   INSTANCE_ACCOUNT_STORAGE_KEY,
   InstanceSignInError,
   linkThisDevice,
+  PIN_DIFFERS,
   readInstanceAccount,
   signInToInstance,
   writeInstanceAccount,
@@ -312,6 +313,15 @@ export const CONNECT_REFUSAL_TEXT = {
   'bad-offer':
     'That is not a code from another device. It starts oyl-instance: and ends with a code like ' +
     'abcd-efgh-jkmn-pqrs; paste the whole line.',
+  /**
+   * #1207 (ADR 0047 D-6): the card carries a different key from the one this
+   * device holds for the instance, and only the confirm-new-card step replaces
+   * a pin. ⚠️ Draft wording for the owner to approve (D-14 Q6).
+   */
+  pin_differs:
+    'That card has a different key from the one this device already has for this instance. ' +
+    'Nothing was sent. If its operator told you the key changed, give the new card on the ' +
+    'Instance screen and confirm it there.',
 } as const;
 
 /** What the link-code screen says when no code can be shown. Draft wording (#880). */
@@ -369,6 +379,8 @@ function refusalFor(error: unknown, sealedRequired?: string): string {
         return CONNECT_REFUSAL_TEXT[error.code];
       case 'validation_failed':
         return CONNECT_REFUSAL_TEXT['bad-name'];
+      case PIN_DIFFERS:
+        return CONNECT_REFUSAL_TEXT.pin_differs;
       default:
         return CONNECT_REFUSAL_TEXT.other;
     }
@@ -495,8 +507,16 @@ async function judgeAccount(
   if (verdict === 'unreachable') {
     return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
   }
+  // The verdict was judged against `pinned`: if the rider replaced the pin, or
+  // another read found an endorsement, while the request was in flight, it says
+  // nothing about what is held now, so nothing is written and nothing sealed
+  // (#1207).
   const held = readInstanceAccount(storage);
-  if (held?.origin !== account.origin) {
+  if (
+    held?.origin !== account.origin ||
+    held.pin !== pinned ||
+    held.expectedFingerprint !== undefined
+  ) {
     return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
   }
   switch (verdict.kind) {
@@ -623,6 +643,23 @@ function servedKeysAt(http: InstanceHttp): ServedKeysReader {
     } catch {
       return undefined;
     }
+  };
+}
+
+/**
+ * {@link servedKeysAt} for a stored origin: an address this build refuses
+ * (`instanceHttp` throws on one an older build stored) reads as no answer,
+ * rather than throwing past the screen that asked (#1207).
+ */
+function servedKeysOf(origin: string, send: InstanceSend | undefined): ServedKeysReader {
+  return async () => {
+    let http: InstanceHttp;
+    try {
+      http = instanceHttp(origin, send);
+    } catch {
+      return undefined;
+    }
+    return servedKeysAt(http)();
   };
 }
 
@@ -832,7 +869,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       const checked = await checkCard(
         card,
         account.origin,
-        servedKeysAt(instanceHttp(account.origin, dependencies.send)),
+        servedKeysOf(account.origin, dependencies.send),
         crypto,
         account.keyTrust ?? NO_KEY_TRUST,
       );
@@ -870,7 +907,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       const checked = await checkCard(
         card,
         account.origin,
-        servedKeysAt(instanceHttp(account.origin, dependencies.send)),
+        servedKeysOf(account.origin, dependencies.send),
         crypto,
         account.keyTrust ?? NO_KEY_TRUST,
       );

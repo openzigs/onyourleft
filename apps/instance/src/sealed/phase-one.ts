@@ -22,10 +22,10 @@
  * - the hosted-model key routes and the hosted-consent routes (#1199 — #1097
  *   built the operator command and no app route, so there was no plaintext
  *   key route to remove and no home-network check to lift);
- * - masking push and pull (#1101) and every analysis job route (#1095);
- * - `POST /v1/auth/recovery-email/clear` and `POST /v1/auth/recovery/reset`
- *   (#1194). #1193's two account-change routes are born sealed and listed
- *   below.
+ * - masking push and pull (#1101) and every analysis job route (#1095).
+ *
+ * #1193's two account-change routes and #1194's `/clear` and full reset were
+ * born sealed and are listed below.
  *
  * ## The families
  *
@@ -72,6 +72,9 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   },
   only('POST', '/v1/auth/recovery-email', 'Giving a recovery address'),
   only('POST', '/v1/auth/recovery-email/confirm', 'Confirming a recovery address'),
+  // #1194 (ADR 0047 D-8): born sealed.
+  only('POST', '/v1/auth/recovery-email/clear', 'Clearing a recovery address'),
+  only('POST', '/v1/auth/recovery/reset', 'The full reset'),
   only('POST', '/v1/auth/devices/{publicKey}/revoke', 'Revoking a device key'),
   only('GET', '/v1/auth/devices', 'The device list'),
   // The account-change log (#1193, ADR 0047 D-8): born sealed.
