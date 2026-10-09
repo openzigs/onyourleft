@@ -18,6 +18,7 @@
  * reads (jsdom loads no stylesheet).
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
@@ -78,24 +79,46 @@ async function offer(card: string): Promise<void> {
   const use = queryAll<HTMLButtonElement>(document.body, 'button').find(
     (each) => each.textContent === 'Use this card',
   );
-  use?.click();
+  expect(use, 'no Use this card button').toBeDefined();
+  // The press starts the port's promise; its answer renders inside the same
+  // act scope, so React has nothing to warn about (#1207).
+  await act(async () => {
+    use!.click();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
   await settle();
 }
 
+// One state per case (#1207): the three together took 3.7–4.1 s of Vitest's
+// 5 s default under a loaded machine, and each now has the whole budget.
 describe('the card-entry and confirm-new-card screens (#1190)', () => {
-  it('passes the audit with no card, with one, and with the confirm screen open', async () => {
+  const PINNED = `oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`;
+  const NEW_CARD = `oyl-instance:https://ride.example#${SCRIPTED_NEW_FINGERPRINT}`;
+
+  it('passes the audit connected with no card', async () => {
     const scripted = scriptedInstance({ connected: true });
     await open(scripted);
     expect(document.body.textContent).toContain('This needs the instance’s card');
     expectClean('Instance, connected, no card');
     expectTargets('Instance, connected, no card');
+  });
 
-    await offer(`oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`);
+  it('passes the audit with a card pinned', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    await open(scripted);
+    await offer(PINNED);
     expect(scripted.held.pin).toBe(SCRIPTED_FINGERPRINT);
     expectClean('Instance, pinned');
     expectTargets('Instance, pinned');
+  });
 
-    await offer(`oyl-instance:https://ride.example#${SCRIPTED_NEW_FINGERPRINT}`);
+  it('passes the audit with the confirm-new-card screen open', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    await open(scripted);
+    await offer(PINNED);
+    await offer(NEW_CARD);
     expect(document.body.textContent).toContain('Confirm the new card');
     expectClean('Instance, confirm-new-card');
     expectTargets('Instance, confirm-new-card');

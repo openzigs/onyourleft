@@ -251,7 +251,7 @@ export interface Counter {
   runs: number;
 }
 
-/** The production table, plus a sealed-only counter and two sealed-only streams. */
+/** The production table, plus a sealed-only counter and four sealed-only streams. */
 export function testRoutes(counter: Counter): readonly Route[] {
   const encoder = new TextEncoder();
   const stream = (cut: boolean, endAt?: number): Route['handle'] => {
@@ -278,7 +278,25 @@ export function testRoutes(counter: Counter): readonly Route[] {
       return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
     };
   };
+  /** Two events that carry no `id:` line at all (#1207). */
+  const idless: Route['handle'] = () =>
+    new Response(
+      encoder.encode('event: section\ndata: part 1\n\nevent: section\ndata: part 2\n\n'),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
   const extra: Route[] = [
+    {
+      method: 'GET',
+      path: '/v1/test/stream-no-ids',
+      operationId: 'testStreamNoIds',
+      reaches: 'own',
+      summary: 'Two events with no ids. Test-only.',
+      identity: true,
+      auth: 'session',
+      sealed: 'only',
+      response: { contentType: 'text/plain' },
+      handle: idless,
+    },
     {
       method: 'POST',
       path: '/v1/test/count',

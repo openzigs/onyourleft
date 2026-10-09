@@ -334,6 +334,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   takeInstanceKeyLease: {
     notAScopedRead: 'a write: who may change the instance’s own keys, naming no athlete',
   },
+  renewInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   releaseInstanceKeyLease: { notAScopedRead: 'a write: the instance’s own key lease' },
   close: { notAScopedRead: 'not a read' },
 };

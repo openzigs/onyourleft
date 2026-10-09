@@ -257,7 +257,10 @@ function LinkSpecimens(): JSX.Element {
  * The options are chosen for the typeahead case: exactly one starts with "f".
  * And the one checkbox label that is NOT copied is long on purpose: it wraps
  * at a phone's width, which is when a flex row squeezes its box (#667's CI run
- * found Settings' switch at 22.6 px that way).
+ * found Settings' switch at 22.6 px that way). *
+ * The instance card box (#1190) is here too, since #1207: the Instance screen
+ * renders it only connected, which this port-less shell never is. Its markup
+ * is `views/InstanceKeys.tsx`'s — three rows, the two classes.
  */
 const CONTROL_SPECIMENS = 'specimens';
 
@@ -341,6 +344,16 @@ function NativeControls(): JSX.Element {
       </p>
       <p>
         <progress data-oyl-native-control="progress" max={10} value={4} aria-label="Progress" />
+      </p>
+      <p>
+        <label htmlFor="specimen-card">The instance’s card</label>
+        <br />
+        <textarea
+          className="oyl-input oyl-instance__card-box"
+          data-oyl-native-control="card-box"
+          id="specimen-card"
+          rows={3}
+        />
       </p>
     </section>
   );

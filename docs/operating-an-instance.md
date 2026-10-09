@@ -369,6 +369,11 @@ accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); witho
   one busy client uses up registration, linking and recovery for every rider. A signed-in rider's
   sealed requests are counted against their session instead — 120 a minute — and are not affected.
 
+**A sealed body over the instance's body limit is refused only after it is opened**, as a sealed
+`payload_too_large` sent with 200, not as a plaintext 413. Padding (ADR 0047 D-9) hides how large
+the inner body is, so the envelope's own limit has room for it, and the instance learns the size
+only once it has decrypted the request. A plaintext 413 means the envelope itself was too large.
+
 ### Which routes are sealed, and what an instance without the secret exposes
 
 **Since #1192, on an instance that holds keys, every route ADR 0047 D-7 puts in phase 1 is reached

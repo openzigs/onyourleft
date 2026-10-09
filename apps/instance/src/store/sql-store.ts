@@ -844,6 +844,13 @@ export interface SqlStore {
    * atomic statement, so two processes cannot both take it.
    */
   takeInstanceKeyLease(holder: string, now: number, expiresAt: number): Promise<boolean>;
+  /**
+   * Extend `holder`'s lease to `expiresAt` (#1207): `true` while the lease is
+   * still `holder`'s — lapsed or not, so long as nobody took it — and `false`
+   * once another holder has. A pass calls it before each write, which is what
+   * FENCES it: a pass that outlived its lease and lost it writes nothing more.
+   */
+  renewInstanceKeyLease(holder: string, expiresAt: number): Promise<boolean>;
   /** Give the lease back, if `holder` still holds it. */
   releaseInstanceKeyLease(holder: string): Promise<void>;
 
@@ -4052,6 +4059,17 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           )
           .executeTakeFirst();
         return Number(result.numInsertedOrUpdatedRows ?? 0n) === 1;
+      }),
+
+    renewInstanceKeyLease: (holder, expiresAt) =>
+      exclusive(async () => {
+        const result = await db
+          .updateTable('instance_key_lease')
+          .set({ expires_at: expiresAt })
+          .where('name', '=', 'keys')
+          .where('holder', '=', holder)
+          .executeTakeFirst();
+        return Number(result.numUpdatedRows) === 1;
       }),
 
     releaseInstanceKeyLease: (holder) =>
