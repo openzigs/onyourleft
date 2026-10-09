@@ -126,6 +126,8 @@ import {
 } from './instance/instance-port';
 import type { LoadedFrom } from './instance/instance-pin';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
+import { createSyncPort, type SyncPort } from './instance/sync-port';
+import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
 import type { AthleteMassPort } from './athlete/store-port';
@@ -795,6 +797,33 @@ function loadedFrom(): LoadedFrom {
 }
 
 /**
+ * The Instance screen's sync port (#1195): the ONE production place a sync
+ * port is built, so `check:wiring` reports `createSyncPort` — and through it
+ * `syncWithInstance` and `admitDeviceKey` — if this goes. Over the sealed
+ * session the Connect screen keeps, through the one instance module (ADR 0036
+ * D-3 (a)); a device with no instance sees no sync and sends nothing, and one
+ * with no card sends nothing either (ADR 0047 D-14 Q1, Q7).
+ *
+ * The ride summary is bound ONCE here, so its cache outlives a sync (#928's
+ * review). `undefined` where there is no `localStorage` or no WebCrypto.
+ */
+function buildSyncPort(): SyncPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createSyncPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    store: localStore,
+    athleteId: LOCAL_ATHLETE,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    rideSummary: rideSummaryOf(localStore(), LOCAL_ATHLETE),
+    newDocumentId: () => globalThis.crypto.randomUUID(),
+  });
+}
+
+/**
  * The Moderation screen's port (#955): the ONE production place a moderation
  * port is built, so `check:wiring` reports `createModerationPort` if this goes.
  * Over the session the Connect screen keeps, through the one instance module
@@ -1175,6 +1204,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #955: built once, for the Connect screen's reason above.
   const moderation = buildModerationPort();
+  // #1195: built once, so a second press joins the sync already running.
+  const sync = buildSyncPort();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
@@ -1208,6 +1239,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           riderText={buildRiderTextPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
+          {...(sync === undefined ? {} : { sync })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`

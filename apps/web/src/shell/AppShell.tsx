@@ -58,6 +58,7 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { SyncPort } from '../instance/sync-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -482,6 +483,12 @@ export interface AppShellProps {
    */
   readonly moderation?: ModerationPort | undefined;
   /**
+   * Sync with the instance (#1195) — `instance/sync-port.ts`
+   * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
+   * screen draws its panel only once connected, and offers it only with a card.
+   */
+  readonly sync?: SyncPort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -690,7 +697,7 @@ function viewFor(
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} />;
+      return <InstanceView port={props.instance} moderation={props.moderation} sync={props.sync} />;
     case 'moderation':
       return <ModerationView port={props.moderation} />;
     case 'credits':

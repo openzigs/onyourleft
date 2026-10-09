@@ -18,6 +18,7 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { agentEngine } from './analysis/engine.ts';
+import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
@@ -45,6 +46,7 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
+import { createSync, type Sync } from './sync/sync.ts';
 
 /**
  * The running instance, put together (#780, #791): the store opened (never
@@ -123,6 +125,18 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /**
+   * The endpoint (an ORIGIN) an athlete's own recorded hosted consent names,
+   * or `undefined` when they have none — `analysis/source.ts`
+   * §`SourceOptions.recordedConsent` (ADR 0046 D-9, Q10). ⚠️ **Nothing records
+   * a consent yet: that is #1199**, so `serve.ts` never sets this and every
+   * `instance-hosted` job on a running instance — the operator's included —
+   * fails `hosted_unavailable` before the key is opened (#1223). A test sets
+   * it to run a hosted job end to end; #1199 replaces it with the store's read.
+   */
+  readonly hostedConsent?: (athleteId: string) => Promise<string | undefined>;
+  /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
+  readonly hostedFetch?: typeof globalThis.fetch;
 }
 
 export interface StartedInstance {
@@ -215,6 +229,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       ? Promise.resolve(undefined)
       : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
+  let sync: Sync | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
   let stopRetrying = (): void => undefined;
@@ -436,6 +451,24 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ...identitySettings(options.config),
         now,
       });
+      // #1195: sync (#37, #38, #776, #35), and ONLY where the instance holds
+      // keys. Every sync route is sealed-only (ADR 0047 D-7, the owner's D-14
+      // Q7 ruling: "ships sealed only"), and an instance with no keys seals
+      // nothing (`handler.ts` §`sealsRoutes`) — so a keyless instance handed
+      // a sync would serve it in plaintext. With no keys, every sync route
+      // answers `unavailable`, as it did before this. The files go in the
+      // blob directory's own `objects/` tree, which `operator backup` copies.
+      const syncIndexed = history;
+      sync = keys.configured
+        ? createSync({
+            store,
+            blobs: createDiskBlobStore(server.blobsPath),
+            now,
+            itemStored: () => {
+              syncIndexed.schedule();
+            },
+          })
+        : undefined;
       // #784, #785: riders' rooms. Their routes are kept apart from the
       // synced files — under the blob directory's `rooms/` — and live only as
       // long as their room (`rooms/rooms.ts`), so a backup does not carry them.
@@ -500,7 +533,16 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         store,
         engine: agentEngine({
           reads: store,
-          sources: { local, hostedKey },
+          sources: {
+            local,
+            hostedKey,
+            ...(options.hostedConsent === undefined
+              ? {}
+              : { recordedConsent: options.hostedConsent }),
+            // #1223: every hosted request masked by the athlete's own guard (#1101).
+            guard: (athleteId) => readMaskingGuard(reading, athleteId),
+            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+          },
           clock: { now },
         }),
         available: async () => local !== undefined || (await hostedKey()).kind === 'held',
@@ -546,6 +588,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             history,
             rooms,
             sealed: createSealed({ store, now }),
+            ...(sync === undefined ? {} : { sync }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
           }),
     });
