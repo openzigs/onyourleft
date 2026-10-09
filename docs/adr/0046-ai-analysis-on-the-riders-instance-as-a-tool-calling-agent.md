@@ -1047,10 +1047,10 @@ Until 2026-10-07 this section was §"Owner questions left open".
   `apps/instance/src/analysis/agent.ts` §`AGENT_TOKEN_BUDGET` says so; the owner may rule the
   other reading. No figure was measured against a model an operator runs; that is still owed.
   (#1098)
-- **2026-10-09** — **D-9's "until #1179 ships" clause has stopped applying.** Phase 1 of
-  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) has NOT all shipped:
-  as of [#1192](https://github.com/openzigs/onyourleft/issues/1192) every phase-1 route D-7 lists
-  that exists in the route table is reached only sealed on an instance that holds keys
+- **2026-10-09** — **D-9's "until #1179 ships" clause has stopped applying.** As of
+  [#1192](https://github.com/openzigs/onyourleft/issues/1192), every phase-1 route of
+  [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7 that exists in
+  the route table is reached only sealed on an instance that holds keys
   (`apps/instance/src/sealed/phase-one.ts`). The rest of D-7's phase 1 —
   `POST /v1/auth/recovery-email/clear`, `POST /v1/auth/recovery/reset`, the two account-changes
   routes, and D-8's semantics — is still owed by
