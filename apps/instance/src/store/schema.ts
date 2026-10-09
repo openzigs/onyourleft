@@ -367,6 +367,17 @@ export interface InstanceKeyStatementTable {
   readonly signature: string;
 }
 
+/**
+ * A sealed request's `enc`, as the instance saw it (#1191, ADR 0047 D-9).
+ * Added by migration 0016; kept ten minutes.
+ */
+export interface SealedReplayTable {
+  /** SHA-256 of the request's `enc`, lowercase hex. */
+  readonly enc_sha256: string;
+  /** Unix seconds, by the box's clock. */
+  readonly seen_at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -395,4 +406,5 @@ export interface InstanceDatabase {
   readonly hosted_model_key: HostedModelKeyTable;
   readonly instance_key: InstanceKeyTable;
   readonly instance_key_statement: InstanceKeyStatementTable;
+  readonly sealed_replay: SealedReplayTable;
 }

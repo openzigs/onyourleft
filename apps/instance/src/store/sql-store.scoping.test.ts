@@ -190,6 +190,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'email recovery: the token is what names the athlete (#773)',
   },
   touchDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
+  recordSealedRequest: {
+    notAScopedRead: 'a write over sealed requests’ `enc`s, which name no athlete (#1191)',
+  },
   revokeDeviceKey: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   revokeSession: { notAScopedRead: 'a write; scoping is sql-store.test.ts’s' },
   registerAthlete: { notAScopedRead: 'a write; ownership is sql-store.test.ts’s' },

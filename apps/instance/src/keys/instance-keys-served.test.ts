@@ -33,7 +33,7 @@ import {
   type InstanceKeysShown,
   type ServedKeys,
 } from './instance-keys.ts';
-import { privateSpellings } from './instance-keys-testing.ts';
+import { privateSpellings, secretBytes } from './instance-keys-testing.ts';
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('../operator/cli.ts', import.meta.url));
@@ -346,21 +346,15 @@ describe('key material leaks nowhere (#1189, D-5)', () => {
     const synced = await syncWorld(1);
     world = synced.world;
     const rider = synced.riders[0]!;
-    const rows = await world.freshRead(async (store) => {
-      await createInstanceKeys({
-        store,
-        secret: secretOf(SECRET),
-        origin: TEST_ORIGIN,
-        now: () => T0_MS / 1000,
-      }).maintain();
-      return store.listInstanceKeys();
-    });
+    // Since #1191 every test world makes its keys as it starts, under the test
+    // secret `startIdentityInstance` names (`secretBytes(7)`).
+    const rows = await world.freshRead((store) => store.listInstanceKeys());
     expect(rows).toHaveLength(2);
     const exported = await authorised(world, rider.token, 'GET', '/v1/account/export');
     const text = await exported.text();
     expect(exported.status, text).toBe(200);
     for (const row of rows) {
-      for (const spelling of await privateSpellings(row, secretOf(SECRET), TEST_ORIGIN)) {
+      for (const spelling of await privateSpellings(row, secretBytes(7), TEST_ORIGIN)) {
         expect(text).not.toContain(spelling);
       }
     }

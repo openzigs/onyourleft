@@ -601,8 +601,20 @@ export interface SqlStore {
   listDeviceKeys(athleteId: string): Promise<readonly DeviceKey[]>;
   /** Authentication: the key is what names the athlete, so this is not athlete-scoped. */
   findDeviceKey(publicKey: string): Promise<DeviceKey | undefined>;
-  /** Record that one of this athlete's keys signed in. */
+  /** Record that one of this athlete's keys signed in, or signed a sealed request (#1191). */
   touchDeviceKey(athleteId: string, publicKey: string, at: number): Promise<void>;
+  /**
+   * Record a sealed request's `enc` (#1191, ADR 0047 D-9): `recorded` the
+   * first time it is seen, `replayed` every time after, for as long as it is
+   * kept. The check and the record are ONE statement — an insert that does
+   * nothing on the primary key — so two identical requests at once cannot
+   * both be `recorded`. Rows seen before `forgetBefore` are deleted first.
+   */
+  recordSealedRequest(
+    encSha256: string,
+    at: number,
+    forgetBefore: number,
+  ): Promise<'recorded' | 'replayed'>;
   /**
    * Revoke one of this athlete's keys, and every session and unspent link
    * code it holds. `not_found` when the athlete holds no such key.
@@ -1516,6 +1528,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('athlete_id', '=', athleteId)
           .where('public_key', '=', publicKey)
           .execute();
+      }),
+
+    recordSealedRequest: (encSha256, at, forgetBefore) =>
+      exclusive(async () => {
+        await db.deleteFrom('sealed_replay').where('seen_at', '<', forgetBefore).execute();
+        const inserted = await db
+          .insertInto('sealed_replay')
+          .values({ enc_sha256: encSha256, seen_at: at })
+          .onConflict((conflict) => conflict.column('enc_sha256').doNothing())
+          .returning('enc_sha256')
+          .executeTakeFirst();
+        return inserted === undefined ? 'replayed' : 'recorded';
       }),
 
     revokeDeviceKey: (athleteId, publicKey, at, recoveryCodeSha256) =>

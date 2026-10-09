@@ -546,9 +546,16 @@ export default tseslint.config(
       'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
     },
   },
-  // The two non-test modules allowed to name `hpke/hpke` (#1196 review).
+  // The three non-test modules allowed to name `hpke/hpke` (#1196 review, #1191).
   {
-    files: ['packages/domain/src/index.ts', 'packages/domain/src/hpke/hpke-testing.ts'],
+    // `sealed/sealed.ts` (#1191) composes the public `setupBaseSender`,
+    // `setupBaseRecipient`, `sealReply` and `openReply`, and names neither
+    // `setupSender` nor `encap`.
+    files: [
+      'packages/domain/src/index.ts',
+      'packages/domain/src/hpke/hpke-testing.ts',
+      'packages/domain/src/sealed/sealed.ts',
+    ],
     rules: {
       'no-restricted-imports': ['error', { patterns: AI_SDK_IMPORT_PATTERNS }],
     },

@@ -52,6 +52,7 @@ import {
   toHex,
   type InstanceIdentityRotation,
   type InstanceKeyStatement,
+  type X25519KeyPair,
 } from '@onyourleft/domain';
 
 import type { InstanceKeyRow, InstanceKeyStatementRow, SqlStore } from '../store/sql-store.ts';
@@ -194,8 +195,14 @@ export interface InstanceKeys {
    * statements.
    */
   served(): Promise<ServedKeys>;
-  /** The encryption key `keyId`'s private half, non-extractable, or `undefined` if not held (#1191). */
-  encryptionKey(keyId: string): Promise<InstanceCryptoKey | undefined>;
+  /**
+   * The encryption key `keyId` as an HPKE recipient (#1191): its public key and
+   * its private half, non-extractable — or `undefined` for a key not held, or
+   * one past its overlap ({@link OLD_KEY_KEPT_SECONDS} after its successor),
+   * which `maintain` has not deleted yet. `/v1/sealed` answers that
+   * `instance_key_unknown`.
+   */
+  encryptionKey(keyId: string): Promise<X25519KeyPair<InstanceCryptoKey> | undefined>;
 }
 
 export interface InstanceKeysOptions {
@@ -540,7 +547,11 @@ export function createInstanceKeys(options: InstanceKeysOptions): InstanceKeys {
         (each) => each.role === 'encryption' && each.keyId === keyId,
       );
       if (row === undefined) return undefined;
-      return privateOf(row);
+      if (row.supersededAt !== null && options.now() >= row.supersededAt + OLD_KEY_KEPT_SECONDS) {
+        return undefined;
+      }
+      const privateKey = await privateOf(row);
+      return privateKey === undefined ? undefined : { publicKey: row.publicKey, privateKey };
     },
   };
 }

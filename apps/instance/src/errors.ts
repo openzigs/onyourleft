@@ -39,6 +39,8 @@
 /** Every code this instance can send, and the HTTP status each one is sent with. */
 export const ERROR_STATUS = {
   validation_failed: 400,
+  instance_key_unknown: 400,
+  sealed_unopened: 400,
   unauthenticated: 401,
   wrong_purpose: 401,
   wrong_instance: 401,
@@ -46,6 +48,7 @@ export const ERROR_STATUS = {
   challenge_used: 401,
   challenge_expired: 401,
   bad_signature: 401,
+  stale_request: 401,
   key_revoked: 401,
   code_unknown: 401,
   code_used: 401,
@@ -59,6 +62,7 @@ export const ERROR_STATUS = {
   not_found: 404,
   method_not_allowed: 405,
   key_in_use: 409,
+  replayed: 409,
   last_device: 409,
   moderation_not_applicable: 409,
   address_in_use: 409,
@@ -103,6 +107,12 @@ export interface ErrorBody {
  */
 const MESSAGES: Record<ErrorCode, string> = {
   validation_failed: 'The request is not valid. Each field named in `fields` says why.',
+  instance_key_unknown:
+    'This instance does not hold that encryption key. Fetch its keys again and seal to a current one.',
+  sealed_unopened: 'The sealed request did not open under this instance’s key and this session.',
+  stale_request:
+    'The request was signed too far from this instance’s clock. `instanceTime` says what it reads.',
+  replayed: 'This sealed request has already been received.',
   unauthenticated: 'This needs a signed-in device.',
   wrong_purpose: 'The signature is not a statement made for this request.',
   wrong_instance: 'The signature was made for another instance.',

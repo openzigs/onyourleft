@@ -35,6 +35,7 @@ import type { InstanceProbes } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
+import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
@@ -466,7 +467,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     handler = createHandler({
       ...handlerOptions,
       instanceKeys: keys,
-      ...(identity === undefined ? {} : { identity, history, rooms }),
+      // #1191: sealed requests need the accounts, so they come with them.
+      ...(identity === undefined
+        ? {}
+        : { identity, history, rooms, sealed: createSealed({ store, now }) }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
     history.schedule();

@@ -19,6 +19,7 @@ import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
+import { sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { assessReadiness } from './readiness.ts';
@@ -341,6 +342,15 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
     return send(world, 'POST', `/v1/auth/devices/${second.publicKey}/revoke`, token, {});
   },
+  sealedRequest: async (world) => {
+    const { device, token } = await signedIn(world);
+    const sealed = await sealFor(world, {
+      path: '/v1/auth/session',
+      token,
+      signer: device.signingKey,
+    });
+    return sendEnvelope(world.url, sealed.envelope, token);
+  },
   createLinkCode: async (world) =>
     send(world, 'POST', '/v1/auth/link-codes', (await signedIn(world)).token),
   linkDevice: async (world) => {
@@ -510,7 +520,10 @@ describe('every route answers with the shape its entry declares', () => {
       if (route.response.contentType === 'none') {
         expect(response.status, await response.clone().text()).toBe(204);
         expect(await response.text()).toBe('');
-      } else if (route.response.contentType === 'application/json') {
+      } else if (
+        route.response.contentType === 'application/json' ||
+        route.response.contentType === 'sealed'
+      ) {
         const body: unknown = await response.json();
         expect(response.status, JSON.stringify(body)).toBe(200);
         expect(violations(body, route.response.schema)).toEqual([]);

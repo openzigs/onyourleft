@@ -217,6 +217,21 @@ export interface IdentityLimits {
    * over any rider's use. Chosen.
    */
   readonly historySearchesPerAthlete: RateLimit;
+  /**
+   * Sealed requests per session (#1191, ADR 0047 D-9): counted on the
+   * session's token hash BEFORE any X25519, so a signed-in caller in a loop
+   * costs a hash and a lookup per request past it, never a Diffie–Hellman.
+   */
+  readonly sealedPerSession: RateLimit;
+  /**
+   * Sealed requests with no session (register, link, recover) per client
+   * address, before any X25519 (#1191, D-9). ⚠️ Per RIDER only through
+   * `client-address.ts`: behind `cloudflared` every request comes from one
+   * peer unless the operator sets `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and
+   * trusts the proxy, and then this is one shared bucket — and an address the
+   * adapter did not know at all is the bucket `unknown`.
+   */
+  readonly sessionlessSealedPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -231,6 +246,12 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   confirmationsPerAddress: { limit: 10, windowMs: 60 * 60_000 },
   firstLinksPerAddress: { limit: 3, windowMs: 60 * 60_000 },
   historySearchesPerAthlete: DEFAULT_HISTORY_SEARCHES,
+  // Chosen: a rider's app makes a few sealed calls a minute, and a write-up a
+  // dozen; 120 is far over that and still bounds a loop.
+  sealedPerSession: { limit: 120, windowMs: 60_000 },
+  // Chosen: registering, linking and recovering are a handful of requests a
+  // rider makes once; the inner routes' own limits apply after this one.
+  sessionlessSealedPerAddress: { limit: 30, windowMs: 60_000 },
 };
 
 /**
@@ -422,6 +443,17 @@ export interface Identity {
    * `rate_limited` and embeds nothing.
    */
   allowHistorySearch(caller: Caller): boolean;
+  /**
+   * Count one sealed request against the caller's session (#1191). `false`
+   * when over {@link IdentityLimits.sealedPerSession}: `rate_limited`, before
+   * any X25519.
+   */
+  allowSealedRequest(caller: Caller): boolean;
+  /**
+   * Count one sealed request with no session against the client's address
+   * (#1191). `false` when over {@link IdentityLimits.sessionlessSealedPerAddress}.
+   */
+  allowSessionlessSealedRequest(address: string | null): boolean;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -494,6 +526,8 @@ export function createIdentity(options: IdentityOptions): Identity {
   const confirmationsPerAddress = createRateLimiter(limits.confirmationsPerAddress, now);
   const firstLinksPerAddress = createRateLimiter(limits.firstLinksPerAddress, now);
   const historySearches = createRateLimiter(limits.historySearchesPerAthlete, now);
+  const sealedPerSession = createRateLimiter(limits.sealedPerSession, now);
+  const sessionlessSealed = createRateLimiter(limits.sessionlessSealedPerAddress, now);
   const tickets = createTicketBook(now, () => randomToken(32));
   const moderation = createModeration({
     store,
@@ -758,6 +792,8 @@ export function createIdentity(options: IdentityOptions): Identity {
     confirmationsPerAddress,
     firstLinksPerAddress,
     historySearches,
+    sealedPerSession,
+    sessionlessSealed,
   ];
 
   return {
@@ -774,6 +810,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.confirmationsPerAddress,
       limits.firstLinksPerAddress,
       limits.historySearchesPerAthlete,
+      limits.sealedPerSession,
+      limits.sessionlessSealedPerAddress,
     ]),
 
     sweepRateLimits() {
@@ -786,6 +824,14 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     allowHistorySearch(caller) {
       return historySearches.allow(caller.athleteId);
+    },
+
+    allowSealedRequest(caller) {
+      return sealedPerSession.allow(caller.tokenSha256);
+    },
+
+    allowSessionlessSealedRequest(address) {
+      return sessionlessSealed.allow(address === null ? 'unknown' : addressKey(address));
     },
 
     async challenge(publicKey, address) {
