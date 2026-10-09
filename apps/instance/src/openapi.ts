@@ -64,9 +64,20 @@ function operation(route: Route): Record<string, unknown> {
     const success =
       route.response.contentType === 'application/json'
         ? { 'application/json': { schema: route.response.schema } }
-        : route.response.contentType === 'application/octet-stream'
-          ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
-          : { 'text/plain': { schema: { type: 'string' } } };
+        : route.response.contentType === 'sealed'
+          ? {
+              'application/json': { schema: route.response.schema },
+              'text/event-stream': {
+                schema: {
+                  type: 'string',
+                  description:
+                    'When the inner route streams: frames of one `data:` line each — the first `{ "v": 1, "nonce", "ct" }`, then `{ "ct" }` — never an `event:` or `id:` field, ending with a sealed `end` event.',
+                },
+              },
+            }
+          : route.response.contentType === 'application/octet-stream'
+            ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
+            : { 'text/plain': { schema: { type: 'string' } } };
     responses['200'] = { description: 'OK', content: success };
   }
   const codes = new Set<ErrorCode>([...EVERY_ROUTE, ...(route.errors ?? [])]);
@@ -98,6 +109,8 @@ function operation(route: Route): Record<string, unknown> {
     summary: route.summary,
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
+    // #1191: reachable only inside `POST /v1/sealed`; a plaintext request is `not_found`.
+    ...(route.sealed === 'only' ? { 'x-oyl-sealed': 'only' } : {}),
     ...(route.request === undefined
       ? {}
       : {

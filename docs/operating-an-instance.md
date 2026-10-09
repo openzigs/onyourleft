@@ -262,8 +262,8 @@ An instance holds two long-term keys of its own (#1189,
 [ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-4, D-5): an
 **identity** key (Ed25519), which riders' devices pin and which only signs, and an **encryption**
 key (X25519), which devices seal requests to. The encryption key is published only inside a
-statement the identity key signs, at `GET /v1/instance/keys`. Nothing seals to it yet: `/v1/sealed`
-is #1191 and the app's pin is #1190.
+statement the identity key signs, at `GET /v1/instance/keys`. Devices seal requests to it at
+`POST /v1/sealed` (#1191, below); the app's pin is #1190.
 
 **They need `OYL_INSTANCE_SECRET_KEY`**, the same secret a hosted model key uses (above) — never a
 second one — and `OYL_INSTANCE_ORIGIN`, which they are bound to. Both private halves are stored in
@@ -337,6 +337,36 @@ set again. Keep the secret somewhere other than the backups, and somewhere you w
 a snapshot from before the latest rotation would otherwise bring back a key older than one every
 device has already seen. The identity key comes back unchanged, so every pin holds. `restore`
 reports what it did under `keys`; with no secret set it says so and restores the data all the same.
+
+## Sealed requests
+
+`POST /v1/sealed` (#1191, [ADR 0047](adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)
+D-8, D-9) is the one endpoint a sealed request arrives at: the inner method, path and body travel
+inside the ciphertext, signed by the device's key, and the answer goes back sealed. It needs the
+accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); without either it answers
+`unavailable`. Three things about it are the operator's:
+
+- ⚠️ **The box's clock must be set by NTP, and right to within two minutes.** A sealed request signed
+  more than **120 seconds** from the box's clock is refused `stale_request`, and nothing runs. The
+  app re-signs once with the box's time and remembers the difference, so a phone a few minutes off
+  costs one extra round trip; but a box whose own clock wanders makes **every** sealed request fail,
+  revoking a device and recovering an account included, and the app then tells the rider *"Your
+  instance's clock looks wrong; ask its operator to check it."* A home machine running Docker keeps
+  its clock by NTP already; check it does.
+- **The clock rule, stated once.** Each request carries its signing time (`issuedAt`), checked
+  against the box's clock with **120 s** either way; and the SHA-256 of each request's ephemeral key
+  is kept in the database for **10 minutes**, so the same request sent again is refused `replayed`
+  without running — across a restart too, because the record is a table (`sealed_replay`, migration
+  0017), not memory. Its rows name no athlete, and rows older than ten minutes are deleted as new
+  ones arrive.
+- ⚠️ **The per-client limit needs `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` and a trusted proxy, or it is
+  one shared bucket.** A sealed request with no session (registering, linking, recovering) is
+  counted against the client's address before the instance does any cryptography — 30 a minute.
+  Behind `cloudflared` every request arrives from the tunnel's address, so the limit is per rider
+  only when the instance is told to read `cf-connecting-ip` and the tunnel's address is loopback or
+  in `OYL_INSTANCE_TRUSTED_PROXIES` (the home deployment's `compose.yaml` sets both). Without them,
+  one busy client uses up registration, linking and recovery for every rider. A signed-in rider's
+  sealed requests are counted against their session instead — 120 a minute — and are not affected.
 
 ## Room close codes
 

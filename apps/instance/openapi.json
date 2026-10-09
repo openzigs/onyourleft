@@ -4261,6 +4261,109 @@
         }
       }
     },
+    "/v1/sealed": {
+      "post": {
+        "operationId": "sealedRequest",
+        "summary": "A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer"
+                  },
+                  "keyId": {
+                    "type": "string"
+                  },
+                  "enc": {
+                    "type": "string"
+                  },
+                  "ct": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "v",
+                  "keyId",
+                  "enc",
+                  "ct"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "v": {
+                      "type": "integer"
+                    },
+                    "nonce": {
+                      "type": "string"
+                    },
+                    "ct": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "v",
+                    "nonce",
+                    "ct"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "When the inner route streams: frames of one `data:` line each — the first `{ \"v\": 1, \"nonce\", \"ct\" }`, then `{ \"ct\" }` — never an `event:` or `id:` field, ending with a sealed `end` event."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "One of `validation_failed`, `instance_key_unknown`, `sealed_unopened`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/sync/files/{content}": {
       "get": {
         "operationId": "getOriginalFile",
@@ -4948,6 +5051,8 @@
                 "type": "string",
                 "enum": [
                   "validation_failed",
+                  "instance_key_unknown",
+                  "sealed_unopened",
                   "unauthenticated",
                   "wrong_purpose",
                   "wrong_instance",
@@ -4955,6 +5060,7 @@
                   "challenge_used",
                   "challenge_expired",
                   "bad_signature",
+                  "stale_request",
                   "key_revoked",
                   "code_unknown",
                   "code_used",
@@ -4968,6 +5074,7 @@
                   "not_found",
                   "method_not_allowed",
                   "key_in_use",
+                  "replayed",
                   "last_device",
                   "moderation_not_applicable",
                   "address_in_use",
@@ -5025,6 +5132,26 @@
     "responses": {
       "validation_failed": {
         "description": "`validation_failed` (400), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "instance_key_unknown": {
+        "description": "`instance_key_unknown` (400), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "sealed_unopened": {
+        "description": "`sealed_unopened` (400), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {
@@ -5095,6 +5222,16 @@
       },
       "bad_signature": {
         "description": "`bad_signature` (401), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "stale_request": {
+        "description": "`stale_request` (401), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {
@@ -5225,6 +5362,16 @@
       },
       "key_in_use": {
         "description": "`key_in_use` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "replayed": {
+        "description": "`replayed` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

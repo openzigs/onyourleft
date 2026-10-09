@@ -36,6 +36,10 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
 import { createRooms, type RoomLimits, type Rooms } from '../rooms/rooms.ts';
+import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts';
+import { secretBytes } from '../keys/instance-keys-testing.ts';
+import type { Route } from '../route-kit.ts';
+import { createSealed, type Sealed } from '../sealed/sealed.ts';
 import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 
 /** The origin every test instance states. */
@@ -132,6 +136,13 @@ export interface IdentityInstance {
   readonly rooms: Rooms;
   /** Rooms' routes, as the memory blob store keeps them: a store of their own, not sync's. */
   readonly roomRoutes: MemoryBlobs;
+  /**
+   * The instance's own keys (#1189), made with a test secret before the
+   * listener starts, so `/v1/sealed` has an encryption key to open with (#1191).
+   */
+  readonly instanceKeys: InstanceKeys;
+  /** `/v1/sealed`'s replay record, clock and HPKE port (#1191). */
+  readonly sealed: Sealed;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -172,6 +183,10 @@ export async function startIdentityInstance(
     roomLimits?: RoomLimits;
     /** A new room code each call — `code.ts`'s unless a test needs a known one. */
     roomCode?: () => string;
+    /** `/v1/sealed`'s HPKE port: the instance's own unless a test counts its calls (#1191). */
+    sealedPrimitives?: Sealed['primitives'];
+    /** The route table: the production one unless a test adds a route of its own (#1191). */
+    routes?: readonly Route[];
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -192,6 +207,8 @@ export async function startIdentityInstance(
     originIsTheListener,
     roomLimits,
     roomCode,
+    sealedPrimitives,
+    routes,
     ...rest
   } = options;
   const identityFor = (origin: string): Identity =>
@@ -259,14 +276,29 @@ export async function startIdentityInstance(
     ...(roomLimits === undefined ? {} : { limits: roomLimits }),
     ...(roomCode === undefined ? {} : { code: roomCode }),
   });
+  const instanceKeys = createInstanceKeys({
+    store,
+    secret: secretBytes(7),
+    origin: TEST_ORIGIN,
+    now: () => Math.floor(clock.ms / 1000),
+  });
+  await instanceKeys.maintain();
+  const sealed = createSealed({
+    store,
+    now: () => clock.ms,
+    ...(sealedPrimitives === undefined ? {} : { primitives: sealedPrimitives }),
+  });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
       identity,
       sync,
       history,
       rooms,
+      instanceKeys,
+      sealed,
       config: listenerConfig,
       ...(probes === undefined ? {} : { probes }),
+      ...(routes === undefined ? {} : { routes }),
     });
   let identity: Identity;
   let instance: TestInstance;
@@ -328,6 +360,8 @@ export async function startIdentityInstance(
     history,
     rooms,
     roomRoutes,
+    instanceKeys,
+    sealed,
     confirmations,
     call,
     nonceFor,

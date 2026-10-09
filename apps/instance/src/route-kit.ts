@@ -12,6 +12,7 @@ import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode } from './errors.ts';
 
@@ -102,6 +103,21 @@ export interface RouteContext {
    */
   readonly instanceKeys: InstanceKeys | undefined;
   readonly probes: InstanceProbes | undefined;
+  /** Sealed requests' replay record, clock and HPKE port (#1191). Absent on a handler handed none. */
+  readonly sealed: Sealed | undefined;
+  /**
+   * Dispatch an opened sealed request's INNER request through the same route
+   * table (#1191, ADR 0047 D-9): the path matched, the method checked, the
+   * inner body held to `config.bodyLimitBytes`, and then every check the
+   * route declares, exactly as a plaintext request — except that a route
+   * marked {@link Route.sealed} `'only'` is reachable here and nowhere else.
+   * `/v1/sealed` itself is never an inner route.
+   */
+  readonly dispatch: (
+    request: Request,
+    body: Uint8Array | null,
+    client: ClientInfo,
+  ) => Promise<Response>;
 }
 
 /**
@@ -170,6 +186,21 @@ export interface Route {
   readonly admitsSuspended?: true;
   /** The route needs a signed-in device: `Authorization: Bearer <session token>`. */
   readonly auth?: 'session';
+  /**
+   * `'only'`: the route is reachable ONLY inside a sealed request (#1191,
+   * ADR 0047 D-9) — `POST /v1/sealed` dispatches to it, and a plaintext
+   * request to its path is `not_found`, as though it were not there.
+   * `openapi.json` documents the mark as `x-oyl-sealed: only`. Which routes
+   * carry it is #1192's.
+   */
+  readonly sealed?: 'only';
+  /**
+   * The largest body this route reads, from the instance's configuration —
+   * `config.bodyLimitBytes` unless a route declares its own. Only
+   * `/v1/sealed` does: its envelope carries an inner body of the ordinary
+   * limit, padded, tagged and base64url-encoded.
+   */
+  readonly bodyLimit?: (config: Config) => number;
   /** The JSON body the route reads, for the specification. */
   readonly request?: Schema;
   /** The error codes this route answers with beyond every route's. */
@@ -180,7 +211,12 @@ export interface Route {
     /** Bytes, exactly as they were stored: an original activity file (#35, #776). */
     | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */
-    | { readonly contentType: 'none' };
+    | { readonly contentType: 'none' }
+    /**
+     * A sealed reply (#1191): a JSON envelope `{ v, nonce, ct }`, or — when the
+     * inner route streams — `text/event-stream` whose frames carry `data:` alone.
+     */
+    | { readonly contentType: 'sealed'; readonly schema: Schema };
   readonly handle: (context: RouteContext) => Response | Promise<Response>;
 }
 

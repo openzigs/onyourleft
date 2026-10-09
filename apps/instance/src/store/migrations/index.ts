@@ -32,6 +32,7 @@ import * as privateRooms from './0013-private-rooms.ts';
 import * as hostedModelKey from './0014-hosted-model-key.ts';
 import * as instanceKeys from './0015-instance-keys.ts';
 import * as instanceKeyLease from './0016-instance-key-lease.ts';
+import * as sealedReplay from './0017-sealed-replay.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -56,4 +57,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0014-hosted-model-key': hostedModelKey,
   '0015-instance-keys': instanceKeys,
   '0016-instance-key-lease': instanceKeyLease,
+  '0017-sealed-replay': sealedReplay,
 };

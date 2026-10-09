@@ -354,6 +354,67 @@ export {
   X25519_KEY_BYTES,
 } from './hpke/hpke';
 
+// --- Sealed requests between the app and its instance (#1191, ADR 0047 D-8, D-9)
+//
+// The envelope, the AAD, the `oyl-sealed-request-v1` statement, the padding
+// and the framing, and both halves of sealing and opening, written once over
+// the HPKE port above so the device and the instance run the same lines.
+
+export type {
+  OpenedSealedReply,
+  OpenedSealedRequest,
+  ParsedEnvelope,
+  SealedBinding,
+  SealedEnvelope,
+  SealedEvent,
+  SealedInstanceKey,
+  SealedRefusal,
+  SealedReplyWriter,
+  SealedRequest,
+  SealedRequestStatement,
+  SealedStreamOpener,
+  SealRequestInput,
+} from './sealed/sealed';
+export {
+  decodeFrame,
+  encodeFrame,
+  EVENT_PAD_STEP_BYTES,
+  fromBase64url,
+  isLowerHex32,
+  MAXIMUM_FRAME_HEADER_BYTES,
+  openSealedRequest,
+  pad,
+  PAD_MINIMUM_BYTES,
+  PAD_POWER_CEILING_BYTES,
+  padEvent,
+  paddedEventLength,
+  paddedLength,
+  parseSealedEnvelope,
+  PASTED_KEY_PAD_BYTES,
+  SEALED_AAD_PURPOSE,
+  SEALED_CLOCK_NOTICE_SECONDS,
+  SEALED_END_KIND,
+  SEALED_FRESHNESS_SECONDS,
+  SEALED_INFO,
+  SEALED_PATH,
+  SEALED_REPLAY_SECONDS,
+  SEALED_REQUEST_PURPOSE,
+  SEALED_TAG_BYTES,
+  SEALED_VERSION,
+  sealedBodySha256,
+  sealedEnvelopeLimit,
+  SealedError,
+  sealedReplyWriter,
+  sealedRequestAad,
+  sealedRequestStatementBytes,
+  sealedResponseAad,
+  sealRequest,
+  sessionTokenSha256,
+  toBase64url,
+  unpad,
+  utf8Decode,
+} from './sealed/sealed';
+
 // --- Analysis (#75) ---------------------------------------------------------
 //
 // The power-duration curve and the critical-power model fitted to it. Pure

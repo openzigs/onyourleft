@@ -625,7 +625,8 @@ describe('the identity key (D-5, D-6)', () => {
     const keys = await restart();
     const served = await keys.served();
     const key = await keys.encryptionKey(served.statements[0]!.statement.keyId);
-    expect(key?.extractable).toBe(false);
+    expect(key?.privateKey.extractable).toBe(false);
+    expect(key?.publicKey).toHaveLength(32);
     expect(await keys.encryptionKey('0000000000000000')).toBeUndefined();
     expect(existsSync(path)).toBe(true);
   });

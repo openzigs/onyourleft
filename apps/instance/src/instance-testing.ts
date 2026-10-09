@@ -8,6 +8,7 @@ import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
+import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
 import { createServer } from 'node:net';
 
@@ -83,6 +84,7 @@ export async function startTestInstance(
     rooms?: Rooms;
     probes?: InstanceProbes;
     instanceKeys?: InstanceKeys;
+    sealed?: Sealed;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
@@ -99,6 +101,7 @@ export async function startTestInstance(
     ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
     ...(options.probes === undefined ? {} : { probes: options.probes }),
     ...(options.instanceKeys === undefined ? {} : { instanceKeys: options.instanceKeys }),
+    ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
   });
   const listening = await listen(handler, {
     host: '127.0.0.1',
