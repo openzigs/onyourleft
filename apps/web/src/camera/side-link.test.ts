@@ -1161,6 +1161,8 @@ describe('pictures, phone → tablet — #530, ADR 0033 D-3 and D-4', () => {
     }
     frames.bufferedAmount = 2009;
     expect(phone.link.sendPictureToTablet(PICTURE)).toBe('busy');
+    // #1112: what the phone records before each offer is the same number.
+    expect(phone.link.picturesWaiting()).toBe(2009);
     frames.bufferedAmount = 0;
     network.drop();
     await flushSideLink();

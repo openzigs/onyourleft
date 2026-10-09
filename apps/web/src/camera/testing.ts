@@ -403,6 +403,8 @@ export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCame
   readonly pictures: SidePicture[];
   /** What the next picture is answered with. `sent` by default. */
   answer: SidePictureSent;
+  /** What {@link SideCameraLinkPort.picturesWaiting} answers. `undefined` by default. */
+  waiting: number | undefined;
   ended: number;
   emit(event: SideLinkEvent): void;
 } {
@@ -416,6 +418,8 @@ export function scriptedLink(initial: SideLinkCondition = 'connected'): SideCame
       link.pictures.push(picture);
       return link.answer;
     },
+    waiting: undefined as number | undefined,
+    picturesWaiting: (): number | undefined => link.waiting,
     ended: 0,
     sideLinkCondition: () => condition,
     onSideLinkEvent: (listener: (event: SideLinkEvent) => void) => {

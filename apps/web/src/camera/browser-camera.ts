@@ -62,6 +62,8 @@ import type {
 import { capturedFrame, FRAME_MEDIA_TYPE, FRAME_QUALITY } from './frame';
 import { cameraProblemMessage } from './notice';
 import { lumaGrid, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS } from './presence';
+import { sidePictureEncoder, type JpegEncoder } from './side-picture-encoder';
+import type { SidePictureStages } from './side-picture-timings';
 
 /** The slice of `MediaStreamTrack` this module uses. */
 export interface VideoTrackLike {
@@ -114,6 +116,8 @@ export interface GrabbedFrame {
   readonly mediaType: string;
   readonly width: number;
   readonly height: number;
+  /** #1112: how long a side picture's draw and encode took. Numbers only. */
+  readonly stages?: SidePictureStages | undefined;
 }
 
 /**
@@ -497,8 +501,10 @@ function browserSession(
       }
       // Through the same tripwire as every other frame (ADR 0029 D-9): a
       // picture that crosses the link is a frame, and is refused here if the
-      // re-encode did not happen.
-      return capturedFrame(grabbed);
+      // re-encode did not happen. The stages ride beside it, numbers only
+      // (#1112, `side-picture-timings.ts`).
+      const frame = capturedFrame(grabbed);
+      return grabbed.stages === undefined ? frame : { ...frame, stages: grabbed.stages };
     },
     attachCameraPreview(surface: PreviewSurface): () => void {
       // The stream itself, played by the platform: nothing is drawn, encoded
@@ -711,15 +717,21 @@ export function videoCodePixelSampler(stream: MediaStreamLike): CodePixelSampler
  * and encoded as a JPEG — #530, ADR 0033 D-3.
  *
  * ⚠️ **This is a frame, and it is the D-9 re-encode**: the canvas is drawn
- * from the video's pixels and encoded by `toBlob`, exactly as
- * {@link canvasFrameGrabber} does at full size, and the session hands the
- * bytes through `frame.ts` §`capturedFrame`. The only differences are the
- * size, and that the video and the canvas are kept for the session instead of
- * made per picture. Like the rest of this file's platform half it is
+ * from the video's pixels and encoded as a JPEG, as {@link canvasFrameGrabber}
+ * does at full size, and the session hands the bytes through `frame.ts`
+ * §`capturedFrame`. The differences are the size, that the video and the
+ * canvas are kept for the session instead of made per picture, and — since
+ * #1112 — that the encode is `side-picture-encoder.ts`' worker rather than
+ * `toBlob`, which on Android waited up to 4 s for the page to go idle.
+ * `encoder` is a parameter for one caller, `browser/sidecamera-harness.tsx`,
+ * whose control puts `toBlob` back. Like the rest of this file's platform half it is
  * reachable from no jsdom suite; `browser/sidelink.browser.spec.ts` sends
  * pictures through it off the synthetic camera.
  */
-export function videoSidePictureSampler(stream: MediaStreamLike): SidePictureSampler {
+export function videoSidePictureSampler(
+  stream: MediaStreamLike,
+  encoder: JpegEncoder = sidePictureEncoder(),
+): SidePictureSampler {
   const media = stream as unknown as MediaStream;
   const video = document.createElement('video');
   video.srcObject = media;
@@ -751,18 +763,31 @@ export function videoSidePictureSampler(stream: MediaStreamLike): SidePictureSam
         canvas.width = width;
         canvas.height = height;
       }
+      // #1112: each stage timed, so the phone can say where a picture's time
+      // went (`side-picture-timings.ts`).
+      const drawStart = performance.now();
+      const videoFrames = frameProgress(video);
       context.drawImage(video, 0, 0, width, height);
-      const blob = await toBlob(canvas);
+      const drawn = performance.now();
+      const encoded = await encoder.encode(canvas);
+      const done = performance.now();
       return {
-        bytes: new Uint8Array(await blob.arrayBuffer()),
+        bytes: encoded.bytes,
         mediaType: FRAME_MEDIA_TYPE,
         width,
         height,
+        stages: {
+          drawMilliseconds: drawn - drawStart,
+          encodeMilliseconds: done - drawn,
+          videoFrames,
+          encoder: encoded.encoder,
+        },
       };
     },
     release(): void {
       video.pause();
       video.srcObject = null;
+      encoder.release();
     },
   };
 }
