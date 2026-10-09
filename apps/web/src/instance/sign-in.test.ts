@@ -246,8 +246,9 @@ describe('linking this device to an athlete (#773)', () => {
     });
 
     const exportKey = vi.spyOn(crypto.subtle, 'exportKey');
+    // Linking is sealed-only (#1192): the stand-in instance answers the sealed path too.
     const linked = await linkThisDevice(
-      dependencies(newDevice, transport, deviceStorage(), log),
+      { ...dependencies(newDevice, transport, deviceStorage(), log), sealed: transport },
       'code-1',
     );
     expect(exportKey).not.toHaveBeenCalled();
@@ -266,7 +267,10 @@ describe('linking this device to an athlete (#773)', () => {
     const first = await signInToInstance(dependencies(harness(), transport, deviceStorage(), log));
     links.set('code-2', first.instanceAthleteId);
     const exportKey = vi.spyOn(crypto.subtle, 'exportKey');
-    await linkThisDevice(dependencies(harness(), transport, deviceStorage(), log), 'code-2');
+    await linkThisDevice(
+      { ...dependencies(harness(), transport, deviceStorage(), log), sealed: transport },
+      'code-2',
+    );
     // Minting a key exports its PUBLIC half, which is the identity (ADR 0014).
     for (const [, key] of exportKey.mock.calls) {
       expect(key.type).toBe('public');

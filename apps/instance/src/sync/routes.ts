@@ -108,6 +108,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/account/export',
+    sealed: 'only',
     operationId: 'exportAccount',
     reaches: 'own',
     // A rider awaiting approval (#775), or suspended (#898), may still take
@@ -131,6 +132,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/account',
+    sealed: 'only',
     operationId: 'eraseAccount',
     reaches: 'own',
     // A rider awaiting approval (#775), or suspended (#898), may still take
@@ -187,6 +189,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/manifest',
+    sealed: 'only',
     operationId: 'getSyncManifest',
     reaches: 'own',
     summary:
@@ -217,6 +220,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/records/{content}',
+    sealed: 'only',
     operationId: 'getSignedRecord',
     reaches: 'own',
     summary:
@@ -233,6 +237,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/sync/records/{content}/race-consent',
+    sealed: 'only',
     operationId: 'setRaceConsent',
     reaches: 'own',
     summary:
@@ -256,6 +261,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'putSyncItem',
     reaches: 'own',
     summary:
@@ -280,6 +286,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'getSyncItem',
     reaches: 'own',
     summary: 'One of your items, byte for byte as it was sent.',
@@ -301,6 +308,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/sync/items/{kind}/{key}',
+    sealed: 'only',
     operationId: 'deleteSyncItem',
     reaches: 'own',
     summary:
@@ -320,6 +328,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/sync/records',
+    sealed: 'only',
     operationId: 'ingestRecord',
     reaches: 'own',
     summary:
@@ -353,6 +362,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/sync/files/{content}',
+    sealed: 'only',
     operationId: 'getOriginalFile',
     reaches: 'own',
     summary:
@@ -371,6 +381,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities',
+    sealed: 'only',
     operationId: 'listActivities',
     reaches: 'own',
     summary:
@@ -390,6 +401,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities/{content}',
+    sealed: 'only',
     operationId: 'getActivity',
     reaches: 'own',
     summary:
@@ -406,6 +418,7 @@ export const SYNC_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/activities/{content}/streams',
+    sealed: 'only',
     operationId: 'getActivityStreams',
     reaches: 'own',
     summary:

@@ -65,8 +65,13 @@
  * is true of is shown as a conflict, open, with no control on it.
  */
 
-import { heldInstanceSession, type InstanceStorage } from './instance-port';
-import type { InstanceAnswer, InstanceSend } from './instance-transport';
+import {
+  heldInstanceSession,
+  heldSealedSession,
+  type HeldSealedSession,
+  type SealingDependencies,
+} from './instance-port';
+import type { InstanceAnswer } from './instance-transport';
 import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, sealedRouteGate } from './instance-pin';
 import { readInstanceAccount } from './sign-in';
 
@@ -140,6 +145,12 @@ export type ModerationStanding =
 
 export type ModerationRead =
   | { readonly kind: Exclude<ModerationStanding, 'moderator'> }
+  /**
+   * A moderator, on a device that cannot seal now (#1192, ADR 0047 D-7, D-11):
+   * a copy of the app loaded from a website, no card, or keys refused. Every
+   * moderator route is sealed-only, so nothing is read; `text` says why.
+   */
+  | { readonly kind: 'sealed-unavailable'; readonly text: string }
   | {
       readonly kind: 'moderator';
       /** This account's id on the instance: what {@link isConflict} compares against. */
@@ -252,11 +263,11 @@ export const INVITE_CARD_CAUTION =
   'could change the card on the way, so send it by a channel you trust, or show it to them in ' +
   'person.';
 
-export interface ModerationPortDependencies {
-  readonly storage: InstanceStorage;
-  /** Injected so a test needs no network. Defaults to the platform's `fetch`. */
-  readonly send?: InstanceSend | undefined;
-}
+/**
+ * Every moderator route is sealed and signed by the moderator's device key
+ * (#1192, ADR 0047 D-7, D-8), so the port needs what a sealed call needs.
+ */
+export type ModerationPortDependencies = SealingDependencies;
 
 /**
  * THE rule for #905: a report whose subject is the moderator reading it is a
@@ -459,23 +470,49 @@ const INVITE_CODE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/;
 /** The production {@link ModerationPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createModerationPort(dependencies: ModerationPortDependencies): ModerationPort {
   const held = () => heldInstanceSession(dependencies.storage, dependencies.send);
+  const sealedSession = heldSealedSession(dependencies);
 
-  /** One moderators' request and its answer, or the standing that stopped it. */
-  async function probe(): Promise<
-    | { readonly kind: 'answer'; readonly answer: InstanceAnswer }
-    | { readonly kind: Exclude<ModerationStanding, 'moderator'> }
+  /** The session sealed, or the refusal the screen says instead (#1192). */
+  async function sealedOr(
+    refusal: (closed: Extract<HeldSealedSession, { kind: 'closed' }>) => {
+      readonly kind: 'refused';
+      readonly text: string;
+    },
+  ): Promise<
+    | Extract<HeldSealedSession, { kind: 'open' }>
+    | { readonly kind: 'refused'; readonly text: string }
   > {
+    const session = await sealedSession();
+    return session.kind === 'open' ? session : refusal(session);
+  }
+
+  const closedRefusal = (closed: Extract<HeldSealedSession, { kind: 'closed' }>) =>
+    ({
+      kind: 'refused',
+      text: closed.why === 'signed-out' ? MODERATION_REFUSAL_TEXT['signed-out'] : closed.text,
+    }) as const;
+
+  /**
+   * Whether this account moderates its instance, from `GET /v1/auth/account`
+   * (#775's `moderatorRole`) — a phase-2 route, so it is read in plaintext
+   * and a moderator on a device that cannot seal is still told why the
+   * screen is empty (#1192).
+   */
+  async function standingOf(): Promise<ModerationStanding> {
     const connection = held();
-    if (connection === undefined) return { kind: 'not-connected' };
+    if (connection === undefined) return 'not-connected';
     try {
-      const answer = await connection.http.call('GET', '/v1/moderation/registrations', {
+      const answer = await connection.http.call('GET', '/v1/auth/account', {
         token: connection.token,
       });
-      if (answer.status === 401) return { kind: 'signed-out' };
-      if (answer.status === 200) return { kind: 'answer', answer };
-      return isNotAModerator(answer) ? { kind: 'not-moderator' } : { kind: 'unreachable' };
+      if (answer.status === 401) return 'signed-out';
+      if (answer.status === 200) {
+        const role = record(answer.body)?.moderatorRole;
+        return typeof role === 'string' && role !== '' ? 'moderator' : 'not-moderator';
+      }
+      return isNotAModerator(answer) ? 'not-moderator' : 'unreachable';
     } catch {
-      return { kind: 'unreachable' };
+      return 'unreachable';
     }
   }
 
@@ -487,14 +524,13 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
   ): Promise<ModerationOutcome> {
     const accepted = acceptedReason(reason);
     if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
-    const connection = held();
-    if (connection === undefined) {
-      return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
-    }
     try {
+      // Sealed-only (#1192): every moderator action is signed by this device.
+      const session = await sealedOr(closedRefusal);
+      if (!('sealed' in session)) return session;
       return outcomeOf(
-        await connection.http.call('POST', path, {
-          token: connection.token,
+        await session.sealed.call('POST', path, {
+          token: session.token,
           body: { reason: accepted, ...extra },
         }),
       );
@@ -512,12 +548,12 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     each: (value: unknown) => T | undefined,
   ): Promise<ModerationList<T> | undefined> {
     if (cursor !== undefined && !CURSOR.test(cursor)) return undefined;
-    const connection = held();
-    if (connection === undefined) return undefined;
     try {
+      const session = await sealedSession();
+      if (session.kind === 'closed') return undefined;
       return page(
-        await connection.http.call('GET', path, {
-          token: connection.token,
+        await session.sealed.call('GET', path, {
+          token: session.token,
           query: { limit: String(limit), ...(cursor === undefined ? {} : { cursor }) },
         }),
         field,
@@ -534,29 +570,36 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, 'items', suspendedFrom);
 
   return {
-    standing: async () => {
-      const probed = await probe();
-      return probed.kind === 'answer' ? 'moderator' : probed.kind;
-    },
+    standing: async () => standingOf(),
 
     read: async () => {
-      const probed = await probe();
-      if (probed.kind !== 'answer') return { kind: probed.kind };
+      const standing = await standingOf();
+      if (standing !== 'moderator') return { kind: standing };
       const me = readInstanceAccount(dependencies.storage)?.instanceAthleteId;
-      const connection = held();
-      if (me === undefined || connection === undefined) return { kind: 'not-connected' };
+      if (me === undefined) return { kind: 'not-connected' };
       try {
+        // Every moderator read is sealed-only (#1192, ADR 0047 D-7).
+        const session = await sealedSession();
+        if (session.kind === 'closed') {
+          return session.why === 'signed-out'
+            ? { kind: 'signed-out' }
+            : { kind: 'sealed-unavailable', text: session.text };
+        }
         // The log and the suspended accounts are each read as a section of
         // their own (#957's review): one that cannot be read, or holds a row
         // this client does not accept, is `undefined`, and the queues are
         // still shown.
-        const [reports, suspended, log] = await Promise.all([
-          connection.http.call('GET', '/v1/moderation/reports', { token: connection.token }),
+        const [registrations, reports, suspended, log] = await Promise.all([
+          session.sealed.call('GET', '/v1/moderation/registrations', { token: session.token }),
+          session.sealed.call('GET', '/v1/moderation/reports', { token: session.token }),
           suspendedPage(),
           logPage(),
         ]);
-        if (reports.status === 401) return { kind: 'signed-out' };
-        const registrationRows = rows(probed.answer, 'registrations', registrationFrom);
+        if (registrations.status === 401 || reports.status === 401) return { kind: 'signed-out' };
+        if (registrations.status !== 200 && isNotAModerator(registrations)) {
+          return { kind: 'not-moderator' };
+        }
+        const registrationRows = rows(registrations, 'registrations', registrationFrom);
         const reportRows = rows(reports, 'reports', reportFrom);
         if (registrationRows === undefined || reportRows === undefined) {
           return { kind: 'unreachable' };
@@ -613,7 +656,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       // ⚠️ The card is composed HERE, from this device's own pin (D-6
       // source 3): never from anything the instance answers below.
       const account = readInstanceAccount(dependencies.storage);
-      const gate = sealedRouteGate(account);
+      const gate = sealedRouteGate(account, dependencies.loadedFrom);
       const card = cardFromPin(account);
       if (gate.kind !== 'open' || card === undefined) {
         return {
@@ -623,13 +666,12 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       }
       const accepted = acceptedReason(reason);
       if (accepted === undefined) return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
-      const connection = held();
-      if (connection === undefined) {
-        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
-      }
       try {
-        const answer = await connection.http.call('POST', '/v1/moderation/invites', {
-          token: connection.token,
+        // Sealed-only (#1192): the code is in the reply, as ciphertext.
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call('POST', '/v1/moderation/invites', {
+          token: session.token,
           body: { reason: accepted },
         });
         const refused = outcomeOf(answer);

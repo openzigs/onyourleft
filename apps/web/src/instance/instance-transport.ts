@@ -450,6 +450,12 @@ export interface SealedCallOptions {
   /** A pasted key travels in this request: pad it to at least 1 KiB (D-9). */
   readonly pastedKey?: boolean;
   readonly maximumAnswerBytes?: number;
+  /**
+   * A query string, as names and values (#1192: a moderators' list's `limit`
+   * and `cursor`), encoded with `URLSearchParams` and appended to the INNER
+   * path after it has passed {@link isPlainPath}, as {@link instanceHttp} does.
+   */
+  readonly query?: Readonly<Record<string, string>>;
 }
 
 /** A sealed call's answer: the INNER status and body, and anything the rider must be told. */
@@ -479,11 +485,20 @@ export interface SealedStreamResult {
 }
 
 export interface SealedInstance {
+  readonly origin: string;
   call(
     method: 'GET' | 'POST' | 'DELETE',
     path: string,
     options?: SealedCallOptions,
   ): Promise<SealedInstanceAnswer>;
+  /**
+   * A call answered with BYTES (#1192: an original activity file, #776): the
+   * inner status and the opened body exactly as the route wrote it.
+   */
+  bytes(
+    path: string,
+    options?: SealedCallOptions,
+  ): Promise<{ readonly status: number; readonly bytes: Uint8Array }>;
   stream(path: string, options: SealedStreamOptions): Promise<SealedStreamResult>;
 }
 
@@ -564,16 +579,28 @@ export function sealedInstance(
    * A whole answer: a plaintext refusal as it is (only a non-200 can be one —
    * the instance answers a sealed 200 or a plaintext refusal before Open), or
    * the sealed reply opened. A 200 that is not a sealed reply, or a reply that
-   * does not open, can only be the edge's, so it is no answer.
+   * does not open, can only be the edge's, so it is no answer. ⚠️ The OPENED
+   * body is held to `innerLimit` too (#1192): the envelope's own bound allows
+   * for padding, so an answer a plaintext call would refuse as too large must
+   * not pass because it came sealed.
    */
-  async function whole(sealed: SealedRequest, response: Response, limit: number) {
-    const body = parsed(new TextDecoder().decode(await boundedBytes(response, limit)));
-    if (response.status !== 200) return { status: response.status, body, sealed: false };
+  async function whole(sealed: SealedRequest, response: Response, innerLimit: number) {
+    const raw = await boundedBytes(response, sealedEnvelopeLimit(innerLimit));
+    const body = parsed(new TextDecoder().decode(raw));
+    if (response.status !== 200)
+      return { status: response.status, body, bytes: raw, sealed: false };
     if (!isSealedReply(body)) throw new InstanceUnreachableError('no-answer');
     try {
       const reply = await sealed.openReply(body);
-      return { status: reply.status, body: parsed(utf8Decode(reply.body) ?? ''), sealed: true };
-    } catch {
+      if (reply.body.byteLength > innerLimit) throw new InstanceUnreachableError('too-large');
+      return {
+        status: reply.status,
+        body: parsed(utf8Decode(reply.body) ?? ''),
+        bytes: reply.body,
+        sealed: true,
+      };
+    } catch (error) {
+      if (error instanceof InstanceUnreachableError) throw error;
       throw new InstanceUnreachableError('no-answer');
     }
   }
@@ -592,36 +619,47 @@ export function sealedInstance(
 
   const WRONG: SealedNotice = { kind: 'instance-clock-wrong', text: INSTANCE_CLOCK_WRONG_NOTICE };
 
+  /** One whole sealed call, re-signed once on a sealed `stale_request` (D-9). */
+  async function wholeCall(
+    method: string,
+    path: string,
+    options: SealedCallOptions,
+  ): Promise<{ status: number; body: unknown; bytes: Uint8Array; notice?: SealedNotice }> {
+    if (!isPlainPath(path)) throw new InstanceUnreachableError('refused-path');
+    const query = options.query === undefined ? '' : new URLSearchParams(options.query).toString();
+    const inner = query === '' ? path : `${path}?${query}`;
+    const limit = Math.min(
+      options.maximumAnswerBytes ?? MAXIMUM_INSTANCE_ANSWER_BYTES,
+      MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+    );
+    const attempt = async () => {
+      const sealed = await seal(method, inner, options.body, options.token, options);
+      return whole(sealed, await post(sealed, options.token, INSTANCE_TIMEOUT_MILLISECONDS), limit);
+    };
+    const first = await attempt();
+    const instanceTime = first.sealed ? staleTime(first.body) : undefined;
+    if (instanceTime === undefined) return first;
+    const notice = learnOffset(instanceTime);
+    const second = await attempt();
+    if (second.sealed && staleTime(second.body) !== undefined) return { ...second, notice: WRONG };
+    return { ...second, ...(notice === undefined ? {} : { notice }) };
+  }
+
   return {
+    origin,
+
     async call(method, path, options = {}) {
-      if (!isPlainPath(path)) throw new InstanceUnreachableError('refused-path');
-      const limit = sealedEnvelopeLimit(
-        Math.min(
-          options.maximumAnswerBytes ?? MAXIMUM_INSTANCE_ANSWER_BYTES,
-          MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
-        ),
-      );
-      const attempt = async () => {
-        const sealed = await seal(method, path, options.body, options.token, options);
-        return whole(
-          sealed,
-          await post(sealed, options.token, INSTANCE_TIMEOUT_MILLISECONDS),
-          limit,
-        );
-      };
-      const first = await attempt();
-      const instanceTime = first.sealed ? staleTime(first.body) : undefined;
-      if (instanceTime === undefined) return { status: first.status, body: first.body };
-      const notice = learnOffset(instanceTime);
-      const second = await attempt();
-      if (second.sealed && staleTime(second.body) !== undefined) {
-        return { status: second.status, body: second.body, notice: WRONG };
-      }
+      const answer = await wholeCall(method, path, options);
       return {
-        status: second.status,
-        body: second.body,
-        ...(notice === undefined ? {} : { notice }),
+        status: answer.status,
+        body: answer.body,
+        ...(answer.notice === undefined ? {} : { notice: answer.notice }),
       };
+    },
+
+    async bytes(path, options = {}) {
+      const answer = await wholeCall('GET', path, options);
+      return { status: answer.status, bytes: answer.bytes };
     },
 
     async stream(path, options) {
@@ -633,11 +671,7 @@ export function sealedInstance(
         });
         const response = await post(sealed, options.token, SEALED_STREAM_TIMEOUT_MILLISECONDS);
         if (!(response.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
-          const answer = await whole(
-            sealed,
-            response,
-            sealedEnvelopeLimit(MAXIMUM_INSTANCE_ANSWER_BYTES),
-          );
+          const answer = await whole(sealed, response, MAXIMUM_INSTANCE_ANSWER_BYTES);
           const instanceTime = answer.sealed ? staleTime(answer.body) : undefined;
           if (instanceTime !== undefined && attempt === 0) {
             notice = learnOffset(instanceTime);

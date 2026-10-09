@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 
+import { INSTANCE_KEY_TEXT, WEB_BUILD_TEXT } from '../instance/instance-pin';
 import { NOTHING_CHANGED_TEXT } from '../instance/moderation-port';
 import {
   scriptedModeration,
@@ -127,6 +128,22 @@ describe('who sees what — #955', () => {
       expect(container().querySelectorAll('button, input')).toHaveLength(0);
       expect(text()).not.toContain('Anna');
       expect(text()).not.toContain(MODERATION_IS_LOGGED);
+    },
+  );
+});
+
+describe('a moderator on a device that cannot seal (#1192, ADR 0047 D-7, D-11)', () => {
+  it.each([
+    ['a copy of the app a website served', WEB_BUILD_TEXT],
+    ['no card', INSTANCE_KEY_TEXT['needs-card']],
+  ] as const)(
+    'is told why, in the gate’s own sentence, with no queue and no control (%s)',
+    async (_name, sentence) => {
+      const scripted = scriptedModeration({ sealedUnavailable: sentence });
+      await open(scripted);
+      expect(text()).toContain(sentence);
+      expect(container().querySelectorAll('button, input')).toHaveLength(0);
+      expect(text()).not.toContain('Anna');
     },
   );
 });

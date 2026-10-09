@@ -21,13 +21,15 @@ interface IdentityInstance {
   call(
     method: string,
     path: string,
-    options?: { body?: unknown },
+    options?: { body?: unknown; plain?: boolean },
   ): Promise<{ status: number; body: unknown }>;
   freshRead<T>(
     read: (store: {
       listDeviceKeys(athleteId: string): Promise<readonly { publicKey: string }[]>;
     }) => Promise<T>,
   ): Promise<T>;
+  /** The instance's keys (#1189): its card. */
+  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   close(): Promise<void>;
 }
 
@@ -36,6 +38,7 @@ interface IdentityTesting {
   startIdentityInstance(options?: {
     originIsTheListener?: boolean;
     config?: { name?: string };
+    startsAt?: number;
   }): Promise<IdentityInstance>;
 }
 
@@ -57,12 +60,29 @@ test.afterEach(async () => {
   await world.close();
 });
 
-async function openHarness(
-  page: Page,
-  tamper: (body: Record<string, unknown>) => Record<string, unknown> = (body) => body,
-): Promise<void> {
+async function openHarness(page: Page): Promise<void> {
+  // Plaintext, as the page sent it: the challenge, and a known key's sign-in.
   await page.exposeFunction('oylInstancePost', (path: string, body: Record<string, unknown>) =>
-    world.call('POST', path, { body: path === '/v1/auth/session' ? tamper(body) : body }),
+    world.call('POST', path, { body, plain: true }),
+  );
+  // A raw request — the sealed one the page made (#1192) — to the same instance.
+  await page.exposeFunction(
+    'oylInstanceFetch',
+    async (
+      path: string,
+      init: { method: string; headers: Record<string, string>; body: string | null },
+    ) => {
+      const response = await fetch(`${world.url}${path}`, {
+        method: init.method,
+        headers: init.headers,
+        ...(init.body === null ? {} : { body: init.body }),
+      });
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') ?? '',
+        text: await response.text(),
+      };
+    },
   );
   const response = await page.goto('/identity.html');
   expect(
@@ -72,10 +92,14 @@ async function openHarness(
   await page.waitForFunction(() => window.__oylIdentity !== undefined);
 }
 
-function signIn(page: Page, origin: string, database = 'identity-gate') {
+function signIn(page: Page, origin: string, flipSignature = false, database = 'identity-gate') {
   return page.evaluate(
-    ([o, d]) => (window.__oylIdentity as IdentityHarness).signIn(o as string, d as string),
-    [origin, database],
+    ([o, d, i, f]) =>
+      (window.__oylIdentity as IdentityHarness).signIn(o as string, d as string, {
+        instanceOrigin: i as string,
+        flipSignature: f === 'flip',
+      }),
+    [origin, database, testing.TEST_ORIGIN, flipSignature ? 'flip' : 'keep'],
   );
 }
 
@@ -102,12 +126,9 @@ test.describe('the device key, from the browser to the Node instance (#772)', ()
   test('the control: one flipped signature byte in transit is refused by the instance', async ({
     page,
   }) => {
-    await openHarness(page, (body) => {
-      const signature = body.signature as string;
-      const flipped = (signature[0] === 'a' ? 'b' : 'a') + signature.slice(1);
-      return { ...body, signature: flipped };
-    });
-    await expect(signIn(page, testing.TEST_ORIGIN)).rejects.toThrow(/bad_signature/);
+    // Flipped in the page, before it is sealed: nothing on the way can read it (#1192).
+    await openHarness(page);
+    await expect(signIn(page, testing.TEST_ORIGIN, true)).rejects.toThrow(/bad_signature/);
   });
 
   test('the control: a browser signing for another instance is refused', async ({ page }) => {
@@ -125,6 +146,8 @@ test.describe('the production transport, from the browser to the Node instance (
     const own = await testing.startIdentityInstance({
       originIsTheListener: true,
       config: { name: 'Lanes of the Weald' },
+      // The page judges the instance's key statements by its own clock (#1190, #1192).
+      startsAt: Date.now(),
     });
     try {
       await openHarness(page);
@@ -133,10 +156,16 @@ test.describe('the production transport, from the browser to the Node instance (
         if (request.url().startsWith(own.url))
           requests.push(`${request.method()} ${request.url()}`);
       });
+      // The instance's card, as its operator hands it over (#1190, #1192).
+      const card = (await own.instanceKeys.show()).card;
       const result = await page.evaluate(
-        ([address]) =>
-          (window.__oylIdentity as IdentityHarness).connect(address as string, 'instance-gate'),
-        [own.url],
+        ([address, given]) =>
+          (window.__oylIdentity as IdentityHarness).connect(
+            address as string,
+            'instance-gate',
+            given as string,
+          ),
+        [own.url, card],
       );
       expect(result.connected).toMatchObject({ kind: 'connected' });
       expect(result.current).toMatchObject({
@@ -147,9 +176,13 @@ test.describe('the production transport, from the browser to the Node instance (
       });
       expect(result.devices).toMatchObject({ kind: 'listed' });
       // The requests went from the page to the instance, preflights included.
+      // Registered SEALED (#1192): the session request went inside `/v1/sealed`.
+      expect(requests.some((line) => line.startsWith('POST') && line.endsWith('/v1/sealed'))).toBe(
+        true,
+      );
       expect(
         requests.some((line) => line.startsWith('POST') && line.endsWith('/v1/auth/session')),
-      ).toBe(true);
+      ).toBe(false);
 
       const reloaded = await page.evaluate(() =>
         (window.__oylIdentity as IdentityHarness).reload('instance-gate'),

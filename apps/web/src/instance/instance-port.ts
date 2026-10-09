@@ -47,18 +47,24 @@ import {
   checkDisplayName,
   NO_KEY_TRUST,
   parseInstanceCard,
+  type HpkePrimitives,
+  type SealedInstanceKey,
   type Sha256,
   type SignatureVerifier,
   type SigningKey,
 } from '@onyourleft/domain';
-import { webCryptoSha256, webCryptoVerifier } from '@onyourleft/store';
+import { webCryptoHpkePrimitives, webCryptoSha256, webCryptoVerifier } from '@onyourleft/store';
 
 import { ADDRESS_REFUSAL_TEXT, instanceAddress } from './address';
 import {
+  createInstanceClock,
   instanceHttp,
   InstanceUnreachableError,
+  sealedInstance,
+  type InstanceClock,
   type InstanceHttp,
   type InstanceSend,
+  type SealedInstance,
 } from './instance-transport';
 import {
   cardFromPin,
@@ -69,7 +75,11 @@ import {
   judgeWithReread,
   olderKeyText,
   readCodeWithCard,
+  sealedBuildOffered,
+  sealedKeyOf,
   sealedRouteGate,
+  WEB_BUILD_TEXT,
+  type LoadedFrom,
   type PinCrypto,
   type ServedKeysReader,
 } from './instance-pin';
@@ -81,6 +91,7 @@ import {
   signInToInstance,
   writeInstanceAccount,
   type InstanceAccount,
+  type InstanceTransport,
   type SignInDependencies,
 } from './sign-in';
 
@@ -240,11 +251,16 @@ export interface InstanceStorage {
   removeItem(key: string): void;
 }
 
-export interface InstancePortDependencies {
+/**
+ * What a sealed call needs of this device (#1192, ADR 0047 D-8, D-9, D-11):
+ * the sign-in it holds, where this copy of the app was loaded from, and the
+ * key that signs. Shared by the instance port and the moderation port.
+ */
+export interface SealingDependencies {
   readonly storage: InstanceStorage;
-  /** `ensureLocalAthlete`, bound: the athlete row exists before a key is asked for. */
-  readonly ensureLocalAthlete: () => Promise<unknown>;
-  /** `ensureDeviceSigningKey`, bound. */
+  /** Where this copy of the app was loaded from: a website's copy seals nothing (D-11). */
+  readonly loadedFrom: LoadedFrom;
+  /** `ensureDeviceSigningKey`, bound: the session's key, which signs every sealed request. */
   readonly signingKey: () => Promise<SigningKey>;
   /** Injected so a test needs no network. Defaults to the platform's `fetch`. */
   readonly send?: InstanceSend | undefined;
@@ -253,6 +269,15 @@ export interface InstancePortDependencies {
   /** SHA-256 and Ed25519 verification for the pin (#1190). WebCrypto's unless a test says otherwise. */
   readonly sha256?: Sha256;
   readonly verifier?: SignatureVerifier;
+  /** HPKE's primitives (#1191). WebCrypto's unless a test says otherwise. */
+  readonly primitives?: HpkePrimitives<unknown>;
+  /** The offset to each instance's clock (#1191, D-9): one per port unless a test hands its own. */
+  readonly clock?: InstanceClock;
+}
+
+export interface InstancePortDependencies extends SealingDependencies {
+  /** `ensureLocalAthlete`, bound: the athlete row exists before a key is asked for. */
+  readonly ensureLocalAthlete: () => Promise<unknown>;
 }
 
 /**
@@ -276,6 +301,14 @@ export const CONNECT_REFUSAL_TEXT = {
     'A name other riders see must be 1 to 32 characters, with no control or invisible ' +
     'characters.',
   other: 'The instance refused to sign this device in.',
+  /**
+   * #1192 (ADR 0047 D-7): an instance holding keys registers a new key only
+   * sealed, and this device had no card to seal with. ⚠️ Draft wording for
+   * the owner to approve in #1192's pull request (D-14 Q6).
+   */
+  sealed_required:
+    'This instance registers a new rider only with its card. Paste the card its operator gave ' +
+    'you below, and connect again.',
   'bad-offer':
     'That is not a code from another device. It starts oyl-instance: and ends with a code like ' +
     'abcd-efgh-jkmn-pqrs; paste the whole line.',
@@ -319,10 +352,12 @@ function httpsUrl(value: unknown): string | null {
   }
 }
 
-function refusalFor(error: unknown): string {
+function refusalFor(error: unknown, sealedRequired?: string): string {
   if (error instanceof InstanceUnreachableError) return CONNECT_REFUSAL_TEXT['no-answer'];
   if (error instanceof InstanceSignInError) {
     switch (error.code) {
+      case 'sealed_required':
+        return sealedRequired ?? CONNECT_REFUSAL_TEXT.sealed_required;
       case 'not_found':
       case 'method_not_allowed':
       case 'unknown':
@@ -408,6 +443,177 @@ export function heldInstanceSession(
   }
 }
 
+/** A sealed call as {@link InstanceTransport}: POST, sealed, the inner answer opened. */
+function sealedTransport(sealed: SealedInstance): InstanceTransport {
+  return { post: async (path, body) => sealed.call('POST', path, { body }) };
+}
+
+/** What a device makes of its instance's keys, and the key to seal to when it trusts them. */
+interface Judged {
+  readonly outcome: KeysOutcome;
+  readonly instanceKey?: SealedInstanceKey;
+}
+
+/**
+ * Judge `account`'s instance's served keys under its pin (#1190), remember
+ * what the judgement says to (the pin itself never moves here), and say what
+ * a sealed call may seal to (#1192).
+ */
+async function judgeAccount(
+  storage: InstanceStorage,
+  account: InstanceAccount | undefined,
+  dependencies: Pick<SealingDependencies, 'send'>,
+  crypto: PinCrypto,
+): Promise<Judged> {
+  if (account?.pin === undefined) {
+    return { outcome: { kind: 'no-card', text: INSTANCE_KEY_TEXT['needs-card'] } };
+  }
+  const pinned = account.pin;
+  if (account.expectedFingerprint !== undefined) {
+    return {
+      outcome: {
+        kind: 'needs-new-card',
+        text: INSTANCE_KEY_TEXT['needs-new-card'],
+        pinned,
+        expected: account.expectedFingerprint,
+      },
+    };
+  }
+  let http: InstanceHttp;
+  try {
+    http = instanceHttp(account.origin, dependencies.send);
+  } catch {
+    return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
+  }
+  const verdict = await judgeWithReread(
+    servedKeysAt(http),
+    account.origin,
+    pinned,
+    account.keyTrust ?? NO_KEY_TRUST,
+    crypto,
+  );
+  if (verdict === 'unreachable') {
+    return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
+  }
+  const held = readInstanceAccount(storage);
+  if (held?.origin !== account.origin) {
+    return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
+  }
+  switch (verdict.kind) {
+    case 'mismatch':
+      return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.mismatch, pinned } };
+    case 'new-card':
+      writeInstanceAccount(storage, { ...held, expectedFingerprint: verdict.fingerprint });
+      return {
+        outcome: {
+          kind: 'needs-new-card',
+          text: INSTANCE_KEY_TEXT['needs-new-card'],
+          pinned,
+          expected: verdict.fingerprint,
+        },
+      };
+    case 'older':
+      writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+      return {
+        outcome: { kind: 'refused', text: olderKeyText(verdict.highestSerial), pinned },
+      };
+    case 'expired':
+      writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+      return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.expired, pinned } };
+    case 'trusted':
+      writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+      return {
+        outcome: { kind: 'trusted', pinned, serial: verdict.statement.serial },
+        instanceKey: sealedKeyOf(verdict.statement),
+      };
+  }
+}
+
+/** The sign-in this device holds, sealed — or why a phase-1 feature is not offered now. */
+export type HeldSealedSession =
+  | {
+      readonly kind: 'open';
+      readonly sealed: SealedInstance;
+      readonly token: string;
+      readonly account: InstanceAccount;
+    }
+  | {
+      readonly kind: 'closed';
+      /** `signed-out`: no sign-in; `gate`: D-11 or no card (D-14 Q1, Q8); `keys`: the keys were refused. */
+      readonly why: 'signed-out' | 'gate' | 'keys';
+      readonly text: string;
+    };
+
+/** What {@link heldSealedSession} needs beyond the dependencies: the clock and the pin's crypto. */
+interface SealingKit {
+  readonly clock: InstanceClock;
+  readonly crypto: PinCrypto;
+}
+
+function sealingKit(dependencies: SealingDependencies): SealingKit {
+  return {
+    clock: dependencies.clock ?? createInstanceClock(),
+    crypto: {
+      sha256: dependencies.sha256 ?? webCryptoSha256,
+      verifier: dependencies.verifier ?? webCryptoVerifier,
+      now: dependencies.now ?? (() => Date.now()),
+    },
+  };
+}
+
+/**
+ * The instance this device is signed in to, as SEALED calls (#1192, ADR 0047
+ * D-7, D-8, D-11): every phase-1 route goes through this and nothing else.
+ * Closed — with the sentence to show — for a copy of the app loaded from a
+ * website, a device with no card or waiting for a new one, and keys that do
+ * not verify under the pin; nothing is sent then but the keys' read.
+ */
+async function sealedSessionOf(
+  dependencies: SealingDependencies,
+  kit: SealingKit,
+): Promise<HeldSealedSession> {
+  const account = readInstanceAccount(dependencies.storage);
+  const held = heldInstanceSession(dependencies.storage, dependencies.send);
+  if (account === undefined || held === undefined) {
+    return { kind: 'closed', why: 'signed-out', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+  }
+  const gate = sealedRouteGate(account, dependencies.loadedFrom);
+  if (gate.kind !== 'open') return { kind: 'closed', why: 'gate', text: gate.text };
+  const judged = await judgeAccount(dependencies.storage, account, dependencies, kit.crypto);
+  if (judged.instanceKey === undefined) {
+    const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
+    return { kind: 'closed', why: 'keys', text };
+  }
+  return {
+    kind: 'open',
+    sealed: sealedInstance(
+      account.origin,
+      {
+        instanceKey: judged.instanceKey,
+        signingKey: await dependencies.signingKey(),
+        primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
+        sha256: kit.crypto.sha256,
+        clock: kit.clock,
+        ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+      },
+      dependencies.send,
+    ),
+    token: held.token,
+    account,
+  };
+}
+
+/**
+ * {@link sealedSessionOf} for a port that is not the instance port — the
+ * moderation port (#1192): one clock for the port's life.
+ */
+export function heldSealedSession(
+  dependencies: SealingDependencies,
+): () => Promise<HeldSealedSession> {
+  const kit = sealingKit(dependencies);
+  return () => sealedSessionOf(dependencies, kit);
+}
+
 /** `GET /v1/instance/keys` at `http`: its body, or `undefined` when nothing usable answered. */
 function servedKeysAt(http: InstanceHttp): ServedKeysReader {
   return async () => {
@@ -423,11 +629,31 @@ function servedKeysAt(http: InstanceHttp): ServedKeysReader {
 /** The production {@link InstancePort}: `main.tsx` builds it, and nothing else in the client. */
 export function createInstancePort(dependencies: InstancePortDependencies): InstancePort {
   const { storage } = dependencies;
-  const crypto: PinCrypto = {
-    sha256: dependencies.sha256 ?? webCryptoSha256,
-    verifier: dependencies.verifier ?? webCryptoVerifier,
-    now: dependencies.now ?? (() => Date.now()),
-  };
+  const kit = sealingKit(dependencies);
+  const { crypto } = kit;
+
+  /**
+   * A sessionless sealed transport to `origin`, signed by this device's key
+   * (#1192). The key is asked for at the first request, so after sign-in has
+   * made sure the local athlete it belongs to exists.
+   */
+  const sealedFor = (origin: string, instanceKey: SealedInstanceKey): InstanceTransport => ({
+    post: async (path, body) =>
+      sealedTransport(
+        sealedInstance(
+          origin,
+          {
+            instanceKey,
+            signingKey: await dependencies.signingKey(),
+            primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
+            sha256: crypto.sha256,
+            clock: kit.clock,
+            ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+          },
+          dependencies.send,
+        ),
+      ).post(path, body),
+  });
 
   /** What signing in to `origin` needs, over `http`. */
   const signIn = (origin: string, http: InstanceHttp): SignInDependencies => ({
@@ -438,12 +664,6 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     signingKey: dependencies.signingKey,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
   });
-
-  /** The account this device holds, if it is still for `origin`. */
-  const accountAt = (origin: string): InstanceAccount | undefined => {
-    const account = readInstanceAccount(storage);
-    return account?.origin === origin ? account : undefined;
-  };
 
   /** The instance and the token this device holds, or `undefined` for neither. */
   const held = (): HeldInstanceSession | undefined =>
@@ -502,18 +722,33 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         if (!checked.ok) return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-name'] };
         name = checked.name;
       }
+      // What a `sealed_required` refusal means here (#1192): a copy of the app
+      // that may not seal (D-11), or no card, or keys that would not seal.
+      let sealedRequired = sealedBuildOffered(dependencies.loadedFrom)
+        ? CONNECT_REFUSAL_TEXT.sealed_required
+        : WEB_BUILD_TEXT;
       try {
         const http = instanceHttp(decision.origin, dependencies.send);
         // The card is checked BEFORE anything else is sent: a mismatch sends
         // nothing more and keeps nothing (D-6).
         let pin: SignInDependencies['pin'];
+        let sealed: InstanceTransport | undefined;
         if (cardText !== '') {
           const checked = await checkCard(cardText, decision.origin, servedKeysAt(http), crypto);
           if (checked.kind === 'refused') return checked;
           pin = { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust };
+          if (checked.instanceKey === undefined) {
+            sealedRequired = checked.sealingText ?? sealedRequired;
+          } else if (sealedBuildOffered(dependencies.loadedFrom)) {
+            sealed = sealedFor(decision.origin, checked.instanceKey);
+          }
         }
         const signedIn = await signInToInstance(
-          { ...signIn(decision.origin, http), ...(pin === undefined ? {} : { pin }) },
+          {
+            ...signIn(decision.origin, http),
+            ...(pin === undefined ? {} : { pin }),
+            ...(sealed === undefined ? {} : { sealed }),
+          },
           name === undefined ? {} : { displayName: name },
         );
         storage.setItem(
@@ -527,7 +762,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
             : { recoveryCodes: signedIn.recoveryCodes }),
         };
       } catch (error) {
-        return { kind: 'refused', text: refusalFor(error) };
+        return { kind: 'refused', text: refusalFor(error, sealedRequired) };
       }
     },
 
@@ -543,14 +778,22 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       if (decision.origin !== parsed.card.origin) {
         return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-offer'] };
       }
+      // Linking is sealed-only (#1192): a copy of the app that may not seal sends nothing.
+      if (!sealedBuildOffered(dependencies.loadedFrom)) {
+        return { kind: 'refused', text: WEB_BUILD_TEXT };
+      }
       try {
         const http = instanceHttp(decision.origin, dependencies.send);
         const checked = await checkCard(read.card, decision.origin, servedKeysAt(http), crypto);
         if (checked.kind === 'refused') return checked;
+        if (checked.instanceKey === undefined) {
+          return { kind: 'refused', text: checked.sealingText ?? INSTANCE_KEY_TEXT.unreachable };
+        }
         const signedIn = await linkThisDevice(
           {
             ...signIn(decision.origin, http),
             pin: { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust },
+            sealed: sealedFor(decision.origin, checked.instanceKey),
           },
           read.code,
         );
@@ -566,56 +809,10 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
 
     keys: async () => {
       const account = readInstanceAccount(storage);
-      const gate = sealedRouteGate(account);
-      if (account === undefined || gate.kind === 'needs-card') {
+      if (account === undefined) {
         return { kind: 'no-card', text: INSTANCE_KEY_TEXT['needs-card'] };
       }
-      const pinned = account.pin ?? '';
-      if (gate.kind === 'needs-new-card') {
-        return { kind: 'needs-new-card', text: gate.text, pinned, expected: gate.expected };
-      }
-      let http: InstanceHttp;
-      try {
-        http = instanceHttp(account.origin, dependencies.send);
-      } catch {
-        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
-      }
-      const verdict = await judgeWithReread(
-        servedKeysAt(http),
-        account.origin,
-        pinned,
-        account.keyTrust ?? NO_KEY_TRUST,
-        crypto,
-      );
-      if (verdict === 'unreachable') {
-        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
-      }
-      // What is remembered moves only forward, and the pin never moves here.
-      const held = accountAt(account.origin);
-      if (held === undefined) {
-        return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned };
-      }
-      switch (verdict.kind) {
-        case 'mismatch':
-          return { kind: 'refused', text: INSTANCE_KEY_TEXT.mismatch, pinned };
-        case 'new-card':
-          writeInstanceAccount(storage, { ...held, expectedFingerprint: verdict.fingerprint });
-          return {
-            kind: 'needs-new-card',
-            text: INSTANCE_KEY_TEXT['needs-new-card'],
-            pinned,
-            expected: verdict.fingerprint,
-          };
-        case 'older':
-          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
-          return { kind: 'refused', text: olderKeyText(verdict.highestSerial), pinned };
-        case 'expired':
-          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
-          return { kind: 'refused', text: INSTANCE_KEY_TEXT.expired, pinned };
-        case 'trusted':
-          writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
-          return { kind: 'trusted', pinned, serial: verdict.statement.serial };
-      }
+      return (await judgeAccount(storage, account, dependencies, crypto)).outcome;
     },
 
     offerCard: async (card) => {
@@ -688,24 +885,26 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     },
 
     linkCode: async () => {
-      const connection = held();
       const account = readInstanceAccount(storage);
-      if (connection === undefined || account === undefined) {
+      if (held() === undefined || account === undefined) {
         return { kind: 'unavailable', text: LINK_CODE_UNAVAILABLE_TEXT['signed-out'] };
       }
-      const gate = sealedRouteGate(account);
       // ⚠️ The card is composed HERE, from this device's own pin (D-6): never
       // from anything the instance answers below.
       const card = cardFromPin(account);
-      if (gate.kind !== 'open' || card === undefined) {
+      if (card === undefined) {
+        const gate = sealedRouteGate(account, dependencies.loadedFrom);
         return {
           kind: 'unavailable',
           text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
         };
       }
       try {
-        const answer = await connection.http.call('POST', '/v1/auth/link-codes', {
-          token: connection.token,
+        // Sealed-only (#1192): the code crosses the edge only as ciphertext.
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'unavailable', text: session.text };
+        const answer = await session.sealed.call('POST', '/v1/auth/link-codes', {
+          token: session.token,
           body: {},
         });
         if (answer.status === 401) {
@@ -729,13 +928,12 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     },
 
     devices: async () => {
-      const connection = held();
-      if (connection === undefined) {
-        return { kind: 'unavailable', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
-      }
       try {
-        const answer = await connection.http.call('GET', '/v1/auth/devices', {
-          token: connection.token,
+        // Sealed-only (#1192): the list is read through the route D-9 names.
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'unavailable', text: session.text };
+        const answer = await session.sealed.call('GET', '/v1/auth/devices', {
+          token: session.token,
         });
         if (answer.status === 401) {
           return { kind: 'unavailable', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };

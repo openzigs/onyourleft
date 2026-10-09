@@ -78,6 +78,8 @@ function athleteAction(
   return {
     method: 'POST',
     path: `/v1/moderation/${path}`,
+    // ADR 0047 D-7: every moderator route is sealed and signed (#1192).
+    sealed: 'only',
     operationId,
     reaches: 'moderation',
     summary,
@@ -180,6 +182,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/moderation/reports',
+    sealed: 'only',
     operationId: 'listOpenReports',
     reaches: 'moderation',
     summary: 'The moderators’ queue: every report not yet decided, oldest first.',
@@ -204,6 +207,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/moderation/reports/{reportId}/dismiss',
+    sealed: 'only',
     operationId: 'dismissReport',
     reaches: 'moderation',
     summary: 'Dismiss a report, with a reason. Written to the moderation log.',
@@ -243,6 +247,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/moderation/registrations',
+    sealed: 'only',
     operationId: 'listPendingRegistrations',
     reaches: 'moderation',
     summary:
@@ -289,6 +294,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/moderation/invites',
+    sealed: 'only',
     operationId: 'createInvite',
     reaches: 'moderation',
     summary:
@@ -317,6 +323,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/moderation/suspended',
+    sealed: 'only',
     operationId: 'listSuspendedAthletes',
     reaches: 'moderation',
     summary:
@@ -349,6 +356,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/moderation/log',
+    sealed: 'only',
     operationId: 'getModerationLog',
     reaches: 'moderation',
     summary:

@@ -741,8 +741,11 @@ export function ModerationView({
             {last.text}
           </StatusMessage>
         )}
+        {/* #1192: a moderator on a device that cannot seal is told why — a
+            copy of the app loaded from a website, or no card (ADR 0047 D-11,
+            D-14 Q1) — in the gate's own sentence. */}
         <StatusMessage tone="info" label="Not available">
-          {MODERATION_STANDING_TEXT[state.kind]}
+          {state.kind === 'sealed-unavailable' ? state.text : MODERATION_STANDING_TEXT[state.kind]}
         </StatusMessage>
         <p>
           <a href={hrefFor(routeById('instance'))}>Go to the instance screen</a>

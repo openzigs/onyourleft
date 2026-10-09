@@ -10,7 +10,9 @@
  *   scheme, and nothing the operating system hands the app is a card.
  * - **No card, no sealed route** (D-14 Q1): a device that signed in with only
  *   an address may sign in as today and holds no pin; {@link sealedRouteGate}
- *   is the gate every phase-1 feature asks (#1192 puts it on each screen).
+ *   is the gate every phase-1 feature asks (#1192 puts it on each screen),
+ *   and — first — whether this copy of the app may seal at all (D-11,
+ *   {@link sealedBuildOffered}).
  * - **Never a silent re-pin.** A served identity that is not the pin is
  *   refused; a verified endorsement from the pinned key stops sealing and asks
  *   for a card; only the rider confirming a card replaces the pin.
@@ -32,8 +34,11 @@ import {
   judgeInstanceKeys,
   NO_KEY_TRUST,
   parseInstanceCard,
+  fromHex,
+  type InstanceKeyStatement,
   type InstanceKeysVerdict,
   type InstanceKeyTrust,
+  type SealedInstanceKey,
   type Sha256,
   type SignatureVerifier,
 } from '@onyourleft/domain';
@@ -93,14 +98,70 @@ export function cardFromPin(account: InstanceAccount | undefined): string | unde
   return `${INSTANCE_CARD_PREFIX}${account.origin}#${account.pin}`;
 }
 
-/** Whether a phase-1 (sealed) feature may be used on this device now (D-14 Q1, Q8). */
+/**
+ * Where this copy of the app was loaded from (#1192, ADR 0047 D-11): whether
+ * it runs inside the Android shell, and the page's own address. `main.tsx`
+ * reads it once, from `location.href` and `support/capacitor.ts`.
+ */
+export interface LoadedFrom {
+  readonly native: boolean;
+  readonly href: string;
+}
+
+/**
+ * D-11's web-build notice, wherever a phase-1 feature would be. ⚠️ **Draft
+ * wording for the owner to approve in #1192's pull request** (D-14 Q6).
+ */
+export const WEB_BUILD_TEXT =
+  'Encrypted features are not offered in a copy of the app loaded from a website, because ' +
+  'whoever serves a website’s code could change it to take the encryption out. Use the Android ' +
+  'app, or a copy of the app saved on this device.';
+
+/** A loopback host, as the URL parser spells one. */
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    /^127\.(?:\d{1,3})\.(?:\d{1,3})\.(?:\d{1,3})$/.test(hostname)
+  );
+}
+
+/**
+ * D-11: sealed features are offered only in the Android app, and in a web
+ * build loaded from a loopback address or from a file the rider installed. A
+ * build loaded over `https:` from any other host — the instance's own origin
+ * included — offers none of them, because the edge that served its code could
+ * have served other code. Anything that cannot be read as an address is a
+ * website, so it is refused rather than guessed at.
+ */
+export function sealedBuildOffered(from: LoadedFrom): boolean {
+  if (from.native) return true;
+  let url: URL;
+  try {
+    url = new URL(from.href);
+  } catch {
+    return false;
+  }
+  if (url.protocol === 'file:') return true;
+  return (url.protocol === 'http:' || url.protocol === 'https:') && isLoopbackHost(url.hostname);
+}
+
+/** Whether a phase-1 (sealed) feature may be used on this device now (D-11, D-14 Q1, Q8). */
 export type SealedRouteGate =
   | { readonly kind: 'open'; readonly pin: string }
+  | { readonly kind: 'web-build'; readonly text: string }
   | { readonly kind: 'needs-card'; readonly text: string }
   | { readonly kind: 'needs-new-card'; readonly text: string; readonly expected: string };
 
-/** The gate: no pin, no sealed route; an endorsed rotation waiting, no sealed route. */
-export function sealedRouteGate(account: InstanceAccount | undefined): SealedRouteGate {
+/**
+ * The gate: a build loaded from a website, no sealed route (D-11); no pin, no
+ * sealed route; an endorsed rotation waiting, no sealed route.
+ */
+export function sealedRouteGate(
+  account: InstanceAccount | undefined,
+  from: LoadedFrom,
+): SealedRouteGate {
+  if (!sealedBuildOffered(from)) return { kind: 'web-build', text: WEB_BUILD_TEXT };
   if (account?.pin === undefined) {
     return { kind: 'needs-card', text: INSTANCE_KEY_TEXT['needs-card'] };
   }
@@ -201,8 +262,24 @@ export type CardCheck =
       readonly kind: 'verified';
       readonly fingerprint: string;
       readonly keyTrust: InstanceKeyTrust;
+      /**
+       * The encryption key a sealed request goes to (#1192): present only when
+       * the served keys are TRUSTED under the card, not merely signed by it —
+       * an expired or older statement pins the identity and seals nothing.
+       */
+      readonly instanceKey?: SealedInstanceKey;
+      /** What to say when there is no {@link instanceKey}. */
+      readonly sealingText?: string;
     }
   | { readonly kind: 'refused'; readonly text: string };
+
+/** The key a trusted statement names, as a sealed request takes it (#1192). */
+export function sealedKeyOf(statement: InstanceKeyStatement): SealedInstanceKey {
+  return {
+    keyId: statement.keyId,
+    publicKey: fromHex(statement.encryptionKey, 'the instance’s encryption key', 32),
+  };
+}
 
 /**
  * Read `cardText` for `origin` and check the instance at `origin` serves keys
@@ -229,5 +306,13 @@ export async function checkCard(
     kind: 'verified',
     fingerprint: parsed.card.fingerprintText,
     keyTrust: verdict.trust,
+    ...(verdict.kind === 'trusted'
+      ? { instanceKey: sealedKeyOf(verdict.statement) }
+      : {
+          sealingText:
+            verdict.kind === 'older'
+              ? olderKeyText(verdict.highestSerial)
+              : INSTANCE_KEY_TEXT.expired,
+        }),
   };
 }

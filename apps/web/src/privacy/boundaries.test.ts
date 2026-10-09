@@ -452,6 +452,7 @@ describe('an instance is sent no coordinate at all — #777', () => {
       return Promise.resolve(Response.json(answer));
     };
     const port = createInstancePort({
+      loadedFrom: { native: false, href: 'http://localhost:5173/' },
       storage: {
         getItem: (key) => map.get(key) ?? null,
         setItem: (key, value) => void map.set(key, value),
@@ -472,8 +473,10 @@ describe('an instance is sent no coordinate at all — #777', () => {
 
   it('has none in any body a connection sends', async () => {
     const bodies = await everyBody();
-    // Challenge, sign-in, three reads, the device list and the sign-out.
-    expect(bodies.length).toBeGreaterThanOrEqual(7);
+    // Challenge, sign-in, three reads and the sign-out. The device list is
+    // sealed-only since #1192 and this device holds no card, so it is not
+    // asked for; a sealed body is ciphertext, and carries nothing to walk.
+    expect(bodies.length).toBeGreaterThanOrEqual(6);
     for (const body of bodies) expect(coordinatesIn(body)).toStrictEqual([]);
   });
 
