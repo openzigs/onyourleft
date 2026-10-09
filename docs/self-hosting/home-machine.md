@@ -15,12 +15,13 @@ graph LR
         I --> V[(volume: SQLite + blobs)]
         V -.->|every 6 h| B[(OYL_BACKUP_DIR)]
     end
-    B -.->|copied| O[(OYL_OFFBOX_DIR: a USB drive or a share)]
+    B -.->|copied| O[(OYL_OFFBOX_DIR: off this machine's disk)]
 ```
 
 **What you need**: Windows 10 22H2 or 11 with virtualisation enabled; about 4 GB of memory to spare;
-a Cloudflare account (free) with a domain on it; and — for the off-box backup — a USB drive or a
-network share. **The router opens no port**: `cloudflared` dials out.
+a Cloudflare account (free) with a domain on it; and — for the off-box backup, which the deploy
+requires — a drive that is not this machine's own disk, and **not a removable USB stick** (see
+[Backups](#backups)). **The router opens no port**: `cloudflared` dials out.
 
 ## 1. Install Docker Desktop, with the WSL 2 backend
 
@@ -30,6 +31,12 @@ network share. **The router opens no port**: `cloudflared` dials out.
 3. Install **Git for Windows** (it brings Git Bash, which `deploy.sh` runs in).
 4. In Git Bash: `docker version` answers with a client and a server, and
    `docker compose version` with a version.
+
+⚠️ **Git Bash rewrites anything that looks like a path** before `docker` sees it, so a path INSIDE
+a container (`/backups`, `/restore`) arrives as `C:/Program Files/Git/backups`, and the command
+fails with nothing but `the command failed (Error)`. `deploy.sh` turns this off itself. When you type
+a command from this guide that names a path inside a container, start it with
+`MSYS_NO_PATHCONV=1` (the restore drill below does).
 
 ⚠️ **Docker Desktop starts when you SIGN IN, not when Windows boots.** After a reboot the instance
 comes back only once somebody has signed in — set Windows to sign in automatically
@@ -51,6 +58,12 @@ cd onyourleft
 3. **Public hostname**: a subdomain on your domain (`rides.example.org`), service type **HTTP**, URL
    **`instance:8787`** — the instance's name on the deployment's own Docker network.
 4. Nothing else. WebSockets go through a tunnel with no extra setting.
+5. **Optional: only your own address.** While you are the only rider, a WAF custom rule on the zone
+   (*Security → WAF → Custom rules*, free on every plan) keeps everybody else out:
+   `(http.host eq "rides.example.org" and not ip.src in {<your home IP>})`, action **Block**. Check it
+   from a phone **on mobile data** — blocked — and from home — answers. If your home address changes,
+   change the rule. It also blocks a phone hotspot, which matters in
+   [Measuring the tunnel](#measuring-the-tunnel).
 
 ⚠️ **The token is a secret.** It goes in `.env` in step 4 and nowhere else — not a commit, not a
 chat, not a screenshot. Anybody holding it can serve your hostname.
@@ -70,8 +83,10 @@ Edit `.env`:
 | `OYL_INSTANCE_REGISTRATION` | `approval` (you or your deputy approve each new account), `invite`, `open`, or `closed`. Left empty here it is `closed` — see [`docs/moderation.md`](../moderation.md) |
 | `OYL_INSTANCE_OWNER_KEY`, `OYL_INSTANCE_DEPUTY_KEY` | the device keys of the two moderators, which the app shows; empty names nobody |
 | `CLOUDFLARE_TUNNEL_TOKEN` | the token from step 3 |
+| `OYL_INSTANCE_SECRET_KEY` | empty to start with. It is what a hosted model key and the instance's own keys are encrypted under — read [`operating-an-instance.md`](../operating-an-instance.md) before setting it, and keep it out of both backup folders |
+| `OYL_INSTANCE_NAME` | optional: the name the app shows for this instance, at most 64 characters |
 | `OYL_BACKUP_DIR` | a folder on this machine for snapshots, e.g. `C:/onyourleft/backups` |
-| `OYL_OFFBOX_DIR` | a folder on a drive that is **not** this machine — the USB drive, `E:/onyourleft-backups` |
+| `OYL_OFFBOX_DIR` | **required — the deploy refuses to start without it.** A folder that is **not** on this machine's own disk. ⚠️ On Windows **a USB stick does not work here**: read [Backups](#backups) first |
 | `OYL_INSTANCE_WS_COMPRESSION` | `off` unless your upload is the limit — see [Compression](#compression-and-your-upload) |
 
 `.env` is ignored by git, so `git pull` never overwrites it and never uploads it.
@@ -213,9 +228,22 @@ To go back by hand: `bash apps/instance/deploy/home/deploy.sh --rollback`.
 
 The `backup` service takes an online snapshot every six hours into `OYL_BACKUP_DIR`, copies it to
 `OYL_OFFBOX_DIR`, and keeps the newest fourteen of each (`OYL_BACKUP_INTERVAL_SECONDS`,
-`OYL_BACKUP_KEEP`). **Take the USB drive away from the machine between copies**, or it shares the
-machine's fate — and plug it back in before the next one, or that copy fails (and says so in
-`docker compose logs backup`).
+`OYL_BACKUP_KEEP`). A copy that cannot be written fails, and says so in `docker compose logs backup`.
+
+⚠️ **On Windows, a USB stick cannot be `OYL_OFFBOX_DIR`.** Docker Desktop reaches Windows drives
+through WSL, and WSL does not mount a removable drive by itself, not even after `wsl --shutdown`
+with the stick plugged in. Docker still accepts `E:/onyourleft-backups`, but it gives the container
+an empty folder inside its own VM instead: every copy fails with *Permission denied*, and nothing
+reaches the stick. Measured on the project's Windows box, 2026-10-09
+([#807](https://github.com/openzigs/onyourleft/issues/807)). Check yours before you trust it:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "E:/onyourleft-backups:/t" alpine sh -c 'mount | grep " /t "'
+```
+
+A Windows drive shows as `9p` with `aname=drvfs`. `ext4` means Docker made the folder in its VM, so
+the copy is not on that drive. Until there is a supported way for a removable drive, use a drive
+that WSL does mount.
 
 **Restoring on another machine** — the drill worth doing once, before it is needed:
 
@@ -225,7 +253,7 @@ machine's fate — and plug it back in before the next one, or that copy fails (
 
    ```bash
    docker build --build-arg OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" -f ../../Dockerfile -t onyourleft-instance:local ../../../..
-   docker compose run --rm --no-deps -v "/path/to/snapshot-…:/restore:ro" --entrypoint node migrate \
+   MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -v "C:/path/to/snapshot-…:/restore:ro" --entrypoint node migrate \
      src/operator/cli.ts restore /restore
    docker compose run --rm --no-deps --entrypoint node migrate src/operator/cli.ts verify
    ```
@@ -233,11 +261,17 @@ machine's fate — and plug it back in before the next one, or that copy fails (
 4. Compare `verify`'s row and blob counts with the `manifest.json` in the snapshot folder, and time
    it.
 
+⚠️ **If the second machine already runs an instance, its stack is project `onyourleft` too**, and
+the commands above would restore into ITS volume. Give the drill a project of its own: add
+`-p onyourleft-drill` after every `docker compose`, and remove it afterwards with
+`docker compose -p onyourleft-drill down -v`.
+
 ## Measuring the tunnel
 
 [#807](https://github.com/openzigs/onyourleft/issues/807) asks for a measurement, not a number from a
-forum. From a **different** machine (a laptop on a phone's hotspot is ideal), with the repository and
-Node 24:
+forum. From a **different** machine (a laptop on a phone's hotspot is ideal — but if you set up
+step 3's address rule, a hotspot is blocked: use another machine on your home network), with the
+repository and Node 24:
 
 ```bash
 cd apps/instance
@@ -255,6 +289,11 @@ The rooms first: `room-open lobby-probe --kind race --length 1000` and
 while it runs (it signs its riders up). The first prints how long an idle socket lived; the second
 the disconnects, each rejoin's time and the longest silence. The ride's keepalive (30 s, ADR 0037
 D-8.1) and the instance's ping (25 s) must both be shorter than the idle timeout the first printed.
+Close registration again afterwards.
+
+On the project's Windows box (2026-10-09, run from a Mac on the same home network), the idle socket
+lived **125 s**, and the 30-minute run had no disconnects, 1,799 frames for each rider and a
+longest silence of 1.3 s. Those are one line's figures, not yours.
 
 ## What is not here
 

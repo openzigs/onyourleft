@@ -42,11 +42,20 @@ services:
     restart: unless-stopped
     environment:
       OYL_INSTANCE_ORIGIN: ${OYL_INSTANCE_ORIGIN:?set OYL_INSTANCE_ORIGIN to the tunnel's public hostname, https://…}
+      # The name the app shows, and where a MODIFIED build's source is (the
+      # repository's .env.example says what each means). Empty: no name, and
+      # the source is this build's commit.
+      OYL_INSTANCE_NAME: ${OYL_INSTANCE_NAME:-}
+      OYL_INSTANCE_SOURCE_URL: ${OYL_INSTANCE_SOURCE_URL:-}
       OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-closed}
       OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # The room's WebSocket ping (25 s when empty). `0` turns it off, for
+      # measuring the tunnel's idle timeout only (home-machine.md, "Measuring
+      # the tunnel"); remove it again afterwards.
+      OYL_INSTANCE_PING_INTERVAL_MS: ${OYL_INSTANCE_PING_INTERVAL_MS:-}
       OYL_INSTANCE_OWNER_KEY: ${OYL_INSTANCE_OWNER_KEY:-}
       OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
