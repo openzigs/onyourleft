@@ -29,6 +29,7 @@ import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import { authorised, syncWorld } from '../sync/sync-testing.ts';
 import {
   createInstanceKeys,
+  KEYS_BUSY_DEVICE_SENTENCE,
   KEYS_BUSY_SENTENCE,
   NO_SECRET_SENTENCE,
   type InstanceKeysShown,
@@ -248,6 +249,13 @@ describe('an operator command beside a running instance (#1203, D-5)', () => {
     const { instance, lines } = await serve(data, { secret: SECRET, keysBusyRetryMs: 50 });
     expect(lines.some((line) => line.includes('"state":"busy"'))).toBe(true);
     expect(await keyRows(data)).toEqual([]);
+    // A device asking meanwhile is told to try again, not to run a command (#1207).
+    const busy = await servedKeys(instance.url);
+    expect(busy.status).toBe(503);
+    expect((busy.body as { error: { message: string } }).error.message).toBe(
+      KEYS_BUSY_DEVICE_SENTENCE,
+    );
+    expect(busy.text).not.toContain('command');
     const releasing = openServingStore(data.database);
     try {
       await releasing.releaseInstanceKeyLease('operator');

@@ -15,7 +15,7 @@
 
 import { errorResponse } from '../errors.ts';
 import { json, type Route, type Schema } from '../route-kit.ts';
-import { InstanceKeysUnavailable } from './instance-keys.ts';
+import { InstanceKeysUnavailable, KEYS_BUSY_DEVICE_SENTENCE } from './instance-keys.ts';
 
 /** Before the store is open there is nothing to serve yet. */
 export const KEYS_NOT_OPEN_SENTENCE = 'This instance is starting: its keys are not open yet.';
@@ -106,7 +106,11 @@ export const INSTANCE_KEY_ROUTES: readonly Route[] = [
         return json(await instanceKeys.served());
       } catch (error) {
         if (error instanceof InstanceKeysUnavailable) {
-          return errorResponse('unavailable', { message: error.message });
+          // `busy`'s own sentence is the operator's and names a command; a
+          // device is told what it can do instead (#1207).
+          return errorResponse('unavailable', {
+            message: error.code === 'busy' ? KEYS_BUSY_DEVICE_SENTENCE : error.message,
+          });
         }
         throw error;
       }
