@@ -22,11 +22,12 @@
  *   `sent-fields.test.ts` to require every phrase here to appear in the hosted
  *   consent and in the instance paragraph, word for word.
  *
- * ⚠️ **The phrases are #1104's drafted wording, and await the owner's
- * approval**, as every disclosure does (#1104's first criterion). Nothing
- * renders them, and no disclosure the app shows today names a tool: they
- * describe a path that has not shipped, which is why they live in a table a
- * test reads and not in a screen (ADR 0029: *"a policy amended in advance, 'so
+ * **The phrases are #1104's wording, which the owner approved on 2026-10-09**
+ * (B3's instance paragraph, and the `history_search` entry with all four of
+ * its phrases), as every disclosure must be (#1104's first criterion). This
+ * table renders nothing itself: the words a rider reads are the disclosures
+ * that ship each path, which is why the phrases live in a table a test reads
+ * and not in a screen (ADR 0029: *"a policy amended in advance, 'so
  * it is ready', is a false statement about a shipped app"*). If the owner
  * rewords a phrase, it changes here in the same pull request.
  *
@@ -47,7 +48,7 @@ export const AGENT_TOOL_DISCLOSURES: Readonly<Record<string, readonly string[]>>
   // summaries, earlier write-ups (screened again) and the goals, notes and
   // documents the rider wrote — free text that can name anything, masked but
   // not filtered on a hosted job (#1101). Never the pose summary, a picture or
-  // a date. ⚠️ DRAFT: awaits the owner's approval on #1104.
+  // a date. Approved by the owner on #1104, 2026-10-09.
   history_search: [
     'summaries of older rides',
     'earlier write-ups',
