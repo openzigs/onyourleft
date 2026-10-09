@@ -422,8 +422,5 @@ export interface InstanceDatabase {
   readonly instance_key: InstanceKeyTable;
   readonly instance_key_statement: InstanceKeyStatementTable;
   readonly instance_key_lease: InstanceKeyLeaseTable;
-}
-
-/**
   readonly sealed_replay: SealedReplayTable;
 }
