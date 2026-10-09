@@ -1438,9 +1438,9 @@ describe('the instance is disclosed, class by class — #778', () => {
       "this device's public key",
       'the name other riders see',
       'your internet address',
-      // #1195's sync, named before a version offers it (#778's second pass).
+      // #1195's sync, named before a version offered it (#778's second pass), and the control.
       'what you sync: your rides, and what goes with them',
-      'this version of the app does not offer sync yet',
+      'which needs its card: sync now on the instance screen',
       'power, cadence, the weight you declare, and your display name',
       // #784: a room's route — refused in a privacy zone, deleted when the room is over.
       'the route of a room you make',

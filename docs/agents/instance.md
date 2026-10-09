@@ -69,10 +69,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and
                         tombstones (#776), and account export and deletion
-                        (#35) — and migration 0009, served only by a handler
-                        HANDED a `sync`, which `src/instance.ts` does not yet
-                        (it hands the accounts, and no sync), so every
-                        sync route answers `unavailable` on a running box.
+                        (#35) — and migration 0009, served by a handler
+                        HANDED a `sync`, which `src/instance.ts` does since
+                        #1195 — ONLY on an instance holding keys, because
+                        every sync route is sealed-only (ADR 0047 D-7) and a
+                        keyless instance seals nothing; there every sync route
+                        still answers `unavailable`. Its files go under the
+                        blob directory's `objects/`, which `backup` copies.
                         Every sync route declares `reaches: 'own'` (#83's
                         choke point). ⚠️ It depends on `@onyourleft/fit`
                         (workspace, Apache-2.0) to decode the file it is sent
@@ -134,7 +137,8 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         is the first deploy target — built from the
                         REPOSITORY ROOT since #780, cut to an allowlist by
                         `Dockerfile.dockerignore`, with the production
-                        closure (`kysely`, `ws`, three workspace packages)
+                        closure (`kysely`, `ws`, the AI SDK, and five
+                        workspace packages — `packages/fit` since #1195)
                         installed from the lockfile;
                         `scripts/check-instance-image.sh` builds it, runs the
                         migrate step in it, and asks `/health` inside the
