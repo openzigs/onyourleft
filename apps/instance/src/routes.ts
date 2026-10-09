@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { ANALYSIS_ROUTES } from './analysis/routes.ts';
 import { IDENTITY_ROUTES } from './auth/routes.ts';
 import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
@@ -201,6 +202,7 @@ export const ROUTES: readonly Route[] = [
   ...MODERATION_ROUTES,
   ...SYNC_ROUTES,
   ...HISTORY_ROUTES,
+  ...ANALYSIS_ROUTES,
   ...ROOM_ROUTES,
   {
     method: 'POST',

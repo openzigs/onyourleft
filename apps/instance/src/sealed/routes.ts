@@ -163,10 +163,19 @@ interface InnerEvent {
   readonly data: string;
 }
 
-/** The inner stream's events, parsed as the SSE specification reads them. */
-async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<InnerEvent> {
+/** A comment line of the inner stream: a heartbeat, which carries nothing (#1095). */
+const HEARTBEAT = Symbol('heartbeat');
+
+/**
+ * The inner stream's events, parsed as the SSE specification reads them, and
+ * {@link HEARTBEAT} for each comment line — which the specification has a
+ * reader ignore, and which the tunnel needs to see so it does not cut a quiet
+ * stream.
+ */
+async function* innerEvents(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<InnerEvent | typeof HEARTBEAT> {
   const decoder = new TextDecoder();
-  const reader = body.getReader();
   let buffered = '';
   let id: string | undefined;
   let kind = 'message';
@@ -184,7 +193,10 @@ async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<In
           data = [];
           continue;
         }
-        if (line.startsWith(':')) continue;
+        if (line.startsWith(':')) {
+          yield HEARTBEAT;
+          continue;
+        }
         const colon = line.indexOf(':');
         const field = colon === -1 ? line : line.slice(0, colon);
         const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
@@ -205,6 +217,11 @@ async function* innerEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<In
  * else, and a sealed `end` event once the inner stream has finished. A stream
  * that fails part-way stops WITHOUT `end`, which is how the device tells it
  * was cut.
+ *
+ * A comment line of the inner stream goes through as `: hb` (#1095): it
+ * carries nothing, and without it a quiet job stream is cut by the tunnel's
+ * idle timeout. A device that goes away cancels the inner stream too, so the
+ * inner route's heartbeat and its wait for events stop with it.
  */
 function sealedStream(
   writer: SealedReplyWriter,
@@ -212,30 +229,57 @@ function sealedStream(
   resumedAfter: string | undefined,
 ): Response {
   const encoder = new TextEncoder();
-  let sequence = 0;
+  // An inner event with no id takes one from this count (#1207). A resumed
+  // stream counts on from the id it resumed after when that is a count, so a
+  // resumed stream's ids never repeat ones the device already holds; after an
+  // id that is not a count, an id-less event keeps that id, as SSE's own last
+  // event id does, which repeats nothing new.
+  const resumedCount =
+    resumedAfter !== undefined && /^(?:0|[1-9]\d{0,14})$/.test(resumedAfter)
+      ? Number(resumedAfter)
+      : undefined;
+  let sequence = resumedCount ?? 0;
+  const fallbackId = (): string => {
+    sequence += 1;
+    return resumedAfter === undefined || resumedCount !== undefined
+      ? String(sequence)
+      : resumedAfter;
+  };
   // The `end` event names the last id the stream carried, so a device that
   // resumes after it asks for nothing more.
   let lastId = resumedAfter ?? '0';
+  const reader =
+    inner.body === null ? undefined : (inner.body as ReadableStream<Uint8Array>).getReader();
+  let cancelled = false;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const frame = (line: string): void => {
         controller.enqueue(encoder.encode(`data: ${line}\n\n`));
       };
       try {
-        if (inner.body !== null) {
-          for await (const event of innerEvents(inner.body as ReadableStream<Uint8Array>)) {
+        if (reader !== undefined) {
+          for await (const event of innerEvents(reader)) {
+            if (cancelled) return;
+            if (event === HEARTBEAT) {
+              controller.enqueue(encoder.encode(': hb\n\n'));
+              continue;
+            }
             // `end` is the sealed stream's own; an inner event may not borrow it.
             if (event.kind === SEALED_END_KIND) throw new Error('reserved event kind');
-            sequence += 1;
-            lastId = event.id ?? String(sequence);
+            lastId = event.id ?? fallbackId();
             frame(await writer.event(lastId, event.kind, utf8Encode(event.data)));
           }
         }
+        if (cancelled) return;
         frame(await writer.event(lastId, SEALED_END_KIND, new Uint8Array(0)));
         controller.close();
       } catch {
-        controller.close();
+        if (!cancelled) controller.close();
       }
+    },
+    async cancel() {
+      cancelled = true;
+      await reader?.cancel().catch(() => undefined);
     },
   });
   return new Response(stream, {
@@ -370,7 +414,7 @@ export const SEALED_ROUTES: readonly Route[] = [
     operationId: 'sealedRequest',
     reaches: 'own',
     summary:
-      'A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200.',
+      'A request sealed to the instance’s encryption key (ADR 0047 D-9): the inner method, path, body and the device’s signature are inside `ct`, the inner route is dispatched through this same table, and the answer is sealed back. A refusal before the request opens is plaintext — `unauthenticated`, `rate_limited`, `instance_key_unknown`, `sealed_unopened` — and every answer after it, refusals included (`bad_signature`, `stale_request`, `replayed`), is sealed and sent with 200. An inner body over the instance’s body limit is refused only after Open, as a sealed `payload_too_large`: the envelope’s own limit allows for the padding (D-9), so the size of what was sealed is not known before.',
     identity: true,
     errors: [
       'validation_failed',

@@ -101,7 +101,16 @@ const activityProperties = { contentSha256: string, receivedAt: integer, claims:
 
 const kindSchema: Schema = {
   type: 'string',
-  enum: ['activity', 'write-up', 'ride-summary', 'side-camera-report', 'goal', 'note', 'document'],
+  enum: [
+    'activity',
+    'write-up',
+    'ride-summary',
+    'side-camera-report',
+    'goal',
+    'note',
+    'document',
+    'masking',
+  ],
 };
 
 export const SYNC_ROUTES: readonly Route[] = [
@@ -124,7 +133,7 @@ export const SYNC_ROUTES: readonly Route[] = [
       schema: {
         type: 'object',
         description:
-          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail`, `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`.',
+          '`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`.',
       },
     },
     handle: async (context) => answer(await syncOf(context).exportAccount(callerOf(context))),

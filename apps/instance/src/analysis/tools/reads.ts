@@ -33,3 +33,28 @@ export interface AnalysisReads {
     limit: number,
   ): Promise<readonly ReadItem[]>;
 }
+
+/**
+ * The history index, as the `history_search` tool may ask it (#1099, ADR 0040
+ * D-8 amended by ADR 0046): the index's own in-process search
+ * (`history/history.ts` §`History.searchFor`), never the HTTP route. The
+ * athlete is the JOB's. `History` satisfies it as it stands.
+ */
+export interface AnalysisHistory {
+  searchFor(
+    athleteId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<
+    | {
+        readonly ok: true;
+        readonly value: {
+          readonly passages: readonly {
+            readonly kind: string;
+            readonly label: string;
+            readonly text: string;
+          }[];
+        };
+      }
+    | { readonly ok: false }
+  >;
+}

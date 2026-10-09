@@ -41,6 +41,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { scriptedEngine } from '../analysis/jobs-testing.ts';
 import type { Reach, Route } from '../route-kit.ts';
 import { ROUTES } from '../routes.ts';
 import { codeOf as sealedCodeOf, sealedCall } from '../sealed/sealed-testing.ts';
@@ -119,6 +120,7 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
     'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
   key: 'the key of one of the CALLER’s own sync items (#776)',
+  jobId: 'one of the CALLER’s own analysis jobs; the store reads only the caller’s (#1095)',
 };
 
 /** An athlete id nobody holds, shaped like one that somebody might. */
@@ -393,7 +395,10 @@ describe('a suspended rider’s way-out session reaches the export and the delet
   let token: string;
   let leaving: Rider;
   beforeAll(async () => {
-    world = await startModerationWorld();
+    // Analysis jobs on, so their routes answer as a running instance's do (#1095).
+    world = await startModerationWorld({
+      analysis: { engine: scriptedEngine().engine, available: () => true },
+    });
     leaving = await world.rider('Leaving');
     const suspended = await world.as(
       world.owner,

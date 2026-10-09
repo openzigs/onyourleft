@@ -31,6 +31,11 @@ import {
   type SigningKey,
 } from '@onyourleft/domain';
 
+import {
+  createAnalysisJobs,
+  type AnalysisJobs,
+  type AnalysisJobsOptions,
+} from '../analysis/jobs.ts';
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import type { Config } from '../config.ts';
@@ -124,10 +129,13 @@ export interface IdentityInstance {
   readonly clock: TestClock;
   /** The database file. */
   readonly path: string;
-  /** Mail an email-recovery link would have sent, when email recovery is on. */
-  readonly mail: { address: string; token: string }[];
-  /** Mail a link confirming a recovery address would have sent (#865). */
-  readonly confirmations: { address: string; token: string }[];
+  /**
+   * Mail a recovery code would have sent, when email recovery is on — with
+   * the subject and body the instance wrote (#1194).
+   */
+  readonly mail: { address: string; token: string; subject: string; text: string }[];
+  /** Mail a code confirming a recovery address would have sent (#865, #1194). */
+  readonly confirmations: { address: string; token: string; subject: string; text: string }[];
   /**
    * POST or GET a JSON body; answers the status and the parsed body.
    *
@@ -207,6 +215,8 @@ export interface IdentityInstance {
   readonly instanceKeys: InstanceKeys;
   /** `/v1/sealed`'s replay record, clock and HPKE port (#1191). */
   readonly sealed: Sealed;
+  /** The analysis jobs, when the world was given an engine (#1095). */
+  readonly analysis: AnalysisJobs | undefined;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -264,13 +274,20 @@ export async function startIdentityInstance(
      * world at `Date.now()`.
      */
     startsAt?: number;
+    /**
+     * Analysis jobs (#1095), built over the world's own store and clock by
+     * this function — a test hands the engine and whatever else it sets.
+     */
+    analysis?: Omit<AnalysisJobsOptions, 'store' | 'now'>;
+    /** What `/metrics` would count of each response. */
+    observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
   const path = join(directory, 'instance.sqlite');
   const store = await openSqlStore(path);
-  const mail: { address: string; token: string }[] = [];
-  const confirmations: { address: string; token: string }[] = [];
+  const mail: { address: string; token: string; subject: string; text: string }[] = [];
+  const confirmations: { address: string; token: string; subject: string; text: string }[] = [];
   const {
     emailRecovery,
     storeSeenBy,
@@ -287,6 +304,8 @@ export async function startIdentityInstance(
     routes,
     keyless,
     startsAt,
+    analysis,
+    observe,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -314,14 +333,14 @@ export async function startIdentityInstance(
       ...(emailRecovery === true || emailRecovery === 'failing'
         ? {
             emailRecovery: {
-              send: (address, token) => {
+              send: (address, token, written) => {
                 if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-                mail.push({ address, token });
+                mail.push({ address, token, ...written });
                 return Promise.resolve();
               },
-              confirm: (address, token) => {
+              confirm: (address, token, written) => {
                 if (emailRecovery === 'failing') return Promise.reject(new Error('no mail'));
-                confirmations.push({ address, token });
+                confirmations.push({ address, token, ...written });
                 return Promise.resolve();
               },
             },
@@ -394,8 +413,14 @@ export async function startIdentityInstance(
     now: () => clock.ms,
     ...(sealedPrimitives === undefined ? {} : { primitives: sealedPrimitives }),
   });
+  const analysisJobs =
+    analysis === undefined
+      ? undefined
+      : createAnalysisJobs({ ...analysis, store, now: () => clock.ms });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
+      ...(observe === undefined ? {} : { observe }),
       identity,
       sync,
       history,
@@ -556,6 +581,7 @@ export async function startIdentityInstance(
     roomRoutes,
     instanceKeys,
     sealed,
+    analysis: analysisJobs,
     confirmations,
     call,
     request,
@@ -625,6 +651,7 @@ export async function startIdentityInstance(
       }
     },
     close: async () => {
+      await analysisJobs?.stop();
       await instance.listening.close();
       await history.idle();
       await store.close();

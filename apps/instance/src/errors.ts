@@ -55,6 +55,7 @@ export const ERROR_STATUS = {
   code_unknown: 401,
   code_used: 401,
   code_expired: 401,
+  address_unbound: 401,
   registration_closed: 403,
   sealed_required: 403,
   account_suspended: 403,
@@ -69,7 +70,10 @@ export const ERROR_STATUS = {
   last_device: 409,
   moderation_not_applicable: 409,
   address_in_use: 409,
+  address_limit: 409,
+  confirmation_superseded: 409,
   not_suspended: 409,
+  job_running: 409,
   payload_too_large: 413,
   file_type_unsupported: 415,
   file_undecodable: 422,
@@ -82,6 +86,7 @@ export const ERROR_STATUS = {
   rate_limited: 429,
   internal: 500,
   unavailable: 503,
+  analysis_off: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
@@ -140,8 +145,18 @@ const MESSAGES: Record<ErrorCode, string> = {
   key_in_use: 'That device key is already registered here.',
   last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
   address_in_use: 'That address is already the recovery address of another account here.',
+  address_limit:
+    'This account already has two recovery addresses. Clear one before adding another.',
+  confirmation_superseded:
+    'Another device’s confirmation of that address was used first, so this code no longer works.',
+  address_unbound:
+    'That code was mailed to an address that is no longer a recovery address of this account, or is still in its first week.',
   not_suspended: 'This account is not suspended. Sign in as usual.',
+  job_running:
+    'You already have a write-up being written on this instance. Wait for it to finish, or cancel it.',
   unavailable: 'This instance does not offer accounts.',
+  analysis_off:
+    'This instance has no model to write a ride up with. Its operator has not set one up.',
   file_type_unsupported: 'The file is not a FIT, GPX or TCX activity file.',
   file_undecodable: 'The activity file could not be read, or holds no samples.',
   record_malformed: 'The signed record is not an activity record.',

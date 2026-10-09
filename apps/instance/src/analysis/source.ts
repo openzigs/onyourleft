@@ -11,7 +11,8 @@
  * - `instance-hosted` — the hosted service the instance holds a key for
  *   (`hosted-key.ts`), and ONLY when the job asks for it. With no recorded
  *   consent naming the endpoint, no key held, a key this secret cannot open,
- *   or no masking, it fails `hosted_unavailable` and nothing is sent.
+ *   or no masking guard that can be read, it fails `hosted_unavailable` and
+ *   nothing is sent.
  *
  * ⚠️ **No hosted job without the athlete's own recorded consent — the
  * operator's included.** ADR 0046 D-9 §"A rider's own consent", point 1:
@@ -34,12 +35,16 @@
  * for until the operator clears it and sets it again.
  *
  * ⚠️ **No hosted request without masking.** Everything a hosted model is sent
- * is masked first (#1101), so the hosted connection is built ONLY by
- * {@link SourceOptions.behindMasking} — the seam #1101 supplies. Until it
- * lands nothing supplies it, and `instance-hosted` fails `hosted_unavailable`
- * whatever key is held (`source.test.ts`). Its caller is the job engine
- * (#1095), which is not built yet either.
+ * is masked first (#1101, `hosted.ts`), so the hosted connection is built
+ * ONLY by {@link SourceOptions.behindMasking} — `hosted.ts`
+ * §`hostedBehindMasking` — and only with the athlete's guard, read by
+ * {@link SourceOptions.guard} after the key is opened. A guard that is
+ * missing, cannot be read, or whose read throws is a request not sent:
+ * `hosted_unavailable` (`source.test.ts`). Its caller is the job engine
+ * (#1095, `engine.ts`).
  */
+
+import type { MaskingGuard } from '@onyourleft/analysis';
 
 import type { HostedKeyState } from './hosted-key.ts';
 import type { ModelConnection } from './model-turn.ts';
@@ -69,10 +74,29 @@ export interface SourceOptions {
    */
   readonly recordedConsent?: (athleteId: string) => Promise<string | undefined>;
   /**
-   * Builds the hosted connection behind #1101's masking. `undefined` on this
-   * tree, so `instance-hosted` fails `hosted_unavailable`.
+   * `athleteId`'s masking guard (`hosted.ts` §`readMaskingGuard`), or
+   * `undefined` when they have none that can be read. `undefined` here, or a
+   * read that throws, fails `instance-hosted` with `hosted_unavailable`.
    */
-  readonly behindMasking?: (key: OpenedHostedKey) => ModelConnection;
+  readonly guard?: (athleteId: string) => Promise<MaskingGuard | undefined>;
+  /**
+   * Builds the hosted connection behind the guard's masking: `hosted.ts`
+   * §`hostedBehindMasking`, which a guard is REQUIRED to call.
+   */
+  readonly behindMasking?: (key: OpenedHostedKey, guard: MaskingGuard) => ModelConnection;
+}
+
+/** The athlete's guard, or `undefined` for any way it cannot be had. */
+async function guardFor(
+  options: SourceOptions,
+  athleteId: string,
+): Promise<MaskingGuard | undefined> {
+  if (options.guard === undefined) return undefined;
+  try {
+    return await options.guard(athleteId);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The model for `athleteId`'s job on `source`, or why there is none. */
@@ -102,5 +126,8 @@ export async function modelForSource(
   ) {
     return { ok: false, failure: 'hosted_unavailable' };
   }
-  return { ok: true, model: options.behindMasking(held) };
+  // No guard, no request: masking with half a guard, or none, would look masked and not be.
+  const guard = await guardFor(options, athleteId);
+  if (guard === undefined) return { ok: false, failure: 'hosted_unavailable' };
+  return { ok: true, model: options.behindMasking(held, guard) };
 }

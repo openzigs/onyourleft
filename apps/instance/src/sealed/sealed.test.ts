@@ -624,6 +624,36 @@ describe('streams (D-9)', () => {
   });
 });
 
+describe('an inner event with no id (#1207)', () => {
+  async function idsOf(lastEventId?: string): Promise<readonly string[]> {
+    const { world: w } = await start();
+    const a = await rider(w);
+    const sealed = await sealFor(w, {
+      path: '/v1/test/stream-no-ids',
+      token: a.token,
+      signer: a.device.signingKey,
+      ...(lastEventId === undefined ? {} : { lastEventId }),
+    });
+    const raw = await (await sendEnvelope(w.url, sealed.envelope, a.token)).text();
+    const opened = await openFrames(sealed, frames(raw));
+    expect(opened.failed).toBe(false);
+    expect(opened.events.at(-1)?.kind).toBe('end');
+    return opened.events.map((event) => event.id);
+  }
+
+  it('is numbered from 1 on a stream that is not resumed', async () => {
+    expect(await idsOf()).toEqual(['1', '2', '2']);
+  });
+
+  it('is numbered on from a counted id it resumed after, never again from 1', async () => {
+    expect(await idsOf('7')).toEqual(['8', '9', '9']);
+  });
+
+  it('keeps an id that is not a count, as SSE’s own last event id does', async () => {
+    expect(await idsOf('chunk-a')).toEqual(['chunk-a', 'chunk-a', 'chunk-a']);
+  });
+});
+
 describe('padding on the wire (D-9)', () => {
   it('gives 10-byte and 200-byte requests one `ct` length, and a pasted key at least 1 KiB', async () => {
     const { world: w } = await start();

@@ -123,8 +123,7 @@ query's time, CPU-only and on a GPU if present, are owed by #835.
 With `OYL_INSTANCE_ANALYSIS_MODEL_URL` and `OYL_INSTANCE_ANALYSIS_MODEL` set, the instance can
 reach a model for the post-ride write-up's agent
 ([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-8, D-9;
-#1096). ⚠️ **Nothing starts a job yet**: the agent runs from the job engine, #1095, which is not
-built, so today the setting only checks the address and makes the connection ready.
+#1096). The agent runs from the job engine, #1095 ("Analysis jobs", below).
 
 **Running Ollama beside the instance, in Compose.** The home deployment's `ollama` service serves
 the history index and the analysis model both. Set `COMPOSE_PROFILES=analysis` (or
@@ -163,6 +162,47 @@ it**: its API has no authentication.
 
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
+
+## Analysis jobs
+
+A rider's device asks the instance to write a ride up as a **job** (#1095,
+[ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-11): the
+request answers at once, the instance's one worker runs the agent over the model, and the device
+follows the job's progress on a stream it can reconnect to. Every job route is reached only sealed
+(ADR 0047 D-7), so on an instance without `OYL_INSTANCE_SECRET_KEY` they answer in plaintext, and
+through the tunnel that means readable at Cloudflare's edge: set the secret before you let other
+riders analyse.
+
+**Off unless there is a model.** With no analysis model and no hosted key held, every start answers
+`analysis_off` (503) and nothing else changes; the instance starts and serves as usual.
+
+**What is kept, and for how long.**
+
+| What | Kept until |
+|---|---|
+| The job row: whose it is, its source, its status, when it was made and ended, and why it failed | seven days after the job ended (the owner's Q5 ruling), deleted by the hourly sweep, **unless it holds a write-up**: that row stays with it |
+| The ride input the device sent: numbers and the input's own words, never a coordinate, date, name or picture | with the job row |
+| The job's events: progress (a step, or a tool by name), each screened section, withdrawals, the result | the device acknowledges the write-up, or seven days after the job ended. A job that did not succeed keeps no section's text from the moment it ends |
+| The write-up itself | kept (ADR 0046 D-12, the owner's ruling 8) so another device can read it, erased with the account, and included in the account export as `analysisResults` |
+
+A job that is still queued or running when the instance stops — a restart, an upgrade, a power cut —
+is ended `failed` with the failure `interrupted` at the next start, and is **never run again**: the
+rider asks again if they still want it. Each athlete may have one job queued or running at a time,
+and may start twelve an hour. There is one worker for the whole instance, so a job waits behind
+another athlete's, for up to the agent's run budget.
+
+**What the log says.** One line per change of status, `"event":"analysis-job"` with `state` (and
+`code`, the failure, when it failed). Never a job's id, its input, a tool name or any of the
+write-up.
+
+**How it is erased.** Erasing an account (`DELETE /v1/account`) deletes every job and event of the
+athlete with everything else of theirs. Rolling the database back past migration 0020 drops both
+tables, rows and all.
+
+**The heartbeat.** A quiet stream writes a comment every 25 s so Cloudflare's tunnel (which cuts a
+response it has seen nothing of for 100–125 s) keeps it open. `OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS`
+changes it — up to 60000; `0` sends none, **only** to measure the tunnel cutting a stream that has
+none (#1105), never to run with.
 
 ## A hosted model key
 
@@ -369,12 +409,17 @@ accounts (`OYL_INSTANCE_ORIGIN`) and the keys (`OYL_INSTANCE_SECRET_KEY`); witho
   one busy client uses up registration, linking and recovery for every rider. A signed-in rider's
   sealed requests are counted against their session instead — 120 a minute — and are not affected.
 
+**A sealed body over the instance's body limit is refused only after it is opened**, as a sealed
+`payload_too_large` sent with 200, not as a plaintext 413. Padding (ADR 0047 D-9) hides how large
+the inner body is, so the envelope's own limit has room for it, and the instance learns the size
+only once it has decrypted the request. A plaintext 413 means the envelope itself was too large.
+
 ### Which routes are sealed, and what an instance without the secret exposes
 
 **Since #1192, on an instance that holds keys, every route ADR 0047 D-7 puts in phase 1 is reached
 ONLY sealed**, and a plaintext request to one is refused `sealed_required` before its session is
 read or anything is run: minting a link code, linking, recovering and asking for a recovery mail,
-giving and confirming a recovery address, the device list and revoking a device, the account
+giving, confirming and clearing a recovery address, the full reset, the device list and revoking a device, the account
 export and deleting the account, **every** moderator route (the queues and the log included),
 **every** sync route, and history search. Registering a new rider is sealed too: a key the
 instance has never seen is refused `sealed_required` in plaintext, while a key it already holds
@@ -393,6 +438,36 @@ seal to such an instance, so the features above are not offered on it. Set the s
 **A pasted hosted-model key** (#1199) is accepted only sealed, signed by a device whose pin came from
 a card, from any address — ADR 0047 D-13 lifted the home-network-only rule when phase 1 shipped. No
 plaintext key route exists. `model-key set`, the operator command, is unchanged.
+
+## Email recovery
+
+Email recovery is off unless the operator hands the instance a mailer; `apps/instance/src/instance.ts`
+hands none today, so every email-recovery route answers `not_found` on a running instance. Whoever
+writes one, read this first (#1194, ADR 0047 D-8).
+
+**A mailer sends the text the instance gives it, as it is.** `RecoveryMailer.send` and `.confirm`
+(`apps/instance/src/auth/identity.ts`) receive the address, the token, and a subject and a plain-text
+body the instance wrote (`apps/instance/src/auth/recovery-mail.ts`). The token is a **code the rider
+types into the app**. The mail must hold **no link of any kind**: no `https:` URL on the instance's
+origin or any other, no custom URL scheme, no Android App Link. A link opened in a browser sends the
+code through whatever sits between the rider and the box (Cloudflare's edge, behind the tunnel) in
+plaintext, and that edge could redeem it in a sealed `recover` signed with a key of its own: an
+account takeover. Any app on a phone can claim a custom scheme (RFC 8252), and an App Link opens in a
+browser wherever the app is not installed or the link is not verified. So do not add a "click here",
+do not wrap the code in a URL, and do not let a mail template turn the code into a link.
+
+⚠️ **Do not route the instance's mail through Cloudflare Email Routing** — on your sending domain or
+any other. Mail is outside the instance's sealing: whoever carries it reads the code, and a code
+Cloudflare reads is a code its edge can redeem. Tell riders the same: a rider whose own address domain
+uses Cloudflare Email Routing should not rely on email recovery against an edge they do not trust, and
+should keep their recovery codes on paper. Nothing in the app can see how a mail travelled.
+
+What riders meet: an account holds at most **two** recovery addresses. A newly confirmed address is
+**held for a week**, in which it recovers nothing and steps nothing up, and revoking the device that
+gave it clears it; after that it is established. A recovery code is mailed only to an established
+address, and a mailed code is refused `address_unbound` at redemption if its address has since been
+cleared. Clearing an established address (`POST /v1/auth/recovery-email/clear`) and the full reset
+(`POST /v1/auth/recovery/reset`) each need a recovery code or a code mailed to an established address.
 
 ## Room close codes
 

@@ -196,6 +196,13 @@ export interface DisplayNameChangeTable {
 export interface RecoveryEmailTable {
   readonly athlete_id: string;
   readonly address: string;
+  /**
+   * When `/confirm` bound it, Unix seconds; `null` for an address bound
+   * before migration 0019, which is established (#1194, ADR 0047 D-8).
+   */
+  readonly confirmed_at: number | null;
+  /** The key that gave the address (its binder); `null` before migration 0019. */
+  readonly bound_by_key: string | null;
 }
 
 /** An email recovery link's token, as its SHA-256 (#773). */
@@ -204,6 +211,8 @@ export interface EmailRecoveryTokenTable {
   readonly athlete_id: string;
   readonly expires_at: number;
   readonly used_at: number | null;
+  /** The address it was mailed to (#1194, migration 0019). */
+  readonly address: string | null;
 }
 
 /**
@@ -218,6 +227,11 @@ export interface RecoveryEmailConfirmationTable {
   readonly used_at: number | null;
   /** The key that gave the address, or `null` before migration 0018 (#1193). */
   readonly requested_by_key: Generated<string | null>;
+  /**
+   * When another key's confirmation of the same address bound it first
+   * (#1194, migration 0019): this one is spent, and `confirmation_superseded`.
+   */
+  readonly superseded_at: Generated<number | null>;
 }
 
 /**
@@ -288,7 +302,19 @@ export interface InviteCodeTable {
 
 /** What kind of thing a sync item is (#37, #776). */
 export type SyncKind =
-  'activity' | 'write-up' | 'ride-summary' | 'side-camera-report' | 'goal' | 'note' | 'document';
+  | 'activity'
+  | 'write-up'
+  | 'ride-summary'
+  | 'side-camera-report'
+  | 'goal'
+  | 'note'
+  | 'document'
+  /**
+   * The rider's masking data — their words-to-mask list and their privacy
+   * zones — for masking what a hosted model is sent (#1101, ADR 0046 D-10).
+   * Never indexed and never readable by an analysis tool.
+   */
+  | 'masking';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
@@ -421,6 +447,39 @@ export interface SealedReplayTable {
   readonly seen_at: number;
 }
 
+/**
+ * One analysis job (#1095, ADR 0046 D-11). Added by migration 0020. An ended
+ * job is deleted seven days after `ended_at` (the owner's Q5 ruling).
+ */
+export interface AnalysisJobTable {
+  readonly id: string;
+  readonly athlete_id: string;
+  readonly status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'withheld';
+  readonly source: 'instance-local' | 'instance-hosted';
+  readonly template_version: string;
+  /** The device-built ride input, checked on the way in (`analysis/job-input.ts`). */
+  readonly input_json: string;
+  /** The screened write-up, until the device acknowledges it or the job is deleted. */
+  readonly candidate: string | null;
+  /** One of `analysis/jobs.ts` §`JobFailure`, when the job failed. */
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly created_at: number;
+  readonly ended_at: number | null;
+}
+
+/** One event of a job's stream (#1095), numbered per job from 1. */
+export interface AnalysisEventTable {
+  readonly job_id: string;
+  readonly athlete_id: string;
+  readonly seq: number;
+  readonly kind: 'progress' | 'section' | 'withdrawn' | 'result';
+  /** The event's JSON. Never a tool's arguments or results. */
+  readonly data: string;
+  /** Unix milliseconds. */
+  readonly at: number;
+}
+
 /** Every table, by name. */
 export interface InstanceDatabase {
   readonly athlete: AthleteTable;
@@ -453,4 +512,6 @@ export interface InstanceDatabase {
   readonly sealed_replay: SealedReplayTable;
   readonly account_change: AccountChangeTable;
   readonly account_change_mark: AccountChangeMarkTable;
+  readonly analysis_job: AnalysisJobTable;
+  readonly analysis_event: AnalysisEventTable;
 }
