@@ -13,6 +13,7 @@ import type {
 } from '../instance/instance-port';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
 
 /**
  * The Connect screen (#777, #778): an instance's address, signing in with this
@@ -93,6 +94,16 @@ export const INSTANCE_NO_PORT =
   'This app cannot connect to an instance here, because this browser has no local store to ' +
   'keep a sign-in in.';
 
+/** Beside the card box on the Connect form (#1190, D-14 Q1). Draft. */
+export const CONNECT_CARD_LABEL = 'The instance’s card (optional)';
+export const CONNECT_WITHOUT_CARD =
+  'Without the card this device can sign in to an account it already has, but cannot use ' +
+  'anything that needs the card.';
+
+/** The form that adds this device with another device's code (#773, #1190). Draft. */
+export const LINK_FORM_HEADING = 'Add this device with a code from another of your devices';
+export const LINK_FIELD_LABEL = 'The line your other device shows';
+
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
 export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
@@ -159,11 +170,16 @@ export function InstanceView({
   const [devices, setDevices] = useState<DevicesOutcome | undefined>(undefined);
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
+  const [card, setCard] = useState('');
+  const [offer, setOffer] = useState('');
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | undefined>(undefined);
   const addressId = useId();
   const nameId = useId();
+  const cardId = useId();
+  const cardHintId = useId();
+  const offerId = useId();
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
@@ -193,7 +209,7 @@ export function InstanceView({
     if (port === undefined) return;
     setBusy(true);
     setRefusal(undefined);
-    const outcome = await port.connect(address, name);
+    const outcome = await port.connect(address, name, card);
     setBusy(false);
     if (outcome.kind === 'refused') {
       setRefusal(outcome.text);
@@ -201,6 +217,19 @@ export function InstanceView({
     }
     setRecoveryCodes(outcome.recoveryCodes);
     // ⚠️ What the screen now shows is READ BACK from the instance, not the form.
+    await read();
+  }
+
+  async function link(): Promise<void> {
+    if (port === undefined) return;
+    setBusy(true);
+    setRefusal(undefined);
+    const outcome = await port.link(offer);
+    setBusy(false);
+    if (outcome.kind === 'refused') {
+      setRefusal(outcome.text);
+      return;
+    }
     await read();
   }
 
@@ -259,10 +288,60 @@ export function InstanceView({
               }}
             />
           </p>
+          <p>
+            <label htmlFor={cardId}>{CONNECT_CARD_LABEL}</label>
+            <br />
+            <textarea
+              className="oyl-input oyl-instance__card-box"
+              id={cardId}
+              rows={3}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              aria-describedby={cardHintId}
+              value={card}
+              onChange={(event) => {
+                setCard(event.target.value);
+                setRefusal(undefined);
+              }}
+            />
+          </p>
+          <p className="oyl-muted" id={cardHintId}>
+            {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD}
+          </p>
           <Receives />
           <p className="oyl-muted">{NOTHING_SENT_UNTIL_CONNECT}</p>
           <Button type="submit" disabled={busy}>
             Connect
+          </Button>
+        </form>
+        <h3>{LINK_FORM_HEADING}</h3>
+        <form
+          className="oyl-trainer__form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void link();
+          }}
+        >
+          <p>
+            <label htmlFor={offerId}>{LINK_FIELD_LABEL}</label>
+            <br />
+            <textarea
+              className="oyl-input oyl-instance__card-box"
+              id={offerId}
+              rows={3}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              value={offer}
+              onChange={(event) => {
+                setOffer(event.target.value);
+                setRefusal(undefined);
+              }}
+            />
+          </p>
+          <Button type="submit" variant="secondary" disabled={busy}>
+            Add this device
           </Button>
         </form>
         {refusal === undefined ? null : (
@@ -357,6 +436,8 @@ export function InstanceView({
           </Button>
         </section>
       )}
+
+      {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
 
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-devices">
