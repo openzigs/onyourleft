@@ -147,7 +147,8 @@ export function percentToShare(input: string, what: string): BuildOutcome<number
 
 /** What a builder form submits, before any of it has been checked. */
 export interface BlockDraft {
-  readonly kind: WorkoutBlock['kind'];
+  /** The kinds this form builds. The heart-rate hold (#1239) is added to it by #1241. */
+  readonly kind: Exclude<WorkoutBlock['kind'], 'heart-rate-hold'>;
   readonly minutes: string;
   readonly percent: string;
   /** Ramp only. */

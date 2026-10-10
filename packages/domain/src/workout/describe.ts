@@ -55,6 +55,13 @@ export function workoutBlockText(block: WorkoutBlock): string {
       // that floor is the machine's reported minimum, not zero. A sentence
       // that said 0% would describe a number the player never writes.
       return `${workoutDurationText(block.seconds)} free riding`;
+    case 'heart-rate-hold':
+      // The range is the one the rider chose, said as a range and never as a
+      // limit (ADR 0048 D-12). No watts: the target moves.
+      return (
+        `${workoutDurationText(block.seconds)} holding ` +
+        `${String(block.range.low)}–${String(block.range.high)} bpm`
+      );
     default: {
       const unhandled: never = block;
       throw new Error(`unreachable: ${JSON.stringify(unhandled)}`);

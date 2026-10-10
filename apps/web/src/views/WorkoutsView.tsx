@@ -89,7 +89,7 @@ import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
  */
 
 /** The words for a block kind, in the order the picker offers them. */
-const BLOCK_KINDS: readonly { readonly kind: WorkoutBlock['kind']; readonly label: string }[] = [
+const BLOCK_KINDS: readonly { readonly kind: BlockDraft['kind']; readonly label: string }[] = [
   { kind: 'steady', label: 'Steady' },
   { kind: 'intervals', label: 'Intervals' },
   { kind: 'ramp', label: 'Ramp' },
@@ -755,7 +755,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                     name="kind"
                     value={draft.kind}
                     onChange={(event) =>
-                      setDraft({ ...draft, kind: event.target.value as WorkoutBlock['kind'] })
+                      setDraft({ ...draft, kind: event.target.value as BlockDraft['kind'] })
                     }
                   >
                     {BLOCK_KINDS.map((entry) => (

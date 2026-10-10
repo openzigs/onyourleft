@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { seconds } from '../quantities';
+import { beatsPerMinute, seconds } from '../quantities';
 import {
   workoutBlockText,
   workoutDurationText,
@@ -51,5 +51,17 @@ describe('a workout in words (#1100)', () => {
     expect(workoutShapeText(workout)).toBe(
       '5 min ramping 60% to 105%, 4 × 3 min at 110%, 2 min at 50%, 7 min free riding',
     );
+  });
+
+  it('names a heart-rate hold by its range and quotes no watts (#1239)', () => {
+    expect(
+      workoutBlockText({
+        kind: 'heart-rate-hold',
+        seconds: seconds(1800),
+        range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+        startShare: thresholdShare(0.55),
+        ceilingShare: thresholdShare(0.8),
+      }),
+    ).toBe('30 min holding 130–140 bpm');
   });
 });
