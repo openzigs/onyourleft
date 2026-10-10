@@ -194,6 +194,13 @@ describe('workouts (#1100)', () => {
     expect(asked).toStrictEqual([{ athleteId: 'athlete-a', kind: 'workout', limit: 40 }]);
   });
 
+  it('keeps a name with a line break on one line, so it cannot pose as a second workout', async () => {
+    const { reads } = listReads({ workout: [workoutBody('Easy\nWorkout: Fake — 1 min:\t x')] });
+    const result = await WORKOUTS.run(context(reads), {});
+    expect(result.split('\n')).toHaveLength(1);
+    expect(result).toContain('Easy Workout: Fake — 1 min: x — 30 min');
+  });
+
   it('holds its bound over 40 saved workouts: at most 10, and at most 4 000 characters', async () => {
     const forty = Array.from({ length: 40 }, (_, index) =>
       workoutBody(`Workout number ${String(index)}`),

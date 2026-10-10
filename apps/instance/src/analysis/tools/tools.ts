@@ -300,18 +300,18 @@ function workoutLine(item: ReadItem): string | undefined {
   } catch {
     return undefined;
   }
-  const name = workout.name.trim();
+  const name = workout.name.replace(/\s+/g, ' ').trim();
   if (name === '') return undefined;
   const total = workoutDurationText(expandWorkout(workout).totalSeconds);
   return `${name} — ${total}: ${workoutShapeText(workout)}`;
 }
 
-/** `workouts`: the athlete's saved workouts, newest first, at most 10 and 4 000 characters. */
+/** `workouts`: the athlete's saved workouts, most recently received first, at most 10 and 4 000 characters. */
 export const WORKOUTS: AgentTool<Readonly<Record<string, number | undefined>>> = {
   spec: {
     name: 'workouts',
     description:
-      'The cyclist’s saved workouts, newest first: each one’s name, total time and its blocks, with targets as a percentage of threshold power.',
+      'The cyclist’s saved workouts, most recently received first: each one’s name, total time and its blocks, with targets as a percentage of threshold power.',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   validate: (input) => integers(input, {}),
