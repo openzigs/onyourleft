@@ -80,6 +80,9 @@ import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { DocumentsPanel } from '../rider-text/DocumentsPanel';
+import { WorkoutGoalsPanel } from '../workout-goals/WorkoutGoalsPanel';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
+import { WORKOUT_GOALS_CARD_TITLE, WORKOUT_GOALS_KEPT_VISIBLE } from '../workout-goals/wording';
 import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { GOALS_WORDS } from '../rider-text/words';
@@ -230,6 +233,8 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   // #836, ADR 0040 D-11: what the goals and documents are kept as, where they
   // go, and that a model reads them.
   ...RIDER_TEXT_KEPT_VISIBLE,
+  // #1237: where the typed workout goals are kept, and where a sync sends them.
+  ...WORKOUT_GOALS_KEPT_VISIBLE,
 ];
 
 /** Said when there is nothing to write a weight to. */
@@ -389,6 +394,12 @@ export interface SettingsViewProps {
    * so and offers no control.
    */
   readonly riderText?: RiderTextPort | undefined;
+  /**
+   * The rider's typed workout goals (#1237), which bound a heart-rate hold.
+   * `undefined` where this browser has no local store — the panel then says
+   * so and offers no control.
+   */
+  readonly workoutGoals?: WorkoutGoalsPort | undefined;
 }
 
 export function SettingsView({
@@ -407,6 +418,7 @@ export function SettingsView({
   themeStorage,
   maskedWords,
   riderText,
+  workoutGoals,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -665,6 +677,29 @@ export function SettingsView({
         <DocumentsPanel port={riderText} />
       </SettingsCard>
 
+      {/*
+        #1237. The TYPED goals, which bound a heart-rate hold — their own card,
+        after the goals and documents in words, which never set a number. It
+        spans both columns of a landscape tablet: beside the short Connect
+        card in one column it was three times that card's height
+        (`sections.browser.spec.ts` §"#1026"), and across both its boxes sit
+        side by side.
+      */}
+      <SettingsCard
+        id="oyl-settings-workout-goals"
+        wide
+        title={SETTINGS_CARD_TITLES.workoutGoals}
+        picture={
+          <>
+            <Sky sun={false} />
+            <Hills seed={5} />
+            <RoadRibbon />
+          </>
+        }
+      >
+        <WorkoutGoalsPanel port={workoutGoals} />
+      </SettingsCard>
+
       <SettingsCard
         id="oyl-settings-device"
         title={SETTINGS_CARD_TITLES.device}
@@ -708,6 +743,7 @@ export const SETTINGS_CARD_TITLES = {
   words: 'Your words',
   goals: 'Your goals',
   documents: 'Your documents',
+  workoutGoals: WORKOUT_GOALS_CARD_TITLE,
   device: 'Connect and keep',
 } as const;
 
@@ -728,15 +764,18 @@ function SettingsCard({
   title,
   picture,
   children,
+  wide = false,
 }: {
   readonly id: string;
   readonly title: string;
   readonly picture: ReactNode;
   readonly children: ReactNode;
+  /** Across both columns of a landscape tablet (#1237), for a card of many boxes. */
+  readonly wide?: boolean;
 }): JSX.Element {
   return (
     <section
-      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card"
+      className={`oyl-settings-card${wide ? ' oyl-settings-card--wide' : ''} tw:bg-surface-raised tw:rounded-card`}
       aria-labelledby={id}
     >
       <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">

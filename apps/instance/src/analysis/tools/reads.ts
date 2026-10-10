@@ -16,8 +16,12 @@
  * spell.
  */
 
-/** The synced kinds a tool may read (ADR 0046 D-7's table; `workout` since #1100). */
-export type ToolReadKind = 'ride-summary' | 'goal' | 'workout';
+/**
+ * The synced kinds a tool may read (ADR 0046 D-7's table; `workout` since
+ * #1100; `workout-goal`, the rider's typed goals, since #1237 — for the
+ * re-plan job of ADR 0048 D-10, which #1243 builds).
+ */
+export type ToolReadKind = 'ride-summary' | 'goal' | 'workout' | 'workout-goal';
 
 /**
  * One synced item, as a tool is allowed to see it: its bytes, and its key.

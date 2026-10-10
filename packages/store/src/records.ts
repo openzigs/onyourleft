@@ -1292,7 +1292,9 @@ export type SyncBaseKind =
   | 'note'
   | 'document'
   /** A saved workout (#1100), keyed by its own id. */
-  | 'workout';
+  | 'workout'
+  /** The rider's typed workout goals (#1237), keyed `goals`: one per athlete. */
+  | 'workout-goal';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1304,14 +1306,20 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'note',
   'document',
   'workout',
+  'workout-goal',
 ];
 
 /**
  * The kinds that belong to no ride (#836): the rider's goals and their
- * documents, and since #1100 their saved workouts. Their sync base row names
- * no ride — `activityId` is `null`.
+ * documents, since #1100 their saved workouts, and since #1237 their typed
+ * workout goals. Their sync base row names no ride — `activityId` is `null`.
  */
-export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document', 'workout'];
+export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
+  'goal',
+  'document',
+  'workout',
+  'workout-goal',
+];
 
 /**
  * The **sync base**: what this device and its instance agreed on at the last

@@ -321,7 +321,16 @@ export type SyncKind =
    * device's workout id. Read only by the agent's `workouts` tool, which
    * re-validates every row (`decodeWorkoutFile`). Not indexed for history.
    */
-  | 'workout';
+  | 'workout'
+  /**
+   * The rider's TYPED workout goals (#1237, ADR 0048 D-10, the owner's Q9):
+   * one item, keyed `goals`, its body the goals as JSON
+   * (`@onyourleft/domain` §`readWorkoutGoals`). ⚠️ **Not `goal`**, #836's free
+   * text, which never sets a bound: only this kind may bound a heart-rate hold
+   * or a re-plan. Synced sealed only (ADR 0047), like every item, and not
+   * indexed for history. The device copy is canonical (ADR 0036 D-3).
+   */
+  | 'workout-goal';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {

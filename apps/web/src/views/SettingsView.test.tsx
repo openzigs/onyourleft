@@ -1545,6 +1545,7 @@ describe('the cards — #1026', () => {
       SETTINGS_CARD_TITLES.words,
       SETTINGS_CARD_TITLES.goals,
       SETTINGS_CARD_TITLES.documents,
+      SETTINGS_CARD_TITLES.workoutGoals,
       SETTINGS_CARD_TITLES.device,
     ]);
     const sectionsOf = (title: string): string[] | undefined =>
@@ -1552,6 +1553,7 @@ describe('the cards — #1026', () => {
     expect(sectionsOf(SETTINGS_CARD_TITLES.words)).toEqual(['Words to mask']);
     expect(sectionsOf(SETTINGS_CARD_TITLES.goals)).toEqual(['Goals and notes']);
     expect(sectionsOf(SETTINGS_CARD_TITLES.documents)).toEqual(['Documents for the analysis']);
+    expect(sectionsOf(SETTINGS_CARD_TITLES.workoutGoals)).toEqual(['Workout goals']);
     mounted.unmount();
   });
 });

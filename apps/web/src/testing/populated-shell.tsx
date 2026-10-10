@@ -87,6 +87,8 @@ import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
+import type { WorkoutGoalsRecord } from '@onyourleft/store';
 import { workoutStub } from '../workouts/testing';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 
@@ -619,6 +621,46 @@ function riderTextPort(populated: boolean): RiderTextPort {
   ).port;
 }
 
+/**
+ * The rider's typed workout goals (#1237) — every goal set in the populated
+ * walk, so the reflow walk lays out every box filled; none in the empty one.
+ * Kept in memory, read afresh on each read as the store's would be.
+ */
+function workoutGoalsPort(populated: boolean): WorkoutGoalsPort {
+  let kept: WorkoutGoalsRecord | undefined = populated
+    ? {
+        athleteId: ATHLETE,
+        goals: {
+          sessionType: 'endurance',
+          durationMinutes: 120,
+          holdRange: { low: beatsPerMinute(128), high: beatsPerMinute(138) },
+          heartRateAbove: beatsPerMinute(150),
+          powerCeiling: thresholdShare(0.75),
+          timeInRangeMinutes: 90,
+          effortCheckIns: true,
+        },
+        savedAt: unixSeconds(NOW),
+      }
+    : undefined;
+  return {
+    athleteId: ATHLETE,
+    now: () => unixSeconds(NOW),
+    store: {
+      getWorkoutGoals: () =>
+        Promise.resolve(kept === undefined ? { status: 'none' } : { status: 'kept', record: kept }),
+      putWorkoutGoals: (record) => {
+        kept = record;
+        return Promise.resolve(record);
+      },
+      deleteWorkoutGoals: () => {
+        const had = kept !== undefined;
+        kept = undefined;
+        return Promise.resolve(had);
+      },
+    },
+  };
+}
+
 function athleteMassPort(): AthleteMassPort {
   return {
     athleteId: ATHLETE,
@@ -736,6 +778,7 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
       riderText={riderTextPort(populated)}
+      workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
       moderation={
         scriptedModeration({

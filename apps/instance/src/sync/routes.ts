@@ -111,6 +111,7 @@ const kindSchema: Schema = {
     'document',
     'masking',
     'workout',
+    'workout-goal',
   ],
 };
 
