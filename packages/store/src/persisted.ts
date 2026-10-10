@@ -36,6 +36,7 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  readWorkoutGoals,
   validateWorkout,
   WorkoutError,
 } from '@onyourleft/domain';
@@ -74,6 +75,7 @@ import type {
   SegmentRecord,
   RouteElevationRecord,
   RouteRecord,
+  WorkoutGoalsRecord,
   WorkoutRecord,
 } from './records';
 import {
@@ -1889,4 +1891,38 @@ export function trustedDeviceKeyProblem(row: {
     return 'trustedDeviceKey.admittedAt: must be whole Unix seconds';
   }
   return undefined;
+}
+
+// --- Workout goals (#1236) -----------------------------------------------------
+
+/**
+ * A workout goals row as a record, or why it is not one — for the write and
+ * for a row read off disk alike, so a hand-edited row is refused on the way
+ * out as a bad one is on the way in. The goals are re-read by
+ * `@onyourleft/domain` §`readWorkoutGoals`, which copies only the keys it
+ * knows, so the record returned holds nothing the row smuggled in. Names the
+ * field and the constraint only.
+ */
+export function checkedWorkoutGoals(row: {
+  readonly athleteId: unknown;
+  readonly goals: unknown;
+  readonly savedAt: unknown;
+}): { readonly record: WorkoutGoalsRecord } | { readonly problem: string } {
+  if (typeof row.athleteId !== 'string' || row.athleteId.length === 0) {
+    return { problem: 'workoutGoals.athleteId: must be an athlete id' };
+  }
+  if (typeof row.savedAt !== 'number' || !Number.isSafeInteger(row.savedAt) || row.savedAt < 0) {
+    return { problem: 'workoutGoals.savedAt: must be whole Unix seconds' };
+  }
+  const reading = readWorkoutGoals(row.goals);
+  if (!reading.ok) {
+    return { problem: reading.fault.message };
+  }
+  return {
+    record: {
+      athleteId: athleteId(row.athleteId),
+      goals: reading.goals,
+      savedAt: unixSeconds(row.savedAt),
+    },
+  };
 }
