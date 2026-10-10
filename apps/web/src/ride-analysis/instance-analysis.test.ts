@@ -8,7 +8,7 @@
  */
 
 import { unixSeconds } from '@onyourleft/domain';
-import type { ActivityId, RideWriteUpRecord } from '@onyourleft/store';
+import type { ActivityId, RideWriteUpRecord, SyncBaseRecord } from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -31,6 +31,7 @@ import {
   PENDING_JOBS_STORAGE_KEY,
   pendingJobForgetter,
   reconnectDelayMilliseconds,
+  syncedRideId,
   type InstanceAnalysisOptions,
   type PendingJobStorage,
 } from './instance-analysis';
@@ -204,6 +205,137 @@ describe('one press: start, follow, screen, save, acknowledge', () => {
     expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_FAILURE_TEXT.withheld });
     expect(seen.views.at(-1)?.withdrawn).toBe(true);
     expect(await saved(id)).toBeUndefined();
+  });
+});
+
+describe('naming the ride, only when it is synced (#1229)', () => {
+  /** This device's record that the ride was synced, as a sync writes it. */
+  async function synced(id: ActivityId): Promise<void> {
+    await harness.write(async (store) =>
+      store.putSyncBase({
+        athleteId: ATHLETE_A,
+        kind: 'activity',
+        key: 'c'.repeat(64),
+        activityId: id,
+        localDigest: 'a'.repeat(64),
+        remoteDigest: 'b'.repeat(64),
+      }),
+    );
+  }
+
+  it('names a ride this device has synced, by its own id, read from the store’s sync base', async () => {
+    const id = await seededRide();
+    await synced(id);
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    await controller(scripted, { syncBase: writer }).ask(
+      id,
+      'instance-local',
+      () => undefined,
+      live(),
+    );
+    expect(startedWith(scripted)?.rideId).toBe(id);
+    expect(await saved(id)).toBeDefined();
+  });
+
+  it('names no ride the sync base does not hold — written up without relative ages, never synced first', async () => {
+    const id = await seededRide();
+    const other = await seededRide();
+    await synced(other);
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    await controller(scripted, { syncBase: writer }).ask(
+      id,
+      'instance-local',
+      () => undefined,
+      live(),
+    );
+    expect(startedWith(scripted)).not.toHaveProperty('rideId');
+    // One start and its stream: no sync route was called.
+    expect(scripted.requests.map((request) => request.path)).toStrictEqual([
+      '/v1/analysis/jobs',
+      `/v1/analysis/jobs/${SCRIPTED_JOB_ID}/events`,
+      `/v1/analysis/jobs/${SCRIPTED_JOB_ID}/ack`,
+    ]);
+    expect((await saved(id))?.text).toBe(WRITE_UP);
+  });
+
+  it('starts again naming no ride when the instance no longer holds the one the base names', async () => {
+    const id = await seededRide();
+    await synced(id);
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const channel = scripted.session.channel;
+    const outcome = await controller(scripted, {
+      syncBase: writer,
+      session: async () =>
+        Promise.resolve({
+          ...scripted.session,
+          channel: {
+            ...scripted.session.channel,
+            call: async (method, path, options) => {
+              if ((options.body as { rideId?: unknown } | undefined)?.rideId !== undefined) {
+                scripted.requests.push({ method, path, body: options.body });
+                return Promise.resolve({
+                  status: 400,
+                  body: {
+                    error: {
+                      code: 'validation_failed',
+                      fields: [
+                        { field: 'rideId', problem: 'must be the synced id of one of your rides' },
+                      ],
+                    },
+                  },
+                });
+              }
+              return channel.call(method, path, options);
+            },
+          },
+        }),
+    }).ask(id, 'instance-local', () => undefined, live());
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    const starts = scripted.requests.filter((request) => request.path === '/v1/analysis/jobs');
+    expect(starts.map((request) => (request.body as { rideId?: string }).rideId)).toStrictEqual([
+      id,
+      undefined,
+    ]);
+  });
+
+  it('does not start again for any other refusal', async () => {
+    const id = await seededRide();
+    await synced(id);
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    scripted.startAnswer = { status: 409, body: { error: { code: 'job_running' } } };
+    await controller(scripted, { syncBase: writer }).ask(
+      id,
+      'instance-local',
+      () => undefined,
+      live(),
+    );
+    expect(
+      scripted.requests.filter((request) => request.path === '/v1/analysis/jobs'),
+    ).toHaveLength(1);
+  });
+
+  it('reads a sync base that cannot be read, or none at all, as no ride synced', async () => {
+    const id = 'ride-x' as ActivityId;
+    const row = { kind: 'activity', activityId: id } as SyncBaseRecord;
+    expect(await syncedRideId(undefined, ATHLETE_A, id)).toBeUndefined();
+    expect(
+      await syncedRideId(
+        { listSyncBase: async () => Promise.reject(new Error('no')) },
+        ATHLETE_A,
+        id,
+      ),
+    ).toBeUndefined();
+    expect(
+      await syncedRideId({ listSyncBase: async () => Promise.resolve([row]) }, ATHLETE_A, id),
+    ).toBe(id);
+    // A write-up of the ride, synced, is not the ride synced.
+    expect(
+      await syncedRideId(
+        { listSyncBase: async () => Promise.resolve([{ ...row, kind: 'write-up' }]) },
+        ATHLETE_A,
+        id,
+      ),
+    ).toBeUndefined();
   });
 });
 

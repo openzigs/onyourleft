@@ -990,6 +990,75 @@ describe('analysis jobs on the running instance — #1095', () => {
   });
 });
 
+describe('the agent’s history tool on the running instance — #1229', () => {
+  let embeddings: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((done) =>
+      embeddings === undefined ? done() : embeddings.close(() => done()),
+    );
+    embeddings = undefined;
+  });
+
+  it('searches the history index this instance keeps, through its embedding model', async () => {
+    // Until #1229 the engine was handed no index, and `history_search`
+    // answered "unavailable" on every job without asking the model a thing.
+    const asked: string[] = [];
+    embeddings = createServer((request, response) => {
+      let text = '';
+      request.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      request.on('end', () => {
+        const { input } = JSON.parse(text) as { input: string[] };
+        asked.push(...input);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ embeddings: input.map(() => [1, 0, 0]) }));
+      });
+    });
+    await new Promise<void>((done) => embeddings?.listen(0, '127.0.0.1', done));
+    const embeddingPort = (embeddings.address() as AddressInfo).port;
+    const model = await startFakeModelServer([
+      {
+        kind: 'tool-calls',
+        calls: [{ name: 'history_search', arguments: JSON.stringify({ query: 'hill repeats' }) }],
+      },
+      { kind: 'text', text: 'A steady ride.' },
+    ]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const { instance } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+            history: readHistorySettings({
+              embeddingUrl: `http://ollama:${String(embeddingPort)}`,
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.opened;
+      await instance.jobsRecovered;
+      const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+      const answer = await fetch(`${instance.url}/v1/analysis/jobs`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(jobBody()),
+      });
+      expect(answer.status).toBe(202);
+      await instance.analysisJobs()?.idle();
+      expect(asked).toContain('search_query: hill repeats');
+      expect(model.paths).toStrictEqual(['/v1/chat/completions', '/v1/chat/completions']);
+    } finally {
+      await model.close();
+    }
+  });
+});
+
 describe('a rider’s race on the running instance — #784, #785', () => {
   it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');

@@ -492,6 +492,11 @@ export interface AnalysisJobTable {
   readonly template_version: string;
   /** The device-built ride input, checked on the way in (`analysis/job-input.ts`). */
   readonly input_json: string;
+  /**
+   * The synced ride the job writes up, by its own id, when the device named
+   * one (#1229, migration 0022); checked to be the athlete's at the start.
+   */
+  readonly ride_id: string | null;
   /** The screened write-up, until the device acknowledges it or the job is deleted. */
   readonly candidate: string | null;
   /** One of `analysis/jobs.ts` §`JobFailure`, when the job failed. */
