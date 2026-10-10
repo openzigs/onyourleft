@@ -1807,7 +1807,7 @@ the pagination parser has its first callers, the sync manifest and the activity 
 #### Analysis jobs — #1095
 
 ADR 0046 D-11. A device asks for a write-up with `POST /v1/analysis/jobs` (`{ input,
-templateVersion, source }`); the instance checks the body (`analysis/job-input.ts`: no picture, then
+templateVersion, source, rideId? }`); the instance checks the body (`analysis/job-input.ts`: no picture, then
 the input's exact `RideAnalysisInput` shape and its 4 KiB budget), queues a row in `analysis_job`
 (migration 0020) and answers `202 { jobId }` at once. One worker claims the oldest queued job of any
 athlete and runs it on the engine port — the agent over `modelForSource` in production
@@ -1815,6 +1815,17 @@ athlete and runs it on the engine port — the agent over `modelForSource` in pr
 `running`, then ending it with one `result` event. One job per athlete is queued or running at a
 time (`job_running`), and twelve starts an hour per athlete are allowed (`jobs.ts`
 §`DEFAULT_ANALYSIS_STARTS`).
+
+**Naming the ride — #1229.** A start may carry `rideId`, the ride's own id, which the device sends
+only when its sync base says the ride was synced (`ride-analysis/instance-analysis.ts`
+§`syncedRideId`). The instance refuses one that is not among the caller's live signed records
+(`validation_failed` on `rideId`), keeps it on the job (`analysis_job.ride_id`, migration 0022) and
+hands it to the agent, whose `history_search` then leaves that ride out and dates the others against
+it in whole weeks (ADR 0040 D-2). ⚠️ **A ride not yet synced is written up without relative ages —
+never synced first, never refused**: a sync sends far more than a write-up does and is the rider's
+own press of *Sync now*. A ride the base names and the instance no longer holds is refused and the
+start made again without it. Before #1229 the running instance also handed the engine no history
+index at all, so `history_search` answered "unavailable" on every job.
 
 `GET /v1/analysis/jobs/{jobId}/events` is Server-Sent Events: every event after `Last-Event-ID`, then
 live, ending after `result`; a `: hb` comment at most every 25 s (`OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS`)

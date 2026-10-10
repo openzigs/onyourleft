@@ -524,11 +524,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const hostedKey = async (athleteId: string): Promise<HostedKeyState> =>
         ownHostedKeyState(reading, await secretKey, athleteId);
       const local = analysisModel;
+      // #1229: the agent's history tool searches the index this instance keeps.
+      const indexed = history;
       hostedSettings = createHostedSettings({ store, secret: () => secretKey, now });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
           reads: store,
+          history: indexed,
           sources: {
             local,
             hostedKey,

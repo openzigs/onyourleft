@@ -37,6 +37,8 @@ describe('main.tsx builds the instance write-up port (#1102)', () => {
   it('builds it over the local store, the local athlete and the camera’s consent, read at the press', () => {
     expect(builder).toMatch(/store: localStore\(\)/);
     expect(builder).toMatch(/athleteId: LOCAL_ATHLETE/);
+    // #1229: the sync base a start reads to name a synced ride.
+    expect(builder).toMatch(/syncBase: localStore\(\)/);
     expect(builder).toMatch(
       /cameraConsented: \(\) => camera\?\.state\(\)\.consent\.local \?\? false/,
     );
