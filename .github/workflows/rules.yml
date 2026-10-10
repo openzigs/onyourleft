@@ -166,7 +166,9 @@ jobs:
       # security-relevant file: flipping an entry to `true` is what lets a
       # dependency's install script execute here. What keeps that acceptable is
       # already in place -- `pull_request` rather than its target-context
-      # counterpart, `permissions: contents: read`, no secrets in this job,
+      # counterpart, `permissions: contents: read`, no secret a fork's run is
+      # given (the job's one secret, #1231's read-only Docker Hub pull token,
+      # is withheld from fork pull requests by GitHub),
       # `persist-credentials: false`, and GitHub's first-time-contributor
       # approval gate. Read that block on every fork pull request anyway
       # (docs/agents/toolchain.md section 8).
@@ -206,6 +208,35 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
                      /etc/apt/sources.list.d/google-chrome.sources
+
+      # #1231, the owner's stop-gap of 2026-10-09. `instance image` (in the
+      # concurrent step below) pulls the digest-pinned base image from Docker
+      # Hub, and on 2026-10-09 three runs failed there: 37994349506
+      # (`toomanyrequests: unauthenticated pull rate limit`), and 37994374884
+      # and 37995040607 (auth timeouts against registry-1.docker.io /
+      # auth.docker.io). A logged-in pull counts against the account rather
+      # than the runner's shared address, so this fixes the RATE LIMIT; it
+      # does not fix an auth outage, which a logged-in pull goes through too.
+      # The GHCR mirror #1231 asks for is still the fix for both.
+      #
+      # The token is a read-only "Public Repo Read-only" Docker Hub token, the
+      # ONE secret this job holds. The username is a repository VARIABLE on
+      # purpose: Actions redacts a secret's value everywhere it appears in a
+      # log (#338). A fork's pull request is given no secret, so there the
+      # token is empty, the pull stays unauthenticated, and this step passes.
+      # A login that is attempted and fails fails the step, so a bad token is
+      # seen here rather than as a rate limit later. Neither value is printed:
+      # the token reaches `docker login` on stdin only.
+      - name: Log in to Docker Hub (read-only pull token; skipped on fork pull requests)
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            printf '%s' "${DOCKERHUB_TOKEN}" | docker login --username "${DOCKERHUB_USERNAME}" --password-stdin
+          else
+            echo 'No Docker Hub token in this run (a fork pull request): pulls are unauthenticated.'
+          fi
 
       # None of these commands makes a timing assertion, so they run side by
       # side (#651). Formatting, lint, the typecheck and most checkers are
@@ -541,3 +572,10 @@ jobs:
           path: coverage/
           retention-days: 7
           if-no-files-found: warn
+
+      # #1231: drop the Docker Hub credential the login step wrote to the
+      # runner. The runner is destroyed with the job anyway; this is tidiness,
+      # and `|| true` keeps it from ever failing the job.
+      - name: Log out of Docker Hub
+        if: always()
+        run: docker logout || true
