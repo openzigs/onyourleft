@@ -814,6 +814,33 @@ describe('never logged', () => {
     expect(logged).toContain('"event":"analysis-job","state":"failed","code":"model-error"');
   });
 
+  it('fails a job whose engine rejects, and keeps the error’s text nowhere (#1187)', async () => {
+    // A tool's `run` that rejects — a store error — propagates out of
+    // `runAnalysisAgent` (agent.ts §`runAnalysisAgent`): this is where it lands.
+    const jobLines: string[] = [];
+    const {
+      world: w,
+      engine,
+      riders,
+    } = await jobsWorld(1, { analysis: { log: (line) => jobLines.push(line) } });
+    const jobId = await started(w, riders[0]!.token);
+    const run = await engine.next();
+    run.fail(new Error('SQLITE_IOERR zq_store_marker /data/instance.sqlite'));
+    await w.analysis?.idle();
+    const job = await w.freshRead((store) => store.getAnalysisJob(riders[0]!.athleteId, jobId));
+    expect([job?.status, job?.failure]).toEqual(['failed', 'engine-error']);
+    const events = await w.freshRead((store) =>
+      store.listAnalysisEvents(riders[0]!.athleteId, jobId, 0, 10),
+    );
+    expect(events.map((each) => [each.kind, each.data])).toEqual([
+      ['result', '{"status":"failed","failure":"engine-error"}'],
+    ]);
+    const logged = [...w.instance.lines, ...jobLines].join('\n');
+    expect(logged).toContain('"event":"analysis-job","state":"failed","code":"engine-error"');
+    expect(logged).not.toContain('zq_store_marker');
+    expect(JSON.stringify(job)).not.toContain('zq_store_marker');
+  });
+
   it('keeps only a tool name of the tool-name shape in a progress event', async () => {
     const { world: w, engine, riders } = await jobsWorld(1);
     const jobId = await started(w, riders[0]!.token);

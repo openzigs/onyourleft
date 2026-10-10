@@ -14,9 +14,11 @@ import {
   HOSTED_KEY_UNREADABLE,
   hostedKeyState,
   importSecretKey,
+  ownHostedKeyState,
   type HostedKeyState,
   type SecretKey,
 } from './analysis/hosted-key.ts';
+import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
 import { agentEngine } from './analysis/engine.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
@@ -125,16 +127,6 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
-  /**
-   * The endpoint (an ORIGIN) an athlete's own recorded hosted consent names,
-   * or `undefined` when they have none — `analysis/source.ts`
-   * §`SourceOptions.recordedConsent` (ADR 0046 D-9, Q10). ⚠️ **Nothing records
-   * a consent yet: that is #1199**, so `serve.ts` never sets this and every
-   * `instance-hosted` job on a running instance — the operator's included —
-   * fails `hosted_unavailable` before the key is opened (#1223). A test sets
-   * it to run a hosted job end to end; #1199 replaces it with the store's read.
-   */
-  readonly hostedConsent?: (athleteId: string) => Promise<string | undefined>;
   /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
   readonly hostedFetch?: typeof globalThis.fetch;
 }
@@ -218,6 +210,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let history: History | undefined;
   let analysisModel: ModelConnection | undefined;
   let analysisJobs: AnalysisJobs | undefined;
+  let hostedSettings: HostedSettings | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
@@ -522,15 +515,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         options.sweepTimers,
       );
       // #1095: analysis jobs, on the accounts' sessions. Off — every start
-      // `analysis_off` — while the instance has no model and holds no hosted
-      // key. A job a stopped instance left unended is failed `interrupted`
+      // `analysis_off` — while the instance has no model and no secret to hold
+      // a hosted key under. A job a stopped instance left unended is failed `interrupted`
       // before any new one is queued, and is never run again.
       const reading = store;
-      const hostedKey = async (): Promise<HostedKeyState> =>
-        hostedKeyState(reading, await secretKey);
+      // #1199: the athlete's OWN key — the one they stored, or the operator's
+      // one key for the operator's own jobs — and never anybody else's.
+      const hostedKey = async (athleteId: string): Promise<HostedKeyState> =>
+        ownHostedKeyState(reading, await secretKey, athleteId);
       const local = analysisModel;
       // #1229: the agent's history tool searches the index this instance keeps.
       const indexed = history;
+      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
@@ -539,16 +535,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           sources: {
             local,
             hostedKey,
-            ...(options.hostedConsent === undefined
-              ? {}
-              : { recordedConsent: options.hostedConsent }),
+            // Q10 (#1199): the athlete's own recorded consent, naming an origin.
+            recordedConsent: async (athleteId) =>
+              (await reading.getHostedConsent(athleteId))?.origin,
             // #1223: every hosted request masked by the athlete's own guard (#1101).
             guard: (athleteId) => readMaskingGuard(reading, athleteId),
             behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
           },
           clock: { now },
         }),
-        available: async () => local !== undefined || (await hostedKey()).kind === 'held',
+        // A hosted model needs only a secret to hold a rider's own key under
+        // (#1199): a rider who has none is refused `hosted_unavailable`.
+        available: async () => local !== undefined || (await secretKey) !== undefined,
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,
@@ -593,6 +591,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             sealed: createSealed({ store, now }),
             ...(sync === undefined ? {} : { sync }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
+            ...(hostedSettings === undefined ? {} : { hostedSettings }),
           }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).

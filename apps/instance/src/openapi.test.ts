@@ -70,7 +70,7 @@ function violations(value: unknown, schema: Schema, at = '$'): string[] {
       violations(item, schema.items, `${at}[${String(index)}]`),
     );
   }
-  if (schema.type === 'object' && 'properties' in schema) {
+  if (actual === 'object' && 'properties' in schema) {
     const record = value as Record<string, unknown>;
     const found: string[] = [];
     for (const key of schema.required) if (!(key in record)) found.push(`${at}.${key}: missing`);
@@ -120,6 +120,18 @@ async function signedIn(world: IdentityInstance): Promise<{ device: TestDevice; 
   const device = await testDevice();
   const session = await world.signIn(device);
   return { device, token: session.body.sessionToken as string };
+}
+
+/** A rider's own hosted key and consent, both set (#1199). */
+async function hostedBoth(world: IdentityInstance, token: string): Promise<void> {
+  await send(world, 'POST', '/v1/analysis/hosted/key', token, {
+    url: 'https://models.example/v1',
+    model: 'a-model',
+    key: 'sk-0123456789',
+  });
+  await send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+    endpoint: 'https://models.example',
+  });
 }
 
 function send(
@@ -523,6 +535,45 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     });
   },
   ...SYNC_HAPPY_CALLS,
+  // #1199: a rider's own hosted key and consent — each with both set, so the
+  // nullable objects are read as objects.
+  getHostedModelSettings: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'GET', '/v1/analysis/hosted', token);
+  },
+  setHostedModelKey: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+      endpoint: 'https://models.example',
+    });
+    return send(world, 'POST', '/v1/analysis/hosted/key', token, {
+      url: 'https://models.example/v1',
+      model: 'a-model',
+      key: 'sk-0123456789',
+    });
+  },
+  clearHostedModelKey: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'DELETE', '/v1/analysis/hosted/key', token);
+  },
+  recordHostedConsent: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', '/v1/analysis/hosted/key', token, {
+      url: 'https://models.example/v1',
+      model: 'a-model',
+      key: 'sk-0123456789',
+    });
+    return send(world, 'POST', '/v1/analysis/hosted/consent', token, {
+      endpoint: 'https://models.example',
+    });
+  },
+  withdrawHostedConsent: async (world) => {
+    const { token } = await signedIn(world);
+    await hostedBoth(world, token);
+    return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
+  },
   searchHistory: async (world) => {
     const { token } = await signedIn(world);
     await send(world, 'POST', '/v1/sync/items/note/note-1', token, {

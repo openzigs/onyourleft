@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0021 (#1229): **`analysis_job.ride_id`** — which of the athlete's
+ * Migration 0022 (#1229): **`analysis_job.ride_id`** — which of the athlete's
  * synced rides a job writes up, when the device named one.
  *
  * It is the ride's own id (the signed record's `claims.activityId`, the key a

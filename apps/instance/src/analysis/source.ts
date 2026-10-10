@@ -17,24 +17,27 @@
  * ⚠️ **No hosted job without the athlete's own recorded consent — the
  * operator's included.** ADR 0046 D-9 §"A rider's own consent", point 1:
  * *"A hosted job runs only for an athlete whose own hosted consent is
- * recorded on the instance, in **either** mode … A job without it is refused,
- * before a key is read."* Only the Ollama source is exempt (point 4). The
- * operator is an athlete, so their own jobs need it too. The check is
- * {@link SourceOptions.recordedConsent}, asked BEFORE
- * {@link SourceOptions.hostedKey}; nothing records a consent on this tree
- * (Q10 is #1199), so nothing supplies it on a running instance
- * (`instance.ts` §`InstanceOptions.hostedConsent`, which `serve.ts` never
- * sets) and every athlete’s `instance-hosted` job — the operator's too —
- * fails `hosted_unavailable` without the key being opened (`source.test.ts`,
- * `instance.test.ts` §"#1223").
+ * recorded on the instance … A job without it is refused, before a key is
+ * read."* Only the Ollama source is exempt (point 4). The operator is an
+ * athlete, so their own jobs need it too. The check is
+ * {@link SourceOptions.recordedConsent} — the store's `athlete_hosted_consent`
+ * row on a running instance (#1199) — asked BEFORE
+ * {@link SourceOptions.hostedKey}, and it must name the ORIGIN the key goes
+ * to. Both sides are read through `hosted-key.ts` §`hostedOriginOf`, so a
+ * consent stored as a full URL or with a trailing slash still matches.
  *
- * ⚠️ **The held key serves the athlete it is held for, and nobody else.**
- * That is the operator (ADR 0046 Q9, `operator model-key set`). Every other
- * athlete's job is refused as well until the operator's switch is built
- * (Q13: *"Other riders get no analysis until the operator turns it on,
- * whichever key they use"*). The athlete is the one stored with the key: if
- * `OYL_INSTANCE_OWNER_KEY` changes, the key stays with the athlete it was set
- * for until the operator clears it and sets it again.
+ * ⚠️ **A hosted job runs on the athlete's OWN key and nobody else's.** The
+ * owner's ruling of 2026-10-09 withdrew D-9's Share mode: *"Operator key is
+ * not shared with riders. If it is hosted they need to bring their own key."*
+ * {@link SourceOptions.hostedKey} is asked for `athleteId`'s key
+ * (`hosted-key.ts` §`ownHostedKeyState`: the key the rider stored, or the
+ * operator's one key for the operator's own jobs), and a key held for any
+ * other athlete is refused here as well, so a rider with no key of their own
+ * gets `hosted_unavailable` whatever the operator holds. The operator's key
+ * stays with the athlete it was set for: if `OYL_INSTANCE_OWNER_KEY`
+ * changes, the operator clears it and sets it again. The job engine does not
+ * re-derive Q9's operator at job time (#1199's "Also owed", decided so,
+ * because the key is that athlete's own).
  *
  * ⚠️ **No hosted request without masking.** Everything a hosted model is sent
  * is masked first (#1101, `hosted.ts`), so the hosted connection is built
@@ -48,7 +51,7 @@
 
 import type { MaskingGuard } from '@onyourleft/analysis';
 
-import type { HostedKeyState } from './hosted-key.ts';
+import { hostedOriginOf, type HostedKeyState } from './hosted-key.ts';
 import type { ModelConnection } from './model-turn.ts';
 
 /** The two sources a job may name. */
@@ -63,16 +66,18 @@ export type OpenedHostedKey = Extract<HostedKeyState, { readonly kind: 'held' }>
 export interface SourceOptions {
   /** The local model, or `undefined` when the instance has none configured. */
   readonly local: ModelConnection | undefined;
-  /** The held key, opened with the instance's secret if it can be (`hosted-key.ts`). */
-  readonly hostedKey: () => Promise<HostedKeyState>;
+  /**
+   * `athleteId`'s OWN key, opened with the instance's secret if it can be
+   * (`hosted-key.ts` §`ownHostedKeyState`). Asked only after the consent.
+   */
+  readonly hostedKey: (athleteId: string) => Promise<HostedKeyState>;
   /**
    * The endpoint — the ORIGIN a request would go to — that `athleteId`'s own
    * recorded hosted consent names (ADR 0046 Q10 and D-9 point 2), or
    * `undefined` when they have none. A key rotated at the same origin keeps
    * the consent; another origin does not have it. Asked BEFORE the key is read.
-   * `undefined` on this tree — no consent is recorded yet — so
-   * `instance-hosted` fails `hosted_unavailable` for every athlete, the
-   * operator included, and the key is never opened.
+   * Absent, `instance-hosted` fails `hosted_unavailable` for every athlete
+   * and the key is never opened.
    */
   readonly recordedConsent?: (athleteId: string) => Promise<string | undefined>;
   /**
@@ -116,14 +121,15 @@ export async function modelForSource(
       : { ok: true, model: options.local };
   }
   // Q10, before the key is read: no recorded consent, no key opened.
-  const consented =
+  const recorded =
     options.recordedConsent === undefined ? undefined : await options.recordedConsent(athleteId);
+  const consented = recorded === undefined ? undefined : hostedOriginOf(recorded);
   if (consented === undefined) return { ok: false, failure: 'hosted_unavailable' };
-  const held = await options.hostedKey();
+  const held = await options.hostedKey(athleteId);
   if (
     held.kind !== 'held' ||
     held.athleteId !== athleteId ||
-    new URL(held.url).origin !== consented ||
+    hostedOriginOf(held.url) !== consented ||
     options.behindMasking === undefined
   ) {
     return { ok: false, failure: 'hosted_unavailable' };
