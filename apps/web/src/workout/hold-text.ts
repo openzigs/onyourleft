@@ -31,8 +31,6 @@ import {
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 
-import type { AnnouncementEvent } from '../game/hud/announce';
-
 /**
  * Why a hold block is riding its planned target instead of holding, when
  * that is not the heart rate's doing.
@@ -103,6 +101,19 @@ export function holdHudLine(hold: WorkoutHold): string {
   return `Hold ${holdRangeText(hold.range)}: ${String(hold.target)} W`;
 }
 
+/**
+ * The event both announcers offer — `game/hud/announce.ts`'s
+ * `AnnouncementEvent` of kind `hold-changed`, written out here rather than
+ * imported. ⚠️ Deliberately: the ride controller reads this module's types,
+ * and an import of the announcer from here pulled the HUD's field module into
+ * every import walk that starts at the controller — which doubled the time
+ * `ride-analysis/runner-safety.test.ts` spends walking it.
+ */
+export interface HoldChangedEvent {
+  readonly kind: 'hold-changed';
+  readonly text: string;
+}
+
 /** At most one `hold-changed` a minute. */
 export const HOLD_SPOKEN_EVERY_SECONDS = 60;
 
@@ -151,7 +162,7 @@ export function holdAnnouncement(
   sentence: string | undefined,
   now: number,
   where: { readonly timeline: WorkoutTimeline; readonly elapsedSeconds: number } | undefined,
-): { readonly event: AnnouncementEvent | undefined; readonly next: HoldAnnounced } {
+): { readonly event: HoldChangedEvent | undefined; readonly next: HoldAnnounced } {
   const next = { ...previous, sentence };
   if (sentence === undefined || previous.sentence === undefined || sentence === previous.sentence) {
     return { event: undefined, next };
