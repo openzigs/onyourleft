@@ -29,6 +29,11 @@ import {
   metresPerSecond,
   routeProfile,
   revolutionsPerMinute,
+  beatsPerMinute,
+  HOLD_MAXIMUM_STEP_DOWN_WATTS,
+  HOLD_MAXIMUM_STEP_UP_WATTS,
+  HOLD_SETTLING_SECONDS,
+  HOLD_SILENCE_FALLBACK_SECONDS,
   seconds,
   thresholdShare,
   unixSeconds,
@@ -71,6 +76,7 @@ import {
   hrsStrap,
   type FtmsOptions,
   type SimulatorBench,
+  type SimulatorOptions,
 } from '@onyourleft/sensors/simulator';
 import {
   activityId,
@@ -201,6 +207,8 @@ interface Bench {
 interface BenchOptions {
   /** `two-trainers` adds a second FTMS machine, `NEO 2T`, after the KICKR (#718). */
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
+  /** #1240: the simulated rider, and a heart rate that answers to load. */
+  readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate'>;
   readonly withTrainerControl?: boolean;
   /** Never answer a control point write, so a procedure stays outstanding. */
   readonly silentTrainer?: boolean;
@@ -295,6 +303,7 @@ function benchWith(options: BenchOptions = {}): Bench {
         : []),
       ...(which === 'two-trainers' ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T' })] : []),
     ],
+    ...options.simulator,
   });
 
   let control: TrainerControl | undefined;
@@ -7260,6 +7269,192 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
     await recordAndStop(rig, 2);
     expect(rig.controller.getSnapshot().resultAnnounced).toBe(false);
+    rig.controller.dispose();
+  });
+});
+
+describe('#1240 — the heart-rate hold, through the real controller, session and ERG writer', () => {
+  const THRESHOLD = watts(250);
+  const STRAP = deviceId('strap');
+  const OWN = {
+    thresholdHeartRate: beatsPerMinute(170),
+    assumed: { power: false, heartRate: false },
+  } as const;
+
+  const holdWorkout = (): WorkoutRecord => ({
+    id: workoutId('hold'),
+    createdBy: ATHLETE_A,
+    name: 'Hold',
+    workout: {
+      name: 'Hold',
+      blocks: [
+        {
+          kind: 'heart-rate-hold',
+          seconds: seconds(3600),
+          range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+          startShare: thresholdShare(0.4),
+          ceilingShare: thresholdShare(0.85),
+        },
+      ],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  /**
+   * A rider whose simulated heart sits at 119 bpm at 100 W (#1238's model,
+   * resting rate 80) — the hold has 15 to 20 bpm to find — on a controlled
+   * trainer, recording, with or without a strap.
+   */
+  async function holding(options: { readonly strap?: boolean; readonly own?: boolean } = {}) {
+    const rig = benchWith({
+      devices: options.strap === false ? 'trainer' : 'trainer+strap',
+      simulator: {
+        rider: { power: watts(100) },
+        heartRate: { kind: 'responsive', restingHeartRate: 80 },
+      },
+    });
+    await rig.controller.pair('trainer');
+    if (options.strap !== false) {
+      await rig.controller.pair('heart-rate');
+    }
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(
+      rig.controller.startWorkout(
+        holdWorkout(),
+        THRESHOLD,
+        options.own === false ? undefined : OWN,
+      ),
+    ).toBe(true);
+    return rig;
+  }
+
+  /** Every Set Target Power on the wire, in watts, from `from` on. */
+  const targetsSent = (rig: Bench, from = 0): number[] =>
+    rig.written
+      .slice(from)
+      .filter((write) => write[0] === 0x05)
+      .map((write) => (write[1] ?? 0) + ((write[2] ?? 0) << 8));
+
+  const heartRateNow = (rig: Bench): number | undefined => {
+    const state = metric(rig, 'heartRate');
+    return state.kind === 'live' ? state.value : undefined;
+  };
+
+  it('trainer receives the hold’s targets: every one inside the envelope, and the heart rate ends inside the range', async () => {
+    const rig = await holding();
+    await ride(rig, 12 * 60);
+    await flushMicrotasks(20);
+
+    const sent = targetsSent(rig);
+    expect(sent.length).toBeGreaterThan(5);
+    expect(sent[0]).toBe(100);
+    for (const [index, target] of sent.entries()) {
+      expect(target).toBeLessThanOrEqual(Math.floor(250 * 0.85));
+      expect(target).toBeGreaterThanOrEqual(50);
+      if (index > 0) {
+        const step = target - (sent[index - 1] ?? 0);
+        expect(step).toBeLessThanOrEqual(HOLD_MAXIMUM_STEP_UP_WATTS);
+        expect(-step).toBeLessThanOrEqual(HOLD_MAXIMUM_STEP_DOWN_WATTS);
+      }
+    }
+    // What the TRAINER holds is the last of them, and the heart answered it.
+    expect(rig.targetOnTheTrainer()).toBe(sent.at(-1));
+    const bpm = heartRateNow(rig) ?? 0;
+    expect(bpm).toBeGreaterThanOrEqual(130);
+    expect(bpm).toBeLessThanOrEqual(140);
+    expect(rig.controller.getSnapshot().workout?.hold?.reason).not.toBe('ineligible');
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('stop wins: one release through the controller, and no hold write after it', async () => {
+    const rig = await holding();
+    await ride(rig, HOLD_SETTLING_SECONDS + 30);
+    await flushMicrotasks();
+    expect(targetsSent(rig).length).toBeGreaterThan(1);
+    const before = rig.written.length;
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flushMicrotasks(20);
+    // The heart is still far below the range: a hold still running would raise.
+    await ride(rig, 30);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().workout).toBeUndefined();
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('control lost mid-hold pauses the workout, and on resume the hold settles again', async () => {
+    const rig = await holding();
+    await ride(rig, HOLD_SETTLING_SECONDS + 60);
+    expect(rig.controller.getSnapshot().workout?.hold?.reason).not.toBe('settling');
+
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    expect(rig.controller.getSnapshot().workout?.status).toBe('paused');
+
+    await rig.controller.requestTrainerControl();
+    await ride(rig, 2);
+    const resumed = rig.controller.getSnapshot().workout;
+    expect(resumed?.status).toBe('running');
+    expect(resumed?.hold?.reason).toBe('settling');
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('HR strap drops mid-ride: the hold says so, never raises, and after 15 s is at the planned share', async () => {
+    const rig = await holding();
+    await ride(rig, 5 * 60);
+    await flushMicrotasks(20);
+    const raised = targetsSent(rig).at(-1) ?? 0;
+    expect(raised).toBeGreaterThan(100);
+    const before = rig.written.length;
+
+    rig.bench.device(STRAP).script({ kind: 'notification-dropout', duration: seconds(120) });
+    await ride(rig, HOLD_SILENCE_FALLBACK_SECONDS + 10);
+    await flushMicrotasks(20);
+
+    const hold = rig.controller.getSnapshot().workout?.hold;
+    expect(hold?.reason).toBe('silent');
+    const during = targetsSent(rig, before);
+    expect(during.every((target) => target <= raised)).toBe(true);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('no strap at all: the hold block runs steady at its planned share, and the workout starts', async () => {
+    const rig = await holding({ strap: false });
+    await ride(rig, HOLD_SETTLING_SECONDS + 120);
+    await flushMicrotasks(20);
+    expect(targetsSent(rig)).toEqual([100]);
+    expect(rig.controller.getSnapshot().workout?.hold).toMatchObject({
+      reason: 'ineligible',
+      off: 'no-strap',
+      target: 100,
+    });
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('no threshold heart rate of the rider’s own: steady, and the screen is told why', async () => {
+    const rig = await holding({ own: false });
+    await ride(rig, HOLD_SETTLING_SECONDS + 30);
+    await flushMicrotasks(20);
+    expect(targetsSent(rig)).toEqual([100]);
+    expect(rig.controller.getSnapshot().workout?.hold?.off).toBe('thresholds');
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('one writer: a hand-set ERG target is refused while a hold workout runs', async () => {
+    const rig = await holding();
+    await ride(rig, 3);
+    await flushMicrotasks();
+    const before = rig.written.length;
+    await rig.controller.setTargetPower(watts(200));
+    await flushMicrotasks(20);
+    expect(targetsSent(rig, before)).not.toContain(200);
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeDefined();
     rig.controller.dispose();
   });
 });
