@@ -206,35 +206,46 @@ none (#1105), never to run with.
 
 ## A hosted model key
 
-Besides a model on the box, the instance may hold **one** key for a hosted, OpenAI-compatible model
-service (#1097, [ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
-D-9). ⚠️ **Nothing uses it yet, for anyone — you included.** A hosted job runs only for an athlete
-whose own consent, naming the endpoint, is recorded on the instance (ADR 0046 Q10), and is refused
-before the key is read; and a hosted request must be masked first (#1101). Neither is built, so a job
-that asks for the hosted source fails `hosted_unavailable`, the key is not opened, and nothing is
-sent. And it is used only for a job whose rider's device asked for it — the source is chosen per
-job, never by the instance.
+Besides a model on the box, a hosted, OpenAI-compatible model service may analyse a ride — **on the
+rider's own key, and nobody else's** (#1097, #1199,
+[ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-9 as the owner
+ruled it on 2026-10-09: *"Operator key is not shared with riders. If it is hosted they need to bring
+their own key."* D-9's Share mode, and with it the operator's switch for other riders, is
+withdrawn). A hosted job runs only when all of these hold, and is refused `hosted_unavailable`, with
+nothing sent, otherwise:
 
-**Held for you, the operator, and for nobody else yet.** The instance also hosts group rides and
-races, so it has other riders, and holding a key changes nothing about them: they register and ride
-as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*. The key is
+- the rider's device asked for the hosted source for that job — the source is chosen per job, never
+  by the instance;
+- the rider's own consent is recorded on the instance and names the **origin** their key goes to
+  (ADR 0046 Q10), checked before the key is read. Storing a key at another origin withdraws it; a key
+  rotated at the same origin keeps it;
+- the rider holds a key of their own: one they stored from the app (`POST /v1/analysis/hosted/key`,
+  sealed only), or — for you alone — the key `model-key set` holds for you;
+- the rider's masking item can be read (#1101): everything sent is masked first.
+
+**A rider's own key** is encrypted under `OYL_INSTANCE_SECRET_KEY` exactly as yours is, one per
+rider, erased with their account and named in their export only as `"a hosted model key is held"`,
+beside `hostedConsent` (the origin and when). An instance with no secret refuses to store one. ⚠️
+**You could technically read a key a rider stores here** — the secret is yours — and the app is to
+tell the rider so (ruling 5, in #1104's wording; no app screen stores a key yet).
+
+**Yours is held for you, the operator, and for nobody else.** The instance also hosts group rides
+and races, so it has other riders, and holding a key changes nothing about them: they register and
+ride as before. The owner's ruling 5 on #1092 *"REPLACES ruling 3's 'single-rider only'"*. The key is
 held for the operator, who is, in the owner's Q9 ruling, *"the athlete whose device holds
 `OYL_INSTANCE_OWNER_KEY`, the key that already makes them moderator"*: `model-key set` looks that
 athlete up, and is refused when the variable is unset or your device has not signed in to this
-instance yet. **No job can use it yet, yours included.** ADR 0046 Q10 binds you as it binds every
-rider: a hosted job runs only for an athlete whose own consent, recorded on the instance and naming
-the endpoint, is there, and recording that consent is not built yet — for you or anyone. Another
-rider's job is refused for a second reason as well: your switch for other riders (Q13: *"Other
-riders get no analysis until the operator turns it on, whichever key they use"*) is not built
-either. What remains of #1097 — the switch, a rider's own key, the consent, and where a pasted key
-may be typed — is #1199.
+instance yet. It serves your own jobs only — an operator using their own key for their own account
+is a rider bringing their own key — and only once your own consent naming its origin is recorded. A
+key you store from the app replaces it for your jobs.
 
 **The key stays with the athlete it was set for.** It is stored against your athlete, not against
 the variable. If you change `OYL_INSTANCE_OWNER_KEY` to another athlete's device key, or your device
 key is revoked, the key does not move: run `model-key clear`, then `model-key set` again as the new
-operator. Erasing your account (`DELETE /v1/account`) erases the key with it. Your
+operator. The job engine does not look the operator up again at job time (#1199 decided it: the key
+is that athlete's own). Erasing your account (`DELETE /v1/account`) erases the key with it. Your
 account export says only `"hostedModelKey": "a hosted model key is held"`; another rider's says
-`null`.
+`null` unless they stored one of their own.
 
 **The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
 bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:

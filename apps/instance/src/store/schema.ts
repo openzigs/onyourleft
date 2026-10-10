@@ -384,6 +384,32 @@ export interface HostedModelKeyTable {
 }
 
 /**
+ * A rider's OWN hosted model key (#1199, ADR 0046 D-9 as the owner ruled it
+ * on 2026-10-09: bring-your-own only). Added by migration 0021. One row an
+ * athlete; the key is AES-256-GCM ciphertext under `OYL_INSTANCE_SECRET_KEY`,
+ * sealed exactly as {@link HostedModelKeyTable}'s, and never a column in clear.
+ */
+export interface AthleteHostedKeyTable {
+  readonly athlete_id: string;
+  /** The hosted service's OpenAI-compatible base URL, `https:` only. */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly set_at: number;
+}
+
+/**
+ * A rider's own recorded hosted consent (#1199, ADR 0046 Q10). Added by
+ * migration 0021. One row an athlete: the ORIGIN it names, and when.
+ */
+export interface AthleteHostedConsentTable {
+  readonly athlete_id: string;
+  readonly origin: string;
+  readonly recorded_at: number;
+}
+
+/**
  * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
  * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
  * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
@@ -514,4 +540,6 @@ export interface InstanceDatabase {
   readonly account_change_mark: AccountChangeMarkTable;
   readonly analysis_job: AnalysisJobTable;
   readonly analysis_event: AnalysisEventTable;
+  readonly athlete_hosted_key: AthleteHostedKeyTable;
+  readonly athlete_hosted_consent: AthleteHostedConsentTable;
 }
