@@ -154,6 +154,17 @@ describe('the hardest target is the one a rider wants to know', () => {
     ).toBeCloseTo(1.2, 10);
   });
 
+  it('reads a heart-rate hold at its ceiling, not its start', () => {
+    const hold: WorkoutBlock = {
+      kind: 'heart-rate-hold',
+      seconds: seconds(1800),
+      range: { low: 130 as never, high: 140 as never },
+      startShare: thresholdShare(0.55),
+      ceilingShare: thresholdShare(0.8),
+    };
+    expect(hardestShare({ name: 'Base', blocks: [hold] })).toBeCloseTo(0.8, 10);
+  });
+
   it('takes the maximum across blocks, not the last one', () => {
     expect(hardestShare({ name: 'Mixed', blocks: [steady(60, 1.2), steady(60, 0.5)] })).toBeCloseTo(
       1.2,
