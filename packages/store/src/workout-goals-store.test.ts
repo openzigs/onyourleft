@@ -130,6 +130,18 @@ describe('typed workout goals — #1236', () => {
     });
   });
 
+  it('refuses a save time that is not whole Unix seconds, and an empty athlete id', async () => {
+    const goals = workoutGoalsFor(ATHLETE_A);
+    await expect(
+      harness.write((store) => store.putWorkoutGoals({ ...goals, savedAt: unixSeconds(1.5) })),
+    ).rejects.toThrow('workoutGoals.savedAt');
+    await expect(
+      harness.write((store) =>
+        store.putWorkoutGoals({ ...goals, athleteId: '' } as unknown as WorkoutGoalsRecord),
+      ),
+    ).rejects.toThrow('workoutGoals.athleteId');
+  });
+
   it('refuses goals for an athlete who does not exist', async () => {
     await expect(
       harness.write((store) => store.putWorkoutGoals(workoutGoalsFor(athleteId('nobody-here')))),
