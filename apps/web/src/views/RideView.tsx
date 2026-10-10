@@ -46,7 +46,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 
-import type { Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
 import { SensorGlyph } from '../design/illustration';
@@ -165,7 +165,8 @@ function LiveRide({
   readonly sidePairing: SidePairingPort | undefined;
 }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  const thresholdPower = useThresholdPower(analysis);
+  const own = useOwnThresholds(analysis);
+  const thresholdPower = own.power;
   const sideCamera = useSideCamera(sidePairing);
   // #655: which of two voices answers a held *Set* — the ERG form's, or the
   // ride's one region. ⚠️ Read ONCE, here, and the same object handed to
@@ -310,7 +311,19 @@ function LiveRide({
             if (thresholdPower === undefined) {
               return;
             }
-            controller.startWorkout(record, thresholdPower);
+            // #1240: a heart-rate hold runs only on the rider's OWN two
+            // thresholds (ADR 0048 H1). Without their own threshold heart
+            // rate there is no context, and every hold block rides steady.
+            controller.startWorkout(
+              record,
+              thresholdPower,
+              own.heartRate === undefined
+                ? undefined
+                : {
+                    thresholdHeartRate: own.heartRate,
+                    assumed: { power: false, heartRate: false },
+                  },
+            );
           }}
           onEnd={() => {
             controller.endWorkout();
@@ -328,16 +341,25 @@ function LiveRide({
   );
 }
 
+/** The rider's own thresholds, each `undefined` when they have not set it. */
+interface OwnThresholds {
+  readonly power: Watts | undefined;
+  readonly heartRate: BeatsPerMinute | undefined;
+}
+
+const NO_THRESHOLDS: OwnThresholds = { power: undefined, heartRate: undefined };
+
 /**
- * Read the athlete's threshold once, for the workout panel.
+ * Read the athlete's thresholds once, for the workout panel — threshold
+ * heart rate too since #1240, which a heart-rate hold needs.
  *
  * `undefined` while it is being read and `undefined` when it is not set, and
  * the two are deliberately the same value: the panel's answer to both is the
  * same sentence, and a screen that distinguished "loading" from "not set" would
  * be offering a rider a state they cannot act on.
  */
-function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefined {
-  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
+  const [threshold, setThreshold] = useState<OwnThresholds>(NO_THRESHOLDS);
   useEffect(() => {
     if (analysis === undefined) {
       return;
@@ -346,7 +368,14 @@ function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefine
     void analysis.store
       .getAthlete(analysis.athleteId)
       .then((athlete) => {
-        if (live) setThreshold(athlete?.thresholdPower);
+        if (live) {
+          // The rider's own, and nothing substituted: `analysis/thresholds.ts`
+          // is the one place a default is, and it is not for this screen.
+          setThreshold({
+            power: athlete?.thresholdPower,
+            heartRate: athlete?.thresholdHeartRate,
+          });
+        }
       })
       .catch(() => {
         // A store that cannot be read leaves the threshold absent, which the

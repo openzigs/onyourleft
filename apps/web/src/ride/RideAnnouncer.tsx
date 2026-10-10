@@ -31,6 +31,7 @@
  * | the side camera's link, when it goes (#551) | `side-camera-lost` | `side-camera.ts` §`SIDE_CAMERA_LOST_SENTENCE` |
  * | `RideSnapshot.keepAliveFailed`, when it appears (#647) | `screen-off-risk` | `controller.ts` §`RIDE_MAY_STOP_SPOKEN` |
  * | `TrainerSnapshot.ergHeld`, per press, announcements ON only (#655) | `erg-held` | "Held: …", `TrainerPanel` §`heldSentence` |
+ * | `RideWorkoutSnapshot.hold`, when its sentence changes, announcements ON only, at most once a minute (#1240) | `hold-changed` | "Heart-rate hold: …", `workout/hold-text.ts` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -98,6 +99,12 @@ import {
   isEasedAnnouncement,
   workoutRescueText,
 } from '../workout/rescue-text';
+import {
+  holdAnnouncement,
+  holdSentence,
+  NOTHING_ANNOUNCED,
+  type HoldAnnounced,
+} from '../workout/hold-text';
 
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -318,6 +325,15 @@ export function RideAnnouncer({
    * Owed like {@link screenOffSaid}'s sentence, and for the same reason.
    */
   const heldOwed = useRef<AnnouncementEvent | undefined>(undefined);
+  /**
+   * The heart-rate hold's sentence as last seen, and when one was last
+   * offered — #1240. Seeded from the first render, so a hold already running
+   * when the screen appears is not announced (#394's rule).
+   */
+  const holdSeen = useRef<HoldAnnounced>({
+    ...NOTHING_ANNOUNCED,
+    sentence: workout?.hold === undefined ? undefined : holdSentence(workout.hold),
+  });
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -381,6 +397,7 @@ export function RideAnnouncer({
   const timeline = workout?.timeline;
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
+  const holdText = workout?.hold === undefined ? undefined : holdSentence(workout.hold);
   const {
     lost,
     releaseFault,
@@ -451,6 +468,24 @@ export function RideAnnouncer({
       heldPress,
       heldText,
     };
+    // #1240: the hold's sentence when it changes — at most once a minute, and
+    // not in the last 30 s of a hard segment. Its rank is below every trainer
+    // and workout fault, and it is spoken with announcements ON only
+    // (`announce.ts` §`PRIORITY`, §`ALWAYS_SPOKEN`).
+    const held = holdAnnouncement(
+      holdSeen.current,
+      holdText,
+      now.current(),
+      timeline === undefined || elapsedSeconds === undefined
+        ? undefined
+        : { timeline, elapsedSeconds },
+    );
+    holdSeen.current = held.next;
+    // Offered whatever the preference: `hold-changed` is not in `announce.ts`
+    // §`ALWAYS_SPOKEN`, so with announcements off the core drops it.
+    if (held.event !== undefined) {
+      events.push(held.event);
+    }
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -482,6 +517,7 @@ export function RideAnnouncer({
     timeline,
     elapsedSeconds,
     status,
+    holdText,
   ]);
 
   return (

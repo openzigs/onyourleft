@@ -119,6 +119,14 @@ import {
   workoutRescueText,
 } from '../workout/rescue-text';
 import {
+  holdAnnouncement,
+  holdHudLine,
+  holdSentence,
+  NOTHING_ANNOUNCED,
+  type HoldAnnounced,
+  type WorkoutHold,
+} from '../workout/hold-text';
+import {
   announce,
   INITIAL_ANNOUNCER,
   withdrawPending,
@@ -688,6 +696,13 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const easedRef = useRef<string | undefined>(undefined);
   /**
+   * The running workout's heart-rate hold sentence last seen, and when one
+   * was last offered — #1240. Cleared when a ride starts; the first sentence
+   * seen is then recorded and not said (#394's rule), and a change after it
+   * is said at most once a minute, announcements on only.
+   */
+  const holdSeenRef = useRef<HoldAnnounced>(NOTHING_ANNOUNCED);
+  /**
    * Whether *"Keep the screen on: …"* has been SPOKEN on this ride while the
    * refusal stands — #647, `GameTrainerPort.recordingMayStop`. Cleared when a
    * ride starts, so a refusal already standing is said once as the ride
@@ -1106,6 +1121,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
       gradientFaultRef.current = undefined;
       easedRef.current = undefined;
+      holdSeenRef.current = NOTHING_ANNOUNCED;
       mayStopSaidRef.current = false;
       gradientRef.current =
         found.control === undefined
@@ -1536,6 +1552,21 @@ export function GameView(props: GameViewProps): JSX.Element {
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
       sideLostRef.current = sideCameraLost(side);
       if (sideLost !== undefined) events.push(sideLost);
+      // #1240: the workout's heart-rate hold, when its sentence changes —
+      // `hold-changed`, below every trainer and workout fault, announcements
+      // on only, at most once a minute (`workout/hold-text.ts`).
+      const holdNow = trainerPortRef.current?.workoutHold?.();
+      const holdSaid = holdAnnouncement(
+        holdSeenRef.current,
+        holdNow === undefined ? undefined : holdSentence(holdNow),
+        simulation.state.elapsed,
+        undefined,
+      );
+      holdSeenRef.current = holdSaid.next;
+      // Not in `ALWAYS_SPOKEN`: with announcements off the core drops it.
+      if (holdSaid.event !== undefined) {
+        events.push(holdSaid.event);
+      }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -1975,7 +2006,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         // it visible: the panel it moved into ran off the bottom too (#419,
         // #422). `hud/fields.ts` §`TrainerLine` argues the placement and says
         // what did fix it; `browser/ride.browser.spec.ts` measures it.
-        trainer={trainerReading(gradient)}
+        trainer={trainerReading(gradient) ?? holdLineOf(props.trainer?.workoutHold?.())}
         // #551: the side camera's one line and its Stop. A lost link on an
         // OPEN pairing is not here but in `notices` below — it is the
         // exception, and a steady "filming" in the notice slot would take a
@@ -2194,6 +2225,15 @@ function easedText(rescue: WorkoutRescue | undefined): string | undefined {
  * −3.4%" beside it would be describing a write that did not happen. Absent
  * rather than a nought, on `fields.ts` §`NO_READING`'s precedent.
  */
+/**
+ * A running workout's heart-rate hold as the HUD's trainer line — #1240. A
+ * workout owns the trainer, so the game is not simulating and the line's place
+ * is free; the short line goes there, and the HUD's region says the sentence.
+ */
+function holdLineOf(hold: WorkoutHold | undefined): TrainerLine | undefined {
+  return hold === undefined ? undefined : { hold: holdHudLine(hold) };
+}
+
 function trainerReading(gradient: GradientSessionState | undefined): TrainerLine | undefined {
   if (gradient === undefined || gradient.fault !== undefined || gradient.asked === undefined) {
     return undefined;
