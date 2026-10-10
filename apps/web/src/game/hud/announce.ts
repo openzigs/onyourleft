@@ -58,6 +58,7 @@
  * | `room-rider` | `GameView` | `game/room-ride.ts` §`riderEvents`, from the room's frames (#784) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
+ * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -208,7 +209,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'room-race'; readonly text: string }
   | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
-  | { readonly kind: 'erg-held'; readonly text: string };
+  | { readonly kind: 'erg-held'; readonly text: string }
+  | { readonly kind: 'hold-changed'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -230,6 +232,10 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'room-rider',
   'screen-off-risk',
   'erg-held',
+  // #1240: the heart-rate hold's sentence, BELOW every trainer and workout
+  // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
+  // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
+  'hold-changed',
   'power-off-target',
   'distance-tick',
   'power',

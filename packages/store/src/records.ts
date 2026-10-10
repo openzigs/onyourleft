@@ -40,6 +40,7 @@ import type {
   Watts,
   GeographicPosition,
   Workout,
+  WorkoutGoals,
 } from '@onyourleft/domain';
 
 import type {
@@ -1291,7 +1292,9 @@ export type SyncBaseKind =
   | 'note'
   | 'document'
   /** A saved workout (#1100), keyed by its own id. */
-  | 'workout';
+  | 'workout'
+  /** The rider's typed workout goals (#1237), keyed `goals`: one per athlete. */
+  | 'workout-goal';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1303,14 +1306,20 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'note',
   'document',
   'workout',
+  'workout-goal',
 ];
 
 /**
  * The kinds that belong to no ride (#836): the rider's goals and their
- * documents, and since #1100 their saved workouts. Their sync base row names
- * no ride — `activityId` is `null`.
+ * documents, since #1100 their saved workouts, and since #1237 their typed
+ * workout goals. Their sync base row names no ride — `activityId` is `null`.
  */
-export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document', 'workout'];
+export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
+  'goal',
+  'document',
+  'workout',
+  'workout-goal',
+];
 
 /**
  * The **sync base**: what this device and its instance agreed on at the last
@@ -1436,3 +1445,33 @@ export interface TrustedDeviceKeyRecord {
   /** When it was admitted on this device. */
   readonly admittedAt: UnixSeconds;
 }
+
+/**
+ * The rider's typed workout goals — #1236, ADR 0048 D-10 (the owner's Q9). One
+ * row per athlete, replaced whole on every save.
+ *
+ * ⚠️ **Not #836's free-text goals** (`RiderTextRecord`, kind `goal`), which
+ * the analysis agent reads and which never set a bound. These do: a
+ * heart-rate hold or a re-plan during the ride stays inside them. So they are
+ * checked by `@onyourleft/domain` §`readWorkoutGoals` on the way in **and** on
+ * the way out, and a row that fails reads back as no goals with a fault —
+ * never as part of a goal.
+ */
+export interface WorkoutGoalsRecord {
+  /** Whose. **Every read of this record names it** — it is the primary key. */
+  readonly athleteId: AthleteId;
+  /** What the rider chose. Every field optional; an absent one is no goal. */
+  readonly goals: WorkoutGoals;
+  /** When they were last saved on this device. */
+  readonly savedAt: UnixSeconds;
+}
+
+/**
+ * What a read of the athlete's workout goals found: nothing saved, the goals,
+ * or a row that is not goals and the one reason why. A fault holds **no**
+ * goals, so nothing downstream can bound a ride with half of one.
+ */
+export type WorkoutGoalsRead =
+  | { readonly status: 'none' }
+  | { readonly status: 'kept'; readonly record: WorkoutGoalsRecord }
+  | { readonly status: 'fault'; readonly fault: string };

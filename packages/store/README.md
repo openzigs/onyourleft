@@ -867,6 +867,30 @@ row going. The primary key is `[athleteId+publicKey]`; `listTrustedDeviceKeys(ow
 athlete, and one rule, `trustedDeviceKeyProblem`, holds a row on the way in and out.
 `assertTrustedDeviceKeyRoundTrip` is red against `memoryWriteStoreFactory`.
 
+## Typed workout goals — #1236, ADR 0048 D-10
+
+Schema version 18, additive: a new store, `workoutGoals`, and no existing record changes shape. One
+row per athlete, keyed **by** the athlete (`records.ts` §`WorkoutGoalsRecord`): the rider's own
+choices that **bound** a heart-rate hold or a re-plan during the ride — a session type, a duration,
+a heart-rate range to hold, a heart rate not to go above, a power ceiling as a share of their own
+threshold (at most 0.85, ADR 0048 H3), minutes in range, and effort check-ins. Every field is
+optional and an absent one is no goal, never a default. ⚠️ **They are not #836's free-text goals**
+(a `riderTexts` row of kind `goal`), which never set a bound.
+
+The model and its one check are `@onyourleft/domain` §`readWorkoutGoals` (`workout/goals.ts`), which
+refuses a malformed set **whole** — an unknown key included, ADR 0017 D-4's reasoning — and names
+the field and the constraint. `putWorkoutGoals` runs it on the way in and replaces the row whole;
+`getWorkoutGoals(owner)` runs it again on the way out and answers `none`, `kept`, or `fault` with
+the reason and **no** goals, so a hand-edited row never bounds a ride with part of a goal.
+`deleteWorkoutGoals(owner)` clears them; `deleteAthlete` counts them as `workoutGoals`. Bounds
+against the athlete's own thresholds are checked where a hold is computed, not here, because a
+threshold can change after the goals were saved.
+
+There is no `up`/`down` pair: no record changes shape, so a `down` would be the identity (§
+"Migrations"). The rollback is export → downgrade → re-import, executed with rides in the database by
+`workout-goals-store.test.ts` §"version 18 rolls back". `assertWorkoutGoalsRoundTrip` is red against
+`memoryWriteStoreFactory`.
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.

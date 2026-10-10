@@ -13,6 +13,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { beatsPerMinute } from '@onyourleft/domain';
+
+import type { WorkoutHold } from '../workout/hold-text';
+
 import {
   NO_GAME_TRAINER,
   gameTrainerFrom,
@@ -482,6 +486,28 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     rescue = { kind: 'floor', reason: 'Pedalling has stopped.' };
     expect(port.workoutRescue()).toEqual(rescue);
     expect(gameTrainerPortOver(undefined).workoutRescue()).toBeUndefined();
+  });
+
+  it('reads a running workout’s heart-rate hold off the controller, on every call — #1240', () => {
+    let hold: WorkoutHold | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: { status: 'running', rescue: undefined, hold },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.workoutHold?.()).toBeUndefined();
+    hold = {
+      reason: 'raised',
+      range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+      target: 160,
+    };
+    expect(port.workoutHold?.()).toEqual(hold);
+    expect(gameTrainerPortOver(undefined).workoutHold?.()).toBeUndefined();
   });
 
   it('hands a game ride’s outcome to the ride controller, and to nothing without one — #1042', () => {

@@ -40,6 +40,11 @@ one-for-one. Four things about it are decisions rather than details:
 - **One key, `onYourLeftWorkout: 1`, is both the identity and the version** (D-3). A `format` string
   beside a `version` number can disagree with itself; one key cannot. **The decoder never looks at
   the filename.**
+- ⚠️ **There is a version 2 since #1239**, for the heart-rate hold block (ADR 0048 D-3, ADR 0017's
+  2026-10-09 amendment). A workout is written at the **lowest** version that can carry it
+  (`format.ts` §`workoutFileVersionFor`): no hold, version 1, which an older build still opens. The
+  decoder reads both, and refuses a version-1 file that carries a hold — the file contradicts
+  itself. A reviewer who remembers "the only version it reads is 1" is reading the old file.
 - ⚠️ **An unrecognised key is refused, not ignored** (D-4) — the opposite of the usual convention.
   A future field that changed what a workout *does* would otherwise be dropped silently and the
   rider would ride something else against a machine applying resistance to them. Forward

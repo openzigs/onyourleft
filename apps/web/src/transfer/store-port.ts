@@ -38,6 +38,7 @@ import type {
   SegmentRecord,
   StoredActivityRecord,
   StreamSet,
+  WorkoutGoalsRead,
   WorkoutRecord,
 } from '@onyourleft/store';
 
@@ -80,6 +81,11 @@ export interface AccountStore {
    * that formats one into a string.
    */
   deleteAthlete(id: AthleteId): Promise<AthleteDeletionCounts>;
+  /**
+   * The rider's typed workout goals (#1236) — carried by the account export so
+   * that ADR 0005 F's rollback (export → downgrade → re-import) keeps them.
+   */
+  getWorkoutGoals(owner: AthleteId): Promise<WorkoutGoalsRead>;
   /**
    * Puts the athlete row back after an erase.
    *

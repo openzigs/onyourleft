@@ -1183,6 +1183,12 @@ h3:first-child {
   grid-column: 1 / -1;
 }
 
+/* A Settings card of many boxes (#1237's workout goals): across every column,
+   its boxes side by side, rather than one column three times its neighbour. */
+.oyl-sections > .oyl-settings-card--wide {
+  grid-column: 1 / -1;
+}
+
 @container oyl-pane (min-width: 40rem) {
   .oyl-sections:not(.oyl-sections--broad) {
     display: grid;
@@ -4776,6 +4782,50 @@ select.oyl-input {
   font-size: var(--oyl-font-size-md);
   line-height: 1.55;
   resize: vertical;
+}
+
+/*
+ * The workout goals (#1237, `workout-goals/`). Eight boxes, each its label,
+ * its box and its description, side by side where the card is wide enough and
+ * a column on a phone — stacked one under another they made the card three
+ * times its row's other card on a landscape tablet
+ * (`sections.browser.spec.ts` §"#1026"). A track may shrink below its
+ * content's width for `.oyl-rider-text__form`'s reason.
+ */
+.oyl-workout-goals__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oyl-space-md);
+  justify-items: start;
+}
+
+.oyl-workout-goals__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  gap: var(--oyl-space-md);
+  width: 100%;
+}
+
+.oyl-workout-goals__field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oyl-space-xs);
+  align-content: start;
+  justify-items: start;
+}
+
+.oyl-workout-goals__field--wide {
+  grid-column: 1 / -1;
+}
+
+.oyl-workout-goals__field > .oyl-field-hint {
+  margin: 0;
+}
+
+.oyl-workout-goals__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
 }
 
 /*

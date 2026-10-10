@@ -22,13 +22,17 @@
 import { fileURLToPath } from 'node:url';
 
 import {
+  beatsPerMinute,
   encodeWorkoutFile,
   fromHex,
+  readWorkoutGoals,
+  thresholdShare,
   kilograms,
   toHex,
   unixSeconds,
   type ActivityClaims,
   type SigningKey,
+  type WorkoutGoals,
 } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
@@ -37,6 +41,7 @@ import {
   webCryptoSha256,
   webCryptoVerifier,
   type ActivityId,
+  type WorkoutGoalsRecord,
   type WorkoutRecord,
 } from '@onyourleft/store';
 import {
@@ -99,6 +104,12 @@ interface InstanceStoreModule {
       requester: string,
       limit: number,
     ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
+    /** The agent's read port (`analysis/tools/reads.ts` §`AnalysisReads`), as `SqlStore` serves it. */
+    listLiveSyncItems(
+      athleteId: string,
+      kind: string,
+      limit: number,
+    ): Promise<readonly { readonly key: string; readonly body: Uint8Array | null }[]>;
     close(): Promise<void>;
   }>;
 }
@@ -1834,5 +1845,190 @@ describe('the rider’s saved workouts, through to the agent’s tool (#1100)', 
     expect(report).toMatchObject({ workoutsDeletedOnInstance: 0, workoutsPushed: 0 });
     expect(report.failures).toStrictEqual([{ kind: 'workout', key: '', reason: 'not-read' }]);
     expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(workout));
+  }, 60_000);
+});
+
+describe('the rider’s typed workout goals, through to the agent’s read port (#1237)', () => {
+  /**
+   * The typed goals as the agent's read port serves them (`AnalysisReads`),
+   * on a store opened for this read alone — each body read back WHOLE by
+   * `readWorkoutGoals`, or `null` where it is not goals.
+   */
+  async function goalsOnInstance(
+    path: string,
+    athleteId: string,
+    kind = 'workout-goal',
+  ): Promise<readonly (WorkoutGoals | null)[]> {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      const items = await fresh.listLiveSyncItems(athleteId, kind, 10);
+      return items.map((item) => {
+        try {
+          const reading = readWorkoutGoals(
+            JSON.parse(new TextDecoder().decode(item.body ?? new Uint8Array())),
+          );
+          return reading.ok ? reading.goals : null;
+        } catch {
+          return null;
+        }
+      });
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  const GOALS: WorkoutGoals = {
+    sessionType: 'endurance',
+    durationMinutes: 90,
+    holdRange: { low: beatsPerMinute(128), high: beatsPerMinute(138) },
+    heartRateAbove: beatsPerMinute(150),
+    powerCeiling: thresholdShare(0.75),
+    timeInRangeMinutes: 60,
+    effortCheckIns: true,
+  };
+
+  const saved = (goals: WorkoutGoals): WorkoutGoalsRecord => ({
+    athleteId: LOCAL_ATHLETE,
+    goals,
+    savedAt: NOW,
+  });
+
+  const goalsOn = (on: Device) => on.harness.read((store) => store.getWorkoutGoals(LOCAL_ATHLETE));
+
+  it('sends the goals, and the agent’s read port reads them back on a fresh store — that kind and that athlete only', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([GOALS]);
+    // Not under #836's free-text kind, which never sets a bound.
+    expect(await goalsOnInstance(world.path, a.athleteId, 'goal')).toStrictEqual([]);
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 0, failures: [] });
+
+    // Another athlete on the same instance reads none of it.
+    const stranger = await signedInDevice(world.url, origin, ['paused-laps.fit']);
+    expect(stranger.athleteId).not.toBe(a.athleteId);
+    expect(await goalsOnInstance(world.path, stranger.athleteId)).toStrictEqual([]);
+
+    // A change here is sent again.
+    const changed: WorkoutGoals = { ...GOALS, powerCeiling: thresholdShare(0.7) };
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(changed)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([changed]);
+  }, 60_000);
+
+  it('removes the goals from the instance at the next sync once they are cleared here, and never brings them back', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    await a.on.harness.write((store) => store.deleteWorkoutGoals(LOCAL_ATHLETE));
+    expect(await a.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'workout-goal' && item.key === 'goals',
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([]);
+    // Forgotten: nothing more is asked, and nothing comes back.
+    expect(await a.sync()).toMatchObject({
+      workoutGoalsDeletedOnInstance: 0,
+      workoutGoalsPushed: 0,
+      workoutGoalsPulled: 0,
+      failures: [],
+    });
+    expect(await goalsOn(a.on)).toStrictEqual({ status: 'none' });
+  }, 60_000);
+
+  it('brings the goals to a linked device, takes a change made on another device, and keeps them there when another device clears them', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 1, failures: [] });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(GOALS) });
+
+    // Changed on A: B, unchanged since, takes it.
+    const changed: WorkoutGoals = { sessionType: 'recovery', durationMinutes: 45 };
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(changed)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+    expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 1, workoutGoalsPushed: 0 });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(changed) });
+
+    // Cleared on A: B, unchanged since, keeps them and does not send them back.
+    await a.on.harness.write((store) => store.deleteWorkoutGoals(LOCAL_ATHLETE));
+    expect(await a.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1 });
+    expect(await b.sync()).toMatchObject({
+      workoutGoalsHiddenOnInstance: 1,
+      workoutGoalsPushed: 0,
+      failures: [],
+    });
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: saved(changed) });
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for goals on the instance this program would not read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    // A ceiling over ADR 0048 H3's 0.85, as a hand-edited instance could hold.
+    const answer = await a.on.transport.sync.json('POST', '/v1/sync/items/workout-goal/goals', {
+      body: JSON.stringify({ powerCeiling: 0.95 }),
+    });
+    expect(answer.status).toBe(200);
+
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const report = await b.sync();
+      expect(report.workoutGoalsPulled).toBe(0);
+      expect(report.failures).toContainEqual({
+        kind: 'workout-goal',
+        key: 'goals',
+        reason: 'not-workout-goals',
+      });
+    }
+    expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+    const bases = await b.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+    expect(bases.filter((row) => row.kind === 'workout-goal')).toStrictEqual([]);
+  }, 60_000);
+
+  it('sends and deletes nothing of the goals when they cannot be read here', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write((store) => store.putWorkoutGoals(saved(GOALS)));
+    expect(await a.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+
+    const report = await a.on.harness.write((store) =>
+      syncWithInstance(
+        syncDependencies(
+          a.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              if (property === 'getWorkoutGoals') {
+                return () => Promise.resolve({ status: 'fault', fault: 'workoutGoals: bad' });
+              }
+              const value = Reflect.get(target, property) as unknown;
+              return typeof value === 'function'
+                ? (value as (...args: unknown[]) => unknown).bind(target)
+                : value;
+            },
+          }),
+        ),
+      ),
+    );
+    expect(report).toMatchObject({ workoutGoalsDeletedOnInstance: 0, workoutGoalsPushed: 0 });
+    expect(report.failures).toStrictEqual([
+      { kind: 'workout-goal', key: 'goals', reason: 'not-read' },
+    ]);
+    expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([GOALS]);
   }, 60_000);
 });

@@ -98,6 +98,10 @@ export function hardestShare(workout: Workout): number | undefined {
         break;
       case 'free-ride':
         break;
+      case 'heart-rate-hold':
+        // The most the hold may ask for, which is how hard the block can be.
+        consider(block.ceilingShare);
+        break;
     }
   }
   return hardest;

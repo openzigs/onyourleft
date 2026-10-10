@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { SyncReport } from '../instance/sync';
-import { syncReportLines } from './SyncPanel';
+import { syncReportLines, WORKOUT_GOALS_SYNCED_TEXT } from './SyncPanel';
 
 const NOTHING: SyncReport = {
   pulled: 0,
@@ -29,6 +29,10 @@ const NOTHING: SyncReport = {
   workoutsPulled: 0,
   workoutsDeletedOnInstance: 0,
   workoutsHiddenOnInstance: 0,
+  workoutGoalsPushed: 0,
+  workoutGoalsPulled: 0,
+  workoutGoalsDeletedOnInstance: 0,
+  workoutGoalsHiddenOnInstance: 0,
   keysToConfirm: [],
   failures: [],
 };
@@ -65,6 +69,28 @@ describe('the sync report’s lines for saved workouts (#1100)', () => {
       syncReportLines({ ...NOTHING, textsDeletedOnInstance: 1, workoutsDeletedOnInstance: 1 }),
     ).toStrictEqual(['Deleted 2 things on the instance that you deleted here.']);
     expect(syncReportLines({ ...NOTHING, workoutsHiddenOnInstance: 1 })).toStrictEqual([
+      'Another device deleted 1 thing you still have here. It stays on this device.',
+    ]);
+  });
+
+  it('says the typed workout goals were synced, either way (#1237)', () => {
+    expect(syncReportLines({ ...NOTHING, workoutGoalsPushed: 1 })).toStrictEqual([
+      WORKOUT_GOALS_SYNCED_TEXT,
+    ]);
+    expect(syncReportLines({ ...NOTHING, workoutGoalsPulled: 1 })).toStrictEqual([
+      WORKOUT_GOALS_SYNCED_TEXT,
+    ]);
+  });
+
+  it('counts the typed workout goals deleted, or kept, with the other things (#1237)', () => {
+    expect(
+      syncReportLines({
+        ...NOTHING,
+        workoutsDeletedOnInstance: 1,
+        workoutGoalsDeletedOnInstance: 1,
+      }),
+    ).toStrictEqual(['Deleted 2 things on the instance that you deleted here.']);
+    expect(syncReportLines({ ...NOTHING, workoutGoalsHiddenOnInstance: 1 })).toStrictEqual([
       'Another device deleted 1 thing you still have here. It stays on this device.',
     ]);
   });

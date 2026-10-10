@@ -42,6 +42,10 @@ import type { StoreHarness } from '@onyourleft/store/testing';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
+  expandWorkout,
+  seconds,
+  thresholdShare,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -69,6 +73,7 @@ import {
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { LOSS_REASON } from '../ride/TrainerPanel';
 import { workoutRescueHeadline } from '../workout/rescue-text';
+import { HOLD_LABEL, holdReading, holdSentence, type WorkoutHold } from '../workout/hold-text';
 import { RELEASE_INCOMPLETE } from '../workout/session';
 import { ALL_ROUTES, routeById, type RouteDefinition, type RouteId } from '../shell/routes';
 import { openRoute } from '../testing/hierarchy-walk';
@@ -165,6 +170,23 @@ const RIDE_CONTROLLED_KEPT_VISIBLE: readonly string[] = [
   RIDE_NOTIFICATION_REFUSED,
 ];
 
+/**
+ * A running workout's heart-rate hold — #1240. Trainer-control text: it says
+ * what the trainer is being told and why, so it may never be tucked.
+ */
+const RIDE_HOLD: WorkoutHold = {
+  reason: 'lowered',
+  range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+  target: 165,
+};
+const RIDE_HOLD_KEPT_VISIBLE: readonly string[] = [
+  HOLD_LABEL,
+  holdSentence(RIDE_HOLD),
+  holdReading(RIDE_HOLD),
+  // A loaded workout owns the target (#605), which the ERG form says, kept.
+  'End the workout to set a target by hand.',
+];
+
 /** A controllable trainer this app does not hold, after the link dropped. */
 const RIDE_UNCONTROLLED_KEPT_VISIBLE: readonly string[] = [
   'This app does not have control of the trainer.',
@@ -237,7 +259,11 @@ const KEPT: Record<RouteId, Kept> = {
   ride: {
     sentences: RIDE_KEPT_VISIBLE,
     populated: RIDE_POPULATED_KEPT_VISIBLE,
-    elsewhere: [...RIDE_CONTROLLED_KEPT_VISIBLE, ...RIDE_UNCONTROLLED_KEPT_VISIBLE],
+    elsewhere: [
+      ...RIDE_CONTROLLED_KEPT_VISIBLE,
+      ...RIDE_UNCONTROLLED_KEPT_VISIBLE,
+      ...RIDE_HOLD_KEPT_VISIBLE,
+    ],
     reason:
       'the release, the stall rescue, the recording-service notices and a lost control render only in states the walk does not reach; two mounted cases below cover them',
   },
@@ -732,6 +758,46 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     const main = document.querySelector('main');
     if (main === null) throw new Error('no main');
     expect(allFaults(main, RIDE_CONTROLLED_KEPT_VISIBLE, everyListed(KEPT.ride))).toEqual([]);
+  });
+
+  it('Ride, a workout’s heart-rate hold (#1240)', async () => {
+    const riding = ridingSnapshot();
+    const timeline = expandWorkout({
+      name: 'Hold',
+      blocks: [
+        {
+          kind: 'heart-rate-hold',
+          seconds: seconds(1800),
+          range: RIDE_HOLD.range,
+          startShare: thresholdShare(0.5),
+          ceilingShare: thresholdShare(0.8),
+        },
+      ],
+    });
+    const stub = stubRideController({
+      ...riding,
+      workout: {
+        name: 'Hold',
+        status: 'running',
+        elapsedSeconds: 300,
+        totalSeconds: 1800,
+        holdingWatts: 165,
+        nowRiding: '30 min holding 130–140 bpm',
+        fault: undefined,
+        rescue: undefined,
+        hold: RIDE_HOLD,
+        timeline,
+      },
+    });
+    mounted = await mount(
+      <main>
+        <RideView controller={stub.controller} />
+      </main>,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('no main');
+    expect(allFaults(main, RIDE_HOLD_KEPT_VISIBLE, everyListed(KEPT.ride))).toEqual([]);
   });
 
   it('Ride, a controllable trainer this app lost control of', async () => {

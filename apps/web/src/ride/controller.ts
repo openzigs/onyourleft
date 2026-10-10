@@ -57,6 +57,8 @@
 
 import {
   expandWorkout,
+  holdEligible,
+  type HeartRateHoldContext,
   type WorkoutTimeline,
   seconds,
   unixSeconds,
@@ -118,6 +120,7 @@ import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '.
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
+import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 
 /** Which channel each metric on the screen reads from. */
 const METRIC_CAPABILITY: Readonly<Record<RideMetricId, MeasurementCapability>> = {
@@ -310,6 +313,12 @@ export interface RideWorkoutSnapshot {
    * `PlayerState.rescue`, unchanged; `workout/rescue-text.ts` is the sentence.
    */
   readonly rescue: WorkoutRescue | undefined;
+  /**
+   * The heart-rate hold running in this block, or `undefined` outside a hold
+   * block (#1240). The player's `PlayerState.hold`, with why a hold that is
+   * not running is off; `workout/hold-text.ts` is every word about it.
+   */
+  readonly hold?: WorkoutHold | undefined;
   /**
    * The plan itself, so a screen can look AHEAD in it — #398. The same
    * timeline the session plays; `segmentAt(timeline, elapsed + lead)` is the
@@ -884,7 +893,11 @@ export interface RideController {
    * @returns whether the workout started. `false` when there is no controllable
    * trainer or control has not been granted; the screen says which.
    */
-  startWorkout(workout: WorkoutRecord, thresholdPower: Watts): boolean;
+  startWorkout(
+    workout: WorkoutRecord,
+    thresholdPower: Watts,
+    heartRateHold?: HeartRateHoldContext,
+  ): boolean;
 
   /**
    * Re-read the rides this device is still holding — #212. Call it on mount
@@ -1914,6 +1927,16 @@ export function createRideController(options: RideControllerOptions): RideContro
       // #567: a hand-set target gets the same rule, from the same stream.
       manual?.erg.observeCadence(reading);
     }
+    // #1240: and heart rate, for the heart-rate hold — from the same call, for
+    // the recorder's reason. Only a reading that ARRIVED is passed: a strap
+    // that drops passes nothing, which the hold reads as silence and never as
+    // a zero (ADR 0048 H7).
+    if (measurement.capability === 'heart-rate') {
+      workout?.session.observeHeartRate({
+        at: seconds(measurement.at),
+        bpm: measurement.heartRate,
+      });
+    }
     // The reading is what wakes an automatic pause, so the phase moves with it
     // rather than on the next tick: for that second the screen would otherwise
     // offer a Resume the controller refuses.
@@ -2341,7 +2364,13 @@ export function createRideController(options: RideControllerOptions): RideContro
     readonly session: WorkoutSession;
     /** Expanded once, and the same object the session plays. */
     readonly timeline: WorkoutTimeline;
+    /** What the heart-rate hold was given, so the screen can say why one is off (#1240). */
+    readonly heartRateHold: HeartRateHoldContext | undefined;
   }
+
+  /** Whether a heart-rate strap is paired — in any state: a quiet strap is silence, not "none". */
+  const heartRateStrapPaired = (): boolean =>
+    [...sensors.values()].some((entry) => entry.device.capabilities.has('heart-rate'));
 
   /**
    * ⚠️ **The workout's clock is the ride's clock**, and that is the join this
@@ -2393,7 +2422,29 @@ export function createRideController(options: RideControllerOptions): RideContro
           : blockText(workout.record.workout.blocks[segment.block] ?? EMPTY_BLOCK),
       fault: state.lastFault,
       rescue: state.player.rescue,
+      hold: holdOf(workout, segment),
     };
+  };
+
+  /** The player's hold, with why it is off when it is (#1240). */
+  const holdOf = (
+    current: WorkoutInProgress,
+    segment: { readonly hold?: Parameters<typeof holdEligible>[0] | undefined } | undefined,
+  ): WorkoutHold | undefined => {
+    const hold = current.session.state().player.hold;
+    if (hold === undefined) {
+      return undefined;
+    }
+    let off: HoldOff | undefined;
+    if (hold.reason === 'ineligible') {
+      off =
+        current.heartRateHold === undefined
+          ? 'thresholds'
+          : segment?.hold !== undefined && !holdEligible(segment.hold, current.heartRateHold)
+            ? 'range'
+            : 'no-strap';
+    }
+    return { reason: hold.reason, range: hold.range, target: hold.target, off };
   };
 
   const workoutTick = (at: UnixSeconds): void => {
@@ -2868,7 +2919,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       return gone;
     },
 
-    startWorkout(record: WorkoutRecord, thresholdPower: Watts): boolean {
+    startWorkout(
+      record: WorkoutRecord,
+      thresholdPower: Watts,
+      heartRateHold?: HeartRateHoldContext,
+    ): boolean {
       const connection = trainerEntry()?.trainer;
       const client = connection?.control;
       // ⚠️ Both halves. A trainer that is paired but has not granted control
@@ -2906,9 +2961,13 @@ export function createRideController(options: RideControllerOptions): RideContro
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,
+        // #1240: H3's ceiling is never above the machine's own maximum.
+        powerCeiling: connection.powerRange.maximum,
+        heartRateHold,
+        heartRateStrap: heartRateStrapPaired,
         onChange: changed,
       });
-      workout = { record, session, timeline };
+      workout = { record, session, timeline, heartRateHold };
       // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
       // pairing and requesting control both advance the real clock without one
       // — so anchoring there started every workout already seconds old, and the

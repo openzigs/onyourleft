@@ -1350,6 +1350,27 @@ there is no lock to take, so an editor keeps the `updatedAt` it read and hands i
 is refused. The comparison is on the value read rather than on which timestamp is newer, because two
 saves inside one second is exactly what a second tab produces.
 
+### The heart-rate hold: one writer, one envelope, and no instance (#1238–#1241)
+
+[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's fast loop. A workout block,
+`heart-rate-hold`, whose ERG target moves in small bounded steps to keep the rider's heart rate in
+a range they chose. It needs no instance and no model.
+
+| Half | Where | What it owns |
+|---|---|---|
+| The block and format version 2 | `packages/domain/src/workout/workout.ts`, `format.ts` | the shape, `validateWorkout`'s refusals, and a file written at the lowest version that carries it |
+| The decision | `packages/domain/src/workout/heart-rate-hold.ts` | H1–H11 as named constants: eligibility, floor and ceiling, settling, the 5 s update and its step limits, overshoot, silence, implausible readings |
+| The one writer | `packages/domain/src/workout/player.ts` | asks the hold for a target and emits it in its own `write-target`. The stall rescue goes first, and a pause makes a new hold |
+| The wiring | `apps/web/src/workout/session.ts`, `ride/controller.ts` | heart-rate readings in from the same call as the recorder's; no strap is no history, a quiet strap a stale one; the machine's range as H3's floor and ceiling |
+| The words | `apps/web/src/workout/hold-text.ts` | every sentence; when `hold-changed` is said (announcements on, once a minute at most, never in the last 30 s of a hard segment) |
+| The screens | `ride/WorkoutPanel.tsx`, `game/GameView.tsx` | the range, the target and the sentence, kept visible; the game's HUD shows a short line in the trainer line's place, free while a workout owns the trainer |
+| The closed loop | `packages/sensors/protocol/src/heart-rate-hold.closed-loop.test.ts`, `apps/web/src/ride/controller.test.ts` §"#1240" | #1238's simulated heart, read through the real decoder, against the real player and, in the second, the real controller, session and ERG writer |
+
+⚠️ **Nothing new reaches the control point.** The hold's targets go through the same ERG writer
+and `gatedTargets` as every workout target, a hand-set target is refused while a workout runs,
+and the release is still `releaseTrainer`. The simulated heart's gain and lag are Hunt & Hurni's
+means, which are test defaults and not a claim about any rider.
+
 ### The camera seam: one port, one consent, and where each guarantee is actually kept
 
 [#382](https://github.com/openzigs/onyourleft/issues/382) built the camera, and
@@ -1704,7 +1725,7 @@ sequenceDiagram
 |---|---|---|
 | Ingestion (#37) | Refused in order, each with its own code: the file's type **from its bytes** (`file_type_unsupported`), that it decodes to at least one sample (`file_undecodable`), then ADR 0014 D-6's answers (`record_malformed`, `record_unsupported`, `record_signature_mismatch`, `record_content_mismatch`), then `record_not_your_key`, then — for a key since revoked — `record_key_revoked` unless the ride started before the revocation (#898). Nothing is written until every check passes. The file goes to the blob store, then the record and its manifest row in ONE transaction; a failed transaction takes the file back unless another athlete's record holds it, under a per-file lock. A duplicate is decided by the primary key and answers the first record | `src/sync/sync.ts` §`ingest`, `src/sync/activity-file.ts` |
 | The manifest (#776) | `sync_item` (migration 0009): every activity and item, and a tombstone for each one deleted. Paged by `(receivedAt, seq)`, where `seq` is `AUTOINCREMENT` and `receivedAt` is written as `max(now, the newest)`, so no row is ever inserted behind a cursor a reader holds | `src/store/sql-store.ts` §`nextReceivedAt` |
-| Items (#776's 2026-09-29 addition) | `write-up`, `ride-summary` (since #835), `side-camera-report` (the pose summary inside it), `goal`, `note`, `document`, `workout` (since #1100: the ADR 0017 workout file, keyed by the device's workout id, synced both ways since the owner's ruling of 2026-10-10, the device's change winning) — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs write-ups, side-camera reports and ride summaries; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
+| Items (#776's 2026-09-29 addition) | `write-up`, `ride-summary` (since #835), `side-camera-report` (the pose summary inside it), `goal`, `note`, `document`, `workout` (since #1100: the ADR 0017 workout file, keyed by the device's workout id, synced both ways since the owner's ruling of 2026-10-10, the device's change winning), `workout-goal` (since #1237: the rider's TYPED workout goals as JSON, one item keyed `goals`, which bound a heart-rate hold, ADR 0048 D-10; not `goal`, which is free text) — stored byte for byte as the device sent them; the device copy is canonical (ADR 0036). The client syncs write-ups, side-camera reports and ride summaries; goals, notes and documents wait for #836 on the device | `src/sync/sync.ts` §`putItem` |
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
 | Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), every recovery address (up to two since #1194, each with when it was confirmed and the public key that gave it) and every confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account` — only with a step-up beyond the session token (#898): one of the athlete's recovery codes, checked and not spent, or a fresh `oyl-erase-account-v1` statement signed by one of their own live keys (`src/auth/identity.ts` §`stepUp`); a suspended athlete reaches it, and the export, through a one-hour way-out session (`POST /v1/auth/leave-session`, `admitsSuspended`, migration 0012). Then: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |

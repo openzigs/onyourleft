@@ -841,6 +841,10 @@ describe('what the wind is doing to the rider (#335)', () => {
 });
 
 describe('the trainer status line — #373', () => {
+  it('carries a running workout’s heart-rate hold in the trainer line’s place — #1240', () => {
+    expect(trainerLine({ hold: 'Hold 130–140 bpm: 160 W' })).toBe('Hold 130–140 bpm: 160 W');
+  });
+
   it('says simulating, with the gradient to a tenth and the write count', () => {
     expect(trainerLine({ gradePercent: -3.42, writes: 17 })).toBe(
       'Trainer: simulating -3.4% (17 sent)',

@@ -64,6 +64,7 @@ import {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
   sideCameraReportFor,
 } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
@@ -305,7 +306,8 @@ describe('the production registry', () => {
     // gains a REQUIRED `mayBeRaced`, false. So the registry holds two.
     // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
     // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
-    expect(SCHEMA_VERSION).toBe(17);
+    // Version 18 (#1236) adds `workoutGoals`: a new store, nothing again.
+    expect(SCHEMA_VERSION).toBe(18);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
   });
 
@@ -1138,5 +1140,78 @@ describe('version 16 to version 17 — #898’s trusted device keys', () => {
     expect(kept).toStrictEqual(goal);
     expect(empty).toStrictEqual([]);
     expect(read).toStrictEqual([key]);
+  });
+});
+
+describe('version 17 to version 18 — #1236’s typed workout goals', () => {
+  /**
+   * Additive: rides written at version 17 read back unchanged at 18, and the
+   * new store is usable on a database that predates it. The rollback is
+   * `workout-goals-store.test.ts` §"version 18 rolls back".
+   */
+  it('reads every version-17 ride unchanged and makes workout goals usable', async () => {
+    const v17 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 17).forEach((stores, index) => {
+      v17.version(index + 1).stores(stores);
+    });
+    const rides: PersistedActivity[] = [
+      {
+        id: 'ride-1',
+        athleteId: 'athlete-a',
+        name: 'Written at seventeen',
+        startedAt: 1_760_000_000,
+        startedAtTimeZone: 'Europe/London',
+        elapsedTime: 600,
+        movingTime: 590,
+        distance: 5000,
+        visibility: 'public',
+        hasPosition: true,
+        createdAt: 1_760_000_600,
+        mayBeRaced: true,
+      },
+      {
+        id: 'ride-2',
+        athleteId: 'athlete-a',
+        name: 'Indoors',
+        startedAt: 1_760_100_000,
+        startedAtTimeZone: 'UTC',
+        elapsedTime: 1200,
+        movingTime: 1200,
+        distance: 10_000,
+        visibility: 'private',
+        hasPosition: false,
+        createdAt: 1_760_101_200,
+        mayBeRaced: false,
+      },
+    ];
+    await v17.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v17.table(TABLE.activities).bulkPut(rides);
+    const beforeVersion = v17.backendDB().version;
+    v17.close();
+
+    const owner = athleteId('athlete-a');
+    const store = openActivityStore(databaseName);
+    const empty = await store.getWorkoutGoals(owner);
+    const goals = workoutGoalsFor(owner);
+    await store.putWorkoutGoals(goals);
+    store.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = await raw.table(TABLE.activities).toArray();
+    const afterVersion = raw.backendDB().version;
+    raw.close();
+
+    const reopened = openActivityStore(databaseName);
+    const read = await reopened.getWorkoutGoals(owner);
+    reopened.close();
+
+    expect(beforeVersion).toBe(17 * 10);
+    expect(afterVersion).toBe(18 * 10);
+    expect(onDisk).toStrictEqual(rides);
+    expect(empty).toStrictEqual({ status: 'none' });
+    expect(read).toStrictEqual({ status: 'kept', record: goals });
   });
 });

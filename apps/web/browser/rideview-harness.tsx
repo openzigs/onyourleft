@@ -94,6 +94,7 @@ import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
+import type { WorkoutHold } from '../src/workout/hold-text';
 import { workoutStub } from '../src/workouts/testing';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -144,6 +145,40 @@ const WORKOUT: WorkoutRecord = {
  * at about 60, so it is the whole sentence that binds.
  */
 const WORKOUT_STATE = new URLSearchParams(window.location.search).get('workout');
+
+/**
+ * `rideview.html?workout=hold` — #1240: a workout running a heart-rate hold,
+ * so its notice (the range, the target and one sentence) stands in the
+ * running workout's section. Through the stub's snapshot, for
+ * {@link WORKOUT_STATE}'s reason: `ride/controller.test.ts` §"#1240" drives
+ * the real controller; this page measures where the notice lands.
+ *
+ * ⚠️ **The longest sentence `workout/hold-text.ts` can produce** — a range
+ * above the rider's threshold heart rate — because the one that binds a fold
+ * is the one that wraps furthest.
+ */
+const HOLD: WorkoutHold = {
+  reason: 'ineligible',
+  off: 'range',
+  range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+  target: 125,
+};
+
+const HOLD_WORKOUT = {
+  name: 'Endurance hold',
+  workout: {
+    name: 'Endurance hold',
+    blocks: [
+      {
+        kind: 'heart-rate-hold' as const,
+        seconds: seconds(1800),
+        range: HOLD.range,
+        startShare: thresholdShare(0.5),
+        ceilingShare: thresholdShare(0.8),
+      },
+    ],
+  },
+};
 
 const FLOOR: WorkoutRescue = {
   kind: 'floor',
@@ -304,6 +339,23 @@ function snapshot(): RideSnapshot {
   }
   if (RIDE_STATE === 'armed') {
     return { ...riding, phase: 'paused', stopArmed: true };
+  }
+  if (WORKOUT_STATE === 'hold') {
+    return {
+      ...riding,
+      workout: {
+        name: HOLD_WORKOUT.name,
+        status: 'running',
+        elapsedSeconds: 312,
+        totalSeconds: 1800,
+        holdingWatts: HOLD.target,
+        nowRiding: '30 min holding 130–140 bpm',
+        fault: undefined,
+        rescue: undefined,
+        hold: HOLD,
+        timeline: expandWorkout(HOLD_WORKOUT.workout),
+      },
+    };
   }
   if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
     return riding;
@@ -963,6 +1015,12 @@ async function run(): Promise<void> {
     await until(awaited, () =>
       [...document.querySelectorAll('.oyl-ride__group--live button')].find(
         (each) => textOf(each) === awaited,
+      ),
+    );
+  } else if (WORKOUT_STATE === 'hold') {
+    await until('the heart-rate hold', () =>
+      [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find(
+        (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Heart-rate hold:',
       ),
     );
   } else if (WORKOUT_STATE === 'eased' || WORKOUT_STATE === 'running') {

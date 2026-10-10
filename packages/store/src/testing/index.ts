@@ -24,6 +24,9 @@ export type { StoreHarness, StoreHarnessOptions } from './harness';
 
 export type { PersistentStore, StoreFactory } from './store';
 
+export { openOlderSchema } from './older-schema';
+export type { OlderSchemaDatabase } from './older-schema';
+
 export {
   assertRecordingRecovers,
   assertSameSamples,
@@ -38,6 +41,7 @@ export {
   assertSyncBaseRoundTrip,
   assertRiderTextRoundTrip,
   assertTrustedDeviceKeyRoundTrip,
+  assertWorkoutGoalsRoundTrip,
   assertStreamSetRoundTrip,
   assertWorkoutRoundTrip,
   RoundTripFailure,
@@ -58,6 +62,7 @@ export {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
   CHANNELS_WITHOUT_POSITION,
   chunksOf,
   claimsFor,

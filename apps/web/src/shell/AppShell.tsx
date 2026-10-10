@@ -63,6 +63,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
@@ -471,6 +472,12 @@ export interface AppShellProps {
    */
   readonly riderText?: RiderTextPort | undefined;
   /**
+   * The rider's typed workout goals (#1237) — `workout-goals/workout-goals-port.ts`.
+   * Optional like every other port here; without one the panel says there is
+   * no store to keep them in.
+   */
+  readonly workoutGoals?: WorkoutGoalsPort | undefined;
+  /**
    * The Connect screen's port (#777) — `instance/instance-port.ts`
    * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
    * the screen says this platform cannot connect.
@@ -692,6 +699,7 @@ function viewFor(
           basemap={props.basemap}
           maskedWords={props.maskedWords}
           riderText={props.riderText}
+          workoutGoals={props.workoutGoals}
         />
       );
     case 'about':
