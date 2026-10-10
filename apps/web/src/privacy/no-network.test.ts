@@ -1493,7 +1493,7 @@ describe('the instance is disclosed, class by class — #778', () => {
       "your saved workouts, each one's name, description and blocks",
       'what another of your devices synced there, your saved workouts included',
       // #1237: the typed workout goals, one item, synced both ways (rule 10).
-      // DRAFT wording until #1245's is approved by the owner.
+      // The owner's wording of 2026-10-10.
       'your workout goals, the numbers you chose on the workout goals screen',
       // ADR 0047 D-7 and D-11: what is sealed, and what Cloudflare still sees.
       'everything you sync is sealed',

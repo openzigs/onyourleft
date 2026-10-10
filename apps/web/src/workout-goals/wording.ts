@@ -8,9 +8,8 @@
  * *safe*, *cardiac*, *heart condition*, *patient* or *therapy*.
  * `form.test.ts` §'the wording (ADR 0048 D-12)' holds every string here to that list.
  *
- * ⚠️ The sentence about what a sync sends ({@link WORKOUT_GOALS_SYNC_TEXT}) is
- * a disclosure, and #1245 owns the approved wording of the disclosures for
- * workouts that change during the ride. This one waits on the owner there.
+ * Every sentence here is the wording the owner approved on 2026-10-10 (on
+ * #1259), the sync disclosure ({@link WORKOUT_GOALS_SYNC_TEXT}) included.
  */
 
 import type { WorkoutSessionType } from '@onyourleft/domain';
@@ -39,7 +38,7 @@ export const WORKOUT_GOALS_SYNC_TEXT = WORKOUT_GOALS_KEPT_VISIBLE.join(' ');
 
 /** The ⓘ's longer explanation. */
 export const WORKOUT_GOALS_HELP: readonly string[] = [
-  'These are not the goals you write in words for the analysis. Words never set a number; these do.',
+  'These are not the goals you write in words for the analysis. Those never change a number in a workout; these can.',
   'Your own threshold power and threshold heart rate are checked when a workout uses these goals, not here, because you can change them later.',
 ];
 
