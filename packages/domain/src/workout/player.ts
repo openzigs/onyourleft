@@ -121,6 +121,7 @@ import {
   holdEligible,
   holdEnvelope,
   type HeartRateHold,
+  type HoldCheckpoint,
   type HeartRateHoldContext,
   type HeartRateSample,
   type HoldReason,
@@ -291,6 +292,13 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
    * THAT and not compounded tick after tick on the eased number.
    */
   let rescueBase: Watts | undefined;
+  /**
+   * The hold as it was before the decision behind the write now outstanding.
+   * A write that never landed (refused, timed out, or forgotten on a pause) is
+   * a decision the heart never answered to, so it is put back rather than
+   * left to wind the loop up.
+   */
+  let holdCheckpoint: { readonly hold: HeartRateHold; readonly state: HoldCheckpoint } | undefined;
 
   let status: PlayerStatus = 'idle';
   let elapsed = 0;
@@ -353,6 +361,15 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       };
     }
     return activeHold.hold;
+  };
+
+  /** A write that will not be acknowledged: forget it and the hold decision behind it. */
+  const abandonWrite = (): void => {
+    if (pending !== undefined && holdCheckpoint !== undefined) {
+      holdCheckpoint.hold.restore(holdCheckpoint.state);
+    }
+    holdCheckpoint = undefined;
+    pending = undefined;
   };
 
   const advance = (now: Seconds): void => {
@@ -467,12 +484,24 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         // H9 again: the relief applies to what the hold holds now, and the
         // hold takes the eased number as its own. No heart-rate decision is
         // made while the rescue writes.
-        target = watts(Math.round((rescueBase ?? hold.current()) * step.share));
+        // Never below the hold's own floor: `rescued` clamps there, and a
+        // write below it would be followed by an unbounded step back up.
+        const base = rescueBase ?? hold.current();
+        target = watts(Math.max(hold.envelope.floor, Math.round(base * step.share)));
         hold.rescued(target);
         holdReason = holdStatus?.reason ?? 'settling';
-        reportedShare = hold.current() / thresholdPower;
+        // The share BEFORE the relief, as for a block with no hold.
+        reportedShare = base / thresholdPower;
+      } else if (pending !== undefined) {
+        // No heart-rate decision while a write is outstanding: it would raise
+        // the target and its rise ledger against a load that has not arrived.
+        target = hold.current();
+        holdReason = holdStatus?.reason ?? 'settling';
+        reportedShare = target / thresholdPower;
       } else {
+        const before = hold.checkpoint();
         const decided = hold.decide(now, rider?.heartRate);
+        holdCheckpoint = { hold, state: before };
         target = decided.watts;
         holdReason = decided.reason;
         reportedShare = target / thresholdPower;
@@ -501,6 +530,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // case in disguise: its share moves every tick while the watts it
       // rounds to move every few seconds, and only the watts reach the wire.
       if (lastAsked === target) {
+        holdCheckpoint = undefined;
         intent = { kind: 'hold' };
         return snapshot();
       }
@@ -528,7 +558,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // for, the rider has stopped, and the next tick after a resume decides
       // afresh. Keeping it would leave the player refusing to write on resume
       // until an acknowledgement that may never come.
-      pending = undefined;
+      abandonWrite();
       inForce = undefined;
       intent = { kind: 'release', reason: 'Paused.' };
       return snapshot();
@@ -553,15 +583,17 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // is not holding it any more. A rider pressing resume should feel the
       // trainer pick up.
       lastAsked = undefined;
-      // H11: the hold keeps no state past a pause. The next tick makes a new
-      // one, which settles for 90 s again before it acts on a heart rate.
-      activeHold = undefined;
+      // H11 reads "no state past its BLOCK", not past a pause. The hold settles
+      // again, never starts higher than it was, and keeps an overshoot latch
+      // (D-9: no failure raises a target).
+      activeHold?.hold.resumed(now);
       holdStatus = undefined;
       return snapshot();
     },
 
     acknowledge(written: Watts): PlayerState {
       pending = undefined;
+      holdCheckpoint = undefined;
       // ⚠️ `lastAsked` deliberately keeps what was ASKED FOR, not `written`.
       // `setTargetPower` quantises, so a readback of 151 W against an ask of
       // 150 W is an ordinary acknowledgement rather than a change — and a
@@ -574,7 +606,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
     },
 
     writeFailed(): PlayerState {
-      pending = undefined;
+      abandonWrite();
       // Forget what was asked for too, so the next tick counts as a change and
       // tries again rather than deciding nothing has moved. This — a refused,
       // timed-out or superseded write — is the one way an unchanged target is
@@ -589,7 +621,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       }
       status = status === 'finished' ? 'finished' : 'paused';
       runningSince = undefined;
-      pending = undefined;
+      abandonWrite();
       inForce = undefined;
       intent = {
         kind: 'release',

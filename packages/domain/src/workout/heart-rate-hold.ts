@@ -264,6 +264,35 @@ export interface HeartRateHold {
    * lasts, and resumes from the eased target, never from the one before.
    */
   rescued(eased: Watts): void;
+  /**
+   * The whole state of the hold, to be put back by {@link restore} when a write
+   * made from it never landed. Opaque on purpose.
+   */
+  checkpoint(): HoldCheckpoint;
+  /** Put back a {@link checkpoint}: the decisions since never reached the trainer. */
+  restore(checkpoint: HoldCheckpoint): void;
+  /**
+   * The rider paused and came back at `now`. Settling starts again and the
+   * target never goes UP: `min(current, start)`. The overshoot latch, and the
+   * floor it holds, survive — a pause is not a recovery (H6, D-9).
+   */
+  resumed(now: Seconds): void;
+}
+
+declare const checkpointBrand: unique symbol;
+/** @see HeartRateHold.checkpoint */
+export type HoldCheckpoint = { readonly [checkpointBrand]: true };
+
+interface HoldState {
+  current: number;
+  reason: HoldReason;
+  settlingFrom: number;
+  lastHeardAt: number;
+  lastUpdateAt: number | undefined;
+  overshootSince: number | undefined;
+  overshootLatched: boolean;
+  insideSince: number | undefined;
+  rises: { at: number; watts: number }[];
 }
 
 /**
@@ -285,6 +314,7 @@ export function createHeartRateHold(
   let current: number = start;
   let reason: HoldReason = eligible ? 'settling' : 'ineligible';
   let lastHeardAt: number = startedAt;
+  let settlingFrom: number = startedAt;
   let lastUpdateAt: number | undefined;
   let overshootSince: number | undefined;
   let overshootLatched = false;
@@ -304,6 +334,9 @@ export function createHeartRateHold(
   };
 
   const risenInWindow = (now: number): number => {
+    // Half-open: a rise exactly HOLD_RISE_WINDOW_SECONDS old has LEFT the
+    // window, so rises at t and t + 60 never both count. The boundary is
+    // exclusive on the older side.
     while (rises.length > 0 && (rises[0]?.at ?? now) <= now - HOLD_RISE_WINDOW_SECONDS) {
       rises.shift();
     }
@@ -327,8 +360,8 @@ export function createHeartRateHold(
       // H4 before H7: in the settling window the target is the start share
       // whatever the strap says, so silence there changes nothing and says
       // nothing either.
-      if (now - startedAt < HOLD_SETTLING_SECONDS) {
-        return decision('settling');
+      if (now - settlingFrom < HOLD_SETTLING_SECONDS) {
+        return decision(overshootLatched ? 'overshoot' : 'settling');
       }
 
       const inSilenceWindow = valid.filter(
@@ -396,6 +429,46 @@ export function createHeartRateHold(
       const why: HoldReason = next > current ? 'raised' : 'lowered';
       current = next;
       return decision(why);
+    },
+
+    checkpoint() {
+      const state: HoldState = {
+        current,
+        reason,
+        settlingFrom,
+        lastHeardAt,
+        lastUpdateAt,
+        overshootSince,
+        overshootLatched,
+        insideSince,
+        rises: rises.map((rise) => ({ ...rise })),
+      };
+      return state as unknown as HoldCheckpoint;
+    },
+
+    restore(checkpoint) {
+      const state = checkpoint as unknown as HoldState;
+      current = state.current;
+      reason = state.reason;
+      settlingFrom = state.settlingFrom;
+      lastHeardAt = state.lastHeardAt;
+      lastUpdateAt = state.lastUpdateAt;
+      overshootSince = state.overshootSince;
+      overshootLatched = state.overshootLatched;
+      insideSince = state.insideSince;
+      rises.splice(0, rises.length, ...state.rises.map((rise) => ({ ...rise })));
+    },
+
+    resumed(now) {
+      current = Math.min(current, start);
+      settlingFrom = now;
+      lastHeardAt = now;
+      overshootSince = undefined;
+      insideSince = undefined;
+      lastUpdateAt = undefined;
+      if (!overshootLatched) {
+        reason = eligible ? 'settling' : 'ineligible';
+      }
     },
 
     rescued(eased) {
