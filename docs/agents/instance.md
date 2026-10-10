@@ -24,9 +24,17 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         identity (#855) and sync (#881) — answers
                         `unavailable` there (below). ⚠️ A reviewer who
                         remembers "and nothing else yet" is reading the old
-                        file. ⚠️ **One third-party runtime dependency since
-                        #769, `kysely`** (ADR 0037 D-9's row): its notices
-                        document says so and `check:notices` holds it. Since
+                        file. ⚠️ **Its third-party runtime closure is
+                        `kysely` (#769), `ws` (#780) and, since #1096, the
+                        AI SDK (`ai`, `@ai-sdk/openai-compatible`)**, each
+                        with an ADR 0037 D-9 row: its notices document says
+                        so and `check:notices` holds it. A reviewer who
+                        remembers "one, `kysely`" is reading the old file.
+                        `src/analysis/` is the post-ride agent (#1096,
+                        #1098): `model.ts` the ONE module that names the
+                        SDK (static or `import()`, `eslint.config.js`),
+                        `agent.ts` the tool-calling loop, `tools/` its
+                        read-only tools. Since
                         #842 it also holds `src/store/` — the `SqlStore` port
                         over SQLite (`node:sqlite` through Kysely, with a
                         forty-line adapter because Kysely reads NO rows from

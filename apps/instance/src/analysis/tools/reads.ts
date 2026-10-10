@@ -8,7 +8,7 @@
  * (`packages/sensors`): the store is handed to the tools as an
  * {@link AnalysisReads}, which has one method and it reads. No tool module
  * can name a write, because the object it holds has none to name — and no
- * tool module imports the store at all (`tools-reach.test.ts` walks them).
+ * tool module imports the store at all (`agent-safety.test.ts` walks them).
  *
  * The kinds are narrowed too: a tool can ask for a `ride-summary` or a `goal`
  * and for nothing else, so the side-camera report — which carries the pose
@@ -19,8 +19,16 @@
 /** The synced kinds a tool may read (ADR 0046 D-7's table; `workout` since #1100). */
 export type ToolReadKind = 'ride-summary' | 'goal' | 'workout';
 
-/** One synced item, as a tool is allowed to see it: its bytes, and nothing that names it. */
+/**
+ * One synced item, as a tool is allowed to see it: its bytes, and its key.
+ *
+ * The key is read for ONE thing (#1187): `recent_rides` leaves out the
+ * asked-about ride, whose `ride-summary` is keyed by its synced id
+ * (`history/passages.ts` §`RIDE_KINDS`). No tool returns a key, and
+ * `tools.test.ts` holds that.
+ */
 export interface ReadItem {
+  readonly key: string;
   readonly body: Uint8Array | null;
 }
 
