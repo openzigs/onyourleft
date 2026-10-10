@@ -472,6 +472,88 @@ describe('no new writer', () => {
   });
 });
 
+describe('review of #1258: writes that do not land, and a pause', () => {
+  const tickWith = (
+    subject: WorkoutPlayer,
+    history: HeartRateSample[],
+    second: number,
+    bpm: number,
+  ): PlayerState => {
+    history.push({ at: seconds(second), bpm });
+    return subject.tick(seconds(second), { heartRate: history.slice(-40) });
+  };
+
+  it('a refused write does not wind the loop up: what finally lands is one bounded step', () => {
+    const subject = holdPlayer();
+    subject.start(seconds(0));
+    const history: HeartRateSample[] = [];
+    const before = ride(subject, 0, 100, () => 110, history);
+    for (let second = 100; second < 300; second += 1) {
+      if (tickWith(subject, history, second, 110).intent.kind === 'write-target') {
+        subject.writeFailed();
+      }
+    }
+    let last = before.at(-1)?.watts ?? 125;
+    let landedAny = false;
+    for (let second = 300; second < 330; second += 1) {
+      const state = tickWith(subject, history, second, 110);
+      if (state.intent.kind === 'write-target') {
+        landedAny = true;
+        expect(state.intent.watts - last).toBeLessThanOrEqual(HOLD_MAXIMUM_STEP_UP_WATTS);
+        last = state.intent.watts;
+        subject.acknowledge(state.intent.watts);
+      }
+    }
+    expect(landedAny).toBe(true);
+  });
+
+  it('makes no heart-rate decision while a write is outstanding', () => {
+    const subject = holdPlayer();
+    subject.start(seconds(0));
+    const history: HeartRateSample[] = [];
+    ride(subject, 0, 100, () => 110, history);
+    let asked: number | undefined;
+    for (let second = 100; second < 200; second += 1) {
+      const state = tickWith(subject, history, second, 110);
+      if (state.intent.kind === 'write-target') {
+        asked ??= state.intent.watts;
+      }
+    }
+    expect(subject.state().hold?.target).toBe(asked);
+  });
+
+  it('a pause during an overshoot keeps the floor and the latch', () => {
+    const subject = holdPlayer();
+    subject.start(seconds(0));
+    const history: HeartRateSample[] = [];
+    ride(subject, 0, 100, () => 135, history);
+    ride(subject, 100, 160, () => 160, history);
+    expect(subject.state().hold?.reason).toBe('overshoot');
+    subject.pause(seconds(160));
+    subject.resume(seconds(190));
+    const after = ride(subject, 190, 190 + HOLD_SETTLING_SECONDS + 100, () => 160, history);
+    expect(after[0]).toEqual({ at: 190, watts: 50, hold: 'overshoot' });
+    expect(Math.max(...after.map((write) => write.watts))).toBe(50);
+  });
+});
+
+describe('a relief never writes below the hold floor — review of #1258', () => {
+  it('writes the floor, so the hold resumes from what the rescue wrote', () => {
+    const subject = holdPlayer({ block: holdBlock({ startShare: thresholdShare(0.2) }) });
+    subject.start(seconds(0));
+    const history: HeartRateSample[] = [];
+    const falling = (second: number): readonly CadenceReading[] =>
+      Array.from({ length: 12 }, (_, i) => ({
+        at: seconds(Math.max(0, second - 11 + i)),
+        cadence: revolutionsPerMinute(Math.max(30, 90 - (second - 11 + i) * 4)),
+      }));
+    const written = ride(subject, 0, 30, () => 135, history, falling);
+    for (const write of written) {
+      expect(write.watts).toBeGreaterThanOrEqual(50);
+    }
+  });
+});
+
 describe('the share a hold reports', () => {
   it('is the share of threshold the target is, so a screen showing a percentage is not lying', () => {
     const subject = holdPlayer();
