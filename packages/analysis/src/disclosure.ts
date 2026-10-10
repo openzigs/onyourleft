@@ -55,4 +55,10 @@ export const AGENT_TOOL_DISCLOSURES: Readonly<Record<string, readonly string[]>>
     'what you wrote about your goals',
     'your notes and documents',
   ],
+  // Synced saved workouts (#1100): each one's name — free text the rider
+  // typed, masked on a hosted job (#1101) — its total time and its blocks as
+  // shares of threshold, never watts; at most ten and 4 000 characters. The
+  // phrase is the one the owner approved in #1104's instance paragraph
+  // (`apps/web/src/detail/write-up.ts` §`INSTANCE_SENDS`).
+  workouts: ['your saved workouts'],
 };

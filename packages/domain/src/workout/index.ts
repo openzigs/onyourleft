@@ -35,6 +35,13 @@ export {
   WORKOUT_FILE_VERSION,
 } from './format';
 
+export {
+  workoutBlockText,
+  workoutDurationText,
+  workoutPercent,
+  workoutShapeText,
+} from './describe';
+
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
 

@@ -25,8 +25,11 @@
 
 import {
   expandWorkout,
+  workoutBlockText,
+  workoutDurationText,
+  workoutPercent,
+  workoutShapeText,
   type Workout,
-  type WorkoutBlock,
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
@@ -57,55 +60,17 @@ export interface WorkoutRow {
   readonly hardestPercent: number | undefined;
 }
 
-/** `3720` → `"1 h 2 min"`; `600` → `"10 min"`; `45` → `"45 s"`. */
-export function durationText(totalSeconds: number): string {
-  const whole = Math.max(0, Math.round(totalSeconds));
-  if (whole < 60) {
-    return `${String(whole)} s`;
-  }
-  const minutes = Math.round(whole / 60);
-  if (minutes < 60) {
-    return `${String(minutes)} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `${String(hours)} h` : `${String(hours)} h ${String(rest)} min`;
-}
-
-/** A share as a whole-number percentage. `0.885` → `89`. */
-export function percentOf(share: number): number {
-  return Math.round(share * 100);
-}
-
-/** One block, in the words a rider would use for it. */
-export function blockText(block: WorkoutBlock): string {
-  switch (block.kind) {
-    case 'steady':
-      return `${durationText(block.seconds)} at ${String(percentOf(block.target))}%`;
-    case 'ramp':
-      return (
-        `${durationText(block.seconds)} ramping ${String(percentOf(block.from))}% ` +
-        `to ${String(percentOf(block.to))}%`
-      );
-    case 'intervals':
-      return (
-        `${String(block.repeats)} × ${durationText(block.hardSeconds)} ` +
-        `at ${String(percentOf(block.hardTarget))}%, ` +
-        `${durationText(block.easySeconds)} at ${String(percentOf(block.easyTarget))}%`
-      );
-    case 'free-ride':
-      // ⚠️ Not "at 0%". A free ride eases the trainer to its OWN lowest
-      // target — `session.ts` §`ease`, since #441 (it sent `stop()` before,
-      // which the trainer #372 was measured on ignored) — and that floor is
-      // the machine's reported minimum, not zero. A row that said 0% would be
-      // describing a number the player never writes.
-      return `${durationText(block.seconds)} free riding`;
-    default: {
-      const unhandled: never = block;
-      throw new Error(`unreachable: ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
+/**
+ * A duration, a share as a percentage, and one block, in words. Since #1100
+ * they are `packages/domain`'s (`workout/describe.ts`), so the instance
+ * agent's `workouts` tool says a workout's shape in this same sentence: the
+ * names here are the ones every caller in this client already uses.
+ */
+export {
+  workoutBlockText as blockText,
+  workoutDurationText as durationText,
+  workoutPercent as percentOf,
+};
 
 /** The highest target anywhere in the workout, or `undefined` if there is none. */
 export function hardestShare(workout: Workout): number | undefined {
@@ -159,9 +124,9 @@ export function workoutRow(
     id: record.id,
     name: record.name,
     totalSeconds: timeline.totalSeconds,
-    duration: durationText(timeline.totalSeconds),
+    duration: workoutDurationText(timeline.totalSeconds),
     blockCount: record.workout.blocks.length,
-    shape: record.workout.blocks.map(blockText).join(', '),
-    hardestPercent: hardest === undefined ? undefined : percentOf(hardest),
+    shape: workoutShapeText(record.workout),
+    hardestPercent: hardest === undefined ? undefined : workoutPercent(hardest),
   };
 }

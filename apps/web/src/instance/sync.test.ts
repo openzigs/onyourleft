@@ -22,6 +22,7 @@
 import { fileURLToPath } from 'node:url';
 
 import {
+  encodeWorkoutFile,
   fromHex,
   kilograms,
   toHex,
@@ -36,12 +37,14 @@ import {
   webCryptoSha256,
   webCryptoVerifier,
   type ActivityId,
+  type WorkoutRecord,
 } from '@onyourleft/store';
 import {
   createStoreHarness,
   rideWriteUpFor,
   riderTextFor,
   sideCameraReportFor,
+  workoutFor,
   type StoreHarness,
 } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -50,6 +53,7 @@ import { orderedRows, PAGE_SIZE } from '../library/rows';
 import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { importActivityFiles } from '../transfer/import-batch';
+import { workoutRow } from '../workouts/library';
 import {
   createInstanceClock,
   sealedInstance,
@@ -99,13 +103,25 @@ interface InstanceStoreModule {
   }>;
 }
 
+/** The instance agent's `workouts` tool (#1100), run over the reads it is handed. */
+interface InstanceToolsModule {
+  readonly WORKOUTS: {
+    run(
+      context: { readonly athleteId: string; readonly input: unknown; readonly reads: unknown },
+      args: Readonly<Record<string, never>>,
+    ): Promise<string>;
+  };
+}
+
 const INSTANCE = (path: string): string =>
   fileURLToPath(new URL(`../../../instance/src/${path}`, import.meta.url));
 
 let instanceTesting: InstanceTesting;
 let syncTesting: SyncTesting;
 let instanceStore: InstanceStoreModule;
+let instanceTools: InstanceToolsModule;
 beforeAll(async () => {
+  instanceTools = (await import(INSTANCE('analysis/tools/tools.ts'))) as InstanceToolsModule;
   instanceTesting = (await import(INSTANCE('auth/identity-testing.ts'))) as InstanceTesting;
   syncTesting = (await import(INSTANCE('sync/sync-testing.ts'))) as SyncTesting;
   instanceStore = (await import(INSTANCE('store/open-sql-store.ts'))) as InstanceStoreModule;
@@ -312,7 +328,7 @@ async function signedInDevice(url: string, origin: string, names: readonly strin
   const signedIn = await signInToInstance(signInDependencies(origin, on));
   on.transport.setToken(signedIn.sessionToken);
   const sync = () => on.harness.write((store) => syncWithInstance(syncDependencies(on, store)));
-  return { on, ids, sync };
+  return { on, ids, sync, athleteId: signedIn.instanceAthleteId };
 }
 
 /** A device's own public key, lowercase hex, as a signed record carries it. */
@@ -1529,5 +1545,294 @@ describe('two devices’ words, and a delete over a newer edit (#924)', () => {
     // Deleted again, now over the copy it knows, the delete goes.
     await a.on.harness.write((store) => store.deleteRiderText(LOCAL_ATHLETE, 'document', plan.key));
     expect(await a.sync()).toMatchObject({ textsDeletedOnInstance: 1, failures: [] });
+  }, 60_000);
+});
+
+describe('the rider’s saved workouts, through to the agent’s tool (#1100)', () => {
+  /** The `workouts` tool's answer for an athlete, on a store opened for this read alone. */
+  async function workoutsOnInstance(path: string, athleteId: string): Promise<string> {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      return await instanceTools.WORKOUTS.run({ athleteId, input: {}, reads: fresh }, {});
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  /** What the tool should say of a workout: the Workouts screen's own row, in one line. */
+  const toolLine = (record: WorkoutRecord): string => {
+    const row = workoutRow(record);
+    return `Workout: ${row.name} — ${row.duration}: ${row.shape}`;
+  };
+
+  const workoutsOn = (on: Device) => on.harness.read((store) => store.listWorkouts(LOCAL_ATHLETE));
+
+  const idsOf = (records: readonly { readonly id: string }[]): string[] =>
+    records.map((row) => row.id).sort();
+
+  /** Workout bodies a hand-edited instance could hold, each one this program refuses. */
+  const INVALID_WORKOUT_BODIES: readonly (readonly [string, string])[] = [
+    // ADR 0017 D-4: an unknown key is refused, not ignored.
+    [
+      'workout-unknown-key',
+      JSON.stringify({
+        onYourLeftWorkout: 1,
+        name: 'Extra',
+        blocks: [{ kind: 'steady', seconds: 60, target: 0.5 }],
+        resistanceOverride: 400,
+      }),
+    ],
+    // ADR 0017 D-6: 51 interval blocks of 100 repeats expand past 10 000 segments.
+    [
+      'workout-over-the-bound',
+      JSON.stringify({
+        onYourLeftWorkout: 1,
+        name: 'Too long',
+        blocks: Array.from({ length: 51 }, () => ({
+          kind: 'intervals',
+          repeats: 100,
+          hardSeconds: 1,
+          hardTarget: 1,
+          easySeconds: 1,
+          easyTarget: 0.5,
+        })),
+      }),
+    ],
+  ];
+
+  const renamed = (record: WorkoutRecord, name: string): WorkoutRecord => ({
+    ...record,
+    name,
+    workout: { ...record.workout, name },
+    updatedAt: unixSeconds(record.updatedAt + 1),
+  });
+
+  it('sends a saved workout, and the tool reads it back on a fresh store — for its athlete only', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Over-unders' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(workout));
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 0, failures: [] });
+
+    // Another athlete on the same instance reads none of it.
+    const stranger = await signedInDevice(world.url, origin, ['paused-laps.fit']);
+    expect(stranger.athleteId).not.toBe(a.athleteId);
+    expect(await workoutsOnInstance(world.path, stranger.athleteId)).toBe(
+      'The cyclist has no saved workouts synced.',
+    );
+
+    // A change here is sent again.
+    const changed = renamed(workout, 'Threshold');
+    await a.on.harness.write((store) => store.putWorkout(changed));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(changed));
+  }, 60_000);
+
+  it('deletes on the instance a workout deleted here, and the tool no longer returns it; another device that brought it back keeps it', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const kept = workoutFor(LOCAL_ATHLETE, { name: 'Kept' });
+    const gone = workoutFor(LOCAL_ATHLETE, { name: 'Gone' });
+    await a.on.harness.write(async (store) => {
+      await store.putWorkout(kept);
+      await store.putWorkout(gone);
+    });
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 2, failures: [] });
+
+    // A linked device brings both back (the owner's ruling of 2026-10-10).
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({
+      workoutsPulled: 2,
+      workoutsPushed: 0,
+      workoutsDeletedOnInstance: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(b.on))).toStrictEqual(idsOf([kept, gone]));
+    expect((await workoutsOn(b.on)).find((row) => row.id === gone.id)?.workout).toStrictEqual(
+      gone.workout,
+    );
+
+    await a.on.harness.write((store) => store.deleteWorkout(LOCAL_ATHLETE, gone.id));
+    expect(await a.sync()).toMatchObject({ workoutsDeletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'workout' && item.key === gone.id,
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(kept));
+    // Forgotten, so nothing more is asked of the instance, and nothing comes back.
+    expect(await a.sync()).toMatchObject({
+      workoutsDeletedOnInstance: 0,
+      workoutsPushed: 0,
+      workoutsPulled: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(a.on))).toStrictEqual([kept.id]);
+
+    // Another device's deletion of a workout still here leaves it here.
+    expect(await b.sync()).toMatchObject({
+      workoutsHiddenOnInstance: 1,
+      workoutsDeletedOnInstance: 0,
+      workoutsPushed: 0,
+      failures: [],
+    });
+    expect(idsOf(await workoutsOn(b.on))).toStrictEqual(idsOf([kept, gone]));
+  }, 60_000);
+
+  it('deletes a workout deleted here even over a change another device made since, and never brings it back', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Contested' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, failures: [] });
+
+    // B changes it there; A deletes it here. A's change wins.
+    await b.on.harness.write((store) => store.putWorkout(renamed(workout, 'Changed on B')));
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.deleteWorkout(LOCAL_ATHLETE, workout.id));
+    expect(await a.sync()).toMatchObject({
+      workoutsDeletedOnInstance: 1,
+      workoutsPulled: 0,
+      failures: [],
+    });
+    expect(await a.sync()).toMatchObject({ workoutsPulled: 0, failures: [] });
+    expect(await workoutsOn(a.on)).toStrictEqual([]);
+    expect(
+      (await manifestOf(a.on)).find((item) => item.kind === 'workout' && item.key === workout.id)
+        ?.deleted,
+    ).toBe(true);
+  }, 60_000);
+
+  it('brings back a change made on another device, and sends this device’s over one made there too', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Both' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, failures: [] });
+
+    // Changed on B only: A, unchanged since, brings it back.
+    await b.on.harness.write((store) => store.putWorkout(renamed(workout, 'From B')));
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0, failures: [] });
+    expect((await workoutsOn(a.on)).map((row) => row.name)).toStrictEqual(['From B']);
+
+    // Changed on both: each device's own change wins on it, and is sent.
+    await b.on.harness.write(async (store) =>
+      store.putWorkout(renamed((await store.getWorkout(LOCAL_ATHLETE, workout.id))!, 'B again')),
+    );
+    expect(await b.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+    await a.on.harness.write(async (store) =>
+      store.putWorkout(renamed((await store.getWorkout(LOCAL_ATHLETE, workout.id))!, 'A wins')),
+    );
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, workoutsPulled: 0, failures: [] });
+    expect((await workoutsOn(a.on)).map((row) => row.name)).toStrictEqual(['A wins']);
+    expect(await instanceItem(a.on, 'workout', workout.id)).toMatchObject({ name: 'A wins' });
+    // B, unchanged since its own push, now brings A's back.
+    expect(await b.sync()).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0, failures: [] });
+    expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['A wins']);
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for a workout on the instance this program would not read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const good = workoutFor(LOCAL_ATHLETE, { name: 'Good' });
+    for (const [key, body] of [
+      ['workout-good', encodeWorkoutFile(good.workout)],
+      ...INVALID_WORKOUT_BODIES,
+    ] as const) {
+      const put = await a.on.transport.sync.json(
+        'POST',
+        `/v1/sync/items/workout/${encodeURIComponent(key)}`,
+        { body },
+      );
+      expect(put.status, key).toBe(200);
+    }
+    const report = await a.sync();
+    expect(report).toMatchObject({ workoutsPulled: 1, workoutsPushed: 0 });
+    expect(report.failures).toStrictEqual(
+      INVALID_WORKOUT_BODIES.map(([key]) => ({
+        kind: 'workout',
+        key,
+        reason: 'not-a-workout',
+      })).sort((one, other) => one.key.localeCompare(other.key)),
+    );
+    expect(idsOf(await workoutsOn(a.on))).toStrictEqual(['workout-good']);
+    const baseKeys = await a.on.harness.read(async (store) =>
+      (await store.listSyncBase(LOCAL_ATHLETE))
+        .filter((row) => row.kind === 'workout')
+        .map((row) => row.key),
+    );
+    expect(baseKeys).toStrictEqual(['workout-good']);
+    // Asked again next time, and refused again.
+    expect((await a.sync()).failures).toHaveLength(INVALID_WORKOUT_BODIES.length);
+  }, 60_000);
+
+  it('keeps a workout the instance deleted, and sends it again only once it is changed here', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Sweet spot' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    const deleted = await a.on.transport.sync.json(
+      'DELETE',
+      `/v1/sync/items/workout/${encodeURIComponent(workout.id)}`,
+    );
+    expect(deleted.status).toBeLessThan(300);
+    expect(await a.sync()).toMatchObject({
+      workoutsHiddenOnInstance: 1,
+      workoutsPushed: 0,
+      failures: [],
+    });
+    expect((await workoutsOn(a.on)).map((row) => row.id)).toStrictEqual([workout.id]);
+
+    await a.on.harness.write((store) => store.putWorkout(renamed(workout, 'Sweet spot 2')));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+  }, 60_000);
+
+  it('sends and deletes nothing of the workouts when their list cannot be read', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Kept on the instance' });
+    await a.on.harness.write((store) => store.putWorkout(workout));
+    expect(await a.sync()).toMatchObject({ workoutsPushed: 1, failures: [] });
+
+    const report = await a.on.harness.write((store) =>
+      syncWithInstance(
+        syncDependencies(
+          a.on,
+          // The store's methods read private fields, so each is bound to it.
+          new Proxy(store, {
+            get: (target, property) => {
+              if (property === 'listWorkouts') return () => Promise.reject(new Error('unreadable'));
+              const value = Reflect.get(target, property) as unknown;
+              return typeof value === 'function'
+                ? (value as (...args: unknown[]) => unknown).bind(target)
+                : value;
+            },
+          }),
+        ),
+      ),
+    );
+    expect(report).toMatchObject({ workoutsDeletedOnInstance: 0, workoutsPushed: 0 });
+    expect(report.failures).toStrictEqual([{ kind: 'workout', key: '', reason: 'not-read' }]);
+    expect(await workoutsOnInstance(world.path, a.athleteId)).toBe(toolLine(workout));
   }, 60_000);
 });

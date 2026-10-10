@@ -194,6 +194,16 @@ const WorkoutBlockChart = memo(function WorkoutBlockChart({
   return timeline === undefined ? null : <BlockChart segments={timeline.segments} />;
 });
 
+/**
+ * A new workout's id: `workout-` and a random UUID, never the clock (#1100).
+ * Since saved workouts sync both ways across a rider's devices, an id is a
+ * key on the instance, and one minted from a device's clock in milliseconds
+ * — as it was until then — collides when two devices save in the same
+ * millisecond, and the instance would then hold whichever synced last.
+ * `crypto.randomUUID`, as a ride's and a route's id are (`main.tsx`).
+ */
+const newWorkoutId = (): WorkoutId => `workout-${globalThis.crypto.randomUUID()}` as WorkoutId;
+
 export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): JSX.Element {
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -344,7 +354,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       event.preventDefault();
       if (port === undefined) return;
       const outcome = workoutToSave({
-        id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
+        id: newWorkoutId(),
         owner: port.athleteId,
         name,
         blocks,
@@ -406,7 +416,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         return;
       }
       const outcome = workoutFromFile(await chosen.text(), {
-        id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
+        id: newWorkoutId(),
         owner: port.athleteId,
         now: clock(),
       });
