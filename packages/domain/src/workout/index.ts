@@ -32,6 +32,24 @@ export {
   workoutSegmentCount,
 } from './workout';
 
+export type {
+  WorkoutGoals,
+  WorkoutGoalsFault,
+  WorkoutGoalsReading,
+  WorkoutSessionType,
+} from './goals';
+export {
+  MAXIMUM_GOAL_DURATION_MINUTES,
+  MAXIMUM_GOAL_HEART_RATE,
+  MAXIMUM_GOAL_POWER_CEILING,
+  MINIMUM_GOAL_DURATION_MINUTES,
+  MINIMUM_GOAL_HEART_RATE,
+  MINIMUM_HOLD_RANGE_WIDTH,
+  readWorkoutGoals,
+  WORKOUT_GOAL_CONSTRAINTS,
+  WORKOUT_SESSION_TYPES,
+} from './goals';
+
 export type { WorkoutFile } from './format';
 export {
   decodeWorkoutFile,

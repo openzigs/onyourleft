@@ -40,6 +40,7 @@ import type {
   Watts,
   GeographicPosition,
   Workout,
+  WorkoutGoals,
 } from '@onyourleft/domain';
 
 import type {
@@ -1436,3 +1437,33 @@ export interface TrustedDeviceKeyRecord {
   /** When it was admitted on this device. */
   readonly admittedAt: UnixSeconds;
 }
+
+/**
+ * The rider's typed workout goals — #1236, ADR 0048 D-10 (the owner's Q9). One
+ * row per athlete, replaced whole on every save.
+ *
+ * ⚠️ **Not #836's free-text goals** (`RiderTextRecord`, kind `goal`), which
+ * the analysis agent reads and which never set a bound. These do: a
+ * heart-rate hold or a re-plan during the ride stays inside them. So they are
+ * checked by `@onyourleft/domain` §`readWorkoutGoals` on the way in **and** on
+ * the way out, and a row that fails reads back as no goals with a fault —
+ * never as part of a goal.
+ */
+export interface WorkoutGoalsRecord {
+  /** Whose. **Every read of this record names it** — it is the primary key. */
+  readonly athleteId: AthleteId;
+  /** What the rider chose. Every field optional; an absent one is no goal. */
+  readonly goals: WorkoutGoals;
+  /** When they were last saved on this device. */
+  readonly savedAt: UnixSeconds;
+}
+
+/**
+ * What a read of the athlete's workout goals found: nothing saved, the goals,
+ * or a row that is not goals and the one reason why. A fault holds **no**
+ * goals, so nothing downstream can bound a ride with half of one.
+ */
+export type WorkoutGoalsRead =
+  | { readonly status: 'none' }
+  | { readonly status: 'kept'; readonly record: WorkoutGoalsRecord }
+  | { readonly status: 'fault'; readonly fault: string };
