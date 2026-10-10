@@ -499,8 +499,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   are **not met**, '598 on its routine score and the prompts chosen by it (and, for claims 9 and 19,
   environment data), '871 on bridging wireless protocols, calorie, weight-loss or temperature
   criteria, and broadcast. **Peloton's claims 1 and 18, as published, read on the re-plan**, and
-  claim 1 reads on the heart-rate hold as well. So the first condition in §"What would make this ADR
-  wrong" is not met (nothing is granted), and its #1234 clause is answered (US11270598's claim 1 does
-  not read, provided the spike's rule R1, *no performance score during a ride*, holds). The
-  application's current status could not be read from Patent Center. The spike's ten rules (R1 to
-  R10) and option H are for #1242 to #1244, and its §8 Questions A and B are put to the owner. (#1234)
+  claim 1 reads on the heart-rate hold as well. Whether the first condition in §"What would make this
+  ADR wrong" is met is **not known as of 2026-10-10**: no grant was found, and the application's
+  status after its publication on 2026-08-27 could not be read from Patent Center (spike §1.3;
+  ADR 0007 D7 records an unread fact as unread). Its #1234 clause is answered (US11270598's claim 1
+  does not read, provided the spike's rule R1, *no performance score during a ride*, holds). The
+  spike's ten rules (R1 to R10) are owned by the issues its §6 names, the heart-rate hold's among
+  them: #1236 (R6), #1239 (R2, R10), #1242 to #1244 and #1245 (R2). Option H is #1243's to decide.
+  Its §8 Questions A and B are put to the owner. (#1234)
