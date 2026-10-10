@@ -26,6 +26,11 @@ export type WorkoutErrorCode =
   | 'target-out-of-range'
   /** A repeat count that is zero, negative, not an integer, or absurd. */
   | 'invalid-repeat'
+  /**
+   * A heart-rate hold's range that is not two whole numbers of beats per
+   * minute in the plausible band, or is narrower than 6 bpm (#1239, H2).
+   */
+  | 'invalid-heart-rate-range'
   /** A block kind the model does not have. */
   | 'unknown-block'
   /**

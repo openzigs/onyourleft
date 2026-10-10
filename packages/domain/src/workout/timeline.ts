@@ -33,7 +33,13 @@
 
 import { seconds, type Seconds } from '../quantities';
 
-import { validateWorkout, type ThresholdShare, type Workout, type WorkoutBlock } from './workout';
+import {
+  validateWorkout,
+  type HeartRateHoldBlock,
+  type ThresholdShare,
+  type Workout,
+  type WorkoutBlock,
+} from './workout';
 
 /** One stretch of the ride, at absolute offsets from the workout's start. */
 export interface WorkoutSegment {
@@ -53,6 +59,12 @@ export interface WorkoutSegment {
   /** The index of the block this came from, so a screen can group by block. */
   readonly block: number;
   readonly label?: string | undefined;
+  /**
+   * The heart-rate hold this segment is, when it is one (#1239). Its {@link from}
+   * and {@link to} are the hold's start share, so a reader that does not know
+   * about the hold rides it as the steady block it falls back to.
+   */
+  readonly hold?: HeartRateHoldBlock | undefined;
 }
 
 /** A workout with its segments and its total length. */
@@ -82,6 +94,7 @@ export function expandWorkout(workout: Workout): WorkoutTimeline {
     to: ThresholdShare | undefined,
     block: number,
     label: string | undefined,
+    hold?: HeartRateHoldBlock,
   ): void => {
     segments.push({
       startsAt: seconds(offset),
@@ -90,6 +103,7 @@ export function expandWorkout(workout: Workout): WorkoutTimeline {
       to,
       block,
       ...(label === undefined ? {} : { label }),
+      ...(hold === undefined ? {} : { hold }),
     });
     offset += length;
   };
@@ -110,6 +124,7 @@ function expandBlock(
     to: ThresholdShare | undefined,
     block: number,
     label: string | undefined,
+    hold?: HeartRateHoldBlock,
   ) => void,
 ): void {
   switch (block.kind) {
@@ -121,6 +136,9 @@ function expandBlock(
       return;
     case 'free-ride':
       push(block.seconds, undefined, undefined, index, block.label);
+      return;
+    case 'heart-rate-hold':
+      push(block.seconds, block.startShare, block.startShare, index, block.label, block);
       return;
     case 'intervals':
       // Hard then easy, every time, including the last repeat. A rider who
