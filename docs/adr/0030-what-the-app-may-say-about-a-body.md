@@ -697,3 +697,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     2026-09-28** (R2 to R10; **R5 and R6 untouched**, **R4 and R7's non-medical half relaxed for a
     model's write-up only** as above, and R1 relaxed only as above). The body above
     is not edited.
+- **2026-10-09** — **The wording rules of [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-12 apply to every workout string**,
+  on the owner's Q12 ruling on [#1233](https://github.com/openzigs/onyourleft/issues/1233)
+  (2026-10-09): *"The banned-word list, a source scan for it, and a reviewer checklist."* Every
+  string, store listing and release note about a workout — the heart-rate hold and the re-plan
+  during the ride included — never uses *cardiac*, *heart condition*, *rehabilitation*, *patient*,
+  *therapy*, *safe heart rate*, *protects your heart*, *medical* or *clinical*; never calls a
+  heart-rate number a limit for health or safety (it is *"the range you chose"*); and makes no claim
+  to prevent, treat or reduce the risk of anything, which is **R5**, negative form included. The
+  sentences a workout speaks are about the workout, never the body. A source scan in the shape of
+  `apps/web/src/camera/no-absolute-angles.test.ts` and a reviewer checklist for what no scan
+  reaches enforce it ([#1245](https://github.com/openzigs/onyourleft/issues/1245)). The two new
+  announcement kinds keep D-7 S1 and S4's shape. **Nothing above is relaxed by this entry**; the
+  body is not edited. (#1233)
