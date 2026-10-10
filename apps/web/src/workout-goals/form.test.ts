@@ -89,6 +89,7 @@ describe('the wording (ADR 0048 D-12)', () => {
     const all = [
       ...strings(wording),
       wording.goalsSaveFailure('x'),
+      wording.goalsClearFailure('x'),
       ...Object.keys(wording.FIELD_WORDS).map((field) =>
         wording.fieldRefusal(field as wording.GoalField, 'x'),
       ),

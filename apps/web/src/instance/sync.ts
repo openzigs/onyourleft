@@ -1170,7 +1170,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       return pullWorkoutGoals(path, remoteDigest);
     }
     // Saved or changed here, never synced, or gone from the instance: this
-    // device's copy is canonical (ADR 0036 D-3).
+    // device's copy is canonical (ADR 0036 D-3). That includes goals this
+    // device held before its first sync, which replace another device's: a
+    // deliberate choice, the device copy winning, and the other device pulls
+    // the replacement at its next sync.
     const answer = await sealed.json('POST', path, { body });
     if (answer.status !== 200) return codeOf(answer.body);
     await remember({

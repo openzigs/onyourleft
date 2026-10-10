@@ -6,7 +6,7 @@
  * ADR 0048 D-12 (the owner's Q12), and #1233 §8: a heart rate here is *the
  * range you chose*, never a limit for health or safety, and no sentence says
  * *safe*, *cardiac*, *heart condition*, *patient* or *therapy*.
- * `wording.test.ts` holds every string here to that list.
+ * `form.test.ts` §'the wording (ADR 0048 D-12)' holds every string here to that list.
  *
  * ⚠️ The sentence about what a sync sends ({@link WORKOUT_GOALS_SYNC_TEXT}) is
  * a disclosure, and #1245 owns the approved wording of the disclosures for
@@ -114,6 +114,11 @@ export const GOALS_NOT_READ =
 /** A save that failed: what was saved before is unchanged. */
 export function goalsSaveFailure(reason: string): string {
   return `Your workout goals could not be saved, so what you saved before is unchanged: ${reason}`;
+}
+
+/** A clear that failed: what was saved before is unchanged. */
+export function goalsClearFailure(reason: string): string {
+  return `Your workout goals could not be cleared, so what you saved before is unchanged: ${reason}`;
 }
 
 /** A refusal for one field: its label and what it must be. */

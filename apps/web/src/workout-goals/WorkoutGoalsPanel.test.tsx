@@ -17,6 +17,7 @@ import {
   type PersistentStore,
   type StoreHarness,
 } from '@onyourleft/store/testing';
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
@@ -202,6 +203,22 @@ describe('the workout goals screen (#1237)', () => {
     await settle();
     expect(status()).toContain(GOALS_CLEARED);
     expect(field(FIELD_WORDS.durationMinutes.label).value).toBe('');
+    expect(await freshRead()).toStrictEqual({ status: 'none' });
+  });
+
+  it('treats Save on an all-blank form as clearing the goals: the row is gone', async () => {
+    await writer.putWorkoutGoals({
+      athleteId: ATHLETE_A,
+      goals: { durationMinutes: 45, effortCheckIns: true },
+      savedAt: unixSeconds(1),
+    });
+    await open(portOver(writer));
+    await typeInto(field(FIELD_WORDS.durationMinutes.label), '');
+    act(() => {
+      field(FIELD_WORDS.effortCheckIns.label).click();
+    });
+    await save();
+    expect(status()).toContain(GOALS_CLEARED);
     expect(await freshRead()).toStrictEqual({ status: 'none' });
   });
 

@@ -46,6 +46,7 @@ import {
   GOALS_NOT_READ,
   GOALS_READING,
   GOALS_SAVED,
+  goalsClearFailure,
   goalsSaveFailure,
   NO_SESSION_TYPE,
   SAVE_GOALS,
@@ -121,7 +122,7 @@ export function WorkoutGoalsPanel({
       setInvalid(undefined);
       setMessage({ tone: 'success', text: GOALS_CLEARED });
     } catch (error) {
-      setMessage({ tone: 'danger', text: goalsSaveFailure(reasonOf(error)) });
+      setMessage({ tone: 'danger', text: goalsClearFailure(reasonOf(error)) });
     } finally {
       setBusy(false);
     }
