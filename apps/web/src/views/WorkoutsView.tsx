@@ -94,6 +94,8 @@ const BLOCK_KINDS: readonly { readonly kind: BlockDraft['kind']; readonly label:
   { kind: 'intervals', label: 'Intervals' },
   { kind: 'ramp', label: 'Ramp' },
   { kind: 'free-ride', label: 'Free ride' },
+  // #1241: ADR 0048 D-12's name for it, and none of the names it rules out.
+  { kind: 'heart-rate-hold', label: 'Heart-rate hold' },
 ];
 
 export interface WorkoutsViewProps {
@@ -465,7 +467,10 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   }
 
   const needsTarget =
-    draft.kind === 'steady' || draft.kind === 'ramp' || draft.kind === 'intervals';
+    draft.kind === 'steady' ||
+    draft.kind === 'ramp' ||
+    draft.kind === 'intervals' ||
+    draft.kind === 'heart-rate-hold';
 
   const shown: Fetched | { readonly kind: 'found'; readonly entry: WorkoutEntry } | undefined =
     inList !== undefined
@@ -741,7 +746,9 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                   help={
                     <p>
                       Targets are a percentage of your own threshold power, so the same workout
-                      works whatever shape you are in.
+                      works whatever shape you are in. A heart-rate hold starts at its starting
+                      target and moves it, never above its ceiling, to keep your heart rate in the
+                      range you choose.
                     </p>
                   }
                 >
@@ -783,7 +790,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                 {needsTarget ? (
                   <p>
                     <label htmlFor="block-percent">
-                      {draft.kind === 'ramp'
+                      {draft.kind === 'ramp' || draft.kind === 'heart-rate-hold'
                         ? 'Starting target, % of threshold'
                         : draft.kind === 'intervals'
                           ? 'Hard target, % of threshold'
@@ -858,6 +865,51 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                           onChange={(event) =>
                             setDraft({ ...draft, easyPercent: event.target.value })
                           }
+                        />
+                      </Stepper>
+                    </p>
+                  </>
+                ) : null}
+                {draft.kind === 'heart-rate-hold' ? (
+                  <>
+                    <p>
+                      <label htmlFor="block-ceiling-percent">Ceiling, % of threshold</label>
+                      <Stepper name="ceiling percentage" step={5} min={0}>
+                        <input
+                          id="block-ceiling-percent"
+                          name="ceilingPercent"
+                          type="text"
+                          inputMode="decimal"
+                          value={draft.ceilingPercent}
+                          onChange={(event) =>
+                            setDraft({ ...draft, ceilingPercent: event.target.value })
+                          }
+                        />
+                      </Stepper>
+                    </p>
+                    <p>
+                      <label htmlFor="block-low-bpm">Heart rate from, bpm</label>
+                      <Stepper name="bottom of the heart-rate range" step={1} min={0}>
+                        <input
+                          id="block-low-bpm"
+                          name="lowBpm"
+                          type="text"
+                          inputMode="numeric"
+                          value={draft.lowBpm}
+                          onChange={(event) => setDraft({ ...draft, lowBpm: event.target.value })}
+                        />
+                      </Stepper>
+                    </p>
+                    <p>
+                      <label htmlFor="block-high-bpm">Heart rate to, bpm</label>
+                      <Stepper name="top of the heart-rate range" step={1} min={0}>
+                        <input
+                          id="block-high-bpm"
+                          name="highBpm"
+                          type="text"
+                          inputMode="numeric"
+                          value={draft.highBpm}
+                          onChange={(event) => setDraft({ ...draft, highBpm: event.target.value })}
                         />
                       </Stepper>
                     </p>

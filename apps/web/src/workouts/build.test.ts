@@ -34,6 +34,55 @@ const refusalOf = (outcome: { status: string } & Record<string, unknown>): strin
   return (outcome.refusal as { code: string }).code;
 };
 
+describe('a heart-rate hold — #1241', () => {
+  const hold = (overrides: Partial<BlockDraft> = {}): BlockDraft =>
+    draft({
+      kind: 'heart-rate-hold',
+      minutes: '30',
+      percent: '55',
+      ceilingPercent: '80',
+      lowBpm: '130',
+      highBpm: '140',
+      ...overrides,
+    });
+
+  it('becomes a block, the percentages as shares through the one conversion', () => {
+    expect(built<WorkoutBlock>(blockFromDraft(hold({ label: 'Base' })))).toStrictEqual({
+      kind: 'heart-rate-hold',
+      seconds: 1800,
+      range: { low: 130, high: 140 },
+      startShare: 0.55,
+      ceilingShare: 0.8,
+      label: 'Base',
+    });
+  });
+
+  it('refuses a range under 6 bpm, and one upside down, naming the range', () => {
+    expect(refusalOf(blockFromDraft(hold({ highBpm: '135' })))).toBe('bad-heart-rate-range');
+    expect(refusalOf(blockFromDraft(hold({ lowBpm: '140', highBpm: '130' })))).toBe(
+      'bad-heart-rate-range',
+    );
+    expect(refusalOf(blockFromDraft(hold({ lowBpm: '140', highBpm: '140' })))).toBe(
+      'bad-heart-rate-range',
+    );
+    // Six exactly is the narrowest a hold may keep.
+    expect(blockFromDraft(hold({ highBpm: '136' })).status).toBe('built');
+  });
+
+  it('refuses a bpm that is not a whole number in 30 to 230, or is missing', () => {
+    for (const lowBpm of ['', '25', '130.5', 'abc']) {
+      expect(refusalOf(blockFromDraft(hold({ lowBpm }))), lowBpm).toBe('bad-heart-rate-range');
+    }
+    expect(refusalOf(blockFromDraft(hold({ highBpm: '231' })))).toBe('bad-heart-rate-range');
+  });
+
+  it('refuses a ceiling over 85 %, and a start above the ceiling', () => {
+    expect(refusalOf(blockFromDraft(hold({ ceilingPercent: '86' })))).toBe('bad-target');
+    expect(blockFromDraft(hold({ ceilingPercent: '85' })).status).toBe('built');
+    expect(refusalOf(blockFromDraft(hold({ percent: '81' })))).toBe('bad-target');
+  });
+});
+
 describe('a percentage becomes a share, once, in one place', () => {
   it('reads 110 as 1.1 times threshold', () => {
     // ⚠️ The whole reason `build.ts` exists. These are the same instruction and
