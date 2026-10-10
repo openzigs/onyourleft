@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
@@ -87,6 +88,8 @@ export async function startTestInstance(
     instanceKeys?: InstanceKeys;
     sealed?: Sealed;
     analysis?: AnalysisJobs;
+    /** A rider's own hosted key and consent (#1199). */
+    hostedSettings?: HostedSettings;
     /** What `/metrics` would count of each response (#1095's never-logged test). */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -107,6 +110,7 @@ export async function startTestInstance(
     ...(options.instanceKeys === undefined ? {} : { instanceKeys: options.instanceKeys }),
     ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
     ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
+    ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
     ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
   const listening = await listen(handler, {
