@@ -78,6 +78,8 @@ import {
   seconds,
   watts,
   type CadenceReading,
+  type HeartRateHoldContext,
+  type HeartRateSample,
   type PlayerState,
   type Seconds,
   type Watts,
@@ -89,6 +91,12 @@ import { TargetHeldBack } from '../ride/held-back';
 
 /** How long a cadence history is kept for the ERG rule. */
 export const CADENCE_HISTORY_SECONDS = 30;
+
+/**
+ * How long a heart-rate history is kept for the hold (#1240). The hold reads
+ * at most the last 15 s (H7's fallback), so 30 s is that with room to spare.
+ */
+export const HEART_RATE_HISTORY_SECONDS = 30;
 
 /**
  * What the session needs from a trainer.
@@ -115,6 +123,25 @@ export interface WorkoutSessionOptions {
    * refused as out of range — an ease that rescues nobody.
    */
   readonly powerFloor: Watts;
+  /**
+   * The top of the machine's own Supported Power Range, which H3 puts over a
+   * heart-rate hold's ceiling (#1240). Absent, the hold is bounded by its own
+   * shares and the ERG writer by the range as always.
+   */
+  readonly powerCeiling?: Watts | undefined;
+  /**
+   * What a heart-rate hold needs to know about the rider (#1240). Absent — the
+   * rider has not set their own threshold heart rate, or a threshold is
+   * assumed — every hold block rides steady at its start share (H1).
+   */
+  readonly heartRateHold?: HeartRateHoldContext | undefined;
+  /**
+   * Whether a heart-rate strap is paired, asked on every tick. `false` (or
+   * absent) hands the player NO history at all, which is "no strap"; a strap
+   * that is paired and quiet hands it an empty or stale one, which is
+   * silence — never a zero (ADR 0048 H7).
+   */
+  readonly heartRateStrap?: (() => boolean) | undefined;
   /** Told what happened, so a screen can re-render. */
   readonly onChange?: ((state: WorkoutSessionState) => void) | undefined;
 }
@@ -154,6 +181,12 @@ export interface WorkoutSession {
   tick(now: Seconds): void;
   /** One cadence reading, for the ERG spiral rule. */
   observeCadence(reading: CadenceReading): void;
+  /**
+   * One heart-rate reading, for the hold (#1240). A dropped reading is NOT
+   * passed — there is no reading to pass — so a strap that goes quiet leaves
+   * a history that goes stale, which the hold reads as silence.
+   */
+  observeHeartRate(reading: HeartRateSample): void;
   pause(now: Seconds): void;
   resume(now: Seconds): void;
   /** The trainer link dropped. Pauses; loses nothing. */
@@ -178,10 +211,19 @@ export interface WorkoutSession {
 export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSession {
   const { timeline, thresholdPower, control, powerFloor, onChange } = options;
 
-  const player: WorkoutPlayer = createWorkoutPlayer({ timeline, thresholdPower });
+  const player: WorkoutPlayer = createWorkoutPlayer({
+    timeline,
+    thresholdPower,
+    heartRateHold: options.heartRateHold,
+    trainerRange:
+      options.powerCeiling === undefined
+        ? undefined
+        : { minimum: powerFloor, maximum: options.powerCeiling },
+  });
   const writer: ErgWriter = createErgWriter(control);
 
   let cadence: CadenceReading[] = [];
+  let heartRate: HeartRateSample[] = [];
   let lastFault: string | undefined;
   /**
    * Whether the trainer has been eased to its floor since this session last
@@ -340,8 +382,13 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       // is 3 600 readings scanned every tick to look at eight of them.
       const floor = now - CADENCE_HISTORY_SECONDS;
       cadence = cadence.filter((reading) => reading.at >= floor);
+      heartRate = heartRate.filter((reading) => reading.at >= now - HEART_RATE_HISTORY_SECONDS);
 
-      const state = player.tick(now, { cadence });
+      const state = player.tick(now, {
+        cadence,
+        // #1240: no strap is NO history; a quiet strap is a stale one.
+        heartRate: options.heartRateStrap?.() === true ? heartRate : undefined,
+      });
 
       // ⚠️ Act on the intent only when the player is actually playing. A
       // paused or idle player returns its LAST intent unchanged — that is what
@@ -379,6 +426,10 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     observeCadence(reading: CadenceReading): void {
       cadence.push(reading);
+    },
+
+    observeHeartRate(reading: HeartRateSample): void {
+      heartRate.push(reading);
     },
 
     pause(now: Seconds): void {
