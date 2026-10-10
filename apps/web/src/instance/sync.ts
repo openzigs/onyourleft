@@ -190,22 +190,31 @@
  *    body that is not one (too long, a control character, a 51st document)
  *    is not stored and is reported.
  *
- * 9. **The rider's saved workouts** (#1100), for the analysis agent's
- *    `workouts` tool on the instance: each one as an item of kind `workout`,
- *    keyed by its own id, its body the workout's own file format
- *    (`encodeWorkoutFile`, ADR 0017 — which validates, so a workout this
- *    program would not read is never sent). Against the base, like rule 8,
- *    and **one way only**:
- *    - new or changed here, or gone from the instance: pushed;
- *    - synced, and deleted here since: deleted on the instance;
- *    - unchanged here and deleted on the instance: KEPT here, not pushed back;
- *    - ⚠️ **never pulled**: another device's workouts stay on the instance
- *      for the agent and are not brought to this device. A workout's id is
- *      minted from its device's clock in milliseconds (`WorkoutsView`), so
- *      two devices write one key only if they saved in the same millisecond;
- *      then the instance holds whichever synced last.
- *    A list of workouts that cannot be read sends and deletes nothing that
- *    sync — an absent list says nothing about what the rider deleted.
+ * 9. **The rider's saved workouts** (#1100; both ways since the owner's
+ *    ruling of 2026-10-10): each one as an item of kind `workout`, keyed by
+ *    its own id, its body the workout's own file format (`encodeWorkoutFile`,
+ *    ADR 0017 — which validates, so a workout this program would not read is
+ *    never sent). Against the base, like rule 8, with **this device's change
+ *    winning** and no conflict copy (a workout is blocks, not typed words):
+ *    - new or changed here, or gone from the instance: pushed — over a change
+ *      another device made there since the base, too;
+ *    - synced, and deleted here since: deleted on the instance, and never
+ *      brought back — even if another device changed it there since;
+ *    - unchanged here and deleted on the instance (another device's unsigned
+ *      delete): KEPT here, and not pushed back, as rule 8's text;
+ *    - unchanged here and changed there since the base, or on the instance
+ *      and never held here: **brought back** — read through
+ *      `workouts/transfer.ts` §`workoutFromFile`, the same decode a rider's
+ *      own import takes (`decodeWorkoutFile`: an unknown key refused, ADR 0017
+ *      D-4, and `validateWorkout`'s expansion bound, D-6), BEFORE anything is
+ *      written. A body it refuses writes nothing — no workout and no base row
+ *      — and is reported as `not-a-workout`, so the next sync asks again.
+ *    A new workout's id is `workout-` and a random UUID (`WorkoutsView`), so
+ *    two devices never mint one key; an id minted from a device's clock
+ *    before that is still a key, and two devices collide on one only if they
+ *    saved in the same millisecond. A list of workouts that cannot be read
+ *    sends, deletes and brings back nothing that sync — an absent list says
+ *    nothing about what the rider deleted.
  */
 
 import {
@@ -240,11 +249,13 @@ import {
   MAXIMUM_DOCUMENT_NAME_CHARACTERS,
   tidyRiderText,
   withoutBidiControls,
+  workoutId,
 } from '@onyourleft/store';
 
 import { exportActivity } from '../transfer/export-activity';
 import { MAXIMUM_ROOM_ROUTE_ANSWER_BYTES, type SealedInstance } from './instance-transport';
 import { importActivityFiles } from '../transfer/import-batch';
+import { workoutFromFile } from '../workouts/transfer';
 import type { TransferStore } from '../transfer/store-port';
 
 /**
@@ -299,7 +310,7 @@ export function sealedSyncTransport(instance: SealedInstance, token: string): Sy
   };
 }
 
-/** What sync needs of the local store: the transfer screen's port, and fourteen writes and reads. */
+/** What sync needs of the local store: the transfer screen's port, and sixteen writes and reads. */
 export type SyncStore = TransferStore &
   Pick<
     ActivityStore,
@@ -319,6 +330,7 @@ export type SyncStore = TransferStore &
     | 'deleteRiderText'
     | 'listTrustedDeviceKeys'
     | 'listWorkouts'
+    | 'putWorkout'
   >;
 
 export interface SyncDependencies {
@@ -481,6 +493,8 @@ export interface SyncReport {
   readonly textConflicts: number;
   /** Saved workouts sent to the instance, new or changed here (#1100). */
   readonly workoutsPushed: number;
+  /** Saved workouts brought back from the instance: saved, or changed, on another device (#1100). */
+  readonly workoutsPulled: number;
   /** Saved workouts deleted on the instance, because the rider deleted them here (#1100). */
   readonly workoutsDeletedOnInstance: number;
   /**
@@ -592,6 +606,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let textsDeletedOnInstance = 0;
   let textConflicts = 0;
   let workoutsPushed = 0;
+  let workoutsPulled = 0;
   let workoutsDeletedOnInstance = 0;
   let workoutsHiddenOnInstance = 0;
 
@@ -921,7 +936,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   }
 
   // --- The rider's saved workouts (#1100) -------------------------------------
-  // Rule 9: sent, and deleted there when deleted here; never pulled.
+  // Rule 9: both ways, with this device's change winning.
   let workouts: readonly WorkoutRecord[] | undefined;
   try {
     workouts = await store.listWorkouts(athleteId);
@@ -934,11 +949,15 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     const held = new Map<string, WorkoutRecord>(workouts.map((each) => [each.id, each]));
     const keys = new Set<string>([
       ...held.keys(),
+      ...manifest
+        .filter((entry) => entry.kind === WORKOUT_KIND && !entry.deleted)
+        .map((entry) => entry.key),
       ...[...base.values()].filter((row) => row.kind === WORKOUT_KIND).map((row) => row.key),
     ]);
     for (const key of [...keys].sort()) {
       const outcome = await syncWorkout(key, held.get(key));
       if (outcome === 'pushed') workoutsPushed += 1;
+      else if (outcome === 'pulled') workoutsPulled += 1;
       else if (outcome === 'deleted-on-instance') workoutsDeletedOnInstance += 1;
       else if (outcome === 'hidden-on-instance') workoutsHiddenOnInstance += 1;
       else if (outcome !== 'same') failures.push({ kind: WORKOUT_KIND, key, reason: outcome });
@@ -967,6 +986,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     textsDeletedOnInstance,
     textConflicts,
     workoutsPushed,
+    workoutsPulled,
     workoutsDeletedOnInstance,
     workoutsHiddenOnInstance,
     keysToConfirm: [...keysToConfirm].sort(),
@@ -974,9 +994,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   };
 
   /**
-   * One saved workout — rule 9. `local` is this device's, or `undefined` for
-   * a key only the base names (so it was synced, and deleted here since).
-   * Answers what happened, or why not.
+   * One saved workout, both ways — rule 9. `local` is this device's, or
+   * `undefined` for a key only the base or the instance names (deleted here
+   * since it was synced, or saved on another device). Answers what happened,
+   * or why not.
    */
   async function syncWorkout(key: string, local: WorkoutRecord | undefined): Promise<string> {
     const entry = remote.get(keyOf(WORKOUT_KIND, key));
@@ -989,15 +1010,22 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     };
     const path = `/v1/sync/items/${WORKOUT_KIND}/${encodeURIComponent(key)}`;
     if (local === undefined) {
-      // Synced before, and not here now: the rider deleted it HERE.
-      if (remoteDigest !== null) {
-        const answer = await sealed.json('DELETE', path);
-        if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
-          return codeOf(answer.body);
-        }
+      if (remoteDigest === null) {
+        await forget();
+        return 'same';
+      }
+      // On the instance, and never held here: another device saved it.
+      if (known === undefined) return pullWorkout(key, path, remoteDigest, undefined);
+      // Synced before, and not here now: the rider deleted it HERE. The
+      // device's change wins (the owner's ruling of 2026-10-10), so it is
+      // deleted there even if another device changed it since, and never
+      // brought back.
+      const answer = await sealed.json('DELETE', path);
+      if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
+        return codeOf(answer.body);
       }
       await forget();
-      return remoteDigest === null ? 'same' : 'deleted-on-instance';
+      return 'deleted-on-instance';
     }
     let body: string;
     try {
@@ -1017,8 +1045,13 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       // rule 8's unsigned delete: KEPT here, and not pushed back.
       return 'hidden-on-instance';
     }
+    if (known?.localDigest === localDigest && remoteDigest !== null) {
+      // Unchanged here since the last sync: another device changed it there.
+      if (remoteDigest === known.remoteDigest) return 'same';
+      return pullWorkout(key, path, remoteDigest, local);
+    }
     // Changed here, never synced, or gone from the instance: this device's
-    // copy is canonical (ADR 0036 D-3).
+    // copy is canonical (ADR 0036 D-3) — over a change made there, too.
     const answer = await sealed.json('POST', path, { body });
     if (answer.status !== 200) return codeOf(answer.body);
     await remember({
@@ -1029,6 +1062,46 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       remoteDigest: localDigest,
     });
     return 'pushed';
+  }
+
+  /**
+   * One saved workout from the instance — rule 9. Decoded and validated as a
+   * rider's own import is (`workoutFromFile`) BEFORE anything is written: a
+   * body it refuses writes no workout and no base row, and answers
+   * `not-a-workout`.
+   */
+  async function pullWorkout(
+    key: string,
+    path: string,
+    remoteDigest: string,
+    local: WorkoutRecord | undefined,
+  ): Promise<string> {
+    const answer = await sealed.json('GET', path);
+    if (answer.status !== 200) return codeOf(answer.body);
+    const text = (answer.body as { body?: unknown } | null)?.body;
+    if (typeof text !== 'string') return 'not-a-workout';
+    let id;
+    try {
+      id = workoutId(key);
+    } catch {
+      return 'not-a-workout';
+    }
+    const now = dependencies.now();
+    const outcome = workoutFromFile(text, { id, owner: athleteId, now });
+    if (outcome.status === 'refused') return 'not-a-workout';
+    const record: WorkoutRecord = {
+      ...outcome.record,
+      createdAt: local?.createdAt ?? now,
+      updatedAt: now,
+    };
+    try {
+      await store.putWorkout(record);
+    } catch {
+      return 'not-stored';
+    }
+    const localDigest = await hex(utf8(encodeWorkoutFile(record.workout)), sha256);
+    await remember({ kind: WORKOUT_KIND, key, activityId: null, localDigest, remoteDigest });
+    return 'pulled';
   }
 
   /**

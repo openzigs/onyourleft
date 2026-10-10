@@ -68,6 +68,7 @@ const REPORT: SyncReport = {
   textsDeletedOnInstance: 0,
   textConflicts: 0,
   workoutsPushed: 0,
+  workoutsPulled: 0,
   workoutsDeletedOnInstance: 0,
   workoutsHiddenOnInstance: 0,
   keysToConfirm: [OTHER_KEY],

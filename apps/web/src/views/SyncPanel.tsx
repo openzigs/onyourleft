@@ -94,9 +94,18 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       count(texts, 'Synced 1 goal, note or document.', 'Synced {n} goals, notes and documents.'),
     );
   }
-  // ⚠️ DRAFT (#1100): a new sentence, awaiting the owner's approval on #1104.
+  // #1100: the owner's wording of 2026-10-10, following the ride lines.
   if (report.workoutsPushed > 0) {
     lines.push(count(report.workoutsPushed, 'Sent 1 saved workout.', 'Sent {n} saved workouts.'));
+  }
+  if (report.workoutsPulled > 0) {
+    lines.push(
+      count(
+        report.workoutsPulled,
+        'Brought back 1 saved workout.',
+        'Brought back {n} saved workouts.',
+      ),
+    );
   }
   if (report.textConflicts > 0) {
     lines.push(

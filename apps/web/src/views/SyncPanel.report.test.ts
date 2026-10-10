@@ -26,6 +26,7 @@ const NOTHING: SyncReport = {
   textsDeletedOnInstance: 0,
   textConflicts: 0,
   workoutsPushed: 0,
+  workoutsPulled: 0,
   workoutsDeletedOnInstance: 0,
   workoutsHiddenOnInstance: 0,
   keysToConfirm: [],
@@ -43,6 +44,19 @@ describe('the sync report’s lines for saved workouts (#1100)', () => {
     ]);
     expect(syncReportLines({ ...NOTHING, workoutsPushed: 3 })).toStrictEqual([
       'Sent 3 saved workouts.',
+    ]);
+  });
+
+  it('says how many saved workouts were brought back, as the ride lines do', () => {
+    expect(syncReportLines({ ...NOTHING, workoutsPulled: 1 })).toStrictEqual([
+      'Brought back 1 saved workout.',
+    ]);
+    expect(syncReportLines({ ...NOTHING, workoutsPulled: 4 })).toStrictEqual([
+      'Brought back 4 saved workouts.',
+    ]);
+    expect(syncReportLines({ ...NOTHING, pulled: 2, workoutsPulled: 2 })).toStrictEqual([
+      'Brought back 2 rides.',
+      'Brought back 2 saved workouts.',
     ]);
   });
 

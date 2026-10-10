@@ -571,6 +571,27 @@ describe('#670 — a selected workout', () => {
     expect(view.container.textContent).toContain('Saved “Tempo”.');
   });
 
+  it('gives two workouts saved in the same second ids that cannot collide on another device — #1100', async () => {
+    // Saved workouts sync both ways (#1100), so an id is a key on the
+    // instance: one minted from the clock collides across devices.
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub, 1_700_000_500);
+    for (const name of ['Tempo', 'Tempo again']) {
+      await typeInto(field(view.container, 'block-minutes'), '10');
+      await typeInto(field(view.container, 'block-percent'), '65');
+      await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+      await typeInto(field(view.container, 'workout-name'), name);
+      await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+      await settle();
+    }
+    const ids = stub.rows().map((row) => row.id as string);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) {
+      expect(id).toMatch(/^workout-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    }
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it('keeps the name when a save is refused, so the rider can fix what was wrong — #723', async () => {
     const stub = workoutStub(ATHLETE);
     const view = await render(stub);
