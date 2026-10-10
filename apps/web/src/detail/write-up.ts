@@ -121,7 +121,42 @@ export const WRITE_UP_EARLIER_NOT_READ =
 export const WRITE_UP_SOURCE_TEXT: Readonly<Record<RideWriteUpSourceRecord, string>> = {
   computer: 'It was written by the model on your own computer.',
   hosted: 'It was written by a service you chose, on your own key.',
+  // #1102: a write-up asked of the rider's instance (ADR 0046 D-1).
+  'instance-local': 'It was written by the model on your instance.',
+  'instance-hosted': 'It was written by a service your instance sent it to.',
 };
+
+/**
+ * #1104's B3, the instance paragraph — what a write-up asked of the rider's
+ * instance sends, said beside the press (ADR 0046 D-6, D-7). It replaces
+ * {@link COMPUTER_SENDS} when #1103 removes the own-computer path.
+ *
+ * Approved by the owner on #1104 on 2026-10-09, with "summaries of older
+ * rides" added to the list. `write-up.test.ts` pins it word for word.
+ */
+export const INSTANCE_SENDS_LEAD =
+  'A ride analysed on your instance, when you ask for an analysis.';
+export const INSTANCE_SENDS =
+  "When you press the button on a ride's page, that ride's numbers go to your instance: heart " +
+  'rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set ' +
+  "one, how long the ride lasted, its distance, and each section's gradient and total climb, and " +
+  'how it went section by section. If the side camera filmed the ride, and you agreed to the ' +
+  'camera, it also gets how a few measurements of your riding position changed between the start ' +
+  'and the end of filming. Never a picture. Your instance writes the analysis with a model on its ' +
+  'own machine, and the model may look up what is already on your instance: short summaries of ' +
+  'your recent rides, summaries of older rides, what you wrote about your goals, your notes and ' +
+  'documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the ' +
+  'button. Once you have pressed it, the analysis can finish while the app is closed.';
+
+/**
+ * #1104's B4, the ride page's no-instance sentence (ADR 0046 D-2), around a
+ * link to the Connect screen whose words are that route's title. Approved by
+ * the owner on #1104 on 2026-10-09, as written.
+ */
+export const WRITE_UP_NO_INSTANCE_BEFORE =
+  'A write-up of this ride is written on an instance you connect in';
+export const WRITE_UP_NO_INSTANCE_AFTER =
+  ', and without one everything else in the app works as before and the write-ups already saved here stay.';
 
 /** Whether the side camera's summary was part of what the model was sent. */
 export const WRITE_UP_POSE_TEXT: Readonly<Record<'included' | 'left-out', string>> = {

@@ -87,6 +87,8 @@ import {
 import {
   COMPUTER_SENDS,
   COMPUTER_SENDS_LEAD,
+  INSTANCE_SENDS,
+  INSTANCE_SENDS_LEAD,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
   WRITE_UP_POSE_TEXT,
@@ -274,6 +276,9 @@ const KEPT: Record<RouteId, Kept> = {
     populated: [
       WRITE_UP_EXPLANATION,
       `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`,
+      // #1102: what a write-up asked of the rider's instance sends (#1104 B3).
+      // The populated fixture is signed in to an instance.
+      `${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`,
       RACE_CONSENT_SENTENCE,
       // #836: the note box's disclosure (ADR 0040 D-11) — where the note goes and
       // that a model reads it.

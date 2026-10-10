@@ -67,6 +67,10 @@ import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
 import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type {
+  InstanceAnalysisPort,
+  InstanceAskOutcome,
+} from '../ride-analysis/instance-analysis-port';
 import { stubEffortPort } from '../efforts/testing';
 import { stubLibrary } from '../library/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -430,6 +434,23 @@ function rideAnalysisPort(): RideAnalysisPort {
   };
 }
 
+/**
+ * A write-up asked of the rider's instance (#1102): connected on the
+ * populated walk, so its press and what it says is sent are laid out, and not
+ * on the empty one, so its one no-instance sentence is. It never answers — a
+ * walk never presses it.
+ */
+function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
+  return {
+    connected: () => populated,
+    availableSources: () => (populated ? ['instance-local'] : []),
+    pendingJob: () => false,
+    ask: async () => new Promise<InstanceAskOutcome>(() => undefined),
+    followAgain: async () => Promise.resolve({ kind: 'detached' }),
+    cancel: async () => Promise.resolve(),
+  };
+}
+
 function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
   const count = 1800;
   const track = Array.from({ length: count }, (_unused, index) =>
@@ -726,6 +747,7 @@ export function PopulatedShell({
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}
+      instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,
         rides.map((activity) => ({
