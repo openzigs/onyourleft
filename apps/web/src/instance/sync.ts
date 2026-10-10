@@ -215,11 +215,28 @@
  *    saved in the same millisecond. A list of workouts that cannot be read
  *    sends, deletes and brings back nothing that sync — an absent list says
  *    nothing about what the rider deleted.
+ * 10. **The rider's typed workout goals** (#1237, ADR 0048 D-10): ONE item of
+ *    kind `workout-goal`, keyed `goals`, its body the goals as JSON in
+ *    `readWorkoutGoals`' own key order. ⚠️ **Not `goal`** (rule 8's free
+ *    text, which never sets a bound): only this kind may bound a heart-rate
+ *    hold or a re-plan. Rule 9's way, with this device's change winning and no
+ *    conflict copy:
+ *    - saved or changed here, or gone from the instance: pushed;
+ *    - **cleared here since the last sync: deleted (tombstoned) on the
+ *      instance**, and never brought back;
+ *    - unchanged here and deleted on the instance: KEPT here, not pushed back;
+ *    - unchanged here and changed there, or there and never held here:
+ *      brought back — read by `@onyourleft/domain` §`readWorkoutGoals`, which
+ *      refuses a malformed set WHOLE, before anything is written; a refused
+ *      body writes nothing and is reported `not-workout-goals`.
+ *    Goals that cannot be read here (a hand-edited row) send, delete and bring
+ *    back nothing that sync, and are reported `not-read`.
  */
 
 import {
   contentHashOf,
   encodeWorkoutFile,
+  readWorkoutGoals,
   parseContentHash,
   signActivityRecord,
   toHex,
@@ -230,6 +247,7 @@ import {
   type SignatureVerifier,
   type SigningKey,
   type UnixSeconds,
+  type WorkoutGoals,
 } from '@onyourleft/domain';
 import type {
   ActivityId,
@@ -331,6 +349,8 @@ export type SyncStore = TransferStore &
     | 'listTrustedDeviceKeys'
     | 'listWorkouts'
     | 'putWorkout'
+    | 'getWorkoutGoals'
+    | 'putWorkoutGoals'
   >;
 
 export interface SyncDependencies {
@@ -502,6 +522,17 @@ export interface SyncReport {
    * unchanged (#1100): KEPT here, and not sent back until changed here.
    */
   readonly workoutsHiddenOnInstance: number;
+  /** The typed workout goals sent to the instance, saved or changed here (#1237): 0 or 1. */
+  readonly workoutGoalsPushed: number;
+  /** The typed workout goals brought back: saved, or changed, on another device (#1237). */
+  readonly workoutGoalsPulled: number;
+  /** The typed workout goals deleted on the instance, because the rider cleared them here (#1237). */
+  readonly workoutGoalsDeletedOnInstance: number;
+  /**
+   * The typed workout goals the instance holds deleted that this device still
+   * holds unchanged (#1237): KEPT here, and not sent back until changed here.
+   */
+  readonly workoutGoalsHiddenOnInstance: number;
   /**
    * Keys that signed a record the instance served and this device refused as
    * `key-not-admitted` (#898): listed by the instance as the athlete's, and
@@ -609,6 +640,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let workoutsPulled = 0;
   let workoutsDeletedOnInstance = 0;
   let workoutsHiddenOnInstance = 0;
+  let workoutGoalsPushed = 0;
+  let workoutGoalsPulled = 0;
+  let workoutGoalsDeletedOnInstance = 0;
+  let workoutGoalsHiddenOnInstance = 0;
 
   const manifest = await readManifest(sealed);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
@@ -964,6 +999,26 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
   }
 
+  // --- The rider's typed workout goals (#1237) --------------------------------
+  // Rule 10: one item, both ways, with this device's change winning.
+  const goalsRead = await store.getWorkoutGoals(athleteId).catch(() => undefined);
+  if (goalsRead === undefined || goalsRead.status === 'fault') {
+    // Goals that cannot be read here say nothing about what the rider
+    // cleared, so nothing of them is sent, deleted or brought back.
+    failures.push({ kind: WORKOUT_GOAL_KIND, key: WORKOUT_GOALS_KEY, reason: 'not-read' });
+  } else {
+    const outcome = await syncWorkoutGoals(
+      goalsRead.status === 'kept' ? goalsRead.record.goals : undefined,
+    );
+    if (outcome === 'pushed') workoutGoalsPushed += 1;
+    else if (outcome === 'pulled') workoutGoalsPulled += 1;
+    else if (outcome === 'deleted-on-instance') workoutGoalsDeletedOnInstance += 1;
+    else if (outcome === 'hidden-on-instance') workoutGoalsHiddenOnInstance += 1;
+    else if (outcome !== 'same') {
+      failures.push({ kind: WORKOUT_GOAL_KIND, key: WORKOUT_GOALS_KEY, reason: outcome });
+    }
+  }
+
   // --- The base forgets what neither side holds any more ---------------------
   for (const row of [...base.values()]) {
     if (row.kind !== 'activity' || remote.has(keyOf('activity', row.key))) continue;
@@ -989,6 +1044,10 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     workoutsPulled,
     workoutsDeletedOnInstance,
     workoutsHiddenOnInstance,
+    workoutGoalsPushed,
+    workoutGoalsPulled,
+    workoutGoalsDeletedOnInstance,
+    workoutGoalsHiddenOnInstance,
     keysToConfirm: [...keysToConfirm].sort(),
     failures,
   };
@@ -1062,6 +1121,105 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       remoteDigest: localDigest,
     });
     return 'pushed';
+  }
+
+  /**
+   * The typed workout goals, both ways — rule 10. `local` is this device's,
+   * or `undefined` when the rider has none saved here. Answers what happened,
+   * or why not.
+   */
+  async function syncWorkoutGoals(local: WorkoutGoals | undefined): Promise<string> {
+    const key = WORKOUT_GOALS_KEY;
+    const entry = remote.get(keyOf(WORKOUT_GOAL_KIND, key));
+    const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+    const known = base.get(keyOf(WORKOUT_GOAL_KIND, key));
+    const path = `/v1/sync/items/${WORKOUT_GOAL_KIND}/${key}`;
+    if (local === undefined) {
+      if (remoteDigest === null) {
+        if (base.delete(keyOf(WORKOUT_GOAL_KIND, key))) {
+          await store.deleteSyncBase(athleteId, WORKOUT_GOAL_KIND, key);
+        }
+        return 'same';
+      }
+      // On the instance, and never held here: another device saved them.
+      if (known === undefined) return pullWorkoutGoals(path, remoteDigest);
+      // Synced before, and cleared here since: the device's change wins, so
+      // they are deleted there — even if another device changed them since.
+      const answer = await sealed.json('DELETE', path);
+      if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
+        return codeOf(answer.body);
+      }
+      base.delete(keyOf(WORKOUT_GOAL_KIND, key));
+      await store.deleteSyncBase(athleteId, WORKOUT_GOAL_KIND, key);
+      return 'deleted-on-instance';
+    }
+    const body = JSON.stringify(local);
+    const localDigest = await hex(utf8(body), sha256);
+    if (remoteDigest === localDigest) {
+      await remember({ kind: WORKOUT_GOAL_KIND, key, activityId: null, localDigest, remoteDigest });
+      return 'same';
+    }
+    if (known?.localDigest === localDigest && entry?.deleted === true) {
+      // Unchanged here, and deleted on the instance by another device's
+      // unsigned delete: KEPT here, and not pushed back.
+      return 'hidden-on-instance';
+    }
+    if (known?.localDigest === localDigest && remoteDigest !== null) {
+      // Unchanged here since the last sync: another device changed them there.
+      if (remoteDigest === known.remoteDigest) return 'same';
+      return pullWorkoutGoals(path, remoteDigest);
+    }
+    // Saved or changed here, never synced, or gone from the instance: this
+    // device's copy is canonical (ADR 0036 D-3).
+    const answer = await sealed.json('POST', path, { body });
+    if (answer.status !== 200) return codeOf(answer.body);
+    await remember({
+      kind: WORKOUT_GOAL_KIND,
+      key,
+      activityId: null,
+      localDigest,
+      remoteDigest: localDigest,
+    });
+    return 'pushed';
+  }
+
+  /**
+   * The typed workout goals from the instance — rule 10. Read WHOLE by
+   * `readWorkoutGoals` before anything is written: a body it refuses writes
+   * no goals and no base row, and answers `not-workout-goals`.
+   */
+  async function pullWorkoutGoals(path: string, remoteDigest: string): Promise<string> {
+    const answer = await sealed.json('GET', path);
+    if (answer.status !== 200) return codeOf(answer.body);
+    const text = (answer.body as { body?: unknown } | null)?.body;
+    if (typeof text !== 'string') return 'not-workout-goals';
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return 'not-workout-goals';
+    }
+    const reading = readWorkoutGoals(parsed);
+    if (!reading.ok) return 'not-workout-goals';
+    let written;
+    try {
+      written = await store.putWorkoutGoals({
+        athleteId,
+        goals: reading.goals,
+        savedAt: dependencies.now(),
+      });
+    } catch {
+      return 'not-stored';
+    }
+    const localDigest = await hex(utf8(JSON.stringify(written.goals)), sha256);
+    await remember({
+      kind: WORKOUT_GOAL_KIND,
+      key: WORKOUT_GOALS_KEY,
+      activityId: null,
+      localDigest,
+      remoteDigest,
+    });
+    return 'pulled';
   }
 
   /**
@@ -1327,6 +1485,15 @@ const SUMMARY_KIND = 'ride-summary';
 
 /** A saved workout's item kind on the instance, and its sync base kind here (#1100). */
 const WORKOUT_KIND = 'workout';
+
+/**
+ * The typed workout goals' item kind on the instance, and their sync base
+ * kind here (#1237) — ⚠️ not rule 8's `goal`, which is free text.
+ */
+const WORKOUT_GOAL_KIND = 'workout-goal';
+
+/** The one key the typed workout goals are kept under: one set per athlete. */
+const WORKOUT_GOALS_KEY = 'goals';
 
 /**
  * Delete a ride on the instance: its write-up, side-camera report, summary

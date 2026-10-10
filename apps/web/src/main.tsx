@@ -116,6 +116,7 @@ import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
+import type { WorkoutGoalsPort } from './workout-goals/workout-goals-port';
 import type { RiderTextPort } from './rider-text/rider-text-port';
 import {
   createInstancePort,
@@ -766,6 +767,15 @@ function buildRiderTextPort(): RiderTextPort {
   };
 }
 
+/** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */
+function buildWorkoutGoalsPort(): WorkoutGoalsPort {
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+  };
+}
+
 /**
  * The Connect screen's port (#777): the ONE production place an instance port
  * is built, so `check:wiring` reports `createInstancePort` if this goes.
@@ -1238,6 +1248,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           athleteKit={buildAthleteKitColourPort()}
           maskedWords={buildMaskedWordsPort()}
           riderText={buildRiderTextPort()}
+          workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
           {...(sync === undefined ? {} : { sync })}

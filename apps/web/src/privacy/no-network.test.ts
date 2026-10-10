@@ -1488,10 +1488,13 @@ describe('the instance is disclosed, class by class — #778', () => {
       'your answer to may be raced for each ride',
       'all of it is sealed for that instance alone',
       'shows none of it to another rider',
-      'delete a ride, note, goal, document or saved workout on this device and then sync: the instance deletes it too',
+      'delete a ride, note, goal, document or saved workout on this device, or clear your workout goals, and then sync: the instance deletes it too',
       // #1100: saved workouts are synced both ways (`instance/sync.ts` rule 9).
       "your saved workouts, each one's name, description and blocks",
       'what another of your devices synced there, your saved workouts included',
+      // #1237: the typed workout goals, one item, synced both ways (rule 10).
+      // DRAFT wording until #1245's is approved by the owner.
+      'your workout goals, the numbers you chose on the workout goals screen',
       // ADR 0047 D-7 and D-11: what is sealed, and what Cloudflare still sees.
       'everything you sync is sealed',
       'what cloudflare still sees, even then',

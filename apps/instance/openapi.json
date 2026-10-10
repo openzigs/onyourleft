@@ -6285,7 +6285,8 @@
                               "note",
                               "document",
                               "masking",
-                              "workout"
+                              "workout",
+                              "workout-goal"
                             ]
                           },
                           "key": {

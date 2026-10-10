@@ -69,6 +69,9 @@ export const ADMIT_CONFIRM_BODY =
   'device at the next sync.';
 export const ADMITTED_TEXT = 'Trusted. Sync again to bring its rides to this device.';
 
+/** #1237: the sync report's line for the typed workout goals, sent or brought back. */
+export const WORKOUT_GOALS_SYNCED_TEXT = 'Synced your workout goals.';
+
 /** One line per count that is not nothing: what the last sync did. */
 export function syncReportLines(report: SyncReport): readonly string[] {
   const lines: string[] = [];
@@ -107,6 +110,10 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       ),
     );
   }
+  // #1237. One set of goals a rider, so one line whichever way it went.
+  if (report.workoutGoalsPushed + report.workoutGoalsPulled > 0) {
+    lines.push(WORKOUT_GOALS_SYNCED_TEXT);
+  }
   if (report.textConflicts > 0) {
     lines.push(
       count(
@@ -117,7 +124,10 @@ export function syncReportLines(report: SyncReport): readonly string[] {
     );
   }
   const deleted =
-    report.deletedOnInstance + report.textsDeletedOnInstance + report.workoutsDeletedOnInstance;
+    report.deletedOnInstance +
+    report.textsDeletedOnInstance +
+    report.workoutsDeletedOnInstance +
+    report.workoutGoalsDeletedOnInstance;
   if (deleted > 0) {
     lines.push(
       count(
@@ -128,7 +138,10 @@ export function syncReportLines(report: SyncReport): readonly string[] {
     );
   }
   const hidden =
-    report.hiddenOnInstance + report.textsHiddenOnInstance + report.workoutsHiddenOnInstance;
+    report.hiddenOnInstance +
+    report.textsHiddenOnInstance +
+    report.workoutsHiddenOnInstance +
+    report.workoutGoalsHiddenOnInstance;
   if (hidden > 0) {
     lines.push(
       count(

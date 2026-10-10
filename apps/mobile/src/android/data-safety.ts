@@ -367,7 +367,9 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     purposes: ['App functionality'],
     // #1100 adds the rider's saved workouts (name, description and blocks),
     // synced both ways like the rest: the owner's wording of 2026-10-10.
-    why: 'the rider’s goals, notes on their rides and the documents they added for the analysis (#836), their saved workouts (#1100), and each ride’s write-up and side-camera report, stay on the device until the rider syncs with an instance they connected to (#1195): then they go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account so a later analysis can look back at them, and shows them to no other rider. A sync also brings them, saved workouts included, back to the rider’s other devices that sync with the same instance. Nothing syncs until the rider presses Sync, which needs the instance’s card',
+    // #1237 adds their typed workout goals — DRAFT until #1245's wording is
+    // approved, and a change to this answer is re-filed on Play.
+    why: 'the rider’s goals, notes on their rides and the documents they added for the analysis (#836), their saved workouts (#1100), their workout goals (#1237), and each ride’s write-up and side-camera report, stay on the device until the rider syncs with an instance they connected to (#1195): then they go to that instance, sealed on the device for that instance alone (ADR 0047), which keeps them with the rider’s account so a later analysis can look back at them, and shows them to no other rider. A sync also brings them, saved workouts included, back to the rider’s other devices that sync with the same instance. Nothing syncs until the rider presses Sync, which needs the instance’s card',
   },
   {
     // ⚠️ **Re-answered by #387, and the answer CHANGED — collected: true.**
