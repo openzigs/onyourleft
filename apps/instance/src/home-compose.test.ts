@@ -117,3 +117,34 @@ describe('deploy/home/compose.yaml — the analysis model (#1096, ADR 0046 D-9)'
     expect(env).toMatch(/^OYL_INSTANCE_ANALYSIS_MODEL=$/m);
   });
 });
+
+/**
+ * #807's Windows run: `OYL_INSTANCE_PING_INTERVAL_MS=0` in `.env`, as the guide's
+ * idle probe says, reached nothing — compose never passed it on, and the probe
+ * measured a socket the instance was still pinging. The list is DERIVED from
+ * what `serve.ts` reads, so a setting added there and forgotten here is red.
+ */
+describe('deploy/home/compose.yaml — every setting the server reads reaches it (#807)', () => {
+  const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const serverReads = new Set(
+    [...read('./serve.ts').matchAll(/process\.env\.(OYL_INSTANCE_[A-Z_]+)/g)].map((m) => m[1]),
+  );
+  // The image sets these itself (its `ENV`): where the data is, and the commit it was built from.
+  const imageSets = new Set(
+    [...read('../Dockerfile').matchAll(/\b(OYL_INSTANCE_[A-Z_]+)=/g)].map((m) => m[1]),
+  );
+  const instance = /^ {2}instance:\n([\s\S]*?)^ {2}\w/m.exec(COMPOSE)?.[1] ?? '';
+
+  it('reads the lists it compares from the files themselves', () => {
+    expect(serverReads.size).toBeGreaterThan(10);
+    expect(imageSets).toContain('OYL_INSTANCE_DATABASE');
+    expect(instance).toContain('environment:');
+  });
+
+  it.each([...serverReads].filter((name) => name !== undefined && !imageSets.has(name)))(
+    'passes %s from .env to the instance',
+    (name) => {
+      expect(instance).toMatch(new RegExp(`^ {6}${name}: `, 'm'));
+    },
+  );
+});
