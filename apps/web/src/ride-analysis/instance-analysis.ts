@@ -12,7 +12,26 @@
  * The ride's input is built HERE, by #809's builder (`read-input.ts`), with the
  * camera consent read at the press — so the pose summary goes only with it
  * (the owner's ruling 5 on #795, ADR 0046 D-6) — and sent in the job request
- * (`instance-job.ts` §`analysisJobRequest`). Nothing else of the ride leaves.
+ * (`instance-job.ts` §`analysisJobRequest`). Nothing else of the ride leaves
+ * but its own id, and only for a ride already synced (below).
+ *
+ * ## Naming the ride, only when it is synced (#1229)
+ *
+ * The instance's history tool says how long before this ride each earlier
+ * ride it finds was (ADR 0040 D-2), which needs the ride on the instance. So a
+ * start names the ride ({@link syncedRideId}) when this device's sync base
+ * says it was synced, and the instance checks it is the rider's.
+ *
+ * ⚠️ **The rule for a ride not yet synced, decided here: it is written up
+ * without relative ages — never synced first, and never refused.** A sync
+ * sends the ride's file, its positions and everything that goes with it
+ * (`docs/privacy-policy.md` §"An instance you connect to"), which is far more
+ * than a write-up sends and is the rider's own press of *Sync now*; a press of
+ * the write-up button must not do it for them. And a write-up refused until
+ * the ride is synced would refuse every write-up of a rider who never syncs.
+ * The same holds for a ride the sync base names and the instance no longer
+ * holds (deleted from another device since): the instance refuses the id,
+ * and the start is made again without it.
  *
  * ## Never unscreened on the page, never unscreened in the store
  *
@@ -49,7 +68,7 @@
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId } from '@onyourleft/store';
+import type { ActivityId, AthleteId, SyncBaseRecord } from '@onyourleft/store';
 
 import {
   ANALYSIS_AGENT_TEMPLATE_V1,
@@ -266,6 +285,38 @@ export interface InstanceAnalysisOptions {
   readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   /** The recording, so the page stops following while a ride is recorded. */
   readonly ride?: RideInProgressWatch;
+  /**
+   * This device's sync base (#776), read at the press to name a synced ride
+   * in the start (#1229). Absent, no ride is named.
+   */
+  readonly syncBase?: SyncBaseReader;
+}
+
+/** What {@link syncedRideId} reads: `ActivityStore.listSyncBase`. */
+export interface SyncBaseReader {
+  listSyncBase(owner: AthleteId): Promise<readonly SyncBaseRecord[]>;
+}
+
+/**
+ * The ride's id, when this device has synced the ride with its instance — an
+ * `activity` row of the sync base for it — and `undefined` otherwise,
+ * including when the base cannot be read: a write-up does not fail for want
+ * of relative ages (#1229, the file comment).
+ */
+export async function syncedRideId(
+  syncBase: SyncBaseReader | undefined,
+  owner: AthleteId,
+  activityId: ActivityId,
+): Promise<string | undefined> {
+  if (syncBase === undefined) return undefined;
+  try {
+    const rows = await syncBase.listSyncBase(owner);
+    return rows.some((row) => row.kind === 'activity' && row.activityId === activityId)
+      ? activityId
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A timer, ended early by `signal`. */
@@ -513,7 +564,15 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
     const session = await options.session();
     if (session.kind === 'closed') return failed(session.text);
     if (cancelledEarly.delete(activityId)) return failed(INSTANCE_ASK_TEXT.cancelled);
-    const started = await startJob(session, analysisJobRequest(input, template.version, source));
+    const rideId = await syncedRideId(options.syncBase, owner, activityId);
+    let started = await startJob(
+      session,
+      analysisJobRequest(input, template.version, source, rideId),
+    );
+    // A ride the instance no longer holds: the same start, naming no ride.
+    if (started.kind === 'refused' && started.rideRefused === true && rideId !== undefined) {
+      started = await startJob(session, analysisJobRequest(input, template.version, source));
+    }
     if (started.kind === 'unreachable') return failed(INSTANCE_ASK_TEXT.unreachable);
     if (started.kind === 'refused') {
       return failed(

@@ -105,7 +105,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   sealed_replay: `INSERT INTO sealed_replay VALUES ('${'ef'.repeat(32)}', 20)`,
   account_change: `INSERT INTO account_change (id, athlete_id, at, kind, actor_key, subject_key, via, address) VALUES (1, 'a', 21, 'key_added', 'key-a', 'key-a', 'link_code', NULL)`,
   account_change_mark: `INSERT INTO account_change_mark VALUES ('a', 'key-a', 1, 22)`,
-  analysis_job: `INSERT INTO analysis_job VALUES ('job-a', 'a', 'succeeded', 'instance-local', '1', '{}', 'A ride.', NULL, 23, 24)`,
+  // The columns named, so migration 0021's `ride_id` is NULL (#1229).
+  analysis_job: `INSERT INTO analysis_job (id, athlete_id, status, source, template_version, input_json, candidate, failure, created_at, ended_at) VALUES ('job-a', 'a', 'succeeded', 'instance-local', '1', '{}', 'A ride.', NULL, 23, 24)`,
   analysis_event: `INSERT INTO analysis_event VALUES ('job-a', 'a', 1, 'result', '{}', 24)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };

@@ -46,6 +46,39 @@ describe('the request', () => {
     });
   });
 
+  it('carries the ride’s id only when it is handed a synced one (#1229)', () => {
+    expect(analysisJobRequest(INPUT, '1', 'instance-local', 'ride-7')).toStrictEqual({
+      input: INPUT,
+      templateVersion: '1',
+      source: 'instance-local',
+      rideId: 'ride-7',
+    });
+    expect(analysisJobRequest(INPUT, '1', 'instance-local', undefined)).not.toHaveProperty(
+      'rideId',
+    );
+  });
+
+  it('says when a refusal names the ride id, and only then (#1229)', async () => {
+    const answered = (body: unknown) =>
+      startJob(
+        session({ call: async () => Promise.resolve({ status: 400, body }) }),
+        analysisJobRequest(INPUT, '1', 'instance-local', 'ride-7'),
+      );
+    expect(
+      await answered({
+        error: { code: 'validation_failed', fields: [{ field: 'rideId', problem: 'x' }] },
+      }),
+    ).toStrictEqual({ kind: 'refused', code: 'validation_failed', rideRefused: true });
+    expect(
+      await answered({
+        error: { code: 'validation_failed', fields: [{ field: 'input.power', problem: 'x' }] },
+      }),
+    ).toStrictEqual({ kind: 'refused', code: 'validation_failed' });
+    expect(
+      await answered({ error: { code: 'job_running', fields: [{ field: 'rideId' }] } }),
+    ).toStrictEqual({ kind: 'refused', code: 'job_running' });
+  });
+
   it('is sent as the start’s body, under the session token', async () => {
     const calls: unknown[] = [];
     const started = await startJob(

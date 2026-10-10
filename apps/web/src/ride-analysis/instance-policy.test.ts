@@ -50,6 +50,9 @@ describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () =>
       'never the ride’s numbers or the model’s words',
       'your instance stops the analysis at its next step',
       "A ride's numbers sent to your instance, when you ask for an analysis of it",
+      // #1229: what naming a synced ride sends, and that an unsynced one is not synced for it.
+      "the app also sends the ride's id, which your instance already holds with the ride",
+      'A ride you have not synced is not synced for this: it is sent with no id',
     ].map((each) => each.replaceAll('’', "'")),
   )('says %s', (fact) => {
     expect(POLICY).toContain(fact);

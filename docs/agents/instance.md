@@ -125,6 +125,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         stream with `Last-Event-ID` resume and a heartbeat
                         on injected timers); docs/architecture.md
                         §"Analysis jobs — #1095" says what it keeps.
+                        Since #1229 a start may name the synced ride
+                        (`rideId`, migration 0021, checked to be the
+                        caller's), and the engine hands the agent the
+                        history index — it was handed none before.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

@@ -738,6 +738,8 @@ export interface AnalysisJob {
   readonly source: AnalysisJobTable['source'];
   readonly templateVersion: string;
   readonly inputJson: string;
+  /** The synced ride it writes up, by its own id; `null` when the device named none (#1229). */
+  readonly rideId: string | null;
   readonly candidate: string | null;
   readonly failure: string | null;
   /** Unix milliseconds. */
@@ -759,7 +761,10 @@ export interface AnalysisResult {
 export type NewAnalysisJob = Pick<
   AnalysisJob,
   'id' | 'athleteId' | 'source' | 'templateVersion' | 'inputJson' | 'createdAt'
->;
+> & {
+  /** #1229: the synced ride it writes up; absent or `null` when the device named none. */
+  readonly rideId?: string | null;
+};
 
 /** One event of a job's stream. */
 export interface AnalysisEvent {
@@ -1477,6 +1482,7 @@ const analysisJobFrom = (row: Selectable<AnalysisJobTable>): AnalysisJob => ({
   source: row.source,
   templateVersion: row.template_version,
   inputJson: row.input_json,
+  rideId: row.ride_id,
   candidate: row.candidate,
   failure: row.failure,
   createdAt: row.created_at,
@@ -4042,6 +4048,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               source: job.source,
               template_version: job.templateVersion,
               input_json: job.inputJson,
+              ride_id: job.rideId ?? null,
               candidate: null,
               failure: null,
               created_at: job.createdAt,

@@ -381,6 +381,13 @@ closed.
   which carries the traffic to the project's own instance, sees only ciphertext.
 - **What it is not sent:** not a picture, and nothing made from one beyond those few differences;
   not your name, not where you rode — no position, no height above sea level — and not when.
+- **Which ride it is, only if you have synced it:** if you have already synced this ride with your
+  instance, the app also sends the ride's id, which your instance already holds with the ride, so
+  that when the model looks up your earlier rides your instance can tell it how many weeks before
+  this ride each of them was. Naming it tells your instance which of the rides it holds the
+  analysis is about, that ride's date included. A ride you have not synced is not synced for this:
+  it is sent with no id, and the analysis then says nothing about how long ago your other rides
+  were.
 - **What your instance keeps:** the analysis job — the ride's numbers it was sent, its progress and
   the write-up as it was written — for 7 days. The finished write-up is kept with your account so
   another of your devices can show it. The side camera's measurements are not kept with it. All of

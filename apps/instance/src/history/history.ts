@@ -160,7 +160,7 @@ export interface HistoryOptions {
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 
 /** A ride's key, as a device names it: one path segment's characters (`handler.ts` §`PARAMETER`). */
-const RIDE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export const RIDE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 type Refusal = Extract<Outcome<never>, { readonly ok: false }>;
 
