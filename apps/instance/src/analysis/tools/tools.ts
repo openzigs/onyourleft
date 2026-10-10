@@ -2,8 +2,8 @@
 
 /**
  * **The analysis agent's tools** — #1098, ADR 0046 D-7: `ride_sections`,
- * `recent_rides` and `goals`, and since #1099 `history_search`
- * (`history-search.ts`). Workouts are #1100.
+ * `recent_rides` and `goals`, since #1099 `history_search`
+ * (`history-search.ts`), and since #1100 `workouts`.
  *
  * Every tool is:
  *
@@ -14,7 +14,8 @@
  *   path for a model to set, and an argument a schema does not name is
  *   refused, not ignored.
  * - **Bounded** in what it returns ({@link RECENT_RIDES_LIMIT},
- *   {@link RIDE_SUMMARY_CHARACTERS}, {@link GOALS_CHARACTERS}).
+ *   {@link RIDE_SUMMARY_CHARACTERS}, {@link GOALS_CHARACTERS},
+ *   {@link WORKOUTS_LIMIT}, {@link WORKOUTS_CHARACTERS}).
  * - **Validated here**, against its own schema, before it runs: a model's
  *   arguments are untrusted input, and a wrong type is a tool error the model
  *   is shown, never a throw.
@@ -34,6 +35,13 @@ import {
   MAXIMUM_SECTIONS,
   type RideAnalysisInput,
 } from '@onyourleft/analysis';
+import {
+  decodeWorkoutFile,
+  expandWorkout,
+  workoutDurationText,
+  workoutShapeText,
+  type Workout,
+} from '@onyourleft/domain';
 
 import { holdsDataUrl } from '../../history/passages.ts';
 import type { ToolSpec } from '../model-turn.ts';
@@ -258,6 +266,78 @@ export const GOALS: AgentTool<Readonly<Record<string, number | undefined>>> = {
   },
 };
 
+/** The most workouts `workouts` returns (#1100). */
+export const WORKOUTS_LIMIT = 10;
+
+/** The most `workouts` returns, all workouts together (#1100). */
+export const WORKOUTS_CHARACTERS = 4_000;
+
+/**
+ * How many workout items are read, at most, to fill {@link WORKOUTS_LIMIT}:
+ * more than the limit, so a few rows that do not validate are skipped without
+ * leaving the answer short.
+ */
+const WORKOUT_ITEMS = 40;
+
+/**
+ * One saved workout, compactly — its name, its total time and its shape in
+ * the Workouts screen's own sentence (`@onyourleft/domain`
+ * §`workoutShapeText`): shares of threshold, never watts (ADR 0017). Or
+ * `undefined` for a row that is not a workout this program would ride.
+ *
+ * ⚠️ **Re-validated on the way out**, as `packages/store`'s
+ * `fromPersistedWorkout` does on the device: a synced row can be hand-edited
+ * on the instance, and `decodeWorkoutFile` refuses anything `validateWorkout`
+ * would — which is also what bounds `expandWorkout` (ADR 0017 D-6). A row it
+ * refuses is skipped, never thrown. The description is not returned.
+ */
+function workoutLine(item: ReadItem): string | undefined {
+  const text = textOf(item);
+  if (text === undefined || holdsDataUrl(text)) return undefined;
+  let workout: Workout;
+  try {
+    workout = decodeWorkoutFile(text);
+  } catch {
+    return undefined;
+  }
+  const name = workout.name.trim();
+  if (name === '') return undefined;
+  const total = workoutDurationText(expandWorkout(workout).totalSeconds);
+  return `${name} — ${total}: ${workoutShapeText(workout)}`;
+}
+
+/** `workouts`: the athlete's saved workouts, newest first, at most 10 and 4 000 characters. */
+export const WORKOUTS: AgentTool<Readonly<Record<string, number | undefined>>> = {
+  spec: {
+    name: 'workouts',
+    description:
+      'The cyclist’s saved workouts, newest first: each one’s name, total time and its blocks, with targets as a percentage of threshold power.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  validate: (input) => integers(input, {}),
+  run: async (context) => {
+    const items = await context.reads.listLiveSyncItems(
+      context.athleteId,
+      'workout',
+      WORKOUT_ITEMS,
+    );
+    const lines: string[] = [];
+    let used = 0;
+    for (const item of items) {
+      if (lines.length === WORKOUTS_LIMIT) break;
+      const workout = workoutLine(item);
+      if (workout === undefined) continue;
+      const room = WORKOUTS_CHARACTERS - used;
+      if (room < 2) break;
+      const line = bounded(`Workout: ${workout}`, room);
+      lines.push(line);
+      // The line, and the line break before the next.
+      used += line.length + 1;
+    }
+    return lines.length === 0 ? 'The cyclist has no saved workouts synced.' : lines.join('\n');
+  },
+};
+
 /** A tool of any argument shape, as the agent holds them. */
 export type AnyAgentTool = AgentTool<Readonly<Record<string, unknown>>>;
 
@@ -267,4 +347,5 @@ export const AGENT_TOOLS: readonly AnyAgentTool[] = [
   RECENT_RIDES,
   GOALS,
   HISTORY_SEARCH,
+  WORKOUTS,
 ];

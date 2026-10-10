@@ -7,6 +7,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { encodeWorkoutFile, seconds, thresholdShare } from '@onyourleft/domain';
+
 import { RIDE_INPUT } from '../agent-testing.ts';
 import { openSqlStore } from '../../store/open-sql-store.ts';
 import type { SqlStore } from '../../store/sql-store.ts';
@@ -17,6 +19,7 @@ import {
 } from '../../store/testing/index.ts';
 import type { AnalysisReads, ReadItem, ToolReadKind } from './reads.ts';
 import {
+  AGENT_TOOLS,
   GOALS,
   GOALS_CHARACTERS,
   RECENT_RIDES,
@@ -24,6 +27,9 @@ import {
   RECENT_RIDES_LIMIT,
   RIDE_SECTIONS,
   RIDE_SUMMARY_CHARACTERS,
+  WORKOUTS,
+  WORKOUTS_CHARACTERS,
+  WORKOUTS_LIMIT,
   type ToolContext,
 } from './tools.ts';
 
@@ -157,6 +163,139 @@ describe('goals', () => {
       goal: [JSON.stringify({ text: 'see data:image/png;base64,iVBOR' }), 'Ride further.'],
     });
     expect(await GOALS.run(context(reads), {})).toBe('Goal: Ride further.');
+  });
+});
+
+/** A saved workout's item body, as the device sends it: the ADR 0017 file. */
+function workoutBody(name: string, minutes = 10, target = 0.6): string {
+  return encodeWorkoutFile({
+    name,
+    description: 'Not for the model.',
+    blocks: [
+      { kind: 'steady', seconds: seconds(minutes * 60), target: thresholdShare(target) },
+      {
+        kind: 'intervals',
+        repeats: 4,
+        hardSeconds: seconds(180),
+        hardTarget: thresholdShare(1.1),
+        easySeconds: seconds(120),
+        easyTarget: thresholdShare(0.5),
+      },
+    ],
+  });
+}
+
+describe('workouts (#1100)', () => {
+  it('returns each workout’s name, total time and shape — shares of threshold, never watts', async () => {
+    const { reads, asked } = listReads({ workout: [workoutBody('Over-unders')] });
+    expect(await WORKOUTS.run(context(reads), {})).toBe(
+      'Workout: Over-unders — 30 min: 10 min at 60%, 4 × 3 min at 110%, 2 min at 50%',
+    );
+    expect(asked).toStrictEqual([{ athleteId: 'athlete-a', kind: 'workout', limit: 40 }]);
+  });
+
+  it('holds its bound over 40 saved workouts: at most 10, and at most 4 000 characters', async () => {
+    const forty = Array.from({ length: 40 }, (_, index) =>
+      workoutBody(`Workout number ${String(index)}`),
+    );
+    const result = await WORKOUTS.run(context(listReads({ workout: forty }).reads), {});
+    const lines = result.split('\n');
+    expect(lines).toHaveLength(WORKOUTS_LIMIT);
+    expect(lines[0]).toContain('Workout number 0 ');
+    expect(result.length).toBeLessThanOrEqual(WORKOUTS_CHARACTERS);
+
+    // Long names: the character bound holds before the count does.
+    const long = Array.from({ length: 40 }, () => workoutBody('n'.repeat(500)));
+    const cut = await WORKOUTS.run(context(listReads({ workout: long }).reads), {});
+    expect(cut.length).toBeLessThanOrEqual(WORKOUTS_CHARACTERS);
+    expect(cut.split('\n').length).toBeGreaterThan(1);
+  });
+
+  it('skips a hand-edited row that is not a workout it would ride, and never throws', async () => {
+    const tooHard = workoutBody('Too hard').replace('1.1', '99');
+    const unknownKey = workoutBody('Extra').replace('"name"', '"watts": 300,\n  "name"');
+    const { reads } = listReads({
+      workout: [
+        'not json',
+        JSON.stringify({ text: 'a goal in the wrong kind' }),
+        tooHard,
+        unknownKey,
+        workoutBody('Look at data:image/png;base64,iVBOR'),
+        workoutBody('Kept'),
+      ],
+    });
+    const result = await WORKOUTS.run(context(reads), {});
+    expect(result).toBe('Workout: Kept — 30 min: 10 min at 60%, 4 × 3 min at 110%, 2 min at 50%');
+    expect(result).not.toContain('Not for the model');
+  });
+
+  it('says so when none is synced, and takes no argument at all', async () => {
+    expect(await WORKOUTS.run(context(listReads({}).reads), {})).toBe(
+      'The cyclist has no saved workouts synced.',
+    );
+    expect(WORKOUTS.validate({})).toStrictEqual({ ok: true, args: {} });
+    expect(WORKOUTS.validate({ athleteId: 'athlete-b' }).ok).toBe(false);
+    expect(WORKOUTS.validate({ count: 50 }).ok).toBe(false);
+  });
+
+  it('is one of the agent’s tools', () => {
+    expect(AGENT_TOOLS).toContain(WORKOUTS);
+  });
+});
+
+describe('the workouts tool over the real store, three athletes (#1100)', () => {
+  let harness: StoreHarness;
+  let store: SqlStore;
+
+  beforeEach(async () => {
+    harness = await createStoreHarness();
+    await harness.write(async (writer) => {
+      for (const athlete of ['a', 'b', 'c']) {
+        await writer.registerAthlete(registrationFixture(athlete));
+        for (const [key, now] of [
+          ['first', 10],
+          ['second', 20],
+        ] as const) {
+          const body = encode(workoutBody(`${athlete}'s ${key}`));
+          await writer.putSyncItem({
+            athleteId: athlete,
+            kind: 'workout',
+            key,
+            body,
+            digest: `${athlete}-${key}`.padEnd(64, '0'),
+            now,
+          });
+        }
+        // The same name under another kind: never a workout.
+        await writer.putSyncItem({
+          athleteId: athlete,
+          kind: 'goal',
+          key: 'goals',
+          body: encode(workoutBody(`${athlete}'s goal`)),
+          digest: `${athlete}-goal`.padEnd(64, '0'),
+          now: 30,
+        });
+      }
+      await writer.deleteSyncItem('a', 'workout', 'first', 40);
+    });
+    store = await openSqlStore(harness.path);
+  });
+
+  afterEach(async () => {
+    await store.close();
+    await harness.destroy();
+  });
+
+  it('returns the job’s athlete’s live workouts only — no other athlete’s, no other kind, no tombstone', async () => {
+    const forA = await WORKOUTS.run({ athleteId: 'a', input: RIDE_INPUT, reads: store }, {});
+    expect(forA.split('\n').map((line) => line.split(' — ')[0])).toStrictEqual([
+      "Workout: a's second",
+    ]);
+    const forB = await WORKOUTS.run({ athleteId: 'b', input: RIDE_INPUT, reads: store }, {});
+    expect(forB.split('\n').map((line) => line.split(' — ')[0])).toStrictEqual([
+      "Workout: b's second",
+      "Workout: b's first",
+    ]);
   });
 });
 

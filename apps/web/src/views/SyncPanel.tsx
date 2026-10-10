@@ -94,6 +94,10 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       count(texts, 'Synced 1 goal, note or document.', 'Synced {n} goals, notes and documents.'),
     );
   }
+  // ⚠️ DRAFT (#1100): a new sentence, awaiting the owner's approval on #1104.
+  if (report.workoutsPushed > 0) {
+    lines.push(count(report.workoutsPushed, 'Sent 1 saved workout.', 'Sent {n} saved workouts.'));
+  }
   if (report.textConflicts > 0) {
     lines.push(
       count(
@@ -103,7 +107,8 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       ),
     );
   }
-  const deleted = report.deletedOnInstance + report.textsDeletedOnInstance;
+  const deleted =
+    report.deletedOnInstance + report.textsDeletedOnInstance + report.workoutsDeletedOnInstance;
   if (deleted > 0) {
     lines.push(
       count(
@@ -113,7 +118,8 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       ),
     );
   }
-  const hidden = report.hiddenOnInstance + report.textsHiddenOnInstance;
+  const hidden =
+    report.hiddenOnInstance + report.textsHiddenOnInstance + report.workoutsHiddenOnInstance;
   if (hidden > 0) {
     lines.push(
       count(

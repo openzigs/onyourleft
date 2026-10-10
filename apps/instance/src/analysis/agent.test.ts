@@ -123,12 +123,13 @@ describe('a write-up with no tool called', () => {
     expect(first?.role === 'user' && first.text).toContain('"kind":"climb"');
     expect(events.filter((event) => event.type === 'section')).toHaveLength(3);
     expect(events.some((event) => event.type === 'withdrawn')).toBe(false);
-    // The tools are offered, all four, and only those.
+    // The tools are offered, all five, and only those.
     expect(model.requests[0]?.tools.map((tool) => tool.name)).toStrictEqual([
       'ride_sections',
       'recent_rides',
       'goals',
       'history_search',
+      'workouts',
     ]);
   });
 });
@@ -230,12 +231,13 @@ describe('malformed tool calls are tool errors, counted, and never thrown', () =
     }
     expect(results[4]).toContain('there is no such tool');
     // A model that "asks" for a trainer tool changes nothing: the next turn
-    // offers exactly the same four tools.
+    // offers exactly the same five tools.
     expect(model.requests[1]?.tools.map((tool) => tool.name)).toStrictEqual([
       'ride_sections',
       'recent_rides',
       'goals',
       'history_search',
+      'workouts',
     ]);
   });
 

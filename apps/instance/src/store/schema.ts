@@ -314,7 +314,14 @@ export type SyncKind =
    * zones — for masking what a hosted model is sent (#1101, ADR 0046 D-10).
    * Never indexed and never readable by an analysis tool.
    */
-  | 'masking';
+  | 'masking'
+  /**
+   * A saved workout (#1100): its body is the workout's own file format
+   * (`@onyourleft/domain` §`encodeWorkoutFile`, ADR 0017), keyed by the
+   * device's workout id. Read only by the agent's `workouts` tool, which
+   * re-validates every row (`decodeWorkoutFile`). Not indexed for history.
+   */
+  | 'workout';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {

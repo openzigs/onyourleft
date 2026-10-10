@@ -189,10 +189,28 @@
  *    A pulled text is written through the store's own validating write, so a
  *    body that is not one (too long, a control character, a 51st document)
  *    is not stored and is reported.
+ *
+ * 9. **The rider's saved workouts** (#1100), for the analysis agent's
+ *    `workouts` tool on the instance: each one as an item of kind `workout`,
+ *    keyed by its own id, its body the workout's own file format
+ *    (`encodeWorkoutFile`, ADR 0017 — which validates, so a workout this
+ *    program would not read is never sent). Against the base, like rule 8,
+ *    and **one way only**:
+ *    - new or changed here, or gone from the instance: pushed;
+ *    - synced, and deleted here since: deleted on the instance;
+ *    - unchanged here and deleted on the instance: KEPT here, not pushed back;
+ *    - ⚠️ **never pulled**: another device's workouts stay on the instance
+ *      for the agent and are not brought to this device. A workout's id is
+ *      minted from its device's clock in milliseconds (`WorkoutsView`), so
+ *      two devices write one key only if they saved in the same millisecond;
+ *      then the instance holds whichever synced last.
+ *    A list of workouts that cannot be read sends and deletes nothing that
+ *    sync — an absent list says nothing about what the rider deleted.
  */
 
 import {
   contentHashOf,
+  encodeWorkoutFile,
   parseContentHash,
   signActivityRecord,
   toHex,
@@ -214,6 +232,7 @@ import type {
   RiderTextRecord,
   SideCameraReportRecord,
   SyncBaseRecord,
+  WorkoutRecord,
 } from '@onyourleft/store';
 
 import {
@@ -299,6 +318,7 @@ export type SyncStore = TransferStore &
     | 'listRiderTexts'
     | 'deleteRiderText'
     | 'listTrustedDeviceKeys'
+    | 'listWorkouts'
   >;
 
 export interface SyncDependencies {
@@ -459,6 +479,15 @@ export interface SyncReport {
    * Counted in {@link SyncReport.textsPushed} as well.
    */
   readonly textConflicts: number;
+  /** Saved workouts sent to the instance, new or changed here (#1100). */
+  readonly workoutsPushed: number;
+  /** Saved workouts deleted on the instance, because the rider deleted them here (#1100). */
+  readonly workoutsDeletedOnInstance: number;
+  /**
+   * Saved workouts the instance holds deleted that this device still holds
+   * unchanged (#1100): KEPT here, and not sent back until changed here.
+   */
+  readonly workoutsHiddenOnInstance: number;
   /**
    * Keys that signed a record the instance served and this device refused as
    * `key-not-admitted` (#898): listed by the instance as the athlete's, and
@@ -562,6 +591,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let textsHiddenOnInstance = 0;
   let textsDeletedOnInstance = 0;
   let textConflicts = 0;
+  let workoutsPushed = 0;
+  let workoutsDeletedOnInstance = 0;
+  let workoutsHiddenOnInstance = 0;
 
   const manifest = await readManifest(sealed);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
@@ -888,6 +920,31 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     } else if (outcome !== 'same') failures.push({ kind, key, reason: outcome });
   }
 
+  // --- The rider's saved workouts (#1100) -------------------------------------
+  // Rule 9: sent, and deleted there when deleted here; never pulled.
+  let workouts: readonly WorkoutRecord[] | undefined;
+  try {
+    workouts = await store.listWorkouts(athleteId);
+  } catch {
+    // A list that cannot be read says nothing about what was deleted here,
+    // so nothing of the workouts is sent or deleted this time.
+    failures.push({ kind: WORKOUT_KIND, key: '', reason: 'not-read' });
+  }
+  if (workouts !== undefined) {
+    const held = new Map<string, WorkoutRecord>(workouts.map((each) => [each.id, each]));
+    const keys = new Set<string>([
+      ...held.keys(),
+      ...[...base.values()].filter((row) => row.kind === WORKOUT_KIND).map((row) => row.key),
+    ]);
+    for (const key of [...keys].sort()) {
+      const outcome = await syncWorkout(key, held.get(key));
+      if (outcome === 'pushed') workoutsPushed += 1;
+      else if (outcome === 'deleted-on-instance') workoutsDeletedOnInstance += 1;
+      else if (outcome === 'hidden-on-instance') workoutsHiddenOnInstance += 1;
+      else if (outcome !== 'same') failures.push({ kind: WORKOUT_KIND, key, reason: outcome });
+    }
+  }
+
   // --- The base forgets what neither side holds any more ---------------------
   for (const row of [...base.values()]) {
     if (row.kind !== 'activity' || remote.has(keyOf('activity', row.key))) continue;
@@ -909,9 +966,70 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     textsHiddenOnInstance,
     textsDeletedOnInstance,
     textConflicts,
+    workoutsPushed,
+    workoutsDeletedOnInstance,
+    workoutsHiddenOnInstance,
     keysToConfirm: [...keysToConfirm].sort(),
     failures,
   };
+
+  /**
+   * One saved workout — rule 9. `local` is this device's, or `undefined` for
+   * a key only the base names (so it was synced, and deleted here since).
+   * Answers what happened, or why not.
+   */
+  async function syncWorkout(key: string, local: WorkoutRecord | undefined): Promise<string> {
+    const entry = remote.get(keyOf(WORKOUT_KIND, key));
+    const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+    const known = base.get(keyOf(WORKOUT_KIND, key));
+    const forget = async (): Promise<void> => {
+      if (base.delete(keyOf(WORKOUT_KIND, key))) {
+        await store.deleteSyncBase(athleteId, WORKOUT_KIND, key);
+      }
+    };
+    const path = `/v1/sync/items/${WORKOUT_KIND}/${encodeURIComponent(key)}`;
+    if (local === undefined) {
+      // Synced before, and not here now: the rider deleted it HERE.
+      if (remoteDigest !== null) {
+        const answer = await sealed.json('DELETE', path);
+        if (answer.status !== 204 && answer.status !== 200 && codeOf(answer.body) !== 'not_found') {
+          return codeOf(answer.body);
+        }
+      }
+      await forget();
+      return remoteDigest === null ? 'same' : 'deleted-on-instance';
+    }
+    let body: string;
+    try {
+      // The workout's own file format (ADR 0017), which validates first: a
+      // workout this program would refuse to read is never sent.
+      body = encodeWorkoutFile(local.workout);
+    } catch {
+      return 'not-a-workout';
+    }
+    const localDigest = await hex(utf8(body), sha256);
+    if (remoteDigest === localDigest) {
+      await remember({ kind: WORKOUT_KIND, key, activityId: null, localDigest, remoteDigest });
+      return 'same';
+    }
+    if (known?.localDigest === localDigest && entry?.deleted === true) {
+      // Unchanged here since the last sync, and deleted on the instance —
+      // rule 8's unsigned delete: KEPT here, and not pushed back.
+      return 'hidden-on-instance';
+    }
+    // Changed here, never synced, or gone from the instance: this device's
+    // copy is canonical (ADR 0036 D-3).
+    const answer = await sealed.json('POST', path, { body });
+    if (answer.status !== 200) return codeOf(answer.body);
+    await remember({
+      kind: WORKOUT_KIND,
+      key,
+      activityId: null,
+      localDigest,
+      remoteDigest: localDigest,
+    });
+    return 'pushed';
+  }
 
   /**
    * One goal, note or document, both ways — rule 8. Answers what happened,
@@ -1133,6 +1251,9 @@ const ITEM_KINDS: readonly ItemKind[] = ['write-up', 'side-camera-report'];
 
 /** A ride's summary (#835): derived from the ride, so pushed and deleted, never pulled. */
 const SUMMARY_KIND = 'ride-summary';
+
+/** A saved workout's item kind on the instance, and its sync base kind here (#1100). */
+const WORKOUT_KIND = 'workout';
 
 /**
  * Delete a ride on the instance: its write-up, side-camera report, summary

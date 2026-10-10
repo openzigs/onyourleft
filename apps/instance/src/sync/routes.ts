@@ -110,6 +110,7 @@ const kindSchema: Schema = {
     'note',
     'document',
     'masking',
+    'workout',
   ],
 };
 
