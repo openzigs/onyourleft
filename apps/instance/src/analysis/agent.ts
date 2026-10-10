@@ -293,7 +293,18 @@ async function runCall(
   return { text: fenceData(await known.run(context, checked.args)), known };
 }
 
-/** Run the agent over one job. Every way it can end is an {@link AgentOutcome}; it never throws for a model's doing. */
+/**
+ * Run the agent over one job. Every way it can end is an {@link AgentOutcome};
+ * it never throws for a model's doing.
+ *
+ * ⚠️ **It DOES reject for the instance's doing** (#1187): a tool's `run` whose
+ * read rejects — a store error — is not caught here, because it is no answer a
+ * model should be shown and no failure a rider can act on. It propagates, and
+ * the job engine catches it (`jobs.ts` §`runJob`): the job ends `failed` with
+ * `engine-error`, and the error's text is kept in no event, log line or row
+ * (`jobs.test.ts` §"fails a job whose engine rejects"). A caller other than
+ * the job engine must do the same.
+ */
 export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutcome> {
   const { job, model, reads, history, clock, signal, emit } = options;
   const template = options.template ?? ANALYSIS_AGENT_TEMPLATE_V1;

@@ -48,7 +48,7 @@
  */
 
 import { isAddress, normalisedAddress } from './client-address.ts';
-import { configuredHostProblem } from './history/address.ts';
+import { configuredHostProblem, isAddressLiteral } from './history/address.ts';
 import {
   DEFAULT_DOCUMENT_PREFIX,
   DEFAULT_EMBEDDING_MODEL,
@@ -150,7 +150,7 @@ export type AnalysisModelSettings =
 
 /** Why the analysis model is off. */
 export type AnalysisModelOffCode =
-  'not-set' | 'not-a-url' | 'not-base-url' | 'not-local' | 'no-model' | 'bad-model';
+  'not-set' | 'not-a-url' | 'not-base-url' | 'not-local' | 'tls-by-name' | 'no-model' | 'bad-model';
 
 /** A configuration the instance can start with. */
 export interface Config {
@@ -470,6 +470,11 @@ export function readHistorySettings(raw: RawConfig): HistorySettings {
  * - **It is a base URL**: `http:` or `https:`, no credentials, query or
  *   fragment. A path is kept (`/v1`), because an OpenAI-compatible server is
  *   addressed by one.
+ * - **`https:` only at an address literal** (#1187). Every turn sends to the
+ *   address the name was checked at, never to the name (`analysis/model.ts`
+ *   §`atAddress`), so a certificate issued to a NAME cannot verify: TLS would
+ *   fail on every turn and report only `model-unreachable`. A name with
+ *   `https:` is refused here instead, saying why (`tls-by-name`).
  * - **The model has NO default**, and no model is named in source or the
  *   documentation (ADR 0031 D-4): an address with no model is off, saying so.
  */
@@ -505,6 +510,12 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
     return off(
       'not-local',
       `OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because ${hostProblem}: the analysis model must be on this machine or its private network (ADR 0046 D-9, ADR 0040 D-6).`,
+    );
+  }
+  if (url.protocol === 'https:' && !isAddressLiteral(url.hostname)) {
+    return off(
+      'tls-by-name',
+      'OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network, or https: at the address itself.',
     );
   }
   if (!present(raw.analysisModel)) {

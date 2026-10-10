@@ -29,14 +29,19 @@ import {
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
-/** Reads that answer from a list, recording what was asked. */
+/** Reads that answer from a list, recording what was asked. Item `i` is keyed `key-i`. */
 function listReads(items: Partial<Record<ToolReadKind, readonly string[]>>) {
   const asked: { kind: ToolReadKind; limit: number; athleteId: string }[] = [];
   const reads: AnalysisReads = {
     listLiveSyncItems: (athleteId, kind, limit) => {
       asked.push({ athleteId, kind, limit });
       // Deliberately more than asked for: the tool holds its own bound.
-      return Promise.resolve((items[kind] ?? []).map((body): ReadItem => ({ body: encode(body) })));
+      return Promise.resolve(
+        (items[kind] ?? []).map((body, index): ReadItem => ({
+          key: `key-${String(index)}`,
+          body: encode(body),
+        })),
+      );
     },
   };
   return { reads, asked };
@@ -88,13 +93,34 @@ describe('recent_rides', () => {
     });
     const three = await RECENT_RIDES.run(context(reads), { count: 3 });
     expect(three.split('\n')).toHaveLength(3);
-    expect(three).toContain('Ride 1 (most recent): Ride number 0.');
+    expect(three).toContain('Ride 1 (most recently synced): Ride number 0.');
+    expect(three).not.toContain('key-');
     const unsaid = await RECENT_RIDES.run(context(reads), {});
     expect(unsaid.split('\n')).toHaveLength(RECENT_RIDES_DEFAULT);
     expect(asked).toStrictEqual([
       { athleteId: 'athlete-a', kind: 'ride-summary', limit: 3 },
       { athleteId: 'athlete-a', kind: 'ride-summary', limit: RECENT_RIDES_DEFAULT },
     ]);
+  });
+
+  it('leaves out the asked-about ride, and still returns the count asked for (#1187)', async () => {
+    const { reads, asked } = listReads({
+      'ride-summary': Array.from({ length: 6 }, (_, index) =>
+        summary(`Ride number ${String(index)}.`),
+      ),
+    });
+    const result = await RECENT_RIDES.run({ ...context(reads), rideId: 'key-0' }, { count: 3 });
+    expect(result.split('\n')).toStrictEqual([
+      'Ride 1 (most recently synced): Ride number 1.',
+      'Ride 2: Ride number 2.',
+      'Ride 3: Ride number 3.',
+    ]);
+    expect(asked).toStrictEqual([{ athleteId: 'athlete-a', kind: 'ride-summary', limit: 4 }]);
+  });
+
+  it('says the order is the sync’s, not the riding’s', () => {
+    expect(RECENT_RIDES.spec.description).toContain('most recently synced');
+    expect(RECENT_RIDES.spec.description).not.toMatch(/most recent rides/);
   });
 
   it('takes a count from 1 to 8, and refuses more', () => {
@@ -117,7 +143,7 @@ describe('recent_rides', () => {
     const lines = result.split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[0]?.length).toBeLessThanOrEqual(
-      'Ride 1 (most recent): '.length + RIDE_SUMMARY_CHARACTERS,
+      'Ride 1 (most recently synced): '.length + RIDE_SUMMARY_CHARACTERS,
     );
     expect(lines[1]).toBe('Ride 2: A short ride.');
     expect(result).not.toContain('data:');
@@ -145,6 +171,13 @@ describe('goals', () => {
     ).toBe(true);
     expect(result.length).toBeLessThanOrEqual(GOALS_CHARACTERS);
     expect(asked[0]).toMatchObject({ athleteId: 'athlete-a', kind: 'goal' });
+  });
+
+  it('reads a body that parses as JSON but is no object as plain text, rather than dropping it (#1187)', async () => {
+    const { reads } = listReads({
+      goal: ['42', '"Ride the coast road."', JSON.stringify({ x: 1 })],
+    });
+    expect(await GOALS.run(context(reads), {})).toBe('Goal: 42\nGoal: "Ride the coast road."');
   });
 
   it('takes no argument at all', () => {

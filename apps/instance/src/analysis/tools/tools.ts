@@ -24,7 +24,8 @@
  *
  * ⚠️ **What no tool returns**: anything of a `side-camera-report` (the pose
  * summary, ADR 0046 D-6 — not a kind `reads.ts` can spell), an item's key, its
- * time or its athlete (a {@link ReadItem} carries its bytes and nothing else),
+ * time or its athlete (a {@link ReadItem} carries its bytes, and its key only
+ * so `recent_rides` can leave the asked-about ride out),
  * any item holding a `data:` URL (a picture, ADR 0040 D-2 item 1), and another
  * athlete's row (the read is by the job's athlete).
  */
@@ -74,6 +75,11 @@ export interface AgentTool<T = unknown> {
    */
   readonly maximumCalls?: number;
   validate(input: unknown): Checked<T>;
+  /**
+   * The tool's answer. ⚠️ A read that rejects is NOT turned into an answer:
+   * it propagates out of the agent and fails the job `engine-error`, with the
+   * error's text kept nowhere (`agent.ts` §`runAnalysisAgent`, #1187).
+   */
   run(context: ToolContext, args: T): Promise<string>;
 }
 
@@ -193,11 +199,21 @@ function summaryText(item: ReadItem): string | undefined {
   return joined === '' ? undefined : bounded(joined, RIDE_SUMMARY_CHARACTERS);
 }
 
-/** `recent_rides`: summaries of the athlete's recent synced rides, newest first. */
+/**
+ * `recent_rides`: summaries of the athlete's most recently SYNCED rides,
+ * newest sync first.
+ *
+ * ⚠️ **Synced, not ridden** (#1187): the read orders by when the instance
+ * received an item (`sql-store.ts` §`listLiveSyncItems`), and a summary
+ * carries no ride date a tool may return. After a back-catalogue sync the
+ * first line may be an old ride, so it is labelled "most recently synced",
+ * never "most recent". The asked-about ride is left out when the job names
+ * it ({@link ToolContext.rideId}); #1229 is what makes a job name it.
+ */
 export const RECENT_RIDES: AgentTool<Readonly<Record<string, number | undefined>>> = {
   spec: {
     name: 'recent_rides',
-    description: `Short summaries of the cyclist’s most recent rides, newest first. Ask for up to ${String(RECENT_RIDES_LIMIT)}.`,
+    description: `Short summaries of the cyclist’s most recently synced rides, newest sync first. The order is when each reached this server, not when it was ridden. Ask for up to ${String(RECENT_RIDES_LIMIT)}.`,
     parameters: {
       type: 'object',
       properties: {
@@ -209,26 +225,38 @@ export const RECENT_RIDES: AgentTool<Readonly<Record<string, number | undefined>
   validate: (input) => integers(input, { count: [1, RECENT_RIDES_LIMIT] }),
   run: async (context, args) => {
     const count = args.count ?? RECENT_RIDES_DEFAULT;
-    const items = await context.reads.listLiveSyncItems(context.athleteId, 'ride-summary', count);
+    const { rideId } = context;
+    // One more than asked, when the asked-about ride may be among them.
+    const items = await context.reads.listLiveSyncItems(
+      context.athleteId,
+      'ride-summary',
+      rideId === undefined ? count : count + 1,
+    );
     const summaries = items
+      .filter((item) => item.key !== rideId)
       .slice(0, count)
       .map(summaryText)
       .filter((text): text is string => text !== undefined);
     if (summaries.length === 0) return 'No summaries of other rides are synced.';
     return summaries
       .map(
-        (text, index) => `Ride ${String(index + 1)}${index === 0 ? ' (most recent)' : ''}: ${text}`,
+        (text, index) =>
+          `Ride ${String(index + 1)}${index === 0 ? ' (most recently synced)' : ''}: ${text}`,
       )
       .join('\n');
   },
 };
 
-/** A goal's text: a JSON body's `text`, or the body itself as plain text. */
+/**
+ * A goal's text: a JSON object's `text`, or else the body itself as plain
+ * text — a body that parses as JSON but is no object (`42`, `"a quoted
+ * line"`, `[1]`) included, which used to be dropped in silence (#1187).
+ */
 function goalText(item: ReadItem): string | undefined {
   const text = textOf(item);
   if (text === undefined || holdsDataUrl(text)) return undefined;
   const body = parsed(text);
-  const goal = isObject(body) ? body.text : body === undefined ? text : undefined;
+  const goal = isObject(body) ? body.text : text;
   if (typeof goal !== 'string' || holdsDataUrl(goal)) return undefined;
   return goal.trim() === '' ? undefined : goal.trim();
 }
