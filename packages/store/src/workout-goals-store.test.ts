@@ -10,20 +10,17 @@ import { unixSeconds } from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { deleteActivityStore, openActivityStore } from './activity-store';
 import { StoreReferentialError, StoreValidationError } from './errors';
 import { athleteId } from './ids';
-import type { NewActivity, WorkoutGoalsRecord } from './records';
-import { SCHEMA_VERSION, SCHEMA_VERSIONS, TABLE } from './schema';
+import type { WorkoutGoalsRecord } from './records';
+import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
   assertWorkoutGoalsRoundTrip,
   ATHLETE_A,
   ATHLETE_B,
-  athleteRecord,
   createStoreHarness,
   memoryWriteStoreFactory,
   resetFixtureIds,
-  rideFor,
   RoundTripFailure,
   seedAthletes,
   workoutGoalsFor,
@@ -191,82 +188,6 @@ describe('typed workout goals — #1236', () => {
   });
 });
 
-describe('version 18 rolls back — export → downgrade → re-import', () => {
-  /**
-   * Version 18 adds a store and rewrites no record, so `SCHEMA_MIGRATIONS`
-   * holds no pair for it: a `down` over records `up` never changed would be
-   * the identity, and a test of it would pass whatever `down` did
-   * (`migrations.ts` §"The registry"; `identity-rollback.test.ts` makes the
-   * same call for version 4). What a rollback means on this engine is the
-   * runtime path ADR 0005 F names, so that is what is executed here, against
-   * a database with rides in it.
-   */
-  let databaseName: string;
-
-  beforeEach(() => {
-    databaseName = `oyl-goals-rollback-${String(Date.now())}-${String(Math.random()).slice(2)}`;
-  });
-
-  afterEach(async () => {
-    await deleteActivityStore(databaseName);
-  });
-
-  it('brings the rides and the goals back on a database the version-17 build made', async () => {
-    expect(SCHEMA_VERSION).toBe(18);
-    const owner = ATHLETE_A;
-    const current = openActivityStore(databaseName);
-    await current.putAthlete(athleteRecord(owner));
-    const rides = [rideFor(owner), rideFor(owner)];
-    for (const ride of rides) {
-      await current.putActivity(ride);
-    }
-    const goals = workoutGoalsFor(owner);
-    await current.putWorkoutGoals(goals);
-    const read = await current.getWorkoutGoals(owner);
-    const file = JSON.stringify({
-      athlete: await current.getAthlete(owner),
-      activities: await Promise.all(
-        rides.map(async (ride) => (await current.getActivity(owner, ride.id)) as NewActivity),
-      ),
-      goals: read.status === 'kept' ? read.record : undefined,
-    });
-    current.close();
-
-    // Downgrade: the version-17 build's database, with the rides re-imported
-    // and nowhere to put goals.
-    await deleteActivityStore(databaseName);
-    const older = new Dexie(databaseName);
-    SCHEMA_VERSIONS.slice(0, 17).forEach((stores, index) => {
-      older.version(index + 1).stores(stores);
-    });
-    await older.open();
-    expect(older.verno).toBe(17);
-    expect(older.tables.map((table) => table.name)).not.toContain(TABLE.workoutGoals);
-    const exported = JSON.parse(file) as {
-      athlete: unknown;
-      activities: unknown[];
-      goals: unknown;
-    };
-    await older.table(TABLE.athletes).put(exported.athlete);
-    for (const activity of exported.activities) {
-      await older.table(TABLE.activities).put(activity);
-    }
-    older.close();
-
-    // Upgrade again, and re-import the goals through the public write.
-    const back = openActivityStore(databaseName);
-    await expect(back.getWorkoutGoals(owner)).resolves.toStrictEqual({ status: 'none' });
-    await back.putWorkoutGoals(exported.goals as WorkoutGoalsRecord);
-    back.close();
-
-    const reopened = openActivityStore(databaseName);
-    const summaries = await reopened.listActivitySummaries(owner);
-    const goalsBack = await reopened.getWorkoutGoals(owner);
-    reopened.close();
-
-    expect(summaries.map((ride) => ride.id).sort()).toStrictEqual(
-      rides.map((ride) => ride.id).sort(),
-    );
-    expect(goalsBack).toStrictEqual({ status: 'kept', record: goals });
-  });
-});
+// Version 18's rollback (ADR 0005 F: export → downgrade → re-import) is run
+// through the product's own account export, which is the only export a rider
+// can make: `apps/web/src/transfer/workout-goals-rollback.test.ts`.

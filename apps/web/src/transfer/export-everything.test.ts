@@ -26,6 +26,7 @@ import {
   signedRecordFor,
   streamSetFor,
   workoutFor,
+  workoutGoalsFor,
 } from '@onyourleft/store/testing';
 import type { ActivityId, PrivacyZoneRecord } from '@onyourleft/store';
 import { activityId, privacyZoneId, TABLE, webCryptoVerifier } from '@onyourleft/store';
@@ -62,6 +63,7 @@ import {
   RIDER_TEXTS_UNREADABLE,
   SIDE_CAMERA_REPORT_UNREADABLE,
   signedRecordFileName,
+  WORKOUT_GOALS_UNREADABLE,
   type AccountExportCursor,
 } from './export-everything';
 import type { DownloadableFile } from './store-port';
@@ -551,6 +553,73 @@ describe('the rider’s goals, ride notes and documents — #836, ADR 0040 D-10'
     ]);
     expect((texts['goals'] as { text: string }).text).toBe(riderTextFor(ATHLETE_A, 'goal').text);
     expect(JSON.stringify(texts)).not.toContain('zzzz');
+    expect(report.exported).toBe(1);
+  });
+});
+
+describe('the rider’s typed workout goals — #1236, ADR 0048 D-10', () => {
+  it('carries them, every field, read through the real store, and nobody else’s', async () => {
+    await seedLibrary(1);
+    const mine = workoutGoalsFor(ATHLETE_A);
+    await harness.write(async (store) => {
+      await store.putWorkoutGoals(mine);
+      await store.putWorkoutGoals(workoutGoalsFor(ATHLETE_B));
+    });
+
+    const manifest = manifestOf((await runExport()).files);
+
+    // Through JSON, so a brand is a number here, exactly as a reader sees it.
+    expect(manifest['workoutGoals']).toStrictEqual(
+      JSON.parse(JSON.stringify({ goals: mine.goals, savedAt: mine.savedAt })),
+    );
+    // Fields, not the row: the athlete is the manifest's own, not repeated.
+    expect(Object.keys(manifest['workoutGoals'] as object).sort()).toStrictEqual([
+      'goals',
+      'savedAt',
+    ]);
+    const theirs = workoutGoalsFor(ATHLETE_B).goals;
+    expect(JSON.stringify(manifest['workoutGoals'])).not.toContain(
+      `"durationMinutes":${String(theirs.durationMinutes)}`,
+    );
+  });
+
+  it('says there are none rather than omitting the key', async () => {
+    await seedLibrary(1);
+    expect(manifestOf((await runExport()).files)).toHaveProperty('workoutGoals', null);
+  });
+
+  it('says a row could not be read and carries nothing of it', async () => {
+    await seedLibrary(1);
+    await harness.discard();
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open(harness.databaseName);
+      opening.onsuccess = () => {
+        resolve(opening.result);
+      };
+      opening.onerror = () => {
+        reject(new Error('could not open the database'));
+      };
+    });
+    // A hand-edited row: a range 2 bpm wide, which the store's re-check refuses.
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(TABLE.workoutGoals, 'readwrite');
+      transaction.objectStore(TABLE.workoutGoals).put({
+        ...workoutGoalsFor(ATHLETE_A),
+        goals: { holdRange: { low: 131, high: 133 } },
+      });
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = () => {
+        reject(new Error('could not write the row'));
+      };
+    });
+    database.close();
+
+    const { files, report } = await runExport();
+    expect(manifestOf(files)['workoutGoals']).toStrictEqual({
+      unreadable: WORKOUT_GOALS_UNREADABLE,
+    });
     expect(report.exported).toBe(1);
   });
 });
