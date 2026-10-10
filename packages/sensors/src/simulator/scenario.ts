@@ -64,4 +64,25 @@ export type Scenario =
   | {
       readonly kind: 'indoor-bike-data-fields';
       readonly fields: ReadonlySet<IndoorBikeDataField>;
-    };
+    }
+  /**
+   * Cardiac drift (#1238): from now the rider's heart rate rises by
+   * `bpmPerHour` at constant power, through the response model's own lag.
+   * Refused on a device with no heart rate service, and on a simulator whose
+   * heart rate is `fixed`, where there is no model to drift.
+   */
+  | { readonly kind: 'heart-rate-drift'; readonly bpmPerHour: number }
+  /**
+   * The strap notifies these values verbatim, one per notification, then goes
+   * back to the rider's heart (#1238). How a strap's bad contact or crosstalk
+   * looks on the wire: 0, 255, a sudden jump. A value over 255 is sent in the
+   * 16-bit form. Refused on a device with no heart rate service.
+   */
+  | { readonly kind: 'heart-rate-readings'; readonly values: readonly number[] }
+  /**
+   * The strap is off the chest for `duration` (#1238): it keeps notifying,
+   * with Sensor Contact Status "not detected", and a decoder reports nothing.
+   * A rider with no strap at all is a simulator with no `hrsStrap`. Refused on
+   * a device with no heart rate service.
+   */
+  | { readonly kind: 'strap-absent'; readonly duration: Seconds };

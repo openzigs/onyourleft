@@ -314,7 +314,7 @@ reproducible. `advance` takes a `Seconds`, not a number, and refuses a fraction.
 
 | Builder | Services | Declares | Notes |
 |---|---|---|---|
-| `hrsStrap()` | Heart Rate | `heart-rate` | 1 Hz, the rider's heart rate |
+| `hrsStrap()` | Heart Rate | `heart-rate` | 1 Hz, the rider's heart rate: the profile's fixed `heartRate` by default, or, with `createSimulator({ heartRate: { kind: 'responsive' } })` (#1238), `heart-rate-response.ts`' first-order model of the power the rider is making — `k = 0.392 bpm/W`, `τ = 65.6 s` (Hunt & Hurni 2019), **test defaults, not a claim about any rider** |
 | `cpsPowerMeter()` | Cycling Power | `power`, `cadence` | crank-based; cadence is **derived** from the `uint16` crank counter and its 1/1024 s event time, exactly as #42 must derive it |
 | `cscsSensor()` | Cycling Speed and Cadence | `cadence` | wheel (`uint32`) and crank (`uint16`) counters both modelled; **not** `speed`, because that needs the athlete's wheel circumference — `capability.ts` states the rule |
 | `ftmsTrainer()` | FTMS | `power`, `cadence`, `speed`, `trainer-control` | Indoor Bike Data fanned out with **one instant**; Control Point; Fitness Machine Status. Since #43 it also answers Set Target Resistance Level, Set Indoor Bike Simulation Parameters and Stop or Pause, and reports its supported ranges on the bench handle |
@@ -350,6 +350,14 @@ changes internal state is decoration.
 | `counter-wrap` | crank count and event time both lap on the next frames; the cadence stream does not notice | `scenarios.test.ts` |
 | `control-permission-lost` | Fitness Machine Status `0xFF`; the next setpoint answers `0x05`; the power stream does not move | `control-point.test.ts` |
 | `indoor-bike-data-fields` | speed present with flag bit 0 **clear**, total distance present, no cadence: the cadence stream goes quiet, power and speed continue | `scenarios.test.ts` |
+| `heart-rate-drift` | at constant power the decoded heart rate rises by the drift less its lag; refused on a `fixed` heart rate | `protocol/src/heart-rate-simulator.test.ts` |
+| `heart-rate-readings` | the values, verbatim and in order, through the real decoder — 0, 255, a jump, and a value over 255 in the 16-bit form | the same |
+| `strap-absent` | Sensor Contact Status "not detected": the real decoder and the typed stream both report nothing for its length | the same |
+
+The heart-rate scenarios (#1238) are observed through octets rather than the typed stream:
+`bench.device(id).onNotify` hands a test every frame a device actually notifies, and
+`@onyourleft/sensors/protocol/testing`'s `heartRatesThroughTheDecoder` encodes each with literal
+offsets and decodes it with the real `heartRateProfile`, so a wrong encoding is a red test.
 
 The trainer's control-point refusals are not scenarios — they are its ordinary behaviour under the
 sequence of writes that provokes them, so a client reaches them by writing:
