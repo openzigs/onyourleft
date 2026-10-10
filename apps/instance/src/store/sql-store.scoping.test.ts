@@ -361,6 +361,24 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
       'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
   },
   clearHostedModelKey: { notAScopedRead: 'a write: the operator’s, not a rider’s' },
+  putAthleteHostedKey: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  getAthleteHostedKey: {
+    probe: async (store, athleteId) => one(await store.getAthleteHostedKey(athleteId)),
+  },
+  clearAthleteHostedKey: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  putHostedConsent: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  getHostedConsent: {
+    probe: async (store, athleteId) => one(await store.getHostedConsent(athleteId)),
+  },
+  clearHostedConsent: {
+    notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
   listInstanceKeys: {
     notAScopedRead:
       'the instance’s own keys (#1189), wrapped; read by the instance and the operator command, never served to a rider, and naming no athlete',

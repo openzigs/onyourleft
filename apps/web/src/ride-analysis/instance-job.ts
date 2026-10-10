@@ -25,9 +25,12 @@
  * {@link analysisJobRequest} is the ONE builder of a start's body: the ride's
  * input as `@onyourleft/analysis` §`rideAnalysisInput` built it (#809 — no
  * coordinate, no absolute altitude, no date, no name, no id), the template
- * version and the source, and no other key. It is a `departing` boundary
- * (`privacy/boundaries.test.ts`), and `camera/no-picture-reachable.test.ts`
- * walks this module and holds the body to carrying no picture.
+ * version and the source — and, since #1229, the ride's own id when the ride
+ * is already synced with this instance, which the instance then holds anyway,
+ * so its history tool can date the rider's other rides against this one. No
+ * other key. It is a `departing` boundary (`privacy/boundaries.test.ts`), and
+ * `camera/no-picture-reachable.test.ts` walks this module and holds the body
+ * to carrying no picture.
  *
  * ## What arrives is untrusted
  *
@@ -50,11 +53,16 @@ import type {
 /** Where the instance runs the job (#1095, ADR 0046 D-9). */
 export type InstanceJobSource = 'instance-local' | 'instance-hosted';
 
-/** A start's body: exactly these three keys (`apps/instance` §`job-input.ts`). */
+/** A start's body: exactly these keys (`apps/instance` §`analysis/jobs.ts` §`start`). */
 export interface AnalysisJobRequest {
   readonly input: RideAnalysisInput;
   readonly templateVersion: string;
   readonly source: InstanceJobSource;
+  /**
+   * The ride's own id — only for a ride this device has synced with the
+   * instance (#1229), which refuses any other as `validation_failed`.
+   */
+  readonly rideId?: string;
 }
 
 /**
@@ -65,8 +73,14 @@ export function analysisJobRequest(
   input: RideAnalysisInput,
   templateVersion: string,
   source: InstanceJobSource,
+  syncedRideId?: string,
 ): AnalysisJobRequest {
-  return { input, templateVersion, source };
+  return {
+    input,
+    templateVersion,
+    source,
+    ...(syncedRideId === undefined ? {} : { rideId: syncedRideId }),
+  };
 }
 
 /** What a job's calls go through: a sealed instance and its session, in production. */
@@ -179,8 +193,13 @@ function codeOf(body: unknown): string | undefined {
 /** How a start went. */
 export type StartedJob =
   | { readonly kind: 'started'; readonly jobId: string }
-  /** The instance refused; `code` is its error code, when it named one. */
-  | { readonly kind: 'refused'; readonly code?: string }
+  /**
+   * The instance refused; `code` is its error code, when it named one, and
+   * `rideRefused` that the refusal named the ride id (#1229) — a ride the
+   * instance no longer holds, though this device's sync base says it was
+   * synced.
+   */
+  | { readonly kind: 'refused'; readonly code?: string; readonly rideRefused?: true }
   /** No answer: nothing is known to have been queued. */
   | { readonly kind: 'unreachable' };
 
@@ -203,7 +222,21 @@ export async function startJob(
     return { kind: 'started', jobId };
   }
   const code = codeOf(answer.body);
-  return code === undefined ? { kind: 'refused' } : { kind: 'refused', code };
+  return {
+    kind: 'refused',
+    ...(code === undefined ? {} : { code }),
+    ...(refusesRide(answer.body) ? { rideRefused: true } : {}),
+  };
+}
+
+/** Whether a `validation_failed` refusal names the ride id among its fields (#1229). */
+function refusesRide(body: unknown): boolean {
+  const error = (body as { error?: { code?: unknown; fields?: unknown } } | null)?.error;
+  return (
+    error?.code === 'validation_failed' &&
+    Array.isArray(error.fields) &&
+    error.fields.some((each) => (each as { field?: unknown } | null)?.field === 'rideId')
+  );
 }
 
 /** How following a job's stream ended. */

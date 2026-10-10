@@ -38,6 +38,7 @@ import { deviceKeyFixture, migrateAllBut, registrationFixture } from './store/te
 import type { Caller } from './auth/identity.ts';
 import { RIDE_INPUT } from './analysis/agent-testing.ts';
 import { MASKING_ITEM_KEY, type MaskingItemBody } from './analysis/hosted.ts';
+import { importSecretKey, sealHostedKey } from './analysis/hosted-key.ts';
 import { secretText } from './analysis/hosted-key-testing.ts';
 import { modelKeySet } from './operator/commands.ts';
 import { jobBody, parseStream } from './analysis/jobs-testing.ts';
@@ -86,7 +87,7 @@ async function start(
     config?: Partial<Config>;
     resolve?: Resolver;
     timing?: Pick<InstanceOptions, 'now' | 'sweepTimers' | 'defaultCountdownMs'>;
-    hosted?: Pick<InstanceOptions, 'hostedConsent' | 'hostedFetch'>;
+    hosted?: Pick<InstanceOptions, 'hostedFetch'>;
   } = {},
 ) {
   const lines: string[] = [];
@@ -989,6 +990,75 @@ describe('analysis jobs on the running instance — #1095', () => {
   });
 });
 
+describe('the agent’s history tool on the running instance — #1229', () => {
+  let embeddings: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((done) =>
+      embeddings === undefined ? done() : embeddings.close(() => done()),
+    );
+    embeddings = undefined;
+  });
+
+  it('searches the history index this instance keeps, through its embedding model', async () => {
+    // Until #1229 the engine was handed no index, and `history_search`
+    // answered "unavailable" on every job without asking the model a thing.
+    const asked: string[] = [];
+    embeddings = createServer((request, response) => {
+      let text = '';
+      request.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      request.on('end', () => {
+        const { input } = JSON.parse(text) as { input: string[] };
+        asked.push(...input);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ embeddings: input.map(() => [1, 0, 0]) }));
+      });
+    });
+    await new Promise<void>((done) => embeddings?.listen(0, '127.0.0.1', done));
+    const embeddingPort = (embeddings.address() as AddressInfo).port;
+    const model = await startFakeModelServer([
+      {
+        kind: 'tool-calls',
+        calls: [{ name: 'history_search', arguments: JSON.stringify({ query: 'hill repeats' }) }],
+      },
+      { kind: 'text', text: 'A steady ride.' },
+    ]);
+    try {
+      const path = join(await freshDirectory(), 'instance.sqlite');
+      await migrateForDeploy(path);
+      const { instance } = await start(
+        path,
+        {},
+        {
+          config: {
+            analysis: readAnalysisModelSettings({
+              analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
+              analysisModel: 'scripted',
+            }),
+            history: readHistorySettings({
+              embeddingUrl: `http://ollama:${String(embeddingPort)}`,
+            }),
+          },
+          resolve: () => Promise.resolve(['127.0.0.1']),
+        },
+      );
+      await instance.opened;
+      await instance.jobsRecovered;
+      const { sessionToken } = await signIn(instance.url, 'Ann Rider');
+      const answer = await fetch(`${instance.url}/v1/analysis/jobs`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(jobBody()),
+      });
+      expect(answer.status).toBe(202);
+      await instance.analysisJobs()?.idle();
+      expect(asked).toContain('search_query: hill repeats');
+      expect(model.paths).toStrictEqual(['/v1/chat/completions', '/v1/chat/completions']);
+    } finally {
+      await model.close();
+    }
+  });
+});
+
 describe('a rider’s race on the running instance — #784, #785', () => {
   it('is made and joined by code over HTTP, started by its creator alone, and lets its route go when it is over', async () => {
     const path = join(await freshDirectory(), 'instance.sqlite');
@@ -1354,22 +1424,35 @@ describe('a hosted analysis job on the running instance — #1223', () => {
    * key needs — serves the job routes sealed only, #1192, and sealing is not
    * what this tests.)
    */
+  /** The operator: the athlete `operator model-key set` holds the instance's one key for. */
+  const OPERATOR = 'athlete-a';
+  /** Another rider on the same instance (#1199). */
+  const RIDER = 'athlete-b';
+
   async function hostedJob(options: {
     readonly consent: boolean;
     readonly masking: string | null;
+    /**
+     * Whose key is held: the operator's one key, set by `operator model-key
+     * set` (the default), or a key the job's own athlete stored (#1199).
+     */
+    readonly key?: 'operator' | 'own';
+    /** Whose job it is: the operator's unless said. */
+    readonly athleteId?: string;
   }) {
     const model = await startFakeModelServer([
       { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
       { kind: 'text', text: 'A steady ride.' },
     ]);
     const { bodies, fetch: hostedFetch } = internet(model.baseUrl);
-    const athleteId = 'athlete-a';
+    const athleteId = options.athleteId ?? OPERATOR;
     try {
       const path = join(await freshDirectory(), 'instance.sqlite');
       await migrateForDeploy(path);
       const write = openServingStore(path);
       try {
-        await write.registerAthlete(registrationFixture(athleteId));
+        await write.registerAthlete(registrationFixture(OPERATOR));
+        if (athleteId !== OPERATOR) await write.registerAthlete(registrationFixture(athleteId));
         const items: [SyncItemWrite['kind'], string, string][] = [
           ['goal', 'goal-1', JSON.stringify({ text: `Goal: ${PLANTED_TEXT}` })],
         ];
@@ -1384,30 +1467,47 @@ describe('a hosted analysis job on the running instance — #1223', () => {
             now: 1_790_000_000 + index,
           });
         }
+        // Q10 (#1199): the job's athlete's own consent, recorded in the store,
+        // naming the key's endpoint's origin.
+        if (options.consent) {
+          await write.putHostedConsent({ athleteId, origin: HOSTED.origin, recordedAt: 1 });
+        }
+        if (options.key === 'own') {
+          const secret = await importSecretKey(new Uint8Array(32).fill(SECRET_FILL));
+          await write.putAthleteHostedKey(athleteId, {
+            url: HOSTED.href,
+            model: 'hosted-model',
+            ...(await sealHostedKey(secret, {
+              athleteId,
+              url: HOSTED.href,
+              model: 'hosted-model',
+              key: 'sk-own-0123456789abcdef',
+            })),
+            setAt: 1,
+          });
+        }
       } finally {
         await write.close();
       }
-      await modelKeySet(
-        { database: path, blobs: join(path, '..', 'blobs') },
-        {
-          url: HOSTED.href,
-          model: 'hosted-model',
-          input: 'sk-hosted-0123456789abcdef\n',
-          secret: secretText(SECRET_FILL),
-          ownerKey: deviceKeyFixture(athleteId).publicKey,
-        },
-      );
+      if (options.key !== 'own') {
+        await modelKeySet(
+          { database: path, blobs: join(path, '..', 'blobs') },
+          {
+            url: HOSTED.href,
+            model: 'hosted-model',
+            input: 'sk-hosted-0123456789abcdef\n',
+            secret: secretText(SECRET_FILL),
+            ownerKey: deviceKeyFixture(OPERATOR).publicKey,
+          },
+        );
+      }
       const { instance } = await start(
         path,
         { secretKey: new Uint8Array(32).fill(SECRET_FILL) },
-        {
-          hosted: options.consent
-            ? { hostedFetch, hostedConsent: () => Promise.resolve(HOSTED.origin) }
-            : { hostedFetch },
-        },
+        { hosted: { hostedFetch } },
       );
       await instance.jobsRecovered;
-      expect((await instance.hostedModelKey()).kind).toBe('held');
+      expect((await instance.hostedModelKey()).kind).toBe(options.key === 'own' ? 'none' : 'held');
       const jobs = instance.analysisJobs();
       if (jobs === undefined) throw new Error('no analysis jobs');
       const caller = { athleteId } as Caller;
@@ -1436,12 +1536,29 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     for (const placeholder of Object.values(MASK_PLACEHOLDER)) expect(last).toContain(placeholder);
   });
 
+  it('runs a rider’s job on the key THEY stored, with their own consent, masked (#1199)', async () => {
+    const { events, bodies, requests } = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+    });
+    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    expect(requests).toHaveLength(2);
+    for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
+      expect(personalDetailFaults(body)).toStrictEqual([]);
+    }
+  });
+
   it.each([
     ['no masking item synced', { consent: true, masking: null }],
     ['a masking item that cannot be read', { consent: true, masking: '{"words":' }],
+    ['no recorded consent', { consent: false, masking: GUARD_BODY }],
     [
-      'no recorded consent — every running instance until #1199',
-      { consent: false, masking: GUARD_BODY },
+      // The owner, 2026-10-09: "Operator key is not shared with riders. If it
+      // is hosted they need to bring their own key."
+      'a rider with no key of their own, while the operator holds one (#1199)',
+      { consent: true, masking: GUARD_BODY, athleteId: RIDER },
     ],
   ])(
     '%s: refused hosted_unavailable, and the hosted server is sent nothing',

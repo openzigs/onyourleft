@@ -437,7 +437,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record` and its `file` address), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`."
                 }
               }
             }
@@ -872,10 +872,593 @@
         }
       }
     },
+    "/v1/analysis/hosted": {
+      "get": {
+        "operationId": "getHostedModelSettings",
+        "summary": "Your own hosted model key (its URL and model, never the key) and your recorded hosted consent (#1199). A hosted job runs on your own key only, and only while your consent names the origin it goes to.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your hosted model key, or null: its base URL, model and when it was set (Unix seconds) — never the key itself. `setBy` is `app` for a key you stored, `operator-command` for the operator’s own key on the operator’s own account.",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "setAt": {
+                          "type": "integer"
+                        },
+                        "setBy": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "operator-command"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "setAt",
+                        "setBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your recorded hosted consent, or null: the origin it names and when (Unix seconds). A hosted job runs only while it names the origin your key goes to.",
+                      "properties": {
+                        "origin": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "origin",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/hosted/consent": {
+      "post": {
+        "operationId": "recordHostedConsent",
+        "summary": "Record your hosted consent naming `endpoint` (ADR 0046 Q10): an `https:` URL, kept as its origin. Replaces any consent you had.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "endpoint"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your hosted model key, or null: its base URL, model and when it was set (Unix seconds) — never the key itself. `setBy` is `app` for a key you stored, `operator-command` for the operator’s own key on the operator’s own account.",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "setAt": {
+                          "type": "integer"
+                        },
+                        "setBy": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "operator-command"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "setAt",
+                        "setBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your recorded hosted consent, or null: the origin it names and when (Unix seconds). A hosted job runs only while it names the origin your key goes to.",
+                      "properties": {
+                        "origin": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "origin",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "withdrawHostedConsent",
+        "summary": "Withdraw your hosted consent. No hosted job of yours runs until you record one again.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your hosted model key, or null: its base URL, model and when it was set (Unix seconds) — never the key itself. `setBy` is `app` for a key you stored, `operator-command` for the operator’s own key on the operator’s own account.",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "setAt": {
+                          "type": "integer"
+                        },
+                        "setBy": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "operator-command"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "setAt",
+                        "setBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your recorded hosted consent, or null: the origin it names and when (Unix seconds). A hosted job runs only while it names the origin your key goes to.",
+                      "properties": {
+                        "origin": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "origin",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/hosted/key": {
+      "post": {
+        "operationId": "setHostedModelKey",
+        "summary": "Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url",
+                  "model",
+                  "key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your hosted model key, or null: its base URL, model and when it was set (Unix seconds) — never the key itself. `setBy` is `app` for a key you stored, `operator-command` for the operator’s own key on the operator’s own account.",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "setAt": {
+                          "type": "integer"
+                        },
+                        "setBy": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "operator-command"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "setAt",
+                        "setBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your recorded hosted consent, or null: the origin it names and when (Unix seconds). A hosted job runs only while it names the origin your key goes to.",
+                      "properties": {
+                        "origin": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "origin",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearHostedModelKey",
+        "summary": "Clear the hosted model key you stored, scrubbed from the database. The operator’s own key is cleared only by `operator model-key clear`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your hosted model key, or null: its base URL, model and when it was set (Unix seconds) — never the key itself. `setBy` is `app` for a key you stored, `operator-command` for the operator’s own key on the operator’s own account.",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "setAt": {
+                          "type": "integer"
+                        },
+                        "setBy": {
+                          "type": "string",
+                          "enum": [
+                            "app",
+                            "operator-command"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "model",
+                        "setAt",
+                        "setBy"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Your recorded hosted consent, or null: the origin it names and when (Unix seconds). A hosted job runs only while it names the origin your key goes to.",
+                      "properties": {
+                        "origin": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "origin",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/analysis/jobs": {
       "post": {
         "operationId": "startAnalysisJob",
-        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
         "security": [
           {
             "session": []
@@ -902,6 +1485,9 @@
                       "instance-local",
                       "instance-hosted"
                     ]
+                  },
+                  "rideId": {
+                    "type": "string"
                   }
                 },
                 "required": [

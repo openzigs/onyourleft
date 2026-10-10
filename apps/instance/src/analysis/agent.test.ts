@@ -11,6 +11,7 @@
 import {
   HISTORY_FENCE_BEGIN,
   HISTORY_FENCE_END,
+  MAXIMUM_WRITE_UP_CHARACTERS,
   passedScreen,
   screenWriteUp,
   type UntrustedText,
@@ -421,9 +422,32 @@ describe('screened before anything is kept or streamed, with one rewrite (ADR 00
     expectNoUnscreenedText(events, outcome);
   });
 
-  it('withdraws when only the whole fails: an empty reply is no write-up', async () => {
-    const { outcome } = await run(scriptedModel(text('   '), text('')));
+  it('an empty reply is no write-up, and streams nothing to withdraw', async () => {
+    const { outcome, events } = await run(scriptedModel(text('   '), text('')));
     expect(outcome).toStrictEqual({ kind: 'withheld', reasons: ['empty'] });
+    expect(events.filter((event) => event.type !== 'progress')).toStrictEqual([]);
+  });
+
+  it('withdraws every streamed section when each passed alone and only the whole fails (#1187)', async () => {
+    // Two sections each under the screen's bound, joined over it: each passes
+    // alone and is streamed, and the whole is `too-long`.
+    const half = 'A long and steady ride. '.repeat(
+      Math.ceil((MAXIMUM_WRITE_UP_CHARACTERS / 2 + 10) / 24),
+    );
+    const section = half.trim();
+    expect(section.length).toBeLessThan(MAXIMUM_WRITE_UP_CHARACTERS);
+    expect(section.length * 2 + 2).toBeGreaterThan(MAXIMUM_WRITE_UP_CHARACTERS);
+    const reply = `${section}\n\n${section}`;
+    const { outcome, events } = await run(scriptedModel(text(reply), text(reply)));
+    expect(outcome).toStrictEqual({ kind: 'withheld', reasons: ['too-long'] });
+    expect(events.filter((event) => event.type !== 'progress')).toStrictEqual([
+      { type: 'section', index: 1, text: section },
+      { type: 'section', index: 2, text: section },
+      { type: 'withdrawn' },
+      { type: 'section', index: 1, text: section },
+      { type: 'section', index: 2, text: section },
+      { type: 'withdrawn' },
+    ]);
   });
 });
 

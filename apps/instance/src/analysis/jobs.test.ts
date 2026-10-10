@@ -225,6 +225,76 @@ describe('starting, following and reading a job', () => {
   });
 });
 
+describe('naming the synced ride (#1229)', () => {
+  /** A ride as sync stores it: a signed record whose claims name the ride and when it started. */
+  async function syncedRide(w: IdentityInstance, athleteId: string, activityId: string) {
+    await w.freshRead((store) =>
+      store.putActivityRecord({
+        athleteId,
+        contentSha256: `${activityId}`
+          .padEnd(64, '0')
+          .replace(/[^0-9a-f]/g, 'a')
+          .slice(0, 64),
+        signedRecord: new TextEncoder().encode(
+          JSON.stringify({ claims: { activityId, startedAt: 1_790_000_000 } }),
+        ),
+        receivedAt: 1_790_000_000,
+      }),
+    );
+  }
+
+  it('hands the engine the ride a start names, when it is one of the caller’s synced rides, and keeps it on the job', async () => {
+    const { world: w, engine, riders } = await jobsWorld(1);
+    const [anna] = riders;
+    await syncedRide(w, anna!.athleteId, 'ride-of-anna');
+    const answer = await startJob(w, anna!.token, { ...jobBody(), rideId: 'ride-of-anna' });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(202);
+    const { jobId } = answer.body as { jobId: string };
+    const run = await engine.next();
+    expect(run.job.rideId).toBe('ride-of-anna');
+    run.finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+    expect(
+      (await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, jobId)))?.rideId,
+    ).toBe('ride-of-anna');
+  });
+
+  it('hands the engine no ride, and keeps none, for a start that names none', async () => {
+    const { world: w, engine, riders } = await jobsWorld(1);
+    const [anna] = riders;
+    await syncedRide(w, anna!.athleteId, 'ride-of-anna');
+    const jobId = await started(w, anna!.token);
+    const run = await engine.next();
+    expect('rideId' in run.job).toBe(false);
+    run.finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+    expect(
+      (await w.freshRead((store) => store.getAnalysisJob(anna!.athleteId, jobId)))?.rideId,
+    ).toBe(null);
+  });
+
+  it('refuses another athlete’s ride, a ride never synced, and an id of the wrong shape — and queues nothing', async () => {
+    const { world: w, engine, riders } = await jobsWorld(2);
+    const [anna, ben] = riders;
+    await syncedRide(w, anna!.athleteId, 'ride-of-anna');
+    await syncedRide(w, ben!.athleteId, 'ride-of-ben');
+    for (const rideId of ['ride-of-ben', 'never-synced', 'not/a/ride', '', 7]) {
+      const answer = await startJob(w, anna!.token, { ...jobBody(), rideId });
+      expect(answer.status, String(rideId)).toBe(400);
+      expect((answer.body as { error: { fields: unknown[] } }).error.fields).toEqual([
+        { field: 'rideId', problem: 'must be the synced id of one of your rides' },
+      ]);
+    }
+    expect(engine.runs).toEqual([]);
+    // Anna's own ride is still hers to name.
+    expect((await startJob(w, anna!.token, { ...jobBody(), rideId: 'ride-of-anna' })).status).toBe(
+      202,
+    );
+    (await engine.next()).finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+  });
+});
+
 describe('resume', () => {
   it('reads 1–3, drops the connection, and gets 4… on Last-Event-ID: 3 — no duplicate, no gap', async () => {
     const { world: w, engine, riders } = await jobsWorld(1);
@@ -742,6 +812,33 @@ describe('never logged', () => {
     }
     // What IS logged of a job: its status and its failure code.
     expect(logged).toContain('"event":"analysis-job","state":"failed","code":"model-error"');
+  });
+
+  it('fails a job whose engine rejects, and keeps the error’s text nowhere (#1187)', async () => {
+    // A tool's `run` that rejects — a store error — propagates out of
+    // `runAnalysisAgent` (agent.ts §`runAnalysisAgent`): this is where it lands.
+    const jobLines: string[] = [];
+    const {
+      world: w,
+      engine,
+      riders,
+    } = await jobsWorld(1, { analysis: { log: (line) => jobLines.push(line) } });
+    const jobId = await started(w, riders[0]!.token);
+    const run = await engine.next();
+    run.fail(new Error('SQLITE_IOERR zq_store_marker /data/instance.sqlite'));
+    await w.analysis?.idle();
+    const job = await w.freshRead((store) => store.getAnalysisJob(riders[0]!.athleteId, jobId));
+    expect([job?.status, job?.failure]).toEqual(['failed', 'engine-error']);
+    const events = await w.freshRead((store) =>
+      store.listAnalysisEvents(riders[0]!.athleteId, jobId, 0, 10),
+    );
+    expect(events.map((each) => [each.kind, each.data])).toEqual([
+      ['result', '{"status":"failed","failure":"engine-error"}'],
+    ]);
+    const logged = [...w.instance.lines, ...jobLines].join('\n');
+    expect(logged).toContain('"event":"analysis-job","state":"failed","code":"engine-error"');
+    expect(logged).not.toContain('zq_store_marker');
+    expect(JSON.stringify(job)).not.toContain('zq_store_marker');
   });
 
   it('keeps only a tool name of the tool-name shape in a progress event', async () => {

@@ -1016,6 +1016,7 @@ function buildInstanceAnalysis(
     cameraConsented: () => camera?.state().consent.local ?? false,
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
     pending: storage,
+    syncBase: localStore(),
     ...(rideController === undefined
       ? {}
       : {

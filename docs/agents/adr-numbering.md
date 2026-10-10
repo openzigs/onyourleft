@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0048 is [ADR 0048](../adr/0048-workouts-that-change-during-the-ride.md)**, taken by
+  [#1233](https://github.com/openzigs/onyourleft/issues/1233) on 2026-10-09 for workouts that change
+  during the ride (a heart-rate hold on the device, and re-plans an instance agent may only
+  propose), and **accepted on the owner's rulings of the same day**. A reviewer who remembers this
+  sentence offering 0048 is reading the old file.
   ⚠️ **0047 is [ADR 0047](../adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)**,
   taken by [#1179](https://github.com/openzigs/onyourleft/issues/1179) on 2026-10-08 for end-to-end
   encryption between the app and its instance, and **accepted by the owner on 2026-10-08**. A
