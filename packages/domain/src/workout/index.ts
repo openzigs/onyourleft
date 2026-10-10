@@ -33,7 +33,6 @@ export {
 } from './workout';
 
 export type {
-  HeartRateRange,
   WorkoutGoals,
   WorkoutGoalsFault,
   WorkoutGoalsReading,
