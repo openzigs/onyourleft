@@ -1078,7 +1078,7 @@ Until 2026-10-07 this section was §"Owner questions left open".
 - **2026-10-09** — **D-9's Share mode is withdrawn by the owner, and a hosted model runs only on the
   rider's own key.** The owner ruled on #1233 on 2026-10-09, *"Operator key is not shared with
   riders. If it is hosted they need to bring their own key"*, and, asked whether that reached
-  post-ride analysis too, *"yes share mode should go for post ride analysis"*. So D-9's
+  post-ride analysis too, *"yes share mode should go for post ride analysis"* ([recorded on #1092](https://github.com/openzigs/onyourleft/issues/1092#issuecomment-6091274039)). So D-9's
   *"**Share**: the operator sets one key, and every permitted rider's analysis uses it"* no longer
   holds, for post-ride analysis and for re-plans alike: **a hosted model runs only on a key the
   rider brought themselves** (bring-your-own,

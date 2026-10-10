@@ -92,7 +92,7 @@ verbatim:
 
 A third ruling, given the same day when the author asked whether Q5's *"Operator key is not shared
 with riders"* also reached post-ride analysis, verbatim: *"yes share mode should go for post ride
-analysis"*. So the rule is **general**: [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
+analysis"* ([recorded on #1092](https://github.com/openzigs/onyourleft/issues/1092#issuecomment-6091274039)). So the rule is **general**: [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)
 D-9's Share mode is withdrawn, and a hosted model runs only on a rider's own key.
 
 ### How the rulings change the design
