@@ -67,6 +67,10 @@ const REPORT: SyncReport = {
   textsHiddenOnInstance: 0,
   textsDeletedOnInstance: 0,
   textConflicts: 0,
+  workoutsPushed: 0,
+  workoutsPulled: 0,
+  workoutsDeletedOnInstance: 0,
+  workoutsHiddenOnInstance: 0,
   keysToConfirm: [OTHER_KEY],
   failures: [{ kind: 'activity', key: 'abc', reason: 'key-not-admitted' }],
 };

@@ -1284,7 +1284,15 @@ export interface RideWriteUpRecord {
  * after another device revoked it.
  */
 export type SyncBaseKind =
-  'activity' | 'write-up' | 'side-camera-report' | 'race-consent' | 'goal' | 'note' | 'document';
+  | 'activity'
+  | 'write-up'
+  | 'side-camera-report'
+  | 'race-consent'
+  | 'goal'
+  | 'note'
+  | 'document'
+  /** A saved workout (#1100), keyed by its own id. */
+  | 'workout';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1295,13 +1303,15 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'goal',
   'note',
   'document',
+  'workout',
 ];
 
 /**
  * The kinds that belong to no ride (#836): the rider's goals and their
- * documents. Their sync base row names no ride — `activityId` is `null`.
+ * documents, and since #1100 their saved workouts. Their sync base row names
+ * no ride — `activityId` is `null`.
  */
-export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document'];
+export const RIDERLESS_SYNC_BASE_KINDS: readonly SyncBaseKind[] = ['goal', 'document', 'workout'];
 
 /**
  * The **sync base**: what this device and its instance agreed on at the last

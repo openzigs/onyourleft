@@ -276,6 +276,8 @@ export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
     'goal',
     'note',
     'document',
+    // #1100: a saved workout, so the scoped reads and the erasure cover it.
+    'workout',
   ] as const;
   return kinds.map((kind) => ({
     athleteId,
