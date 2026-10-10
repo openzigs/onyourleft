@@ -44,3 +44,32 @@ export interface LibraryPort {
   readonly athleteId: AthleteId;
   readonly store: LibraryStore;
 }
+
+/**
+ * Something noted on this device about a ride, outside the store, that goes
+ * when the ride is deleted — the pending-job note of an analysis asked of an
+ * instance (#1102, `ride-analysis/instance-analysis.ts` §`pendingJobForgetter`).
+ */
+export interface RideDeletionNote {
+  forgetRide(id: ActivityId): void;
+}
+
+/**
+ * The library store, with each of `notes` told once a ride's delete has gone
+ * through. Not when the delete throws: the ride may still be there, and a job
+ * about it may still be followed. `main.tsx` is the one caller.
+ */
+export function forgettingOnDelete(
+  store: LibraryStore,
+  notes: readonly RideDeletionNote[],
+): LibraryStore {
+  return {
+    listActivitySummaries: (owner, options) => store.listActivitySummaries(owner, options),
+    getActivity: (owner, id) => store.getActivity(owner, id),
+    deleteActivity: async (owner, id) => {
+      const deleted = await store.deleteActivity(owner, id);
+      for (const note of notes) note.forgetRide(id);
+      return deleted;
+    },
+  };
+}

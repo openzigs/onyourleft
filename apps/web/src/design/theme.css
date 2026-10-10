@@ -4831,7 +4831,14 @@ select.oyl-input {
   max-width: 32rem;
 }
 
-.oyl-write-up__text {
+/*
+ * A section of a write-up as the rider's instance streams it (#1102): laid
+ * out as the saved write-up is, one text node each, but a class of its own so
+ * nothing that looks for the SAVED write-up finds a section still being
+ * written.
+ */
+.oyl-write-up__text,
+.oyl-write-up__section {
   margin-inline: 0;
   padding-inline-start: var(--oyl-space-md);
   border-inline-start: 4px solid var(--oyl-color-border);

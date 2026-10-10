@@ -400,6 +400,7 @@ function transferPort(populated: boolean): TransferPort {
     save: () => undefined,
     drafts: { forget: () => undefined },
     instance: { forget: () => undefined },
+    instanceAnalysis: { forget: () => undefined },
     theme: { forget: () => undefined },
     hostedModel: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),

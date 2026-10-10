@@ -1205,11 +1205,21 @@ export interface SideSessionSummaryRecord {
   readonly source: SideSessionSourceRecord;
 }
 
-/** Where a ride's write-up was written: the rider's own computer, or a model on the rider's key. */
-export type RideWriteUpSourceRecord = 'computer' | 'hosted';
+/**
+ * Where a ride's write-up was written: the rider's own computer, a model on
+ * the rider's key, or — since #1102 (ADR 0046 D-1) — the rider's instance,
+ * with the model on its own machine (`instance-local`) or a hosted service it
+ * sends to (`instance-hosted`). The values are the job's `source` (#1095).
+ */
+export type RideWriteUpSourceRecord = 'computer' | 'hosted' | 'instance-local' | 'instance-hosted';
 
 /** Every {@link RideWriteUpSourceRecord}, for a decoder that refuses anything else. */
-export const RIDE_WRITE_UP_SOURCES: readonly RideWriteUpSourceRecord[] = ['computer', 'hosted'];
+export const RIDE_WRITE_UP_SOURCES: readonly RideWriteUpSourceRecord[] = [
+  'computer',
+  'hosted',
+  'instance-local',
+  'instance-hosted',
+];
 
 /**
  * A model's write-up of one ride, as it passed the runtime screen — #800,
