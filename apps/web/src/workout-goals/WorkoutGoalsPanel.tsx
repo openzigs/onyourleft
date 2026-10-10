@@ -198,33 +198,35 @@ export function WorkoutGoalsPanel({
           }}
         >
           {unreadable ? <StatusMessage tone="warning">{GOALS_NOT_READ}</StatusMessage> : null}
-          <p>
-            <label htmlFor={fieldId('sessionType')}>{FIELD_WORDS.sessionType.label}</label>
-            <select
-              id={fieldId('sessionType')}
-              value={form.sessionType}
-              aria-describedby={describedBy('sessionType')}
-              {...invalidProps('sessionType')}
-              onChange={(event) => {
-                const chosen = WORKOUT_SESSION_TYPES.find((each) => each === event.target.value);
-                edit({ sessionType: chosen ?? '' });
-              }}
-            >
-              <option value="">{NO_SESSION_TYPE}</option>
-              {WORKOUT_SESSION_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {SESSION_TYPE_NAMES[type]}
-                </option>
-              ))}
-            </select>
-          </p>
-          <p id={`${fieldId('sessionType')}-hint`} className="oyl-muted oyl-field-hint">
-            {FIELD_WORDS.sessionType.hint}
-          </p>
+          {/* The boxes side by side where the card is wide enough — a column
+            on a phone — each its label, its box and its description. */}
+          <div className="oyl-workout-goals__fields">
+            <div className="oyl-workout-goals__field">
+              <label htmlFor={fieldId('sessionType')}>{FIELD_WORDS.sessionType.label}</label>
+              <select
+                id={fieldId('sessionType')}
+                value={form.sessionType}
+                aria-describedby={describedBy('sessionType')}
+                {...invalidProps('sessionType')}
+                onChange={(event) => {
+                  const chosen = WORKOUT_SESSION_TYPES.find((each) => each === event.target.value);
+                  edit({ sessionType: chosen ?? '' });
+                }}
+              >
+                <option value="">{NO_SESSION_TYPE}</option>
+                {WORKOUT_SESSION_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {SESSION_TYPE_NAMES[type]}
+                  </option>
+                ))}
+              </select>
+              <p id={`${fieldId('sessionType')}-hint`} className="oyl-muted oyl-field-hint">
+                {FIELD_WORDS.sessionType.hint}
+              </p>
+            </div>
 
-          {NUMBER_FIELDS.map((field) => (
-            <div key={field}>
-              <p>
+            {NUMBER_FIELDS.map((field) => (
+              <div key={field} className="oyl-workout-goals__field">
                 <label htmlFor={fieldId(field)}>{FIELD_WORDS[field].label}</label>
                 <input
                   className="oyl-input"
@@ -238,30 +240,30 @@ export function WorkoutGoalsPanel({
                     edit({ [field]: event.target.value });
                   }}
                 />
-              </p>
-              <p id={`${fieldId(field)}-hint`} className="oyl-muted oyl-field-hint">
-                {FIELD_WORDS[field].hint}
+                <p id={`${fieldId(field)}-hint`} className="oyl-muted oyl-field-hint">
+                  {FIELD_WORDS[field].hint}
+                </p>
+              </div>
+            ))}
+
+            <div className="oyl-workout-goals__field oyl-workout-goals__field--wide">
+              <label>
+                <input
+                  type="checkbox"
+                  id={fieldId('effortCheckIns')}
+                  checked={form.effortCheckIns}
+                  aria-describedby={describedBy('effortCheckIns')}
+                  onChange={(event) => {
+                    edit({ effortCheckIns: event.currentTarget.checked });
+                  }}
+                />{' '}
+                {FIELD_WORDS.effortCheckIns.label}
+              </label>
+              <p id={`${fieldId('effortCheckIns')}-hint`} className="oyl-muted oyl-field-hint">
+                {FIELD_WORDS.effortCheckIns.hint}
               </p>
             </div>
-          ))}
-
-          <p>
-            <label>
-              <input
-                type="checkbox"
-                id={fieldId('effortCheckIns')}
-                checked={form.effortCheckIns}
-                aria-describedby={describedBy('effortCheckIns')}
-                onChange={(event) => {
-                  edit({ effortCheckIns: event.currentTarget.checked });
-                }}
-              />{' '}
-              {FIELD_WORDS.effortCheckIns.label}
-            </label>
-          </p>
-          <p id={`${fieldId('effortCheckIns')}-hint`} className="oyl-muted oyl-field-hint">
-            {FIELD_WORDS.effortCheckIns.hint}
-          </p>
+          </div>
 
           <div className="oyl-workout-goals__actions">
             <Button variant="secondary" type="submit">

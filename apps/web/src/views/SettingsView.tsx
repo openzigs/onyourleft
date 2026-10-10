@@ -679,10 +679,15 @@ export function SettingsView({
 
       {/*
         #1237. The TYPED goals, which bound a heart-rate hold — their own card,
-        after the goals and documents in words, which never set a number.
+        after the goals and documents in words, which never set a number. It
+        spans both columns of a landscape tablet: beside the short Connect
+        card in one column it was three times that card's height
+        (`sections.browser.spec.ts` §"#1026"), and across both its boxes sit
+        side by side.
       */}
       <SettingsCard
         id="oyl-settings-workout-goals"
+        wide
         title={SETTINGS_CARD_TITLES.workoutGoals}
         picture={
           <>
@@ -759,15 +764,18 @@ function SettingsCard({
   title,
   picture,
   children,
+  wide = false,
 }: {
   readonly id: string;
   readonly title: string;
   readonly picture: ReactNode;
   readonly children: ReactNode;
+  /** Across both columns of a landscape tablet (#1237), for a card of many boxes. */
+  readonly wide?: boolean;
 }): JSX.Element {
   return (
     <section
-      className="oyl-settings-card tw:bg-surface-raised tw:rounded-card"
+      className={`oyl-settings-card${wide ? ' oyl-settings-card--wide' : ''} tw:bg-surface-raised tw:rounded-card`}
       aria-labelledby={id}
     >
       <div className="tw:flex tw:items-center tw:gap-sm tw:mb-md">
