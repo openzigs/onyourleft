@@ -1734,7 +1734,7 @@ export function rideWriteUpProblem(writeUp: {
     }
   }
   if (!(RIDE_WRITE_UP_SOURCES as readonly unknown[]).includes(writeUp.source)) {
-    return 'rideWriteUp.source: must be computer or hosted';
+    return 'rideWriteUp.source: must be computer, hosted, instance-local or instance-hosted';
   }
   if (typeof writeUp.includedPose !== 'boolean') {
     return 'rideWriteUp.includedPose: must be true or false';

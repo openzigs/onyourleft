@@ -72,12 +72,12 @@ describe('the own-computer paragraph (#802, ADR 0035 D-9 B)', () => {
   });
 
   it('goes red on a policy that drops the owner’s addition', () => {
-    const drifted = asProse(read(POLICY)).replace('your threshold power, if you set one, ', '');
+    const drifted = asProse(read(POLICY)).replaceAll('your threshold power, if you set one, ', '');
     expect(drifted).not.toContain(wording);
   });
 
   it('goes red on a policy that drops the distance, gradient and climb — #845', () => {
-    const drifted = asProse(read(POLICY)).replace(
+    const drifted = asProse(read(POLICY)).replaceAll(
       "its distance, and each section's gradient and total climb, ",
       '',
     );

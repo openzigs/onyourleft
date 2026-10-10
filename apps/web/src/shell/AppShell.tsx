@@ -58,6 +58,7 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { SyncPort } from '../instance/sync-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -70,6 +71,7 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
@@ -356,6 +358,14 @@ export interface AppShellProps {
    */
   readonly rideAnalysis?: RideAnalysisPort | undefined;
   /**
+   * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): started,
+   * streamed, cancelled and resumed on a ride's page, then screened and saved
+   * on this device. ⚠️ Optional, so a `main.tsx` that left it out would be
+   * green in `check:wiring`; `ride-analysis/instance-analysis-wiring.test.tsx`
+   * is what goes red for that.
+   */
+  readonly instanceAnalysis?: InstanceAnalysisPort | undefined;
+  /**
    * The analysis screen's store (#78).
    *
    * A fifth port over the same connection, and the only one that may read the
@@ -473,6 +483,12 @@ export interface AppShellProps {
    */
   readonly moderation?: ModerationPort | undefined;
   /**
+   * Sync with the instance (#1195) — `instance/sync-port.ts`
+   * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
+   * screen draws its panel only once connected, and offers it only with a card.
+   */
+  readonly sync?: SyncPort | undefined;
+  /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
    * ⚠️ **The initial value only**, exactly like {@link riderMass}, and passed
@@ -548,6 +564,7 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           writeUp={props.rideAnalysis}
+          instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
         />
       );
@@ -680,7 +697,7 @@ function viewFor(
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} />;
+      return <InstanceView port={props.instance} moderation={props.moderation} sync={props.sync} />;
     case 'moderation':
       return <ModerationView port={props.moderation} />;
     case 'credits':

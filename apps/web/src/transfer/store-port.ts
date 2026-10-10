@@ -288,6 +288,13 @@ export interface TransferPort {
    */
   readonly instance: DraftStore;
   /**
+   * The note of analysis jobs asked of an instance and not yet seen to end
+   * (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`.
+   * Required, so an erase cannot leave it behind and the policy's sentence
+   * about it stay true.
+   */
+  readonly instanceAnalysis: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

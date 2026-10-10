@@ -1708,13 +1708,17 @@ sequenceDiagram
 | Reads (#38) | The caller's own activities only — no read of another athlete's exists, because nothing records who may see whose ride. The list is ONE query a page; streams are served in full or at `?points=`, bucket means with a gap left `null`, and **never a position**; every response is `no-store` | `src/sync/sync.ts` §`owned`, §`streams` |
 | Export (#35) | `GET /v1/account/export`: the account as JSON, each activity's signed record and the address of its ORIGINAL file (the true track, unobfuscated), every item, public keys only, the blocks and reports the athlete made (#83; whom, why and when, and never how a report was decided, which would say whether an id is real), every recovery address (up to two since #1194, each with when it was confirmed and the public key that gave it) and every confirmation's state (never the token's hash), and a list of what is left out and why — the moderation log and reports ABOUT them among it | `src/sync/sync.ts` §`exportAccount` |
 | Deletion (#35) | `DELETE /v1/account` — only with a step-up beyond the session token (#898): one of the athlete's recovery codes, checked and not spent, or a fresh `oyl-erase-account-v1` statement signed by one of their own live keys (`src/auth/identity.ts` §`stepUp`); a suspended athlete reaches it, and the export, through a one-hour way-out session (`POST /v1/auth/leave-session`, `admitsSuspended`, migration 0012). Then: files first — each one no other athlete also holds — then every row, in tables **derived from the schema's foreign keys at the time of the call**, and another athlete's block OF this one (`block.blocked_athlete_id` has no foreign key, #83; a report ABOUT them and the moderation log are kept, and `sql-store.erasure.test.ts` says why for every such column), then a sweep of files a concurrent upload added. A failure part way is retried safely. It reaches THIS instance only: not a copy already downloaded, and not another instance | `src/sync/sync.ts` §`eraseAccount`, `src/store/sql-store.ts` §`athleteTablesInErasureOrder` |
-| The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: #777 wires the transport | `apps/web/src/instance/sync.ts` |
+| The client (#776) | `apps/web/src/instance/sync.ts`: **the device's change wins** (ADR 0036 D-3). Each copy is read against the device's **sync base** — what it and the instance agreed on at the last sync (`packages/store` §`SyncBaseRecord`, schema v14), a row that outlives its ride so the device remembers deleting it. A synced ride missing here is deleted on the instance, its items first, and never pulled back; a ride never synced here is pulled, verified before any write, through the rider's own import path; a ride the instance lacks is pushed, as a FIT signed with the device key; an item changed here is pushed, and only an item unchanged here whose instance copy moved is pulled. ⚠️ #893's first draft pulled whatever differed, before pushing — which pulled back a ride deleted here and overwrote a write-up replaced here, and its review found both. A pulled record is NOT kept on the device — `putActivityRecord` refuses another device's key, and that rule stands — so a pulled ride is never signed again. It names no `fetch`: `sync-port.ts` hands it the sealed transport (#1195) | `apps/web/src/instance/sync.ts`, `sync-port.ts` |
 
-⚠️ **Not wired to a running box yet.** Since #780 `src/instance.ts` hands the handler the accounts,
-but no sync: wiring one over the blob directory it already configures (`OYL_INSTANCE_BLOBS`, #791)
-is left to a follow-up rather than done in #893's merge, and the shipped client calls none of this
-(#777), so every sync route answers `unavailable` on a running instance and a rider's device
-sends nothing.
+⚠️ **Wired to a running box since #1195, sealed only** — a reviewer who remembers "not wired to a
+running box yet" is reading the old file. `src/instance.ts` hands the handler a sync over the blob
+directory it already configures (`OYL_INSTANCE_BLOBS`, #791; files under its `objects/`, which
+`operator backup` copies) — and only when the instance holds keys, because every sync route is
+sealed-only (ADR 0047 D-7, D-14 Q7) and a keyless instance seals nothing: there every sync route
+still answers `unavailable`. The client calls it from the Instance screen's *Sync now*
+(`apps/web/src/instance/sync-port.ts`, `views/SyncPanel.tsx`), over the sealed session, offered only
+with the instance's card and drawn not at all with no instance; another device's key is admitted
+only from the rider's confirmation on that screen.
 
 #### The history index (#835, ADR 0040)
 
@@ -1763,11 +1767,10 @@ removes the on-device runner.
 | Export and erasure (D-10) | The export says which model built the index and how many passages, never the passages or vectors; `DELETE /v1/account` takes them with everything else | `src/sync/sync.ts` §`exportAccount` |
 | The device's half | Template version 2's history step is the ONE step a passage reaches, inside a fence no passage can close, and its note is accepted and screened before the summary is shown it. Retrieval runs before the run, on the rider's own computer's path only (a hosted step port refuses a history step until D-9's disclosures change), and an unreachable instance is a sentence, never a failed run | `packages/analysis/src/history.ts`, `template/template-v2.ts` (in `apps/web/src/ride-analysis/` until #1094), `apps/web/src/ride-analysis/ride-analysis.ts` |
 
-⚠️ **Mounted on a running box, fed by nothing yet.** `src/instance.ts` builds the index and serves
-`/v1/history/search` when `OYL_INSTANCE_EMBEDDING_URL` is set, but it hands the handler no sync
-(above, and #898), so no item reaches it; and the shipped client asks for no history, because the
-one transport that may call an instance is #777's. Whoever wires either owes ADR 0040 D-11's
-disclosures first.
+⚠️ **Mounted on a running box, and fed by sync since #1195.** `src/instance.ts` builds the index and
+serves `/v1/history/search` when `OYL_INSTANCE_EMBEDDING_URL` is set, and on an instance holding
+keys a synced item now reaches it (above). The shipped client still asks for no history; whoever
+wires that owes ADR 0040 D-11's disclosures first.
 
 #### The API contract (#36)
 

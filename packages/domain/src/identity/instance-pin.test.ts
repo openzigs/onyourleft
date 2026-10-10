@@ -303,6 +303,81 @@ describe('judging the keys an instance serves (#1190, ADR 0047 D-5)', () => {
     expect(later.kind).toBe('expired');
   });
 
+  describe('48 hours per KEY, not per re-signing (#1216, ADR 0047 D-5 amendment of 2026-10-09)', () => {
+    const DAY = 24 * HOUR;
+    /**
+     * The same key, re-signed each day, as an edge might hold them for a
+     * device that was away: one serial, one key, a distant `notAfter` so that
+     * only the 48 hours bound them.
+     */
+    const resigning = (day: number) =>
+      statementFor('enc-1', { issuedAt: T0 + day * DAY, notAfter: T0 + 365 * DAY });
+
+    it('refuses a run of unseen older re-signings once a newer one has been verified', async () => {
+      const [one, two, three] = await Promise.all([resigning(1), resigning(2), resigning(3)]);
+      // The edge leads with its newest held re-signing: trusted, 48 hours.
+      const newest = await judge(await served('identity', [three]), { now: T0 + 10 * DAY });
+      expect(newest).toMatchObject({ kind: 'trusted', statement: three });
+      if (newest.kind !== 'trusted') return;
+      expect(newest.trust.newestIssued[three.keyId]?.issuedAt).toBe(three.issuedAt);
+
+      // Its 48 hours run out, and the edge hands out the older ones it holds,
+      // each never seen here — every one would have started 48 hours of its own.
+      let trust: InstanceKeyTrust = newest.trust;
+      let now = T0 + 10 * DAY + STATEMENT_TRUST_CAP_SECONDS;
+      for (const older of [two, one]) {
+        const verdict = await judge(await served('identity', [older]), { trust, now });
+        expect(verdict.kind).toBe('expired');
+        if (verdict.kind !== 'expired') return;
+        trust = verdict.trust;
+        now += HOUR;
+      }
+      // And the newest itself does not start again.
+      expect((await judge(await served('identity', [three]), { trust, now })).kind).toBe('expired');
+    });
+
+    it('learns the newest from an answer that serves several, and trusts only that one', async () => {
+      const [one, three] = await Promise.all([resigning(1), resigning(3)]);
+      const both = await judge(await served('identity', [one, three]), { now: T0 + 4 * DAY });
+      expect(both).toMatchObject({ kind: 'trusted', statement: three });
+      if (both.kind !== 'trusted') return;
+      // The older one alone, later, inside the newest's 48 hours: not trusted.
+      expect(
+        (await judge(await served('identity', [one]), { trust: both.trust, now: T0 + 5 * DAY }))
+          .kind,
+      ).toBe('expired');
+    });
+
+    it('control: the daily re-signing a device does see is trusted each day, past 48 hours from the first', async () => {
+      let trust: InstanceKeyTrust = NO_KEY_TRUST;
+      for (const day of [0, 1, 2, 3, 4]) {
+        const statement = await resigning(day);
+        const verdict = await judge(await served('identity', [statement]), {
+          trust,
+          now: T0 + day * DAY + HOUR,
+        });
+        expect(verdict).toMatchObject({ kind: 'trusted', statement });
+        if (verdict.kind !== 'trusted') return;
+        trust = verdict.trust;
+      }
+    });
+
+    it('forgets a key’s newest once its notAfter has passed', async () => {
+      const short = await statementFor('enc-1', { notAfter: T0 + 2 * HOUR });
+      const seen = await judge(await served('identity', [short]), { now: T0 + HOUR });
+      expect(seen.kind).toBe('trusted');
+      if (seen.kind !== 'trusted') return;
+      expect(Object.keys(seen.trust.newestIssued)).toEqual([short.keyId]);
+      const after = await judge(await served('identity', []), {
+        trust: seen.trust,
+        now: T0 + 2 * HOUR,
+      });
+      expect(after.kind).toBe('expired');
+      if (after.kind !== 'expired') return;
+      expect(after.trust.newestIssued).toEqual({});
+    });
+  });
+
   it('accepts an issuedAt and a notBefore in the device’s future, and refuses one past its notAfter', async () => {
     const ahead = await statementFor('enc-1', {
       notBefore: T0 + 10 * HOUR,

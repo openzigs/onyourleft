@@ -531,8 +531,8 @@ describe('a running instance holding a key (#1097)', () => {
 
 /**
  * Sync — the account export and erasure (#35) — is served by a handler handed
- * one, which the running instance is not yet (`docs/agents/instance.md`); the
- * sync world is that handler over a real database file.
+ * one: the running instance hands it one only when it holds keys, and then
+ * only sealed (#1195); the sync world is that handler over a real database file.
  */
 describe('the account export and erasure (#1097, #35)', () => {
   let world: IdentityInstance | undefined;
