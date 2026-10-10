@@ -157,6 +157,7 @@ it**: its API has no authentication.
 | `"event":"analysis-model","state":"on"` at start | the model connection is ready. The model's name is not logged |
 | `"event":"analysis-model","state":"off","code":"not-set"` | no address is set: analysis is off, and nothing else changes |
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
+| `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
 | `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"` | the setting is malformed; standard error says which |
 

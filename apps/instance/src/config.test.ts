@@ -282,6 +282,20 @@ describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
     }
   });
 
+  it('refuses https: by a name, whose certificate could never verify at the checked address (#1187)', () => {
+    for (const url of ['https://ollama:11434/v1', 'https://localhost:11434/v1']) {
+      const settings = readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' });
+      expect(settings, url).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+      expect(settings.kind === 'off' && settings.reason).toContain('cannot verify');
+    }
+    for (const url of ['https://192.168.1.20:11434/v1', 'https://[fd00::7]/v1']) {
+      expect(
+        readAnalysisModelSettings({ analysisModelUrl: url, analysisModel: 'm' }).kind,
+        url,
+      ).toBe('on');
+    }
+  });
+
   it('has NO default model: an address with no model is off, and says so', () => {
     const settings = readAnalysisModelSettings({ analysisModelUrl: 'http://ollama:11434/v1' });
     expect(settings).toMatchObject({ kind: 'off', code: 'no-model' });

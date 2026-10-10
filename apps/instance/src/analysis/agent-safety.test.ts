@@ -22,6 +22,19 @@
  *
  * A type-only import (`import type`) is erased before the code runs, so it
  * reaches nothing and is not followed.
+ *
+ * ## What the walk does not follow (#1187)
+ *
+ * - **A bare specifier is recorded and not followed** — a workspace package
+ *   such as `@onyourleft/analysis` included. What such a package itself
+ *   imports is not walked: a trainer, a socket or a picture reached only
+ *   THROUGH it is not seen here. That holds today because each package carries
+ *   its own boundary (`packages/analysis` names no store, no model SDK and no
+ *   platform API — `eslint.config.js` §`ANALYSIS_IMPORT_PATTERNS` and its
+ *   `tsconfig.platform-free.json`), not because this walk proves it. A new
+ *   workspace dependency of `src/analysis/` needs that argument made again.
+ * - **A computed specifier** (`import(name)`) is not a string, and no static
+ *   walk can read it.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -45,7 +58,10 @@ function specifiers(source: string): string[] {
   )) {
     if (match[2] === undefined) found.push(match[3] ?? '');
   }
-  for (const match of source.matchAll(/import\(\s*'([^']+)'\s*\)/g)) found.push(match[1] ?? '');
+  // Any quote: `eslint.config.js` refuses the SDK by `import()` too (#1187).
+  for (const match of source.matchAll(/import\(\s*(['"`])([^'"`$]+)\1\s*\)/g)) {
+    found.push(match[2] ?? '');
+  }
   for (const match of source.matchAll(/(?:^|\n)\s*import\s+'([^']+)'/g)) found.push(match[1] ?? '');
   return found;
 }
@@ -176,6 +192,21 @@ describe('nothing the agent is made of reaches a trainer, or a network but the o
     const { bare } = reach(['/src/analysis/agent.ts'], (path) => tree[path] ?? '');
     expect(bare.filter((path) => TRAINER.test(path))).toStrictEqual([
       '@onyourleft/sensors/protocol',
+    ]);
+  });
+
+  it('reads a dynamic import in any quote — the control (#1187)', () => {
+    const tree: Record<string, string> = {
+      '/src/analysis/agent.ts': [
+        "const a = await import('ai');",
+        'const b = await import("@ai-sdk/openai-compatible");',
+        'const c = await import(`ai/rsc`);',
+      ].join('\n'),
+    };
+    expect(reach(['/src/analysis/agent.ts'], (path) => tree[path] ?? '').bare).toStrictEqual([
+      'ai',
+      '@ai-sdk/openai-compatible',
+      'ai/rsc',
     ]);
   });
 
