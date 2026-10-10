@@ -31,6 +31,11 @@
  */
 
 import {
+  beatsPerMinute,
+  MAXIMUM_HOLD_BPM,
+  MAXIMUM_HOLD_CEILING_SHARE,
+  MINIMUM_HOLD_BPM,
+  MINIMUM_HOLD_RANGE_BPM,
   seconds,
   thresholdShare,
   unixSeconds,
@@ -43,7 +48,13 @@ import type { AthleteId, WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 export interface BuildRefusal {
   readonly code:
-    'name-required' | 'name-too-long' | 'no-blocks' | 'bad-duration' | 'bad-target' | 'bad-repeats';
+    | 'name-required'
+    | 'name-too-long'
+    | 'no-blocks'
+    | 'bad-duration'
+    | 'bad-target'
+    | 'bad-repeats'
+    | 'bad-heart-rate-range';
   readonly message: string;
 }
 
@@ -147,8 +158,7 @@ export function percentToShare(input: string, what: string): BuildOutcome<number
 
 /** What a builder form submits, before any of it has been checked. */
 export interface BlockDraft {
-  /** The kinds this form builds. The heart-rate hold (#1239) is added to it by #1241. */
-  readonly kind: Exclude<WorkoutBlock['kind'], 'heart-rate-hold'>;
+  readonly kind: WorkoutBlock['kind'];
   readonly minutes: string;
   readonly percent: string;
   /** Ramp only. */
@@ -157,6 +167,10 @@ export interface BlockDraft {
   readonly repeats: string;
   readonly easyMinutes: string;
   readonly easyPercent: string;
+  /** Heart-rate hold only (#1241): the range, in bpm, and the ceiling, as a percentage. */
+  readonly lowBpm: string;
+  readonly highBpm: string;
+  readonly ceilingPercent: string;
   readonly label: string;
 }
 
@@ -169,6 +183,9 @@ export const EMPTY_DRAFT: BlockDraft = {
   repeats: '',
   easyMinutes: '',
   easyPercent: '',
+  lowBpm: '',
+  highBpm: '',
+  ceilingPercent: '',
   label: '',
 };
 
@@ -250,11 +267,86 @@ export function blockFromDraft(draft: BlockDraft): BuildOutcome<WorkoutBlock> {
         }) as WorkoutBlock,
       };
     }
+    case 'heart-rate-hold':
+      return holdFromDraft(draft, withLabel);
     default: {
       const unhandled: never = draft.kind;
       throw new Error(`unreachable: ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/**
+ * A heart rate as typed → whole beats per minute in the band a hold may
+ * name, or a refusal that names the field and the constraint.
+ */
+function bpmFrom(input: string, what: string): BuildOutcome<number> {
+  const value = Number(input.trim());
+  if (
+    input.trim().length === 0 ||
+    !Number.isInteger(value) ||
+    value < MINIMUM_HOLD_BPM ||
+    value > MAXIMUM_HOLD_BPM
+  ) {
+    return refuse(
+      'bad-heart-rate-range',
+      `${what} needs a whole number of beats per minute from ${String(MINIMUM_HOLD_BPM)} to ` +
+        `${String(MAXIMUM_HOLD_BPM)}.`,
+    );
+  }
+  return { status: 'built', value };
+}
+
+/**
+ * A heart-rate hold (#1241, ADR 0048 D-3). Refuses what `validateWorkout`
+ * refuses, in the form's own field-and-constraint words: a range under
+ * 6 bpm (and so one upside down), a ceiling above 85 % of threshold, and a
+ * start above the ceiling. The percentages go through {@link percentToShare},
+ * the one place a typed percentage becomes a share.
+ *
+ * The range is the one the rider chose, never called a limit (ADR 0048 D-12).
+ */
+function holdFromDraft(
+  draft: BlockDraft,
+  withLabel: <T extends object>(block: T) => T,
+): BuildOutcome<WorkoutBlock> {
+  const length = minutesToSeconds(draft.minutes, 'This block');
+  if (length.status === 'refused') return length;
+  const low = bpmFrom(draft.lowBpm, 'The bottom of the range');
+  if (low.status === 'refused') return low;
+  const high = bpmFrom(draft.highBpm, 'The top of the range');
+  if (high.status === 'refused') return high;
+  if (high.value - low.value < MINIMUM_HOLD_RANGE_BPM) {
+    return refuse(
+      'bad-heart-rate-range',
+      `The top of the range must be at least ${String(MINIMUM_HOLD_RANGE_BPM)} bpm above its ` +
+        'bottom. A narrower range is one the hold would chase rather than hold.',
+    );
+  }
+  const start = percentToShare(draft.percent, 'The starting target');
+  if (start.status === 'refused') return start;
+  const ceiling = percentToShare(draft.ceilingPercent, 'The ceiling');
+  if (ceiling.status === 'refused') return ceiling;
+  if (ceiling.value > MAXIMUM_HOLD_CEILING_SHARE) {
+    return refuse(
+      'bad-target',
+      `The ceiling of ${draft.ceilingPercent.trim()}% is above what a heart-rate hold may ask ` +
+        `for: at most ${String(Math.round(MAXIMUM_HOLD_CEILING_SHARE * 100))}% of your threshold.`,
+    );
+  }
+  if (start.value > ceiling.value) {
+    return refuse('bad-target', 'The starting target must not be above the ceiling.');
+  }
+  return {
+    status: 'built',
+    value: withLabel({
+      kind: 'heart-rate-hold',
+      seconds: seconds(length.value),
+      range: { low: beatsPerMinute(low.value), high: beatsPerMinute(high.value) },
+      startShare: thresholdShare(start.value),
+      ceilingShare: thresholdShare(ceiling.value),
+    }) as WorkoutBlock,
+  };
 }
 
 export interface SaveInput {
