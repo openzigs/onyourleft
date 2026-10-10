@@ -11,10 +11,14 @@ import { describe, expect, it } from 'vitest';
 import {
   hostedKeyFrom,
   hostedKeyState,
+  hostedModelFrom,
+  hostedOriginOf,
   hostedUrlFrom,
   importSecretKey,
   MAXIMUM_HOSTED_KEY_LENGTH,
+  MAXIMUM_HOSTED_MODEL_NAME,
   openHostedKey,
+  ownHostedKeyState,
   readSecretKey,
   sealHostedKey,
 } from './hosted-key.ts';
@@ -205,5 +209,85 @@ describe('the state the instance reads', () => {
       athleteId: 'a',
       key: KEY,
     });
+  });
+});
+
+describe('an athlete’s OWN key (#1199: bring-your-own only)', () => {
+  async function sealedFor(athleteId: string, secretKey: Awaited<ReturnType<typeof secret>>) {
+    return {
+      athleteId,
+      url: URL_TEXT,
+      model: 'm',
+      setAt: 1,
+      ...(await sealHostedKey(secretKey, { athleteId, url: URL_TEXT, model: 'm', key: KEY })),
+    };
+  }
+
+  it('is the key the rider stored, before the operator’s', async () => {
+    const secretKey = await secret(1);
+    const store = {
+      getAthleteHostedKey: (athleteId: string) =>
+        athleteId === 'a' ? sealedFor('a', secretKey) : Promise.resolve(undefined),
+      getHostedModelKey: async () => ({
+        ...(await sealedFor('a', secretKey)),
+        model: 'the-operators',
+      }),
+    };
+    expect(await ownHostedKeyState(store, secretKey, 'a')).toMatchObject({
+      kind: 'held',
+      athleteId: 'a',
+      model: 'm',
+    });
+  });
+
+  it('is the operator’s one key for the operator’s own jobs, and NOBODY else’s', async () => {
+    const secretKey = await secret(1);
+    const store = {
+      getAthleteHostedKey: () => Promise.resolve(undefined),
+      getHostedModelKey: () => sealedFor('a', secretKey),
+    };
+    expect(await ownHostedKeyState(store, secretKey, 'a')).toMatchObject({
+      kind: 'held',
+      athleteId: 'a',
+    });
+    // The owner, 2026-10-09: "Operator key is not shared with riders."
+    expect(await ownHostedKeyState(store, secretKey, 'b')).toEqual({ kind: 'none' });
+  });
+
+  it('is unreadable or no-secret, never thrown, when it cannot be opened', async () => {
+    const sealed = await sealedFor('b', await secret(1));
+    const store = {
+      getAthleteHostedKey: () => Promise.resolve(sealed),
+      getHostedModelKey: () => Promise.resolve(undefined),
+    };
+    expect(await ownHostedKeyState(store, await secret(2), 'b')).toEqual({
+      kind: 'unreadable',
+      url: URL_TEXT,
+      model: 'm',
+    });
+    expect(await ownHostedKeyState(store, undefined, 'b')).toEqual({
+      kind: 'no-secret',
+      url: URL_TEXT,
+      model: 'm',
+    });
+  });
+});
+
+describe('a model name and an origin, as a rider gives them (#1199)', () => {
+  it('takes a model name of printable characters, and nothing else', () => {
+    expect(hostedModelFrom(' a-model ')).toBe('a-model');
+    expect(hostedModelFrom('')).toBeUndefined();
+    expect(hostedModelFrom('a model')).toBeUndefined();
+    expect(hostedModelFrom('x'.repeat(MAXIMUM_HOSTED_MODEL_NAME))).toBeDefined();
+    expect(hostedModelFrom('x'.repeat(MAXIMUM_HOSTED_MODEL_NAME + 1))).toBeUndefined();
+  });
+
+  it('reads an https URL or origin as its origin, and refuses anything else', () => {
+    expect(hostedOriginOf('https://models.example')).toBe('https://models.example');
+    expect(hostedOriginOf('https://models.example/')).toBe('https://models.example');
+    expect(hostedOriginOf('https://Models.Example:8443/v1')).toBe('https://models.example:8443');
+    expect(hostedOriginOf('http://models.example')).toBeUndefined();
+    expect(hostedOriginOf('models.example')).toBeUndefined();
+    expect(hostedOriginOf('https://user:pass@models.example')).toBeUndefined();
   });
 });

@@ -36,6 +36,8 @@ import {
   type AnalysisJobs,
   type AnalysisJobsOptions,
 } from '../analysis/jobs.ts';
+import { importSecretKey } from '../analysis/hosted-key.ts';
+import { createHostedSettings } from '../analysis/hosted-settings.ts';
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import type { Config } from '../config.ts';
@@ -417,9 +419,18 @@ export async function startIdentityInstance(
     analysis === undefined
       ? undefined
       : createAnalysisJobs({ ...analysis, store, now: () => clock.ms });
+  // A rider's own hosted key and consent (#1199), under the same secret as the keys.
+  const hostedSecret =
+    keyless === true ? Promise.resolve(undefined) : importSecretKey(secretBytes(7));
+  const hostedSettings = createHostedSettings({
+    store,
+    secret: () => hostedSecret,
+    now: () => clock.ms,
+  });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
+      hostedSettings,
       ...(observe === undefined ? {} : { observe }),
       identity,
       sync,

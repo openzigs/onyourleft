@@ -422,6 +422,19 @@ export async function seedWorld(store: SqlStore): Promise<void> {
     });
     // Migration 0020's (#1095): a job that ran, with a progress event and its result.
     await seedAnalysisJob(store, athlete);
+    // Migration 0021's (#1199): the rider's own hosted key, and their consent naming its origin.
+    await store.putAthleteHostedKey(athlete, {
+      url: `https://models-of-${athlete}.example/v1`,
+      model: `model-of-${athlete}`,
+      iv: new Uint8Array(12),
+      ciphertext: new TextEncoder().encode(`sealed-of-${athlete}`),
+      setAt: 1_790_000_550,
+    });
+    await store.putHostedConsent({
+      athleteId: athlete,
+      origin: `https://models-of-${athlete}.example`,
+      recordedAt: 1_790_000_560,
+    });
   }
   // Migration 0013's (#784): ATHLETE_A made a room, and the other two joined it.
   await store.createPrivateRoom({

@@ -416,6 +416,17 @@ export interface HeldHostedModelKey extends SealedHostedModelKey {
   readonly athleteId: string;
 }
 
+/**
+ * A rider's own recorded hosted consent (#1199, ADR 0046 Q10): the ORIGIN it
+ * names — `https://host[:port]`, as `new URL(…).origin` writes it — and when
+ * it was recorded, in Unix seconds.
+ */
+export interface HostedConsent {
+  readonly athleteId: string;
+  readonly origin: string;
+  readonly recordedAt: number;
+}
+
 /** What {@link SqlStore.putHostedModelKey} did. */
 export type HostedKeyPut =
   | { readonly outcome: 'stored' }
@@ -860,6 +871,30 @@ export interface SqlStore {
    * §"A hosted model key" says what can still remain).
    */
   clearHostedModelKey(): Promise<boolean>;
+
+  /**
+   * Hold `athleteId`'s OWN hosted model key (#1199: bring-your-own), sealed.
+   * One statement that writes only if the athlete exists, replacing any key
+   * they held, scrubbed. ⚠️ **A key at another ORIGIN than their recorded
+   * consent names withdraws that consent**, in the same transaction (Q10: a
+   * changed endpoint is not consented to); a key rotated at the same origin
+   * keeps it.
+   */
+  putAthleteHostedKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
+  /** `athleteId`'s own key, sealed, or `undefined`. Never another athlete's. */
+  getAthleteHostedKey(athleteId: string): Promise<HeldHostedModelKey | undefined>;
+  /** Clear `athleteId`'s own key, scrubbed: `true` if there was one. */
+  clearAthleteHostedKey(athleteId: string): Promise<boolean>;
+  /**
+   * Record `athleteId`'s hosted consent naming `origin` (#1199, ADR 0046
+   * Q10), replacing any they had: `no-athlete` and nothing written for an
+   * athlete who is not here.
+   */
+  putHostedConsent(consent: HostedConsent): Promise<HostedKeyPut>;
+  /** `athleteId`'s recorded hosted consent, or `undefined`. */
+  getHostedConsent(athleteId: string): Promise<HostedConsent | undefined>;
+  /** Withdraw `athleteId`'s hosted consent: `true` if there was one. */
+  clearHostedConsent(athleteId: string): Promise<boolean>;
 
   /**
    * The instance's own keys (#1189, ADR 0047 D-5), wrapped: every row, the
@@ -4327,6 +4362,97 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           return Number(result.numDeletedRows) > 0;
         }),
       ),
+
+    putAthleteHostedKey: (athleteId, key) =>
+      exclusive(() =>
+        scrubbing(() =>
+          db.transaction().execute(async (trx) => {
+            // ONE statement for the athlete's existence and the write, as for
+            // the operator's key above.
+            const written = await sql<{ athlete_id: string }>`
+              insert into athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at)
+              select id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+              from athlete where id = ${athleteId}
+              on conflict (athlete_id) do update set
+                url = excluded.url, model = excluded.model,
+                iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+              returning athlete_id`.execute(trx);
+            if (written.rows.length === 0) return { outcome: 'no-athlete' } as const;
+            // Q10: a consent names an origin, and a key at another one is not consented to.
+            await trx
+              .deleteFrom('athlete_hosted_consent')
+              .where('athlete_id', '=', athleteId)
+              .where('origin', '!=', new URL(key.url).origin)
+              .execute();
+            return { outcome: 'stored' } as const;
+          }),
+        ),
+      ),
+
+    getAthleteHostedKey: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete_hosted_key')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              url: row.url,
+              model: row.model,
+              iv: row.iv,
+              ciphertext: row.ciphertext,
+              setAt: row.set_at,
+            };
+      }),
+
+    clearAthleteHostedKey: (athleteId) =>
+      exclusive(() =>
+        scrubbing(async () => {
+          const result = await db
+            .deleteFrom('athlete_hosted_key')
+            .where('athlete_id', '=', athleteId)
+            .executeTakeFirst();
+          return Number(result.numDeletedRows) > 0;
+        }),
+      ),
+
+    putHostedConsent: (consent) =>
+      exclusive(async () => {
+        const written = await sql<{ athlete_id: string }>`
+          insert into athlete_hosted_consent (athlete_id, origin, recorded_at)
+          select id, ${consent.origin}, ${consent.recordedAt}
+          from athlete where id = ${consent.athleteId}
+          on conflict (athlete_id) do update set
+            origin = excluded.origin, recorded_at = excluded.recorded_at
+          returning athlete_id`.execute(db);
+        return written.rows.length > 0
+          ? ({ outcome: 'stored' } as const)
+          : ({ outcome: 'no-athlete' } as const);
+      }),
+
+    getHostedConsent: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete_hosted_consent')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : { athleteId: row.athlete_id, origin: row.origin, recordedAt: row.recorded_at };
+      }),
+
+    clearHostedConsent: (athleteId) =>
+      exclusive(async () => {
+        const result = await db
+          .deleteFrom('athlete_hosted_consent')
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      }),
 
     listInstanceKeys: () =>
       exclusive(async () => {
