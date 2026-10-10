@@ -138,7 +138,14 @@ export function holdMayBeSpoken(timeline: WorkoutTimeline, elapsedSeconds: numbe
   return !(hard && segment.endsAt - elapsedSeconds <= HOLD_QUIET_BEFORE_HARD_END_SECONDS);
 }
 
-/** What an announcer remembers about the hold between calls. */
+/**
+ * What an announcer remembers about the hold between calls.
+ *
+ * Per announcer instance: `RideAnnouncer` starts it afresh on mount and
+ * `GameView` clears it at ride start, so moving between the Ride screen and
+ * the game starts the once-a-minute window over. Deliberate; the screen shows
+ * the sentence either way.
+ */
 export interface HoldAnnounced {
   /** The sentence last seen, said or not. */
   readonly sentence: string | undefined;

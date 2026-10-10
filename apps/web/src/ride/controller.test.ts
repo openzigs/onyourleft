@@ -7306,7 +7306,16 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
    * resting rate 80) — the hold has 15 to 20 bpm to find — on a controlled
    * trainer, recording, with or without a strap.
    */
-  async function holding(options: { readonly strap?: boolean; readonly own?: boolean } = {}) {
+  async function holding(
+    options: {
+      readonly strap?: boolean;
+      readonly own?: boolean;
+      readonly context?: {
+        readonly thresholdHeartRate: ReturnType<typeof beatsPerMinute>;
+        readonly assumed: { readonly power: boolean; readonly heartRate: boolean };
+      };
+    } = {},
+  ) {
     const rig = benchWith({
       devices: options.strap === false ? 'trainer' : 'trainer+strap',
       simulator: {
@@ -7324,7 +7333,7 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
       rig.controller.startWorkout(
         holdWorkout(),
         THRESHOLD,
-        options.own === false ? undefined : OWN,
+        options.own === false ? undefined : (options.context ?? OWN),
       ),
     ).toBe(true);
     return rig;
@@ -7443,6 +7452,23 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     await flushMicrotasks(20);
     expect(targetsSent(rig)).toEqual([100]);
     expect(rig.controller.getSnapshot().workout?.hold?.off).toBe('thresholds');
+    rig.controller.dispose();
+  }, 30_000);
+
+  it('a range above the rider’s own threshold heart rate: steady, and the screen says the range is why, strap or not', async () => {
+    const rig = await holding({
+      context: {
+        thresholdHeartRate: beatsPerMinute(120),
+        assumed: { power: false, heartRate: false },
+      },
+    });
+    await ride(rig, HOLD_SETTLING_SECONDS + 30);
+    await flushMicrotasks(20);
+    expect(targetsSent(rig)).toEqual([100]);
+    expect(rig.controller.getSnapshot().workout?.hold).toMatchObject({
+      reason: 'ineligible',
+      off: 'range',
+    });
     rig.controller.dispose();
   }, 30_000);
 
