@@ -90,6 +90,7 @@ import {
   workoutRescueDetail,
   workoutRescueHeadline,
 } from '../workout/rescue-text';
+import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -315,6 +316,16 @@ export function WorkoutPanel({
             }}
           >
             {workoutRescueHeadline(workout.rescue)}
+          </StatusMessage>
+        )}
+        {workout.hold === undefined ? null : (
+          // #1240: the heart-rate hold — the range, the target, and one
+          // sentence from `workout/hold-text.ts`, the one module for them.
+          // Kept on the screen: it says what the trainer is being told and
+          // why, which is trainer-control text (#666). Not `live`:
+          // `RideAnnouncer` says it, at most once a minute.
+          <StatusMessage tone="info" label={HOLD_LABEL} kept>
+            {holdSentence(workout.hold)} {holdReading(workout.hold)}
           </StatusMessage>
         )}
         {workout.fault === undefined ? null : (

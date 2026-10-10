@@ -42,7 +42,8 @@
  */
 
 import type { BeatsPerMinute } from '../quantities';
-import type { ThresholdShare } from './workout';
+// The hold block's own range (#1239): one shape for a range a rider chose.
+import type { HeartRateRange, ThresholdShare } from './workout';
 import { MINIMUM_SHARE } from './workout';
 
 /** The kinds of session a rider may say they are riding. */
@@ -50,12 +51,6 @@ export const WORKOUT_SESSION_TYPES = ['endurance', 'tempo', 'intervals', 'recove
 
 /** One of {@link WORKOUT_SESSION_TYPES}. */
 export type WorkoutSessionType = (typeof WORKOUT_SESSION_TYPES)[number];
-
-/** A heart-rate range the rider wants a hold to keep them inside. */
-export interface HeartRateRange {
-  readonly low: BeatsPerMinute;
-  readonly high: BeatsPerMinute;
-}
 
 /**
  * The rider's typed goals. Every field is optional; an absent one is no goal.

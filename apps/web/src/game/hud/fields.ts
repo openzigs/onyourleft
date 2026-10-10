@@ -878,14 +878,24 @@ export function gapAgainst(state: GameState, theirDistance: number): GapInput {
  * ⚠️ **The count is the half that catches #362**, where a gradient was computed
  * and never sent. A percentage with `(0 sent)` beside it is the defect.
  */
-export interface TrainerLine {
-  /** The gradient last asked for, as a signed percentage. */
-  readonly gradePercent: number;
-  /** How many writes have been attempted. */
-  readonly writes: number;
-}
+export type TrainerLine =
+  | {
+      /** The gradient last asked for, as a signed percentage. */
+      readonly gradePercent: number;
+      /** How many writes have been attempted. */
+      readonly writes: number;
+    }
+  /**
+   * A running workout's heart-rate hold, in its short line (#1240,
+   * `workout/hold-text.ts` §`holdHudLine`). A workout owns the trainer, so
+   * the game is not simulating and the line's place is free.
+   */
+  | { readonly hold: string };
 
 /** {@link TrainerLine} as the one sentence the HUD renders. */
 export function trainerLine(line: TrainerLine): string {
+  if ('hold' in line) {
+    return line.hold;
+  }
   return `Trainer: simulating ${line.gradePercent.toFixed(1)}% (${String(line.writes)} sent)`;
 }

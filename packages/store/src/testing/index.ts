@@ -24,6 +24,9 @@ export type { StoreHarness, StoreHarnessOptions } from './harness';
 
 export type { PersistentStore, StoreFactory } from './store';
 
+export { openOlderSchema } from './older-schema';
+export type { OlderSchemaDatabase } from './older-schema';
+
 export {
   assertRecordingRecovers,
   assertSameSamples,

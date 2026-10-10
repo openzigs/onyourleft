@@ -365,6 +365,8 @@ issue that first needs it.
 | `pacer/pacing.ts` | the bot pacer's pacing rule: a target w/kg, and how it responds to a gradient (#92) |
 | `pacer/gap.ts` | how far ahead the bot is, as a distance and as a time (#92) |
 | `pacer/errors.ts` | `PacerError` and its codes |
+| `workout/format.ts` | the workout file format (ADR 0017): **version 2** since #1239, written only when a workout carries a heart-rate hold, so a workout without one is still a version-1 file an older build opens; a version-1 file carrying a hold is refused |
+| `workout/heart-rate-hold.ts` | the heart-rate hold (#1239, ADR 0048 D-3): the target one hold block should have, decided every 5 s from a heart rate inside an envelope the owner approved (H1–H11, each a named, exported constant). Pure, and asked by `workout/player.ts`, which stays the one writer of a target |
 | `index.ts` | the public surface; consumers import from here and never from a file inside |
 
 `recording/` is the one part of this package that is not a unit or a conversion, and it is here for

@@ -1350,6 +1350,27 @@ there is no lock to take, so an editor keeps the `updatedAt` it read and hands i
 is refused. The comparison is on the value read rather than on which timestamp is newer, because two
 saves inside one second is exactly what a second tab produces.
 
+### The heart-rate hold: one writer, one envelope, and no instance (#1238–#1241)
+
+[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's fast loop. A workout block,
+`heart-rate-hold`, whose ERG target moves in small bounded steps to keep the rider's heart rate in
+a range they chose. It needs no instance and no model.
+
+| Half | Where | What it owns |
+|---|---|---|
+| The block and format version 2 | `packages/domain/src/workout/workout.ts`, `format.ts` | the shape, `validateWorkout`'s refusals, and a file written at the lowest version that carries it |
+| The decision | `packages/domain/src/workout/heart-rate-hold.ts` | H1–H11 as named constants: eligibility, floor and ceiling, settling, the 5 s update and its step limits, overshoot, silence, implausible readings |
+| The one writer | `packages/domain/src/workout/player.ts` | asks the hold for a target and emits it in its own `write-target`. The stall rescue goes first, and a pause makes a new hold |
+| The wiring | `apps/web/src/workout/session.ts`, `ride/controller.ts` | heart-rate readings in from the same call as the recorder's; no strap is no history, a quiet strap a stale one; the machine's range as H3's floor and ceiling |
+| The words | `apps/web/src/workout/hold-text.ts` | every sentence; when `hold-changed` is said (announcements on, once a minute at most, never in the last 30 s of a hard segment) |
+| The screens | `ride/WorkoutPanel.tsx`, `game/GameView.tsx` | the range, the target and the sentence, kept visible; the game's HUD shows a short line in the trainer line's place, free while a workout owns the trainer |
+| The closed loop | `packages/sensors/protocol/src/heart-rate-hold.closed-loop.test.ts`, `apps/web/src/ride/controller.test.ts` §"#1240" | #1238's simulated heart, read through the real decoder, against the real player and, in the second, the real controller, session and ERG writer |
+
+⚠️ **Nothing new reaches the control point.** The hold's targets go through the same ERG writer
+and `gatedTargets` as every workout target, a hand-set target is refused while a workout runs,
+and the release is still `releaseTrainer`. The simulated heart's gain and lag are Hunt & Hurni's
+means, which are test defaults and not a claim about any rider.
+
 ### The camera seam: one port, one consent, and where each guarantee is actually kept
 
 [#382](https://github.com/openzigs/onyourleft/issues/382) built the camera, and
