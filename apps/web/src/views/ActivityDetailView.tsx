@@ -94,6 +94,7 @@ import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { NOTE_WORDS } from '../rider-text/words';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import {
   CHART_POINTS,
   DEFAULT_SERIES,
@@ -160,6 +161,11 @@ export interface ActivityDetailViewProps {
    */
   readonly writeUp?: RideAnalysisPort | undefined;
   /**
+   * A write-up asked of the rider's instance (#1102), or `undefined` for the
+   * page as #805 built it.
+   */
+  readonly instanceWriteUp?: InstanceAnalysisPort | undefined;
+  /**
    * Where the rider's note on this ride is kept (#836), or `undefined` where
    * there is no store — the box then says so and offers no control.
    */
@@ -215,6 +221,7 @@ export function ActivityDetailView({
   basemap,
   preferences,
   writeUp,
+  instanceWriteUp,
   riderText,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
@@ -604,6 +611,7 @@ export function ActivityDetailView({
       */}
       <RideWriteUpSection
         port={writeUp}
+        instance={instanceWriteUp}
         activityId={activity.id}
         initial={savedWriteUp}
         reread={async () =>
