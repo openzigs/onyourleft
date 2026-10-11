@@ -114,7 +114,11 @@ export interface StepTiming {
 export interface RunRecord {
   readonly run: number;
   readonly cold: boolean;
-  /** How the job ended: `succeeded`, `failed`, `withheld`, `cancelled`, or `timed-out` here. */
+  /**
+   * How the job ended: `succeeded`, `failed`, `withheld`, `cancelled`, or here
+   * `timed-out` or `connection-lost` (the stream broke before its result;
+   * `failure` is then the socket's own code).
+   */
   readonly status: string;
   readonly failure?: string;
   /** From before the start request is sealed to the result decrypted on the device. */
@@ -263,6 +267,12 @@ interface Device {
 function codeOf(body: unknown): string | undefined {
   const code = (body as { error?: { code?: unknown } } | null)?.error?.code;
   return typeof code === 'string' ? code : undefined;
+}
+
+/** What broke a stream: the socket's code (`ECONNRESET`) where there is one. */
+function lostReason(error: unknown): string {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === 'string' ? code : 'unknown';
 }
 
 /** Every complete block (`\n\n`-ended) of an event stream, as it arrives. */
@@ -496,6 +506,7 @@ async function oneRun(
   let resultAt = 0;
   let receivedWall = 0;
   const timeout = AbortSignal.timeout(timeoutMs);
+  let lost: string | undefined;
   try {
     await device.stream(
       `/v1/analysis/jobs/${jobId}/events`,
@@ -517,15 +528,16 @@ async function oneRun(
       timeout,
     );
   } catch (error) {
-    if (!timeout.aborted) throw error;
+    // A stream cut on the way is a finding, not a reason to lose every run before it.
+    if (!timeout.aborted) lost = lostReason(error);
   }
   if (result === undefined) {
     await device.call('POST', `/v1/analysis/jobs/${jobId}/cancel`).catch(() => undefined);
     resultAt = performance.now() - began;
   }
 
-  const read = await device.call('GET', `/v1/analysis/jobs/${jobId}`);
-  const job = read.status === 200 ? (read.body as { createdAt?: number; endedAt?: number }) : {};
+  const read = await device.call('GET', `/v1/analysis/jobs/${jobId}`).catch(() => undefined);
+  const job = read?.status === 200 ? (read.body as { createdAt?: number; endedAt?: number }) : {};
   const timed =
     result !== undefined && typeof job.createdAt === 'number' && typeof job.endedAt === 'number'
       ? { createdAt: job.createdAt, endedAt: job.endedAt }
@@ -538,8 +550,9 @@ async function oneRun(
   return {
     run,
     cold,
-    status: result?.status ?? 'timed-out',
+    status: result?.status ?? (lost === undefined ? 'timed-out' : 'connection-lost'),
     ...(result?.failure === undefined ? {} : { failure: result.failure }),
+    ...(result === undefined && lost !== undefined ? { failure: lost } : {}),
     totalMs: resultAt,
     sealMs,
     openMs,
