@@ -1089,3 +1089,23 @@ Until 2026-10-07 this section was §"Owner questions left open".
   source 1 (the instance's local model) and every rule D-9 states for a key (held on the instance,
   encrypted at rest, never logged, erased with its athlete) are unchanged.
   [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-11 records it. (#1233)
+- **2026-10-11** — **D-7's four figures stand; a turn's allowance, which the table does not list,
+  grows for a model that reasons.** A server counts a model's reasoning and its answer against one
+  `max_tokens`, and the agent asked for 1 024 a turn, so a reasoning model failed jobs
+  `model-cut-off` by how long it thought: 7 of 31 through the owner's instance, and all three
+  direct calls of [#1268](https://github.com/openzigs/onyourleft/issues/1268) (847, 1 024 and
+  1 024 of the 1 024 tokens spent reasoning). Now, once a turn of a run shows the model reasons —
+  the server reports reasoning tokens or sends reasoning beside the answer, or a turn ends on its
+  limit with no answer and no tool call — every later turn of that run is asked for **1 024 +
+  3 072** tokens, and a turn that showed it at its limit is asked again once, counted as a model
+  call like any other. **24 turns, 16 tool calls, ten minutes and 40 000 tokens are unchanged**,
+  and the token budget is checked against whichever allowance a turn is given, so a reasoning
+  model reaches `out-of-tokens` sooner and never spends past 40 000. A run that never shows
+  reasoning is asked for 1 024 a turn, as before. The answer keeps its own 1 024: a turn in the
+  larger allowance whose server reports more answer tokens than that keeps nothing, and where the
+  server does not count reasoning apart (Ollama), the screen's 16 000 characters bound it. A turn
+  that ends on its limit with no answer text now fails `model-no-answer`, apart from
+  `model-cut-off`. No request option that turns reasoning off is sent (the spellings are each
+  service's own, and a server may refuse a field it does not know), and there is no rider or
+  operator setting. **3 072 is the author's draft, not a measurement** — the three calls were
+  capped at 1 024 — and it and the `model-no-answer` sentence are the owner's to rule on. (#1268)

@@ -299,6 +299,12 @@ async function oneTurn(
             input: call.input as unknown,
           },
     );
+    // Whether the model reasoned, and for how many tokens where the server
+    // says (#1268). DeepSeek and OpenAI count them; Ollama sends the reasoning
+    // beside the answer and counts nothing apart. The text is read for being
+    // there and dropped.
+    const reasoningTokens = result.usage.outputTokenDetails.reasoningTokens ?? 0;
+    const reasoned = reasoningTokens > 0 || (result.reasoningText ?? '') !== '';
     return {
       ok: true,
       text: result.text,
@@ -312,6 +318,7 @@ async function oneTurn(
           ? {}
           : { outputTokens: result.usage.outputTokens }),
       },
+      ...(reasoned ? { reasoning: reasoningTokens > 0 ? { tokens: reasoningTokens } : {} } : {}),
     };
   } catch (error) {
     return {

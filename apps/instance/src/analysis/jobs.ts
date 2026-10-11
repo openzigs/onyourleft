@@ -118,6 +118,7 @@ export const JOB_FAILURES: readonly JobFailure[] = [
   'model-refused',
   'model-error',
   'model-cut-off',
+  'model-no-answer',
   'model-malformed',
   'local_unavailable',
   'hosted_unavailable',

@@ -137,6 +137,45 @@ describe('one turn through the fake server', () => {
     ]);
   });
 
+  it('says a turn reasoned, and for how many tokens, and hands on none of the reasoning (#1268)', async () => {
+    const model = await fake({
+      kind: 'text',
+      text: '',
+      finish: 'length',
+      usage: { prompt: 120, completion: 1_024 },
+      reasoning: { field: 'reasoning_content', text: 'PLANTED-REASONING', tokens: 1_024 },
+    });
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    const turn = await connection.turn(request());
+    expect(turn).toStrictEqual({
+      ok: true,
+      text: '',
+      calls: [],
+      finish: 'length',
+      usage: { inputTokens: 120, outputTokens: 1_024 },
+      reasoning: { tokens: 1_024 },
+    });
+    expect(JSON.stringify(turn)).not.toContain('PLANTED-REASONING');
+  });
+
+  it('says a turn reasoned when the server sent reasoning and counted none (Ollama)', async () => {
+    const model = await fake({
+      kind: 'text',
+      text: 'A steady ride.',
+      reasoning: { field: 'reasoning', text: 'PLANTED-REASONING' },
+    });
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    const turn = await connection.turn(request());
+    expect(turn.ok && turn.reasoning).toStrictEqual({});
+    expect(JSON.stringify(turn)).not.toContain('PLANTED-REASONING');
+  });
+
   it('says a reply was cut off by its bound', async () => {
     const model = await fake({ kind: 'text', text: 'A steady', finish: 'length' });
     const connection = createLocalModel({

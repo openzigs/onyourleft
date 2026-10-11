@@ -95,8 +95,15 @@ export type ModelTurn =
       readonly text: string;
       readonly calls: readonly ToolCallRequest[];
       readonly finish: TurnFinish;
-      /** What the server reported, when it did. */
+      /** What the server reported, when it did. `outputTokens` includes any reasoning. */
       readonly usage: { readonly inputTokens?: number; readonly outputTokens?: number };
+      /**
+       * Present when the model reasoned before it answered (#1268): the server
+       * reported reasoning tokens, or sent reasoning beside the answer. `tokens`
+       * is the count where it gave one. ⚠️ **Never the reasoning itself**: it is
+       * model text no screen has read, and it stops at `model.ts`.
+       */
+      readonly reasoning?: { readonly tokens?: number };
     }
   | { readonly ok: false; readonly failure: ModelFailure };
 

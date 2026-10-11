@@ -210,6 +210,8 @@ export const INSTANCE_FAILURE_TEXT = {
   'model-error': 'The model server had an error, so nothing was kept. Try again later.',
   'model-cut-off':
     'The model’s answer was cut off before it finished, so nothing was kept. A model with a larger context may do better.',
+  'model-no-answer':
+    'The model used up what your instance allows for one answer before it wrote any of it, so nothing was kept. A model that reasons before it answers can do this; one that reasons less may do better.',
   'model-malformed': 'The model server sent an answer this app cannot read, so nothing was kept.',
   local_unavailable:
     'Your instance has no model of its own set up, so nothing was sent and nothing was kept.',
