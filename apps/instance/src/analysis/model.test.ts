@@ -137,6 +137,25 @@ describe('one turn through the fake server', () => {
     ]);
   });
 
+  it('carries the allowance said for the model on a local and a hosted connection (#1268)', () => {
+    const local = createLocalModel({
+      settings: { baseUrl: new URL('http://127.0.0.1:1/v1'), model: 'm', reasoningTokens: 2_048 },
+      resolve: LOOPBACK,
+    });
+    const hosted = createHostedModel({
+      baseUrl: new URL('https://models.example/v1'),
+      model: 'm',
+      apiKey: 'k',
+      reasoningTokens: 4_096,
+    });
+    expect([local.reasoningTokens, hosted.reasoningTokens]).toStrictEqual([2_048, 4_096]);
+    const plain = createLocalModel({
+      settings: { baseUrl: new URL('http://127.0.0.1:1/v1'), model: 'm' },
+      resolve: LOOPBACK,
+    });
+    expect(plain).not.toHaveProperty('reasoningTokens');
+  });
+
   it('says a turn reasoned, and for how many tokens, and hands on none of the reasoning (#1268)', async () => {
     const model = await fake({
       kind: 'text',

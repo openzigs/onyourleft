@@ -1106,6 +1106,14 @@ Until 2026-10-07 this section was §"Owner questions left open".
   server does not count reasoning apart (Ollama), the screen's 16 000 characters bound it. A turn
   that ends on its limit with no answer text now fails `model-no-answer`, apart from
   `model-cut-off`. No request option that turns reasoning off is sent (the spellings are each
-  service's own, and a server may refuse a field it does not know), and there is no rider or
-  operator setting. **3 072 is the author's draft, not a measurement** — the three calls were
-  capped at 1 024 — and it and the `model-no-answer` sentence are the owner's to rule on. (#1268)
+  service's own, and a server may refuse a field it does not know). Per the owner's ruling on the
+  issue, a rider or an operator can also say the model reasons, in one field: `reasoningTokens`
+  (1 to 16 384, the tokens a turn may spend reasoning beside the answer's own 1 024), stored with
+  the rider's hosted key (`POST /v1/analysis/hosted/key`) or read from
+  `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS` for the local model; every turn of such a model is
+  given that room from the first, and the budget check above applies to it unchanged. Detection
+  covers a server that reports reasoning apart from the answer (a token count,
+  `reasoning_content`, `reasoning`) and the empty-at-limit case; a server that leaves reasoning
+  inline in the answer shows neither sign, and its rider or operator sets the field. **3 072 is the
+  author's draft, not a measurement** — the three calls were capped at 1 024 — and it and the
+  `model-no-answer` sentence are the owner's to rule on. (#1268)

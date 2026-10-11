@@ -240,6 +240,21 @@ describe('an athlete’s OWN key (#1199: bring-your-own only)', () => {
     });
   });
 
+  it('carries what the rider said their model needs to reason, when they said (#1268)', async () => {
+    const secretKey = await secret(1);
+    const sealed = { ...(await sealedFor('a', secretKey)), reasoningTokens: 2_048 };
+    const store = {
+      getAthleteHostedKey: () => Promise.resolve(sealed),
+      getHostedModelKey: () => Promise.resolve(undefined),
+    };
+    expect(await ownHostedKeyState(store, secretKey, 'a')).toMatchObject({
+      kind: 'held',
+      reasoningTokens: 2_048,
+    });
+    const silent = { ...store, getAthleteHostedKey: () => sealedFor('a', secretKey) };
+    expect(await ownHostedKeyState(silent, secretKey, 'a')).not.toHaveProperty('reasoningTokens');
+  });
+
   it('is the operator’s one key for the operator’s own jobs, and NOBODY else’s', async () => {
     const secretKey = await secret(1);
     const store = {

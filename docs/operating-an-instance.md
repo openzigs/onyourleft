@@ -135,6 +135,14 @@ OYL_INSTANCE_ANALYSIS_MODEL_URL=http://ollama:11434/v1
 OYL_INSTANCE_ANALYSIS_MODEL=<the model you pulled>
 ```
 
+**A model that reasons before it answers** (a `deepseek-r1` tag, for example) spends part of each
+turn thinking. By default the instance finds this out from the model's replies and gives it more
+room on the turns after (ADR 0046, Amendments, #1268). To say so up front, set
+`OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS` to the tokens a turn may spend reasoning, 1 to
+16384; every turn then gets that room beside the answer's own 1 024. Anything else turns analysis
+off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted key with the
+`reasoningTokens` field of `POST /v1/analysis/hosted/key`.
+
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
 default, and an address with no model name leaves analysis off and says so. Two things to check of
 the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
@@ -159,7 +167,7 @@ it**: its API has no authentication.
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
 | `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
-| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"` | the setting is malformed; standard error says which |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
 
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".

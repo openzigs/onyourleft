@@ -520,6 +520,44 @@ describe('a model that reasons before it answers (#1268)', () => {
     expect((await run(plain)).outcome).toStrictEqual({ kind: 'failed', why: 'model-cut-off' });
   });
 
+  it('does not hold a run that never showed reasoning to the answer’s bound by its token count', async () => {
+    // A server that over-reports its output (1 025, finish stop): the bound is for runs
+    // that were given room to reason, and this one was not.
+    const model = scriptedModel({
+      ...text(PASSING_WRITE_UP),
+      usage: { inputTokens: 500, outputTokens: 1_025 },
+    });
+    expect((await run(model)).outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS]);
+  });
+
+  it('gives every turn the room the rider or operator said, from the first (#1268, option 3)', async () => {
+    const said = {
+      ...scriptedModel(calls(['goals', {}]), text(PASSING_WRITE_UP)),
+      reasoningTokens: 2_000,
+    };
+    const { outcome } = await run(said);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(said)).toStrictEqual([
+      AGENT_TURN_OUTPUT_TOKENS + 2_000,
+      AGENT_TURN_OUTPUT_TOKENS + 2_000,
+    ]);
+  });
+
+  it('does not ask again at the limit when the room was given up front', async () => {
+    const said = { ...scriptedModel(text('', 'length')), reasoningTokens: 2_000 };
+    const { outcome } = await run(said);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'model-no-answer' });
+    expect(said.requests).toHaveLength(1);
+  });
+
+  it('holds the run’s token budget against the figure said', async () => {
+    const said = { ...scriptedModel(text(PASSING_WRITE_UP)), reasoningTokens: 16_384 };
+    const { outcome } = await run(said, { budgets: { tokens: 17_000 } });
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
+    expect(said.requests).toHaveLength(0);
+  });
+
   it('holds the run’s token budget against the larger allowance', async () => {
     // The first turn costs 500 + 1 024. The retry is estimated at what is
     // sent, and must fit with all 4 096 it may answer.

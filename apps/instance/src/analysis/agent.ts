@@ -371,7 +371,9 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
   let tokens = 0;
   let rewritesLeft = AGENT_REWRITES;
   // Whether a turn of this run has shown that the model reasons (#1268).
-  let reasoningModel = false;
+  // ...or because the rider or the operator said so (`model.reasoningTokens`, #1268).
+  let reasoningModel = model.reasoningTokens !== undefined;
+  const reasoningAllowance = model.reasoningTokens ?? AGENT_TURN_REASONING_TOKENS;
 
   const failed = (why: AgentFailure): AgentOutcome => ({ kind: 'failed', why });
 
@@ -383,7 +385,7 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
     const sent = estimatedTokens(
       fixedCharacters + messages.reduce((sum, message) => sum + messageCharacters(message), 0),
     );
-    const allowance = AGENT_TURN_OUTPUT_TOKENS + (reasoningModel ? AGENT_TURN_REASONING_TOKENS : 0);
+    const allowance = AGENT_TURN_OUTPUT_TOKENS + (reasoningModel ? reasoningAllowance : 0);
     if (tokens + sent + allowance > budgets.tokens) return failed('out-of-tokens');
 
     modelCalls += 1;

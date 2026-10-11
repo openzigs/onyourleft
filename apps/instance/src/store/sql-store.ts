@@ -409,6 +409,11 @@ export interface SealedHostedModelKey {
   readonly iv: Uint8Array;
   readonly ciphertext: Uint8Array;
   readonly setAt: number;
+  /**
+   * What the rider says a turn may spend reasoning (#1268, migration 0023).
+   * Only a rider's own key carries it; absent is none said.
+   */
+  readonly reasoningTokens?: number;
 }
 
 /** The held key, and the athlete it is held for: the operator (ADR 0046 Q9). */
@@ -4379,12 +4384,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             // ONE statement for the athlete's existence and the write, as for
             // the operator's key above.
             const written = await sql<{ athlete_id: string }>`
-              insert into athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at)
-              select id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt}
+              insert into athlete_hosted_key
+                (athlete_id, url, model, iv, ciphertext, set_at, reasoning_tokens)
+              select id, ${key.url}, ${key.model}, ${key.iv}, ${key.ciphertext}, ${key.setAt},
+                ${key.reasoningTokens ?? null}
               from athlete where id = ${athleteId}
               on conflict (athlete_id) do update set
                 url = excluded.url, model = excluded.model,
-                iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at
+                iv = excluded.iv, ciphertext = excluded.ciphertext, set_at = excluded.set_at,
+                reasoning_tokens = excluded.reasoning_tokens
               returning athlete_id`.execute(trx);
             if (written.rows.length === 0) return { outcome: 'no-athlete' } as const;
             // Q10: a consent names an origin, and a key at another one is not consented to.
@@ -4414,6 +4422,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               iv: row.iv,
               ciphertext: row.ciphertext,
               setAt: row.set_at,
+              ...(row.reasoning_tokens === null ? {} : { reasoningTokens: row.reasoning_tokens }),
             };
       }),
 

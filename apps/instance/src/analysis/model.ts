@@ -91,6 +91,8 @@ export interface AnalysisModelSettings {
   /** The OpenAI-compatible base URL: `http://ollama:11434/v1`. */
   readonly baseUrl: URL;
   readonly model: string;
+  /** What the operator says a turn may spend reasoning (#1268), when they did. */
+  readonly reasoningTokens?: number;
 }
 
 export interface LocalModelOptions {
@@ -202,6 +204,9 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
   const { settings, resolve } = options;
   const send = options.fetch ?? globalThis.fetch.bind(globalThis);
   return {
+    ...(settings.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: settings.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
       const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
@@ -224,6 +229,8 @@ export interface HostedModelOptions {
   readonly model: string;
   /** The opened key. Sent as a bearer token to `baseUrl` and nowhere else. */
   readonly apiKey: string;
+  /** The rider's standing allowance for reasoning (#1268), when they set one. */
+  readonly reasoningTokens?: number;
   /** The platform's `fetch` unless a test hands its own. */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -256,6 +263,7 @@ export function createHostedModel(options: HostedModelOptions): ModelConnection 
     fetch: pinnedTo(base, send),
   });
   return {
+    ...(options.reasoningTokens === undefined ? {} : { reasoningTokens: options.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
       return oneTurn(provider, options.model, request);

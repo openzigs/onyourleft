@@ -107,7 +107,32 @@ export type ModelTurn =
     }
   | { readonly ok: false; readonly failure: ModelFailure };
 
+/**
+ * The most a rider or an operator may say a model needs to reason in one turn
+ * (#1268). With the answer's own 1 024 it is a turn of 17 408 tokens, still
+ * inside ADR 0046 D-7's 40 000 for one such turn; the agent checks the budget
+ * before every turn, so a larger allowance reaches `out-of-tokens` sooner and
+ * never spends past it.
+ */
+export const MAXIMUM_REASONING_TOKENS = 16_384;
+
+/** Whether `value` is a whole number of tokens from 1 to {@link MAXIMUM_REASONING_TOKENS}. */
+export function isReasoningTokens(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= MAXIMUM_REASONING_TOKENS
+  );
+}
+
 /** A model, one turn at a time. */
 export interface ModelConnection {
+  /**
+   * What a turn may spend reasoning, beside the answer's own bound, when the
+   * rider (for their hosted key) or the operator (for the local model) said
+   * this model reasons (#1268). Absent: the agent finds out from the reply.
+   */
+  readonly reasoningTokens?: number;
   turn(request: ModelTurnRequest): Promise<ModelTurn>;
 }
