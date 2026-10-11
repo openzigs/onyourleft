@@ -72,7 +72,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         (migrate, backup, restore, verify, room-open);
                         `deploy/home/` is #807's compose file and #52's
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
-                        measurement. Since #881 it also holds `src/sync/` —
+                        measurement, and `tools/replan-round-trip.ts` #1235's
+                        (an analysis job timed start to decrypted result;
+                        spike 0023). Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and

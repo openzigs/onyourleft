@@ -14,7 +14,8 @@
     "openapi:generate": "node tools/write-openapi.ts",
     "migrate": "node tools/migrate.ts",
     "operator": "node src/operator/cli.ts",
-    "tunnel-soak": "node tools/tunnel-soak.ts"
+    "tunnel-soak": "node tools/tunnel-soak.ts",
+    "replan-round-trip": "node tools/replan-round-trip.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.65",
