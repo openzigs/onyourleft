@@ -105,7 +105,7 @@ asked a rider to sit on.
   ```bash
   adb logcat -G 16M
   adb logcat -c
-  adb logcat -v time | grep -i "BluetoothLe" | tee hold-$(date +%H%M).log
+  adb logcat -v time | grep --line-buffered -i "BluetoothLe" | tee hold-$(date +%H%M).log
   ```
 
 - **What the trainer did**: the power the Ride screen shows, which is the trainer's own Indoor Bike
