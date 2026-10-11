@@ -485,3 +485,25 @@ through the device's validator. #389's 2026-09-30 gates apply to the agent half 
 - **A regulator or counsel reading a bounded heart-rate hold as a medical function whatever the
   wording.** D-12's distance would not hold, and the hold would need either regulatory controls or
   removal.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-10** — **D-13's read-status for its first, third and fourth rows, and Consequences'
+  *"No first-hand claim chart exists yet"*, have stopped being true.**
+  [Spike 0022](../spikes/0022-re-plans-during-the-ride-patent-chart.md) (#1234, the owner's Q11) read
+  every independent claim first-hand on 2026-10-10: **US 2026/0249137 A1** claims 1, 11 and 18 from
+  the USPTO print server, **US11270598B2** claims 1, 9 and 19, and **US9886871B1** claims 1 and 22,
+  and charted them against D-4 to D-7. It decides nothing; what it measured: the two Pear patents
+  are **not met**, '598 on its routine score and the prompts chosen by it (and, for claims 9 and 19,
+  environment data), '871 on bridging wireless protocols, calorie, weight-loss or temperature
+  criteria, and broadcast. **Peloton's claims 1 and 18, as published, read on the re-plan**, and
+  claim 1 reads on the heart-rate hold as well. Whether the first condition in §"What would make this
+  ADR wrong" is met is **not known as of 2026-10-10**: no grant was found, and the application's
+  status after its publication on 2026-08-27 could not be read from Patent Center (spike §1.3;
+  ADR 0007 D7 records an unread fact as unread). Its #1234 clause is answered (US11270598's claim 1
+  does not read, provided the spike's rule R1, *no performance score during a ride*, holds). The
+  spike's ten rules (R1 to R10) are owned by the issues its §6 names, the heart-rate hold's among
+  them: #1236 (R6), #1239 (R2, R10), #1242 to #1244 and #1245 (R2). Option H is #1243's to decide.
+  Its §8 Questions A and B are put to the owner. (#1234)
