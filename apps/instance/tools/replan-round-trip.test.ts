@@ -8,8 +8,10 @@
  * the tunnel, the owner's instance.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer, request as httpRequest, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +33,9 @@ import { migrateForDeploy } from '../src/store/serving.ts';
 import {
   HOSTED_KEY_VARIABLE,
   hostedFromCommand,
+  KEY_NOT_CLEARED,
   measure,
+  refusedArguments,
   stepsOf,
   summarise,
   type MeasureOptions,
@@ -43,7 +47,15 @@ let model: FakeModelServer | undefined;
 let directory: string | undefined;
 /** The hosted service's own server, when a test has one: never the instance's local model. */
 let hostedModel: FakeModelServer | undefined;
+/** A proxy in front of the instance, when a test has one. */
+let proxy: Server | undefined;
 afterEach(async () => {
+  if (proxy !== undefined) {
+    const closing = proxy;
+    closing.closeAllConnections();
+    await new Promise<void>((resolve) => closing.close(() => resolve()));
+  }
+  proxy = undefined;
   await hostedModel?.close();
   hostedModel = undefined;
   await running?.stop();
@@ -518,6 +530,68 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     }
   }, 60_000);
 
+  it('refuses a hosted model through plain http: to another machine, before anything is sent', async () => {
+    // Rejecting, so that nothing leaves this machine even when the refusal is broken.
+    const sent = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.reject(new Error('a request was sent')));
+    try {
+      for (const url of [
+        'http://192.168.1.20:8787',
+        'http://rides.example.org',
+        'http://127.0.0.1.example.org',
+        'http://localhost.example.org',
+        'http://128.0.0.1',
+      ]) {
+        await expect(measure(options(url, 'sealed', { hosted: HOSTED }))).rejects.toThrow(
+          'an https: or a loopback --url only',
+        );
+      }
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('lets a hosted model through https: and through every loopback name, as far as its first request', async () => {
+    const reached: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      reached.push(
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+      );
+      return Promise.reject(new Error('nothing listens here'));
+    });
+    try {
+      for (const url of [
+        'https://rides.example.org',
+        'http://localhost:9',
+        'http://127.0.0.1:9',
+        'http://127.8.9.10:9',
+        'http://[::1]:9',
+      ]) {
+        await expect(measure(options(url, 'sealed', { hosted: HOSTED }))).rejects.toThrow(
+          'nothing listens here',
+        );
+      }
+      expect(reached).toHaveLength(5);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('holds a local measurement to no such rule', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.reject(new Error('nothing listens here')),
+    );
+    try {
+      await expect(measure(options('http://192.168.1.20:8787', 'sealed'))).rejects.toThrow(
+        'nothing listens here',
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('refuses a hosted model with something to unload, before anything is sent', async () => {
     const sent = vi.spyOn(globalThis, 'fetch');
     try {
@@ -593,6 +667,146 @@ describe('the hosted options of the command — #1235', () => {
     );
     expect(ran.status).not.toBe(0);
     expect(ran.stderr).toContain('sealed transport only');
+    expect(`${ran.stdout}${ran.stderr}`).not.toContain(MARKER);
+  }, 60_000);
+});
+
+describe('the command, run hosted against an instance — #1235', () => {
+  /**
+   * A loopback proxy in front of the instance, so a test can take the
+   * instance away from the command at a chosen request. Sealed requests are
+   * counted as they arrive; from `cutFrom` on (counted from one) each has its
+   * socket destroyed, unanswered.
+   */
+  async function proxied(target: string, cutFrom: number): Promise<string> {
+    let sealed = 0;
+    const server = createServer((incoming, outgoing) => {
+      if (incoming.url === '/v1/sealed') {
+        sealed += 1;
+        if (sealed >= cutFrom) {
+          incoming.socket.destroy();
+          return;
+        }
+      }
+      const upstream = httpRequest(
+        `${target}${incoming.url ?? ''}`,
+        { method: incoming.method, headers: incoming.headers },
+        (answer) => {
+          outgoing.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.pipe(outgoing);
+        },
+      );
+      upstream.on('error', () => outgoing.destroy());
+      incoming.pipe(upstream);
+    });
+    proxy = server;
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  }
+
+  /** The command, without blocking this process: the instance it talks to runs here. */
+  function hostedCommand(
+    url: string,
+  ): Promise<{ status: number | null; out: string; err: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          join(dirname(fileURLToPath(import.meta.url)), 'replan-round-trip.ts'),
+          ...['--url', url, '--origin', TEST_ORIGIN, '--runs', '1', '--run-timeout-seconds', '20'],
+          ...['--hosted-url', HOSTED_URL, '--hosted-model', 'hosted-model'],
+        ],
+        { env: { ...process.env, [HOSTED_KEY_VARIABLE]: MARKER_KEY } },
+      );
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
+      child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString('utf8')));
+      child.on('error', reject);
+      child.on('close', (status) => resolve({ status, out, err }));
+    });
+  }
+
+  /**
+   * The sealed requests of a one-run hosted measurement, in order: the
+   * session, the key, the consent and the masking item (4), then a start, a
+   * stream and a read for the warm-up and again for the counted run (6). The
+   * eleventh is the clean-up's first.
+   */
+  const FIRST_OF_THE_CLEAN_UP = 11;
+
+  it('prints a report and progress lines with no key in them, and exits 0 with every account cleared', async () => {
+    const service = await hostedService([TEXT, TEXT]);
+    const url = await proxied(await instance([], true, service.fetch), Number.POSITIVE_INFINITY);
+    const ran = await hostedCommand(url);
+    expect(ran.err.trimEnd().split('\n').at(-1)).toBe(
+      'account 1: the hosted key and consent are cleared',
+    );
+    expect(ran.status).toBe(0);
+    const report = JSON.parse(ran.out) as { statuses: unknown; hosted: unknown };
+    expect(report.statuses).toEqual({ succeeded: 1 });
+    expect(report.hosted).toEqual({
+      origin: 'https://models.example',
+      model: 'hosted-model',
+      cleared: true,
+    });
+    expect(service.authorizations).toEqual([`Bearer ${MARKER_KEY}`, `Bearer ${MARKER_KEY}`]);
+    expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
+  }, 60_000);
+
+  it('exits 3, its last line on stderr saying to revoke the key, when an account could not be read back as cleared', async () => {
+    const service = await hostedService([TEXT, TEXT]);
+    const url = await proxied(await instance([], true, service.fetch), FIRST_OF_THE_CLEAN_UP);
+    const ran = await hostedCommand(url);
+    const report = JSON.parse(ran.out) as { statuses: unknown; hosted: { cleared: unknown } };
+    // The run itself was whole: only the clean-up lost the instance.
+    expect(report.statuses).toEqual({ succeeded: 1 });
+    expect(report.hosted.cleared).toBe(false);
+    expect(ran.err.trimEnd().split('\n').at(-1)).toBe(KEY_NOT_CLEARED);
+    expect(ran.status).toBe(3);
+    expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
+  }, 60_000);
+});
+
+describe('the options the command does not have — #1235', () => {
+  const KNOWN = ['--url', '--runs'];
+
+  it('passes the options it has, each with its value — a value that looks like an option too', () => {
+    expect(refusedArguments([], KNOWN)).toBeUndefined();
+    expect(refusedArguments(['--url', 'https://x.example', '--runs', '3'], KNOWN)).toBeUndefined();
+    expect(refusedArguments(['--url', '--not-an-option'], KNOWN)).toBeUndefined();
+  });
+
+  it('refuses an option it does not have by name, and never with its value', () => {
+    expect(refusedArguments(['--url', 'https://x.example', '--rnus', '3'], KNOWN)).toBe(
+      '--rnus is not an option of this command',
+    );
+    const pasted = refusedArguments(['--hosted-key', MARKER_KEY, '--url', 'u'], KNOWN);
+    expect(pasted).toMatch(/^--hosted-key is not an option: .* OYL_MEASURE_HOSTED_KEY/);
+    expect(pasted).not.toContain(MARKER);
+    // The value glued to the name is no more written than one beside it.
+    const glued = refusedArguments([`--hosted-key=${MARKER_KEY}`], KNOWN);
+    expect(glued).toMatch(/^--hosted-key is not an option/);
+    expect(glued).not.toContain(MARKER);
+  });
+
+  it('refuses a word that is no option’s value, without writing it', () => {
+    const stray = refusedArguments(['--url', 'u', MARKER_KEY], KNOWN);
+    expect(stray).toBe('an argument that is no option’s value was given');
+  });
+
+  it('the command stops on a key given as an option, naming the option and not the key', () => {
+    const ran = spawnSync(
+      process.execPath,
+      [
+        join(dirname(fileURLToPath(import.meta.url)), 'replan-round-trip.ts'),
+        ...['--url', 'http://127.0.0.1:9', '--hosted-url', HOSTED_URL],
+        ...['--hosted-model', 'hosted-model', '--hosted-key', MARKER_KEY],
+      ],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    expect(ran.status).toBe(2);
+    expect(ran.stderr).toContain('--hosted-key is not an option');
     expect(`${ran.stdout}${ran.stderr}`).not.toContain(MARKER);
   }, 60_000);
 });

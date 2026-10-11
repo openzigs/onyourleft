@@ -23,6 +23,14 @@
  * origin and pushes an empty masking item, the three things a hosted job is
  * refused without, and the key and the consent are cleared when the run ends,
  * however it ends.
+ *
+ * ⚠️ **What "sealed" is worth here.** The app seals only to a key judged
+ * against an identity it pinned from the instance's card (ADR 0047 D-5, D-6).
+ * This tool pins nothing and checks no statement: it seals to whatever
+ * encryption key `/v1/instance/keys` at the URL serves. So a hosted run is
+ * refused unless the URL is `https:` or loopback, and over `https:` the key
+ * is sealed to whoever terminates TLS for that name — for a tunnel, the
+ * tunnel's operator, the very party ADR 0047 seals against.
  */
 
 import { webcrypto } from 'node:crypto';
@@ -240,6 +248,46 @@ export function hostedFromCommand(
     );
   }
   return { url, model, key };
+}
+
+/** `localhost`, 127.0.0.0/8 or `[::1]`, as `URL` writes a host: an address that does not leave this machine. */
+function isLoopback(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
+/** The last line a hosted run writes when an account could not be read back as cleared. */
+export const KEY_NOT_CLEARED =
+  '⚠️ the hosted key could NOT be confirmed cleared from every account: revoke the key at its provider';
+
+/**
+ * Why `given` — a command line's arguments — cannot be run, or `undefined`:
+ * an option that is not one of `known`, or a word that is no option's value.
+ * Every option takes one value.
+ *
+ * ⚠️ **It names an option and never a value**: a mistaken `--hosted-key sk-…`
+ * is refused without the key being written again.
+ */
+export function refusedArguments(
+  given: readonly string[],
+  known: readonly string[],
+): string | undefined {
+  for (let index = 0; index < given.length; index += 1) {
+    const word = given[index] ?? '';
+    if (known.includes(word)) {
+      index += 1;
+      continue;
+    }
+    if (!word.startsWith('--')) return 'an argument that is no option’s value was given';
+    const name = /^--[A-Za-z0-9-]*/.exec(word)?.[0] ?? '--';
+    return name === '--hosted-key'
+      ? `${name} is not an option: the hosted key is read from ${HOSTED_KEY_VARIABLE} and never from the command line`
+      : `${name} is not an option of this command`;
+  }
+  return undefined;
 }
 
 export interface MeasureOptions {
@@ -730,6 +778,12 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   if (hosted !== undefined && options.unload !== undefined) {
     throw new Error(
       'a hosted model has nothing to unload, so it has no cold runs: drop --unload (and --cold-runs)',
+    );
+  }
+  const reached = new URL(options.url);
+  if (hosted !== undefined && reached.protocol !== 'https:' && !isLoopback(reached.hostname)) {
+    throw new Error(
+      'a hosted model is measured through an https: or a loopback --url only: this tool seals the key to whatever encryption key that address serves, and over plain http: to another machine anything on the path can serve its own',
     );
   }
   const hostedOrigin = hosted === undefined ? undefined : new URL(hosted.url).origin;

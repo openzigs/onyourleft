@@ -31,14 +31,30 @@
  * - **`--hosted-url` and `--hosted-model`**, together, measure a hosted model
  *   on a key of your own instead of the instance's local one. ⚠️ **The key is
  *   read from the environment variable `OYL_MEASURE_HOSTED_KEY` and from
- *   nowhere else** — there is no option for it, so it is in no process list
- *   and no shell history — and it is printed nowhere. Each throwaway account
+ *   nowhere else** — it is not an argument, and there is no option for it
+ *   (`--hosted-key` is refused) — and it is printed nowhere. Set it for the
+ *   one command from a file, `OYL_MEASURE_HOSTED_KEY="$(cat key-file)" node …`:
+ *   a key typed at a prompt is in the shell's history, and a process's
+ *   environment can be read by the same user. Each throwaway account
  *   stores it (sealed), consents to the URL's origin and pushes an empty
  *   masking item; when the run ends, or throws, the key and the consent are
  *   cleared and read back, and the report's `hosted.cleared` says whether
- *   every account read back empty. Sealed only, and refused with `--unload`:
- *   a hosted model has nothing to unload, so it has no cold runs. ⚠️ A run
- *   that is KILLED (Ctrl-C) clears nothing: revoke the key at its provider.
+ *   every account read back empty. When one did not, the command exits 3 and
+ *   its last line on stderr says to revoke the key. When the run throws there
+ *   is no report: each account's line on stderr is then the only record.
+ *   Sealed only, and refused with `--unload`: a hosted model has nothing to
+ *   unload, so it has no cold runs. ⚠️ A run that is KILLED (Ctrl-C), or
+ *   whose stderr is closed under it, clears nothing: revoke the key at its
+ *   provider.
+ *   ⚠️ **"Sealed" here is less than the app's.** The app seals to a key it
+ *   judged against an identity pinned from the instance's card (ADR 0047
+ *   D-5, D-6). This tool pins nothing and checks no statement: it seals to
+ *   whatever encryption key `--url` serves. So a hosted run is refused unless
+ *   `--url` is `https:` or loopback, and over `https:` the key is sealed to
+ *   whoever terminates TLS for that name — through a tunnel, the tunnel's
+ *   operator. Use a key you can revoke.
+ * - **An option this command does not have is refused**, by name and never
+ *   with its value.
  *
  * The job is the ride write-up that exists, over a synthetic ride — see
  * `replan-round-trip-run.ts` for why and what that does and does not say
@@ -55,13 +71,32 @@ import { resolveExtensionless } from '../src/node-imports.ts';
 
 registerHooks({ resolve: resolveExtensionless });
 
-const { hostedFromCommand, measure } = await import('./replan-round-trip-run.ts');
+const { hostedFromCommand, KEY_NOT_CLEARED, measure, refusedArguments } =
+  await import('./replan-round-trip-run.ts');
+
+const OPTIONS = [
+  '--url',
+  '--transport',
+  '--runs',
+  '--cold-runs',
+  '--unload',
+  '--origin',
+  '--starts-per-account',
+  '--run-timeout-seconds',
+  '--hosted-url',
+  '--hosted-model',
+];
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index < 0 ? undefined : process.argv[index + 1];
 }
 
+const refused = refusedArguments(process.argv.slice(2), OPTIONS);
+if (refused !== undefined) {
+  process.stderr.write(`${refused}\n`);
+  process.exit(2);
+}
 const url = arg('--url');
 const transport = arg('--transport') ?? 'sealed';
 if (url === undefined || (transport !== 'sealed' && transport !== 'plaintext')) {
@@ -107,3 +142,8 @@ const report = await measure({
       }),
 });
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+if (report.hosted?.cleared === false) {
+  // A key left behind is not a run that ended well, whatever it measured.
+  process.stderr.write(`${KEY_NOT_CLEARED}\n`);
+  process.exitCode = 3;
+}

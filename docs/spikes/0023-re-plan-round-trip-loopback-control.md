@@ -398,45 +398,129 @@ Everything in §8 except its first line's "anything through the tunnel": the dep
 the tunnel, the Compose Ollama, a re-plan job, a run that calls a tool, a hosted model, a device
 that is not the instance's own machine, and the Windows machine.
 
-## 11. A hosted model: how to measure it
+## 11. A hosted model, measured on 2026-10-11
 
-**No hosted measurement has been made.** §8 and §10.3 list a hosted model on the rider's own key as
-not measured, and that is still so: this section, appended on 2026-10-11, records only that the tool
-can now make that run, and the command. No figure for a hosted model exists anywhere in this
-write-up. The tool's hosted path has been run against a fake hosted server inside
-`apps/instance/tools/replan-round-trip.test.ts` and against no real hosted service.
+Appended after §1 to §10, which are as they were: where §8 and §10.3 say a hosted model was not
+measured, read this section. One hosted model was measured, once.
+
+> **In one paragraph.** Thirty analysis jobs were sent through the tunnel to the owner's instance,
+> which ran each on a hosted model (`deepseek-flash`) on a key stored for the job's own throwaway
+> account. **Six of the thirty failed `model-cut-off`, and so did the uncounted first job: 7 of 31.**
+> The 24 that succeeded came back in **6 620.0 ms p50 / 7 766.8 ms p95 / 8 007.1 ms at most**.
+> ⚠️ **A failure rate of one job in five matters more than that speed**, and why the jobs were cut
+> off is not known. ⚠️ These jobs called tools and most took two model calls, so they are **not
+> like-for-like** with §10's one-call local jobs.
+
+### 11.1 What was run
+
+```bash
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" node tools/replan-round-trip.ts \
+  --url https://onyourleft.openzigs.com --runs 30 \
+  --hosted-url https://api.deepseek.com/v1 --hosted-model deepseek-flash
+```
+
+- **The tool** at commit `925e4663`, which is before §11.4's refusals were added. Nothing they
+  refuse was used in this run
+- **The instance**: the owner's deployed stack on the Mac of §3 and §10, the Docker image built
+  from `main` at `1908021c`, reached through the Cloudflare tunnel, with registration open for the
+  run
+- **The device**: a Node process on the same Mac, as in §10. So §10's limit holds here too: the
+  device was the instance's own machine
+- **The model call left the instance's container** for `api.deepseek.com`, on a key each throwaway
+  account stored as its own, with a masking item holding no word and no zone
+- **The job** is §2's: a ride write-up over a synthetic ride, for an account with no history and no
+  goals. No re-plan job exists
+- **No cold runs.** A hosted model has nothing to unload
+- The report's `startedAt` is `2026-10-11T22:33:14.381Z`. The one-minute load average of the Mac was
+  2.46 before and 2.42 after
+
+### 11.2 What it measured
+
+**How the 31 jobs ended**
+
+| | Jobs | `succeeded` | `failed`, `model-cut-off` |
+| --- | --: | --: | --: |
+| The first job, which the tool does not count | 1 | 0 | 1 |
+| The counted jobs | 30 | 24 | 6 |
+
+`model-cut-off` is the agent's own code for a model turn that ended with the finish reason `length`
+(`apps/instance/src/analysis/agent.ts`). Of the seven, five were cut off on their second model call
+and two on their first. ⚠️ **Why this model ran out of its token allowance is not known and was not
+investigated.** No connection was lost, and each of the 30 counted jobs could be read back.
+
+**The 24 jobs that succeeded**
+
+| Leg | n | p50 | p95 | max |
+| --- | --: | --: | --: | --: |
+| The whole round trip | 24 | 6 620.0 ms | 7 766.8 ms | 8 007.1 ms |
+| The start request | 24 | 136.8 ms | 169.0 ms | 217.2 ms |
+| Start answered to the first event | 24 | 133.4 ms | 156.8 ms | 164.5 ms |
+| One model step | 46 | 3 127.2 ms | 5 826.1 ms | 5 960.0 ms |
+| Sealing, a job | 24 | 4.0 ms | 5.3 ms | 5.4 ms |
+| Opening, a job | 24 | 4.6 ms | 7.3 ms | 7.6 ms |
+| The job on the instance's own clock | 24 | 6 467 ms | 7 623 ms | 7 806 ms |
+
+- ⚠️ **These jobs called tools, which no local run in this spike did** (§2, §10.1). 22 of the 24
+  took two model calls: the first asked for the `goals` and `recent_rides` tools, the second wrote.
+  The other 2 took one call and asked for no tool. So this is the spike's first measurement of a
+  run of more than one model call, and its round trip is not like-for-like with §10's
+- A model step here is §4.2's: from a step's `progress` event to the next event, so a first step
+  includes the first tool it asked for
+- **P5** (60 s) is met with 52.2 s to spare at p95, **for the jobs that succeeded**. A job that is
+  cut off returns no proposal at all, at any speed
+- **P2**: by §6's rule, a summary sent at a boundary serves a next block of 37.8 s or longer, again
+  only for a job that succeeds
+- **The key was cleared.** The report says `hosted.cleared: true`, and each of the three accounts'
+  lines on stderr says its key and consent read back as cleared
+
+### 11.3 Not measured
+
+- **Why a fifth of the jobs were cut off**, and whether another model, another token allowance or
+  another prompt changes it
+- **A second hosted model.** The service also offers `deepseek-v4-pro`
+- **A re-plan job** (§2), and **a device that is not the instance's own machine**
+- **What a job costs** in the service's own billing
+- **The same hosted job without the tunnel**, so the tunnel's share of these figures is not split
+  out here. §10.1's 0.14 s is the local model's
+- **A second run.** Every figure above is one run of 31 jobs
+
+### 11.4 The command, and what it does and does not protect
 
 From `apps/instance`, with Node 24, the key in a file that is not in the repository:
 
 ```bash
 OYL_MEASURE_HOSTED_KEY="$(cat key-file)" node tools/replan-round-trip.ts \
-  --url https://onyourleft.openzigs.com --runs 30 \
+  --url https://<the instance> --runs 30 \
   --hosted-url https://<the service's OpenAI-compatible base URL> --hosted-model <name>
 ```
 
-- **The key is read from `OYL_MEASURE_HOSTED_KEY` and from nowhere else.** There is no option for
-  it, so it is in no process list. The tool writes it to no output: not the report, not a progress
-  line, not an error
+- **The key is read from `OYL_MEASURE_HOSTED_KEY` and from nowhere else.** It is not an argument,
+  and an option the command does not have (`--hosted-key` among them) is refused by name, never
+  with its value. Set it from a file for the one command, as above: a key typed at a prompt is in
+  the shell's history, and a process's environment can be read by the same user. The tool writes
+  the key to no output: not the report, not a progress line, not an error
 - **What each throwaway account does first**, because a hosted job is refused `hosted_unavailable`
   without all three (`docs/operating-an-instance.md`, "A hosted model key"): it stores the key
   (`POST /v1/analysis/hosted/key`), records consent for the URL's origin, and pushes a `masking`
   item with no word and no zone. Its jobs then ask for `instance-hosted`
-- **Sealed only.** The instance takes a key sealed and never in plaintext, so
-  `--transport plaintext` with the hosted options is refused before anything is sent, and there is
-  no plaintext control for a hosted model
-- **No cold runs.** A hosted model has nothing to unload: `--unload` with the hosted options is
-  refused, and without it the tool makes no cold run
+- ⚠️ **"Sealed" here is less than the app's.** The app seals only to a key it judged against an
+  identity pinned from the instance's card
+  ([ADR 0047](../adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-5, D-6).
+  This tool pins nothing and checks no key statement: it seals the key to whatever encryption key
+  `/v1/instance/keys` at `--url` serves. So a hosted run is refused, before anything is sent,
+  unless `--url` is `https:` or loopback (`localhost`, 127.0.0.0/8, `[::1]`). Over `https:` the key
+  is sealed to whoever terminates TLS for that name, which through a tunnel is the tunnel's
+  operator: the party ADR 0047 seals against. **Use a key that can be revoked**
+- **Sealed only.** `--transport plaintext` with the hosted options is refused before anything is
+  sent, so there is no plaintext control for a hosted model
+- **No cold runs.** `--unload` with the hosted options is refused
 - **When the run ends, or throws**, every account's key is cleared and its consent withdrawn, and
   each is read back through `GET /v1/analysis/hosted`. The report's `hosted.cleared` is `true` only
-  when every account read back holding neither. ⚠️ A run that is killed (Ctrl-C) clears nothing,
-  and the throwaway accounts cannot be signed in to again: revoke the key at its provider
+  when every account read back holding neither. When one did not, the command exits 3 and its last
+  line on stderr says to revoke the key. ⚠️ A run that is killed (Ctrl-C) clears nothing, and the
+  throwaway accounts cannot be signed in to again: revoke the key at its provider
 - **The report** says `"source": "instance-hosted"` and, under `hosted`, the URL's origin and the
   model's name
 - **What the instance needs** is what §7 lists, less the local model: `OYL_INSTANCE_SECRET_KEY`
   (without it the instance can hold no key and seal nothing) and a device it admits. It needs no
-  setting that turns hosted models on. ⚠️ Whether the deployed container can reach a hosted service
-  on the internet was **not checked**
-
-What the figures will and will not say is as §2 has it: the job is a ride write-up over a synthetic
-ride, for an account with no history. A hosted run adds one thing to that list: the model call
-leaves the instance, so its time includes the instance's own route to the service.
+  setting that turns hosted models on
