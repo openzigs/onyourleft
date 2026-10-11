@@ -37,7 +37,7 @@
 
 > **Later the same day the tunnel run was made: §10.** Thirty warm jobs through the tunnel took
 > **14 198.0 ms p50 / 17 601.9 ms p95**, and the tunnel added about 0.14 s a job. §1 to §9 are as
-> they were written before it.
+> they were written before it, so wherever they say the tunnel was not measured, read §10.
 
 ---
 
@@ -248,7 +248,7 @@ this is a write-up job with one model call:
 | `qwen2.5:14b`, warm, p95 17.4 s | **Met**, with 42.6 s to spare | A next block of 47.4 s or longer |
 | `qwen2.5:14b`, cold, at most 24.3 s (n = 5) | **Met**, with 35.7 s to spare | A next block of 54.3 s or longer |
 | `qwen2.5:14b`, the busy machine of §5.1, p95 93.5 s | **Not met**, by 33.5 s. The median, 52.6 s, is inside by 7.4 s | A next block of 123.5 s or longer |
-| Through the tunnel, on the owner's instance, `qwen2.5:14b`, warm, p95 17.6 s (§10) | **Met**, with 42.4 s to spare | A next block of 47.6 s or longer |
+| Through the tunnel, on the owner's instance | **not measured** | **not measured** |
 
 ## 7. The run on the owner's instance: what it needs, and the command
 
@@ -291,12 +291,12 @@ commented-out local-debugging port.
 
 | Cell | Result |
 | --- | --- |
-| Sealed, through the tunnel, warm: p50 / p95 / max (n ≥ 30) | 14 198.0 / 17 601.9 / 17 653.5 ms (n = 30), §10 |
-| Sealed, through the tunnel, cold (n = 5) | 20 691.4 to 23 108.8 ms, §10 |
-| Start request through the tunnel (the cleanest read of the tunnel's own cost) | 130.6 ms p50 / 241.6 ms p95, §10 |
+| Sealed, through the tunnel, warm: p50 / p95 / max (n ≥ 30) | not measured |
+| Sealed, through the tunnel, cold (n = 5) | not measured |
+| Start request through the tunnel (the cleanest read of the tunnel's own cost) | not measured |
 | The same job on the deployed stack without the tunnel | not measured |
-| P5 at p95, and the margin | Met, with 42.4 s to spare, §10 |
-| P2 at p95, and the margin | A next block of 47.6 s or longer, §10 |
+| P5 at p95, and the margin | not measured |
+| P2 at p95, and the margin | not measured |
 
 ## 8. What was not measured
 
@@ -365,24 +365,32 @@ a write-up job, not a re-plan).
 
 - **The tunnel cost about 0.14 s a job.** The round trip less the job's own time on the instance was
   122 to 303 ms over the 29 runs that have both figures, 137 ms at the median. Over loopback the
-  same remainder was under 20 ms (§4.2). One run's job could not be read back for its times
+  same remainder was under 20 ms (§4.2). One run's job could not be read back for its times, and
+  ⚠️ **why is not known**: the tool as it ran discarded the reason (§10.2)
 - **The model call is still the whole of it**: 13.9 s of 14.2 s at the median
 - **P5 is met through the tunnel** on an idle machine, with 42.4 s to spare at p95 and 36.9 s for
-  the slowest cold run. §5's finding stands: the same machine, busy, missed it
+  the slowest cold run, under the two limits in the table above (the host's model server, a device
+  on the same Mac). §5's finding stands: the same machine, busy, missed it
+- **P2**: by §6's rule, a summary sent at a boundary serves a next block of 47.6 s or longer
 
 ### 10.2 A first attempt lost its figures to one reset connection
 
 The first attempt, forty minutes earlier with the same command, ended at its twenty-second job:
 the event stream was reset (`ECONNRESET`) and the tool, as merged, threw and printed nothing. Its
-21 finished jobs are known only from the progress lines: 10.1 to 18.0 s each, after a first job of
-32.0 s. ⚠️ **Why the connection was reset is not known**: the instance's container was restarted
+21 finished jobs are known only from the progress lines: the first, which loads the model, took
+32.0 s, and the other 20 took 10.1 to 18.0 s each. ⚠️ **Why the connection was reset is not known**: the instance's container was restarted
 before its log was read, and the tunnel's log holds nothing for that minute. The second attempt
-saw no reset in 36 jobs. One reset in 58 streams is too few to call a rate, and
+recorded no reset on its 36 event streams, though the one job read that failed in it (§10.1) may
+have been one. One reset in 58 streams is too few to call a rate, and
 [#1105](https://github.com/openzigs/onyourleft/issues/1105) is the issue that measures the tunnel
 cutting a stream.
 
 The tool now records such a run as `connection-lost`, under the socket's own code, and goes on to
-the next run. `replan-round-trip.test.ts` holds that with a stream cut before its first event.
+the next run. It still stops on anything that is not a broken connection, a refused stream among
+them. A job read that fails is recorded with its reason (`unread`) from now on.
+`replan-round-trip.test.ts` holds all three. ⚠️ The second attempt ran on an earlier form of this
+change, which swallowed the failed read's reason and would also have filed a refused stream as a
+lost connection; none of its 35 counted runs was filed so.
 
 ### 10.3 Still not measured
 
