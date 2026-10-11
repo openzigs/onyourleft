@@ -506,6 +506,16 @@ pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … 
 # model that admits a new device. Run over loopback on 2026-10-11; ⚠️ never
 # yet through the tunnel.
 pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --cold-runs 5 --unload 'ollama stop <model>'
+# The same, on a HOSTED model and a key of your own (spike 0023 §11):
+# `--hosted-url` and `--hosted-model` together. ⚠️ The key is read from
+# OYL_MEASURE_HOSTED_KEY and from nowhere else — there is no option for it —
+# and is printed nowhere. Each throwaway account stores it (sealed), consents
+# to the URL's origin and pushes an empty masking item; when the run ends or
+# throws, the key and consent are cleared and read back (`hosted.cleared` in
+# the report). Sealed only; refused with `--unload` (a hosted model has no cold
+# runs). A run that is KILLED clears nothing: revoke the key. Its suite runs it
+# against a fake hosted server; ⚠️ never yet run against a real hosted service.
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --hosted-url https://… --hosted-model <name>
 
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's

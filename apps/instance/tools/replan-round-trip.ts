@@ -11,7 +11,8 @@
  *     node tools/replan-round-trip.ts --url https://rides.example.org \
  *       [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] \
  *       [--unload 'ollama stop <model>'] [--origin https://…] \
- *       [--starts-per-account 12] [--run-timeout-seconds 660]
+ *       [--starts-per-account 12] [--run-timeout-seconds 660] \
+ *       [--hosted-url https://… --hosted-model <name>]
  *
  * - **`--transport sealed`** (the default) is what a device sends (ADR 0047):
  *   the instance must hold keys (`OYL_INSTANCE_SECRET_KEY`).
@@ -26,6 +27,18 @@
  *   three hours.
  * - **`--origin`** is what the instance states as `OYL_INSTANCE_ORIGIN`, when
  *   it is reached at another address (the control, over loopback).
+ *
+ * - **`--hosted-url` and `--hosted-model`**, together, measure a hosted model
+ *   on a key of your own instead of the instance's local one. ⚠️ **The key is
+ *   read from the environment variable `OYL_MEASURE_HOSTED_KEY` and from
+ *   nowhere else** — there is no option for it, so it is in no process list
+ *   and no shell history — and it is printed nowhere. Each throwaway account
+ *   stores it (sealed), consents to the URL's origin and pushes an empty
+ *   masking item; when the run ends, or throws, the key and the consent are
+ *   cleared and read back, and the report's `hosted.cleared` says whether
+ *   every account read back empty. Sealed only, and refused with `--unload`:
+ *   a hosted model has nothing to unload, so it has no cold runs. ⚠️ A run
+ *   that is KILLED (Ctrl-C) clears nothing: revoke the key at its provider.
  *
  * The job is the ride write-up that exists, over a synthetic ride — see
  * `replan-round-trip-run.ts` for why and what that does and does not say
@@ -42,7 +55,7 @@ import { resolveExtensionless } from '../src/node-imports.ts';
 
 registerHooks({ resolve: resolveExtensionless });
 
-const { measure } = await import('./replan-round-trip-run.ts');
+const { hostedFromCommand, measure } = await import('./replan-round-trip-run.ts');
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -53,12 +66,21 @@ const url = arg('--url');
 const transport = arg('--transport') ?? 'sealed';
 if (url === undefined || (transport !== 'sealed' && transport !== 'plaintext')) {
   process.stderr.write(
-    "usage: node tools/replan-round-trip.ts --url https://… [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] [--unload '<command>'] [--origin https://…] [--starts-per-account 12] [--run-timeout-seconds 660]\n",
+    "usage: node tools/replan-round-trip.ts --url https://… [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] [--unload '<command>'] [--origin https://…] [--starts-per-account 12] [--run-timeout-seconds 660] [--hosted-url https://… --hosted-model <name>, with the key in OYL_MEASURE_HOSTED_KEY]\n",
   );
   process.exit(2);
 }
 const unload = arg('--unload');
 const origin = arg('--origin');
+let hosted: ReturnType<typeof hostedFromCommand>;
+try {
+  hosted = hostedFromCommand(arg('--hosted-url'), arg('--hosted-model'), process.env);
+} catch (error) {
+  process.stderr.write(
+    `${error instanceof Error ? error.message : 'the hosted options are not usable'}\n`,
+  );
+  process.exit(2);
+}
 const report = await measure({
   url,
   transport,
@@ -68,6 +90,7 @@ const report = await measure({
   runTimeoutMs: Number(arg('--run-timeout-seconds') ?? 660) * 1000,
   log: (line) => process.stderr.write(`${line}\n`),
   ...(origin === undefined ? {} : { origin }),
+  ...(hosted === undefined ? {} : { hosted }),
   ...(unload === undefined
     ? {}
     : {

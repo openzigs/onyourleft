@@ -17,6 +17,12 @@
  * call, of the transport and of the sealing — not the number of steps.
  *
  * Nothing here is a real ride: {@link syntheticInput} is arithmetic.
+ *
+ * **A hosted model** ({@link MeasureOptions.hosted}) is measured the same way,
+ * on a key of the measurer's own: each account stores it, consents to its
+ * origin and pushes an empty masking item, the three things a hosted job is
+ * refused without, and the key and the consent are cleared when the run ends,
+ * however it ends.
  */
 
 import { webcrypto } from 'node:crypto';
@@ -196,6 +202,46 @@ export function summarise(samples: readonly number[]): Summary | null {
   };
 }
 
+/** The name of the one place the hosted key is read from: the environment, never the command line. */
+export const HOSTED_KEY_VARIABLE = 'OYL_MEASURE_HOSTED_KEY';
+
+/**
+ * A hosted model on a key of the measurer's own (ADR 0046 D-9, #1199).
+ *
+ * ⚠️ **`key` is a secret.** It goes into exactly one place — the sealed body
+ * of `POST /v1/analysis/hosted/key` — and into no log line, no error and no
+ * part of the report.
+ */
+export interface HostedOptions {
+  /** The service's `https:` OpenAI-compatible base URL. */
+  readonly url: string;
+  readonly model: string;
+  readonly key: string;
+}
+
+/**
+ * The command's `--hosted-url` and `--hosted-model`, with the key from
+ * {@link HOSTED_KEY_VARIABLE} in `environment`: `undefined` when neither
+ * option is given, and a refusal when only one is or the variable is unset.
+ */
+export function hostedFromCommand(
+  url: string | undefined,
+  model: string | undefined,
+  environment: Readonly<Record<string, string | undefined>>,
+): HostedOptions | undefined {
+  if (url === undefined && model === undefined) return undefined;
+  if (url === undefined || model === undefined) {
+    throw new Error('--hosted-url and --hosted-model go together: give both, or neither');
+  }
+  const key = environment[HOSTED_KEY_VARIABLE];
+  if (key === undefined || key === '') {
+    throw new Error(
+      `${HOSTED_KEY_VARIABLE} is not set: a hosted model is measured on a key read from that environment variable and from nowhere else (never the command line)`,
+    );
+  }
+  return { url, model, key };
+}
+
 export interface MeasureOptions {
   /** Where the instance is reached: `https://rides.example.org`, or `http://127.0.0.1:8787`. */
   readonly url: string;
@@ -212,13 +258,32 @@ export interface MeasureOptions {
   readonly startsPerAccount: number;
   /** How long one run may take before it is recorded `timed-out` and cancelled. */
   readonly runTimeoutMs: number;
+  /**
+   * Measure a hosted model instead of the instance's local one: every account
+   * stores the key, records consent for the URL and pushes an empty masking
+   * item, and every job asks for `instance-hosted`. Sealed only, and never
+   * with {@link MeasureOptions.unload}: there is nothing of a hosted model to
+   * unload, so a hosted measurement has no cold runs.
+   */
+  readonly hosted?: HostedOptions;
   readonly log?: (line: string) => void;
 }
+
+/** The two sources a job may name (`src/analysis/source.ts`). */
+export type MeasuredSource = 'instance-local' | 'instance-hosted';
 
 export interface MeasureReport {
   readonly startedAt: string;
   readonly url: string;
   readonly transport: Transport;
+  /** Which model every job of this report ran on. */
+  readonly source: MeasuredSource;
+  /**
+   * For `instance-hosted`: the origin the requests went to and the model
+   * asked for — never the key. `cleared` is whether EVERY account this run
+   * stored the key on read back, afterwards, as holding no key and no consent.
+   */
+  readonly hosted?: { readonly origin: string; readonly model: string; readonly cleared: boolean };
   /**
    * The one-minute load average of the machine THIS ran on, before and after.
    * It says how busy the instance was only when the two are one machine.
@@ -493,6 +558,7 @@ async function oneRun(
   cold: boolean,
   timeoutMs: number,
   variant: number,
+  source: MeasuredSource,
 ): Promise<RunRecord> {
   device.takeCrypto();
   const began = performance.now();
@@ -500,7 +566,7 @@ async function oneRun(
   const started = await device.call('POST', '/v1/analysis/jobs', {
     input: syntheticInput(variant),
     templateVersion: '1',
-    source: 'instance-local',
+    source,
   });
   const startMs = performance.now() - began;
   const jobId = (started.body as { jobId?: unknown } | null)?.jobId;
@@ -585,6 +651,66 @@ async function oneRun(
   };
 }
 
+/** The body of the `masking` item a throwaway account pushes: no word and no zone, nobody's. */
+const EMPTY_MASKING_ITEM = JSON.stringify({ words: [], zones: [] });
+
+/**
+ * What a hosted job needs of its account (`src/analysis/source.ts`): the key
+ * stored, the consent naming the key's origin, and a masking item that reads.
+ *
+ * ⚠️ A refusal names the step, the instance's code and the fields at fault —
+ * never the instance's sentence about them, so nothing that was sent can come
+ * back into an error message.
+ */
+async function prepareHosted(device: Device, hosted: HostedOptions): Promise<void> {
+  const steps: readonly (readonly [string, string, unknown])[] = [
+    [
+      'the hosted key',
+      '/v1/analysis/hosted/key',
+      { url: hosted.url, model: hosted.model, key: hosted.key },
+    ],
+    ['the hosted consent', '/v1/analysis/hosted/consent', { endpoint: hosted.url }],
+    ['the masking item', '/v1/sync/items/masking/guard', { body: EMPTY_MASKING_ITEM }],
+  ];
+  for (const [what, path, body] of steps) {
+    const answer = await device.call('POST', path, body);
+    if (answer.status === 200) continue;
+    const fields = (answer.body as { error?: { fields?: { field?: unknown }[] } } | null)?.error
+      ?.fields;
+    const named = (fields ?? []).map((each) => String(each.field)).join(', ');
+    throw new Error(
+      `${what} was refused: ${codeOf(answer.body) ?? String(answer.status)}${named === '' ? '' : ` (${named})`}`,
+    );
+  }
+}
+
+/**
+ * Clear the key and withdraw the consent of every account that may hold one,
+ * then read each back the way a device does. Best effort: a call that fails
+ * is not retried, and the account is then reported as not confirmed.
+ */
+async function clearHosted(
+  holding: readonly { readonly account: number; readonly device: Device }[],
+  log: (line: string) => void,
+): Promise<boolean> {
+  let cleared = true;
+  for (const { account, device } of holding) {
+    await device.call('DELETE', '/v1/analysis/hosted/key').catch(() => undefined);
+    await device.call('DELETE', '/v1/analysis/hosted/consent').catch(() => undefined);
+    const read = await device.call('GET', '/v1/analysis/hosted').catch(() => undefined);
+    const settings =
+      read?.status === 200 ? (read.body as { key?: unknown; consent?: unknown } | null) : null;
+    const gone = settings?.key === null && settings.consent === null;
+    if (!gone) cleared = false;
+    log(
+      gone
+        ? `account ${String(account)}: the hosted key and consent are cleared`
+        : `account ${String(account)}: ⚠️ could NOT confirm the hosted key and consent are cleared — revoke the key at its provider`,
+    );
+  }
+  return cleared;
+}
+
 function known(values: readonly (number | null)[]): number[] {
   return values.filter((value): value is number => value !== null);
 }
@@ -595,6 +721,21 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   const log = options.log ?? (() => undefined);
   const startedAt = new Date().toISOString();
   const loadBefore = loadavg()[0] ?? 0;
+  const hosted = options.hosted;
+  if (hosted !== undefined && options.transport !== 'sealed') {
+    throw new Error(
+      'a hosted model is measured over the sealed transport only: the instance takes a hosted key sealed and never in plaintext',
+    );
+  }
+  if (hosted !== undefined && options.unload !== undefined) {
+    throw new Error(
+      'a hosted model has nothing to unload, so it has no cold runs: drop --unload (and --cold-runs)',
+    );
+  }
+  const hostedOrigin = hosted === undefined ? undefined : new URL(hosted.url).origin;
+  const source: MeasuredSource = hosted === undefined ? 'instance-local' : 'instance-hosted';
+  /** Every account that was, or was about to be, sent the key. */
+  const holding: { account: number; device: Device }[] = [];
 
   let device: Device | undefined;
   let starts = 0;
@@ -605,26 +746,38 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
       accounts += 1;
       device = await signedInDevice(url, origin, options.transport, `Measure ${String(accounts)}`);
       starts = 0;
+      if (hosted !== undefined) {
+        // Listed before the key is sent: a set-up that fails half way is cleared too.
+        holding.push({ account: accounts, device });
+        await prepareHosted(device, hosted);
+      }
     }
     starts += 1;
     jobs += 1;
-    const record = await oneRun(device, run, cold, options.runTimeoutMs, jobs);
+    const record = await oneRun(device, run, cold, options.runTimeoutMs, jobs, source);
     log(
       `${cold ? 'cold' : 'warm'} ${String(run)}: ${record.status}${record.failure === undefined ? '' : `:${record.failure}`} in ${record.totalMs.toFixed(0)} ms, ${String(record.steps.length)} steps`,
     );
     return record;
   };
 
-  // One run nobody counts: it loads the model, so the first warm run is warm.
-  const warmUp = options.runs > 0 ? await next(0, false) : null;
+  let warmUp: RunRecord | null = null;
   const warm: RunRecord[] = [];
-  for (let run = 1; run <= options.runs; run += 1) warm.push(await next(run, false));
   const cold: RunRecord[] = [];
-  if (options.unload !== undefined) {
-    for (let run = 1; run <= options.coldRuns; run += 1) {
-      await options.unload();
-      cold.push(await next(run, true));
+  let cleared: boolean;
+  try {
+    // One run nobody counts: it loads the model, so the first warm run is warm.
+    if (options.runs > 0) warmUp = await next(0, false);
+    for (let run = 1; run <= options.runs; run += 1) warm.push(await next(run, false));
+    if (options.unload !== undefined) {
+      for (let run = 1; run <= options.coldRuns; run += 1) {
+        await options.unload();
+        cold.push(await next(run, true));
+      }
     }
+  } finally {
+    // However the run ended, the key does not outlive it on the instance.
+    cleared = await clearHosted(holding, log);
   }
 
   const good = warm.filter((record) => record.status === 'succeeded');
@@ -638,6 +791,10 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
     startedAt,
     url,
     transport: options.transport,
+    source,
+    ...(hosted === undefined || hostedOrigin === undefined
+      ? {}
+      : { hosted: { origin: hostedOrigin, model: hosted.model, cleared } }),
     deviceLoadAverage: { before: loadBefore, after: loadavg()[0] ?? 0 },
     warmUp,
     warm,

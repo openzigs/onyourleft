@@ -397,3 +397,46 @@ lost connection; none of its 35 counted runs was filed so.
 Everything in §8 except its first line's "anything through the tunnel": the deployed stack without
 the tunnel, the Compose Ollama, a re-plan job, a run that calls a tool, a hosted model, a device
 that is not the instance's own machine, and the Windows machine.
+
+## 11. A hosted model: how to measure it
+
+**No hosted measurement has been made.** §8 and §10.3 list a hosted model on the rider's own key as
+not measured, and that is still so: this section, appended on 2026-10-11, records only that the tool
+can now make that run, and the command. No figure for a hosted model exists anywhere in this
+write-up. The tool's hosted path has been run against a fake hosted server inside
+`apps/instance/tools/replan-round-trip.test.ts` and against no real hosted service.
+
+From `apps/instance`, with Node 24, the key in a file that is not in the repository:
+
+```bash
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" node tools/replan-round-trip.ts \
+  --url https://onyourleft.openzigs.com --runs 30 \
+  --hosted-url https://<the service's OpenAI-compatible base URL> --hosted-model <name>
+```
+
+- **The key is read from `OYL_MEASURE_HOSTED_KEY` and from nowhere else.** There is no option for
+  it, so it is in no process list. The tool writes it to no output: not the report, not a progress
+  line, not an error
+- **What each throwaway account does first**, because a hosted job is refused `hosted_unavailable`
+  without all three (`docs/operating-an-instance.md`, "A hosted model key"): it stores the key
+  (`POST /v1/analysis/hosted/key`), records consent for the URL's origin, and pushes a `masking`
+  item with no word and no zone. Its jobs then ask for `instance-hosted`
+- **Sealed only.** The instance takes a key sealed and never in plaintext, so
+  `--transport plaintext` with the hosted options is refused before anything is sent, and there is
+  no plaintext control for a hosted model
+- **No cold runs.** A hosted model has nothing to unload: `--unload` with the hosted options is
+  refused, and without it the tool makes no cold run
+- **When the run ends, or throws**, every account's key is cleared and its consent withdrawn, and
+  each is read back through `GET /v1/analysis/hosted`. The report's `hosted.cleared` is `true` only
+  when every account read back holding neither. ⚠️ A run that is killed (Ctrl-C) clears nothing,
+  and the throwaway accounts cannot be signed in to again: revoke the key at its provider
+- **The report** says `"source": "instance-hosted"` and, under `hosted`, the URL's origin and the
+  model's name
+- **What the instance needs** is what §7 lists, less the local model: `OYL_INSTANCE_SECRET_KEY`
+  (without it the instance can hold no key and seal nothing) and a device it admits. It needs no
+  setting that turns hosted models on. ⚠️ Whether the deployed container can reach a hosted service
+  on the internet was **not checked**
+
+What the figures will and will not say is as §2 has it: the job is a ride write-up over a synthetic
+ride, for an account with no history. A hosted run adds one thing to that list: the model call
+leaves the instance, so its time includes the instance's own route to the service.

@@ -8,9 +8,11 @@
  * the tunnel, the owner's instance.
  */
 
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +21,7 @@ import {
   type FakeModelServer,
   type ScriptedReply,
 } from '../src/analysis/fake-model-server-testing.ts';
+import { MARKER, MARKER_KEY } from '../src/analysis/hosted-key-testing.ts';
 import { TEST_ORIGIN } from '../src/auth/identity-testing.ts';
 import { readAnalysisModelSettings } from '../src/config.ts';
 import { startInstance, type StartedInstance } from '../src/instance.ts';
@@ -26,6 +29,8 @@ import { testConfig } from '../src/instance-testing.ts';
 import { readServerConfig } from '../src/server-config.ts';
 import { migrateForDeploy } from '../src/store/serving.ts';
 import {
+  HOSTED_KEY_VARIABLE,
+  hostedFromCommand,
   measure,
   stepsOf,
   summarise,
@@ -36,7 +41,11 @@ import {
 let running: StartedInstance | undefined;
 let model: FakeModelServer | undefined;
 let directory: string | undefined;
+/** The hosted service's own server, when a test has one: never the instance's local model. */
+let hostedModel: FakeModelServer | undefined;
 afterEach(async () => {
+  await hostedModel?.close();
+  hostedModel = undefined;
   await running?.stop();
   running = undefined;
   await model?.close();
@@ -53,7 +62,11 @@ const TWO_STEPS: readonly ScriptedReply[] = [
 ];
 
 /** An instance on loopback over `script`; `keyed` makes it hold keys, and so serve jobs sealed only. */
-async function instance(script: readonly ScriptedReply[], keyed: boolean): Promise<string> {
+async function instance(
+  script: readonly ScriptedReply[],
+  keyed: boolean,
+  hostedFetch?: typeof globalThis.fetch,
+): Promise<string> {
   model = await startFakeModelServer(script);
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-round-trip-'));
   const path = join(directory, 'instance.sqlite');
@@ -78,6 +91,7 @@ async function instance(script: readonly ScriptedReply[], keyed: boolean): Promi
     version: '0',
     notices: '',
     log: () => undefined,
+    ...(hostedFetch === undefined ? {} : { hostedFetch }),
   });
   await running.opened;
   await running.jobsRecovered;
@@ -318,5 +332,267 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     const report = await measure(options(url, 'plaintext'));
     expect(Object.keys(report.statuses)).toEqual([expect.stringMatching(/^failed:model-/)]);
     expect(report.summary.totalMs).toBeNull();
+  }, 60_000);
+});
+
+/** Where the hosted service is said to be. Nothing listens there: {@link hostedService} stands in. */
+const HOSTED_URL = 'https://models.example/v1';
+
+/**
+ * The internet, for the instance's hosted requests (`InstanceOptions.hostedFetch`,
+ * as `src/instance.test.ts` does it): a request to {@link HOSTED_URL} reaches
+ * the fake hosted server, and its `Authorization` header is kept.
+ */
+async function hostedService(script: readonly ScriptedReply[]) {
+  const fake = await startFakeModelServer(script);
+  hostedModel = fake;
+  const authorizations: (string | null)[] = [];
+  const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith(`${HOSTED_URL}/`)) return Promise.reject(new Error('another host'));
+    authorizations.push(new Headers(init?.headers).get('authorization'));
+    return globalThis.fetch(`${fake.baseUrl.href}${url.slice(HOSTED_URL.length)}`, init);
+  }) as typeof globalThis.fetch;
+  return { fake, authorizations, fetch };
+}
+
+const HOSTED = { url: HOSTED_URL, model: 'hosted-model', key: MARKER_KEY };
+
+describe('the round-trip measurement of a hosted model, on a key of the measurer’s own — #1235', () => {
+  it('measures a hosted job to its decrypted result, on the hosted server with the key, and says the key nowhere', async () => {
+    const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
+    // The local model has no script: a job that reached it would fail.
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const report = await measure(
+      options(url, 'sealed', { hosted: HOSTED, log: (line) => lines.push(line) }),
+    );
+    expect(report.statuses).toEqual({ succeeded: 1 });
+    expect(report.source).toBe('instance-hosted');
+    expect(report.hosted).toEqual({
+      origin: 'https://models.example',
+      model: 'hosted-model',
+      cleared: true,
+    });
+    expect(report.warm[0]?.writeUpCharacters).toBe('A steady ride.'.length);
+    expect(report.warm[0]?.steps).toHaveLength(2);
+    // The hosted server answered all four model calls, each carrying the key; the local one none.
+    expect(service.fake.paths).toHaveLength(4);
+    expect(service.authorizations).toEqual(Array.from({ length: 4 }, () => `Bearer ${MARKER_KEY}`));
+    expect(service.fake.requests[0]?.model).toBe('hosted-model');
+    expect(model?.paths).toEqual([]);
+    // The key is in no part of the report and no line the tool logged.
+    expect(JSON.stringify(report)).not.toContain(MARKER);
+    expect(lines.join('\n')).not.toContain(MARKER);
+    // Afterwards the account holds neither: read back through GET /v1/analysis/hosted.
+    expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
+  }, 60_000);
+
+  it('says which source a local measurement ran on, and nothing of a hosted one', async () => {
+    const url = await instance([TEXT, TEXT], true);
+    const lines: string[] = [];
+    const report = await measure(options(url, 'sealed', { log: (line) => lines.push(line) }));
+    expect(report.source).toBe('instance-local');
+    expect(report.hosted).toBeUndefined();
+    // No account was sent a key, so none is cleared.
+    expect(lines).toHaveLength(2);
+  }, 60_000);
+
+  it('clears the key and the consent when the run throws', async () => {
+    const service = await hostedService(Array.from({ length: 12 }, () => TEXT));
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    // Thirteen starts on one account: the thirteenth is the instance's refusal.
+    await expect(
+      measure(
+        options(url, 'sealed', {
+          hosted: HOSTED,
+          runs: 12,
+          startsPerAccount: 100,
+          log: (line) => lines.push(line),
+        }),
+      ),
+    ).rejects.toThrow('rate_limited');
+    expect(service.authorizations).toHaveLength(12);
+    expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
+    expect(lines.join('\n')).not.toContain(MARKER);
+  }, 60_000);
+
+  it('clears every account it took, not only the last', async () => {
+    const service = await hostedService(Array.from({ length: 3 }, () => TEXT));
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const report = await measure(
+      options(url, 'sealed', {
+        hosted: HOSTED,
+        runs: 2,
+        startsPerAccount: 2,
+        log: (line) => lines.push(line),
+      }),
+    );
+    expect(report.statuses).toEqual({ succeeded: 2 });
+    expect(report.hosted?.cleared).toBe(true);
+    expect(lines.slice(-2)).toEqual([
+      'account 1: the hosted key and consent are cleared',
+      'account 2: the hosted key and consent are cleared',
+    ]);
+  }, 60_000);
+
+  it('stops on a set-up the instance refuses, naming the step, the code and the field — and clears what it may have left', async () => {
+    const service = await hostedService([]);
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const failure: unknown = await measure(
+      options(url, 'sealed', {
+        hosted: { ...HOSTED, model: 'two words' },
+        log: (line) => lines.push(line),
+      }),
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      'the hosted key was refused: validation_failed (model)',
+    );
+    expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
+    expect(service.authorizations).toEqual([]);
+  }, 60_000);
+
+  it('files a hosted job the service refused under its own reason, never as a lost connection', async () => {
+    const service = await hostedService([
+      TEXT,
+      { kind: 'status', status: 401, body: '{"error":{"message":"bad key"}}' },
+    ]);
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const report = await measure(
+      options(url, 'sealed', { hosted: HOSTED, log: (line) => lines.push(line) }),
+    );
+    expect(Object.keys(report.statuses)).toEqual([expect.stringMatching(/^failed:model-/)]);
+    expect(report.summary.totalMs).toBeNull();
+    expect(report.hosted?.cleared).toBe(true);
+    expect(JSON.stringify(report)).not.toContain(MARKER);
+    expect(lines.join('\n')).not.toContain(MARKER);
+  }, 60_000);
+
+  it('says so, in the report and aloud, when an account cannot be read back as cleared', async () => {
+    const service = await hostedService([TEXT, TEXT]);
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const real = globalThis.fetch;
+    let down = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+      down
+        ? Promise.reject(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }))
+        : real(input, init),
+    );
+    try {
+      const report = await measure(
+        options(url, 'sealed', {
+          hosted: HOSTED,
+          log: (line) => {
+            lines.push(line);
+            // The instance cannot be reached from the end of the last counted run on.
+            if (line.startsWith('warm 1:')) down = true;
+          },
+        }),
+      );
+      expect(report.statuses).toEqual({ succeeded: 1 });
+      expect(report.hosted?.cleared).toBe(false);
+      expect(lines.at(-1)).toMatch(/^account 1: ⚠️ could NOT confirm .* revoke the key/);
+      expect(lines.join('\n')).not.toContain(MARKER);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  }, 60_000);
+
+  it('refuses a hosted model in plaintext, before anything is sent', async () => {
+    const service = await hostedService([]);
+    const url = await instance([], true, service.fetch);
+    const sent = vi.spyOn(globalThis, 'fetch');
+    try {
+      await expect(measure(options(url, 'plaintext', { hosted: HOSTED }))).rejects.toThrow(
+        'sealed transport only',
+      );
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  }, 60_000);
+
+  it('refuses a hosted model with something to unload, before anything is sent', async () => {
+    const sent = vi.spyOn(globalThis, 'fetch');
+    try {
+      await expect(
+        measure(
+          options('http://127.0.0.1:9', 'sealed', {
+            hosted: HOSTED,
+            coldRuns: 1,
+            unload: () => Promise.resolve(),
+          }),
+        ),
+      ).rejects.toThrow('nothing to unload');
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe('the hosted options of the command — #1235', () => {
+  it('reads the key from the environment variable, and nothing when no hosted option is given', () => {
+    expect(
+      hostedFromCommand(undefined, undefined, { [HOSTED_KEY_VARIABLE]: MARKER_KEY }),
+    ).toBeUndefined();
+    expect(
+      hostedFromCommand(HOSTED_URL, 'hosted-model', { [HOSTED_KEY_VARIABLE]: MARKER_KEY }),
+    ).toEqual(HOSTED);
+  });
+
+  it('refuses hosted options with the variable unset or empty, naming it', () => {
+    expect(() => hostedFromCommand(HOSTED_URL, 'hosted-model', {})).toThrow(
+      /^OYL_MEASURE_HOSTED_KEY is not set/,
+    );
+    expect(() =>
+      hostedFromCommand(HOSTED_URL, 'hosted-model', { [HOSTED_KEY_VARIABLE]: '' }),
+    ).toThrow(/^OYL_MEASURE_HOSTED_KEY is not set/);
+  });
+
+  it('refuses one hosted option without the other', () => {
+    const environment = { [HOSTED_KEY_VARIABLE]: MARKER_KEY };
+    expect(() => hostedFromCommand(HOSTED_URL, undefined, environment)).toThrow('go together');
+    expect(() => hostedFromCommand(undefined, 'hosted-model', environment)).toThrow('go together');
+  });
+
+  /** The command itself, as `pnpm run replan-round-trip` starts it. */
+  function command(given: readonly string[], key: string | undefined) {
+    const environment = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name !== HOSTED_KEY_VARIABLE),
+    );
+    return spawnSync(
+      process.execPath,
+      [join(dirname(fileURLToPath(import.meta.url)), 'replan-round-trip.ts'), ...given],
+      {
+        encoding: 'utf8',
+        env: { ...environment, ...(key === undefined ? {} : { [HOSTED_KEY_VARIABLE]: key }) },
+        timeout: 30_000,
+      },
+    );
+  }
+  const HOSTED_ARGUMENTS = ['--hosted-url', HOSTED_URL, '--hosted-model', 'hosted-model'];
+
+  it('the command stops, naming the variable, when it is run hosted without it', () => {
+    const ran = command(['--url', 'http://127.0.0.1:9', ...HOSTED_ARGUMENTS], undefined);
+    expect(ran.status).toBe(2);
+    expect(ran.stderr).toContain('OYL_MEASURE_HOSTED_KEY is not set');
+    expect(ran.stdout).toBe('');
+  }, 60_000);
+
+  it('the command hands the variable’s key to the measurement, which refuses plaintext without printing it', () => {
+    const ran = command(
+      ['--url', 'http://127.0.0.1:9', '--transport', 'plaintext', ...HOSTED_ARGUMENTS],
+      MARKER_KEY,
+    );
+    expect(ran.status).not.toBe(0);
+    expect(ran.stderr).toContain('sealed transport only');
+    expect(`${ran.stdout}${ran.stderr}`).not.toContain(MARKER);
   }, 60_000);
 });
