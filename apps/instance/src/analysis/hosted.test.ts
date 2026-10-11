@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import { MASK_PLACEHOLDER, PATTERNS_ONLY, type MaskingGuard } from '@onyourleft/analysis';
 import { PLANTED_DETAILS, PLANTED_GUARD, personalDetailFaults } from '@onyourleft/analysis/testing';
+import { encodeWorkoutFile, seconds, thresholdShare } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createHistory, type History } from '../history/history.ts';
@@ -117,6 +118,16 @@ async function plantHistory(text: string): Promise<void> {
       `note-${athlete}`,
       JSON.stringify({ text: `Kestrel notes. ${text}` }),
     );
+    // A saved workout (#1100): its name is free text the rider typed.
+    await plant(
+      athlete,
+      'workout',
+      `workout-${athlete}`,
+      encodeWorkoutFile({
+        name: `Sweet spot. ${text}`,
+        blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.9) }],
+      }),
+    );
   }
   // The write-up passage: the screen refuses a link, so it carries only what it may.
   await plant(
@@ -160,6 +171,7 @@ async function scriptedServer(): Promise<FakeModelServer> {
         { name: 'goals', arguments: '{}' },
         // The model's own argument names a listed word: it is masked when sent back.
         { name: 'history_search', arguments: '{"query":"Kestrel notes Kestrel Farm"}' },
+        { name: 'workouts', arguments: '{}' },
       ],
     },
     { kind: 'text', text: 'A steady ride. The knee reached 12 degrees on the climb.' },
@@ -254,7 +266,10 @@ describe('planted details never leave for a hosted model (#1101)', () => {
       'history_search',
       'recent_rides',
       'ride_sections',
+      'workouts',
     ]);
+    // The workout's name reached the model — masked, below (#1100).
+    expect(JSON.stringify(model.requests)).toContain('Workout: Sweet spot.');
     const last = JSON.stringify(model.requests.at(-1));
     // The rewrite instruction went too.
     expect(model.requests[2]?.messages).toBeDefined();

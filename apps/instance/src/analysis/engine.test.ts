@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { PASSING_WRITE_UP, RIDE_INPUT, scriptedModel, text } from './agent-testing.ts';
+import { calls, PASSING_WRITE_UP, RIDE_INPUT, scriptedModel, text } from './agent-testing.ts';
 import { agentEngine } from './engine.ts';
 import type { AgentEvent } from './agent.ts';
 
@@ -51,5 +51,43 @@ describe('agentEngine', () => {
     expect(ended).toMatchObject({ kind: 'written', writeUp: PASSING_WRITE_UP });
     expect(events[0]).toEqual({ type: 'progress', step: 1 });
     expect(events.filter((each) => each.type === 'section')).toHaveLength(3);
+  });
+
+  it('hands the agent the history index and the job’s ride, which the history tool searches with (#1229)', async () => {
+    const searched: { athleteId: string; body: Readonly<Record<string, unknown>> }[] = [];
+    const engineAsking = () =>
+      agentEngine({
+        reads: NO_READS,
+        history: {
+          searchFor: (athleteId, body) => {
+            searched.push({ athleteId, body });
+            return Promise.resolve({ ok: true, value: { passages: [] } });
+          },
+        },
+        sources: {
+          local: scriptedModel(
+            calls(['history_search', { query: 'hill repeats' }]),
+            text(PASSING_WRITE_UP),
+          ),
+          hostedKey: NO_KEY,
+        },
+        clock: { now: () => 0 },
+      });
+    for (const rideId of ['ride-1', undefined]) {
+      searched.length = 0;
+      await engineAsking().run(
+        {
+          athleteId: 'athlete-a',
+          input: RIDE_INPUT,
+          source: 'instance-local',
+          ...(rideId === undefined ? {} : { rideId }),
+        },
+        new AbortController().signal,
+        () => undefined,
+      );
+      expect(searched).toHaveLength(1);
+      expect(searched[0]?.athleteId).toBe('athlete-a');
+      expect(searched[0]?.body.rideId).toBe(rideId);
+    }
   });
 });

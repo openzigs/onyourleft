@@ -1438,9 +1438,9 @@ describe('the instance is disclosed, class by class — #778', () => {
       "this device's public key",
       'the name other riders see',
       'your internet address',
-      // #1195's sync, named before a version offers it (#778's second pass).
+      // #1195's sync, named before a version offered it (#778's second pass), and the control.
       'what you sync: your rides, and what goes with them',
-      'this version of the app does not offer sync yet',
+      'which needs its card: sync now on the instance screen',
       'power, cadence, the weight you declare, and your display name',
       // #784: a room's route — refused in a privacy zone, deleted when the room is over.
       'the route of a room you make',
@@ -1488,7 +1488,13 @@ describe('the instance is disclosed, class by class — #778', () => {
       'your answer to may be raced for each ride',
       'all of it is sealed for that instance alone',
       'shows none of it to another rider',
-      'delete a ride, note, goal or document on this device and then sync: the instance deletes it too',
+      'delete a ride, note, goal, document or saved workout on this device, or clear your workout goals, and then sync: the instance deletes it too',
+      // #1100: saved workouts are synced both ways (`instance/sync.ts` rule 9).
+      "your saved workouts, each one's name, description and blocks",
+      'what another of your devices synced there, your saved workouts included',
+      // #1237: the typed workout goals, one item, synced both ways (rule 10).
+      // The owner's wording of 2026-10-10.
+      'your workout goals, the numbers you chose on the workout goals screen',
       // ADR 0047 D-7 and D-11: what is sealed, and what Cloudflare still sees.
       'everything you sync is sealed',
       'what cloudflare still sees, even then',

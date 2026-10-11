@@ -851,12 +851,18 @@ const STANDING_NOTICES: readonly {
   { name: 'device full', query: '?storage=full', labels: ['Device full:'] },
   { name: 'side camera lost', query: '?side=lost', labels: ['Side camera:'] },
   { name: 'a workout eased', query: '?workout=eased', labels: ['Eased:'] },
+  // #1240: a workout's heart-rate hold — its notice, with the longest sentence
+  // `workout/hold-text.ts` can produce, in the running workout's section.
+  { name: 'a heart-rate hold', query: '?workout=hold', labels: ['Heart-rate hold:'] },
 ];
 
 const EVERY_NOTICE = {
   name: 'every standing notice at once',
   query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
-  labels: STANDING_NOTICES.flatMap((each) => each.labels),
+  // One workout on the stub: eased, not also holding (#1240's hold has its own case).
+  labels: STANDING_NOTICES.filter((each) => each.query !== '?workout=hold').flatMap(
+    (each) => each.labels,
+  ),
 };
 
 /** Live-group notices that are not standing IN the column. @see the #692 case */

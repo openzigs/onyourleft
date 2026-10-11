@@ -258,6 +258,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Game world',
     'Words to mask',
     'Documents for the analysis',
+    // #1237: what the typed goals are not, and why thresholds are checked
+    // later; where they are kept stays above the form.
+    'Workout goals',
   ],
   segments: ['Make a segment', 'Find your efforts'],
   transfer: ['Import', 'Erase this device', 'Why this is a file and not a connection'],

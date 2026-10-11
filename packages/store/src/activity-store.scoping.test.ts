@@ -105,6 +105,7 @@ import type {
   SyncBaseRecord,
   RiderTextRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -124,6 +125,7 @@ import {
   syncBaseFor,
   riderTextFor,
   trustedDeviceKeyFor,
+  workoutGoalsFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -182,6 +184,7 @@ interface World {
   readonly note: RiderTextRecord;
   readonly document: RiderTextRecord;
   readonly trustedKey: TrustedDeviceKeyRecord;
+  readonly workoutGoals: WorkoutGoalsRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -258,6 +261,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   const document = riderTextFor(owner, 'document');
   // #898. A different key per athlete.
   const trustedKey = trustedDeviceKeyFor(owner);
+  // #1236. Different numbers per athlete.
+  const workoutGoals = workoutGoalsFor(owner);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -284,6 +289,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putRiderText(note);
     await store.putRiderText(document);
     await store.putTrustedDeviceKey(trustedKey);
+    await store.putWorkoutGoals(workoutGoals);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -310,6 +316,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     note,
     document,
     trustedKey,
+    workoutGoals,
   };
 }
 
@@ -849,6 +856,32 @@ const PROBES: readonly ScopingProbe[] = [
       await expect(store.listTrustedDeviceKeys(mine.owner)).resolves.toStrictEqual([
         mine.trustedKey,
       ]);
+    },
+  },
+  {
+    member: 'getWorkoutGoals',
+    leaks:
+      "another athlete's workout goals — a heart-rate hold of mine would then be bounded by the range somebody else chose",
+    async run(store, mine) {
+      await expect(store.getWorkoutGoals(mine.owner)).resolves.toStrictEqual({
+        status: 'kept',
+        record: mine.workoutGoals,
+      });
+    },
+  },
+  {
+    member: 'deleteWorkoutGoals',
+    leaks: "the deletion of another athlete's workout goals",
+    async run(store, mine, theirs) {
+      // Mine go; theirs stay. The world is shared and this runs twice, so
+      // mine are put back afterwards.
+      await expect(store.deleteWorkoutGoals(mine.owner)).resolves.toBe(true);
+      await expect(store.getWorkoutGoals(mine.owner)).resolves.toStrictEqual({ status: 'none' });
+      await expect(store.getWorkoutGoals(theirs.owner)).resolves.toStrictEqual({
+        status: 'kept',
+        record: theirs.workoutGoals,
+      });
+      await store.putWorkoutGoals(mine.workoutGoals);
     },
   },
   {

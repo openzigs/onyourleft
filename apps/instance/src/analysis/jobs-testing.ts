@@ -17,6 +17,8 @@ export interface ScriptedRun {
   emit(event: AgentEvent): void;
   /** End the run with `ending`. */
   finish(ending: EngineEnding): void;
+  /** End the run by REJECTING with `error`, as a tool's store read that throws does (#1187). */
+  fail(error: unknown): void;
 }
 
 export interface ScriptedEngine {
@@ -36,8 +38,8 @@ export function scriptedEngine(): ScriptedEngine {
     runs,
     engine: {
       run: (job, signal, emit) =>
-        new Promise<EngineEnding>((resolve) => {
-          const run: ScriptedRun = { job, signal, emit, finish: resolve };
+        new Promise<EngineEnding>((resolve, reject) => {
+          const run: ScriptedRun = { job, signal, emit, finish: resolve, fail: reject };
           runs.push(run);
           waiting.shift()?.(run);
         }),

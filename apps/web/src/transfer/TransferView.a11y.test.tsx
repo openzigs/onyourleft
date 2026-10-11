@@ -91,6 +91,7 @@ async function openBusyScreen(): Promise<void> {
     theme: { forget: () => forgotten.push('theme') },
     hostedModel: { forget: () => forgotten.push('hosted-model') },
     instance: { forget: () => forgotten.push('instance') },
+    instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 

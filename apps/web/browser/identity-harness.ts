@@ -28,6 +28,16 @@
  * The tampering control flips the signature HERE, before sealing, because
  * nothing on the way can read the request any more.
  *
+ * Since #1227 it also asks the instance for a WRITE-UP of a ride
+ * (`writeUp`): the real `createInstanceAnalysis`, as `main.tsx` builds it,
+ * over the sealed session the production port keeps once it has connected
+ * with the instance's card, so the job's start, its event stream, its resume
+ * and its acknowledgement all go over the real `fetch`, sealed, to the
+ * instance's own listener on loopback. The ride is written into this page's
+ * IndexedDB from the store's own fixtures, and the write-up is read back from
+ * a fresh connection to it. What the page was shown is recorded view by view,
+ * so the spec can turn the network off mid-stream and see the page follow.
+ *
  * ⚠️ **What it does not prove**: anything about a phone's WebView. The page
  * publishes the result on `window.__oylIdentity` and asserts nothing.
  */
@@ -38,14 +48,23 @@ import {
   openActivityStore,
   webCryptoHpkePrimitives,
   webCryptoSha256,
+  type ActivityId,
 } from '@onyourleft/store';
+import { rideFor, streamSetFor } from '@onyourleft/store/testing';
 
 import {
   createInstancePort,
+  heldSealedSession,
   type ConnectOutcome,
   type DevicesOutcome,
   type InstanceState,
 } from '../src/instance/instance-port';
+import { createInstanceAnalysis } from '../src/ride-analysis/instance-analysis';
+import type {
+  InstanceAskOutcome,
+  InstanceJobView,
+} from '../src/ride-analysis/instance-analysis-port';
+import { jobSessionOf, type JobSession } from '../src/ride-analysis/instance-job';
 import {
   createInstanceClock,
   sealedInstance,
@@ -77,6 +96,27 @@ export interface IdentityHarness {
   ): Promise<{ connected: ConnectOutcome; current: InstanceState; devices: DevicesOutcome }>;
   /** A fresh port over the same `localStorage` — the reload — and what it reads. */
   reload(database: string): Promise<InstanceState>;
+  /**
+   * #1227: write a ride into `database` and press for a write-up of it on the
+   * instance this page connected to (`connect` first). Returns at once; the
+   * run goes on, and {@link IdentityHarness.writeUpState} reads it.
+   * `idleMilliseconds` is the transport's idle cut for the job's stream, for
+   * the control; the shipped one otherwise.
+   */
+  startWriteUp(database: string, options?: { readonly idleMilliseconds?: number }): Promise<void>;
+  /**
+   * Every view the page was handed so far, the outcome once the run ended,
+   * and — once it has — the write-up read back through a FRESH connection to
+   * the store, as the ride's page reads it.
+   */
+  writeUpState(): Promise<WriteUpState>;
+}
+
+/** What {@link IdentityHarness.writeUpState} reads. */
+export interface WriteUpState {
+  readonly views: readonly InstanceJobView[];
+  readonly outcome: InstanceAskOutcome | undefined;
+  readonly saved: { readonly text: string; readonly source: string } | undefined;
 }
 
 declare global {
@@ -121,6 +161,29 @@ function portOver(database: string) {
   });
 }
 
+/** The run `startWriteUp` began: one at a time. */
+let writing:
+  | {
+      readonly database: string;
+      readonly rideId: ActivityId;
+      readonly views: InstanceJobView[];
+      outcome: InstanceAskOutcome | undefined;
+    }
+  | undefined;
+
+/** A job session whose stream has the given idle cut: the control's. */
+function withIdleCut(session: JobSession, idleMilliseconds: number | undefined): JobSession {
+  if (session.kind === 'closed' || idleMilliseconds === undefined) return session;
+  const { channel } = session;
+  return {
+    ...session,
+    channel: {
+      call: (method, path, options) => channel.call(method, path, options),
+      stream: (path, options) => channel.stream(path, { ...options, idleMilliseconds }),
+    },
+  };
+}
+
 window.__oylIdentity = {
   connect: async (address, database, card) => {
     const port = portOver(database);
@@ -129,6 +192,52 @@ window.__oylIdentity = {
     return { connected, current: await port.current(), devices: await port.devices() };
   },
   reload: async (database) => portOver(database).current(),
+  startWriteUp: async (database, options = {}) => {
+    const store = openActivityStore(database);
+    await ensureLocalAthlete(store, unixSeconds(Math.floor(Date.now() / 1000)));
+    // An hour's ride from the store's own fixtures, with its streams.
+    const ride = rideFor(LOCAL_ATHLETE);
+    await store.putActivity(ride);
+    await store.putStreamSet(streamSetFor(ride, { sampleCount: 3600 }));
+    // As `main.tsx` §`buildInstanceAnalysis` builds it.
+    const sealed = heldSealedSession({
+      storage: localStorage,
+      loadedFrom: { native: false, href: location.href },
+      signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
+    });
+    const port = createInstanceAnalysis({
+      store,
+      athleteId: LOCAL_ATHLETE,
+      connected: () => true,
+      session: async () => withIdleCut(jobSessionOf(await sealed()), options.idleMilliseconds),
+      cameraConsented: () => false,
+      now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+      pending: localStorage,
+    });
+    const run: NonNullable<typeof writing> = {
+      database,
+      rideId: ride.id,
+      views: [],
+      outcome: undefined,
+    };
+    writing = run;
+    void port
+      .ask(ride.id, 'instance-local', (view) => run.views.push(view), new AbortController().signal)
+      .then((outcome) => {
+        run.outcome = outcome;
+      });
+  },
+  writeUpState: async () => {
+    const run = writing;
+    if (run === undefined) return { views: [], outcome: undefined, saved: undefined };
+    let saved: WriteUpState['saved'];
+    if (run.outcome !== undefined) {
+      const fresh = openActivityStore(run.database);
+      const row = await fresh.getRideWriteUp(LOCAL_ATHLETE, run.rideId);
+      saved = row === undefined ? undefined : { text: row.text, source: row.source };
+    }
+    return { views: [...run.views], outcome: run.outcome, saved };
+  },
   signIn: async (origin, database, options) => {
     const store = openActivityStore(database);
     const signingKey = () => ensureDeviceSigningKey(store, LOCAL_ATHLETE);

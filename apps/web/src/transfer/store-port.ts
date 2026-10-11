@@ -38,6 +38,7 @@ import type {
   SegmentRecord,
   StoredActivityRecord,
   StreamSet,
+  WorkoutGoalsRead,
   WorkoutRecord,
 } from '@onyourleft/store';
 
@@ -80,6 +81,11 @@ export interface AccountStore {
    * that formats one into a string.
    */
   deleteAthlete(id: AthleteId): Promise<AthleteDeletionCounts>;
+  /**
+   * The rider's typed workout goals (#1236) — carried by the account export so
+   * that ADR 0005 F's rollback (export → downgrade → re-import) keeps them.
+   */
+  getWorkoutGoals(owner: AthleteId): Promise<WorkoutGoalsRead>;
   /**
    * Puts the athlete row back after an erase.
    *
@@ -287,6 +293,13 @@ export interface TransferPort {
    * key, and a token left behind would sign in as the identity just erased.
    */
   readonly instance: DraftStore;
+  /**
+   * The note of analysis jobs asked of an instance and not yet seen to end
+   * (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`.
+   * Required, so an erase cannot leave it behind and the policy's sentence
+   * about it stay true.
+   */
+  readonly instanceAnalysis: DraftStore;
   /**
    * The row to recreate after an erase.
    *

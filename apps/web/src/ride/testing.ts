@@ -23,7 +23,7 @@
  * directory would put it outside the tsconfig program that typechecks it.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { unixSeconds, type HeartRateHoldContext } from '@onyourleft/domain';
 import { deviceId } from '@onyourleft/sensors';
 
 import { RIDE_METRIC_IDS, type RideController, type RideSnapshot } from './controller';
@@ -35,6 +35,11 @@ export interface RecordedCalls {
   readonly setTargetPower: number[];
   /** The workouts the screen asked to ride, by name. */
   readonly startWorkout: string[];
+  /** #1240: what each of those was started with — the threshold and the hold context. */
+  readonly startWorkoutWith: {
+    readonly thresholdPower: number;
+    readonly heartRateHold: HeartRateHoldContext | undefined;
+  }[];
   /** #212's three, each recorded with the recording it was asked about. */
   readonly continueRecovered: string[];
   readonly saveRecovered: string[];
@@ -165,6 +170,7 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     unpair: [],
     setTargetPower: [],
     startWorkout: [],
+    startWorkoutWith: [],
     continueRecovered: [],
     saveRecovered: [],
     discardRecovered: [],
@@ -291,8 +297,9 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
      * control, so nothing on the screen this stub is for reads it.
      */
     simulationControl: () => undefined,
-    startWorkout: (record) => {
+    startWorkout: (record, thresholdPower, heartRateHold) => {
       calls.startWorkout.push(record.name);
+      calls.startWorkoutWith.push({ thresholdPower, heartRateHold });
       // ⚠️ Answers `true` unconditionally, and a test that needs the refusal
       // path drives the real controller instead. A stub that guessed at the
       // control state would be a second implementation of the rule

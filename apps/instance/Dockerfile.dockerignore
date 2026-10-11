@@ -4,7 +4,7 @@
 # the repository root (#780). BuildKit reads `<Dockerfile>.dockerignore` for
 # that Dockerfile alone. Everything is left out, and then only what the image
 # is built from is let back in: the lockfile and the workspace manifest, the
-# instance and the four packages it imports — with their tests, their test
+# instance and the five packages it imports (`packages/fit` since #1195) — with their tests, their test
 # support and anything installed left out again.
 *
 !package.json
@@ -26,6 +26,9 @@
 !packages/analysis/package.json
 !packages/analysis/LICENSE
 !packages/analysis/src
+!packages/fit/package.json
+!packages/fit/LICENSE
+!packages/fit/src
 **/node_modules
 **/*.test.ts
 **/*-testing.ts

@@ -393,6 +393,15 @@ export function instanceRoomSocket(
 export const SEALED_STREAM_TIMEOUT_MILLISECONDS = 10 * 60_000;
 
 /**
+ * How long a sealed stream may be silent before it is read as dropped
+ * (#1102): past the longest heartbeat interval an instance may be set to
+ * (60 s), so a healthy stream is never cut for being quiet, and a tunnel that
+ * stopped forwarding without closing is noticed in well under a minute and a
+ * half rather than at {@link SEALED_STREAM_TIMEOUT_MILLISECONDS}.
+ */
+export const SEALED_STREAM_IDLE_MILLISECONDS = 75_000;
+
+/**
  * The offset between this device's clock and each instance's, in seconds,
  * kept in memory and replaced only by a later SEALED `stale_request` (D-9).
  */
@@ -469,6 +478,18 @@ export interface SealedStreamOptions {
   readonly body?: Readonly<Record<string, unknown>>;
   /** Resume after this event id: a NEW sealed request (D-9). */
   readonly lastEventId?: string;
+  /**
+   * Stop reading (#1102): the page went away, or the rider cancelled. The
+   * stream ends `cut`, so a later request can resume it after its last id.
+   */
+  readonly signal?: AbortSignal;
+  /**
+   * How long the stream may be silent — no event and no heartbeat — before it
+   * is read as dropped and ends `cut` (#1102). An instance sends a heartbeat
+   * at most every 60 s (`apps/instance` §`MAXIMUM_HEARTBEAT_MS`), so the
+   * default, {@link SEALED_STREAM_IDLE_MILLISECONDS}, is past that.
+   */
+  readonly idleMilliseconds?: number;
   /** Each event as it opens, in order. Never the `end` event. */
   onEvent(event: { readonly id: string; readonly kind: string; readonly data: string }): void;
 }
@@ -553,7 +574,12 @@ export function sealedInstance(
     });
   }
 
-  async function post(sealed: SealedRequest, token: string | undefined, timeout: number) {
+  async function post(
+    sealed: SealedRequest,
+    token: string | undefined,
+    timeout: number,
+    stop?: AbortSignal,
+  ) {
     const headers: Record<string, string> = {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
@@ -568,7 +594,10 @@ export function sealedInstance(
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
         cache: 'no-store',
-        signal: AbortSignal.timeout(timeout),
+        signal:
+          stop === undefined
+            ? AbortSignal.timeout(timeout)
+            : AbortSignal.any([AbortSignal.timeout(timeout), stop]),
       });
     } catch {
       throw new InstanceUnreachableError('no-answer');
@@ -669,7 +698,12 @@ export function sealedInstance(
         const sealed = await seal(options.method ?? 'GET', path, options.body, options.token, {
           ...(options.lastEventId === undefined ? {} : { lastEventId: options.lastEventId }),
         });
-        const response = await post(sealed, options.token, SEALED_STREAM_TIMEOUT_MILLISECONDS);
+        const response = await post(
+          sealed,
+          options.token,
+          SEALED_STREAM_TIMEOUT_MILLISECONDS,
+          options.signal,
+        );
         if (!(response.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
           const answer = await whole(sealed, response, MAXIMUM_INSTANCE_ANSWER_BYTES);
           const instanceTime = answer.sealed ? staleTime(answer.body) : undefined;
@@ -711,12 +745,18 @@ async function readStream(
   let buffered = '';
   try {
     for (;;) {
-      let chunk: ReadableStreamReadResult<Uint8Array>;
+      let chunk: ReadableStreamReadResult<Uint8Array> | undefined;
       try {
-        chunk = await reader.read();
+        chunk = await readWithin(
+          reader,
+          options.idleMilliseconds ?? SEALED_STREAM_IDLE_MILLISECONDS,
+          options.signal,
+        );
       } catch {
         return result('cut');
       }
+      // Silent past the idle bound, or told to stop: dropped, and resumable.
+      if (chunk === undefined) return result('cut');
       buffered += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       if (buffered.length > sealedEnvelopeLimit(MAXIMUM_INSTANCE_ANSWER_BYTES)) {
         return result('cut');
@@ -743,5 +783,34 @@ async function readStream(
     }
   } finally {
     await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * The next chunk, or `undefined` when nothing — not even a heartbeat — came
+ * within `idle` milliseconds, or `stop` was aborted first (#1102).
+ */
+async function readWithin(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idle: number,
+  stop: AbortSignal | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array> | undefined> {
+  if (stop?.aborted === true) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onStop: (() => void) | undefined;
+  const quiet = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(undefined);
+    }, idle);
+    onStop = () => {
+      resolve(undefined);
+    };
+    stop?.addEventListener('abort', onStop, { once: true });
+  });
+  try {
+    return await Promise.race([reader.read(), quiet]);
+  } finally {
+    clearTimeout(timer);
+    if (onStop !== undefined) stop?.removeEventListener('abort', onStop);
   }
 }

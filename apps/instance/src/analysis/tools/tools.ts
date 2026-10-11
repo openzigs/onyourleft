@@ -2,8 +2,8 @@
 
 /**
  * **The analysis agent's tools** — #1098, ADR 0046 D-7: `ride_sections`,
- * `recent_rides` and `goals`, and since #1099 `history_search`
- * (`history-search.ts`). Workouts are #1100.
+ * `recent_rides` and `goals`, since #1099 `history_search`
+ * (`history-search.ts`), and since #1100 `workouts`.
  *
  * Every tool is:
  *
@@ -14,7 +14,8 @@
  *   path for a model to set, and an argument a schema does not name is
  *   refused, not ignored.
  * - **Bounded** in what it returns ({@link RECENT_RIDES_LIMIT},
- *   {@link RIDE_SUMMARY_CHARACTERS}, {@link GOALS_CHARACTERS}).
+ *   {@link RIDE_SUMMARY_CHARACTERS}, {@link GOALS_CHARACTERS},
+ *   {@link WORKOUTS_LIMIT}, {@link WORKOUTS_CHARACTERS}).
  * - **Validated here**, against its own schema, before it runs: a model's
  *   arguments are untrusted input, and a wrong type is a tool error the model
  *   is shown, never a throw.
@@ -24,7 +25,8 @@
  *
  * ⚠️ **What no tool returns**: anything of a `side-camera-report` (the pose
  * summary, ADR 0046 D-6 — not a kind `reads.ts` can spell), an item's key, its
- * time or its athlete (a {@link ReadItem} carries its bytes and nothing else),
+ * time or its athlete (a {@link ReadItem} carries its bytes, and its key only
+ * so `recent_rides` can leave the asked-about ride out),
  * any item holding a `data:` URL (a picture, ADR 0040 D-2 item 1), and another
  * athlete's row (the read is by the job's athlete).
  */
@@ -34,6 +36,13 @@ import {
   MAXIMUM_SECTIONS,
   type RideAnalysisInput,
 } from '@onyourleft/analysis';
+import {
+  decodeWorkoutFile,
+  expandWorkout,
+  workoutDurationText,
+  workoutShapeText,
+  type Workout,
+} from '@onyourleft/domain';
 
 import { holdsDataUrl } from '../../history/passages.ts';
 import type { ToolSpec } from '../model-turn.ts';
@@ -74,6 +83,11 @@ export interface AgentTool<T = unknown> {
    */
   readonly maximumCalls?: number;
   validate(input: unknown): Checked<T>;
+  /**
+   * The tool's answer. ⚠️ A read that rejects is NOT turned into an answer:
+   * it propagates out of the agent and fails the job `engine-error`, with the
+   * error's text kept nowhere (`agent.ts` §`runAnalysisAgent`, #1187).
+   */
   run(context: ToolContext, args: T): Promise<string>;
 }
 
@@ -193,11 +207,21 @@ function summaryText(item: ReadItem): string | undefined {
   return joined === '' ? undefined : bounded(joined, RIDE_SUMMARY_CHARACTERS);
 }
 
-/** `recent_rides`: summaries of the athlete's recent synced rides, newest first. */
+/**
+ * `recent_rides`: summaries of the athlete's most recently SYNCED rides,
+ * newest sync first.
+ *
+ * ⚠️ **Synced, not ridden** (#1187): the read orders by when the instance
+ * received an item (`sql-store.ts` §`listLiveSyncItems`), and a summary
+ * carries no ride date a tool may return. After a back-catalogue sync the
+ * first line may be an old ride, so it is labelled "most recently synced",
+ * never "most recent". The asked-about ride is left out when the job names
+ * it ({@link ToolContext.rideId}); #1229 is what makes a job name it.
+ */
 export const RECENT_RIDES: AgentTool<Readonly<Record<string, number | undefined>>> = {
   spec: {
     name: 'recent_rides',
-    description: `Short summaries of the cyclist’s most recent rides, newest first. Ask for up to ${String(RECENT_RIDES_LIMIT)}.`,
+    description: `Short summaries of the cyclist’s most recently synced rides, newest sync first. The order is when each reached this server, not when it was ridden. Ask for up to ${String(RECENT_RIDES_LIMIT)}.`,
     parameters: {
       type: 'object',
       properties: {
@@ -209,26 +233,38 @@ export const RECENT_RIDES: AgentTool<Readonly<Record<string, number | undefined>
   validate: (input) => integers(input, { count: [1, RECENT_RIDES_LIMIT] }),
   run: async (context, args) => {
     const count = args.count ?? RECENT_RIDES_DEFAULT;
-    const items = await context.reads.listLiveSyncItems(context.athleteId, 'ride-summary', count);
+    const { rideId } = context;
+    // One more than asked, when the asked-about ride may be among them.
+    const items = await context.reads.listLiveSyncItems(
+      context.athleteId,
+      'ride-summary',
+      rideId === undefined ? count : count + 1,
+    );
     const summaries = items
+      .filter((item) => item.key !== rideId)
       .slice(0, count)
       .map(summaryText)
       .filter((text): text is string => text !== undefined);
     if (summaries.length === 0) return 'No summaries of other rides are synced.';
     return summaries
       .map(
-        (text, index) => `Ride ${String(index + 1)}${index === 0 ? ' (most recent)' : ''}: ${text}`,
+        (text, index) =>
+          `Ride ${String(index + 1)}${index === 0 ? ' (most recently synced)' : ''}: ${text}`,
       )
       .join('\n');
   },
 };
 
-/** A goal's text: a JSON body's `text`, or the body itself as plain text. */
+/**
+ * A goal's text: a JSON object's `text`, or else the body itself as plain
+ * text — a body that parses as JSON but is no object (`42`, `"a quoted
+ * line"`, `[1]`) included, which used to be dropped in silence (#1187).
+ */
 function goalText(item: ReadItem): string | undefined {
   const text = textOf(item);
   if (text === undefined || holdsDataUrl(text)) return undefined;
   const body = parsed(text);
-  const goal = isObject(body) ? body.text : body === undefined ? text : undefined;
+  const goal = isObject(body) ? body.text : text;
   if (typeof goal !== 'string' || holdsDataUrl(goal)) return undefined;
   return goal.trim() === '' ? undefined : goal.trim();
 }
@@ -258,6 +294,78 @@ export const GOALS: AgentTool<Readonly<Record<string, number | undefined>>> = {
   },
 };
 
+/** The most workouts `workouts` returns (#1100). */
+export const WORKOUTS_LIMIT = 10;
+
+/** The most `workouts` returns, all workouts together (#1100). */
+export const WORKOUTS_CHARACTERS = 4_000;
+
+/**
+ * How many workout items are read, at most, to fill {@link WORKOUTS_LIMIT}:
+ * more than the limit, so a few rows that do not validate are skipped without
+ * leaving the answer short.
+ */
+const WORKOUT_ITEMS = 40;
+
+/**
+ * One saved workout, compactly — its name, its total time and its shape in
+ * the Workouts screen's own sentence (`@onyourleft/domain`
+ * §`workoutShapeText`): shares of threshold, never watts (ADR 0017). Or
+ * `undefined` for a row that is not a workout this program would ride.
+ *
+ * ⚠️ **Re-validated on the way out**, as `packages/store`'s
+ * `fromPersistedWorkout` does on the device: a synced row can be hand-edited
+ * on the instance, and `decodeWorkoutFile` refuses anything `validateWorkout`
+ * would — which is also what bounds `expandWorkout` (ADR 0017 D-6). A row it
+ * refuses is skipped, never thrown. The description is not returned.
+ */
+function workoutLine(item: ReadItem): string | undefined {
+  const text = textOf(item);
+  if (text === undefined || holdsDataUrl(text)) return undefined;
+  let workout: Workout;
+  try {
+    workout = decodeWorkoutFile(text);
+  } catch {
+    return undefined;
+  }
+  const name = workout.name.replace(/\s+/g, ' ').trim();
+  if (name === '') return undefined;
+  const total = workoutDurationText(expandWorkout(workout).totalSeconds);
+  return `${name} — ${total}: ${workoutShapeText(workout)}`;
+}
+
+/** `workouts`: the athlete's saved workouts, most recently received first, at most 10 and 4 000 characters. */
+export const WORKOUTS: AgentTool<Readonly<Record<string, number | undefined>>> = {
+  spec: {
+    name: 'workouts',
+    description:
+      'The cyclist’s saved workouts, most recently received first: each one’s name, total time and its blocks, with targets as a percentage of threshold power.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  validate: (input) => integers(input, {}),
+  run: async (context) => {
+    const items = await context.reads.listLiveSyncItems(
+      context.athleteId,
+      'workout',
+      WORKOUT_ITEMS,
+    );
+    const lines: string[] = [];
+    let used = 0;
+    for (const item of items) {
+      if (lines.length === WORKOUTS_LIMIT) break;
+      const workout = workoutLine(item);
+      if (workout === undefined) continue;
+      const room = WORKOUTS_CHARACTERS - used;
+      if (room < 2) break;
+      const line = bounded(`Workout: ${workout}`, room);
+      lines.push(line);
+      // The line, and the line break before the next.
+      used += line.length + 1;
+    }
+    return lines.length === 0 ? 'The cyclist has no saved workouts synced.' : lines.join('\n');
+  },
+};
+
 /** A tool of any argument shape, as the agent holds them. */
 export type AnyAgentTool = AgentTool<Readonly<Record<string, unknown>>>;
 
@@ -267,4 +375,5 @@ export const AGENT_TOOLS: readonly AnyAgentTool[] = [
   RECENT_RIDES,
   GOALS,
   HISTORY_SEARCH,
+  WORKOUTS,
 ];

@@ -111,6 +111,7 @@ import type {
   RiderTextKind,
   RiderTextRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -1042,5 +1043,27 @@ export function trustedDeviceKeyFor(owner: AthleteId, seed = 0): TrustedDeviceKe
     athleteId: owner,
     publicKey: hex.slice(0, 64),
     admittedAt: unixSeconds(FIXTURE_EPOCH + 500_000 + ATHLETES.indexOf(owner) + seed),
+  };
+}
+
+/**
+ * One athlete's typed workout goals — #1236. ⚠️ **Different numbers per
+ * athlete and per `seed`**, so a scoping probe that returned somebody else's
+ * goals cannot hand back a set that matches.
+ */
+export function workoutGoalsFor(owner: AthleteId, seed = 0): WorkoutGoalsRecord {
+  const offset = ATHLETES.indexOf(owner) * 3 + seed;
+  return {
+    athleteId: owner,
+    goals: {
+      sessionType: 'endurance',
+      durationMinutes: 60 + offset,
+      holdRange: { low: beatsPerMinute(125 + offset), high: beatsPerMinute(135 + offset) },
+      heartRateAbove: beatsPerMinute(150 + offset),
+      powerCeiling: thresholdShare(0.7 + offset / 100),
+      timeInRangeMinutes: 40 + offset,
+      effortCheckIns: offset % 2 === 0,
+    },
+    savedAt: unixSeconds(FIXTURE_EPOCH + 600_000 + offset),
   };
 }

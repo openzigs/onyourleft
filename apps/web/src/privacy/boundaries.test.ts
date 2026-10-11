@@ -42,6 +42,7 @@ import { decodeGpx, decodeGpxRoute } from '@onyourleft/fit';
 import {
   ATHLETE_A,
   createStoreHarness,
+  indexedDbStoreFactory,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -72,6 +73,8 @@ import { exportActivity } from '../transfer/export-activity';
 import { createInstancePort } from '../instance/instance-port';
 import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
+import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
+import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
 
 import { coordinatesIn, insideZone } from './boundaries';
 import { PATTERNS_ONLY } from '@onyourleft/analysis';
@@ -169,6 +172,16 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'ride-analysis/instance-job.ts',
+    what: 'a ride’s numbers, section by section, sent to the rider’s instance for a write-up when they ask (#1102)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)), and a hosted job goes on from there to a third party (ADR
+    // 0046 D-9). #809's builder puts no coordinate, no altitude and no date in
+    // the input at all, so the walk below finds none over a ride that crosses a
+    // zone — stronger than a trim, and asserted on the body that is sent.
+    direction: 'departing',
+  },
+  {
     module: 'rooms/share.ts',
     what: 'the route a room is made on, relayed to the riders its maker shares its code with (#784)',
     // ⚠️ Departing: the maker's own route, leaving their device for an
@@ -214,7 +227,10 @@ function boundaryModulesOnDisk(): readonly string[] {
       // the only signal this walk has. `privacy/no-network.test.ts` is the
       // stronger check — it pins WHICH module may send at all — and this one
       // makes that module declare which way it faces.
+      // ⚠️ And `instance-job.ts` since #1102: the one builder of a write-up
+      // job's request to the rider's instance, named for what it builds.
       if (
+        entry === 'instance-job.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
@@ -484,6 +500,51 @@ describe('an instance is sent no coordinate at all — #777', () => {
     expect(
       coordinatesIn({ publicKey: 'ab', where: { latitude: 51.5, longitude: -0.12 } }),
     ).toHaveLength(1);
+  });
+});
+
+describe('a write-up job is sent no coordinate at all — #1102', () => {
+  it('has none in the request, for a ride whose track crosses a privacy zone', async () => {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    const ride = rideFor(ATHLETE_A, { hasPosition: true });
+    const streams = streamSetFor(ride, { sampleCount: SAMPLE_COUNT });
+    const positions = (streams.channels.latitude ?? []).map((each, index) => ({
+      latitude: each ?? 0,
+      longitude: streams.channels.longitude?.[index] ?? 0,
+    }));
+    const zone = zoneOver(positions);
+    // The fixture is one the zone matters to: the ride's own track enters it.
+    expect(insideZone(coordinatesIn(positions), zone, ride.id).length).toBeGreaterThan(0);
+    await harness.write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streams);
+      await store.putPrivacyZone(zone);
+    });
+    const scripted = scriptedJobs([succeeded('A steady ride.')]);
+    const reader = indexedDbStoreFactory.open(harness.databaseName);
+    await createInstanceAnalysis({
+      store: reader,
+      athleteId: ATHLETE_A,
+      connected: () => true,
+      session: async () => Promise.resolve(scripted.session),
+      cameraConsented: () => true,
+      now: () => unixSeconds(1_800_000_000),
+    }).ask(ride.id, 'instance-local', () => undefined, new AbortController().signal);
+    const body = startedWith(scripted);
+    // Something was sent, or "no coordinate" is true of nothing.
+    expect(body?.input.sections.length).toBeGreaterThan(0);
+    expect(coordinatesIn(body)).toStrictEqual([]);
+    expect(insideZone(coordinatesIn(body), zone, ride.id)).toStrictEqual([]);
+    reader.close();
+    await harness.destroy();
+  });
+
+  it('would find one if the request carried it', () => {
+    expect(coordinatesIn({ input: { start: { latitude: 51.5, longitude: -0.12 } } })).toHaveLength(
+      1,
+    );
   });
 });
 

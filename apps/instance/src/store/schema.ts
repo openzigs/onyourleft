@@ -314,7 +314,23 @@ export type SyncKind =
    * zones — for masking what a hosted model is sent (#1101, ADR 0046 D-10).
    * Never indexed and never readable by an analysis tool.
    */
-  | 'masking';
+  | 'masking'
+  /**
+   * A saved workout (#1100): its body is the workout's own file format
+   * (`@onyourleft/domain` §`encodeWorkoutFile`, ADR 0017), keyed by the
+   * device's workout id. Read only by the agent's `workouts` tool, which
+   * re-validates every row (`decodeWorkoutFile`). Not indexed for history.
+   */
+  | 'workout'
+  /**
+   * The rider's TYPED workout goals (#1237, ADR 0048 D-10, the owner's Q9):
+   * one item, keyed `goals`, its body the goals as JSON
+   * (`@onyourleft/domain` §`readWorkoutGoals`). ⚠️ **Not `goal`**, #836's free
+   * text, which never sets a bound: only this kind may bound a heart-rate hold
+   * or a re-plan. Synced sealed only (ADR 0047), like every item, and not
+   * indexed for history. The device copy is canonical (ADR 0036 D-3).
+   */
+  | 'workout-goal';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
@@ -381,6 +397,32 @@ export interface HostedModelKeyTable {
   /** The key, encrypted, with GCM's tag on the end. */
   readonly ciphertext: Uint8Array;
   readonly set_at: number;
+}
+
+/**
+ * A rider's OWN hosted model key (#1199, ADR 0046 D-9 as the owner ruled it
+ * on 2026-10-09: bring-your-own only). Added by migration 0021. One row an
+ * athlete; the key is AES-256-GCM ciphertext under `OYL_INSTANCE_SECRET_KEY`,
+ * sealed exactly as {@link HostedModelKeyTable}'s, and never a column in clear.
+ */
+export interface AthleteHostedKeyTable {
+  readonly athlete_id: string;
+  /** The hosted service's OpenAI-compatible base URL, `https:` only. */
+  readonly url: string;
+  readonly model: string;
+  readonly iv: Uint8Array;
+  readonly ciphertext: Uint8Array;
+  readonly set_at: number;
+}
+
+/**
+ * A rider's own recorded hosted consent (#1199, ADR 0046 Q10). Added by
+ * migration 0021. One row an athlete: the ORIGIN it names, and when.
+ */
+export interface AthleteHostedConsentTable {
+  readonly athlete_id: string;
+  readonly origin: string;
+  readonly recorded_at: number;
 }
 
 /**
@@ -459,6 +501,11 @@ export interface AnalysisJobTable {
   readonly template_version: string;
   /** The device-built ride input, checked on the way in (`analysis/job-input.ts`). */
   readonly input_json: string;
+  /**
+   * The synced ride the job writes up, by its own id, when the device named
+   * one (#1229, migration 0022); checked to be the athlete's at the start.
+   */
+  readonly ride_id: string | null;
   /** The screened write-up, until the device acknowledges it or the job is deleted. */
   readonly candidate: string | null;
   /** One of `analysis/jobs.ts` §`JobFailure`, when the job failed. */
@@ -514,4 +561,6 @@ export interface InstanceDatabase {
   readonly account_change_mark: AccountChangeMarkTable;
   readonly analysis_job: AnalysisJobTable;
   readonly analysis_event: AnalysisEventTable;
+  readonly athlete_hosted_key: AthleteHostedKeyTable;
+  readonly athlete_hosted_consent: AthleteHostedConsentTable;
 }

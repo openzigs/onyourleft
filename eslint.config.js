@@ -539,6 +539,30 @@ export default tseslint.config(
       ],
     },
   },
+  // `no-restricted-imports` reads static imports only, so `import('ai')` and
+  // `import('@ai-sdk/openai-compatible')` linted clean (#1187). This is the
+  // dynamic half, by `no-restricted-syntax`, which no other block sets. A
+  // string or a template with no substitution is matched; a COMPUTED
+  // specifier (`import(name)`) cannot be, by lint or by anything static.
+  // Probed: `await import('ai')` and `` import(`@ai-sdk/x`) `` in
+  // `analysis/agent.ts` are errors, in `model.ts` they are not.
+  {
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    ignores: ['apps/instance/src/analysis/model.ts', 'apps/instance/src/analysis/model.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...[
+          'ImportExpression[source.value=/^(?:ai|ai\\x2F.*|@ai-sdk\\x2F.*)$/]',
+          'ImportExpression[source.quasis.0.value.cooked=/^(?:ai|ai\\x2F.*|@ai-sdk\\x2F.*)$/]',
+        ].map((selector) => ({
+          selector,
+          message:
+            'Only apps/instance/src/analysis/model.ts may import the AI SDK, dynamically or not (#1096, #1187, ADR 0046 D-8).',
+        })),
+      ],
+    },
+  },
   {
     files: TEST_AND_TEST_SUPPORT_FILES,
     ignores: ['apps/instance/src/analysis/model.test.ts'],

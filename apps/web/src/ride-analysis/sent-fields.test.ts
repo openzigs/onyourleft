@@ -19,7 +19,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { HOSTED_CONSENT } from '../camera/hosted-model';
-import { COMPUTER_SENDS } from '../detail/write-up';
+import { COMPUTER_SENDS, INSTANCE_SENDS } from '../detail/write-up';
+import { analysisJobRequest } from './instance-job';
 
 import {
   MAXIMUM_SECTIONS,
@@ -213,6 +214,36 @@ describe.each(
       expect(missing, 'a figure is sent that these words do not name').toStrictEqual([]);
     },
   );
+});
+
+describe('what a write-up job sends to the instance is what the rider is told is sent (#1102)', () => {
+  /**
+   * The input's own keys, which a job sends as they are (ADR 0046 D-6) — but
+   * three that are not figures: the template's version; `sections`, the list
+   * each section is in, which "section by section" names; and `pose`, the
+   * side camera's comparison, which its own phrase names.
+   */
+  const keys = sentKeys(JSON.stringify(analysisJobRequest(FULL, '1', 'instance-local').input));
+  const STRUCTURE: Readonly<Record<string, string>> = {
+    templateVersion: 'not a figure: which template the instance runs',
+    sections: 'section by section',
+    pose: 'how a few measurements of your riding position changed',
+  };
+
+  it('reads the figures at all', () => {
+    expect(keys.size).toBeGreaterThan(20);
+    expect(keys).toContain('meanGradientPercent');
+  });
+
+  it('is named, figure by figure, in the instance paragraph (#1104 B3)', () => {
+    expect(INSTANCE_SENDS.length).toBeGreaterThan(300);
+    const missing = [...keys].filter((key) => {
+      if (key === 'templateVersion') return false;
+      const phrase = NAMED_BY[key] ?? STRUCTURE[key];
+      return phrase === undefined || !INSTANCE_SENDS.includes(phrase);
+    });
+    expect(missing, 'a job sends a figure the instance paragraph does not name').toStrictEqual([]);
+  });
 });
 
 describe('the check can fail (#845)', () => {

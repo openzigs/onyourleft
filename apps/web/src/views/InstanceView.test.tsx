@@ -109,7 +109,8 @@ describe('the Connect screen — #777, #778', () => {
     expect(sync).toContain('which needs the instance’s card');
     expect(sync).toContain('with their positions and heart rate');
     expect(sync).toContain('sealed on this device for the instance alone');
-    expect(sync).toContain('This version of the app does not offer Sync yet');
+    expect(sync).toContain('Nothing is synced until you press Sync now');
+    expect(sync).not.toContain('does not offer Sync yet');
     expect(INSTANCE_KEPT_VISIBLE).toContain(room);
     expect(INSTANCE_KEPT_VISIBLE).toContain(sync);
     const scripted = scriptedInstance();

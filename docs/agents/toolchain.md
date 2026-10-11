@@ -76,7 +76,8 @@ for everyone, `test:workerd` included), each for about 0.2 s of a ~20-minute job
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
 that dependency's install script run on the runner. The controls that keep it acceptable are all
 already in place — `pull_request` rather than its target-context counterpart, `permissions: contents:
-read`, no secrets in the job, `persist-credentials: false`, and the first-time-contributor approval
+read`, no secret a fork's run is given (the job's one secret, #1231's read-only Docker Hub pull
+token, is withheld from fork pull requests), `persist-credentials: false`, and the first-time-contributor approval
 gate — and the residual exposure is runner CPU and outbound network, which is inherent to running an
 install in CI at all. Read the block anyway when reviewing a fork's pull request.
 

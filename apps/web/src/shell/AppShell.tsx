@@ -58,10 +58,12 @@ import type { RoutingProvider } from '@onyourleft/domain';
 import { RideSession } from '../ride/RideSession';
 import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
+import type { SyncPort } from '../instance/sync-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
@@ -70,6 +72,7 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
@@ -356,6 +359,14 @@ export interface AppShellProps {
    */
   readonly rideAnalysis?: RideAnalysisPort | undefined;
   /**
+   * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): started,
+   * streamed, cancelled and resumed on a ride's page, then screened and saved
+   * on this device. ⚠️ Optional, so a `main.tsx` that left it out would be
+   * green in `check:wiring`; `ride-analysis/instance-analysis-wiring.test.tsx`
+   * is what goes red for that.
+   */
+  readonly instanceAnalysis?: InstanceAnalysisPort | undefined;
+  /**
    * The analysis screen's store (#78).
    *
    * A fifth port over the same connection, and the only one that may read the
@@ -461,6 +472,12 @@ export interface AppShellProps {
    */
   readonly riderText?: RiderTextPort | undefined;
   /**
+   * The rider's typed workout goals (#1237) — `workout-goals/workout-goals-port.ts`.
+   * Optional like every other port here; without one the panel says there is
+   * no store to keep them in.
+   */
+  readonly workoutGoals?: WorkoutGoalsPort | undefined;
+  /**
    * The Connect screen's port (#777) — `instance/instance-port.ts`
    * §`createInstancePort`, built in `main.tsx` and nowhere else. Without one
    * the screen says this platform cannot connect.
@@ -472,6 +489,12 @@ export interface AppShellProps {
    * Instance screen asks it whether to link to Moderation at all.
    */
   readonly moderation?: ModerationPort | undefined;
+  /**
+   * Sync with the instance (#1195) — `instance/sync-port.ts`
+   * §`createSyncPort`, built in `main.tsx` and nowhere else. The Instance
+   * screen draws its panel only once connected, and offers it only with a card.
+   */
+  readonly sync?: SyncPort | undefined;
   /**
    * The rider's kit colour, read from the athlete row at start-up (#623).
    *
@@ -548,6 +571,7 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           writeUp={props.rideAnalysis}
+          instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
         />
       );
@@ -675,12 +699,13 @@ function viewFor(
           basemap={props.basemap}
           maskedWords={props.maskedWords}
           riderText={props.riderText}
+          workoutGoals={props.workoutGoals}
         />
       );
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} />;
+      return <InstanceView port={props.instance} moderation={props.moderation} sync={props.sync} />;
     case 'moderation':
       return <ModerationView port={props.moderation} />;
     case 'credits':

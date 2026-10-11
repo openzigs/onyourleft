@@ -22,6 +22,17 @@
  * | failed or cancelled | the ask's sentence, ABOVE any earlier write-up, which says it is the earlier one (the owner's ruling of 2026-09-29) |
  * | a row this build cannot read | {@link WRITE_UP_UNREADABLE} |
  *
+ * ## The rider's instance — #1102
+ *
+ * Handed an instance port (ADR 0046 D-1), the section asks the INSTANCE when
+ * this device holds a sign-in to one (`ride-analysis/InstanceWriteUpControl.tsx`:
+ * start, stream, cancel, resume, then screen and save on the device), and when
+ * it does not, says so in one sentence with a link to the Connect screen
+ * (#1104 B4, ADR 0046 D-2) — the section's whole content when nothing is
+ * saved, and above a saved write-up, which still renders and is still screened,
+ * when something is. The own-computer and device-key controls stay beside it
+ * until #1103 removes them; without an instance port the section is #805's.
+ *
  * Each pair a rider could confuse — nothing asked and written, withheld and
  * failed, written and an earlier one after a failure — renders different
  * words, and `RideWriteUpSection.test.tsx` holds them apart the way
@@ -48,7 +59,9 @@ import type {
   RideWriteUpSource,
 } from '../ride-analysis/ride-analysis-port';
 import { RideWriteUpControl, WRITE_UP_HEADING } from '../ride-analysis/RideWriteUpControl';
-import { hrefFor, routeById } from '../shell/routes';
+import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
+import { InstanceWriteUpControl } from '../ride-analysis/InstanceWriteUpControl';
+import { hrefFor, INSTANCE_ROUTE, routeById } from '../shell/routes';
 
 import type { WriteUpOverview } from './load';
 import {
@@ -59,6 +72,8 @@ import {
   WRITE_UP_EARLIER_READING,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
+  WRITE_UP_NO_INSTANCE_AFTER,
+  WRITE_UP_NO_INSTANCE_BEFORE,
   WRITE_UP_NOT_ASKED,
   WRITE_UP_POSE_TEXT,
   WRITE_UP_SET_UP_AFTER,
@@ -74,6 +89,14 @@ const HEADING_ID = 'oyl-write-up-heading';
 export interface RideWriteUpSectionProps {
   /** The post-ride ask (#804), or `undefined` for none — the fallback. */
   readonly port?: RideAnalysisPort | undefined;
+  /**
+   * The rider's instance (#1102, ADR 0046 D-1). Given, the section asks the
+   * instance when this device is signed in to one, and says in one sentence
+   * that a write-up needs one when it is not; the own-computer and
+   * device-key controls above stay beside it until #1103 removes them.
+   * `undefined` is the page as #805 built it.
+   */
+  readonly instance?: InstanceAnalysisPort | undefined;
   readonly activityId: ActivityId;
   /** What the page read with the ride. */
   readonly initial: WriteUpOverview;
@@ -87,6 +110,16 @@ function SetUp(): JSX.Element {
     <p className="oyl-muted">
       {WRITE_UP_SET_UP_BEFORE} <a href={hrefFor(routeById('camera'))}>{WRITE_UP_SET_UP_LINK}</a>{' '}
       {WRITE_UP_SET_UP_AFTER}
+    </p>
+  );
+}
+
+/** #1104 B4: no instance, in one sentence, with a link to connect one (ADR 0046 D-2). */
+function NoInstance(): JSX.Element {
+  return (
+    <p className="oyl-muted">
+      {WRITE_UP_NO_INSTANCE_BEFORE} <a href={hrefFor(INSTANCE_ROUTE)}>{INSTANCE_ROUTE.title}</a>
+      {WRITE_UP_NO_INSTANCE_AFTER}
     </p>
   );
 }
@@ -137,6 +170,7 @@ function Saved({
 
 export function RideWriteUpSection({
   port,
+  instance,
   activityId,
   initial,
   reread,
@@ -144,6 +178,8 @@ export function RideWriteUpSection({
   // Read when the page opens: it asks only whether a port COULD be built, and
   // sends nothing.
   const [sources] = useState<readonly RideWriteUpSource[]>(() => port?.availableSources() ?? []);
+  // Read when the page opens: storage only, nothing sent.
+  const [connected] = useState(() => instance?.connected() ?? false);
   const [saved, setSaved] = useState<WriteUpOverview>(initial);
   const [last, setLast] = useState<AskOutcome | undefined>(undefined);
   // Between a write-up being saved and it being read back, what is on the page
@@ -176,18 +212,35 @@ export function RideWriteUpSection({
     earlier = readBack === 'reading' ? WRITE_UP_EARLIER_READING : WRITE_UP_EARLIER_NOT_READ;
   }
 
-  if (sources.length === 0 && saved.kind === 'none') {
-    // The fallback: today's page and one sentence. No heading, no request.
-    return <SetUp />;
+  const legacy =
+    port === undefined || sources.length === 0 ? undefined : (
+      <RideWriteUpControl port={port} activityId={activityId} sources={sources} onEnded={ended} />
+    );
+
+  if (instance === undefined) {
+    if (sources.length === 0 && saved.kind === 'none') {
+      // The fallback: today's page and one sentence. No heading, no request.
+      return <SetUp />;
+    }
+  } else if (!connected && sources.length === 0 && saved.kind === 'none') {
+    // #1102: no instance and nothing saved — one sentence, no heading, no request.
+    return <NoInstance />;
   }
 
   return (
     <section aria-labelledby={HEADING_ID} className="oyl-write-up-section">
       <h3 id={HEADING_ID}>{WRITE_UP_HEADING}</h3>
-      {port === undefined || sources.length === 0 ? (
-        <SetUp />
+      {instance === undefined ? (
+        (legacy ?? <SetUp />)
       ) : (
-        <RideWriteUpControl port={port} activityId={activityId} sources={sources} onEnded={ended} />
+        <>
+          {connected ? (
+            <InstanceWriteUpControl port={instance} activityId={activityId} onEnded={ended} />
+          ) : (
+            <NoInstance />
+          )}
+          {legacy}
+        </>
       )}
       {saved.kind === 'none' && last === undefined ? (
         <p className="oyl-write-up__state">{WRITE_UP_NOT_ASKED}</p>

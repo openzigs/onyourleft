@@ -45,6 +45,7 @@ import {
   resistanceLevel,
   seconds,
   watts,
+  type BeatsPerMinute,
   type Watts,
 } from '@onyourleft/domain';
 
@@ -59,6 +60,7 @@ import {
   type FtmsControlRequest,
   type FtmsControlResponse,
   type FtmsOptions,
+  type HeartRateFrame,
   type IndoorBikeDataFrame,
   type SimulatedDevice,
   type SimulatedDeviceSpec,
@@ -77,6 +79,8 @@ import {
   type ScheduleTimeout,
   type TrainerControl,
 } from './fitness-machine-control';
+import { heartRateProfile } from './heart-rate';
+import type { MeasurementSink } from './profile';
 
 export const viewOf = (bytes: readonly number[]): DataView => {
   const array = Uint8Array.from(bytes);
@@ -168,6 +172,67 @@ export function frameToOctets(frame: IndoorBikeDataFrame): DataView {
   }
   return viewOf([...int16(flags), ...octets]);
 }
+
+/**
+ * GSS v9 §3.113, Heart Rate Measurement (`0x2A37`), written out with literal
+ * offsets (#1238) — so `decodeHeartRateMeasurement` is checked against the
+ * specification rather than against itself.
+ *
+ * Bit 0 is the value's width: clear for a `uint8`, set for a `uint16`, which a
+ * value over 255 needs. Bits 1 and 2 are Sensor Contact Status: bit 2 says the
+ * strap can tell, bit 1 that it is on the chest.
+ */
+export function heartRateFrameToOctets(frame: HeartRateFrame): DataView {
+  let flags = 0;
+  const value = frame.heartRate;
+  const octets: number[] = [];
+  if (value > 0xff) {
+    flags |= 1 << 0;
+    octets.push(value & 0xff, (value >>> 8) & 0xff);
+  } else {
+    octets.push(value);
+  }
+  if (frame.sensorContact !== 'unsupported') {
+    flags |= 1 << 2;
+    if (frame.sensorContact === 'detected') {
+      flags |= 1 << 1;
+    }
+  }
+  return viewOf([flags, ...octets]);
+}
+
+/**
+ * Every heart rate a strap notifies, read through the **real** Heart Rate
+ * profile (#1238): each notification encoded by
+ * {@link heartRateFrameToOctets} and decoded by `heartRateProfile`, the code a
+ * rider's strap is read with. A reading the decoder drops — a strap off the
+ * chest — never reaches `listener`, and a dropout delivers nothing at all.
+ */
+export function heartRatesThroughTheDecoder(
+  bench: SimulatorBench,
+  id: DeviceId,
+  listener: (heartRate: BeatsPerMinute) => void,
+): Unsubscribe {
+  return bench.device(id).onNotify((frames) => {
+    if (frames.hrs === undefined) {
+      return;
+    }
+    heartRateProfile.decode(
+      heartRateFrameToOctets(frames.hrs),
+      { ...IGNORED_SINK, 'heart-rate': listener },
+      bench.now,
+    );
+  });
+}
+
+const ignore = (): void => undefined;
+
+const IGNORED_SINK: MeasurementSink = {
+  power: ignore,
+  cadence: ignore,
+  speed: ignore,
+  'heart-rate': ignore,
+};
 
 /**
  * One thing that crossed the control point, in the order it crossed.

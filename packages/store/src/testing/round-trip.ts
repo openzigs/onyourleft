@@ -46,6 +46,7 @@ import type {
   SyncBaseRecord,
   RiderTextRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRecord,
   SegmentEndpointRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -918,4 +919,44 @@ export async function assertTrustedDeviceKeyRoundTrip(
     throw new RoundTripFailure('trustedDeviceKey: is not the value kept');
   }
   return read;
+}
+
+/**
+ * Saves the athlete's typed workout goals, closes every connection, and reads
+ * them back through `getWorkoutGoals` — the read a heart-rate hold or a
+ * re-plan makes before it is bounded by them (#1236). `memoryWriteStoreFactory`
+ * answers the write and keeps nothing.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertWorkoutGoalsRoundTrip(
+  harness: StoreHarness,
+  record: WorkoutGoalsRecord,
+): Promise<WorkoutGoalsRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putWorkoutGoals(record),
+    async (store) => store.getWorkoutGoals(record.athleteId),
+  );
+  if (read.status !== 'kept') {
+    throw new RoundTripFailure(
+      `the workout goals were saved and reported success, and a fresh connection reads ${read.status}`,
+    );
+  }
+  if (canonical(read.record) !== canonical(record)) {
+    throw new RoundTripFailure('workoutGoals: are not the goals kept');
+  }
+  return read.record;
+}
+
+/** JSON with every object's keys sorted, so key order is not a difference. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, held: unknown) =>
+    typeof held === 'object' && held !== null && !Array.isArray(held)
+      ? Object.fromEntries(
+          Object.entries(held as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          ),
+        )
+      : held,
+  );
 }

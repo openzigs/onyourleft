@@ -58,6 +58,7 @@ import {
 } from '@onyourleft/analysis';
 
 import type { Caller, Outcome } from '../auth/identity.ts';
+import { RIDE_ID, rideStarts } from '../history/history.ts';
 import { createRateLimiter, type RateLimit } from '../auth/rate-limit.ts';
 import type { FieldProblem } from '../errors.ts';
 import { logEvent, type LogSink } from '../log.ts';
@@ -129,6 +130,12 @@ export interface EngineJob {
   readonly athleteId: string;
   readonly input: RideAnalysisInput;
   readonly source: AnalysisSource;
+  /**
+   * The synced ride it writes up, by its own id, when the device named one
+   * and it was the athlete's at the start (#1229): the agent's `rideId`, which
+   * the history tool dates the other rides against.
+   */
+  readonly rideId?: string;
 }
 
 /** How an engine's run ended. `AgentOutcome` (`agent.ts`) is one. */
@@ -176,6 +183,7 @@ export type JobStore = Pick<
   | 'acknowledgeAnalysisJob'
   | 'interruptAnalysisJobs'
   | 'pruneAnalysisJobs'
+  | 'listActivityRecords'
 >;
 
 export interface AnalysisJobsOptions {
@@ -303,7 +311,13 @@ const refused = (fields: readonly FieldProblem[]): Outcome<never> => ({
   fields,
 });
 
-const BODY_KEYS = ['input', 'templateVersion', 'source'] as const;
+const BODY_KEYS = ['input', 'templateVersion', 'source', 'rideId'] as const;
+
+/** #1229's refusal of a `rideId` that is not one of the caller's synced rides — the history route's own words. */
+const NOT_A_SYNCED_RIDE: FieldProblem = {
+  field: 'rideId',
+  problem: 'must be the synced id of one of your rides',
+};
 const SOURCES: readonly AnalysisSource[] = ['instance-local', 'instance-hosted'];
 
 export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
@@ -367,7 +381,12 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       const input = readRideInput(JSON.parse(job.inputJson) as unknown);
       outcome = input.ok
         ? await engine.run(
-            { athleteId: job.athleteId, input: input.value, source: job.source },
+            {
+              athleteId: job.athleteId,
+              input: input.value,
+              source: job.source,
+              ...(job.rideId === null ? {} : { rideId: job.rideId }),
+            },
             controller.signal,
             emit,
           )
@@ -540,6 +559,20 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       }
       const input = readRideInput(body.input);
       if (!input.ok) return refused(input.fields);
+      // #1229: a named ride must be one of the CALLER's live synced rides —
+      // read from their own records, so another athlete's ride id, a deleted
+      // ride and one never synced are each refused, and no other athlete's
+      // ride is ever dated against.
+      const { rideId } = body;
+      if (rideId !== undefined) {
+        if (typeof rideId !== 'string' || !RIDE_ID.test(rideId)) {
+          return refused([NOT_A_SYNCED_RIDE]);
+        }
+        const records = await store.listActivityRecords(caller.athleteId);
+        if (!rideStarts(records, new Set([rideId])).has(rideId)) {
+          return refused([NOT_A_SYNCED_RIDE]);
+        }
+      }
       await recovering.catch(() => undefined);
       const id = jobId();
       const created = await store.createAnalysisJob({
@@ -548,6 +581,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
         source: body.source as AnalysisSource,
         templateVersion: ANALYSIS_AGENT_TEMPLATE_V1.version,
         inputJson: JSON.stringify(input.value),
+        rideId: typeof rideId === 'string' ? rideId : null,
         createdAt: now(),
       });
       if (created === 'busy') return { ok: false, code: 'job_running' };

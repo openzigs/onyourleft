@@ -67,6 +67,10 @@ import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
 import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type {
+  InstanceAnalysisPort,
+  InstanceAskOutcome,
+} from '../ride-analysis/instance-analysis-port';
 import { stubEffortPort } from '../efforts/testing';
 import { stubLibrary } from '../library/testing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
@@ -83,6 +87,8 @@ import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
+import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
+import type { WorkoutGoalsRecord } from '@onyourleft/store';
 import { workoutStub } from '../workouts/testing';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 
@@ -430,6 +436,23 @@ function rideAnalysisPort(): RideAnalysisPort {
   };
 }
 
+/**
+ * A write-up asked of the rider's instance (#1102): connected on the
+ * populated walk, so its press and what it says is sent are laid out, and not
+ * on the empty one, so its one no-instance sentence is. It never answers — a
+ * walk never presses it.
+ */
+function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
+  return {
+    connected: () => populated,
+    availableSources: () => (populated ? ['instance-local'] : []),
+    pendingJob: () => false,
+    ask: async () => new Promise<InstanceAskOutcome>(() => undefined),
+    followAgain: async () => Promise.resolve({ kind: 'detached' }),
+    cancel: async () => Promise.resolve(),
+  };
+}
+
 function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
   const count = 1800;
   const track = Array.from({ length: count }, (_unused, index) =>
@@ -598,6 +621,46 @@ function riderTextPort(populated: boolean): RiderTextPort {
   ).port;
 }
 
+/**
+ * The rider's typed workout goals (#1237) — every goal set in the populated
+ * walk, so the reflow walk lays out every box filled; none in the empty one.
+ * Kept in memory, read afresh on each read as the store's would be.
+ */
+function workoutGoalsPort(populated: boolean): WorkoutGoalsPort {
+  let kept: WorkoutGoalsRecord | undefined = populated
+    ? {
+        athleteId: ATHLETE,
+        goals: {
+          sessionType: 'endurance',
+          durationMinutes: 120,
+          holdRange: { low: beatsPerMinute(128), high: beatsPerMinute(138) },
+          heartRateAbove: beatsPerMinute(150),
+          powerCeiling: thresholdShare(0.75),
+          timeInRangeMinutes: 90,
+          effortCheckIns: true,
+        },
+        savedAt: unixSeconds(NOW),
+      }
+    : undefined;
+  return {
+    athleteId: ATHLETE,
+    now: () => unixSeconds(NOW),
+    store: {
+      getWorkoutGoals: () =>
+        Promise.resolve(kept === undefined ? { status: 'none' } : { status: 'kept', record: kept }),
+      putWorkoutGoals: (record) => {
+        kept = record;
+        return Promise.resolve(record);
+      },
+      deleteWorkoutGoals: () => {
+        const had = kept !== undefined;
+        kept = undefined;
+        return Promise.resolve(had);
+      },
+    },
+  };
+}
+
 function athleteMassPort(): AthleteMassPort {
   return {
     athleteId: ATHLETE,
@@ -715,6 +778,7 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
       riderText={riderTextPort(populated)}
+      workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
       moderation={
         scriptedModeration({
@@ -726,6 +790,7 @@ export function PopulatedShell({
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       rideAnalysis={rideAnalysisPort()}
+      instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,
         rides.map((activity) => ({

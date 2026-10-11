@@ -12,8 +12,10 @@ import type {
   InstanceState,
 } from '../instance/instance-port';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
+import { keyFingerprint, type SyncPort } from '../instance/sync-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
+import { SyncPanel } from './SyncPanel';
 
 /**
  * The Connect screen (#777, #778): an instance's address, signing in with this
@@ -51,7 +53,7 @@ export const INSTANCE_RECEIVES: readonly string[] = [
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
-  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, and your goals, notes and documents. They are sealed on this device for the instance alone, and stay on this device too. This version of the app does not offer Sync yet.',
+  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, and your goals, notes and documents. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
 ];
 
 export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';
@@ -116,11 +118,6 @@ export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
   'your account once, if you ever lose every device you have. They are shown only now.';
 
-/** A key, shortened to what a rider can compare by eye. */
-function fingerprint(publicKey: string): string {
-  return `${publicKey.slice(0, 8)}…${publicKey.slice(-8)}`;
-}
-
 /** A day, in UTC, so the screen says the same thing wherever it is read. */
 function day(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
@@ -152,7 +149,7 @@ function DeviceList({ outcome }: { readonly outcome: DevicesOutcome | undefined 
       {outcome.devices.map((device: InstanceDevice) => (
         <li key={device.publicKey}>
           <strong>{device.thisDevice ? 'This device' : 'Another device'}</strong>{' '}
-          <code>{fingerprint(device.publicKey)}</code>. Added {day(device.addedAt)}; last used{' '}
+          <code>{keyFingerprint(device.publicKey)}</code>. Added {day(device.addedAt)}; last used{' '}
           {device.lastUsedAt === null ? 'never' : day(device.lastUsedAt)}
           {device.revokedAt === null ? '.' : `; removed ${day(device.revokedAt)}.`}
         </li>
@@ -167,10 +164,13 @@ export const MODERATE_LINK_TEXT = 'Moderate this instance';
 export function InstanceView({
   port,
   moderation,
+  sync,
 }: {
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
+  /** Sync with the instance (#1195): drawn only once connected, and only offered with a card. */
+  readonly sync?: SyncPort | undefined;
 }): JSX.Element {
   const [state, setState] = useState<InstanceState | undefined>(undefined);
   const [standing, setStanding] = useState<ModerationStanding | undefined>(undefined);
@@ -356,6 +356,9 @@ export function InstanceView({
             {refusal}
           </StatusMessage>
         )}
+        {/* #1195: with no instance on this device the panel draws nothing at
+            all; it is here so that only its own availability decides. */}
+        {sync === undefined ? null : <SyncPanel port={sync} />}
       </section>
     );
   }
@@ -445,6 +448,8 @@ export function InstanceView({
       )}
 
       {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
+
+      {sync === undefined ? null : <SyncPanel port={sync} />}
 
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-devices">

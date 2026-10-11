@@ -18,6 +18,7 @@
  * `sealed-step.test.ts` holds both halves.
  */
 
+export * from './disclosure';
 export * from './history';
 export * from './hosted-mask';
 export * from './input';

@@ -16,6 +16,7 @@
  */
 
 import {
+  beatsPerMinute,
   revolutionsPerMinute,
   EVENT_TICKS_PER_SECOND_1024,
   UINT16_MODULUS,
@@ -30,18 +31,71 @@ import type { RiderProfile } from './rider';
 
 // --- Heart Rate Service (0x180D), Heart Rate Measurement (0x2A37) -----------
 
+/**
+ * Whether the strap can tell it is against skin, and whether it is: the
+ * Heart Rate Measurement's flag bits 1 and 2, as `protocol/heart-rate.ts`
+ * reads them. A strap off the chest (#1238's "strap absent") still notifies,
+ * with `not-detected` — and the decoder drops that reading rather than report
+ * its zero.
+ */
+export type SimulatedSensorContact = 'unsupported' | 'not-detected' | 'detected';
+
 export interface HeartRateFrame {
+  /**
+   * What the strap notifies. Not bounded to a plausible heart: #1238's
+   * scenarios notify 0 and 255 on purpose, and a value over 255 needs the
+   * 16-bit form (flag bit 0), which is what an encoder has to get right.
+   */
   readonly heartRate: BeatsPerMinute;
+  readonly sensorContact: SimulatedSensorContact;
 }
 
 export interface HeartRateService {
-  frame(rider: RiderProfile): HeartRateFrame;
+  /**
+   * The frame for the next notification. Called once per notification that
+   * is actually sent, so a scripted reading is spent only when it is notified.
+   */
+  notify(heartRate: number): HeartRateFrame;
+  /** What the next notification would carry, without spending a scripted reading. */
+  peek(heartRate: number): HeartRateFrame;
+  /** Scenario: notify these values verbatim, one per notification, then resume. */
+  queue(values: readonly number[]): void;
+  /** Scenario: the strap is off the chest for this many notifications. */
+  absent(notifications: number): void;
 }
 
 export function createHeartRateService(): HeartRateService {
+  let queued: number[] = [];
+  let absentFor = 0;
+  const frameOf = (value: number, contact: SimulatedSensorContact): HeartRateFrame => ({
+    heartRate: beatsPerMinute(Math.max(0, Math.round(value))),
+    sensorContact: contact,
+  });
   return {
-    frame(rider) {
-      return { heartRate: rider.heartRate };
+    notify(heartRate) {
+      if (absentFor > 0) {
+        absentFor -= 1;
+        return frameOf(0, 'not-detected');
+      }
+      return frameOf(queued.shift() ?? heartRate, 'unsupported');
+    },
+    peek(heartRate) {
+      return absentFor > 0
+        ? frameOf(0, 'not-detected')
+        : frameOf(queued[0] ?? heartRate, 'unsupported');
+    },
+    queue(values) {
+      for (const value of values) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+          throw new RangeError(
+            `a scripted heart rate must be a whole number from 0 to 65535, received ${String(value)}`,
+          );
+        }
+      }
+      queued = [...queued, ...values];
+    },
+    absent(notifications) {
+      absentFor = notifications;
     },
   };
 }

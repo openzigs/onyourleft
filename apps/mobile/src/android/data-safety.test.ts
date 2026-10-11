@@ -754,3 +754,21 @@ describe('the manifest the app actually ships supports the declaration', () => {
     }
   });
 });
+
+describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says a ride’s numbers go to the instance, sealed, never a picture or a position',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain('asks the instance they connected for a write-up (#1102)');
+      expect(why).toContain('sealed on the device for that instance alone (ADR 0047)');
+      expect(why).toContain('no position, altitude, date or identifier is in the numbers');
+      expect(why).toContain('no picture is ever sent');
+      // The rider's own instance is not a third party: the answers do not move.
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+});

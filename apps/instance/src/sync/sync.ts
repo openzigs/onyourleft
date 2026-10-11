@@ -313,10 +313,16 @@ export interface AccountExport {
   }[];
   /**
    * {@link HOSTED_KEY_HELD} when the instance holds a hosted model key for
-   * this athlete (#1097), and `null` when it does not. That and nothing
-   * else: never the key, its service or its model.
+   * this athlete — one they stored (#1199), or the operator's one key held
+   * for them (#1097) — and `null` when it does not. That and nothing else:
+   * never the key, its service or its model.
    */
   readonly hostedModelKey: typeof HOSTED_KEY_HELD | null;
+  /**
+   * The athlete's recorded hosted consent (#1199, ADR 0046 Q10): the origin
+   * it names and when it was recorded (Unix seconds), or `null`.
+   */
+  readonly hostedConsent: { readonly origin: string; readonly recordedAt: number } | null;
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
@@ -334,7 +340,7 @@ export const EXPORT_LEAVES_OUT: readonly string[] = [
   'The moderation log: what moderators did, and to whom, is the instance’s audit trail and is kept even when an account is deleted. Ask the instance’s operator for what it says about you.',
   'Reports other riders made about you: they are the reporters’, and naming them would tell you who they are.',
   'The history index’s passages and vectors: they are cut from the items above and worked out by the model named in historyIndex, so the same model can make them again from those items, and without it they mean nothing.',
-  'A hosted model key: hostedModelKey says only whether one is held. The key is a secret the operator set and can set again, and this file is meant to be carried around.',
+  'A hosted model key: hostedModelKey says only whether one is held. The key is a secret whoever set it can set again, and this file is meant to be carried around.',
 ];
 
 export interface Sync {
@@ -587,9 +593,16 @@ export function createSync(options: SyncOptions): Sync {
             writeUp: result.writeUp,
           })),
           hostedModelKey:
+            (await store.getAthleteHostedKey(caller.athleteId)) !== undefined ||
             (await store.getHostedModelKey())?.athleteId === caller.athleteId
               ? HOSTED_KEY_HELD
               : null,
+          hostedConsent: await (async () => {
+            const consent = await store.getHostedConsent(caller.athleteId);
+            return consent === undefined
+              ? null
+              : { origin: consent.origin, recordedAt: consent.recordedAt };
+          })(),
           notIncluded: EXPORT_LEAVES_OUT,
         },
       };

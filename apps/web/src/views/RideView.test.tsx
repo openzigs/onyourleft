@@ -18,10 +18,24 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 
-import { expandWorkout, seconds, thresholdShare, watts } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  expandWorkout,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  watts,
+} from '@onyourleft/domain';
+import { stubAnalysis } from '../analysis/testing';
+import { workoutStub } from '../workouts/testing';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator } from '@onyourleft/sensors/simulator';
-import { recordingSessionId, type UnitSystem } from '@onyourleft/store';
+import {
+  athleteId as toAthleteId,
+  recordingSessionId,
+  workoutId,
+  type UnitSystem,
+} from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -1083,5 +1097,69 @@ describe('a running workout owns the target — #605', () => {
 
     expect(document.querySelector('#oyl-erg-target')).not.toBeNull();
     expect(document.body.textContent).not.toContain(MANUAL_ERG_DURING_WORKOUT);
+  });
+});
+
+describe('#1240 — the Ride screen builds the heart-rate hold context from the rider’s own thresholds', () => {
+  const OWNER = toAthleteId('athlete-hold');
+  const record = {
+    id: workoutId('hold-w'),
+    createdBy: OWNER,
+    name: 'Hold',
+    workout: {
+      name: 'Hold',
+      blocks: [{ kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.6) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  };
+
+  async function startFor(thresholds: {
+    thresholdPower?: number;
+    thresholdHeartRate?: number;
+  }): Promise<ReturnType<typeof stubRideController>> {
+    const stub = stubRideController(ridingSnapshot());
+    const analysis = stubAnalysis(OWNER, [], {
+      id: OWNER,
+      displayName: 'A',
+      createdAt: unixSeconds(1),
+      ...(thresholds.thresholdPower === undefined
+        ? {}
+        : { thresholdPower: watts(thresholds.thresholdPower) }),
+      ...(thresholds.thresholdHeartRate === undefined
+        ? {}
+        : { thresholdHeartRate: beatsPerMinute(thresholds.thresholdHeartRate) }),
+    });
+    mounted = await mount(
+      <RideView
+        controller={stub.controller}
+        workouts={workoutStub(OWNER, [record])}
+        analysis={analysis}
+      />,
+    );
+    await settle();
+    await activateWithKeyboard(buttonNamed('Ride Hold'));
+    await settle();
+    return stub;
+  }
+
+  it('own power and heart rate: the workout starts with a hold context from them, assumed nothing', async () => {
+    const stub = await startFor({ thresholdPower: 250, thresholdHeartRate: 170 });
+    expect(stub.calls.startWorkoutWith).toStrictEqual([
+      {
+        thresholdPower: 250,
+        heartRateHold: {
+          thresholdHeartRate: 170,
+          assumed: { power: false, heartRate: false },
+        },
+      },
+    ]);
+  });
+
+  it('own power without a heart rate: no context, so every hold block rides steady and says why', async () => {
+    const stub = await startFor({ thresholdPower: 250 });
+    expect(stub.calls.startWorkoutWith).toStrictEqual([
+      { thresholdPower: 250, heartRateHold: undefined },
+    ]);
   });
 });

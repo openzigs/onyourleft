@@ -1065,3 +1065,27 @@ Until 2026-10-07 this section was §"Owner questions left open".
   home-network placement check to take off; the key routes still owed ([#1199](https://github.com/openzigs/onyourleft/issues/1199),
   whose fourth part this lifts) are born sealed-only and are added to that list. The operator
   command stays. (#1192)
+- **2026-10-09** — **D-7's "nothing reaches a trainer control point … nothing runs during a ride"
+  no longer holds for one job type, the re-plan during the ride.** The owner ruled on
+  [#1233](https://github.com/openzigs/onyourleft/issues/1233) (Q2, 2026-10-09): *"Only as
+  enumerated moves, only for future blocks, checked by the device (which computes the watts), off
+  unless switched on for the ride. ADR 0046 D-7 is amended for the re-plan job type."* A re-plan
+  job runs during a ride, starts when the rider has switched re-plans on for that ride (the press
+  D-7 requires), and answers with one move from a closed list and one reason from a closed list. No
+  tool it is given writes anything or reaches a trainer, and its answer reaches a setpoint only
+  through the device's validator and the workout player
+  ([ADR 0048](0048-workouts-that-change-during-the-ride.md) D-4 to D-8). **For every other job type D-7 stands as written.** (#1233)
+- **2026-10-09** — **D-9's Share mode is withdrawn by the owner, and a hosted model runs only on the
+  rider's own key.** The owner ruled on #1233 on 2026-10-09, *"Operator key is not shared with
+  riders. If it is hosted they need to bring their own key"*, and, asked whether that reached
+  post-ride analysis too, *"yes share mode should go for post ride analysis"* ([recorded on #1092](https://github.com/openzigs/onyourleft/issues/1092#issuecomment-6091274039)). So D-9's
+  *"**Share**: the operator sets one key, and every permitted rider's analysis uses it"* no longer
+  holds, for post-ride analysis and for re-plans alike: **a hosted model runs only on a key the
+  rider brought themselves** (bring-your-own,
+  [#1199](https://github.com/openzigs/onyourleft/issues/1199)), under that rider's recorded consent
+  naming the endpoint, masked as [#1101](https://github.com/openzigs/onyourleft/issues/1101) does.
+  The operator's own analyses may still use the operator's key **for the operator's own account**:
+  that is the operator as a rider bringing their own key, not a key shared with anyone. D-9's
+  source 1 (the instance's local model) and every rule D-9 states for a key (held on the instance,
+  encrypted at rest, never logged, erased with its athlete) are unchanged.
+  [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-11 records it. (#1233)

@@ -15,7 +15,7 @@ import { MARKER_KEY } from './hosted-key-testing.ts';
 import type { ModelConnection } from './model-turn.ts';
 import { modelForSource } from './source.ts';
 
-/** A recorded consent naming `origin` — which nothing on this tree supplies (Q10, #1199). */
+/** A recorded consent naming `origin` (Q10; the store's `athlete_hosted_consent` row on a running instance, #1199). */
 const consentTo =
   (origin: string | undefined): ((athleteId: string) => Promise<string | undefined>) =>
   () =>
@@ -152,7 +152,7 @@ describe('a job’s source (#1097)', () => {
   });
 
   describe('the athlete’s own recorded consent, before the key is read (ADR 0046 D-9, Q10)', () => {
-    it('on this tree, with no consent recorded, refuses the OPERATOR’s own hosted job and never reads the key', async () => {
+    it('with no consent reader, refuses the OPERATOR’s own hosted job and never reads the key', async () => {
       const hostedKey = vi.fn(() => Promise.resolve(HELD));
       const behindMasking = vi.fn(() => LOCAL);
       // 'a' is the athlete the key is held for — the operator — with masking supplied.
@@ -182,6 +182,55 @@ describe('a job’s source (#1097)', () => {
       ).toEqual({ ok: false, failure: 'hosted_unavailable' });
       expect(recordedConsent).toHaveBeenCalledWith('a');
       expect(hostedKey).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the origin itself', ORIGIN],
+      ['the origin with a trailing slash', `${ORIGIN}/`],
+      ['a full URL at that origin', 'https://models.example/v1/chat'],
+    ])(
+      'reads a consent recorded as %s as naming the key’s origin (#1197’s review)',
+      async (_why, recorded) => {
+        const hosted: ModelConnection = { turn: () => Promise.reject(new Error('not called')) };
+        expect(
+          await modelForSource('instance-hosted', 'a', {
+            local: LOCAL,
+            hostedKey: () => Promise.resolve(HELD),
+            recordedConsent: consentTo(recorded),
+            guard: () => Promise.resolve(PLANTED_GUARD),
+            behindMasking: () => hosted,
+          }),
+        ).toEqual({ ok: true, model: hosted });
+      },
+    );
+
+    it.each([
+      ['not a URL', 'models.example'],
+      ['not https', 'http://models.example'],
+    ])('refuses a consent that is %s, and never reads the key', async (_why, recorded) => {
+      const hostedKey = vi.fn(() => Promise.resolve(HELD));
+      expect(
+        await modelForSource('instance-hosted', 'a', {
+          local: LOCAL,
+          hostedKey,
+          recordedConsent: consentTo(recorded),
+          guard: () => Promise.resolve(PLANTED_GUARD),
+          behindMasking: () => LOCAL,
+        }),
+      ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+      expect(hostedKey).not.toHaveBeenCalled();
+    });
+
+    it('asks for the job’s own athlete’s key, and no other (#1199: bring-your-own)', async () => {
+      const hostedKey = vi.fn(() => Promise.resolve(HELD));
+      await modelForSource('instance-hosted', 'a', {
+        local: LOCAL,
+        hostedKey,
+        recordedConsent: consentTo(ORIGIN),
+        guard: () => Promise.resolve(PLANTED_GUARD),
+        behindMasking: () => LOCAL,
+      });
+      expect(hostedKey).toHaveBeenCalledWith('a');
     });
 
     it('refuses a consent that names another origin than the held key’s endpoint', async () => {

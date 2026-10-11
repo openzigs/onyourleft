@@ -103,7 +103,7 @@
  * not itself accumulate.
  */
 
-import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
+import type { SignedActivityRecord, UnixSeconds, WorkoutGoals } from '@onyourleft/domain';
 import {
   SIDE_SESSION_KINDS,
   StoreDecodeError,
@@ -119,6 +119,7 @@ import {
   type SideSessionKind,
   type SideSessionSourceRecord,
   type SideSessionSummaryRecord,
+  type WorkoutGoalsRead,
 } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
@@ -251,6 +252,23 @@ export interface ManifestRiderTexts {
     | { readonly unreadable: string }
   )[];
 }
+
+/**
+ * The rider's typed workout goals as the manifest carries them — #1236, ADR
+ * 0048 D-10. Not {@link ManifestRiderTexts}' free-text goals: these bound a
+ * heart-rate hold or a re-plan. They are here because ADR 0005 F's rollback is
+ * export → downgrade → re-import, and a downgrade drops the store that holds
+ * them, so an archive without them loses them. Field by field, never the row:
+ * the athlete is the archive's own. `{ unreadable }` in the place of a row the
+ * store re-checked and refused — carrying nothing of it, not even the store's
+ * fault, which names a field.
+ */
+export type ManifestWorkoutGoals =
+  { readonly goals: WorkoutGoals; readonly savedAt: number } | { readonly unreadable: string };
+
+/** What the manifest says of typed workout goals on this device that could not be read. */
+export const WORKOUT_GOALS_UNREADABLE =
+  'this device holds workout goals that could not be read, so this archive does not contain them';
 
 /** What the manifest says of goals, notes or documents on this device that could not be read. */
 export const RIDER_TEXTS_UNREADABLE =
@@ -534,6 +552,8 @@ export function accountManifest(input: {
   readonly camera: CameraManifest;
   /** #836. @see ManifestRiderTexts — absent from a manifest made before #836. */
   readonly riderTexts?: ManifestRiderTexts | undefined;
+  /** #1236. @see ManifestWorkoutGoals — `undefined` when the rider saved none. */
+  readonly workoutGoals?: ManifestWorkoutGoals | undefined;
   /**
    * #528, ADR 0033 D-7: where the rider was in the side camera's picture in
    * their last session — numbers, never a picture — and, since #530, whether
@@ -591,6 +611,9 @@ export function accountManifest(input: {
     camera: input.camera,
     // #836, ADR 0040 D-10: the rider's own goals, ride notes and documents.
     riderTexts: input.riderTexts ?? null,
+    // #1236, ADR 0048 D-10: the rider's typed workout goals. `null` rather than
+    // omitted, so "there were none" is written down.
+    workoutGoals: input.workoutGoals ?? null,
     // #528, ADR 0033 D-7 and ADR 0004 E: the athlete's own numbers coming back
     // to them. Fields, not the row: the record's `athleteId` is already the
     // manifest's own, and a spread would carry whatever the record grows next.
@@ -863,6 +886,7 @@ export async function exportEverything(
       store.getFramingReference(athleteId),
     ]);
   const riderTexts = await readRiderTexts(store, athleteId);
+  const workoutGoals = manifestWorkoutGoalsOf(await store.getWorkoutGoals(athleteId));
 
   // #384, ADR 0029 D-3.
   //
@@ -929,6 +953,7 @@ export async function exportEverything(
       },
       framingReference,
       riderTexts,
+      workoutGoals,
       exportedAt: Math.trunc(Date.now() / 1000),
     }),
   );
@@ -1025,6 +1050,32 @@ async function readRiderTexts(
         ? unreadable
         : { name: document.name ?? '', text: document.text, savedAt: document.savedAt },
     ),
+  };
+}
+
+/**
+ * The rider's typed workout goals, field by field, or `undefined` for none.
+ * @see ManifestWorkoutGoals
+ */
+function manifestWorkoutGoalsOf(read: WorkoutGoalsRead): ManifestWorkoutGoals | undefined {
+  if (read.status === 'none') return undefined;
+  if (read.status === 'fault') return { unreadable: WORKOUT_GOALS_UNREADABLE };
+  const { goals, savedAt } = read.record;
+  return {
+    goals: {
+      ...(goals.sessionType === undefined ? {} : { sessionType: goals.sessionType }),
+      ...(goals.durationMinutes === undefined ? {} : { durationMinutes: goals.durationMinutes }),
+      ...(goals.holdRange === undefined
+        ? {}
+        : { holdRange: { low: goals.holdRange.low, high: goals.holdRange.high } }),
+      ...(goals.heartRateAbove === undefined ? {} : { heartRateAbove: goals.heartRateAbove }),
+      ...(goals.powerCeiling === undefined ? {} : { powerCeiling: goals.powerCeiling }),
+      ...(goals.timeInRangeMinutes === undefined
+        ? {}
+        : { timeInRangeMinutes: goals.timeInRangeMinutes }),
+      ...(goals.effortCheckIns === undefined ? {} : { effortCheckIns: goals.effortCheckIns }),
+    },
+    savedAt,
   };
 }
 

@@ -106,6 +106,7 @@ import {
   toPersistedRideWriteUp,
   syncBaseProblem,
   trustedDeviceKeyProblem,
+  checkedWorkoutGoals,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
@@ -138,6 +139,8 @@ import type {
   SyncBaseKind,
   SyncBaseRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRead,
+  WorkoutGoalsRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -365,6 +368,11 @@ export interface AthleteDeletionCounts {
    * again.
    */
   readonly trustedDeviceKeys: number;
+  /**
+   * The rider's typed workout goals removed — #1236. At most one row: the
+   * goals are kept per athlete.
+   */
+  readonly workoutGoals: number;
 }
 
 /**
@@ -554,6 +562,10 @@ export class ActivityStore {
 
   get #trustedDeviceKeys(): Table<TrustedDeviceKeyRecord, [string, string]> {
     return this.#db.table<TrustedDeviceKeyRecord, [string, string]>(TABLE.trustedDeviceKeys);
+  }
+
+  get #workoutGoals(): Table<WorkoutGoalsRecord, string> {
+    return this.#db.table<WorkoutGoalsRecord, string>(TABLE.workoutGoals);
   }
 
   get #syncBases(): Table<SyncBaseRecord, [string, string, string]> {
@@ -944,6 +956,7 @@ export class ActivityStore {
         this.#syncBases,
         this.#riderTexts,
         this.#trustedDeviceKeys,
+        this.#workoutGoals,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -1033,6 +1046,10 @@ export class ActivityStore {
           .where(INDEX.trustedDeviceKeyByAthlete)
           .equals(id)
           .delete();
+        // #1236. The rider's typed workout goals: keyed by the athlete, so
+        // this deletes their one row and can reach nobody else's.
+        const workoutGoals = (await this.#workoutGoals.get(id)) === undefined ? 0 : 1;
+        await this.#workoutGoals.delete(id);
         await this.#athletes.delete(id);
         return {
           activities,
@@ -1051,6 +1068,7 @@ export class ActivityStore {
           syncBases,
           riderTexts,
           trustedDeviceKeys,
+          workoutGoals,
         };
       },
     );
@@ -2242,6 +2260,64 @@ export class ActivityStore {
         return row;
       })
       .sort((a, b) => (a.publicKey < b.publicKey ? -1 : a.publicKey > b.publicKey ? 1 : 0));
+  }
+
+  // --- Workout goals (#1236) ------------------------------------------------
+
+  /**
+   * Keeps the rider's typed workout goals, **replacing** whatever they had
+   * saved (`records.ts` §`WorkoutGoalsRecord`). The goals are read by
+   * `@onyourleft/domain` §`readWorkoutGoals` first, which refuses a malformed
+   * set whole and copies only the keys it knows, and what was written is
+   * returned — so a caller shows what landed, not what it asked for.
+   *
+   * @throws {StoreReferentialError} if the athlete does not exist.
+   * @throws {StoreValidationError} naming the field and the constraint.
+   */
+  async putWorkoutGoals(record: WorkoutGoalsRecord): Promise<WorkoutGoalsRecord> {
+    const checked = checkedWorkoutGoals(record);
+    if ('problem' in checked) {
+      throw new StoreValidationError(checked.problem);
+    }
+    const row = checked.record;
+    await this.#db.transaction('rw', [this.#athletes, this.#workoutGoals], async () => {
+      await this.#requireAthlete(row.athleteId);
+      await this.#workoutGoals.put(row);
+    });
+    return row;
+  }
+
+  /**
+   * This athlete's typed workout goals: `none` for a rider who saved none,
+   * `kept` with the goals, or `fault` for a row on disk that is not goals —
+   * a hand-edited row, re-read by the same check the write makes. A fault
+   * carries **no** goals, never part of one, and does not throw: a rider
+   * whose row is bad is told so and can save new goals over it.
+   */
+  async getWorkoutGoals(owner: AthleteId): Promise<WorkoutGoalsRead> {
+    const row: unknown = await this.#workoutGoals.get(owner);
+    if (row === undefined) {
+      return { status: 'none' };
+    }
+    if (typeof row !== 'object' || row === null) {
+      return { status: 'fault', fault: 'workoutGoals: must be a row of goals' };
+    }
+    const checked = checkedWorkoutGoals(row as Record<'athleteId' | 'goals' | 'savedAt', unknown>);
+    if ('problem' in checked) {
+      return { status: 'fault', fault: checked.problem };
+    }
+    return { status: 'kept', record: checked.record };
+  }
+
+  /** Clears this athlete's typed workout goals. `false` when there were none. */
+  async deleteWorkoutGoals(owner: AthleteId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#workoutGoals], async () => {
+      if ((await this.#workoutGoals.get(owner)) === undefined) {
+        return false;
+      }
+      await this.#workoutGoals.delete(owner);
+      return true;
+    });
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

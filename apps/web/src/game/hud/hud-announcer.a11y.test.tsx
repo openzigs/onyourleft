@@ -27,6 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -39,6 +40,7 @@ import { AppShell } from '../../shell/AppShell';
 import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
+import type { WorkoutHold } from '../../workout/hold-text';
 import type { GameRenderer } from '../port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 
@@ -402,5 +404,72 @@ describe('the trainer’s sentences go through the same ONE region — #445', ()
     await startRide(trainerPort(true));
     const said = await pumpUntil(/^Trainer: /, 40);
     expect(said).toMatch(/^Trainer: /);
+  });
+});
+
+describe('the heart-rate hold, through the game — #1240', () => {
+  let hold: WorkoutHold | undefined;
+
+  /** A trainer a running workout owns, whose hold the test changes between frames. */
+  function holdingPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutHold: () => hold,
+    };
+  }
+
+  const range = { low: beatsPerMinute(130), high: beatsPerMinute(140) };
+
+  beforeEach(() => {
+    hold = { reason: 'settling', range, target: 100 };
+  });
+
+  it('shows the hold on the HUD’s trainer line, and the line follows the target', async () => {
+    await startRide(holdingPort());
+    await pump(2);
+    expect(document.body.textContent).toContain('Hold 130–140 bpm: 100 W');
+    hold = { reason: 'raised', range, target: 115 };
+    await pump(2);
+    expect(document.body.textContent).toContain('Hold 130–140 bpm: 115 W');
+    expect(document.body.textContent).not.toContain('Hold 130–140 bpm: 100 W');
+    hold = undefined;
+    await pump(2);
+    expect(document.body.textContent).not.toContain('Hold 130–140 bpm');
+  });
+
+  it('says a CHANGED sentence through the one region with announcements on, and never the first one', async () => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide(holdingPort());
+    await pump(6);
+    expect(region()?.textContent).not.toContain('Heart-rate hold');
+    expect(offered).not.toContain('hold-changed');
+
+    hold = { reason: 'raised', range, target: 115 };
+    const said = await pumpUntil(/Heart-rate hold/, 10);
+    expect(said).toBe(
+      'Heart-rate hold: Target raised to bring your heart rate into the range you chose.',
+    );
+    expect(offered).toContain('hold-changed');
+  });
+
+  it('says nothing about the hold with announcements off', async () => {
+    await startRide(holdingPort());
+    await pump(4);
+    hold = { reason: 'raised', range, target: 115 };
+    await pump(10);
+    expect(region()?.textContent).not.toContain('Heart-rate hold');
   });
 });

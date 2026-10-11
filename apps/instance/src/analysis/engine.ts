@@ -15,10 +15,17 @@
 import { runAnalysisAgent, type AgentClock } from './agent.ts';
 import type { AnalysisEngine } from './jobs.ts';
 import { modelForSource, type SourceOptions } from './source.ts';
-import type { AnalysisReads } from './tools/reads.ts';
+import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
 
 export interface AgentEngineOptions {
   readonly reads: AnalysisReads;
+  /**
+   * The history index (#835) the agent's `history_search` reads, or
+   * `undefined` when the instance has none — which the tool then says. ⚠️
+   * Until #1229 a running instance handed none, so the tool answered
+   * "unavailable" on every job whatever the index held.
+   */
+  readonly history?: AnalysisHistory | undefined;
   readonly sources: SourceOptions;
   readonly clock: AgentClock;
 }
@@ -29,9 +36,14 @@ export function agentEngine(options: AgentEngineOptions): AnalysisEngine {
       const chosen = await modelForSource(job.source, job.athleteId, options.sources);
       if (!chosen.ok) return { kind: 'failed', why: chosen.failure };
       return runAnalysisAgent({
-        job: { athleteId: job.athleteId, input: job.input },
+        job: {
+          athleteId: job.athleteId,
+          input: job.input,
+          ...(job.rideId === undefined ? {} : { rideId: job.rideId }),
+        },
         model: chosen.model,
         reads: options.reads,
+        history: options.history,
         clock: options.clock,
         signal,
         emit,

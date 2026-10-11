@@ -403,8 +403,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         parameter, and #777 is the one module allowed to call
                         an instance, after #778's disclosures. Since #881
                         (#776) it also holds `sync.ts`, two-way sync with an
-                        instance, under the same rule (no `fetch`, nothing in
-                        the shipped client calls it). ⚠️ **The device's change
+                        instance, under the same rule (no `fetch`). ⚠️ Since
+                        #1195 the shipped client DOES call it: `sync-port.ts`
+                        over the sealed session, from the Instance screen's
+                        *Sync now* (`views/SyncPanel.tsx`), offered only with
+                        the instance's card and drawn not at all with no
+                        instance; a key is admitted only from the rider's
+                        confirmation there. ⚠️ **The device's change
                         wins**, and a reviewer who remembers "pull, then push
                         whatever differs" is reading #893's first draft, which
                         pulled back a ride deleted here and overwrote a

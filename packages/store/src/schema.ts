@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **17** since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **18** since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -115,10 +115,15 @@
  * record's key against rather than trusting the instance's device list.
  * Additive: a new store, and no existing record's shape changes.
  *
+ * ⚠️ **Version 18 is #1236's `workoutGoals`** — the rider's typed workout
+ * goals, one row per athlete, which bound a heart-rate hold or a re-plan during
+ * the ride (ADR 0048 D-10). Additive: a new store, and no existing record's
+ * shape changes.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -211,6 +216,12 @@ export const TABLE = {
    * together, so no row can be named without naming whose it is.
    */
   trustedDeviceKeys: 'trustedDeviceKeys',
+  /**
+   * #1236: the rider's typed workout goals (`records.ts`
+   * §`WorkoutGoalsRecord`). One row per athlete, keyed BY the athlete, so no
+   * row can be named without naming whose it is.
+   */
+  workoutGoals: 'workoutGoals',
 } as const;
 
 /**
@@ -855,6 +866,23 @@ export const STORES_V17: Readonly<Record<string, string>> = {
   [TABLE.trustedDeviceKeys]: ['[athleteId+publicKey]', INDEX.trustedDeviceKeyByAthlete].join(', '),
 };
 
+/**
+ * Version 18 — #1236's typed workout goals, added beside the twenty-one stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing — there is no record to transform, and a
+ * `down` over one would be the identity (`migrations.ts` §"The registry").
+ * Its rollback is export → downgrade → re-import, executed by
+ * `workout-goals-store.test.ts` §"rolls back": what a downgrade loses is the
+ * goals themselves, which the rider's own read gives back to be saved again.
+ *
+ * The primary key IS the athlete: one row each, and no row can be named
+ * without naming whose it is.
+ */
+export const STORES_V18: Readonly<Record<string, string>> = {
+  // The twenty-one stores of versions 1 to 17 are inherited unchanged.
+  [TABLE.workoutGoals]: 'athleteId',
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -873,4 +901,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V15,
   STORES_V16,
   STORES_V17,
+  STORES_V18,
 ];

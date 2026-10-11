@@ -105,73 +105,95 @@ describe('the sync manifest (#776)', () => {
   });
 });
 
+/**
+ * Three athletes' rides and items, each read back through the real listener.
+ * Under coverage on the CI runner this case took 2 944 ms (run 38048816433,
+ * EPYC 9V74) and 4 001 ms (run 38051571333, `main`, EPYC 7763) — 80 % of
+ * Vitest's 5 s default — and ran past 5 s on run 38052735064 (EPYC 9V74), with
+ * nothing hung; 968 ms locally without coverage. About three times the slowest
+ * green figure (docs/agents/ci.md §4c); nothing it drives is trimmed.
+ */
+const THREE_ATHLETES_CASE_MS = 15_000;
+
 describe('three athletes, the same keys, the same file (#776)', () => {
-  it('answers each athlete their own manifest, record and items, and nothing of the other two', async () => {
-    const setup = await syncWorld(3);
-    world = setup.world;
-    const riders = setup.riders;
-    const bytes = corpusFile('nominal-outdoor-ride.fit');
-    const shared = toHex(await sha256Bytes(bytes));
-    for (const rider of riders) {
-      await readJson(
-        await authorised(
-          world,
-          rider.token,
-          'POST',
-          '/v1/sync/records',
-          await uploadBody(rider.device, bytes, `ride-of-${rider.athleteId}`),
-        ),
-      );
-      for (const kind of ITEM_KINDS) {
-        // The SAME key for all three, and a body each can tell apart.
-        await readJson(await put(world, rider, kind, 'same-key', `${kind} of ${rider.athleteId}`));
-        await readJson(await put(world, rider, kind, `only-${rider.athleteId}`, 'mine'));
-      }
-    }
-
-    for (const rider of riders) {
-      const manifest = await manifestOf(world, rider);
-      expect(manifest).toHaveLength(1 + ITEM_KINDS.length * 2);
-      const others = riders.filter((other) => other !== rider).map((other) => other.athleteId);
-      for (const entry of manifest) {
-        for (const other of others) expect(entry.key).not.toContain(other);
-      }
-      expect(manifest.find((entry) => entry.kind === 'activity')?.activityId).toBe(
-        `ride-of-${rider.athleteId}`,
-      );
-
-      const pulled: { record: { publicKey: string } } = await readJson(
-        await authorised(world, rider.token, 'GET', `/v1/sync/records/${shared}`),
-      );
-      expect(pulled.record.publicKey, 'the same file, but this athlete’s record').toBe(
-        rider.device.publicKey,
-      );
-
-      for (const kind of ITEM_KINDS) {
-        const mine: { body: string } = await readJson(
-          await authorised(world, rider.token, 'GET', `/v1/sync/items/${kind}/same-key`),
-        );
-        expect(mine.body).toBe(`${kind} of ${rider.athleteId}`);
-        for (const other of others) {
-          const theirs = await authorised(
+  it(
+    'answers each athlete their own manifest, record and items, and nothing of the other two',
+    async () => {
+      const setup = await syncWorld(3);
+      world = setup.world;
+      const riders = setup.riders;
+      const bytes = corpusFile('nominal-outdoor-ride.fit');
+      const shared = toHex(await sha256Bytes(bytes));
+      for (const rider of riders) {
+        await readJson(
+          await authorised(
             world,
             rider.token,
-            'GET',
-            `/v1/sync/items/${kind}/only-${other}`,
+            'POST',
+            '/v1/sync/records',
+            await uploadBody(rider.device, bytes, `ride-of-${rider.athleteId}`),
+          ),
+        );
+        for (const kind of ITEM_KINDS) {
+          // The SAME key for all three, and a body each can tell apart.
+          await readJson(
+            await put(world, rider, kind, 'same-key', `${kind} of ${rider.athleteId}`),
           );
-          expect(theirs.status, `${kind} of ${other}`).toBe(404);
-          expect(
-            (await authorised(world, rider.token, 'DELETE', `/v1/sync/items/${kind}/only-${other}`))
-              .status,
-          ).toBe(404);
+          await readJson(await put(world, rider, kind, `only-${rider.athleteId}`, 'mine'));
         }
       }
-    }
-    // Nobody's delete reached anybody else's item.
-    for (const rider of riders) {
-      expect(await manifestOf(world, rider)).toHaveLength(1 + ITEM_KINDS.length * 2);
-    }
-  });
+
+      for (const rider of riders) {
+        const manifest = await manifestOf(world, rider);
+        expect(manifest).toHaveLength(1 + ITEM_KINDS.length * 2);
+        const others = riders.filter((other) => other !== rider).map((other) => other.athleteId);
+        for (const entry of manifest) {
+          for (const other of others) expect(entry.key).not.toContain(other);
+        }
+        expect(manifest.find((entry) => entry.kind === 'activity')?.activityId).toBe(
+          `ride-of-${rider.athleteId}`,
+        );
+
+        const pulled: { record: { publicKey: string } } = await readJson(
+          await authorised(world, rider.token, 'GET', `/v1/sync/records/${shared}`),
+        );
+        expect(pulled.record.publicKey, 'the same file, but this athlete’s record').toBe(
+          rider.device.publicKey,
+        );
+
+        for (const kind of ITEM_KINDS) {
+          const mine: { body: string } = await readJson(
+            await authorised(world, rider.token, 'GET', `/v1/sync/items/${kind}/same-key`),
+          );
+          expect(mine.body).toBe(`${kind} of ${rider.athleteId}`);
+          for (const other of others) {
+            const theirs = await authorised(
+              world,
+              rider.token,
+              'GET',
+              `/v1/sync/items/${kind}/only-${other}`,
+            );
+            expect(theirs.status, `${kind} of ${other}`).toBe(404);
+            expect(
+              (
+                await authorised(
+                  world,
+                  rider.token,
+                  'DELETE',
+                  `/v1/sync/items/${kind}/only-${other}`,
+                )
+              ).status,
+            ).toBe(404);
+          }
+        }
+      }
+      // Nobody's delete reached anybody else's item.
+      for (const rider of riders) {
+        expect(await manifestOf(world, rider)).toHaveLength(1 + ITEM_KINDS.length * 2);
+      }
+    },
+    THREE_ATHLETES_CASE_MS,
+  );
 });
 
 describe('items (#776)', () => {

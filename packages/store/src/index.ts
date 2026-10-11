@@ -44,6 +44,8 @@ export type {
   SyncBaseKind,
   SyncBaseRecord,
   TrustedDeviceKeyRecord,
+  WorkoutGoalsRead,
+  WorkoutGoalsRecord,
   RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,

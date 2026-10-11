@@ -330,6 +330,8 @@ export async function eraseDevice(
     readonly hostedModel?: EraseSideStores | undefined;
     /** This device's sign-in to an instance (#777) — `instance/instance-port.ts` §`instanceEraser`. */
     readonly instance?: EraseSideStores | undefined;
+    /** The note of jobs asked of the instance and not yet seen to end (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`. */
+    readonly instanceAnalysis?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
@@ -338,6 +340,7 @@ export async function eraseDevice(
   options.theme?.forget();
   options.hostedModel?.forget();
   options.instance?.forget();
+  options.instanceAnalysis?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }

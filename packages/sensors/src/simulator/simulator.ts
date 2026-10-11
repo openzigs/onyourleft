@@ -41,6 +41,7 @@
 import {
   seconds,
   unixSeconds,
+  watts,
   type Seconds,
   type UnixSeconds,
   type Watts,
@@ -94,6 +95,12 @@ import {
   type HeartRateFrame,
   type HeartRateService,
 } from './profiles';
+import {
+  createHeartRateResponse,
+  type HeartRateResponse,
+  type HeartRateResponseOptions,
+} from './heart-rate-response';
+import { listenerList, type ListenerList } from './listeners';
 import { DEFAULT_RIDER, type RiderProfile } from './rider';
 import type { Scenario } from './scenario';
 import { createVendorControlPoint, type VendorControlPoint } from './vendor-control';
@@ -129,7 +136,20 @@ export interface SimulatorOptions {
   readonly startAt?: UnixSeconds;
   /** `cancel` makes every `discover` end as the athlete pressing cancel. */
   readonly chooser?: 'first-match' | 'cancel';
+  /**
+   * Where a strap's heart rate comes from (#1238). `fixed`, the default, is
+   * the rider profile's `heartRate`, unchanged by anything. `responsive` is
+   * `heart-rate-response.ts`' first-order model, driven by the power the rider
+   * is actually making — the trainer's ERG target while one is held, nothing
+   * while the cranks are still — and starting settled at the rider's power
+   * unless `settledAt` says otherwise.
+   */
+  readonly heartRate?: SimulatedHeartRate;
 }
+
+/** See {@link SimulatorOptions.heartRate}. */
+export type SimulatedHeartRate =
+  { readonly kind: 'fixed' } | ({ readonly kind: 'responsive' } & HeartRateResponseOptions);
 
 /** What the device would notify right now, per service. */
 export interface DeviceFrames {
@@ -177,6 +197,16 @@ export interface SimulatedDevice {
    */
   script(scenario: Scenario): void;
   inspect(): DeviceInspection;
+  /**
+   * Every notification this device actually sends, as frames: called once per
+   * notification cycle while connected, and not during a dropout.
+   *
+   * The typed stream `transport.subscribe` delivers has already been decoded;
+   * this is what a test encodes to octets to run through a real decoder
+   * (`@onyourleft/sensors/protocol/testing`), so that a wrong encoding is a red
+   * test rather than a value the simulator agrees with itself about.
+   */
+  onNotify(listener: Listener<DeviceFrames>): Unsubscribe;
 }
 
 export interface SimulatorBench {
@@ -234,6 +264,9 @@ interface DeviceRecord {
   readonly readers: ReadonlyMap<MeasurementCapability, Reader>;
   /** The client half's accumulators start over on every new link. */
   readonly resetClient: () => void;
+  readonly notifications: ListenerList<DeviceFrames>;
+  /** The frame the strap is notifying on this cycle, set in `deliver`. */
+  readonly heard: { frame: HeartRateFrame | undefined };
   dropoutRemaining: number;
   recoverAt: number | undefined;
   handle: SimulatedDevice | undefined;
@@ -251,6 +284,13 @@ export function createSimulator(options: SimulatorOptions): Simulator {
   let availability: TransportAvailability = options.availability ?? { kind: 'available' };
   let rider: RiderProfile = { ...DEFAULT_RIDER, ...options.rider };
   let now: number = options.startAt ?? DEFAULT_START;
+
+  const heartModel: HeartRateResponse | undefined =
+    options.heartRate?.kind === 'responsive'
+      ? createHeartRateResponse({ settledAt: rider.power, ...options.heartRate })
+      : undefined;
+  /** What a strap on this rider's chest would read right now. */
+  const heartRateNow = (): number => heartModel?.heartRate ?? rider.heartRate;
 
   const records = new Map<DeviceId, DeviceRecord>();
 
@@ -282,6 +322,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     };
     const session = createDeviceSession(device);
     const envelope = (at: UnixSeconds) => ({ device: identity, at });
+    const heard: { frame: HeartRateFrame | undefined } = { frame: undefined };
 
     let ftms: FtmsMachine | undefined;
     let vendorControl: VendorControlPoint | undefined;
@@ -375,11 +416,15 @@ export function createSimulator(options: SimulatorOptions): Simulator {
         case 'hrs': {
           const strap = createHeartRateService();
           hrs = strap;
-          register('heart-rate', (at) => ({
-            ...envelope(at),
-            capability: 'heart-rate',
-            heartRate: strap.frame(rider).heartRate,
-          }));
+          register('heart-rate', (at) => {
+            const frame = heard.frame;
+            // A strap that can tell it is off the chest is not reporting a
+            // heart rate of nought: `protocol/heart-rate.ts` drops the same
+            // reading for the same reason.
+            return frame === undefined || frame.sensorContact === 'not-detected'
+              ? undefined
+              : { ...envelope(at), capability: 'heart-rate', heartRate: frame.heartRate };
+          });
           break;
         }
       }
@@ -395,6 +440,8 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       hrs,
       readers,
       resetClient: () => client.clear(),
+      notifications: listenerList<DeviceFrames>(),
+      heard,
       dropoutRemaining: 0,
       recoverAt: undefined,
       handle: undefined,
@@ -483,23 +530,49 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       ...(record.ftms === undefined ? {} : { ftms: record.ftms.frame(rider) }),
       ...(record.cps === undefined ? {} : { cps: record.cps.frame(power) }),
       ...(record.cscs === undefined ? {} : { cscs: record.cscs.frame() }),
-      ...(record.hrs === undefined ? {} : { hrs: record.hrs.frame(rider) }),
+      ...(record.hrs === undefined ? {} : { hrs: record.hrs.peek(heartRateNow()) }),
     };
   };
 
   /** One notification cycle: every service notifies, each capability is delivered once. */
   const deliver = (record: DeviceRecord): void => {
     const at = unixSeconds(now);
+    record.heard.frame = record.hrs?.notify(heartRateNow());
     for (const capability of MEASUREMENT_CAPABILITIES) {
       const measurement = record.readers.get(capability)?.(at);
       if (measurement !== undefined) {
         record.session.report(measurement);
       }
     }
+    record.notifications.emit({
+      ...frames(record),
+      ...(record.heard.frame === undefined ? {} : { hrs: record.heard.frame }),
+    });
+  };
+
+  /**
+   * The power the rider is actually making, which is what a heart answers to:
+   * nothing while the cranks are still, whatever an ERG target says, and
+   * otherwise the first trainer's effective power — its target while one is
+   * held — or the rider's own.
+   */
+  const riderOutput = (): Watts => {
+    if (rider.cadence === 0) {
+      return watts(0);
+    }
+    for (const record of records.values()) {
+      if (record.ftms !== undefined) {
+        return record.ftms.effectivePower(rider);
+      }
+    }
+    return rider.power;
   };
 
   const tick = (): void => {
     now += 1;
+    // One heart, whatever is strapped to it: advanced once a tick, before any
+    // device notifies, and through a dropout as a chest keeps beating.
+    heartModel?.advance(riderOutput(), ONE_SECOND);
     for (const record of records.values()) {
       // The device side runs whether or not anyone is listening: a strap on a
       // chest keeps beating and a crank keeps turning through a dropout.
@@ -542,6 +615,15 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       );
     }
     return record.ftms;
+  };
+
+  const requireStrap = (record: DeviceRecord): HeartRateService => {
+    if (record.hrs === undefined) {
+      throw new SensorError('capability-unsupported', 'this device does not provide heart-rate', {
+        deviceId: record.device.identity.id,
+      });
+    }
+    return record.hrs;
   };
 
   const handleFor = (record: DeviceRecord): SimulatedDevice => {
@@ -595,7 +677,26 @@ export function createSimulator(options: SimulatorOptions): Simulator {
           case 'indoor-bike-data-fields':
             requireFtms(record).setFields(scenario.fields);
             return;
+          case 'heart-rate-drift':
+            requireStrap(record);
+            if (heartModel === undefined) {
+              throw new RangeError(
+                'a heart rate drifts only in the responsive model; create the simulator with heartRate: { kind: "responsive" }',
+              );
+            }
+            heartModel.drift(scenario.bpmPerHour);
+            return;
+          case 'heart-rate-readings':
+            requireStrap(record).queue(scenario.values);
+            return;
+          case 'strap-absent':
+            requireStrap(record).absent(requireWholeSeconds(scenario.duration, 'a strap absence'));
+            return;
         }
+      },
+
+      onNotify(listener) {
+        return record.notifications.add(listener);
       },
 
       inspect() {

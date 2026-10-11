@@ -7,6 +7,7 @@
  */
 
 import type { Readiness } from './readiness.ts';
+import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
@@ -20,7 +21,9 @@ import { JSON_TYPE, type ErrorCode } from './errors.ts';
 /** The subset of JSON Schema the specification uses, and the contract test checks. */
 export type Schema =
   | {
-      readonly type: 'object';
+      /** `['object', 'null']` for an object that may be absent (#1199's settings). */
+      readonly type: 'object' | ['object', 'null'];
+      readonly description?: string;
       readonly properties: Readonly<Record<string, Schema>>;
       readonly required: readonly string[];
       readonly additionalProperties: false;
@@ -100,6 +103,8 @@ export interface RouteContext {
   readonly rooms: Rooms | undefined;
   /** Analysis jobs (#1095). Present for every route that declares `analysis`; the handler sees to it. */
   readonly analysis: AnalysisJobs | undefined;
+  /** A rider's own hosted key and consent (#1199). Present for every route that declares `hostedSettings`. */
+  readonly hostedSettings: HostedSettings | undefined;
   /**
    * The instance's own keys (#1189). Absent until the store is open, and on
    * a test's handler that was handed none.
@@ -180,6 +185,11 @@ export interface Route {
    * `unavailable` without calling it.
    */
   readonly analysis?: true;
+  /**
+   * The route needs a rider's hosted settings (#1199). An instance handed
+   * none answers `unavailable` without calling it.
+   */
+  readonly hostedSettings?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

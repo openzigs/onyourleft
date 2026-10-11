@@ -64,10 +64,19 @@ the install reaches the npm registry, the browser install Playwright's CDN and U
 and the image check **Docker Hub**, on every run, because a runner starts with no base image. What
 each of those can do is turn `main` red on a day the service is down. For Docker Hub:
 
-- **Its pull-rate limit does not apply here.** GitHub's
-  [Actions limits](https://docs.github.com/en/actions/reference/limits) page says *"GitHub-hosted
-  runners pulling public images: Docker Hub's rate limit is not applied"* (read 2026-09-29), and the
-  base image is public. A self-hosted runner would not have that exemption.
+- **Its pull-rate limit DID apply here, and since [#1231](https://github.com/openzigs/onyourleft/issues/1231)
+  the job logs in.** GitHub's [Actions limits](https://docs.github.com/en/actions/reference/limits)
+  page says *"GitHub-hosted runners pulling public images: Docker Hub's rate limit is not applied"*
+  (read 2026-09-29, and the same words again on 2026-10-09), and the base image is public — but on
+  2026-10-09 run 37994349506 on `main` failed in `instance image` with `toomanyrequests:
+  unauthenticated pull rate limit`, and runs 37994374884 and 37995040607 with auth timeouts against
+  `registry-1.docker.io` / `auth.docker.io`; re-runs about 20 minutes later passed. ⚠️ A reviewer
+  who remembers "does not apply here" is reading the old file: the page's sentence is not what the
+  runner observed. So, the owner's stop-gap of 2026-10-09, the step `Log in to Docker Hub` (below,
+  §"exactly three steps") logs in with a read-only pull token before `Checks, concurrently`, which
+  moves the limit from the runner's shared address to the account. It does **not** help an auth
+  outage, which a logged-in pull goes through too, and a fork's pull request gets no secret and
+  stays unauthenticated. #1231's GHCR mirror is still owed and is the fix for both.
 - **An outage is named, not disguised.** The checker pulls the base image as its own step before it
   builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
@@ -86,7 +95,9 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
   exposed to one more registry than the job already was — the same trade as the install. Mirroring
   the base image to GHCR would move the dependency rather than remove it, and would add a push
-  credential, which this job holds none of. Removing `'instance image'` from `Checks, concurrently`
+  credential, which this job holds none of (its one secret, since #1231, is a read-only Docker Hub
+  pull token). ⚠️ Since #1231's failures the owner prefers that mirror as the long-term fix, in a
+  separate non-required workflow; the login is the stop-gap until it lands. Removing `'instance image'` from `Checks, concurrently`
   is a one-line revert if an outage ever outlasts the patience of the day.
 
 | What | Where | Why |
@@ -144,7 +155,7 @@ the 7763, after #852, read the same way: [36636542091](https://github.com/openzi
 (#860, **1196 s**: 294 s coverage, 44 s outside it, 608 s browser gate) and
 [36639122031](https://github.com/openzigs/onyourleft/actions/runs/36639122031) (#862, **1234 s**:
 308 s, 45 s, 619 s). ⚠️ Every one of these CPU lines came from the racing-line test's print, which
-not every run makes; the `Record the runner's CPU` step (below, §"exactly two steps") is what makes
+not every run makes; the `Record the runner's CPU` step (below, §"exactly three steps") is what makes
 it every run's.
 
 **The runs since, read on 2026-09-29 for #841, and why they settle nothing about #771.** No second
@@ -625,7 +636,7 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There are exactly two steps that are not §4a commands**, and since #1128's review one §4a
+⚠️ **There are exactly three steps that are not §4a commands** (two until #1231), and since #1128's review one §4a
 command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 765s pnpm run
 test:browser`, for the reason §"What bounds the browser gate's step" gives — locally the command is
 the same without it. The first, since #866, is `Record
@@ -645,6 +656,20 @@ own CDN, and `--with-deps` takes its shared libraries from Ubuntu's archives. Re
 therefore makes CI trust **less** than it did, which is why it is a safe answer to an outage and
 not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
 deleting the step is a one-line revert if the trade is ever judged wrong.
+
+The third, since [#1231](https://github.com/openzigs/onyourleft/issues/1231), is `Log in to Docker
+Hub`, just before `Checks, concurrently` (whose `instance image` pulls the base image), with a
+`Log out of Docker Hub` at the end of the job (`if: always()`, `|| true`, so it cannot fail it). It
+reads the repository secret `DOCKERHUB_TOKEN` — a read-only *Public Repo Read-only* token, and **the
+only secret this job holds** — and the repository **variable** `DOCKERHUB_USERNAME`, a variable on
+purpose because Actions redacts a secret's value everywhere in a log (#338). The token goes to
+`docker login --password-stdin` and is never printed. Present and wrong, the login fails the step;
+absent — a fork's pull request, which GitHub gives no secret — the step says so and passes, and the
+pull is unauthenticated. Why: three `instance image` failures on 2026-10-09 (above, §"Its pull-rate
+limit DID apply here"). Credentials fix the rate limit, not an auth outage. ⚠️ On a same-repository
+pull request or `main` the credential sits in the runner's Docker config while later steps run that
+branch's code; it can pull public images and nothing else. Deleting both steps is the revert once
+the GHCR mirror lands.
 
 > ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
 > a status check whose context is exactly that string.** Rename either and the required check never

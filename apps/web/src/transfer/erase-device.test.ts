@@ -10,6 +10,10 @@
  * `PUBLIC_ROUTE_WARNING` is a constant and not a string in a component.
  */
 
+import {
+  instanceAnalysisEraser,
+  PENDING_JOBS_STORAGE_KEY,
+} from '../ride-analysis/instance-analysis';
 import { instanceEraser, INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
@@ -427,6 +431,35 @@ describe('erasing, against the real store', () => {
       }),
     );
     expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('forgets the pending-job note after the cascade, over real storage, and only that key (#1102)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const kept = new Map<string, string>([
+      [PENDING_JOBS_STORAGE_KEY, '{"ride":{"jobId":"j"}}'],
+      ['oyl.units.other', 'kept'],
+    ]);
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        instanceAnalysis: instanceAnalysisEraser({ removeItem: (key) => void kept.delete(key) }),
+      }),
+    );
+    expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('does not forget the pending-job note when the cascade threw (#1102)', async () => {
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, {
+        instanceAnalysis: { forget: () => void forgotten.push('analysis') },
+      }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
   });
 
   it('does not forget the instance sign-in when the cascade threw (#777)', async () => {

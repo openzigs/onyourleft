@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
@@ -139,6 +140,11 @@ export interface HandlerOptions {
    * answers `unavailable`.
    */
   readonly analysis?: AnalysisJobs;
+  /**
+   * A rider's own hosted key and consent (#1199). Absent, every route that
+   * needs them answers `unavailable`.
+   */
+  readonly hostedSettings?: HostedSettings;
   /**
    * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
    * /v1/instance/keys` answers `unavailable`.
@@ -313,6 +319,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.analysis === true && options.analysis === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.hostedSettings === true && options.hostedSettings === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -354,6 +363,7 @@ export function createHandler(options: HandlerOptions): Handler {
       history: options.history,
       rooms: options.rooms,
       analysis: options.analysis,
+      hostedSettings: options.hostedSettings,
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,

@@ -499,6 +499,14 @@ pnpm --filter @onyourleft/instance run operator migrate
 # image for one minute on 2026-09-29 (no disconnect, 59 frames each).
 pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … --minutes 30
 
+# #1235's round-trip measurement (spike 0023): a throwaway device starts an
+# analysis job, follows it to its decrypted result and times every leg it can
+# see, sealed by default, `--transport plaintext` against an instance with no
+# keys as the control. NOT a gate: it needs a running instance with an analysis
+# model that admits a new device. Run over loopback on 2026-10-11; ⚠️ never
+# yet through the tunnel.
+pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --cold-runs 5 --unload 'ollama stop <model>'
+
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's
 # row count afterwards. ⚠️ `down` drops what the newest migration created, rows

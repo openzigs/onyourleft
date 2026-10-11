@@ -33,19 +33,19 @@
  * `unreadable` or `no-secret` — and the instance logs
  * {@link HOSTED_KEY_UNREADABLE} and carries on with its local model, or none.
  *
- * ## Whose analysis it serves: nobody's yet, the operator's included
+ * ## Whose analysis it serves: the operator's own, and nobody else's
  *
  * The key is held FOR the operator — ADR 0046's Q9 ruling, *"the athlete
  * whose device holds `OYL_INSTANCE_OWNER_KEY`, the key that already makes
- * them moderator"* — and `operator model-key set` looks that athlete up. But
- * a hosted job runs only for an athlete whose own consent naming the endpoint
- * is recorded (Q10), the operator included, and nothing records one yet; so
- * `source.ts` §`modelForSource` refuses every athlete before the key is read.
- * Other riders also wait for the operator's switch (Q13: *"Other riders get
- * no analysis until the operator turns it on, whichever key they use"*).
- * The key stays with the athlete it was set for: changing
- * `OYL_INSTANCE_OWNER_KEY` does not move it — the operator clears it and
- * sets it again.
+ * them moderator"* — and `operator model-key set` looks that athlete up. The
+ * owner's ruling of 2026-10-09 withdrew D-9's Share mode (*"Operator key is
+ * not shared with riders. If it is hosted they need to bring their own
+ * key"*), so it serves the operator's own jobs only, as their own key
+ * ({@link ownHostedKeyState}); every other rider brings theirs (#1199,
+ * `hosted-settings.ts`), sealed the same way. Every hosted job also needs the
+ * athlete's own consent naming the origin (Q10, `source.ts`). The key stays
+ * with the athlete it was set for: changing `OYL_INSTANCE_OWNER_KEY` does
+ * not move it — the operator clears it and sets it again.
  */
 
 import type { HeldHostedModelKey, SqlStore } from '../store/sql-store.ts';
@@ -201,10 +201,59 @@ export async function hostedKeyState(
   store: Pick<SqlStore, 'getHostedModelKey'>,
   secret: SecretKey | undefined,
 ): Promise<HostedKeyState> {
-  const held = await store.getHostedModelKey();
+  return opened(await store.getHostedModelKey(), secret);
+}
+
+/** A sealed row, opened with `secret` if it can be. */
+async function opened(
+  held: HeldHostedModelKey | undefined,
+  secret: SecretKey | undefined,
+): Promise<HostedKeyState> {
   if (held === undefined) return { kind: 'none' };
   if (secret === undefined) return { kind: 'no-secret', url: held.url, model: held.model };
   const key = await openHostedKey(secret, held);
   if (key === undefined) return { kind: 'unreadable', url: held.url, model: held.model };
   return { kind: 'held', url: held.url, model: held.model, athleteId: held.athleteId, key };
+}
+
+/** The longest model name accepted: the operator command's own bound. */
+export const MAXIMUM_HOSTED_MODEL_NAME = 200;
+
+/** The model's name, trimmed, or `undefined`: printable characters, no spaces, at most 200. */
+export function hostedModelFrom(text: string): string | undefined {
+  const model = text.trim();
+  if (model === '' || model.length > MAXIMUM_HOSTED_MODEL_NAME) return undefined;
+  if (!/^[\x21-\x7e]+$/.test(model)) return undefined;
+  return model;
+}
+
+/**
+ * The ORIGIN a hosted URL or origin names — `https://host[:port]`, as
+ * `new URL(…).origin` writes it — or `undefined` when it is not one
+ * {@link hostedUrlFrom} accepts. Both sides of a consent check go through this
+ * (#1197's review), so a consent given as a full URL, or with a trailing
+ * slash, names the same origin as a key whose URL has a path.
+ */
+export function hostedOriginOf(text: string): string | undefined {
+  const url = hostedUrlFrom(text);
+  return url.ok ? url.url.origin : undefined;
+}
+
+/**
+ * `athleteId`'s OWN hosted key, opened with `secret` if it can be (#1199): the
+ * key the rider stored, or else the instance's one key when it is held for
+ * THIS athlete — the operator's own key for their own account, which the
+ * owner's ruling of 2026-10-09 counts as a rider bringing their own. Never
+ * another athlete's key: *"Operator key is not shared with riders."* A rider
+ * with no key of their own is `none`, whoever else holds one.
+ */
+export async function ownHostedKeyState(
+  store: Pick<SqlStore, 'getAthleteHostedKey' | 'getHostedModelKey'>,
+  secret: SecretKey | undefined,
+  athleteId: string,
+): Promise<HostedKeyState> {
+  const own = await store.getAthleteHostedKey(athleteId);
+  if (own !== undefined) return opened(own, secret);
+  const operators = await store.getHostedModelKey();
+  return opened(operators?.athleteId === athleteId ? operators : undefined, secret);
 }

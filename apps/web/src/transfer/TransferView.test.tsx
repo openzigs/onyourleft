@@ -100,6 +100,7 @@ async function openPort(): Promise<TransferPort> {
     theme: { forget: () => forgotten.push('theme') },
     hostedModel: { forget: () => forgotten.push('hosted-model') },
     instance: { forget: () => forgotten.push('instance') },
+    instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
@@ -992,7 +993,13 @@ describe('TransferView — what it may say about another platform', () => {
     );
     // #672: the palette choice is on this device outside the store, as the
     // half-drawn route is, and the erase forgets both through the port.
-    expect([...forgotten].sort()).toStrictEqual(['draft', 'hosted-model', 'instance', 'theme']);
+    expect([...forgotten].sort()).toStrictEqual([
+      'draft',
+      'hosted-model',
+      'instance',
+      'instance-analysis',
+      'theme',
+    ]);
 
     // Now, and only now, read back through a connection nothing on the page
     // is holding — the ride has to be gone from disk rather than from a

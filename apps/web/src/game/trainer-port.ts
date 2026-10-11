@@ -84,6 +84,7 @@ import type { TrainerControl } from '@onyourleft/sensors/protocol';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
+import type { WorkoutHold } from '../workout/hold-text';
 
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.
@@ -258,6 +259,15 @@ export interface GameTrainerPort {
    */
   workoutRescue(): WorkoutRescue | undefined;
   /**
+   * The running workout's heart-rate hold, or `undefined` outside a hold
+   * block — #1240, `RideWorkoutSnapshot.hold`. Read on every frame, like
+   * {@link workoutRescue}, and for its reason: it decides no write. The HUD
+   * shows its short line where the trainer line goes (a workout's trainer is
+   * not simulating, so that place is free) and the HUD's one region says its
+   * sentence. Optional, so a double that has no workout need not say so.
+   */
+  workoutHold?(): WorkoutHold | undefined;
+  /**
    * Whether the ride being RECORDED may stop if the screen goes off — #647,
    * `RideSnapshot.keepAliveFailed`: the platform refused the recording
    * service. `false` with no ride controller, and with no recording.
@@ -349,7 +359,12 @@ interface GameTrainerSource {
   getSnapshot(): {
     readonly trainer: TrainerFacts;
     readonly workout:
-      { readonly status: string; readonly rescue: WorkoutRescue | undefined } | undefined;
+      | {
+          readonly status: string;
+          readonly rescue: WorkoutRescue | undefined;
+          readonly hold?: WorkoutHold | undefined;
+        }
+      | undefined;
     /** #647. Optional here only so a source with no recording need not say. */
     readonly keepAliveFailed?: boolean;
     /**
@@ -407,6 +422,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       await controller.requestTrainerControl();
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
+    workoutHold: () => controller?.getSnapshot().workout?.hold,
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
