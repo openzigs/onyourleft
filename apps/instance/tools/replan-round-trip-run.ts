@@ -114,9 +114,15 @@ export interface StepTiming {
 export interface RunRecord {
   readonly run: number;
   readonly cold: boolean;
-  /** How the job ended: `succeeded`, `failed`, `withheld`, `cancelled`, or `timed-out` here. */
+  /**
+   * How the job ended: `succeeded`, `failed`, `withheld`, `cancelled`, or here
+   * `timed-out` or `connection-lost` (the stream broke before its result;
+   * `failure` is then the socket's own code).
+   */
   readonly status: string;
   readonly failure?: string;
+  /** Why the job could not be read back for its own times, when it could not: the socket's code. */
+  readonly unread?: string;
   /** From before the start request is sealed to the result decrypted on the device. */
   readonly totalMs: number;
   /** Building every envelope this run sent (start, stream, read). 0 in plaintext. */
@@ -262,6 +268,17 @@ interface Device {
 
 function codeOf(body: unknown): string | undefined {
   const code = (body as { error?: { code?: unknown } } | null)?.error?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * The socket's own code (`ECONNRESET`) when `error` is a connection that
+ * broke, and `undefined` for anything else: a refused request, a frame that
+ * will not open and an event that is not JSON are faults to stop on, not runs
+ * to count.
+ */
+function socketCode(error: unknown): string | undefined {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
   return typeof code === 'string' ? code : undefined;
 }
 
@@ -496,6 +513,7 @@ async function oneRun(
   let resultAt = 0;
   let receivedWall = 0;
   const timeout = AbortSignal.timeout(timeoutMs);
+  let lost: string | undefined;
   try {
     await device.stream(
       `/v1/analysis/jobs/${jobId}/events`,
@@ -517,15 +535,24 @@ async function oneRun(
       timeout,
     );
   } catch (error) {
-    if (!timeout.aborted) throw error;
+    // A stream cut on the way is a finding, not a reason to lose every run before it.
+    if (!timeout.aborted) {
+      lost = socketCode(error);
+      if (lost === undefined) throw error;
+    }
   }
   if (result === undefined) {
     await device.call('POST', `/v1/analysis/jobs/${jobId}/cancel`).catch(() => undefined);
     resultAt = performance.now() - began;
   }
 
-  const read = await device.call('GET', `/v1/analysis/jobs/${jobId}`);
-  const job = read.status === 200 ? (read.body as { createdAt?: number; endedAt?: number }) : {};
+  // The job's own times are a refinement: a read that fails costs them, and says so.
+  let unread: string | undefined;
+  const read = await device.call('GET', `/v1/analysis/jobs/${jobId}`).catch((error: unknown) => {
+    unread = socketCode(error) ?? 'unknown';
+    return undefined;
+  });
+  const job = read?.status === 200 ? (read.body as { createdAt?: number; endedAt?: number }) : {};
   const timed =
     result !== undefined && typeof job.createdAt === 'number' && typeof job.endedAt === 'number'
       ? { createdAt: job.createdAt, endedAt: job.endedAt }
@@ -538,8 +565,10 @@ async function oneRun(
   return {
     run,
     cold,
-    status: result?.status ?? 'timed-out',
+    status: result?.status ?? (lost === undefined ? 'timed-out' : 'connection-lost'),
     ...(result?.failure === undefined ? {} : { failure: result.failure }),
+    ...(result === undefined && lost !== undefined ? { failure: lost } : {}),
+    ...(unread === undefined ? {} : { unread }),
     totalMs: resultAt,
     sealMs,
     openMs,
@@ -581,7 +610,7 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
     jobs += 1;
     const record = await oneRun(device, run, cold, options.runTimeoutMs, jobs);
     log(
-      `${cold ? 'cold' : 'warm'} ${String(run)}: ${record.status} in ${record.totalMs.toFixed(0)} ms, ${String(record.steps.length)} steps`,
+      `${cold ? 'cold' : 'warm'} ${String(run)}: ${record.status}${record.failure === undefined ? '' : `:${record.failure}`} in ${record.totalMs.toFixed(0)} ms, ${String(record.steps.length)} steps`,
     );
     return record;
   };

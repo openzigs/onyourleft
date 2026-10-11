@@ -35,6 +35,10 @@
 > evidence ADR 0048's 60-second freshness bound (P5) is met with 42 s or more to spare on an idle
 > machine and **missed on a busy one**.
 
+> **Later the same day the tunnel run was made: §10.** Thirty warm jobs through the tunnel took
+> **14 198.0 ms p50 / 17 601.9 ms p95**, and the tunnel added about 0.14 s a job. §1 to §9 are as
+> they were written before it, so wherever they say the tunnel was not measured, read §10.
+
 ---
 
 ## 1. The question, and how much of it this answers
@@ -327,3 +331,69 @@ node tools/replan-round-trip.ts --url http://127.0.0.1:18831 --transport sealed 
 The tool prints one JSON object: every run's legs, the summaries of §4, and how every run ended. It
 carries no token, no athlete id and no model text. `apps/instance/tools/replan-round-trip.test.ts`
 runs the same code against a scripted model inside `pnpm run test`, and holds its arithmetic.
+
+## 10. The tunnel run, made later on 2026-10-11
+
+The owner approved the settings §7 lists, and the run was made the same day. What differs from §7's
+plan is said first, because it limits what the figures mean.
+
+| | |
+| --- | --- |
+| Instance | The owner's deployed stack: the Docker image built from `main` at `1908021c`, behind the Cloudflare tunnel at `onyourleft.openzigs.com`, holding keys, registration `open` for the run and `approval` again after it |
+| Model server | ⚠️ **Not the Compose Ollama.** The Mac's own Ollama 0.30.5, on the GPU, reached from the container at the Docker host's private address. So the model call is the same one §4 measured, and a model on the processor is still not measured |
+| Model | `qwen2.5:14b`, context 4 096 tokens |
+| Device | ⚠️ A Node process **on the same Mac**, as in §3. The request leaves through Cloudflare and comes back down the tunnel, but no second machine and no Wi-Fi device was used |
+| Tool | This repository's `apps/instance/tools/replan-round-trip.ts`, with the change of §10.2 |
+| Command | `node tools/replan-round-trip.ts --url https://onyourleft.openzigs.com --transport sealed --runs 30 --cold-runs 5 --unload 'ollama stop qwen2.5:14b'` |
+| Load | The device's one-minute load average was 3.4 before and 2.9 after. Nothing else was started on the Mac during the run |
+
+### 10.1 What it measured
+
+All 35 jobs ended `succeeded`, each with one model call and no tool call (§2 still applies: this is
+a write-up job, not a re-plan).
+
+| Leg | n | p50 | p95 | max |
+| --- | --: | --: | --: | --: |
+| The whole round trip, warm | 30 | 14 198.0 ms | 17 601.9 ms | 17 653.5 ms |
+| The whole round trip, model unloaded first | 5 | 21 137.2 ms | 23 108.8 ms | 23 108.8 ms |
+| The start request | 30 | 130.6 ms | 241.6 ms | 287.7 ms |
+| Start answered to the first event | 30 | 118.3 ms | 134.3 ms | 162.4 ms |
+| The model step | 30 | 13 910.9 ms | 17 359.8 ms | 17 407.5 ms |
+| Sealing, a job | 30 | 4.4 ms | 5.7 ms | 7.3 ms |
+| Opening, a job | 30 | 4.6 ms | 7.0 ms | 7.5 ms |
+| The job on the instance's own clock | 29 | 14 058 ms | 17 472 ms | 17 526 ms |
+
+- **The tunnel cost about 0.14 s a job.** The round trip less the job's own time on the instance was
+  122 to 303 ms over the 29 runs that have both figures, 137 ms at the median. Over loopback the
+  same remainder was under 20 ms (§4.2). One run's job could not be read back for its times, and
+  ⚠️ **why is not known**: the tool as it ran discarded the reason (§10.2)
+- **The model call is still the whole of it**: 13.9 s of 14.2 s at the median
+- **P5 is met through the tunnel** on an idle machine, with 42.4 s to spare at p95 and 36.9 s for
+  the slowest cold run, under the two limits in the table above (the host's model server, a device
+  on the same Mac). §5's finding stands: the same machine, busy, missed it
+- **P2**: by §6's rule, a summary sent at a boundary serves a next block of 47.6 s or longer
+
+### 10.2 A first attempt lost its figures to one reset connection
+
+The first attempt, forty minutes earlier with the same command, ended at its twenty-second job:
+the event stream was reset (`ECONNRESET`) and the tool, as merged, threw and printed nothing. Its
+21 finished jobs are known only from the progress lines: the first, which loads the model, took
+32.0 s, and the other 20 took 10.1 to 18.0 s each. ⚠️ **Why the connection was reset is not known**: the instance's container was restarted
+before its log was read, and the tunnel's log holds nothing for that minute. The second attempt
+recorded no reset on its 36 event streams, though the one job read that failed in it (§10.1) may
+have been one. One reset in 58 streams is too few to call a rate, and
+[#1105](https://github.com/openzigs/onyourleft/issues/1105) is the issue that measures the tunnel
+cutting a stream.
+
+The tool now records such a run as `connection-lost`, under the socket's own code, and goes on to
+the next run. It still stops on anything that is not a broken connection, a refused stream among
+them. A job read that fails is recorded with its reason (`unread`) from now on.
+`replan-round-trip.test.ts` holds all three. ⚠️ The second attempt ran on an earlier form of this
+change, which swallowed the failed read's reason and would also have filed a refused stream as a
+lost connection; none of its 35 counted runs was filed so.
+
+### 10.3 Still not measured
+
+Everything in §8 except its first line's "anything through the tunnel": the deployed stack without
+the tunnel, the Compose Ollama, a re-plan job, a run that calls a tool, a hosted model, a device
+that is not the instance's own machine, and the Windows machine.

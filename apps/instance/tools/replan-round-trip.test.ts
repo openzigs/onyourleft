@@ -246,6 +246,70 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
     await vi.waitFor(() => expect(model?.closedEarly).toBe(1));
   }, 60_000);
 
+  it('records a run whose stream was cut as connection-lost, and goes on to the next run', async () => {
+    const url = await instance([TEXT, TEXT, TEXT], false);
+    const real = globalThis.fetch;
+    let streams = 0;
+    let cutJob: string | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const address =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      // The job whose stream was cut cannot be read back either: the connection is still down.
+      if (cutJob !== undefined && address.endsWith(`/v1/analysis/jobs/${cutJob}`)) {
+        return Promise.reject(new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }));
+      }
+      if (!address.endsWith('/events')) return real(input, init);
+      streams += 1;
+      // The second stream (the first counted run) is reset before any event.
+      if (streams !== 2) return real(input, init);
+      cutJob = address.split('/').at(-2);
+      const cut = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.error(new TypeError('terminated', { cause: { code: 'ECONNRESET' } }));
+        },
+      });
+      return Promise.resolve(
+        new Response(cut, { headers: { 'content-type': 'text/event-stream' } }),
+      );
+    });
+    const lines: string[] = [];
+    try {
+      const report = await measure(
+        options(url, 'plaintext', { runs: 2, log: (line) => lines.push(line) }),
+      );
+      expect(report.statuses).toEqual({ 'connection-lost:ECONNRESET': 1, succeeded: 1 });
+      expect(report.warm.map((record) => [record.status, record.unread])).toEqual([
+        ['connection-lost', 'ECONNREFUSED'],
+        ['succeeded', undefined],
+      ]);
+      expect(report.warm[0]?.serverMs).toBeNull();
+      expect(report.summary.totalMs?.n).toBe(1);
+      expect(lines[1]).toMatch(/^warm 1: connection-lost:ECONNRESET in /);
+    } finally {
+      vi.restoreAllMocks();
+    }
+    await running?.analysisJobs()?.idle();
+  }, 60_000);
+
+  it('stops on a stream that is refused, which is a fault and not a lost connection', async () => {
+    const url = await instance([TEXT, TEXT], false);
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const address =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!address.endsWith('/events')) return real(input, init);
+      return Promise.resolve(new Response('bad gateway', { status: 502 }));
+    });
+    try {
+      await expect(measure(options(url, 'plaintext'))).rejects.toThrow(
+        /the stream was refused: 502/,
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+    await running?.analysisJobs()?.idle();
+  }, 60_000);
+
   it('keeps a job that failed out of the figures, under its own reason', async () => {
     const url = await instance(
       [TEXT, { kind: 'status', status: 500, body: '{"error":{"message":"no"}}' }],
