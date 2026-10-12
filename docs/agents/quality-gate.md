@@ -31,7 +31,7 @@ Concretely, for each meaningful test you add:
 not behaviour asserted: a test that calls a function and asserts nothing scores the same as one that
 pins the contract. And a floor set against a repository with no code is red on arrival, which means
 it gets routed around rather than met. Coverage is still *reported*, because an untested branch is
-worth seeing in review. It is a signal, not a gate. **The mutation list is the gate.**
+worth seeing in review (the report is taken nightly since #1280: [`coverage.md`](coverage.md)). It is a signal, not a gate. **The mutation list is the gate.**
 
 What the report covers (which trees, and which files run outside it and so read as untested) is
 [`docs/agents/coverage.md`](coverage.md).

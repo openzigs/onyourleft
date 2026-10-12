@@ -261,19 +261,26 @@ export const GAME_PART_MS = 85_000;
  *
  * ⚠️ **It is 825 s since #651, the job's stop is 30 minutes, and a reviewer
  * who remembers 765 s inside 25 is reading the old file.** By 2026-10-12 a
- * green job on the 7763 took 1 459–1 498 s and four were cancelled at the
+ * green job on the 7763 took 1 459–1 498 s and five were cancelled at the
  * 25-minute stop with no test red (`docs/agents/ci.md` §"Thirty minutes —
- * #651"). The step now starts as late as 835 s in (run 38196648879 attempt
- * 1), and the slowest step that finished took 679 s (run 38183688472) — one
+ * #651"). The step then started as late as 841 s in (run 38196648879 attempt
+ * 3; #1280 corrected "four" and "835 s … attempt 1"), and the slowest step that finished took 679 s (run 38183688472) — one
  * the job's stop cut short had run 694 s (run 38055121023). 825 s is 1.19
  * times that 694 s, and it now HOLDS both Playwright stops and the builds
- * (720 + 85 + 10 = 815 s), so a `chromium` run that uses all of its 720 s
- * still leaves the game run its 85 s, and each stop names its own run.
- * 835 + 825 + 10 (the kill) is 1 670 s; the step's `timeout-minutes: 14`
- * (840 s) ends it by 1 675 s, and with the 4 s of coverage steps that is
- * 1 679 s, 121 s inside the job's 1 800. `nightly-split.test.ts` holds all
- * three: the two stops inside this, the step's stop behind it, and the job's
- * stop behind that.
+ * (720 + 85 + 14 = 819 s: the 14 s is the builds, the web servers and the
+ * gap between the runs, 10 s until #1280 corrected it), so a `chromium` run
+ * that uses all of its 720 s still leaves the game run its 85 s, and each
+ * stop names its own run. 841 + 825 + 10 (the kill) was 1 676 s; the step's
+ * `timeout-minutes: 14` (840 s) ended it by 1 681 s, and with the 4 s of
+ * coverage steps that was 1 685 s, 115 s inside the job's 1 800.
+ *
+ * ⚠️ **Since #1280 the step starts 674–699 s in on the 7763**, because the
+ * Vitest step before it takes no coverage (the report is nightly): 699 + 840
+ * + 4 s is 1 543 s, 257 s inside the job's 1 800. `nightly-split.test.ts`
+ * holds all three — the two stops inside this, the step's stop at least three
+ * minutes inside the job's, and the job's stop at least five clear of the
+ * slowest job — from the measurements in `docs/agents/ci.md` §"Coverage out
+ * of the required job — #1280", which it reads rather than repeats.
  */
 export const GATE_STEP_MS = 825_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
