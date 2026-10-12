@@ -574,6 +574,27 @@ describe('the two picture model builders hold what the text ones hold (#1106)', 
     expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
   });
 
+  it('reads the same words on a status that is not a refusal of the request’s shape as that status, never as a model that takes no picture', async () => {
+    const said = JSON.stringify({ error: { message: OLLAMA_WITHOUT_PICTURES } });
+    const model = await fake(
+      { kind: 'status', status: 503, body: said },
+      { kind: 'status', status: 429, body: said },
+      { kind: 'status', status: 422, body: said },
+    );
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'server-error' });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+    // The control: the same words on a status that IS one of the three.
+    expect(await connection.look(look())).toStrictEqual({
+      ok: false,
+      failure: 'model-without-pictures',
+    });
+  });
+
   it.each([
     'This model does not support image input.',
     'The model does not support images.',
@@ -582,6 +603,15 @@ describe('the two picture model builders hold what the text ones hold (#1106)', 
     'Invalid content type. image_url is only supported by certain models.',
     'unknown variant `image_url`, expected `text`',
     'this model is missing data required for image input',
+    'This model doesn’t support images',
+    "This model doesn't support images",
+    'Models of this family do not support images',
+    'x is not a multimodal model',
+    'Image inputs are not supported by this model',
+    'Vision is not supported for this model',
+    // As it arrives, inside a server's JSON.
+    '{"error":{"message":"Image inputs are not supported by this model","type":"x"}}',
+    `{"error":{"message":"{\\"error\\":{\\"message\\":\\"${OLLAMA_WITHOUT_PICTURES}\\"}}"}}`,
   ])('takes %j to say the model takes no picture', (words) => {
     expect(saysWithoutPictures(words)).toBe(true);
   });
@@ -590,6 +620,11 @@ describe('the two picture model builders hold what the text ones hold (#1106)', 
     OLLAMA_BAD_PICTURE,
     DEEPSEEK_BAD_PICTURE,
     'image too large',
+    'This model does not support images larger than 20 MB.',
+    'The model does not support image format image/webp',
+    'does not support images in system messages',
+    'image_url is only supported with https or data URLs',
+    'webp images are not supported',
     'could not process image',
     'invalid image',
     'The vision service is busy.',

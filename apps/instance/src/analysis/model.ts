@@ -218,18 +218,25 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
  *
  * ## Provenance
  *
- * - **Observed, 2026-10-12**: the first pattern, from Ollama 400ing
- *   `qwen2.5:3b`, which takes no picture: *"Multimodal data provided, but
- *   model does not support multimodal requests."*
- * - ⚠️ **Not observed, the author's reading of what other servers say**: the
- *   other four. A server whose words for it are none of these is one failed
+ * - **Observed, 2026-10-12**: one sentence, which the first pattern takes,
+ *   from Ollama 400ing `qwen2.5:3b`, which takes no picture: *"Multimodal
+ *   data provided, but model does not support multimodal requests."*
+ * - ⚠️ **Not observed, the author's reading of what other servers say**:
+ *   every other wording, the first pattern's other forms included. Each
+ *   pattern is written to stop where a statement about the PICTURE would go
+ *   on (a size, a format, a URL scheme): `model.test.ts` lists both kinds. A server whose words for it are none of these is one failed
  *   picture at a time, and three in a row stop the session with *"gave no
  *   usable answer"*: the wrong sentence, and no picture sent on regardless.
  */
 const WITHOUT_PICTURES: readonly RegExp[] = [
-  /does not support (?:multi-?modal|images?\b|image input|vision)/i,
-  /image input is not supported/i,
-  /image_url is only supported/i,
+  // "…does not support multimodal requests." / "doesn't support images" — and the clause ends
+  // there, so "does not support images larger than 20 MB" is about the picture and is not this.
+  /(?:does not|doesn['’]?t|do not|don['’]?t) support (?:multi-?modal|images?|vision)(?: inputs?| requests| data)?\s*(?:$|[."'\\!,;)])/i,
+  /is not a (?:multi-?modal|vision) model/i,
+  // "Image inputs are not supported…", opening its clause: "webp images are not supported" is not this.
+  /(?<=^|[.:;,"'\\]\s*|\b(?:but|and) )(?:image inputs?|images?|vision|multi-?modal(?: inputs?)?) (?:is|are) not supported/i,
+  // "…only supported by certain models"; "only supported with https or data URLs" is about the picture.
+  /image_url is only supported by/i,
   /unknown variant .?image_url/i,
   /missing data required for image input/i,
 ];

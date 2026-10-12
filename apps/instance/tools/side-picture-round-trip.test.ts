@@ -311,6 +311,12 @@ describe('a real model on this machine in place of the scripted one — #1106', 
     'https://localhost:11434/v1',
     'http://models.example/v1',
     'http://10.0.0.5:11434/v1',
+    // Names that only begin like this machine's, or carry it where a user name goes.
+    'http://127.0.0.1.models.example/v1',
+    'http://127.0.0.1x/v1',
+    'http://localhost.models.example/v1',
+    'http://localhost@models.example/v1',
+    'http://127.0.0.1@models.example/v1',
     'x',
   ])('refuses %s: a picture is sent to a model on this machine or to none', async (url) => {
     await expect(
