@@ -196,6 +196,9 @@ jobs:
     timeout-minutes: 5
     # This job's token may write issues and nothing else -- not contents, not
     # pull requests. It checks nothing out and runs no repository code.
+    # Reading which step of this run failed (below) needs no more than that
+    # on a public repository: measured with this permission block exactly,
+    # run 38262275064 (#1285).
     permissions:
       issues: write
     steps:
@@ -205,9 +208,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        # One issue for every nightly failure, so the body names the step that
+        # went red: since #1280 a test that fails only under coverage lands
+        # here beside a browser check and a fuzz case. `cancelled` as well as
+        # `failure`, for the step a job's stop cut short. A read that fails
+        # must not cost the issue itself, so it falls back to saying so.
         run: |
           title='Nightly heavy checks failed'
+          steps=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \($job): \(.name) (\(.conclusion))"' || true)
           body="The nightly run failed on ${HEAD_SHA}: ${RUN_URL}
+
+          What went red:
+          ${steps:-(the steps could not be read; open the run)}
 
           These checks are not required and cannot block a merge (docs/agents/ci.md section 4c, #866), so this issue is how a break in them is seen. Close it once a nightly run is green again."
           existing=$(gh issue list --state open --search "\"${title}\" in:title" --json number,title \

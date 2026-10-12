@@ -11,7 +11,8 @@
  * a second artefact for the same reason.
  *
  * ⚠️ **What this file deliberately does NOT do is read `dist`.** CI runs
- * `test:coverage` *before* `build` (docs/agents/ci.md §4c), so a Vitest assertion over
+ * `test:required` on a runner that never runs `build` (docs/agents/ci.md §4c;
+ * the build is another shard's since #1285), so a Vitest assertion over
  * the built output would skip on every CI run and report green — #142's shape
  * arriving through the ordering of a workflow rather than through a selector.
  * The built-output half of #405's criteria is in

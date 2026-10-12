@@ -81,7 +81,7 @@ It has the same authority as the root file. Where the text below says "this file
 | What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](../adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](../adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
-| What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
+| What a real browser checks that jsdom cannot, and which CI shard runs it | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
 | When a browser-gate case may read a page another case loaded, and when it must load its own | `apps/web/browser/shared-load.ts`, §4c §"23m39s of 25 — #1051" |
 | What a map costs a rider on a cold cache, and why CI does not measure it | §4f, [`docs/spikes/0004-cold-load-first-painted-tile.md`](../spikes/0004-cold-load-first-painted-tile.md), `apps/web/browser/hosted-archive.ts` |
 | Why a zero byte count means two opposite things, depending on the origin | `apps/web/browser/harness.ts` §`ArchiveRequestTiming.timingOpaque` |
