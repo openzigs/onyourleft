@@ -3,23 +3,28 @@
 
 /**
  * Assert that splitting the Vitest run three ways drops no test file and runs
- * none twice (#852, #1076).
+ * none twice (#852, #1076), and that the nightly coverage report is taken over
+ * exactly the files the required job runs (#1280).
  *
  * ## Why the run is split at all
  *
- * The required CI job runs the suite under `--coverage`, and some files spend
- * a large share of its time:
+ * Until #1280 the required CI job ran the suite under `--coverage`. Since the
+ * owner's ruling of 2026-10-12 it runs `test:required` — the same files with
+ * no coverage, 106 to 133 s less on the slower runner — and the NIGHTLY
+ * workflow runs `test:coverage` and publishes the report. Both leave the same
+ * files out, and some files spend a large share of the time:
  *
  * - the #545 near-field rides, the FIT decode fuzz and — since #1076 — the
  *   realistic world's texture checks (`realistic-textures.test.ts`). V8's
  *   coverage instrumentation slows the first two about three times, and the
  *   third is the opt-in realistic world, which the owner moved to the nightly
- *   job (#866's class). `test:coverage` leaves them out with `--exclude`, and
- *   `test:uninstrumented` runs exactly them, with no coverage, NIGHTLY;
+ *   job (#866's class). `test:required` and `test:coverage` leave them out
+ *   with `--exclude`, and `test:uninstrumented` runs exactly them, with no
+ *   coverage, NIGHTLY;
  * - since #1076, every `.a11y.test.` file. The `Accessibility` step runs them
  *   as `test:a11y`, under a name that says what broke, and until #1076
  *   `test:coverage` ran all fifty of them a second time. They now run once,
- *   in that step, and `test:coverage` excludes them.
+ *   in that step, and `test:required` and `test:coverage` exclude them.
  *
  * Coverage is REPORTED here, never gated (docs/agents/quality-gate.md §5). What changes is the
  * report — it stops counting what those files alone execute — not what fails.
@@ -35,8 +40,11 @@
  *   `packages/protocol`'s fuzz): a file is in NO run;
  * - an accessibility test outside the project `test:a11y` names: the exclude
  *   takes it out of coverage and the accessibility run never selects it;
- * - a filter added without its exclude: a file runs twice, once instrumented,
- *   which is the cost this split exists to remove.
+ * - a filter added without its exclude: a file runs twice, which is the cost
+ *   this split exists to remove;
+ * - since #1280, an exclude added to one of `test:required` and
+ *   `test:coverage` and not the other: the report is then of a different set
+ *   of files from the one every pull request runs, and says nothing of it.
  *
  * ⚠️ An `--exclude` glob is matched against each Vitest PROJECT's root, not
  * the repository's — measured: `apps/web/src/game/near-field.test.ts` excludes
@@ -46,8 +54,9 @@
  *
  * ## The rules
  *
- * 1. `test:coverage` is `vitest run --coverage` followed only by
- *    `--exclude <glob>` pairs; `test:uninstrumented` is `vitest run` followed
+ * 1. `test:required` is `vitest run` followed only by `--exclude <glob>`
+ *    pairs, and `test:coverage` is the same script with `--coverage` after
+ *    `run` — the same globs in the same order; `test:uninstrumented` is `vitest run` followed
  *    only by path filters; `test:a11y` is `vitest run --project <name>`
  *    followed only by filters. Anything else is a shape this cannot check, and
  *    fails — and so is a script holding anything the shell would read before
@@ -63,7 +72,7 @@
  * ## The seam its own suite uses
  *
  * `--lists <dir>` reads the four selections from `all.txt`,
- * `instrumented.txt`, `uninstrumented.txt` and `a11y.txt` in that directory
+ * `required.txt`, `uninstrumented.txt` and `a11y.txt` in that directory
  * instead of asking Vitest, so `check-test-split.test.sh` can drive every rule
  * in milliseconds. CI runs this with no arguments, against Vitest itself.
  *
@@ -125,29 +134,62 @@ function shellWords(name, script) {
 }
 
 /**
- * The `--exclude` globs `test:coverage` passes. Throws on any other shape.
+ * The `--exclude` globs a script passes after `lead`. Throws on any other shape.
  */
-export function excludesFrom(script) {
+function excludesAfter(name, script, lead) {
   if (typeof script !== 'string' || script.trim() === '') {
-    throw new Error('package.json has no `test:coverage` script for this check to verify.');
+    throw new Error(`package.json has no \`${name}\` script for this check to verify.`);
   }
-  const tokens = shellWords('test:coverage', script);
+  const tokens = shellWords(name, script);
   const shape =
-    '`vitest run --coverage` followed only by `--exclude <glob>` pairs. ' +
+    `\`${lead.join(' ')}\` followed only by \`--exclude <glob>\` pairs. ` +
     'Change this script and check-test-split.mjs together.';
-  if (tokens[0] !== 'vitest' || tokens[1] !== 'run' || tokens[2] !== '--coverage') {
-    throw new Error(`\`test:coverage\` is \`${script}\`; this check expects ${shape}`);
+  if (lead.some((word, index) => tokens[index] !== word)) {
+    throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
   }
-  const rest = tokens.slice(3);
+  const rest = tokens.slice(lead.length);
   const globs = [];
   for (let index = 0; index < rest.length; index += 2) {
     const glob = rest[index + 1];
     if (rest[index] !== '--exclude' || glob === undefined || glob.startsWith('-')) {
-      throw new Error(`\`test:coverage\` is \`${script}\`; this check expects ${shape}`);
+      throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
     }
     globs.push(glob);
   }
   return globs;
+}
+
+/**
+ * The `--exclude` globs `test:required` passes — the required job's run
+ * (#1280). Throws on any other shape, including `--coverage`: that would put
+ * back the cost the owner's ruling of 2026-10-12 took out of the required job.
+ */
+export function requiredExcludesFrom(script) {
+  return excludesAfter('test:required', script, ['vitest', 'run']);
+}
+
+/**
+ * The `--exclude` globs `test:coverage` passes — the nightly report's run.
+ * Throws on any other shape.
+ */
+export function excludesFrom(script) {
+  return excludesAfter('test:coverage', script, ['vitest', 'run', '--coverage']);
+}
+
+/**
+ * Why the nightly report is not of the files the required job runs, or
+ * `undefined` when the two scripts leave out the same globs in the same order.
+ */
+export function reportDrift(required, coverage) {
+  if (required.length === coverage.length && required.every((glob, i) => glob === coverage[i])) {
+    return undefined;
+  }
+  return (
+    `\`test:required\` excludes [${required.join(', ')}] and \`test:coverage\` excludes ` +
+    `[${coverage.join(', ')}]. They must be the same globs in the same order: the nightly ` +
+    'coverage report is of the files the required job runs (#1280), and a report over another ' +
+    'set says nothing about them.'
+  );
 }
 
 /**
@@ -221,10 +263,10 @@ export function parseSelection(output) {
  * What is wrong, in the terms a fixer needs. Empty means the three runs are
  * exactly the whole suite, once each.
  */
-export function problems({ all, instrumented, uninstrumented, a11y, filters }) {
+export function problems({ all, required, uninstrumented, a11y, filters }) {
   const found = [];
   const runs = [
-    ['`test:coverage`', new Set(instrumented)],
+    ['`test:required`', new Set(required)],
     ['`test:uninstrumented`', new Set(uninstrumented)],
     ['`test:a11y`', new Set(a11y)],
   ];
@@ -250,7 +292,7 @@ export function problems({ all, instrumented, uninstrumented, a11y, filters }) {
       );
     }
   }
-  const everywhere = new Set([...instrumented, ...uninstrumented, ...a11y]);
+  const everywhere = new Set([...required, ...uninstrumented, ...a11y]);
   for (const path of [...everywhere].sort()) {
     const holding = runs.filter(([, set]) => set.has(path)).map(([name]) => name);
     if (holding.length > 1) {
@@ -264,7 +306,7 @@ export function problems({ all, instrumented, uninstrumented, a11y, filters }) {
   for (const path of all) {
     if (!everywhere.has(path)) {
       found.push(
-        `${path} runs in NONE of \`test:coverage\`, \`test:uninstrumented\` and ` +
+        `${path} runs in NONE of \`test:required\`, \`test:uninstrumented\` and ` +
           '`test:a11y`, so CI never runs it. An `--exclude` matches it that neither other ' +
           'run selects.',
       );
@@ -312,7 +354,9 @@ if (isEntryPoint) {
   let filters;
   try {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-    const excludes = excludesFrom(manifest.scripts?.['test:coverage']);
+    const excludes = requiredExcludesFrom(manifest.scripts?.['test:required']);
+    const drift = reportDrift(excludes, excludesFrom(manifest.scripts?.['test:coverage']));
+    if (drift !== undefined) throw new Error(drift);
     filters = filtersFrom(manifest.scripts?.['test:uninstrumented']);
     const a11yArguments = a11yArgumentsFrom(manifest.scripts?.['test:a11y']);
     const read = (name) => parseSelection(readFileSync(join(lists, name), 'utf8'));
@@ -320,7 +364,7 @@ if (isEntryPoint) {
       lists === undefined
         ? {
             all: selectionFromVitest(root, []),
-            instrumented: selectionFromVitest(
+            required: selectionFromVitest(
               root,
               excludes.flatMap((glob) => ['--exclude', glob]),
             ),
@@ -329,7 +373,7 @@ if (isEntryPoint) {
           }
         : {
             all: read('all.txt'),
-            instrumented: read('instrumented.txt'),
+            required: read('required.txt'),
             uninstrumented: read('uninstrumented.txt'),
             a11y: read('a11y.txt'),
           };
@@ -353,7 +397,7 @@ if (isEntryPoint) {
   }
   console.log(
     `check-test-split: all ${String(selections.all.length)} test files run once — ` +
-      `${String(selections.instrumented.length)} under coverage, ` +
+      `${String(selections.required.length)} in the required run, ` +
       `${String(selections.uninstrumented.length)} without it (nightly), ` +
       `${String(selections.a11y.length)} in the Accessibility step.`,
   );

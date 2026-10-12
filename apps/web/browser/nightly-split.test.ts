@@ -104,6 +104,61 @@ function taggedBodies(): Map<string, string> {
   return bodies;
 }
 
+/**
+ * The required job as it was last measured — #1280.
+ *
+ * ⚠️ **A measurement cannot be derived, and this is why the two bounds below
+ * still rest on recorded figures.** How long the job takes on GitHub's slower
+ * runner is known only from the Actions API after a run; a Vitest case has no
+ * network (and must not grow one), so nothing here can ask. What CAN be
+ * derived is everything else: the stops come from the workflow and
+ * `playwright.config.ts`, and the figures come from the ONE place they are
+ * recorded — the table in `docs/agents/ci.md` between the two
+ * `required-job-measurements` markers — rather than from a second copy typed
+ * here. Until #1280 this file held its own copies (835 s and 1 522 s), and
+ * #1279's review found the record and the copy already apart (the start was
+ * 841 s). Now a row added to that table moves both bounds, and a row that is
+ * not a number fails here rather than being skipped.
+ *
+ * ⚠️ **It still cannot notice a job that got slower since the last row.** The
+ * job grew about 21 s a day in the week to 2026-10-12; the table's newest row
+ * is how old these bounds are.
+ */
+function measuredRequiredJob(): { jobs: number[]; gateStarts: number[] } {
+  const doc = read(ROOT, 'docs', 'agents', 'ci.md');
+  const block =
+    /<!-- required-job-measurements:start -->\n([\s\S]*?)<!-- required-job-measurements:end -->/.exec(
+      doc,
+    )?.[1] ?? '';
+  const cells = (line: string): string[] =>
+    line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+  const [header = '', , ...rows] = block.trim().split('\n');
+  const column = (name: string): number => cells(header).indexOf(name);
+  const numbers = (name: string): number[] =>
+    rows.map((row) => {
+      const cell = cells(row)[column(name)] ?? '';
+      // Refused rather than skipped: a row this cannot read is a measurement
+      // the bounds would silently leave out.
+      expect(cell, `"${name}" in the row: ${row}`).toMatch(/^\d+$/);
+      return Number(cell);
+    });
+  expect(column('Job'), 'the table has a "Job" column').toBeGreaterThanOrEqual(0);
+  expect(column('Gate starts'), 'the table has a "Gate starts" column').toBeGreaterThanOrEqual(0);
+  return { jobs: numbers('Job'), gateStarts: numbers('Gate starts') };
+}
+
+/**
+ * What runs after the `Browser gate` step, in seconds. It was the two coverage
+ * steps and the post steps until #1280 (4 s, #1128's review); the coverage
+ * steps are nightly now and what is left is the Docker logout and the post
+ * steps. Kept at the larger, older figure: it is an allowance, and #1280's
+ * margin criterion is written with it.
+ */
+const AFTER_GATE_S = 4;
+
 describe('the browser gate is split into a required run and a nightly one — #866', () => {
   const nightly = PROJECTS.filter((project) => project.name === 'nightly');
   const required = PROJECTS.filter((project) => project.name !== 'nightly');
@@ -207,31 +262,45 @@ describe('the browser gate is split into a required run and a nightly one — #8
     const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
     // The step's own stop is behind the wrapper and its kill, never in front.
     expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
-    // ...and the step's stop ends inside the job's, from the latest start the
-    // 7763 has shown (835 s, run 38196648879 attempt 1; 707 s until #651) with
-    // the coverage steps (4 s) after it.
+    // ...and the step's stop ends at least THREE MINUTES inside the job's
+    // (#1280's criterion; it was 115 s when #1279 merged), from the latest
+    // start measured — read from docs/agents/ci.md, @see measuredRequiredJob —
+    // with what runs after the gate.
     const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
-    expect(835 + minutes * 60 + 4).toBeLessThan(job * 60);
+    const { gateStarts } = measuredRequiredJob();
+    expect(gateStarts.length).toBeGreaterThanOrEqual(2);
+    const latestStart = Math.max(...gateStarts);
+    expect(job * 60 - (latestStart + minutes * 60 + AFTER_GATE_S)).toBeGreaterThanOrEqual(180);
   });
 
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
     // Until #651 they summed to 815 s against a 765 s wrapper, and a `chromium`
-    // run that used its 720 s left the game run 35 s of its 85. The two `vite
-    // build`s before the first run take about 10 s on the runner.
-    const BUILDS_MS = 10_000;
+    // run that used its 720 s left the game run 35 s of its 85. What the step
+    // spends OUTSIDE the two runs is about 14 s on the runner, not the 10 s
+    // first written here (#1279's review, run 38196648879 attempt 3): the two
+    // `vite build`s about 5 s, Playwright's two web servers starting before it
+    // prints its first line 11 s in, and 3 s between the `chromium` run ending
+    // and the `game` run starting. So the wrapper holds both stops with 6 s to
+    // spare, not 10.
+    const BUILDS_MS = 14_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
   });
 
-  it('keeps the job’s stop at least three minutes clear of the slowest job measured with nothing red — #651', () => {
-    // 1 522 s: run 38196648879 attempt 1, an AMD EPYC 7763, cancelled at the
-    // 25-minute stop with every test it had run green. A stop has to be clear
-    // of what it stops (docs/agents/ci.md §4c §"Thirty minutes — #651"); when
-    // the job grows past this, the answer is the candidates listed there, and
-    // this number moves only with a new measurement beside it.
-    const SLOWEST_JOB_WITH_NOTHING_RED_S = 1522;
+  it('keeps the job’s stop at least five minutes clear of the slowest job measured — #651, #1280', () => {
+    // A stop has to be clear of what it stops. Three minutes until #1280,
+    // against 1 522 s typed here (a job with coverage, cancelled at the
+    // 25-minute stop with every test green); five since, against the slowest
+    // job in docs/agents/ci.md §4c §"Coverage out of the required job — #1280"
+    // — @see measuredRequiredJob. When a new row there turns this red, the
+    // answer is that section's "what is next" (shards, #1285), not a smaller
+    // number here and not a longer stop.
     const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
     const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
-    expect(job * 60 - SLOWEST_JOB_WITH_NOTHING_RED_S).toBeGreaterThanOrEqual(180);
+    const { jobs } = measuredRequiredJob();
+    expect(jobs.length).toBeGreaterThanOrEqual(2);
+    // A figure outside what a 30-minute job can take is a typo, not a run.
+    for (const seconds of jobs) expect(seconds).toBeGreaterThan(600);
+    expect(job * 60 - Math.max(...jobs)).toBeGreaterThanOrEqual(300);
   });
 });
 
@@ -247,15 +316,41 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     );
   });
 
-  it('leaves the required job running the gate and the covered suite', () => {
+  it('leaves the required job running the gate and the suite, with no coverage — #1280', () => {
     const commands = runCommands(rules);
     expect(commands).toEqual(
       expect.arrayContaining([
-        'pnpm run test:coverage',
+        'pnpm run test:required',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser',
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');
+    // The owner's ruling of 2026-10-12: the instrumented run is nightly. Back
+    // in the required job it is 106 to 133 s of the slower runner's margin,
+    // spent twice over the same files.
+    expect(commands.filter((command) => /test:coverage|--coverage/.test(command))).toEqual([]);
+  });
+
+  it('takes the coverage report nightly and publishes it, so it moved rather than stopped — #1280', () => {
+    // The ruling moved the report; it did not drop it. Each of the three is a
+    // way it stops being reported with nothing red: the run, the table in the
+    // run's summary, the HTML artefact.
+    const commands = runCommands(nightly);
+    expect(commands).toContain('pnpm run test:coverage');
+    expect(commands).toContain(
+      'node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true',
+    );
+    const upload =
+      /^ +- name: Upload the coverage report\n((?: {8}.+\n)+)/m.exec(nightly)?.[1] ?? '';
+    expect(upload).toMatch(/^ +uses: actions\/upload-artifact@[0-9a-f]{40} /m);
+    expect(upload).toMatch(/^ +path: coverage\/$/m);
+    // After the run that writes it, or it publishes yesterday's nothing.
+    expect(commands.indexOf('pnpm run test:coverage')).toBeLessThan(
+      commands.indexOf('node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true'),
+    );
+    expect(nightly.indexOf('run: pnpm run test:coverage')).toBeLessThan(
+      nightly.indexOf('- name: Upload the coverage report'),
+    );
   });
 
   it('reports under a name that is not the required check, on a schedule', () => {

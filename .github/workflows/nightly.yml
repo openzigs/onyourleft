@@ -21,7 +21,7 @@
 #   the two files #852 took out of coverage (28 s on run 36634388848). The
 #   fuzz is a robustness sweep over the decoder: the named refusals the
 #   decoder makes -- XXE, bad CRC, the bounds -- are unit tests that stay in
-#   the required `test:coverage`. `check:test-split`, which stays required,
+#   the required `test:required`. `check:test-split`, which stays required,
 #   still fails a file that is in no Vitest run. Since #1076 it also runs
 #   apps/web/src/game/realistic-textures.test.ts -- the realistic world's
 #   texture checks, about 30 s of the required job on the EPYC 7763 -- on the
@@ -34,6 +34,19 @@
 #   D-3); the one is the reflow walk's DARK palette (#1076, the owner's
 #   ruling of 2026-10-03), whose light-palette twin stays required. `nightly-split.test.ts`, in the required suite, fails a tag that
 #   list does not name and a script or workflow that stops running them.
+#
+# And, since #1280 (the owner's ruling of 2026-10-12), the one thing here that
+# is a REPORT rather than a check:
+#
+#   test:coverage -- the files the required job runs as `test:required`, run
+#   again under V8's coverage, with the table published to this run's summary
+#   and the HTML uploaded as the `coverage-report` artefact. Taking coverage
+#   in the required job cost it 106 to 133 s on the EPYC 7763 (run
+#   38243281606) while that job was being cancelled at its stop with every
+#   test green. No test left the required job: `check:test-split` fails the
+#   two scripts if their excludes differ. Coverage is reported, never gated
+#   (ADR 0005 decision C), so what moved is a table, from every pull
+#   request's run summary to one run a night.
 name: Nightly heavy checks
 
 # `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
@@ -61,6 +74,7 @@ on:
       - apps/web/src/game/realistic-textures.test.ts
       - package.json
       - packages/fit/tools/fuzz/decode-fuzz.test.ts
+      - scripts/coverage-summary.mjs
 
 # Read-only by default. Only the reporting job widens it, to issues alone.
 permissions:
@@ -77,7 +91,11 @@ jobs:
     # repository (CLAUDE.md section 8).
     runs-on: ubuntu-latest
     # A stop, not a budget. The browser half stops itself first
-    # (playwright.config.ts GATE_BUDGET_MS).
+    # (playwright.config.ts GATE_BUDGET_MS). Since #1280 the coverage run is
+    # in this job too -- 482 to 510 s as a step of the required job on the
+    # EPYC 7763 -- after checks that took 322 to 521 s in all on the four
+    # scheduled runs to 2026-10-12; docs/agents/ci.md section 4c has what this
+    # job measured with it.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -124,6 +142,44 @@ jobs:
       # and two of them side by side took about twice as long each (#651).
       - name: Nightly browser checks
         run: pnpm run test:browser:nightly
+
+      # --- The coverage report (#1280) ----------------------------------------
+      #
+      # The required job's Vitest files, under coverage. LAST, and
+      # `!cancelled()`, so a red check above does not cost the night its
+      # report, and a slow report cannot cost the checks above their run. ⚠️ A
+      # test that fails HERE turns this job red and opens the nightly issue,
+      # and that is meant: these are the required job's own tests, so a failure
+      # here and not there is a case that passes only without instrumentation
+      # -- a timeout tuned too close (docs/agents/ci.md section 4c), which is worth an
+      # issue. The coverage FIGURES gate nothing, here or anywhere.
+      - name: Tests under coverage
+        if: ${{ !cancelled() }}
+        run: pnpm run test:coverage
+
+      # Reported, never gated -- ADR 0005 decision C and CLAUDE.md section 5
+      # make the mutation list the gate and forbid a percentage floor. It
+      # cannot fail the job: the renderer exits non-zero only when the report
+      # is missing or unparseable, and `|| true` keeps even that from turning a
+      # reporting step into a gate. `!cancelled()` so a failing suite still
+      # publishes what it measured.
+      - name: Publish the coverage summary
+        if: ${{ !cancelled() }}
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
+
+      # The full HTML report, for the run where a number in the table above
+      # looks wrong and the question is which line.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
+      - name: Upload the coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn
 
   # A red nightly run has to be SEEN, or moving a check here is deleting it.
   # Opens an issue the first time, and comments on it while it stays open.
