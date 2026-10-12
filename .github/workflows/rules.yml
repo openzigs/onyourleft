@@ -64,7 +64,6 @@ jobs:
   # --- Shard 1 of 3: everything that is not Vitest and not a browser ------------
   checks:
     name: Checks
-    if: false
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
     # label) are charged even on a public repository, while standard
     # GitHub-hosted runners are free and unlimited -- CLAUDE.md section 8. It is
@@ -78,6 +77,9 @@ jobs:
     # section's table, which it reads rather than repeats.
     timeout-minutes: 12
     steps:
+      - name: Spike - a step that fails
+        run: exit 1
+
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
         # compromised action runs with whatever permissions this job holds.
@@ -407,14 +409,16 @@ jobs:
   # not the long pole, the browser gate is.
   tests:
     name: Tests
-    if: false
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop, and docs/agents/ci.md section 4c "Shards
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
-    timeout-minutes: 15
+    timeout-minutes: 1
     steps:
+      - name: Spike - a step that outlives the job's stop
+        run: sleep 200
+
       - name: Check out the repository
         # Pinned to a full commit SHA, as in the `checks` shard, which has the
         # provenance.
@@ -710,3 +714,48 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: bash scripts/check-shard-results.sh
+
+  # SPIKE: can the nightly reporter's query read this run's failed steps, with
+  # and without `actions: read`?
+  probe-read:
+    name: Probe with actions read
+    needs: [checks, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Query
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          steps=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \($job): \(.name) (\(.conclusion))"' || true)
+          echo "What went red:"
+          echo "${steps:-(the steps could not be read; open the run)}"
+
+  probe-none:
+    name: Probe with issues write only
+    needs: [checks, tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Query
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          steps=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \($job): \(.name) (\(.conclusion))"' || true)
+          echo "What went red:"
+          echo "${steps:-(the steps could not be read; open the run)}"
