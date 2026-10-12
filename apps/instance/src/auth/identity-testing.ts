@@ -36,8 +36,11 @@ import {
   type AnalysisJobs,
   type AnalysisJobsOptions,
 } from '../analysis/jobs.ts';
-import { importSecretKey } from '../analysis/hosted-key.ts';
+import { importSecretKey, ownHostedKeyState } from '../analysis/hosted-key.ts';
 import { createHostedSettings } from '../analysis/hosted-settings.ts';
+import { hostedForPictures } from '../camera/hosted-pictures.ts';
+import type { PictureConnection } from '../camera/picture-model.ts';
+import { createSidePose } from '../camera/side-pose.ts';
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import type { Config } from '../config.ts';
@@ -281,6 +284,12 @@ export async function startIdentityInstance(
      * this function — a test hands the engine and whatever else it sets.
      */
     analysis?: Omit<AnalysisJobsOptions, 'store' | 'now'>;
+    /**
+     * The side camera's pictures (#1106): the local picture model, and the
+     * `fetch` a hosted one is reached through. The hosted key is the world's
+     * own store's, opened with the world's secret, as a running instance's is.
+     */
+    pictures?: { local?: PictureConnection; hostedFetch?: typeof globalThis.fetch };
     /** What `/metrics` would count of each response. */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -307,6 +316,7 @@ export async function startIdentityInstance(
     keyless,
     startsAt,
     analysis,
+    pictures,
     observe,
     ...rest
   } = options;
@@ -427,8 +437,14 @@ export async function startIdentityInstance(
     secret: () => hostedSecret,
     now: () => clock.ms,
   });
+  const sidePose = createSidePose({
+    local: pictures?.local,
+    hostedKey: async (athleteId) => ownHostedKeyState(store, await hostedSecret, athleteId),
+    hosted: (key) => hostedForPictures(key, pictures?.hostedFetch),
+  });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
       hostedSettings,
       ...(observe === undefined ? {} : { observe }),

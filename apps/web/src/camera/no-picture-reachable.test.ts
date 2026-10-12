@@ -32,6 +32,18 @@
  *    own `messages` and `content` lists are not bounded, and a relative import
  *    the walk cannot resolve fails the walk.
  *
+ * ## The one path a picture has to an instance — #1106
+ *
+ * Since #1106 the side camera's pictures may go to the rider's instance, so
+ * "no picture reaches an instance" is no longer true and this gate says what
+ * IS: **`camera/instance-pose.ts` is the one module that puts a picture in an
+ * instance's request, and the picture route is the one route it names.**
+ * §"a picture reaches an instance by one path" holds it four ways — every
+ * OTHER module that names an instance route is an entry of the graph walk,
+ * derived rather than listed; the picture route is named by that one module;
+ * that module names no other instance route; and its body is the one body
+ * {@link pictureBodyFaults} is REQUIRED to fault. Each has a control.
+ *
  * ## The entries, and the ones still to come
  *
  * The four hosted modules; and **every** non-test module under
@@ -65,6 +77,7 @@ import { runAnalysis } from '@onyourleft/analysis';
 import { capturedFrame } from './frame';
 import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
 import { hostedModelPort, hostedRequestBody } from './hosted-transport';
+import { SIDE_POSE_PATH, sidePoseRequest } from './instance-pose';
 import { hostedModelDecision } from './hosted-model';
 import { CameraController } from './session';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
@@ -682,5 +695,164 @@ describe('the body carries no picture (#799)', () => {
     expect(
       pictureBodyFaults(hostedShapedStep('Your ride data: 62 minutes, 31 km.'), largest),
     ).toStrictEqual([]);
+  });
+});
+
+/**
+ * **A picture reaches an instance by one path** — #1106.
+ *
+ * The side camera's pictures may go to the rider's instance, sealed, when the
+ * rider switched that on. So the rule is no longer "none does": it is that
+ * {@link PICTURE_PATH} is the ONE module that puts a picture in an instance's
+ * request, through the one instance module (`privacy/no-network.test.ts`
+ * holds that half), and that it fails for any other.
+ */
+describe('a picture reaches an instance by one path (#1106)', () => {
+  /** The one module that may send a picture to an instance. */
+  const PICTURE_PATH = 'camera/instance-pose.ts';
+  /** The instance's picture routes: everything under this prefix. */
+  const PICTURE_ROUTES = '/v1/camera/';
+
+  /** Every shipped module under `src`, as a path under it. */
+  function shippedModules(directory = ''): string[] {
+    return readdirSync(join(SOURCE_ROOT, directory), { withFileTypes: true })
+      .flatMap((entry) => {
+        const path = directory === '' ? entry.name : `${directory}/${entry.name}`;
+        if (entry.isDirectory()) return entry.name === 'testing' ? [] : shippedModules(path);
+        return /\.tsx?$/.test(entry.name) &&
+          !/\.test\.tsx?$/.test(entry.name) &&
+          !/(?:^|-)testing\.tsx?$/.test(entry.name) &&
+          !entry.name.endsWith('.d.ts')
+          ? [path]
+          : [];
+      })
+      .sort();
+  }
+
+  /**
+   * An instance route written in a module's code: a string that opens with
+   * `/v1/`. ⚠️ `/v1/chat/completions` is not one — it is the path of an
+   * OpenAI-compatible server on the rider's own computer
+   * (`analysis-endpoint.ts` §`COMPLETIONS_PATH`), which no instance serves.
+   */
+  const INSTANCE_ROUTE = /['"`]\/v1\/(?!chat\/completions)/;
+
+  /** The modules among `paths` whose code names an instance route. */
+  function instanceCallers(paths: readonly string[], read: ReadSource): string[] {
+    return paths.filter((path) => INSTANCE_ROUTE.test(stripComments(read(path) ?? '')));
+  }
+
+  /** The modules among `paths` whose code names a picture route of the instance. */
+  function namingPictureRoute(paths: readonly string[], read: ReadSource): string[] {
+    return paths.filter((path) => stripComments(read(path) ?? '').includes(PICTURE_ROUTES));
+  }
+
+  /** Every instance route `source` names, as written up to its first interpolation. */
+  function routesNamedIn(source: string): string[] {
+    return [...stripComments(source).matchAll(/['"`](\/v1\/[A-Za-z0-9/_-]*)/g)].map(
+      (match) => match[1] ?? '',
+    );
+  }
+
+  const modules = shippedModules();
+  const callers = instanceCallers(modules, readFromDisk);
+  const others = callers.filter((path) => path !== PICTURE_PATH);
+  const walk = importWalk();
+
+  it('derives the modules that call an instance, and finds the ones it knows', () => {
+    expect(modules.length).toBeGreaterThan(300);
+    for (const known of [
+      'instance/instance-port.ts',
+      'instance/sign-in.ts',
+      'instance/sync.ts',
+      'instance/moderation-port.ts',
+      'instance/hosted-service.ts',
+      'net/rooms-port.ts',
+      'ride-analysis/instance-job.ts',
+      PICTURE_PATH,
+    ]) {
+      expect(callers, known).toContain(known);
+    }
+    // The rider's own computer is not an instance.
+    expect(callers).not.toContain('camera/analysis-endpoint.ts');
+  });
+
+  it.each(others)('%s names an instance route, and reaches no picture module', (caller) => {
+    expect(picturesReached(walk.closure([caller]), FORBIDDEN)).toStrictEqual([]);
+  });
+
+  it('names the picture route in one module, and that module names no other instance route', () => {
+    expect(SIDE_POSE_PATH.startsWith(PICTURE_ROUTES)).toBe(true);
+    expect(namingPictureRoute(modules, readFromDisk)).toStrictEqual([PICTURE_PATH]);
+    expect(routesNamedIn(readFromDisk(PICTURE_PATH) ?? '')).toStrictEqual([SIDE_POSE_PATH]);
+  });
+
+  it('is the one path that DOES reach a picture module — the exception is real, not vacuous', () => {
+    expect(picturesReached(walk.closure([PICTURE_PATH]), FORBIDDEN)).toContain(
+      `${PICTURE_PATH} → camera/frame.ts`,
+    );
+  });
+
+  it('builds the one body that carries a picture, which the body rule faults — and a job’s body still has none', () => {
+    const frame = capturedFrame({
+      bytes: cleanFrameBytes(2048),
+      mediaType: 'image/jpeg',
+      width: 640,
+      height: 480,
+    });
+    const body = sidePoseRequest(frame.bytes, { source: 'instance-local' });
+    expect(pictureBodyFaults(body, largestArrayIn(INPUT))).toStrictEqual([
+      'body.picture holds a long run of base64',
+    ]);
+    expect(
+      pictureBodyFaults(analysisJobRequest(INPUT, '1', 'instance-local'), largestArrayIn(INPUT)),
+    ).toStrictEqual([]);
+  });
+
+  describe('it fails for any other — the controls', () => {
+    /** A tree with planted modules over the real one. */
+    const planted =
+      (files: Readonly<Record<string, string>>): ReadSource =>
+      (path) =>
+        files[path] ?? readFromDisk(path);
+
+    it('goes red for a second module that calls an instance and can reach a picture', () => {
+      const files = {
+        'detail/planted-upload.ts':
+          "import { capturedFrame } from '../camera/frame';\nexport const to = '/v1/sync/items/note/1';\nexport { capturedFrame };\n",
+      };
+      const read = planted(files);
+      const found = instanceCallers([...modules, 'detail/planted-upload.ts'], read);
+      expect(found).toContain('detail/planted-upload.ts');
+      expect(
+        picturesReached(importWalk(read).closure(['detail/planted-upload.ts']), FORBIDDEN),
+      ).toContain('detail/planted-upload.ts → camera/frame.ts');
+    });
+
+    it('finds an instance route however it is quoted, and not one only a comment names', () => {
+      const read = planted({
+        'a.ts': 'const path = `/v1/analysis/jobs/${id}`;',
+        'b.ts': 'call("/v1/auth/devices");',
+        'c.ts': "// It used to call '/v1/sync/records'.\nexport {};",
+        'd.ts': "const completions = '/v1/chat/completions';",
+      });
+      expect(instanceCallers(['a.ts', 'b.ts', 'c.ts', 'd.ts'], read)).toStrictEqual([
+        'a.ts',
+        'b.ts',
+      ]);
+    });
+
+    it('goes red for a second module naming the picture route, and for the one module naming another route', () => {
+      const read = planted({
+        'views/planted-sender.tsx': "export const path = '/v1/camera/side-pose';",
+      });
+      expect(namingPictureRoute([...modules, 'views/planted-sender.tsx'], read)).toStrictEqual([
+        PICTURE_PATH,
+        'views/planted-sender.tsx',
+      ]);
+      expect(
+        routesNamedIn("const a = '/v1/camera/side-pose';\nconst b = `/v1/sync/items/${kind}`;"),
+      ).toStrictEqual(['/v1/camera/side-pose', '/v1/sync/items/']);
+    });
   });
 });

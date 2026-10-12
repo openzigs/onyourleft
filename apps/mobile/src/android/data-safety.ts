@@ -438,12 +438,36 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // Inside the shell the request is Capacitor's native HTTP rather than the
     // WebView's (the owner's 2026-09-26 ruling), which changes how it
     // travels and nothing about what this row answers.
+    //
+    // ⚠️ **Re-answered by #1106, and the answer CHANGED — shared: true.** A
+    // reviewer who remembers `shared: false` is reading #553's file. The side
+    // camera's pictures may now go, sealed, to the rider's instance, and from
+    // there — only with a second consent that names the service — to a hosted
+    // model on the rider's OWN key (the owner's ruling of 2026-10-12, ruling
+    // 3). Two transfers, answered apart:
+    //
+    // - **To the instance.** Sealed on the device to the instance's key (ADR
+    //   0047), so nobody between them can read a picture, Cloudflare included.
+    //   The rider's own instance is the rider's; the project's instance is
+    //   OURS, so Play's end-to-end exemption (*"unreadable by you or anyone
+    //   other than the sender and recipient"*) does not cover it there: the
+    //   recipient is us. `collected: true` already; the instance keeps none.
+    // - **On to a hosted service.** A third party — not the rider's machine,
+    //   not ours. That is SHARING in Play's sense, and it is filed as shared on
+    //   #803's reasoning for the health rows rather than by arguing Play's
+    //   user-initiated exemption for a third party. Still `optional: true`:
+    //   two switches, both off by default, the second naming the service.
+    //
+    // ⚠️ **Accepted by the owner on 2026-10-12** (#1106, ADR 0050 D-7: *"Play
+    // Data Safety: the Photos and videos row becomes shared."*). Flipping
+    // this row is what changes the listing's face (ADR 0029 §"What
+    // `docs/privacy-policy.md` and Play Data Safety would have to say").
     dataType: 'Photos and videos',
     collected: true,
-    shared: false,
+    shared: true,
     optional: true,
     purposes: ['App functionality'],
-    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key (#518) is never sent a picture, nor anything made from one',
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. That picture is not sent to this project or to an instance (#777), and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Separately, a side-camera phone the rider paired by scanning sends its pictures to the rider’s own tablet over an end-to-end encrypted WebRTC data channel with no relay (#530, ADR 0033 D-1), where each is analysed on the tablet and discarded at once, never stored, shown or sent on (ADR 0033 D-6) — end-to-end encrypted transfer between the rider’s own devices, which Play exempts, and so not what makes this row collected. The one exception is a stream the rider switches on (#553, ADR 0033 D-11): with a second switch, off by default, ticked beside a sentence saying so, every side-camera picture — about five a second while the side camera films — is sent on to that same computer of the rider’s instead of being analysed on the tablet, over the same path as above, and is still not kept on the tablet. A hosted model the rider sets up on their own key in the app (#518) is never sent a picture by the app, nor anything made from one. Since #1106 there is one way a picture reaches an instance, and one way it reaches a third party, both off by default: with a switch on the Camera page ticked beside a sentence saying so, the side camera’s pictures — about one a second while it films — go to the instance the rider is signed in to instead of being analysed on the tablet, sealed on the device for that instance alone (ADR 0047), so that Cloudflare, which carries a home instance’s and this project’s instance’s traffic, cannot read them; the instance shows each to a model on its own machine and does not store it — not in its database, a file or a log. With a SECOND switch, also off by default and ticked beside a consent that names the service, the instance sends each picture on to a hosted model service the rider holds their own key for — a third party, hence shared — with one fixed question and nothing else; what that service keeps is under its own terms. Without the sealed connection no picture is sent at all',
   },
   {
     // ⚠️ **Re-answered by #777, and the answer CHANGED — collected: true.** A

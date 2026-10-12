@@ -226,13 +226,20 @@ describe('what the filed statements say', () => {
     expect(policy).toContain('exactly **four** network calls');
   });
 
-  it('Play’s Photos and videos row stays shared: false and says why', () => {
+  it('Play’s Photos and videos row still says THIS path is never sent a picture — and is shared since #1106, for another', () => {
     const safety = readFileSync(
       join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
       'utf8',
     );
     const row = safety.slice(safety.indexOf("dataType: 'Photos and videos'"));
-    expect(row).toMatch(/^dataType: 'Photos and videos',\s+collected: true,\s+shared: false,/);
-    expect(row.slice(0, row.indexOf('},'))).toContain('never sent a picture');
+    // ⚠️ `shared: false` until #1106, and this case held it there. The hosted
+    // model the rider sets up in the app (#518) is still never sent a picture,
+    // and the row still says so. What made it `shared: true` is a different
+    // path: the rider's INSTANCE sending the side camera's pictures on to a
+    // hosted service the rider agreed to by name (`instance-pose.ts`).
+    expect(row).toMatch(/^dataType: 'Photos and videos',\s+collected: true,\s+shared: true,/);
+    const why = row.slice(0, row.indexOf('},'));
+    expect(why).toContain('(#518) is never sent a picture by the app');
+    expect(why).toContain('the instance sends each picture on to a hosted model service');
   });
 });

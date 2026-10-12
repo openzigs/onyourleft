@@ -22,10 +22,13 @@ import {
 } from './fake-model-server-testing.ts';
 import {
   createHostedModel,
+  createHostedPictureModel,
   createLocalModel,
+  createLocalPictureModel,
   GATEWAY_REFUSED,
   GatewayRefusedError,
   pinnedTo,
+  saysWithoutPictures,
 } from './model.ts';
 import type { ModelTurnRequest, ToolSpec } from './model-turn.ts';
 
@@ -421,5 +424,233 @@ describe('the hosted model on the instance’s key (#1097)', () => {
     const { fetch } = hostedFetch(model);
     const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
     expect(await connection.turn(request())).toStrictEqual({ ok: false, failure: 'refused' });
+  });
+});
+
+describe('the two picture model builders hold what the text ones hold (#1106)', () => {
+  const HOSTED = new URL('https://models.example/v1');
+  const QUESTION = { question: 'Where is the rider?', maxOutputTokens: 40 };
+  const PICTURE = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+  function look(overrides: Partial<{ timeoutMilliseconds: number; signal: AbortSignal }> = {}) {
+    return {
+      picture: PICTURE,
+      timeoutMilliseconds: 10_000,
+      signal: new AbortController().signal,
+      ...overrides,
+    };
+  }
+
+  /** A fetch that records the init of every request, and answers a plain reply. */
+  function recording() {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      calls.push({ url, init });
+      return Promise.resolve(
+        Response.json({
+          id: 'x',
+          object: 'chat.completion',
+          created: 1,
+          model: 'm',
+          choices: [
+            { index: 0, message: { role: 'assistant', content: 'seen' }, finish_reason: 'stop' },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    }) as typeof globalThis.fetch;
+    return { calls, fetch };
+  }
+
+  it('sends a hosted look through the one-host fetch: refusing a redirect', async () => {
+    const { calls, fetch } = recording();
+    const connection = createHostedPictureModel({
+      baseUrl: HOSTED,
+      model: 'm',
+      apiKey: 'k',
+      question: QUESTION,
+      fetch,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: true, text: 'seen' });
+    expect(calls.map((call) => call.url)).toStrictEqual([
+      'https://models.example/v1/chat/completions',
+    ]);
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' });
+  });
+
+  it('sends a local look through the one-host fetch: refusing a redirect, to the checked address', async () => {
+    const { calls, fetch } = recording();
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: new URL('http://ollama:11434/v1'), model: 'm' },
+      resolve: () => Promise.resolve(['172.30.0.9']),
+      question: QUESTION,
+      fetch,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: true, text: 'seen' });
+    expect(calls.map((call) => call.url)).toStrictEqual([
+      'http://172.30.0.9:11434/v1/chat/completions',
+    ]);
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' });
+  });
+
+  it.each([
+    ['a public address', ['93.184.216.34'], 'not-local'],
+    ['nothing', [], 'unresolved'],
+  ])(
+    'answers a local name resolving to %s as a failure, sending nothing',
+    async (_w, found, why) => {
+      const { calls, fetch } = recording();
+      const connection = createLocalPictureModel({
+        settings: { baseUrl: new URL('http://ollama:11434/v1'), model: 'm' },
+        resolve: () => Promise.resolve(found),
+        question: QUESTION,
+        fetch,
+      });
+      expect(await connection.look(look())).toStrictEqual({ ok: false, failure: why });
+      expect(calls).toStrictEqual([]);
+    },
+  );
+
+  it('refuses an http: hosted URL outright', () => {
+    expect(() =>
+      createHostedPictureModel({
+        baseUrl: new URL('http://models.example/v1'),
+        model: 'm',
+        apiKey: 'k',
+        question: QUESTION,
+      }),
+    ).toThrow(/https/);
+  });
+
+  it('gives a look up when it takes longer than it was given', async () => {
+    const model = await fake({
+      kind: 'slow',
+      milliseconds: 5_000,
+      then: { kind: 'text', text: 'too late' },
+    });
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look({ timeoutMilliseconds: 50 }))).toStrictEqual({
+      ok: false,
+      failure: 'timed-out',
+    });
+  });
+
+  /** A model server's own 400, as Ollama and DeepSeek wrap theirs. */
+  const refusal = (message: string): ScriptedReply => ({
+    kind: 'status',
+    status: 400,
+    body: JSON.stringify({ error: { message, type: 'invalid_request_error' } }),
+  });
+
+  // The words each server really answered on 2026-10-12 (spike 0025 §8).
+  const OLLAMA_WITHOUT_PICTURES =
+    'Multimodal data provided, but model does not support multimodal requests.';
+  const OLLAMA_BAD_PICTURE = 'Failed to load image or audio file';
+  const DEEPSEEK_BAD_PICTURE =
+    '.messages[0].image[0]: You have uploaded an unsupported image. Please make sure your image is valid and has one of the following formats: webp, png, jpeg, and gif.';
+
+  it('reads a model that takes no picture as that, and a picture a model could not open as one refusal', async () => {
+    const model = await fake(
+      refusal(OLLAMA_WITHOUT_PICTURES),
+      refusal(OLLAMA_BAD_PICTURE),
+      refusal(DEEPSEEK_BAD_PICTURE),
+    );
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look())).toStrictEqual({
+      ok: false,
+      failure: 'model-without-pictures',
+    });
+    // These two came from models that DO take pictures, about bytes they could not decode.
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+  });
+
+  it('reads the same words on a status that is not a refusal of the request’s shape as that status, never as a model that takes no picture', async () => {
+    const said = JSON.stringify({ error: { message: OLLAMA_WITHOUT_PICTURES } });
+    const model = await fake(
+      { kind: 'status', status: 503, body: said },
+      { kind: 'status', status: 429, body: said },
+      { kind: 'status', status: 422, body: said },
+    );
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'server-error' });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+    // The control: the same words on a status that IS one of the three.
+    expect(await connection.look(look())).toStrictEqual({
+      ok: false,
+      failure: 'model-without-pictures',
+    });
+  });
+
+  it.each([
+    'This model does not support image input.',
+    'The model does not support images.',
+    'Model does not support vision.',
+    'image input is not supported - hint: provide a projector',
+    'Invalid content type. image_url is only supported by certain models.',
+    'unknown variant `image_url`, expected `text`',
+    'this model is missing data required for image input',
+    'This model doesn’t support images',
+    "This model doesn't support images",
+    'Models of this family do not support images',
+    'x is not a multimodal model',
+    'Image inputs are not supported by this model',
+    'Vision is not supported for this model',
+    // As it arrives, inside a server's JSON.
+    '{"error":{"message":"Image inputs are not supported by this model","type":"x"}}',
+    `{"error":{"message":"{\\"error\\":{\\"message\\":\\"${OLLAMA_WITHOUT_PICTURES}\\"}}"}}`,
+  ])('takes %j to say the model takes no picture', (words) => {
+    expect(saysWithoutPictures(words)).toBe(true);
+  });
+
+  it.each([
+    OLLAMA_BAD_PICTURE,
+    DEEPSEEK_BAD_PICTURE,
+    'image too large',
+    'This model does not support images larger than 20 MB.',
+    'The model does not support image format image/webp',
+    'does not support images in system messages',
+    'image_url is only supported with https or data URLs',
+    'webp images are not supported',
+    'could not process image',
+    'invalid image',
+    'The vision service is busy.',
+    'max_tokens is too large',
+    '',
+  ])('does not take %j to say so', (words) => {
+    expect(saysWithoutPictures(words)).toBe(false);
+  });
+
+  it('adds the rider’s reasoning allowance to the answer bound, on the wire', async () => {
+    const model = await fake({ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' });
+    const local = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm', reasoningTokens: 2_000 },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    const without = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    await local.look(look());
+    await without.look(look());
+    const bounds = model.requests.map(
+      (body) => (body as { max_tokens?: number; max_completion_tokens?: number }).max_tokens,
+    );
+    expect(bounds).toStrictEqual([2_040, 40]);
   });
 });

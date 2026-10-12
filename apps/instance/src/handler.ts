@@ -7,7 +7,7 @@ import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo, InstanceProbes } from './route-kit.ts';
+import type { ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
@@ -145,6 +145,11 @@ export interface HandlerOptions {
    * needs them answers `unavailable`.
    */
   readonly hostedSettings?: HostedSettings;
+  /**
+   * The side camera's pictures (#1106). Absent, the route that needs them
+   * answers `unavailable`.
+   */
+  readonly sidePose?: SidePose;
   /**
    * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
    * /v1/instance/keys` answers `unavailable`.
@@ -322,6 +327,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.hostedSettings === true && options.hostedSettings === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.sidePose === true && options.sidePose === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
@@ -364,6 +372,7 @@ export function createHandler(options: HandlerOptions): Handler {
       rooms: options.rooms,
       analysis: options.analysis,
       hostedSettings: options.hostedSettings,
+      sidePose: options.sidePose,
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,

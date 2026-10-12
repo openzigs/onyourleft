@@ -197,6 +197,12 @@ const IMPORTERS: Readonly<
   // to numbers or to nothing (`sidePoseFromAnswer`), and imports no trainer
   // module — the check below holds it to that like every other holder.
   [join('camera', 'computer-pose.ts')]: 'holds an answer',
+  // #1106: the side camera's pictures sent, sealed, to the rider's instance.
+  // It takes the device's storage from the endpoint rule's module, and holds
+  // a model's answer exactly as `computer-pose.ts` does — handed straight to
+  // that module's `sidePoseFromAnswer`, numbers or nothing — and the check
+  // below holds it to importing no trainer module.
+  [join('camera', 'instance-pose.ts')]: 'holds an answer',
   // #553: hands a port to `computer-pose.ts` or does not. Never calls it.
   [join('camera', 'side-analyser.ts')]: 'chooses the port',
   [join('camera', 'session.ts')]: 'holds an answer',

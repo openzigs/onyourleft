@@ -31,7 +31,8 @@
  * `sign-in.ts` §`INSTANCE_ACCOUNT_STORAGE_KEY` (the address and the instance's
  * athlete id) and {@link INSTANCE_SESSION_STORAGE_KEY} (the token, beside the
  * origin that issued it), and
- * **disconnecting removes both** — and nothing else: no ride, route or other
+ * **disconnecting removes both** — and the picture agreements
+ * ({@link INSTANCE_AGREEMENT_STORAGE_KEYS}, #1106) — and nothing else: no ride, route or other
  * local row is touched, which `instance-port.test.ts` counts.
  *
  * ## What is shown comes from the instance
@@ -424,9 +425,24 @@ export function instanceEraser(storage: Pick<InstanceStorage, 'removeItem'> | un
     forget: () => {
       storage?.removeItem(INSTANCE_SESSION_STORAGE_KEY);
       storage?.removeItem(INSTANCE_ACCOUNT_STORAGE_KEY);
+      // #1106: what the rider agreed to send THIS instance names its address, so it goes too.
+      for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage?.removeItem(key);
     },
   };
 }
+
+/**
+ * The device's keys for what a rider agreed to have sent to ONE instance,
+ * each holding that instance's address or a service's (#1106): the side
+ * camera's switch, and under it the hosted service agreed to by name. Their
+ * reader and writer is `camera/instance-pose.ts`; they are named here because
+ * they hold an instance's address, which {@link instanceEraser} must forget
+ * with the sign-in, and no module in this directory may import that one.
+ */
+export const INSTANCE_AGREEMENT_STORAGE_KEYS = [
+  'oyl.side-analyser-instance.v1',
+  'oyl.side-analyser-instance-hosted.v1',
+] as const;
 
 /** The instance this device is signed in to, and the token it holds for it. */
 export interface HeldInstanceSession {
@@ -995,6 +1011,8 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       // instance does — and whether or not it answers at all.
       storage.removeItem(INSTANCE_SESSION_STORAGE_KEY);
       storage.removeItem(INSTANCE_ACCOUNT_STORAGE_KEY);
+      // #1106: what was agreed to is the signed-in rider's, not the next account's.
+      for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage.removeItem(key);
       if (connection === undefined) return;
       try {
         await connection.http.call('DELETE', '/v1/auth/session', { token: connection.token });

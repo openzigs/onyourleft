@@ -295,7 +295,7 @@ describe('the declaration filed on Play', () => {
     expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
   });
 
-  it('answers the photos row as collected, optional and not shared — #387', () => {
+  it('answers the photos row as collected and optional — #387 — and, since #1106, shared', () => {
     // ⚠️ **Re-filed in the same pull request as the first byte**, which is
     // #377's epic criterion: the declaration is true of the shipped app at
     // every point, not only at the end. `apps/web/src/privacy/no-network.test.ts`
@@ -305,9 +305,11 @@ describe('the declaration filed on Play', () => {
     expect(photos, 'the app has a camera and the form has no Photos row').toBeDefined();
     expect(photos?.collected).toBe(true);
     expect(photos?.optional).toBe(true);
-    // Not a third party: the rider's own machine, on a press. A hosted path
-    // would make this `true`, and is not built.
-    expect(photos?.shared).toBe(false);
+    // #387's own path is not a third party: the rider's own machine, on a
+    // press. *"A hosted path would make this `true`"*, this comment used to
+    // say, *"and is not built"*. #1106 built one — through the rider's
+    // instance, on their own key, by name — so it is `true`.
+    expect(photos?.shared).toBe(true);
     expect(photos?.why).toContain('#387');
   });
 
@@ -328,7 +330,23 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('about five a second');
     expect(photos?.why).toContain('off by default');
     expect(photos?.collected).toBe(true);
-    expect(photos?.shared).toBe(false);
+  });
+
+  it('names the side camera’s pictures to the rider’s instance, and on to a hosted service by name — #1106', () => {
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos).toMatchObject({ collected: true, shared: true, optional: true });
+    const why = photos?.why ?? '';
+    expect(why).toContain('#1106');
+    // To the instance: sealed, and not stored there.
+    expect(why).toContain('sealed on the device for that instance alone');
+    expect(why).toContain('does not store it — not in its database, a file or a log');
+    // On to a third party: its own switch, by name, on the rider's own key.
+    expect(why).toContain('a consent that names the service');
+    expect(why).toContain('a third party, hence shared');
+    expect(why).toContain('the rider holds their own key for');
+    expect(why).toContain('Without the sealed connection no picture is sent at all');
+    // And what #387 said of its own picture is still said of that picture alone.
+    expect(why).toContain('That picture is not sent to this project or to an instance');
   });
 
   it('collects nothing else — the map, the camera, the post-ride ask, an instance and its rooms, and nothing more', () => {
@@ -349,12 +367,18 @@ describe('the declaration filed on Play', () => {
       'Photos and videos',
       'Device or other IDs',
     ]);
-    // Shared: the health rows alone, since #803. Photos and videos, and every
-    // location row, stay `shared: false` — the hosted path is never sent a
-    // picture and nothing it is sent carries a coordinate.
+    // Shared: the health rows since #803, and Photos and videos since #1106,
+    // whose instance path can send a side-camera picture on to a hosted
+    // service the rider agreed to by name. Every location row stays
+    // `shared: false`: nothing sent to a hosted service carries a coordinate,
+    // and a picture is stripped of its metadata before it leaves the device.
     expect(
       DATA_SAFETY_DECLARATION.filter((answer) => answer.shared).map((answer) => answer.dataType),
-    ).toStrictEqual(['Health and fitness — health info', 'Health and fitness — fitness info']);
+    ).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'Photos and videos',
+    ]);
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {

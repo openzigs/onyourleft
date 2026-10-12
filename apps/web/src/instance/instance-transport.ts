@@ -17,8 +17,13 @@
  * are built in those two modules and nowhere else, and
  * `privacy/boundaries.test.ts` walks each for a coordinate — this module is a
  * `departing` boundary (ADR 0036 D-3 (d)). No module here can name a camera
- * type (`instance-transport.test.ts` reads the imports), so a picture cannot
- * reach this path.
+ * type (`instance-transport.test.ts` reads the imports). ⚠️ **Since #1106 one
+ * picture path DOES end here**: `camera/instance-pose.ts` hands
+ * {@link sealedInstance} a side-camera picture as one field of a sealed body,
+ * when the rider switched that on. It is the only module that may
+ * (`camera/no-picture-reachable.test.ts` §"a picture reaches an instance by
+ * one path"), it can only be handed a SEALED channel, and this module still
+ * imports nothing of the camera's.
  *
  * ## The request, and what it refuses
  *
@@ -389,6 +394,9 @@ export function instanceRoomSocket(
 
 // --- Sealed calls — #1191, ADR 0047 D-8, D-9 --------------------------------
 
+/** The longest {@link SealedCallOptions.timeoutMilliseconds} a call may ask for. */
+export const MAXIMUM_SEALED_CALL_MILLISECONDS = 60_000;
+
 /** How long a sealed stream may run before the app stops reading it. */
 export const SEALED_STREAM_TIMEOUT_MILLISECONDS = 10 * 60_000;
 
@@ -459,6 +467,14 @@ export interface SealedCallOptions {
   /** A pasted key travels in this request: pad it to at least 1 KiB (D-9). */
   readonly pastedKey?: boolean;
   readonly maximumAnswerBytes?: number;
+  /**
+   * How long this ONE call may take, in place of
+   * {@link INSTANCE_TIMEOUT_MILLISECONDS} (#1106): a side-camera picture waits
+   * for a model to look at it, which a box at home takes longer over than an
+   * instance takes to answer anything else. Never more than
+   * {@link MAXIMUM_SEALED_CALL_MILLISECONDS}.
+   */
+  readonly timeoutMilliseconds?: number;
   /**
    * A query string, as names and values (#1192: a moderators' list's `limit`
    * and `cursor`), encoded with `URLSearchParams` and appended to the INNER
@@ -661,9 +677,13 @@ export function sealedInstance(
       options.maximumAnswerBytes ?? MAXIMUM_INSTANCE_ANSWER_BYTES,
       MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
     );
+    const timeout = Math.min(
+      options.timeoutMilliseconds ?? INSTANCE_TIMEOUT_MILLISECONDS,
+      MAXIMUM_SEALED_CALL_MILLISECONDS,
+    );
     const attempt = async () => {
       const sealed = await seal(method, inner, options.body, options.token, options);
-      return whole(sealed, await post(sealed, options.token, INSTANCE_TIMEOUT_MILLISECONDS), limit);
+      return whole(sealed, await post(sealed, options.token, timeout), limit);
     };
     const first = await attempt();
     const instanceTime = first.sealed ? staleTime(first.body) : undefined;

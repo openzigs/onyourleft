@@ -1117,3 +1117,10 @@ Until 2026-10-07 this section was §"Owner questions left open".
   inline in the answer shows neither sign, and its rider or operator sets the field. **3 072 is the
   author's draft, not a measurement** — the three calls were capped at 1 024 — and it and the
   `model-no-answer` sentence are the owner's to rule on. (#1268)
+- **2026-10-12** — **D-1's *"pictures do not leave the room"* and D-14(d)'s closing paragraph (Q3,
+  *"never through the Cloudflare tunnel"*) are superseded for ONE path: the side camera's pictures,
+  sealed, to the rider's instance, when the rider has switched it on.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision, and its D-10 says what stays: D-1's rule for analysis, the tablet's own pose model as
+  the default, and D-8, D-9 and D-14(d) otherwise. The body above is not edited. (#1106)

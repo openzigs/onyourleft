@@ -30,7 +30,9 @@ import {
   clockOffsetNotice,
   createInstanceClock,
   INSTANCE_CLOCK_WRONG_NOTICE,
+  INSTANCE_TIMEOUT_MILLISECONDS,
   InstanceUnreachableError,
+  MAXIMUM_SEALED_CALL_MILLISECONDS,
   sealedInstance,
   type InstanceSend,
 } from './instance-transport';
@@ -182,6 +184,22 @@ describe('a sealed call — #1191', () => {
     const { http } = await client(played);
     await expect(http.call('GET', '/v1/../auth')).rejects.toThrow(InstanceUnreachableError);
     expect(played.send).not.toHaveBeenCalled();
+  });
+
+  it('gives one call the time it asked for, never more than a minute, and fifteen seconds otherwise (#1106)', async () => {
+    const timeouts = vi.spyOn(AbortSignal, 'timeout');
+    const played = await playInstance();
+    const { http } = await client(played);
+    await http.call('POST', '/v1/x', { token: 't' });
+    await http.call('POST', '/v1/x', { token: 't', timeoutMilliseconds: 30_000 });
+    await http.call('POST', '/v1/x', { token: 't', timeoutMilliseconds: 600_000 });
+    expect(timeouts.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      INSTANCE_TIMEOUT_MILLISECONDS,
+      30_000,
+      MAXIMUM_SEALED_CALL_MILLISECONDS,
+    ]);
+    expect(INSTANCE_TIMEOUT_MILLISECONDS).toBe(15_000);
+    expect(MAXIMUM_SEALED_CALL_MILLISECONDS).toBe(60_000);
   });
 
   it('pads a pasted key’s request to at least 1 KiB', async () => {
