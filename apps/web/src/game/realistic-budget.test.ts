@@ -34,9 +34,15 @@ import {
   REALISTIC_SKY,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
+  REALISTIC_BROADLEAVES,
+  REALISTIC_TREE_SETS,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
+  realisticVegetation,
+  type RealisticModel,
+  type RealisticTrees,
 } from './realistic-assets';
 import { treeSlots, type TreeLevels } from './tree-levels';
 import {
@@ -91,16 +97,35 @@ const riderTriangles = modelFacts(at(REALISTIC_RIDER)).triangles;
 
 const TREE_KINDS = ['tree-broadleaf', 'tree-conifer'] as const;
 
-/** The heaviest committed file of a kind's near level, or of the trees' middle level. */
-function heaviestNear(kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number {
+/**
+ * Every model of a kind that is COMMITTED, whichever set draws it — #1283:
+ * the generated broadleaves and the scans they replaced are both in the build,
+ * so both are held to their class's budget. Each file once.
+ */
+function everyModel(kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): readonly RealisticModel[] {
+  const models = new Map<string, RealisticModel>();
+  for (const trees of REALISTIC_TREE_SETS) {
+    for (const model of realisticVegetation(trees)[kind]) models.set(model.file, model);
+  }
+  return [...models.values()];
+}
+
+/**
+ * The heaviest committed file of a kind's near level, or of the trees' middle
+ * level, in ONE set — a frame draws one set's trees, never both (#1283).
+ */
+function heaviestNear(
+  kind: (typeof REALISTIC_VEGETATION_KINDS)[number],
+  trees: RealisticTrees = REALISTIC_TREES_DEFAULT,
+): number {
   return Math.max(
-    ...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles),
+    ...realisticVegetation(trees)[kind].map((model) => modelFacts(at(model.file)).triangles),
   );
 }
-function heaviestMiddle(): number {
+function heaviestMiddle(trees: RealisticTrees = REALISTIC_TREES_DEFAULT): number {
   return Math.max(
     ...TREE_KINDS.flatMap((kind) =>
-      REALISTIC_VEGETATION[kind].map((model) =>
+      realisticVegetation(trees)[kind].map((model) =>
         model.middle === undefined
           ? Number.POSITIVE_INFINITY
           : modelFacts(at(model.middle)).triangles,
@@ -115,12 +140,15 @@ function heaviestMiddle(): number {
  * filled with the heaviest file of EITHER tree kind, and the nearest shrubs and
  * rocks as before.
  */
-function worstVegetation(levels: TreeLevels = REALISTIC_TREE_LEVELS): number {
+function worstVegetation(
+  levels: TreeLevels = REALISTIC_TREE_LEVELS,
+  trees: RealisticTrees = REALISTIC_TREES_DEFAULT,
+): number {
   const slots = treeSlots(levels);
-  const heaviestTree = Math.max(...TREE_KINDS.map(heaviestNear));
+  const heaviestTree = Math.max(...TREE_KINDS.map((kind) => heaviestNear(kind, trees)));
   return (
     slots.full * heaviestTree +
-    (slots.middle > 0 ? slots.middle * heaviestMiddle() : 0) +
+    (slots.middle > 0 ? slots.middle * heaviestMiddle(trees) : 0) +
     REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub') +
     REALISTIC_NEAR_MESHES.rock * heaviestNear('rock')
   );
@@ -131,8 +159,12 @@ const BOX_TRIANGLES = 12;
 
 describe('each committed file inside its class’s budget — ADR 0026 D-6', () => {
   it('keeps every model at or under its kind’s triangles', () => {
+    // Non-vacuity for #1283: both sets' broadleaves are read, eight files.
+    expect(everyModel('tree-broadleaf')).toHaveLength(
+      REALISTIC_BROADLEAVES.generated.length + REALISTIC_BROADLEAVES.scanned.length,
+    );
     for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         const { triangles } = modelFacts(at(model.file));
         expect(triangles, model.file).toBeGreaterThan(0);
         expect(triangles, model.file).toBeLessThanOrEqual(REALISTIC_TRIANGLES[kind]);
@@ -144,7 +176,7 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 
   it('keeps every map inside a model at or under the model class’s size', () => {
     for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         const { images } = modelFacts(at(model.file));
         expect(images.length, `${model.file} carries no map at all`).toBeGreaterThan(0);
         for (const image of images) {
@@ -176,10 +208,15 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
       );
     }
     for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         if (model.impostor === undefined) continue;
         expect(largest(model.impostor), model.impostor).toBeLessThanOrEqual(
           REALISTIC_TEXTURE_PIXELS.impostor,
+        );
+        // #630, #1283: and its normals, which a generated tree renders smaller.
+        if (model.impostorNormals === undefined) throw new Error(`${model.name}: no normals`);
+        expect(largest(model.impostorNormals), model.impostorNormals).toBeLessThanOrEqual(
+          largest(model.impostor),
         );
       }
     }
@@ -199,12 +236,19 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 
   it('keeps every tree’s middle level under its ceiling, carrying no map at all — #617', () => {
     for (const kind of TREE_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         const file = model.middle;
         expect(file, model.name).toBeDefined();
         if (file === undefined) continue;
         const facts = modelFacts(at(file));
-        expect(facts.triangles, file).toBeGreaterThan(REALISTIC_TRIANGLES['tree-middle'] / 2);
+        // A scan is cut DOWN to the ceiling, so it sits just under it. A
+        // generated tree is asked for at its size (#1283), which is a third of
+        // the ceiling — and under half its own full level, or it is no level.
+        const generated = REALISTIC_BROADLEAVES.generated.includes(model);
+        expect(facts.triangles, file).toBeGreaterThan(
+          generated ? 1_000 : REALISTIC_TRIANGLES['tree-middle'] / 2,
+        );
+        expect(facts.triangles, file).toBeLessThan(modelFacts(at(model.file)).triangles / 2);
         expect(facts.triangles, file).toBeLessThanOrEqual(REALISTIC_TRIANGLES['tree-middle']);
         // It wears the near file's maps, so it adds no texture memory.
         expect(facts.images, file).toEqual([]);
@@ -292,7 +336,7 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
   it('gives the rider a skin and nothing else one', () => {
     expect(modelFacts(at(REALISTIC_RIDER)).skinned).toBe(true);
     for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         expect(modelFacts(at(model.file)).skinned, model.file).toBe(false);
       }
     }
@@ -310,7 +354,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   // (`realisticBicycleTriangles`), where it read `REALISTIC_BICYCLE_TRIANGLES`:
   // every other term is the committed or built asset, and the ceiling alone
   // overstated three bicycles by about 20 000.
-  const worstFrame = (): {
+  const worstFrame = (
+    trees: RealisticTrees = REALISTIC_TREES_DEFAULT,
+  ): {
     readonly vegetation: number;
     readonly riders: number;
     readonly structureItems: number;
@@ -332,7 +378,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         2 * logoBoxes().length * BOX_TRIANGLES,
       // #620: the ground blobs, every one the belt has room for, a quad each.
       blobs: REALISTIC_GROUND_BLOBS * GROUND_BLOB_TRIANGLES,
-      vegetation: worstVegetation(),
+      vegetation: worstVegetation(REALISTIC_TREE_LEVELS, trees),
       // Three riders: the rider, the pacer and the ghost, each a body and a bicycle.
       riders: 3 * (riderTriangles + realisticBicycleTriangles()),
       // The most structures ANY realistic rung lets a frame carry, each the
@@ -350,6 +396,19 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(
       vegetation + riders + structureItems * heaviestStructure + blobs + gantries,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #1283: with EITHER set's trees, since the owner's page can load both —
+    // at every structure's ceiling, the heaviest frame the budget prices.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const frame = worstFrame(trees);
+      expect(
+        frame.vegetation +
+          frame.riders +
+          frame.structureItems * REALISTIC_TRIANGLES.structure +
+          frame.blobs +
+          frame.gantries,
+        trees,
+      ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    }
     // #679: the gantries inside their own ceiling, and a real sum.
     expect(gantries).toBeLessThanOrEqual(REALISTIC_GANTRY_TRIANGLES);
     expect(gantries).toBeGreaterThan(REALISTIC_GANTRY_TRIANGLES / 2);
@@ -431,40 +490,86 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   });
 
   it('falls by at least 60 000 triangles with the trees’ middle level — #617', () => {
+    // ⚠️ **Of the SCANS** (#1283): #617's figure is what the middle level
+    // saved the trees it was made for, and those are still committed. With
+    // the generated broadleaves the worst tree is a conifer and there is far
+    // less to save — the case below prices that.
+    //
     // The worst frame as it was summed before #617: the nearest THREE of each
     // tree kind as full meshes, a hard swap, no middle level.
     const before =
-      3 * heaviestNear('tree-broadleaf') +
-      3 * heaviestNear('tree-conifer') +
-      REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub') +
-      REALISTIC_NEAR_MESHES.rock * heaviestNear('rock');
-    const now = worstVegetation();
+      3 * heaviestNear('tree-broadleaf', 'scanned') +
+      3 * heaviestNear('tree-conifer', 'scanned') +
+      REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub', 'scanned') +
+      REALISTIC_NEAR_MESHES.rock * heaviestNear('rock', 'scanned');
+    const now = worstVegetation(REALISTIC_TREE_LEVELS, 'scanned');
     console.log(
       `#617: worst vegetation ${String(now)} triangles, ${String(before)} before — ` +
-        `${String(before - now)} fewer; the heaviest middle tree ${String(heaviestMiddle())}`,
+        `${String(before - now)} fewer; the heaviest middle tree ${String(heaviestMiddle('scanned'))}`,
     );
     expect(before - now).toBeGreaterThanOrEqual(60_000);
     // The frame's figure is unchanged: what fell is the worst case under it.
     expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
     // And the hard swap the browser gate draws as its control is no lighter
     // than what it replaced, so a green control is not a lighter frame.
-    expect(worstVegetation(HARD_SWAP_TREE_LEVELS) - now).toBeGreaterThanOrEqual(60_000);
+    expect(worstVegetation(HARD_SWAP_TREE_LEVELS, 'scanned') - now).toBeGreaterThanOrEqual(60_000);
   });
 
   it('counts a band tree at BOTH its levels in that worst case — #617', () => {
     // Non-vacuity for the sum above: the dithered hand-over costs a full tree
     // and two middle ones over the same counts with no band.
-    const bandless = worstVegetation({ ...REALISTIC_TREE_LEVELS, dithered: false });
-    expect(worstVegetation() - bandless).toBe(
-      Math.max(...TREE_KINDS.map(heaviestNear)) + 2 * heaviestMiddle(),
+    for (const trees of REALISTIC_TREE_SETS) {
+      const bandless = worstVegetation({ ...REALISTIC_TREE_LEVELS, dithered: false }, trees);
+      expect(worstVegetation(REALISTIC_TREE_LEVELS, trees) - bandless, trees).toBe(
+        Math.max(...TREE_KINDS.map((kind) => heaviestNear(kind, trees))) +
+          2 * heaviestMiddle(trees),
+      );
+    }
+  });
+
+  it('draws fewer triangles with the generated trees than with the scans, slot for slot — #1283', () => {
+    const scanned = worstVegetation(REALISTIC_TREE_LEVELS, 'scanned');
+    const generated = worstVegetation(REALISTIC_TREE_LEVELS, 'generated');
+    const slots = treeSlots(REALISTIC_TREE_LEVELS);
+    // Every tree slot filled with a BROADLEAF, which is where the two differ:
+    // the frame a rider sees in a broadleaf wood.
+    const broadleafWood = (trees: RealisticTrees): number =>
+      slots.full * heaviestNear('tree-broadleaf', trees) +
+      slots.middle *
+        Math.max(
+          ...REALISTIC_BROADLEAVES[trees].map((model) =>
+            model.middle === undefined ? Infinity : modelFacts(at(model.middle)).triangles,
+          ),
+        );
+    console.log(
+      `#1283: worst vegetation ${String(generated)} triangles generated, ${String(scanned)} scanned ` +
+        `(the worst tree is a conifer in the first, a broadleaf in the second); ` +
+        `a broadleaf wood's trees ${String(broadleafWood('generated'))} generated, ${String(broadleafWood('scanned'))} scanned; ` +
+        `the heaviest generated tree ${String(heaviestNear('tree-broadleaf', 'generated'))}, ` +
+        `the heaviest scanned ${String(heaviestNear('tree-broadleaf', 'scanned'))}`,
     );
+    // The worst frame does not rise — no budget is raised to make room…
+    expect(generated).toBeLessThanOrEqual(scanned);
+    // …and where the trees ARE broadleaves it falls to under a third.
+    expect(broadleafWood('generated')).toBeLessThan(broadleafWood('scanned') / 3);
+    // Non-vacuity: the scans' figure is the one #617 left, a real one.
+    expect(broadleafWood('scanned')).toBeGreaterThan(80_000);
+    // A generated tree is asked for well under the class's ceiling, which did
+    // not move: what is spent fell, the ceiling on what may be spent did not.
+    expect(heaviestNear('tree-broadleaf', 'generated')).toBeLessThan(
+      REALISTIC_TRIANGLES['tree-broadleaf'] / 3,
+    );
+    expect(REALISTIC_TRIANGLES['tree-broadleaf']).toBe(28_000);
+    expect(REALISTIC_TRIANGLES['tree-middle']).toBe(6_000);
   });
 
   /**
    * Every committed texture but the sky, read off disk, by class — #618:
    * each a KTX2 file, whose own header says its size and encoding.
    */
-  const textures = (): readonly {
+  const textures = (
+    trees: RealisticTrees = REALISTIC_TREES_DEFAULT,
+  ): readonly {
     readonly role:
       'surface' | 'structure' | 'model' | 'impostor' | 'impostor-normals' | 'bicycle' | 'rider';
     readonly facts: Ktx2Facts;
@@ -493,8 +598,10 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         facts: fileKtx2Facts(at(file)),
       }));
     }),
+    // #1283: ONE set's trees — a load holds the generated broadleaves or the
+    // scans, never both, so each set is its own estimate.
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
-      REALISTIC_VEGETATION[kind].flatMap((model) => [
+      realisticVegetation(trees)[kind].flatMap((model) => [
         ...modelFacts(at(model.file)).ktx2.map((facts) => ({ role: 'model' as const, facts })),
         ...(model.impostor === undefined
           ? []
@@ -530,25 +637,87 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   };
 
   it('commits every texture but the sky as KTX2, a full mipmap chain each — #618', () => {
-    const all = textures();
-    // Non-vacuity: the whole set, read — eight surface maps, fourteen structure
-    // maps, four impostors and every map in a tree, shrub and rock.
-    expect(all.length).toBeGreaterThanOrEqual(40);
-    for (const { role, facts } of all) {
-      const full = Math.floor(Math.log2(Math.max(facts.width, facts.height))) + 1;
-      expect(facts.levels, `${role} ${JSON.stringify(facts)}`).toBe(full);
+    // #1283: of BOTH sets, since both are committed.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const all = textures(trees);
+      // Non-vacuity: the whole set, read — eight surface maps, fourteen structure
+      // maps, four impostors and every map in a tree, shrub and rock.
+      expect(all.length, trees).toBeGreaterThanOrEqual(40);
+      for (const { role, facts } of all) {
+        const full = Math.floor(Math.log2(Math.max(facts.width, facts.height))) + 1;
+        expect(facts.levels, `${role} ${JSON.stringify(facts)}`).toBe(full);
+      }
     }
     // And no JPEG or PNG is left in a model for three to decode to RGBA8.
     for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
+      for (const model of everyModel(kind)) {
         const facts = modelFacts(at(model.file));
         expect(facts.ktx2.length, model.file).toBe(facts.images.length);
       }
     }
   });
 
+  /** One set's estimated texture memory on the tablet, the sky and what is made at load included. */
+  const estimatedMemory = (trees: RealisticTrees): number => {
+    const banners = estimatedTextureBytes({
+      width: BANNER_CELL_WIDTH,
+      height: BANNER_CELL_HEIGHT * BANNER_CELLS,
+      bytesPerTexel: 1,
+      mipmapped: true,
+    });
+    return (
+      textures(trees).reduce(
+        (sum, { facts }) =>
+          sum +
+          estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true }),
+        0,
+      ) +
+      skyBytes() +
+      REALISTIC_RIDER_SILHOUETTE_BYTES +
+      banners
+    );
+  };
+
+  it('asks for less texture memory with the generated trees than with the scans — #1283', () => {
+    const generated = estimatedMemory('generated');
+    const scanned = estimatedMemory('scanned');
+    const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(2);
+    const trees = (which: RealisticTrees): number =>
+      textures(which)
+        .filter((each) => each.role !== 'surface' && each.role !== 'structure')
+        .reduce(
+          (sum, { facts }) =>
+            sum +
+            estimatedTextureBytes({ ...facts, bytesPerTexel: onTheTablet(facts), mipmapped: true }),
+          0,
+        );
+    console.log(
+      `#1283: texture memory estimated ${mib(generated)} MiB with the generated trees, ` +
+        `${mib(scanned)} MiB with the scans — ${mib(scanned - generated)} MiB less; ` +
+        `models, impostors, rider and bicycle ${mib(trees('generated'))} against ${mib(trees('scanned'))}`,
+    );
+    // Either set alone, inside the ceiling — which did not move.
+    expect(generated).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    expect(scanned).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    expect(REALISTIC_TEXTURE_MEMORY_BYTES).toBe(160 * 2 ** 20);
+    // Six trees for two, and still less: smaller maps and smaller strips.
+    expect(generated).toBeLessThan(scanned);
+    // Non-vacuity: the six generated trees are read, each with four maps and two strips.
+    const generatedTextures = textures('generated').length - textures('scanned').length;
+    expect(generatedTextures).toBe(
+      REALISTIC_BROADLEAVES.generated.length * 6 -
+        REALISTIC_BROADLEAVES.scanned.reduce(
+          (sum, model) => sum + modelFacts(at(model.file)).ktx2.length + 2,
+          0,
+        ),
+    );
+  });
+
   it('holds the estimated texture memory under its ceiling, as the tablet is handed it — #618', () => {
-    const all = textures();
+    // ⚠️ **Of the SCANS** (#1283): #618's before and after are those of the
+    // set it compressed, which is still committed and still loadable. The
+    // generated set is the case above, and asks for less.
+    const all = textures('scanned');
     const compressed = all.reduce(
       (sum, { facts }) =>
         sum +

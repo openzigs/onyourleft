@@ -48,7 +48,7 @@ import type {
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 import { type InstanceTint, NO_TINT, tintedLinear } from '../src/game/instance-tint';
-import { GROUND_BLOB_DARKNESS } from '../src/game/ground-blob';
+import { GROUND_BLOB_DARKNESS, GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
 import { REALISTIC_VALLEY_HAZE } from '../src/game/realistic-light';
 import {
   PRESENCE_CHECK_MILLISECONDS,
@@ -804,6 +804,15 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * 16.1 s), and that run was slower than the one before it in every phase: the
  * load had been 82 s to 83 s on that runner before #720 and 86 s on the first
  * run after (36396660625). 160 s is 1.52 times 105.
+ *
+ * ⚠️ **#1283 added a phase** (`trees: scanned — #1283`: the world loaded again
+ * with the scanned broadleaves, and the wooded frame counted on two views).
+ * On a Mac on 2026-10-12 it is 11.6 s to 11.9 s of a 45 s to 46 s load, a
+ * quarter; the unmerged control beside it is 7.9 s there and was 11.7 s to
+ * 16.1 s on the runner, so this one should be 17 s to 24 s on it — a load of
+ * about 130 s at the slowest, 81 % of this budget. Not measured on the runner:
+ * this describe is nightly, and the first nightly after the merge is the
+ * measurement.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 
@@ -4428,16 +4437,55 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     console.log(
       `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
         `${String(measured.trianglesHardSwap)} with the hard swap; ` +
-        `${String(measured.woodedScenery)} scenery items drawn in ${String(measured.drawCallsSubmitted)} draw calls`,
+        `${String(measured.woodedScenery)} scenery items drawn in ${String(measured.drawCallsSubmitted)} draw calls. ` +
+        `With the scanned broadleaves: ${String(measured.scanned.triangles)} a frame, ` +
+        `${String(measured.scanned.trianglesHardSwap)} with the hard swap`,
     );
     // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
     expect(measured.woodedScenery).toBeGreaterThan(10);
     expect(measured.trianglesSubmitted).toBeGreaterThan(50_000);
-    // The control is the same view with the six nearest trees full and no
-    // middle level — what a frame drew before #617.
-    expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
+    // ⚠️ **#617's 60 000 is the SCANS' figure, and is held on the scans**
+    // (#1283): it is what the middle level took off six trees of 24 000 to
+    // 28 000 triangles, and a generated broadleaf is 6 692. The control is the
+    // same view with the six nearest trees full and no middle level — what a
+    // frame drew before #617 — on the world loaded with the scanned
+    // broadleaves, which is the world #617 measured.
+    expect(measured.scanned.triangles).toBeGreaterThan(50_000);
+    expect(measured.scanned.trianglesHardSwap - measured.scanned.triangles).toBeGreaterThanOrEqual(
       TRIANGLES_FALL_AT_LEAST,
     );
+    // With the generated trees a ride draws, the middle level still saves —
+    // the conifers are scans yet — and the hard swap is still the heavier.
+    expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
+      GENERATED_TRIANGLES_FALL_AT_LEAST,
+    );
+  });
+
+  test('draws the wooded view in fewer triangles with the generated trees than with the scans, inside the same calls — #1283', async ({
+    harnessRun,
+  }) => {
+    const measured = await trees(harnessRun);
+    console.log(
+      `#1283: the wooded view, same route position and camera: ` +
+        `${String(measured.trianglesSubmitted)} triangles in ${String(measured.drawCallsSubmitted)} draw calls ` +
+        `with the generated broadleaves, ${String(measured.scanned.triangles)} in ` +
+        `${String(measured.scanned.calls)} with the scans — ` +
+        `${String(measured.scanned.triangles - measured.trianglesSubmitted)} fewer triangles, ` +
+        `${String(measured.drawCallsSubmitted - measured.scanned.calls)} more calls`,
+    );
+    // Non-vacuity: both are real frames of the realistic world, and different ones.
+    expect(measured.scanned.triangles).toBeGreaterThan(50_000);
+    expect(measured.scanned.calls).toBeGreaterThan(0);
+    expect(measured.scanned.triangles).not.toBe(measured.trianglesSubmitted);
+    // Fewer triangles, by more than one generated tree's worth.
+    expect(measured.scanned.triangles - measured.trianglesSubmitted).toBeGreaterThan(
+      GENERATED_WOODED_TRIANGLES_SAVED,
+    );
+    // More shapes are more calls — a call a level a variant — and both sets
+    // stay inside the one ceiling, which did not move.
+    expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(measured.scanned.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });
 
   test('draws the wooded view in at most 35 calls, into the same picture — #639', async ({
@@ -4531,18 +4579,28 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
         `${String(measured.nearestVisibleTriangles)} triangles; ` +
         `${String(measured.nearestVisibleTrianglesControl)} ranked as before the review`,
     );
-    // It is the full mesh — 24 000 to 28 000 triangles — and nothing else
-    // moves: the two behind the camera are impostors either way.
-    expect(measured.nearestVisibleTriangles).toBeGreaterThan(20_000);
+    // ⚠️ Read off the committed files since #1283, where this named 20 000:
+    // the probe's tree is the first broadleaf, which is a GENERATED oak now —
+    // 6 692 triangles, not a scan's 28 000 — and a figure typed here would be
+    // the scans'.
+    const [first] = REALISTIC_VEGETATION['tree-broadleaf'];
+    if (first?.middle === undefined) throw new Error('the first broadleaf has no middle level');
+    const full = modelFacts(join(REALISTIC_PUBLIC, first.file)).triangles;
+    const middle = modelFacts(join(REALISTIC_PUBLIC, first.middle)).triangles;
+    // It is the full mesh, and its ground blob's two triangles — and nothing
+    // else moves: the two behind the camera are impostors either way.
+    expect(full).toBeGreaterThan(2 * middle);
+    expect(measured.nearestVisibleTriangles).toBe(full + GROUND_BLOB_TRIANGLES);
     // The control: ranked with the two behind the camera it is NOT the full
     // mesh alone. It lands in band A (full and middle) and pushes the 14 m
     // tree behind the camera from the band's full mesh down to the middle
-    // level, so the frame gains about 12 000 — measured 11 980 on
-    // 2026-09-26 — where the product's gains a whole full tree.
-    expect(measured.nearestVisibleTrianglesControl).toBeGreaterThan(1_000);
-    expect(
-      measured.nearestVisibleTriangles - measured.nearestVisibleTrianglesControl,
-    ).toBeGreaterThan(10_000);
+    // level, so the frame gains two middle levels — 4 418 with the blob,
+    // measured 2026-10-12; 11 980 with the scans on 2026-09-26 — where the
+    // product's gains a whole full tree.
+    expect(measured.nearestVisibleTrianglesControl).toBe(2 * middle + GROUND_BLOB_TRIANGLES);
+    expect(measured.nearestVisibleTriangles).toBeGreaterThan(
+      measured.nearestVisibleTrianglesControl,
+    );
   });
 });
 
@@ -4562,6 +4620,25 @@ const MERGED_PIXELS_CHANGED = 0;
  * figure, which `realistic-budget.test.ts` also holds the worst case to.
  */
 const TRIANGLES_FALL_AT_LEAST = 60_000;
+
+/**
+ * The least the middle level must take off the wooded view with the GENERATED
+ * broadleaves a ride draws — #1283: **9 000**, half the 18 078 measured on
+ * 2026-10-12 (169 482 triangles against 187 560 with the hard swap). Far less
+ * than the scans' 60 000, because a generated broadleaf is 6 692 triangles at
+ * full detail where a scan is 28 000: there is less to save, and what is saved
+ * is mostly the conifers', which are scans still.
+ */
+const GENERATED_TRIANGLES_FALL_AT_LEAST = 9_000;
+
+/**
+ * The least the generated broadleaves must take off the wooded view against
+ * the scans, at the same route position with the same camera — #1283:
+ * **6 692**, one generated tree's worth, so that "fewer" is not a rounding
+ * error. Measured on 2026-10-12: see `realistic-budget.ts` §"The generated
+ * trees, measured".
+ */
+const GENERATED_WOODED_TRIANGLES_SAVED = 6_692;
 
 /**
  * The most the picture may change in one frame of a hand-over, as a share of

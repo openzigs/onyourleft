@@ -122,7 +122,7 @@ function natural(across: number, top: number): Reach {
  *
  * | kind | stylised across / top | set by | realistic across / top | set by |
  * |---|--:|---|--:|---|
- * | `tree-broadleaf` | 2.2 / 4.4 | the fallback sphere; `tree_oak`, 1.75 m | 3.0 / 4.5 | `island_tree_02`, 2.97 m; `tree_small_02`, 4.42 m |
+ * | `tree-broadleaf` | 2.2 / 4.4 | the fallback sphere; `tree_oak`, 1.75 m | 3.12 / 4.5 | a generated tree's box, below; `tree_small_02`, 4.42 m |
  * | `tree-conifer` | 2.45 / 7 | `tree_pineRoundD`, 2.40 m | 3.65 / 7.1 | `fir_sapling_medium_a`, 3.55 m and 7.03 m |
  * | `shrub` | 1.15 / 1.6 | `plant_bush`, 1.13 m; the sphere, 1.4 m | 1.1 / 1.6 | `shrub_02_c`, 1.03 m; `shrub_02_a`, 1.54 m |
  * | `rock` | 1.3 / 1.8 | `stone_largeC`, 1.25 m; the octahedron | 1.15 / 1.0 | `boulder_01`, 1.10 m and 0.98 m |
@@ -133,6 +133,15 @@ function natural(across: number, top: number): Reach {
  * realistic scan keeps its own pivot, and its thinned cards grow past the scan
  * (`tools/realistic/blender/process_tree.py`), so a fir's branches reach half
  * its height.
+ *
+ * ⚠️ **A realistic broadleaf reaches 3.12 m since #1283, where it was 3.0**
+ * (`island_tree_02`'s 2.97 m). A generated tree stands with its trunk on its
+ * pivot and is fitted so that nothing of it is further than 2.2 m from the
+ * trunk in plan (`tools/realistic/generated-trees.ts` §`treeSize`); the BOX
+ * this bound is held against is square to the axes, and a box round a 2.2 m
+ * circle has its corner at 2.2 · √2 = 3.111 m. So 3.12 holds any tree that
+ * pipeline can make, and the widest committed — `generated_oak_b` — is 3.03 m.
+ * The scans, which are still shipped, are inside it too.
  */
 const NATURAL_REACH: Readonly<Record<DrawnWorld, Readonly<Record<NaturalKind, Reach>>>> = {
   stylised: {
@@ -143,7 +152,7 @@ const NATURAL_REACH: Readonly<Record<DrawnWorld, Readonly<Record<NaturalKind, Re
     post: natural(0.1, 1.1),
   },
   realistic: {
-    'tree-broadleaf': natural(3, 4.5),
+    'tree-broadleaf': natural(3.12, 4.5),
     'tree-conifer': natural(3.65, 7.1),
     shrub: natural(1.1, 1.6),
     rock: natural(1.15, 1),

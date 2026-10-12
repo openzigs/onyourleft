@@ -126,6 +126,44 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * is visible up close at that budget, which is why these are a little higher
  * and the near band is capped by count instead (below).
  *
+ * ## The generated trees, measured — #1283
+ *
+ * Since #1283 a ride's broadleaf trees are GENERATED to their size (ADR 0049
+ * D-1) rather than scans cut down to these ceilings: 6 692 and 5 800
+ * triangles at full detail against 28 000, and 2 208 and 2 004 at the middle
+ * level against 6 000. **No ceiling here moved**: what is spent fell, and the
+ * scans — still committed, still loadable on the owner's page — are held to
+ * the same figures. Same route position, same camera, pinned Chromium on
+ * 2026-10-12, the scans first:
+ *
+ * | | Scanned broadleaves | Generated broadleaves |
+ * |---|--:|--:|
+ * | The gate's wooded view (`game-harness.ts` §`treeLevelRun`, 900 m of the valley route), triangles a frame | 181 232 | **169 482** |
+ * | The same view, draw calls | 27 | **32** |
+ * | The owner's page held at `at=2550`, triangles a frame | 199 676 | **195 692** |
+ * | The same page, draw calls | 30 to 31 | **35** |
+ * | The same page, bytes of texture the load holds | 31 393 488 | **27 932 576** |
+ * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | **67.26 MiB** |
+ * | The worst vegetation the caps allow, triangles | 168 692 | **160 684** |
+ * | A broadleaf wood's tree slots, every one filled | 91 940 | **26 632** |
+ *
+ * ⚠️ **The draw calls ROSE, and the owner's page sits AT its ceiling.** A tree
+ * is a call a level a shape, and there are six generated shapes where there
+ * were two scans, so the far band alone can make four more calls. Both views
+ * are inside {@link REALISTIC_WOODED_DRAW_CALLS} — which was not raised — and
+ * the page's has no room left in it: the next call that view gains is a red
+ * nightly. What the calls cost the tablet is validation 0002's #1283 row,
+ * which is the owner's; two seeds a species instead of three would give two
+ * back.
+ *
+ * ⚠️ **The build GREW, because both sets ship**: the realistic set is
+ * 40 663 627 bytes where it was 36 440 765 — 4 222 862 for six trees at three
+ * levels — and with the transcoder 41 248 489 of {@link REALISTIC_BUILD_BYTES}'
+ * 41 943 040, 694 551 under it. The scanned broadleaves are
+ * 10 616 301 of those bytes and go when the owner has judged the generated
+ * ones on the tablet (ADR 0049 D-1), at which point the set is smaller than it
+ * was before #1283.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
@@ -292,6 +330,14 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  *
  * So the wooded view is 6 under #617's 33 + 2, and 2 under the 33 it made
  * before #617 at all.
+ *
+ * ⚠️ **Since #1283 that room is spent**, and a reviewer who remembers 27 and
+ * 31 is reading the scans' figures: with the six generated broadleaves the
+ * gate's wooded view makes **32** calls and the owner's page at `at=2550`
+ * **35** — this ceiling exactly — because a tree is a call a level a SHAPE and
+ * there are six shapes where there were two. {@link REALISTIC_TRIANGLES} has
+ * the table. The scans, loaded on the same views, still make 27 and 30 to 31
+ * (the page's count moved by one between runs of the same held frame).
  *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
  * not depend on the GPU, so SwiftShader counts what the tablet would; what the

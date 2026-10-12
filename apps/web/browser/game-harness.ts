@@ -140,6 +140,7 @@ import {
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
+  setRealisticTrees,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -185,6 +186,7 @@ import { CONTACT_SHADOW_DARKNESS } from '../src/game/contact-shadow';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
   REALISTIC_SURFACES,
+  REALISTIC_TREES_DEFAULT,
   realisticUrl,
   realisticWorldNotice,
 } from '../src/game/realistic-assets';
@@ -4758,6 +4760,20 @@ export interface TreeLevelMeasurement {
    * heaviest of R2's probes. @see foliageProbe
    */
   readonly foliage: FoliageMeasurement;
+  /**
+   * #1283: the same wooded frame from a world loaded with the SCANNED
+   * broadleaves (`three-renderer.ts` §`setRealisticTrees`) — the trees every
+   * measurement above was first taken on — at the same route position, with
+   * the same camera: its triangles and draw calls as the product's levels draw
+   * it, and its triangles with the hard swap, which is the pair #617's
+   * 60 000 was measured on. Everything above is the GENERATED trees', which
+   * is what a ride draws.
+   */
+  readonly scanned: {
+    readonly triangles: number;
+    readonly calls: number;
+    readonly trianglesHardSwap: number;
+  };
 }
 
 /**
@@ -6428,6 +6444,7 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
+  scanned: { triangles: 0, calls: 0, trianglesHardSwap: 0 },
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -8495,10 +8512,49 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     setRealisticMaterialsMerged(true);
   }
   phaseEnds('trees: unmerged control');
+  // #1283: the scans the generated broadleaves replaced, on the same frame.
+  // LAST, because it replaces the loaded world and nothing after it reads one;
+  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644).
+  const scannedFrame = (levels: TreeLevels): WoodedFrame => {
+    setTreeLevels(levels);
+    const canvas = document.createElement('canvas');
+    let view: GameView;
+    try {
+      view = threeGameRenderer.create(canvas, top);
+    } finally {
+      setTreeLevels(REALISTIC_TREE_LEVELS);
+    }
+    try {
+      const gl = canvas.getContext('webgl2');
+      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
+      view.resize(160, 90);
+      return woodedFrameOf(view, gl, wooded);
+    } finally {
+      view.destroy();
+    }
+  };
+  setRealisticTrees('scanned');
+  let scanned: TreeLevelMeasurement['scanned'];
+  try {
+    const outcome = await loadRealisticWorld();
+    if (!outcome.loaded) {
+      throw new Error(`#1283: the scanned trees' world did not load: ${outcome.detail}`);
+    }
+    const levelled = scannedFrame(REALISTIC_TREE_LEVELS);
+    scanned = {
+      triangles: levelled.triangles,
+      calls: levelled.calls,
+      trianglesHardSwap: scannedFrame(HARD_SWAP_TREE_LEVELS).triangles,
+    };
+  } finally {
+    setRealisticTrees(REALISTIC_TREES_DEFAULT);
+  }
+  phaseEnds('trees: scanned — #1283');
   const pixels = unmerged.pixels ?? new Uint8Array(0);
   return {
     measured: true,
     ...probed,
+    scanned,
     drawCallsUnmerged: unmerged.calls,
     trianglesUnmerged: unmerged.triangles,
     unmergedPixelsChanged:

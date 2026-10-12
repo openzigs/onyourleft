@@ -42,6 +42,7 @@
     "uqr": "0.1.3"
   },
   "devDependencies": {
+    "@dgreenheck/ez-tree": "1.1.0",
     "@playwright/test": "1.63.0",
     "@tailwindcss/node": "4.3.3",
     "@tailwindcss/oxide": "4.3.3",

@@ -239,7 +239,11 @@ packages, `react-remove-scroll` and its helpers, `aria-hidden`, `get-nonce`, `de
 since #1072 — `motion` 13.5.1 (MIT, with `framer-motion`, `motion-dom` and `motion-utils`, all MIT; a
 runtime dependency of `apps/web` reached only from the list–detail layout's lazily loaded chunk, and
 `tools/bundle/entry-graph.ts` fails the build if any of it is in the entry —
-[ADR 0041](../adr/0041-motion-for-menu-animation.md)), are
+[ADR 0041](../adr/0041-motion-for-menu-animation.md)), and — since #1283 — `@dgreenheck/ez-tree`
+**1.1.0** exactly (MIT, **zero dependencies**, `three` its peer; a devDependency of `apps/web` and a
+pinned TOOL like Blender, not a library: one module loads it, `tools/realistic/ez-tree.ts`, and
+`generated-trees.test.ts` fails if anything under `src/`, `browser/` or elsewhere in `tools/`
+imports it — [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489

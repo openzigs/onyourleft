@@ -365,8 +365,15 @@ pnpm --filter @onyourleft/web run test
 # names it; the default is `ktx` on the PATH), a second pinned TOOL that makes
 # every KTX2 texture, byte-stable, so `--check` still compares byte for byte.
 # `apps/web/tools/realistic/sources.ts` §`PINNED_KTX` says how it was installed.
+# ⚠️ Since #1283 a third pinned TOOL makes the generated trees: EZ-Tree 1.1.0, a
+# devDependency `pnpm install` brings (§`PINNED_EZ_TREE`), refused at any other
+# version, and run under the repository's Node (`.nvmrc`). A tree whose numbers are
+# not the digests `generated-trees.ts` records is refused before Blender runs;
+# `--geometry` prints what the committed seeds and parameters make today, to
+# record after one is changed on purpose, and needs neither Blender nor `ktx`.
 pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
+pnpm --filter @onyourleft/web run realistic:process --geometry
 pnpm --filter @onyourleft/web run realistic:stage
 
 # Regenerate the map's label glyphs (#578) from the committed Roboto v2.138.

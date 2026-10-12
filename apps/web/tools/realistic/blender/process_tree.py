@@ -76,6 +76,7 @@ from mathutils import Vector
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gltf_import import import_scan  # noqa: E402
+from impostor import IMPOSTOR_FRAMES, render_impostor  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 IN_GLTF, OUT_GLB, OUT_REPORT, OBJECT = args[:4]
@@ -88,14 +89,9 @@ if len(args) >= 8 and args[7] not in ("maps", "nomaps"):
     raise SystemExit(f"maps|nomaps expected, not {args[7]}")
 OUT_IMPOSTOR = OUT_GLB[: -len(".glb")] + "-impostor.png"
 OUT_IMPOSTOR_NORMALS = OUT_GLB[: -len(".glb")] + "-impostor-normals.png"
-# #630: samples a pixel for the normal pass. The pass is data, not light: a
-# few samples only anti-alias the silhouette and the leaf edges.
-NORMAL_SAMPLES = 8
-
 # The strip: eight views, each FRAME_W x FRAME_H. The far band starts where a
 # 9 m tree is about 250 px tall on the tablet, so 512 px frames are twice what
 # the nearest impostor needs.
-IMPOSTOR_FRAMES = 8
 FRAME_W, FRAME_H = 256, 512
 # The largest side any shipped texture may have. ADR 0026 D-6 caps it at 2048;
 # `realistic-budget.ts` holds the shipped files to this lower figure.
@@ -182,128 +178,9 @@ plant["oyl_scan_width"] = width
 
 # --- 2. the impostor strip, from the FULL scan --------------------------------
 if WANT_IMPOSTOR:
-    camera_data = bpy.data.cameras.new("impostor")
-    camera_data.type = "ORTHO"
-    ortho = max(height, width * FRAME_H / FRAME_W) * 1.02
-    camera_data.ortho_scale = ortho
-    camera = bpy.data.objects.new("impostor", camera_data)
-    scene.collection.objects.link(camera)
-    scene.camera = camera
-    sun = bpy.data.lights.new("sun", "SUN")
-    sun.energy = 3.5
-    sun_obj = bpy.data.objects.new("sun", sun)
-    sun_obj.rotation_euler = (math.radians(35), 0, math.radians(135))
-    scene.collection.objects.link(sun_obj)
-    scene.world = bpy.data.worlds.new("world")
-    scene.world.use_nodes = True
-    background = scene.world.node_tree.nodes.get("Background")
-    background.inputs["Color"].default_value = (0.55, 0.62, 0.7, 1.0)
-    background.inputs["Strength"].default_value = 0.8
-    scene.render.film_transparent = True
-    scene.render.resolution_x = FRAME_W
-    scene.render.resolution_y = FRAME_H
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.image_settings.color_mode = "RGBA"
-    scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
-    scene.cycles.samples = 32
-    scene.cycles.seed = 430
-    scene.cycles.use_denoising = False
-    scene.view_settings.view_transform = "Standard"
-    strip = np.zeros((FRAME_H, FRAME_W * IMPOSTOR_FRAMES, 4), dtype=np.float32)
-    distance = max(height, width) * 4
-    for frame in range(IMPOSTOR_FRAMES):
-        # Frame k is the plant seen from azimuth 2*pi*k/8, anticlockwise from
-        # -Y in Blender, which is +Z -- the model's front -- in three. The
-        # runtime picks the frame by the same rule.
-        angle = 2 * math.pi * frame / IMPOSTOR_FRAMES
-        camera.location = (math.sin(angle) * distance, -math.cos(angle) * distance, height / 2)
-        camera.rotation_euler = (math.pi / 2, 0, angle)
-        path = f"{OUT_IMPOSTOR}.frame{frame}.png"
-        scene.render.filepath = path
-        bpy.ops.render.render(write_still=True)
-        image = bpy.data.images.load(path)
-        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(FRAME_H, FRAME_W, 4)
-        strip[:, frame * FRAME_W : (frame + 1) * FRAME_W, :] = pixels
-        bpy.data.images.remove(image)
-    out = bpy.data.images.new("impostor", FRAME_W * IMPOSTOR_FRAMES, FRAME_H, alpha=True)
-    out.pixels.foreach_set(strip.ravel())
-    out.filepath_raw = OUT_IMPOSTOR
-    out.file_format = "PNG"
-    out.save()
-    bpy.data.images.remove(out)
-
-    # --- 2b. #630: the same eight views' NORMALS ------------------------------
-    # AFTER the colour strip, and every setting it changes is put back below,
-    # so the colour strip and everything after it are the bytes they were.
-    #
-    # The convention, which `three-renderer.ts` section impostorMaterial reads:
-    # the plant's OWN frame in three's axes -- x across, y up, z the model's
-    # front (Blender's -Y) -- which is Blender's world here, because the plant
-    # stands unrotated on the origin; encoded n * 0.5 + 0.5, no alpha (the
-    # colour strip's alpha is the silhouette), and the background 0.5 grey,
-    # the zero vector. Cycles' Normal pass, which respects the leaves' alpha:
-    # a pixel's normal is the first surface at least `pass_alpha_threshold`
-    # opaque.
-    view_layer = scene.view_layers[0]
-    view_layer.use_pass_normal = True
-    scene.use_nodes = True
-    tree = scene.node_tree
-    for node in list(tree.nodes):
-        tree.nodes.remove(node)
-    layers = tree.nodes.new("CompositorNodeRLayers")
-    separate = tree.nodes.new("CompositorNodeSeparateColor")
-    combine = tree.nodes.new("CompositorNodeCombineColor")
-    composite = tree.nodes.new("CompositorNodeComposite")
-    tree.links.new(layers.outputs["Normal"], separate.inputs["Image"])
-    # (x, y, z) in Blender to (x, z, -y) in three, each * 0.5 + 0.5.
-    for channel, source, sign in (("Red", "Red", 0.5), ("Green", "Blue", 0.5), ("Blue", "Green", -0.5)):
-        scale = tree.nodes.new("CompositorNodeMath")
-        scale.operation = "MULTIPLY_ADD"
-        scale.use_clamp = True
-        scale.inputs[1].default_value = sign
-        scale.inputs[2].default_value = 0.5
-        tree.links.new(separate.outputs[source], scale.inputs[0])
-        tree.links.new(scale.outputs[0], combine.inputs[channel])
-    tree.links.new(combine.outputs["Image"], composite.inputs["Image"])
-    samples = scene.cycles.samples
-    scene.cycles.samples = NORMAL_SAMPLES
-    scene.render.film_transparent = False
-    scene.render.image_settings.color_mode = "RGB"
-    scene.view_settings.view_transform = "Raw"
-    normals = np.zeros((FRAME_H, FRAME_W * IMPOSTOR_FRAMES, 3), dtype=np.float32)
-    for frame in range(IMPOSTOR_FRAMES):
-        angle = 2 * math.pi * frame / IMPOSTOR_FRAMES
-        camera.location = (math.sin(angle) * distance, -math.cos(angle) * distance, height / 2)
-        camera.rotation_euler = (math.pi / 2, 0, angle)
-        path = f"{OUT_IMPOSTOR_NORMALS}.frame{frame}.png"
-        scene.render.filepath = path
-        bpy.ops.render.render(write_still=True)
-        image = bpy.data.images.load(path)
-        image.colorspace_settings.name = "Non-Color"
-        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(FRAME_H, FRAME_W, 4)
-        normals[:, frame * FRAME_W : (frame + 1) * FRAME_W, :] = pixels[:, :, :3]
-        bpy.data.images.remove(image)
-    out = bpy.data.images.new("impostor-normals", FRAME_W * IMPOSTOR_FRAMES, FRAME_H, alpha=False)
-    out.colorspace_settings.name = "Non-Color"
-    rgba = np.ones((FRAME_H, FRAME_W * IMPOSTOR_FRAMES, 4), dtype=np.float32)
-    rgba[:, :, :3] = normals
-    out.pixels.foreach_set(rgba.ravel())
-    out.filepath_raw = OUT_IMPOSTOR_NORMALS
-    out.file_format = "PNG"
-    out.save()
-    bpy.data.images.remove(out)
-    # Put back everything the colour strip was rendered with.
-    for node in list(tree.nodes):
-        tree.nodes.remove(node)
-    scene.use_nodes = False
-    view_layer.use_pass_normal = False
-    scene.cycles.samples = samples
-    scene.render.film_transparent = True
-    scene.render.image_settings.color_mode = "RGBA"
-    scene.view_settings.view_transform = "Standard"
-    bpy.data.objects.remove(camera, do_unlink=True)
-    bpy.data.objects.remove(sun_obj, do_unlink=True)
+    # `impostor.py`, since #1283: the strip and (#630) the same eight views'
+    # NORMALS, so the runtime can light the far band by the world's own sun.
+    ortho = render_impostor(scene, height, width, OUT_IMPOSTOR, OUT_IMPOSTOR_NORMALS, FRAME_W, FRAME_H)
     report.update(
         {
             "impostorFrames": IMPOSTOR_FRAMES,

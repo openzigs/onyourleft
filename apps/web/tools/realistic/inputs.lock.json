@@ -578,6 +578,134 @@
       ]
     },
     {
+      "id": "Bark012",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Bark012",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-12",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Bark012_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Bark012_1K-JPG.zip",
+          "bytes": 10336310,
+          "sha256": "6e26e4c24fe53cf564909b371afbfc84041d9077f39bf8eb4ae16951df1c4763"
+        },
+        {
+          "path": "Bark012_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Bark012_1K-JPG.zip#Bark012_1K-JPG_Color.jpg",
+          "bytes": 1711274,
+          "sha256": "772d7a35b1d93bce6de7ad8adeabfb6cc126ba52d07b7c9103ed9a7e65dac577"
+        },
+        {
+          "path": "Bark012_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Bark012_1K-JPG.zip#Bark012_1K-JPG_NormalGL.jpg",
+          "bytes": 2443285,
+          "sha256": "516a7c92605277d05c7fcdc8fb468572ccdba10a661da1212a10c57977d449b6"
+        }
+      ]
+    },
+    {
+      "id": "Bark005",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Bark005",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-12",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Bark005_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Bark005_1K-JPG.zip",
+          "bytes": 4295962,
+          "sha256": "3a6181f9b1f056d4807532ce456518d81ccd63d44532bd31320136bd9012ec84"
+        },
+        {
+          "path": "Bark005_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Bark005_1K-JPG.zip#Bark005_1K-JPG_Color.jpg",
+          "bytes": 549221,
+          "sha256": "960ce15cfe228c94b5b2199a60f0f676e34d1c6db2f00bb79740252e86f06705"
+        },
+        {
+          "path": "Bark005_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Bark005_1K-JPG.zip#Bark005_1K-JPG_NormalGL.jpg",
+          "bytes": 831792,
+          "sha256": "87dda0e86ebf15587c8c8eacb4e5c98f8c27cc729ae6468cc33550de0bce942b"
+        }
+      ]
+    },
+    {
+      "id": "LeafSet016",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=LeafSet016",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-12",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "LeafSet016_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=LeafSet016_1K-JPG.zip",
+          "bytes": 4151038,
+          "sha256": "c624926d28eeabc266ee942a1a0dc4aa559b10d575f3a37ecaa71915cde02220"
+        },
+        {
+          "path": "LeafSet016_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet016_1K-JPG.zip#LeafSet016_1K-JPG_Color.jpg",
+          "bytes": 610591,
+          "sha256": "ea8d6ca36f8d9b5cab2a93d3fd3d3692f96efdab9558471f57d9f6ce11122ac9"
+        },
+        {
+          "path": "LeafSet016_1K-JPG_Opacity.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet016_1K-JPG.zip#LeafSet016_1K-JPG_Opacity.jpg",
+          "bytes": 91872,
+          "sha256": "2e949862f101eb14e19d2ea7a6db862487cc4d9c1d977f3fbb0ed58ebe0ce9c0"
+        },
+        {
+          "path": "LeafSet016_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet016_1K-JPG.zip#LeafSet016_1K-JPG_NormalGL.jpg",
+          "bytes": 855475,
+          "sha256": "9397b26d0310a0bf09edf7066e9bdeee005b979685c7a3742ef2b3fbcc9fa6d4"
+        }
+      ]
+    },
+    {
+      "id": "LeafSet014",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=LeafSet014",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-12",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "LeafSet014_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=LeafSet014_1K-JPG.zip",
+          "bytes": 3868150,
+          "sha256": "6608b4ebfc74fad675adea30ec1a23a53dd8905b2d9cc9435653aa7bcc00da31"
+        },
+        {
+          "path": "LeafSet014_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet014_1K-JPG.zip#LeafSet014_1K-JPG_Color.jpg",
+          "bytes": 560570,
+          "sha256": "3f7b799e43ea2cca95ebdaa0414a85ea9c8a9149a055f2792166c417431750b4"
+        },
+        {
+          "path": "LeafSet014_1K-JPG_Opacity.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet014_1K-JPG.zip#LeafSet014_1K-JPG_Opacity.jpg",
+          "bytes": 86753,
+          "sha256": "b5f869bf0748b5d886ffe6e91eeded222169aeb20ddfb5ffe0189c3c59cb4493"
+        },
+        {
+          "path": "LeafSet014_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=LeafSet014_1K-JPG.zip#LeafSet014_1K-JPG_NormalGL.jpg",
+          "bytes": 733551,
+          "sha256": "25b3d3537d462a26ba93d9fe2e8c9e6eabd94381801b34242f7ef29cc463f46b"
+        }
+      ]
+    },
+    {
       "id": "makehuman",
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",
