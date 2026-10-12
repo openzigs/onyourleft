@@ -70,6 +70,14 @@ lets your instance send them on to a hosted service that you hold your own key f
 names to you before you agree. No picture is sent to any instance, or to any service, unless you
 have switched this on. It is described under **Side-camera pictures sent to your instance** below.
 
+**The fourth thing you can agree to: your instance sending a ride to a service you hold your own
+key for.** If you are signed in to an instance, you can store your own key for a hosted model
+service on it, and then agree to that service by its address. Your instance then sends a ride's
+numbers there when you ask it for a write-up by that service, with the parts of your history the
+model looks up, masked first. A ride analysis never sends it a picture. Nothing is set up to begin
+with, the operator's key is never used for you, and nothing is sent until you have stored a key and
+agreed. It is described under **Questions your instance sends to a service you agreed to** below.
+
 The other exception is a map, and it is described under **What leaves the device** below: when a
 ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
 `tiles.openzigs.com`, which is where this project keeps its basemap. That is a request the map
@@ -166,6 +174,11 @@ ride sent to your own computer** below).
   to your own computer** below.
 - **A ride's numbers sent to your instance, when you ask for an analysis of it** — never a
   picture. See **A ride analysed on your instance** below.
+- **Your own key for a hosted model service, sent to your instance, if you store one there** —
+  sealed on this device so that only your instance can open it, and not kept on this device. With
+  it, if you agree to that service: **your list of words to mask and your privacy zones**, sent
+  to your instance so that it can mask what it sends on. See **Questions your instance sends to a
+  service you agreed to** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
   picture. See **A ride sent to your own computer** below.
 - **A question, or a ride's numbers when you ask for an analysis of it, sent to a service you
@@ -250,6 +263,9 @@ already knows, your name there, and a room you make, join and ride in.
 | Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
 | What you sync: your rides, and what goes with them | **only if you sync** with the instance, which needs its card: *Sync now* on the Instance screen, offered once you are connected with the card ([#1195](https://github.com/openzigs/onyourleft/issues/1195)). A sync sends each ride on this device that the instance does not hold, as a file this device writes from the ride (a ride imported from a GPX or TCX file is sent as a FIT file too, not as the original), with every sample, **its positions and heart rate included, not trimmed by your privacy zones**, because it is your own copy, and with a signed record that carries the ride's name, when it started and its time zone, its elapsed and moving time, its distance and its average power if it has one — signed with this device's key; each ride's write-up and side-camera report (sentences, and the summary of how your position changed — differences, never a picture); a short summary of each ride that this device writes from its numbers, with no position, date or name in it, so that a later analysis can look back at your history; your notes on your rides, your goals and the documents you added for the analysis; your saved workouts, each one's name, description and blocks, so that an analysis can look at them; your workout goals, the numbers you chose on the workout goals screen, so that another of your devices can use them; and your answer to *May be raced* for each ride. All of it is sealed for that instance alone, as described above. The instance keeps it with your account, and shows none of it to another rider: no other rider is sent your rides, and none is sent a position. A sync also brings to this device what another of your devices synced there, your saved workouts included | when you press *Sync* | delete a ride, note, goal, document or saved workout on this device, or clear your workout goals, and then sync: the instance deletes it too, its original file with it, and keeps only a mark that it was deleted: a fingerprint of the file and when the instance received it, and nothing else of the ride. *Disconnect* and erasing this device do not reach what the instance holds; to have it all erased, ask the instance's operator, as described under **Deleting what an instance holds** below |
 | Analysis jobs and write-ups | when you ask for an analysis, the ride's numbers go to your instance; the job, its progress and its write-up are kept for 7 days, and the finished write-up with your account, so another of your devices can show it. See **A ride analysed on your instance** below | when you press the button on a ride's page | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| A hosted model key you paste | held by your instance, encrypted, and used only for what you asked it to send that service: your own analyses and, if you separately agreed to that, your side camera's pictures. It is never sent back to this device. See **Questions your instance sends to a service you agreed to** below | when you paste it | removed when you press *Remove my key from my instance*, and erased with your account on the instance |
+| Your hosted consent | the address of the service you agreed to, and when, kept by your instance with your account and in its export | when you tick the box that agrees to it | withdrawn when you untick it, or when you store a key for another service; erased with your account on the instance |
+| Your words to mask and your privacy zones | copied to your instance so it can mask what it sends to a service — the list, and each zone's name, where it is and how large — kept with your account and in its export | when you agree to a hosted service there, and again each time you ask for an analysis by it | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | In a room: power, cadence, the weight you declare, and your display name | **only if you make or join a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784), [#785](https://github.com/openzigs/onyourleft/issues/785)) — a group ride or a race on one rider's route, joined by a code they share. While you ride in one, your power and cadence go to the instance running it twice a second — never your position: the room works out where you are from your power — and the weight you declare goes once as you join, for the room to simulate you, and is not shown to anybody. The code you type to join goes once, in the request and never in an address, and the instance keeps only a fingerprint of a room's code, never the code. The other riders in the room see where you are on the room's road, and your name; never your weight or your watts. The instance keeps, with your account, which rooms you made or joined | while you ride in a room; the code, when you press *Join the room* | your power, cadence and weight are not kept after the ride; to have the list of rooms you made or joined erased, ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below |
 | The route of a room you make | **only if you make a private room** ([#784](https://github.com/openzigs/onyourleft/issues/784)): the route you choose — its roads and heights, not its name and no times — goes to the instance, which shows it to the riders you share the room's code with. A route that starts, ends or passes inside one of your privacy zones is refused before anything is sent. The route is deleted from the instance when the room is over, and a room is over when a race in it has finished; when a group ride in it has had nobody in it for a minute; when a race in it was interrupted because the instance restarted; when nobody is riding in it a day after it was made, whether or not anybody ever joined it; or when you erase your account on that instance. Anybody still riding in the room when it ends rides on, but nobody else can join it | when you press *Make a room* | deleted by the instance when the room is over — within about a day of being made, unless somebody is riding in it then, and at once if you erase your account there; to have it deleted sooner, ask the instance's operator |
 | Race results | **only if you ride a private race** ([#785](https://github.com/openzigs/onyourleft/issues/785)): when you cross the line, the instance keeps your result — your place, your time, your power-to-weight over the race (watts per kilogram, W/kg) and any plausibility flag the room raised, which says only the length of time over which your power-to-weight went past the room's ceiling — visible to that race's participants only, until your account on the instance is erased. Nobody can see a race's result until every rider is across the line or out of the race, and a race interrupted because the instance restarted publishes no result. Every rider in the race sees every rider's result, flags included; beside another rider it shows power-to-weight and never watts, and this device alone shows your own watts beside your own result. Nobody sees your weight | when you cross the line | ask the instance's operator to erase your account, as described under **Deleting what an instance holds** below. The other riders' results for that race stay, and show you as "a rider", with no name and nothing of yours |
@@ -271,7 +287,10 @@ already holds stays there, rides you synced included.
 the instance confirms it holds is still on this device afterwards, and a ride deleted on another of
 your devices is hidden on the instance and kept on this one.
 
-**Deleting what an instance holds.** Disconnecting is all this version of the app can do: it cannot
+**Deleting what an instance holds.** Disconnecting is all this version of the app can do, with one
+exception: on the Instance screen you can remove a hosted model key you stored there and withdraw
+your agreement to a service (see **Questions your instance sends to a service you agreed to**
+below). It cannot
 remove a device from your account on an instance, change or remove your name there, or erase your
 account there. Ask the instance's operator to do them. For the project's own instance, that is this project's maintainer: ask privately by email, to
 **matt@openzigs.ai**, as described under **Contact** below and not in a public issue, for any of them or for your account there to
@@ -489,6 +508,67 @@ closed.
 - **If you cancel:** your instance stops the analysis at its next step, and nothing of it is saved
   on this device.
 
+## Questions your instance sends to a service you agreed to
+
+This is the only way a ride analysed on your instance leaves it. It is **off until you agree**, and
+it needs two things from you first, both on the Instance screen: your own key for a hosted model
+service, stored on your instance, and your agreement to that service by its address. **The key is
+always your own.** Whoever runs your instance cannot lend you theirs, and this app has none and
+suggests no service.
+
+This is what you are shown, beside the box you tick, with the service's address where this says
+*the address you agreed to*:
+
+> **This sends your ride, from your instance, to *the address you agreed to*.**
+>
+> If you agree, each time you ask for a ride analysis by this service, your instance sends that ride's numbers to *the address you agreed to*: your heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, it is also sent how a few measurements of your riding position changed between the start and the end of filming. While it writes, the model may look up more on your instance and be sent it: short summaries of your recent rides, summaries of older rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. The model decides during the analysis which of these it looks up, so the app cannot list them in advance.
+>
+> That is a company or a computer that is not yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it for you afterwards. It sees your instance's internet address, not this device's.
+>
+> A ride analysis never sends it a picture — not a photograph of you, and nothing made from one. The ride's numbers carry no name, no place and no date. But what you wrote yourself can say anything, so this cannot promise that your name, where you ride or when is never sent. Before anything is sent, your instance masks e-mail addresses, phone numbers, links, street addresses, postcodes, coordinates, the names of your privacy zones and everything on your list of words to mask. Masking reduces what is sent; it does not guarantee that nothing personal gets through.
+>
+> So that your instance can mask, this device sends it your list of words to mask and your privacy zones — their names, where they are and how large — when you agree, and again each time you ask for a ride analysis by this service. They are sealed on the way, and your instance keeps them with your account.
+>
+> Your key is held by your instance, encrypted, and is sent only to *the address you agreed to*. It is never sent back to this device and is never put in a file the app or your instance exports. Whoever runs your instance holds the secret your key is encrypted with, so they could read your key. If that is not you, only use a key you are willing to let them see.
+>
+> When you press 'Send a test question', your instance sends it one test question, containing none of your data, to check it answers.
+>
+> If the service's address changes, you are asked again before anything is sent to the new one.
+>
+> You do not need this. Everything else in the app works without it, and a model on your instance's own machine can write the same analysis without sending anything to a service.
+>
+> This is off. It stays off until you agree, and you can withdraw it at any time.
+
+- **Where it goes:** from your instance to the one address your consent names, which must start
+  with `https://`. Your instance does not follow a redirect somewhere else.
+- **The key:** held by your instance, encrypted at rest, and used only for what you asked your
+  instance to send that service. It is erased with your account there, or when you press *Remove
+  my key from my instance*. Whoever runs your instance holds the secret your key is encrypted
+  with, so they could read your key. A key you paste is accepted only over the sealed connection
+  from this app, never in plain text, and this device does not keep it.
+- **Your agreement:** recorded by your instance, as the address you agreed to and when. It is not a
+  switch on this device and it does not turn itself off: it stands until you untick the box. If
+  you store a key for a different service, your instance withdraws it, and nothing is sent to the
+  new service until you have read its address and agreed again.
+- **Your list of words to mask and your privacy zones:** your instance masks with its own copy, so
+  this device sends it one — sealed — when you agree, and again each time you ask for an analysis
+  by the service, so that a word you added a minute ago is masked. If it cannot be sent, no
+  analysis is asked for. Your instance keeps it with your account and in its export.
+- **The test question:** two fixed sentences that say it is a connection test, on your key, to the
+  address you agreed to. It carries no ride and nothing you wrote. Your instance tells the app only
+  whether the service answered, never what it said.
+- **What the service sees and keeps:** what it was sent, the model name, your key, and your
+  instance's internet address. It is a company or a computer that is not yours and not ours; we
+  cannot see what it does with the request or how long it keeps it, and we cannot delete it for
+  you afterwards.
+- **What this device keeps:** not the key. Only a note of which service your instance last said it
+  holds both your key and your agreement for, so that a ride's page can offer the write-up without
+  asking your instance first. It is not in the account export, and *Disconnect* and *Erase
+  everything* remove it.
+- **To stop it:** untick the box on the Instance screen, or press *Remove my key from my instance*.
+  Either stops your instance sending anything to the service; neither can recall what was already
+  sent.
+
 ## A ride sent to your own computer
 
 **A ride sent to your own computer, when you ask for an analysis.** When you press the button on
@@ -590,7 +670,9 @@ can do the same analysis.
 - We never sell your data. The only sharing is the analysis you choose to send to a service you
   set up. That includes the side camera's pictures, only if you have your instance send them on
   to a service you hold your own key for and agreed to by name (see **Side-camera pictures sent to
-  your instance** above). Nothing is transmitted to us or to anybody else
+  your instance** above), and a ride your instance sends, masked, to a service you hold your own
+  key for and agreed to by its address, for an analysis you asked for (see **Questions your
+  instance sends to a service you agreed to** above). Nothing is transmitted to us or to anybody else
   except the pictures and the rides you choose to send to your own computer, the questions and the
   rides you choose to send to a service of your own choosing, what you send to an instance you
   choose to connect to — the side camera's pictures among it only if you switched that on — and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor

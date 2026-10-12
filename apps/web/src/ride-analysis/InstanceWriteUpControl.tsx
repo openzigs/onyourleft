@@ -46,6 +46,7 @@ import {
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
 } from '../detail/write-up';
+import { hostedPressSends } from './hosted-consent';
 import type { InstanceJobSource } from './instance-job';
 import type {
   InstanceAnalysisPort,
@@ -87,6 +88,9 @@ export const INSTANCE_WITHDRAWN =
 
 /** Above the sections as they arrive. */
 export const INSTANCE_SO_FAR = 'The write-up so far, as your instance writes it:';
+
+/** The id of the sentence that names the hosted service, which describes the hosted press. */
+export const HOSTED_SENDS_ID = 'oyl-write-up-sends-hosted';
 
 /** The id of the instance paragraph's lead, which describes the press. */
 export const INSTANCE_SENDS_LEAD_ID = 'oyl-write-up-sends-instance';
@@ -134,6 +138,7 @@ export function InstanceWriteUpControl({
 }: InstanceWriteUpControlProps): JSX.Element {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [sources] = useState(() => port.availableSources());
+  const [hostedEndpoint] = useState(() => port.hostedEndpoint());
   const [riding, setRiding] = useState(() => port.ride?.inProgress() ?? false);
   const following = useRef<AbortController | undefined>(undefined);
   const onEndedRef = useRef(onEnded);
@@ -212,7 +217,7 @@ export function InstanceWriteUpControl({
             key={source}
             variant="secondary"
             unavailable={busy || riding}
-            describedBy={INSTANCE_SENDS_LEAD_ID}
+            describedBy={source === 'instance-hosted' ? HOSTED_SENDS_ID : INSTANCE_SENDS_LEAD_ID}
             onClick={() => {
               ask(source);
             }}
@@ -237,6 +242,12 @@ export function InstanceWriteUpControl({
           <strong id={INSTANCE_SENDS_LEAD_ID}>{INSTANCE_SENDS_LEAD}</strong> {INSTANCE_SENDS}
         </p>
       </KeptVisible>
+      {/* #1251: the hosted press names who is sent the ride. Kept visible, as what leaves the instance. */}
+      {hostedEndpoint === undefined ? undefined : (
+        <KeptVisible>
+          <p id={HOSTED_SENDS_ID}>{hostedPressSends(hostedEndpoint)}</p>
+        </KeptVisible>
+      )}
       {/* Rendered from the start, so a screen reader is listening before it changes. */}
       <p role="status" aria-live="polite">
         {riding ? '' : said(state)}

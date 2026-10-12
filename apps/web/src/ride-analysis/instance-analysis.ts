@@ -243,6 +243,9 @@ export const INSTANCE_ASK_TEXT = {
     'The connection to your instance kept dropping, so this page stopped following the write-up. Your instance carries on, and it is shown when you open this ride again.',
   cancelled:
     'The write-up was cancelled and nothing was kept. Your instance stops it at its next step.',
+  // #1251: the instance masks with its own copy of the list, so no copy, no hosted job.
+  'masking-not-sent':
+    'This device could not give your instance your list of words to mask and your privacy zones, so nothing was sent to the service and nothing was kept.',
   failed: 'The write-up did not finish, so nothing was kept.',
 } as const;
 
@@ -292,6 +295,28 @@ export interface InstanceAnalysisOptions {
    * in the start (#1229). Absent, no ride is named.
    */
   readonly syncBase?: SyncBaseReader;
+  /**
+   * The hosted source (#1251). Absent, `instance-hosted` is never offered and
+   * an ask for it is refused before anything is sent.
+   */
+  readonly hosted?: HostedSourceOptions;
+}
+
+/** What the hosted source needs of this device. */
+export interface HostedSourceOptions {
+  /**
+   * The service a hosted write-up may be offered for, or `undefined`: the
+   * origin the instance last said it holds BOTH the rider's own key for and
+   * their consent naming (`hosted-settings.ts` §`readHostedOffer`). Reads
+   * storage; sends nothing.
+   */
+  readonly endpoint: () => string | undefined;
+  /**
+   * Give the instance the rider's masking list and privacy zones, as they are
+   * NOW (`hosted-settings.ts` §`sendMaskingGuard`). `false` when it could not
+   * be done — and then the job is not started.
+   */
+  readonly sendGuard: (session: Extract<JobSession, { kind: 'open' }>) => Promise<boolean>;
 }
 
 /** What {@link syncedRideId} reads: `ActivityStore.listSyncBase`. */
@@ -566,6 +591,12 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
     const session = await options.session();
     if (session.kind === 'closed') return failed(session.text);
     if (cancelledEarly.delete(activityId)) return failed(INSTANCE_ASK_TEXT.cancelled);
+    // #1251: a hosted job is masked by the instance's copy of the rider's
+    // list, so that copy is made current first — or the job is not started.
+    if (source === 'instance-hosted') {
+      const sent = options.hosted === undefined ? false : await options.hosted.sendGuard(session);
+      if (!sent) return failed(INSTANCE_ASK_TEXT['masking-not-sent']);
+    }
     const rideId = await syncedRideId(options.syncBase, owner, activityId);
     let started = await startJob(
       session,
@@ -598,10 +629,15 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
     connected: () => options.connected(),
 
     availableSources(): readonly InstanceJobSource[] {
-      // ⚠️ `instance-hosted` is not offered yet: its consent (#1104 B1) is not
-      // approved, and a path is not shipped ahead of its disclosure (ADR 0029).
-      return options.connected() ? ['instance-local'] : [];
+      if (!options.connected()) return [];
+      // #1251: hosted is offered only where the instance last said it holds
+      // the rider's own key AND their consent naming that key's origin.
+      return options.hosted?.endpoint() === undefined
+        ? ['instance-local']
+        : ['instance-local', 'instance-hosted'];
     },
+
+    hostedEndpoint: () => (options.connected() ? options.hosted?.endpoint() : undefined),
 
     pendingJob: (activityId) => readPending().has(activityId),
 

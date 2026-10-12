@@ -59,3 +59,32 @@ describe('main.tsx builds the instance write-up port (#1102)', () => {
     );
   });
 });
+
+describe('main.tsx builds the hosted source and the hosted-settings port (#1251)', () => {
+  it('offers hosted from the note for the instance signed in to NOW, and sends the list through the job’s own session', () => {
+    expect(builder).toMatch(
+      /endpoint: \(\) => readHostedOffer\(storage, readInstanceAccount\(storage\)\?\.origin\)/,
+    );
+    expect(builder).toMatch(
+      /sendGuard: \(session\) =>\s+sendMaskingGuard\(session\.channel, session\.token, \(\) =>\s+readMaskingGuard\(localStore\(\), LOCAL_ATHLETE\),/,
+    );
+  });
+
+  it('builds the settings port over the sealed session, this device’s storage and its own masking list', () => {
+    const settings = main.slice(
+      main.indexOf('function buildHostedSettings('),
+      main.indexOf('function buildSidePictures('),
+    );
+    expect(settings).toContain('createHostedSettingsPort({');
+    expect(settings).toMatch(/session: heldSealedSession\(\{/);
+    expect(settings).toMatch(/guard: \(\) => readMaskingGuard\(localStore\(\), LOCAL_ATHLETE\)/);
+    expect(settings).toMatch(/\bstorage,/);
+  });
+
+  it('passes the settings port to the shell', () => {
+    expect(main).toMatch(/const hostedSettings = buildHostedSettings\(\);/);
+    expect(main).toMatch(
+      /\{\.\.\.\(hostedSettings === undefined \? \{\} : \{ hostedSettings \}\)\}/,
+    );
+  });
+});

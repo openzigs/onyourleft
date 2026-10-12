@@ -40,6 +40,7 @@ import { RIDE_INPUT } from './analysis/agent-testing.ts';
 import { MASKING_ITEM_KEY, type MaskingItemBody } from './analysis/hosted.ts';
 import { importSecretKey, sealHostedKey } from './analysis/hosted-key.ts';
 import { secretText } from './analysis/hosted-key-testing.ts';
+import { HOSTED_TEST_QUESTION, HOSTED_TEST_SYSTEM } from './analysis/hosted-test.ts';
 import { modelKeySet } from './operator/commands.ts';
 import { jobBody, parseStream } from './analysis/jobs-testing.ts';
 import { ROOM_GPX, roomBody } from './rooms/rooms-testing.ts';
@@ -1443,6 +1444,8 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     const model = await startFakeModelServer([
       { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
       { kind: 'text', text: 'A steady ride.' },
+      // #1251: the test question's answer, asked after the job.
+      { kind: 'text', text: 'ready' },
     ]);
     const { bodies, fetch: hostedFetch } = internet(model.baseUrl);
     const athleteId = options.athleteId ?? OPERATOR;
@@ -1516,7 +1519,11 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       await jobs.idle();
       const stream = await jobs.events(caller, started.value.jobId, null);
       const events = parseStream((await stream?.text()) ?? '').events;
-      return { events, bodies, requests: [...model.requests] };
+      const sent = { bodies: [...bodies], requests: [...model.requests] };
+      // #1251: then the test question, through the running instance's own
+      // settings — which must pass the gate that job just did.
+      const tested = await instance.hostedSettings()?.testQuestion(caller);
+      return { events, ...sent, tested, testRequests: model.requests.slice(sent.requests.length) };
     } finally {
       await model.close();
     }
@@ -1534,6 +1541,22 @@ describe('a hosted analysis job on the running instance — #1223', () => {
     // The goal did reach the model, masked rather than dropped.
     const last = JSON.stringify(requests.at(-1));
     for (const placeholder of Object.values(MASK_PLACEHOLDER)) expect(last).toContain(placeholder);
+  });
+
+  it('sends the test question through the same sources as the job, and only its two sentences (#1251)', async () => {
+    const { tested, testRequests } = await hostedJob({
+      consent: true,
+      masking: GUARD_BODY,
+      key: 'own',
+      athleteId: RIDER,
+    });
+    expect(tested).toEqual({ result: 'answered', reasoned: false });
+    expect(testRequests).toHaveLength(1);
+    expect((testRequests[0] as { messages: unknown }).messages).toEqual([
+      { role: 'system', content: HOSTED_TEST_SYSTEM },
+      { role: 'user', content: HOSTED_TEST_QUESTION },
+    ]);
+    expect(JSON.stringify(testRequests[0])).not.toContain(PLANTED_TEXT);
   });
 
   it('runs a rider’s job on the key THEY stored, with their own consent, masked (#1199)', async () => {
@@ -1563,13 +1586,16 @@ describe('a hosted analysis job on the running instance — #1223', () => {
   ])(
     '%s: refused hosted_unavailable, and the hosted server is sent nothing',
     async (_case, options) => {
-      const { events, bodies, requests } = await hostedJob(options);
+      const { events, bodies, requests, tested, testRequests } = await hostedJob(options);
       expect(events.at(-1)?.data).toMatchObject({
         status: 'failed',
         failure: 'hosted_unavailable',
       });
       expect(bodies).toStrictEqual([]);
       expect(requests).toStrictEqual([]);
+      // #1251: and the test question is refused for the same reason, with nothing sent.
+      expect(tested).toEqual({ result: 'not-ready', reasoned: false });
+      expect(testRequests).toStrictEqual([]);
     },
   );
 });

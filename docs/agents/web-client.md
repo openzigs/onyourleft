@@ -774,6 +774,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         `hosted-step.ts` and every `.tsx`. The tests that read
                         the app or the shell stayed too, as `*-app.test.ts`
                         and `runner-native.test.ts` beside them
+                        ⚠️ Since #1251 it also holds the rider's OWN hosted
+                        key and hosted consent on their instance:
+                        `hosted-settings.ts` (the sealed calls, `pastedKey`
+                        on the one that carries the key, and the device's
+                        note of which service a hosted write-up may be
+                        OFFERED for), `hosted-settings-port.ts`,
+                        `HostedServicePanel.tsx` (the Instance screen's
+                        section) and `hosted-consent.ts` — EVERY sentence a
+                        rider reads about it, DRAFT until the owner approves
+                        it, pinned word for word by `hosted-consent.test.ts`.
+                        ⚠️ The instance masks with ITS copy of the rider's
+                        list, so `sendMaskingGuard` writes it before a
+                        consent and before every hosted job
+                        (`instance-analysis.ts`); nothing synced it before
     src/rider-text/     the rider's own text for the analysis agent's history
                         (#836, ADR 0040 D-1, D-11) — the goals box on Settings,
                         a ride's note on its page (`RiderTextBox.tsx`, one

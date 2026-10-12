@@ -136,6 +136,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('DELETE', '/v1/analysis/hosted/key', KEY_ROW),
   only('POST', '/v1/analysis/hosted/consent', CONSENT_ROW),
   only('DELETE', '/v1/analysis/hosted/consent', CONSENT_ROW),
+  // #1251: the test question goes out on that key, to the endpoint that consent names.
+  only('POST', '/v1/analysis/hosted/test', `${KEY_ROW}; ${CONSENT_ROW}`),
   // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
   // refused unsealed on an instance with no keys too (`camera/routes.ts`).
   only('POST', '/v1/camera/side-pose', PICTURE_ROW),

@@ -442,6 +442,9 @@ export function instanceEraser(storage: Pick<InstanceStorage, 'removeItem'> | un
 export const INSTANCE_AGREEMENT_STORAGE_KEYS = [
   'oyl.side-analyser-instance.v1',
   'oyl.side-analyser-instance-hosted.v1',
+  // #1251: which service a hosted write-up may be offered for on this instance
+  // (`ride-analysis/hosted-settings.ts` §`HOSTED_OFFER_STORAGE_KEY`, its reader and writer).
+  'oyl.instance-hosted-offer.v1',
 ] as const;
 
 /** The instance this device is signed in to, and the token it holds for it. */
