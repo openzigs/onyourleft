@@ -36,25 +36,59 @@
  * P2–P7's values are the owner's rulings (ADR 0048 D-6, Q4). Changing one is
  * an appended amendment to that ADR, not a commit.
  *
- * ## What the ADR does not settle, decided here
+ * ## The eleven decisions ADR 0048's words leave open
  *
- * - **Warm-up and cool-down are the first and the last block.** The workout
- *   model marks neither, so the rule is structural: the main set is every
- *   block between them. The last block is never changed or removed by any
- *   move, and the first is never a future block.
- * - **A scale is in percentage points of a block's own share**, kept per
- *   block ({@link PlanBlock.percent}) and applied to the share it had when it
- *   joined the plan. Two +5 moves are therefore +10 % exactly, and no sequence
- *   of moves can take a target more than 10 % above that share.
- * - **A harder move** is any that is not certainly easier: an extension, a
- *   +5 % scale, a hold range moved up, and every swap. Counting a move as
- *   harder only makes P4 refuse more.
- * - **With no duration goal, total time may not grow past the loaded
- *   workout's own.** An absent goal is no licence.
- * - **A swapped-in block needs a block of its own kind in the loaded
- *   workout**, because P3's peak is per kind and no peak is no licence.
- * - **A proposal must name the latest summary sent**, and its age is counted
- *   from when that summary left.
+ * All eleven are the owner's rulings of 2026-10-12 (#1296), recorded as ADR
+ * 0048's amendment of that date under the same numbers. `docs/architecture.md`
+ * carries the same list. Changing one is a further amendment.
+ *
+ * 1. **"Scale the remaining intervals" reaches steady and ramp blocks as well
+ *    as intervals blocks.** A hold and a free ride are not scaled.
+ * 2. **A swap is bound by P4's +5 % a move and +10 % in total.** The highest
+ *    share of the block swapped in may be at most 5 % above the highest share
+ *    of the block it replaces, as ridden now. What the replaced block had
+ *    already been raised by, and the swap's own rise, are carried by the new
+ *    block ({@link PlanBlock.carried}) and count toward the +10 %; a fall
+ *    earns nothing back. A block with a target may not replace a free ride,
+ *    which has no target to measure a rise from, and a hold swapped in for a
+ *    hold may have a range at most 5 bpm higher. Every swap is a harder move.
+ * 3. **Shortening a recovery is a harder move**, bound by P4's one harder
+ *    move in 10 minutes. A recovery is a block whose lowest share is under the
+ *    highest share of the block after it, or a free ride before a block with
+ *    a target. An extension and a hold range moved up are harder moves too.
+ * 4. **A free ride may be swapped in with none loaded.** It sets no target,
+ *    so P3's peak has nothing to bound. Every other kind needs a block of its
+ *    own kind in the loaded workout: no peak is no licence.
+ * 5. **The machine's minimum is not read here.** An easier move is bounded
+ *    by {@link MINIMUM_SHARE} alone, so a scaled share may be fewer watts than
+ *    the trainer's reported minimum. Raising it to that minimum is for
+ *    whatever writes the target. ⚠️ **Nothing does today**:
+ *    `apps/web/src/workout/session.ts` raises only an eased (stall-relief)
+ *    target to its `powerFloor`, writes a workout's own number as it is, and
+ *    `packages/sensors/protocol/src/fitness-machine-control.ts` refuses a
+ *    target under the reported range. That is true of a loaded workout with
+ *    no re-plan too, and is #1297, which lands before or with #1244.
+ * 6. **Warm-up and cool-down are the first and the last block.** The workout
+ *    model marks neither, so the rule is structural: the main set is every
+ *    block between them. The last block is never changed or removed by any
+ *    move, and the first is never a future block.
+ * 7. **A scale is in percentage points of the share a block joined the plan
+ *    with**, kept for each share ({@link PlanBlock.percents}). Two +5 moves
+ *    are +10 % exactly, and no sequence of moves takes a target more than
+ *    10 % above that share. **What is kept is the change reached**: a share
+ *    held at its ceiling or at the floor by a move keeps the count it had,
+ *    so the next move the other way takes full effect (#1296).
+ * 8. **With no duration goal, total time may not grow past the loaded
+ *    workout's own.** An absent goal is no licence.
+ * 9. **A hold range moves up only to the highest range loaded**, and never
+ *    above threshold heart rate or the goal's.
+ * 10. **An intervals block is neither extended nor shortened.** Its length is
+ *     a repeat count, which no move changes.
+ * 11. **A proposal must name the latest summary sent**, and its age is counted
+ *     from when that summary left.
+ *
+ * Where a ruling's words left a choice, the reading that refuses more was
+ * taken: counting a move as harder only makes P4 refuse more.
  *
  * It bounds what changes and how fast, never whether the change is wise
  * (ADR 0048 D-5).
@@ -117,8 +151,14 @@ export const REPLAN_MOVE_INTERVAL_SECONDS = 180;
 /** P4: at most one accepted harder move in this long. */
 export const REPLAN_HARDER_INTERVAL_SECONDS = 600;
 
+/** P4: the most one harder move may raise a share, in percent. */
+export const REPLAN_MAXIMUM_MOVE_PERCENT = 5;
+
 /** P4: the most a block's share may be raised in total, in percent. */
 export const REPLAN_MAXIMUM_CUMULATIVE_PERCENT = 10;
+
+/** The most a hold swapped in for a hold may raise the range: P1's largest step. */
+export const REPLAN_MAXIMUM_SWAP_RANGE_BPM = 5;
 
 /** P5: a proposal older than this is stale. */
 export const REPLAN_FRESHNESS_SECONDS = 60;
@@ -163,9 +203,20 @@ export interface Proposal {
 export interface PlanBlock {
   /** The block as it joined the plan, with durations and ranges as last moved. */
   readonly base: WorkoutBlock;
-  /** The net scale accepted for it, in percentage points of {@link base}'s shares. */
-  readonly percent: number;
-  /** What is ridden: {@link base} at {@link percent}, inside the bounds of the day. */
+  /**
+   * The net scale each share has reached, in percentage points of
+   * {@link base}'s share, in the order steady `target`; ramp `from`, `to`;
+   * intervals `hardTarget`, `easyTarget`. A share a move could not move keeps
+   * the count it had. Empty for a free ride, and all 0 for a hold.
+   */
+  readonly percents: readonly number[];
+  /**
+   * P4: the percentage points of rise already spent in this place before
+   * {@link base} joined the plan, by swaps and by scales of the blocks it
+   * replaced. 0 for a loaded block. It counts toward the +10 %.
+   */
+  readonly carried: number;
+  /** What is ridden: {@link base} at {@link percents}, inside the bounds of the day. */
   readonly block: WorkoutBlock;
 }
 
@@ -265,7 +316,12 @@ export function loadPlan(workout: Workout): PlanRevision {
   return {
     revision: 0,
     loaded: workout,
-    blocks: workout.blocks.map((block) => ({ base: block, percent: 0, block })),
+    blocks: workout.blocks.map((block) => ({
+      base: block,
+      percents: sharesOf(block).map(() => 0),
+      carried: 0,
+      block,
+    })),
   };
 }
 
@@ -456,40 +512,49 @@ function sharesOf(block: WorkoutBlock): readonly number[] {
  * scale, but never moved the wrong way from what is ridden now. A rise stops
  * at the ceiling, and leaves a share already above it where it is; a cut
  * stops at {@link MINIMUM_SHARE}, which is a target and never a Stop.
+ *
+ * `percent` is the net scale the share reached, which is `net` only when
+ * nothing stopped it. A share that did not move keeps the count it had: a
+ * count advanced by a move that changed nothing would be spent by the next
+ * move the other way, which would then change nothing either (#1296).
  */
 function scaleShare(
   joined: number,
   ridden: ThresholdShare,
+  before: number,
   net: number,
   rising: boolean,
   ceiling: number,
-): ThresholdShare {
-  const scaled = Math.max(MINIMUM_SHARE, (joined * (100 + net)) / 100);
-  return (
-    rising ? Math.max(ridden, Math.min(scaled, ceiling)) : Math.min(ridden, scaled)
+): { readonly share: ThresholdShare; readonly percent: number } {
+  const asked = (joined * (100 + net)) / 100;
+  const share = (
+    rising
+      ? Math.max(ridden, Math.min(asked, ceiling))
+      : Math.min(ridden, Math.max(asked, MINIMUM_SHARE))
   ) as ThresholdShare;
+  if (share === ridden) {
+    return { share, percent: before };
+  }
+  return { share, percent: share === asked ? net : (share / joined - 1) * 100 };
 }
 
-/** A block after a scale move. A hold and a free ride are not scaled. */
-function scaleBlock(entry: PlanBlock, net: number, rising: boolean, ceiling: number): WorkoutBlock {
-  const joined = sharesOf(entry.base);
-  const at = (index: number, ridden: ThresholdShare): ThresholdShare =>
-    scaleShare(joined[index] ?? ridden, ridden, net, rising, ceiling);
-  const ridden = entry.block;
-  switch (ridden.kind) {
+/** A block with the shares {@link sharesOf} reads, replaced in the same order. */
+function withShares(block: WorkoutBlock, shares: readonly ThresholdShare[]): WorkoutBlock {
+  const [first, second] = shares;
+  switch (block.kind) {
     case 'steady':
-      return { ...ridden, target: at(0, ridden.target) };
+      return first === undefined ? block : { ...block, target: first };
     case 'ramp':
-      return { ...ridden, from: at(0, ridden.from), to: at(1, ridden.to) };
+      return first === undefined || second === undefined
+        ? block
+        : { ...block, from: first, to: second };
     case 'intervals':
-      return {
-        ...ridden,
-        hardTarget: at(0, ridden.hardTarget),
-        easyTarget: at(1, ridden.easyTarget),
-      };
+      return first === undefined || second === undefined
+        ? block
+        : { ...block, hardTarget: first, easyTarget: second };
     case 'heart-rate-hold':
     case 'free-ride':
-      return ridden;
+      return block;
   }
 }
 
@@ -519,6 +584,28 @@ function replaced(
   return blocks.map((old, at) => (at === index ? entry : old));
 }
 
+/**
+ * A ratio of two shares is not exact: 0.735 / 0.7 is a hair over 1.05. A rise
+ * this far over a move's limit is the limit, and is stored as it, so the
+ * count carried never holds a hair over +5.
+ */
+const ROUNDING_PERCENT = 1e-9;
+
+/**
+ * Whether a block is a recovery before the block after it: its lowest share is
+ * under that block's highest. A free ride asks for nothing, so it is a
+ * recovery before any block with a target, and nothing is a recovery before
+ * one. Shortening a recovery brings the harder block sooner.
+ */
+function isRecovery(block: WorkoutBlock, following: WorkoutBlock | undefined): boolean {
+  const ahead = following === undefined ? undefined : peakShare(following);
+  if (ahead === undefined) {
+    return false;
+  }
+  const shares = sharesOf(block);
+  return shares.length === 0 || Math.min(...shares) < ahead;
+}
+
 function applyDuration(
   move: Extract<PlanMove, { kind: 'extend-block' | 'shorten-block' }>,
   blocks: readonly PlanBlock[],
@@ -541,14 +628,15 @@ function applyDuration(
   }
   const changed = { seconds: length as Seconds };
   const next = replaced(blocks, move.block, {
+    ...entry,
     base: { ...entry.base, ...changed },
-    percent: entry.percent,
     block: { ...entry.block, ...changed },
   });
   if (extend && totalSeconds(next.map((each) => each.block)) > bounds.longest) {
     return { rule: 'P3' };
   }
-  return { blocks: next, harder: extend };
+  // The block after it is always there: `futureBlock` refuses the last block.
+  return { blocks: next, harder: extend || isRecovery(entry.block, blocks[move.block + 1]?.block) };
 }
 
 function applyScale(
@@ -571,15 +659,34 @@ function applyScale(
       return entry;
     }
     reached = true;
-    const net = entry.percent + percent;
-    if (net > REPLAN_MAXIMUM_CUMULATIVE_PERCENT) {
+    const nets = entry.percents.map((each) => each + percent);
+    if (nets.some((net) => entry.carried + net > REPLAN_MAXIMUM_CUMULATIVE_PERCENT)) {
       over = true;
       return entry;
     }
-    const block = scaleBlock(entry, net, percent > 0, bounds.ceiling(base.kind));
-    const before = sharesOf(entry.block);
-    moved ||= sharesOf(block).some((share, at) => share !== before[at]);
-    return { base, percent: net, block };
+    const joined = sharesOf(base);
+    const before = sharesOf(entry.block) as readonly ThresholdShare[];
+    const ceiling = bounds.ceiling(base.kind);
+    const scaled = before.map((ridden, at) =>
+      scaleShare(
+        joined[at] ?? ridden,
+        ridden,
+        entry.percents[at] ?? 0,
+        nets[at] ?? 0,
+        percent > 0,
+        ceiling,
+      ),
+    );
+    moved ||= scaled.some((each, at) => each.share !== before[at]);
+    return {
+      base,
+      percents: scaled.map((each) => each.percent),
+      carried: entry.carried,
+      block: withShares(
+        entry.block,
+        scaled.map((each) => each.share),
+      ),
+    };
   });
   if (!reached) {
     return { rule: 'P2' };
@@ -615,7 +722,7 @@ function applyHoldRange(
     range: { low: low as BeatsPerMinute, high: high as BeatsPerMinute },
   };
   return {
-    blocks: replaced(blocks, move.block, { base, percent: 0, block: base }),
+    blocks: replaced(blocks, move.block, { ...entry, base, block: base }),
     harder: move.bpm > 0,
   };
 }
@@ -639,7 +746,44 @@ function applySwap(
   if (incoming.kind === 'heart-rate-hold' && incoming.range.high > bounds.holdTop) {
     return { rule: 'P3' };
   }
-  const next = replaced(blocks, index, { base: incoming, percent: 0, block: incoming });
+  // P4: at most +5 % over the block it replaces, as ridden now, and what that
+  // block had been raised by is not forgotten. Neither a fall nor a cut earns
+  // anything back.
+  const replacedPeak = peakShare(entry.block);
+  let rise = 0;
+  if (peak !== undefined) {
+    if (replacedPeak === undefined) {
+      // A free ride has no target to measure a rise from.
+      return { rule: 'P4' };
+    }
+    rise = Math.max(0, (peak / replacedPeak - 1) * 100);
+    if (
+      rise > REPLAN_MAXIMUM_MOVE_PERCENT &&
+      rise <= REPLAN_MAXIMUM_MOVE_PERCENT + ROUNDING_PERCENT
+    ) {
+      rise = REPLAN_MAXIMUM_MOVE_PERCENT;
+    }
+  }
+  const carried = entry.carried + Math.max(0, ...entry.percents) + rise;
+  if (
+    rise > REPLAN_MAXIMUM_MOVE_PERCENT + ROUNDING_PERCENT ||
+    carried > REPLAN_MAXIMUM_CUMULATIVE_PERCENT + ROUNDING_PERCENT
+  ) {
+    return { rule: 'P4' };
+  }
+  if (
+    incoming.kind === 'heart-rate-hold' &&
+    entry.block.kind === 'heart-rate-hold' &&
+    incoming.range.high > entry.block.range.high + REPLAN_MAXIMUM_SWAP_RANGE_BPM
+  ) {
+    return { rule: 'P4' };
+  }
+  const next = replaced(blocks, index, {
+    base: incoming,
+    percents: sharesOf(incoming).map(() => 0),
+    carried,
+    block: incoming,
+  });
   const before = totalSeconds(blocks.map((each) => each.block));
   const after = totalSeconds(next.map((each) => each.block));
   if (after > bounds.longest && after > before) {
@@ -716,8 +860,10 @@ function isPositive(value: number): boolean {
  * Accept or refuse one proposal, on the device.
  *
  * The first rule that refuses is the one named, in this order: P1 (the
- * vocabulary, and a swap's library), P7, P6, P5, P2, P4, then the move's own
- * bounds. An accepted move yields the next {@link PlanRevision}, a pure
+ * vocabulary, and a swap's library), P7, P6, P5, P2, P4's three minutes, then
+ * the move's own bounds (a swap's P3 ceilings, then P4's rises, then P3's
+ * length), then P4's ten minutes. An
+ * accepted move yields the next {@link PlanRevision}, a pure
  * function of the old one and the move, in which nothing at or before the
  * block being ridden differs.
  *
