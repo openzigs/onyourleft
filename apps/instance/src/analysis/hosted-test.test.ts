@@ -84,6 +84,13 @@ describe('the test question, one turn (#1251)', () => {
     expect(HOSTED_TEST_MILLISECONDS).toBe(30_000);
   });
 
+  it('hands the turn the caller’s signal, so a caller that goes away ends the request', async () => {
+    const { asked, options } = sources(ANSWER);
+    const controller = new AbortController();
+    await askHostedTestQuestion(ATHLETE, options, controller.signal);
+    expect(asked[0]?.signal).toBe(controller.signal);
+  });
+
   it('adds the rider’s allowance to the answer’s bound', async () => {
     const { asked, options } = sources(ANSWER, 4_096);
     await askHostedTestQuestion(ATHLETE, options);

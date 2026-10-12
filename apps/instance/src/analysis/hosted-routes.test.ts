@@ -478,4 +478,32 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
     expect(answer).toEqual({ status: 200, body: { result, reasoned: false } });
     expect(JSON.stringify(answer)).not.toContain(words);
   });
+
+  it('refuses a rider’s seventh test in ten minutes with nothing sent, and only that rider', async () => {
+    const { ask, sent, other } = await ready(
+      Array.from({ length: 8 }, () => ({ kind: 'text', text: 'ready' })),
+    );
+    for (let n = 0; n < 6; n += 1) expect((await ask()).status).toBe(200);
+    expect(sent).toHaveLength(6);
+    const refused = await ask();
+    expect(refused.status).toBe(429);
+    expect(JSON.stringify(refused.body)).toContain('rate_limited');
+    expect(sent).toHaveLength(6);
+    // Per rider: another rider is not refused by this one's count (not-ready, and not 429).
+    expect((await ask(other.token)).status).toBe(200);
+  });
+
+  it('allows one test in flight per rider: a second while the first waits is refused, nothing sent', async () => {
+    const { ask, sent } = await ready([
+      { kind: 'slow', milliseconds: 300, then: { kind: 'text', text: 'ready' } },
+    ]);
+    const first = ask();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second = await ask();
+    expect(second.status).toBe(429);
+    expect((await first).body).toEqual({ result: 'answered', reasoned: false });
+    expect(sent).toHaveLength(1);
+    // Once it has finished, the next is let through.
+    expect((await ask()).status).toBe(200);
+  });
 });

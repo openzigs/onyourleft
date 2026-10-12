@@ -108,6 +108,7 @@ function resultOf(failure: ModelFailure): HostedTestResult {
 export async function askHostedTestQuestion(
   athleteId: string,
   sources: SourceOptions,
+  signal: AbortSignal = new AbortController().signal,
 ): Promise<HostedTestOutcome> {
   const chosen = await modelForSource('instance-hosted', athleteId, sources);
   if (!chosen.ok) return { result: 'not-ready', reasoned: false };
@@ -117,7 +118,7 @@ export async function askHostedTestQuestion(
     tools: [],
     maxOutputTokens: HOSTED_TEST_ANSWER_TOKENS + (chosen.model.reasoningTokens ?? 0),
     timeoutMilliseconds: HOSTED_TEST_MILLISECONDS,
-    signal: new AbortController().signal,
+    signal,
   });
   if (!turn.ok) return { result: resultOf(turn.failure), reasoned: false };
   return {

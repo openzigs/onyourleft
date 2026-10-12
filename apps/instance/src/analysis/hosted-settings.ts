@@ -38,6 +38,7 @@ import type { Caller } from '../auth/identity.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './model-turn.ts';
+import { createRateLimiter, type RateLimit } from '../auth/rate-limit.ts';
 import { askHostedTestQuestion, type HostedTestOutcome } from './hosted-test.ts';
 import type { SourceOptions } from './source.ts';
 import {
@@ -103,11 +104,26 @@ export interface HostedSettings {
    * Send the caller's hosted service one test question carrying none of their
    * data (#1251, `hosted-test.ts`), through the gate a hosted job goes
    * through. `not-ready`, with nothing sent, wherever a job would be refused.
+   * `undefined`, with nothing sent, when the caller is over
+   * {@link DEFAULT_HOSTED_TESTS} or already has a test in flight: the address
+   * is the rider's to choose, so the test carries a job's kind of limit.
+   * `signal` ends the request to the service when the caller goes away.
    */
-  testQuestion(caller: Caller): Promise<HostedTestOutcome>;
+  testQuestion(caller: Caller, signal?: AbortSignal): Promise<HostedTestOutcome | undefined>;
 }
 
+/**
+ * How often one rider may send the test question: 6 in 10 minutes, one at a
+ * time. A rider-chosen address is called from the operator's network, so the
+ * test is bounded as a job is (`DEFAULT_ANALYSIS_STARTS`).
+ *
+ * ## Provenance — the author's choice, not a measurement
+ */
+export const DEFAULT_HOSTED_TESTS: RateLimit = { limit: 6, windowMs: 10 * 60 * 1000 };
+
 export interface HostedSettingsOptions {
+  /** The test question's per-rider limit; {@link DEFAULT_HOSTED_TESTS} when absent. */
+  readonly tests?: RateLimit;
   readonly store: Pick<
     SqlStore,
     | 'putAthleteHostedKey'
@@ -154,6 +170,9 @@ function shapeProblems(
 
 export function createHostedSettings(options: HostedSettingsOptions): HostedSettings {
   const { store } = options;
+  const testLimit = createRateLimiter(options.tests ?? DEFAULT_HOSTED_TESTS, options.now);
+  /** Riders whose test question is out now: one at a time. */
+  const testing = new Set<string>();
 
   async function status(athleteId: string): Promise<HostedStatus> {
     const own = await store.getAthleteHostedKey(athleteId);
@@ -264,9 +283,17 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       return status(caller.athleteId);
     },
 
-    async testQuestion(caller) {
+    async testQuestion(caller, signal) {
       if (options.sources === undefined) return { result: 'not-ready', reasoned: false };
-      return askHostedTestQuestion(caller.athleteId, options.sources);
+      if (testing.has(caller.athleteId)) return undefined;
+      testLimit.sweep();
+      if (!testLimit.allow(caller.athleteId)) return undefined;
+      testing.add(caller.athleteId);
+      try {
+        return await askHostedTestQuestion(caller.athleteId, options.sources, signal);
+      } finally {
+        testing.delete(caller.athleteId);
+      }
     },
   };
 }

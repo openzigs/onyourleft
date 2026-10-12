@@ -496,6 +496,17 @@ describe('each call, as it is made', () => {
     }
   });
 
+  it.each([429, 500])(
+    'does not report a %i answer as the test’s result, even one carrying a result word',
+    async (status) => {
+      const { port } = scripted([{ status, body: { result: 'answered', reasoned: true } }]);
+      expect(await port.sendHostedTestQuestion()).toStrictEqual({
+        kind: 'failed',
+        text: HOSTED_TEST_UNREADABLE,
+      });
+    },
+  );
+
   it('waits longer than any other call for the test question', async () => {
     const { calls, port } = scripted([
       { status: 200, body: { result: 'timed-out', reasoned: false } },

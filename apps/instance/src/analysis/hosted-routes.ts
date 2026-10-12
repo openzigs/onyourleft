@@ -171,8 +171,8 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/test',
     operationId: 'sendHostedTestQuestion',
     summary:
-      'Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.',
-    errors: ['unauthenticated', 'unavailable'],
+      'Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, and is limited to a few every ten minutes, one at a time (`rate_limited`, with nothing sent), so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.',
+    errors: ['unauthenticated', 'unavailable', 'rate_limited'],
     response: {
       contentType: 'application/json',
       schema: {
@@ -199,7 +199,8 @@ export const HOSTED_ROUTES: readonly Route[] = [
     handle: async (context) => {
       const got = ready(context);
       if (got === undefined) return errorResponse('unavailable');
-      return json(await got.hostedSettings.testQuestion(got.caller));
+      const tested = await got.hostedSettings.testQuestion(got.caller, context.request.signal);
+      return tested === undefined ? errorResponse('rate_limited') : json(tested);
     },
   },
 ];
