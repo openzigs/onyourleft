@@ -577,3 +577,49 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   workout with no re-plan, and is
   [#1297](https://github.com/openzigs/onyourleft/issues/1297), to land before or with #1244. Read
   from the code, not ridden on a trainer. (#1296)
+- **2026-10-12** — **The amendment above left four choices marked as the owner's to rule, and its
+  ruling 5 rested on a premise that did not hold. The owner ruled on all five that day on
+  [#1300](https://github.com/openzigs/onyourleft/issues/1300), and two statements in that amendment
+  have stopped being true.** Neither the body nor the amendment above is edited. The validator's
+  header and `docs/architecture.md` agree with what follows.
+  - **Ruling 5, accepted as the record reads.** Nothing clamps a workout's own target to the
+    trainer's minimum today, and [#1297](https://github.com/openzigs/onyourleft/issues/1297) must
+    land before or with #1244. No code changes for it here.
+  - **a, changed: the +10 % is of the share the block was loaded with, so it is a true 10 %.** The
+    amendment above says the count is *"additive"*, summing each move's percentage, so that +10 %
+    could reach about 10.25 %. That is no longer so. Each place in the plan keeps the share it was
+    **loaded** with (the loaded block's highest share), and every rise spent there is counted in
+    percentage points of that one share: a swap's rise as the difference between the two shares, a
+    scale of the replaced block as the share it had moved. Measured before: 0.7, a swap to 0.735
+    and a swap to 0.77175 were both accepted, 10.25 % over the loaded share. Now the second is
+    refused under P4 and 0.77 is the most. A +5 % scale of a block swapped in at +5 % is refused
+    for the same reason (0.735 × 1.05 is 0.77175). A move's own +5 % is still measured over the
+    block it replaces *as ridden now*.
+    ⚠️ Ruling 7 is kept beside it: a scale also may not take a block swapped in more than 10 % above
+    the share **it** joined with, however far under the loaded share it is. ⚠️ A fall still earns
+    nothing back, since the count only grows. ⚠️ One consequence the other way, which follows from
+    the ruling's words: a rise from a share that is *below* the loaded one now costs fewer points
+    than it did (0.63 to 0.66 in a place loaded at 0.7 is 4.29 points, where it was 4.76), so a
+    place taken well under its loaded share can be raised by more moves than before. It can never
+    pass 10 % over the loaded share, and each move is still 5 % at most.
+  - **b, changed: a replaced heart-rate hold is measured at its start share**, not at its ceiling
+    share, which is a cap and not a target. Measured before: a hold starting at 0.5 with a ceiling
+    of 0.85, replaced by steady 0.89, was accepted as a 4.7 % rise. Now it is refused under P4, and
+    0.525 is the most. The share a place loaded with a hold keeps for the +10 % is its start share
+    too. ⚠️ **Three choices the ruling's words leave, which are the implementer's and the owner's
+    to change.** A hold swapped **in** for a block that is not a hold is still read at its ceiling
+    share, the higher of its two, which refuses more. A hold swapped in for a **hold** is compared
+    like with like, start with start and ceiling with ceiling, the larger rise counting for the
+    +5 % and the larger difference for the +10 %: reading the new hold's ceiling against the old
+    one's start would refuse a hold in place of an identical hold, and with it nearly every such
+    swap. And ruling 3's test of a recovery reads a hold as it did (its start share against the
+    highest share of the block after it, a hold's ceiling included); the ruling was about a hold
+    that is replaced.
+  - **c, kept as built.** One swapped-in block that has spent its allowance makes a +5 % scale
+    refused for every remaining block until it is ridden. Under a, a block swapped in at a full
+    +5 % is such a block from the moment it joins.
+  - **d, kept as built.** A recovery is read from the block immediately after it only.
+
+  The rounding note above is superseded with a: a rise is no longer stored as exactly 5. A total
+  within 10⁻⁹ of a percentage point over +10 % is taken as +10 %, for a swap and for a scale, as a
+  move's +5 % already was. (#1300)
