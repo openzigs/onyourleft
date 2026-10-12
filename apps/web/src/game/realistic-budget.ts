@@ -200,11 +200,14 @@ export const REALISTIC_TEXTURE_PIXELS = {
  *
  * ⚠️ **The draw calls in this table are one frame's, and the 33 and the 31
  * of the table above are the same frame.** The owner's page reports a mean
- * over its window, and the window's first frame makes about twice the calls
- * of every other — 60 and then 31 at `at=2550`, read frame by frame — so the
- * page said 33 where the frame made 31, and 32 to 35 as a busier machine fit
- * fewer frames into the second
- * (`browser/realistic-harness.ts` §`RealisticSample.drawCalls`). That is why
+ * over its window, and until #1294 that window also held the warm-up and the
+ * page's very first render, which makes about twice the calls of every later
+ * frame — 60 and then 31 at `at=2550`, read frame by frame — so the page said
+ * 33 where the frame made 31, and 32 to 35 as a busier machine fit fewer
+ * frames into its four seconds
+ * (`browser/realistic-harness.ts` §`RealisticSample.drawCalls`). The page now
+ * counts from the end of the warm-up and reports each of this table's figures
+ * as its own: 29, 31 and 31 at `at=2550`, 35, 38 and 38 at `at=700`. That is why
  * #1283's count "moved between runs of the one held frame while its triangles
  * did not". The frame's own count did not move in any run, and it is the same
  * with the generated firs as with the scanned ones at each of the seven
@@ -410,12 +413,14 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * loaded on the same views, still make 27 and 31 (32 in one run of seven:
  * the page's count moves by one between runs of the same held frame).
  *
- * ⚠️ **#1294 found what moves, and the page's 33 and 31 are a mean, not a
- * frame's count**: its window's first frame makes about twice the calls of
- * every other, so the held frame at `at=2550` makes 31 with the generated
- * broadleaves and 29 with the scans, and the page added one to three to
- * each by how few frames its second held. The generated firs add no call to
- * either view. {@link REALISTIC_TRIANGLES}, "The generated firs, measured".
+ * ⚠️ **#1294 found what moves, and the page's 33 and 31 were a mean, not a
+ * frame's count**: the page counted its very first render, which makes about
+ * twice the calls of every later frame, so the held frame at `at=2550` makes
+ * 31 with the generated broadleaves and 29 with the scans, and the page
+ * added one to three to each by how few frames it drew before its sample.
+ * It now counts from the end of its warm-up and says 31 and 29 itself. The
+ * generated firs add no call to either view. {@link REALISTIC_TRIANGLES},
+ * "The generated firs, measured".
  *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
  * not depend on the GPU, so SwiftShader counts what the tablet would; what the

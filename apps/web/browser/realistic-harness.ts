@@ -104,17 +104,20 @@ export interface RealisticSample {
   /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
   /**
-   * Draw calls per drawn frame over the window, a MEAN, rounded.
+   * Draw calls per drawn frame over the window, a MEAN, rounded: the window
+   * is the frames drawn after the warm-up, the ones the clock samples.
    *
-   * ⚠️ **Not one frame's count, and it reads higher the fewer frames the
-   * window holds** — #1294. The first frame of a window makes about twice the
-   * calls of every other: read frame by frame on 2026-10-12 in the pinned
-   * Chromium, held at `at=2550`, the first made 60 and every later one 31. So
-   * this is `(60 + 31·n) / (n + 1)` for `n` later frames — 33 for 11 to 18 of
-   * them, 34 for 8 to 10, 32 for 19 or more — and it moved between runs of
-   * one held frame with how busy the machine was, while the frame did not
-   * change at all. What made the first frame's other 29 was not looked for.
-   * {@link lastFrame}'s `calls` is the steady frame's own.
+   * ⚠️ **Until #1294 it also counted the warm-up's frames, the page's very
+   * first render among them, and so read higher the fewer frames there were.**
+   * Read frame by frame on 2026-10-12 in the pinned Chromium, held at
+   * `at=2550`: the first render made 60 calls and every later frame 31, in
+   * the warm-up and after it. The first published figure was therefore
+   * `(60 + 31·n) / (n + 1)` for `n` later frames, 32 to 35 for one unchanged
+   * frame depending on how busy the machine was, which is what #1289 saw
+   * move. The counts are now reset when the warm-up ends, so a held frame's
+   * mean is its own count and equals {@link lastFrame}'s `calls`. A soak's
+   * later windows never held the first render. What the first render's other
+   * 29 calls are was not looked for (#1293).
    */
   readonly drawCalls: number;
   /**
@@ -392,7 +395,16 @@ async function run(): Promise<void> {
     // Only drawn frames reach the clock, so what it publishes is the time
     // between frames a rider SEES — at a capped rung, at least the cap.
     const { elapsedSeconds: elapsed } = clock.frame(now);
+    const warmBefore = warmedUp;
     warmedUp = elapsed > WARM_UP_SECONDS;
+    // #1294: the counts start where the clock's samples do. The warm-up's
+    // frames are not the window's, and the page's very first render makes
+    // about twice a frame's calls. @see RealisticSample.drawCalls
+    if (warmedUp && !warmBefore) {
+      callsInWindow = 0;
+      trianglesInWindow = 0;
+      framesInWindow = 0;
+    }
     const distance =
       config.at ??
       LOOP_FROM_METRES +

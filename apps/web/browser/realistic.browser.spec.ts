@@ -68,19 +68,30 @@ const AGREEMENT = 0.01;
 const VEGETATION_AT_LEAST = 60_000;
 
 /**
- * The most draw calls the owner's page may make held at `at=2550` with the
- * trees a ride draws — #1294: **33**, the figure #1289 left it at with two
- * seeds a species, two under `REALISTIC_WOODED_DRAW_CALLS`.
+ * The most draw calls the owner's page may REPORT held at `at=2550` with the
+ * trees a ride draws: **33**, the figure #1289 left it at with two seeds a
+ * species, two under `REALISTIC_WOODED_DRAW_CALLS`.
  *
- * ⚠️ **Held on the frame's own count, not on the page's mean.** The page's
- * `drawCalls` is a mean over its window whose first frame makes about twice
- * the calls of the rest (`realistic-harness.ts` §`RealisticSample.drawCalls`),
- * so it reads 32 to 35 for the one frame depending on how many frames a busy
- * machine fits in a second — which is all that #1289 saw move. The frame
- * itself makes **31**, with the generated firs and with the scanned ones
- * alike: two shapes stand where two stood, and they add no call.
+ * **This is the figure #1294's criterion names**: "at or under 33 at
+ * `at=2550`" is the page's own `drawCalls`, a mean over its window. It is
+ * asserted, and so is the frame's own count below.
  */
 const PAGE_DRAW_CALLS_AT_2550 = 33;
+
+/**
+ * What one held frame at `at=2550` makes, counted at the WebGL draw calls:
+ * **31**, with the generated firs and with the scanned ones alike (two shapes
+ * stand where two stood, and they add no call), on a Mac and on the CI runner,
+ * 2026-10-12. Held at the measured figure, so one added call is a red test
+ * and not two calls of room under {@link PAGE_DRAW_CALLS_AT_2550}.
+ *
+ * ⚠️ **The page's mean read 32 to 35 for this frame until #1294**, because
+ * its window also held the warm-up and the page's first render, which makes
+ * 60 calls (`realistic-harness.ts` §`RealisticSample.drawCalls`). The window
+ * now starts where the warm-up ends, so a held frame's mean IS its count, and
+ * the test below holds the two equal.
+ */
+const FRAME_DRAW_CALLS_AT_2550 = 31;
 
 type Published = NonNullable<Window['__oylRealistic']>;
 
@@ -241,14 +252,21 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     // which is why there are two (#1289's review).
     //
     // #1294: the generated firs are two shapes where the scanned firs were
-    // two, so the FRAME makes the calls it made — 31, 2026-10-12 — and is held
-    // at or under the 33 #1289 left the page at ({@link PAGE_DRAW_CALLS_AT_2550}),
+    // two, so the FRAME makes the calls it made: {@link FRAME_DRAW_CALLS_AT_2550},
     // and at or under the scanned firs' own frame, call for call.
     expect(generated.result.lastFrame.calls).toBeGreaterThan(0);
-    expect(generated.result.lastFrame.calls).toBeLessThanOrEqual(PAGE_DRAW_CALLS_AT_2550);
+    expect(generated.result.lastFrame.calls).toBeLessThanOrEqual(FRAME_DRAW_CALLS_AT_2550);
     expect(generated.result.lastFrame.calls).toBeLessThanOrEqual(
       scannedFirs.result.lastFrame.calls,
     );
+    // The issue's own criterion, on the figure it names: the page's mean. The
+    // rider and the ladder are held, so every frame of the window is this
+    // frame, and a mean that is not the frame's count has counted something
+    // that is not the window: the warm-up, and the first render in it.
+    expect(generated.result.drawCalls).toBeLessThanOrEqual(PAGE_DRAW_CALLS_AT_2550);
+    for (const run of [generated, scannedFirs, scanned]) {
+      expect(run.result.drawCalls).toBe(run.result.lastFrame.calls);
+    }
     expect(scannedFirs.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(scanned.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(PAGE_DRAW_CALLS_AT_2550).toBeLessThan(REALISTIC_WOODED_DRAW_CALLS);

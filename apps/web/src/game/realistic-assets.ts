@@ -434,7 +434,7 @@ export const REALISTIC_BROADLEAVES: Readonly<Record<TreeMaking, readonly Realist
  * has about 84 000 of them and a 24 000-triangle budget keeps about 1 900, so
  * the scan is drawn nearly bare, and the owner's route is mostly conifers. A
  * generated fir carries 1 100 sprig cards in 4 792 triangles, a fifth of the
- * scan's, and 1 244 at its middle level against 6 000;
+ * scan's, and 878 at its middle level against 5 998;
  * `realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated firs,
  * measured", has the frame's figures. That it reads as a fir in needle is
  * this change's author looking at screenshots, and nothing here was measured

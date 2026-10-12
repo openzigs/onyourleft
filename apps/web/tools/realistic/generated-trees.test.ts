@@ -450,7 +450,7 @@ describe('the fir is the generator’s evergreen — #1294', () => {
     }
   });
 
-  it('keeps only the stem’s wood at the middle level, and every other sprig card', () => {
+  it('keeps only the stem’s wood at the middle level, and one sprig card in three', () => {
     for (const tree of firs()) {
       const species = speciesOf(tree);
       expect(species.middle.deepestWood).toBe(0);

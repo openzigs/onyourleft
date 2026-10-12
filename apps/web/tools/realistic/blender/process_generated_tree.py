@@ -120,6 +120,43 @@ def shrunk(texels, factor):
     return blocks.mean(axis=(1, 3))
 
 
+# The side of the atlas a rectangle's numbers are texels of: the 1K maps
+# `inputs.lock.json` pins for #1294's fir twigs.
+RECT_ATLAS_SIDE = 1024
+
+
+def held_rectangles(sprig, atlases):
+    """Stops the run unless every map of a rectangle atlas is the size the
+    rectangles were measured on, and every rectangle lies inside it.
+
+    A rectangle is texels of ONE resolution, and nothing else says which: at
+    another size, or past an edge, the slice below would quietly take the
+    wrong texels (a negative start wraps in numpy), and the card would be
+    drawn from them. The lock's digests make that unreachable today; this
+    makes it loud for the next atlas (#1294's review). A grid is shares of
+    its atlas and needs none of this."""
+    if "rects" not in sprig:
+        return
+    for name, atlas in atlases.items():
+        height, width = atlas.shape[:2]
+        if (width, height) != (RECT_ATLAS_SIDE, RECT_ATLAS_SIDE):
+            raise SystemExit(
+                f"{NAME}: the sprig's {name} atlas is {width} x {height} texels, and its "
+                f"rectangles are texels of a {RECT_ATLAS_SIDE} x {RECT_ATLAS_SIDE} atlas"
+            )
+    for index, rect in enumerate(sprig["rects"]):
+        inside = (
+            rect["x"] >= 0
+            and rect["y"] >= 0
+            and rect["width"] > 0
+            and rect["height"] > 0
+            and rect["x"] + rect["width"] <= RECT_ATLAS_SIDE
+            and rect["y"] + rect["height"] <= RECT_ATLAS_SIDE
+        )
+        if not inside:
+            raise SystemExit(f"{NAME}: rectangle {index} of the sprig's atlas lies outside it")
+
+
 def atlas_cell(sprig, cell, atlas_w, atlas_h):
     """Where one leaf lies in its atlas, in texels from the atlas's BOTTOM
     left -- (x0, y0, x1, y1) -- and which way its tip points there, radians.
@@ -152,6 +189,9 @@ def draw_sprig(sprig, pixels):
     colour_atlas = read_image(sprig["colour"], False)
     opacity_atlas = read_image(sprig["opacity"], True)
     normal_atlas = read_image(sprig["normal"], True)
+    held_rectangles(
+        sprig, {"colour": colour_atlas, "opacity": opacity_atlas, "normal": normal_atlas}
+    )
     atlas_h, atlas_w = opacity_atlas.shape[:2]
     colour = np.zeros((pixels, pixels, 3), dtype=np.float32)
     normal = np.zeros((pixels, pixels, 3), dtype=np.float32)
