@@ -11,6 +11,11 @@
  * checks less than it did. `check:test-split` is the Vitest half's own gate;
  * this is the browser half and the workflows.
  *
+ * Since #1285 the required check is one job over three shards, and the same
+ * thing must not happen there by another road: a shard the aggregating job
+ * does not wait for, that job renamed, or its verdict weakened. Those are the
+ * last describe in this file.
+ *
  * ⚠️ **It reads the workflows as text, not as YAML.** There is no YAML parser
  * in this workspace and adding one for a test is not worth a dependency; the
  * assertions are about which commands a file names, which text answers.
@@ -105,57 +110,81 @@ function taggedBodies(): Map<string, string> {
 }
 
 /**
- * The required job as it was last measured — #1280.
+ * The jobs of a workflow, as `id → its lines`, with every comment line removed.
+ * Text, not YAML (see the file header): a job is a key at two spaces under
+ * `jobs:`, which is how both workflows are written.
+ */
+function jobsOf(workflow: string): Map<string, string> {
+  const code = workflow.replace(/^\s*#.*\n/gm, '');
+  const body = code.slice(code.indexOf('\njobs:\n') + '\njobs:\n'.length);
+  const starts = [...body.matchAll(/^ {2}([A-Za-z_][\w-]*):\n/gm)];
+  const jobs = new Map<string, string>();
+  starts.forEach((match, index) => {
+    jobs.set(String(match[1]), body.slice(match.index, starts[index + 1]?.index));
+  });
+  return jobs;
+}
+
+/** A job-level scalar: `name`, `if`, `needs`, `runs-on`, `timeout-minutes`. */
+const jobField = (job: string, key: string): string | undefined =>
+  new RegExp(`^ {4}${key}: (.+)$`, 'm').exec(job)?.[1]?.trim();
+
+/** The name `main` requires a status check under. */
+const REQUIRED_CHECK = 'Repository rules';
+
+/**
+ * The shards as they were last measured — #1285 (the one job, until then:
+ * #1280).
  *
- * ⚠️ **A measurement cannot be derived, and this is why the two bounds below
- * still rest on recorded figures.** How long the job takes on GitHub's slower
+ * ⚠️ **A measurement cannot be derived, and this is why the bounds below
+ * still rest on recorded figures.** How long a job takes on GitHub's slower
  * runner is known only from the Actions API after a run; a Vitest case has no
  * network (and must not grow one), so nothing here can ask. What CAN be
  * derived is everything else: the stops come from the workflow and
  * `playwright.config.ts`, and the figures come from the ONE place they are
  * recorded — the table in `docs/agents/ci.md` between the two
- * `required-job-measurements` markers — rather than from a second copy typed
- * here. Until #1280 this file held its own copies (835 s and 1 522 s), and
- * #1279's review found the record and the copy already apart (the start was
- * 841 s). Now a row added to that table moves both bounds, and a row that is
- * not a number fails here rather than being skipped.
+ * `shard-measurements` markers — rather than from a second copy typed here.
+ * Until #1280 this file held its own copies (835 s and 1 522 s), and #1279's
+ * review found the record and the copy already apart. Now a row added to that
+ * table moves every bound, and a cell that is not a number fails here rather
+ * than being skipped.
  *
- * ⚠️ **It still cannot notice a job that got slower since the last row.** The
- * job grew about 21 s a day in the week to 2026-10-12; the table's newest row
- * is how old these bounds are.
+ * ⚠️ **It still cannot notice a shard that got slower since the last row.**
+ * The one job grew about 21 s a day in the week to 2026-10-12; the table's
+ * newest row is how old these bounds are.
  */
-function measuredRequiredJob(): { jobs: number[]; gateStarts: number[] } {
+function measuredShards(): (column: string) => number[] {
   const doc = read(ROOT, 'docs', 'agents', 'ci.md');
   const block =
-    /<!-- required-job-measurements:start -->\n([\s\S]*?)<!-- required-job-measurements:end -->/.exec(
-      doc,
-    )?.[1] ?? '';
+    /<!-- shard-measurements:start -->\n([\s\S]*?)<!-- shard-measurements:end -->/.exec(doc)?.[1] ??
+    '';
   const cells = (line: string): string[] =>
     line
       .split('|')
       .slice(1, -1)
       .map((cell) => cell.trim());
   const [header = '', , ...rows] = block.trim().split('\n');
-  const column = (name: string): number => cells(header).indexOf(name);
-  const numbers = (name: string): number[] =>
-    rows.map((row) => {
-      const cell = cells(row)[column(name)] ?? '';
+  return (name) => {
+    const column = cells(header).indexOf(name);
+    expect(column, `the table has a "${name}" column`).toBeGreaterThanOrEqual(0);
+    // At least three runs, which is what #1285 asked to be measured.
+    expect(rows.length, 'rows in the table').toBeGreaterThanOrEqual(3);
+    return rows.map((row) => {
+      const cell = cells(row)[column] ?? '';
       // Refused rather than skipped: a row this cannot read is a measurement
       // the bounds would silently leave out.
       expect(cell, `"${name}" in the row: ${row}`).toMatch(/^\d+$/);
       return Number(cell);
     });
-  expect(column('Job'), 'the table has a "Job" column').toBeGreaterThanOrEqual(0);
-  expect(column('Gate starts'), 'the table has a "Gate starts" column').toBeGreaterThanOrEqual(0);
-  return { jobs: numbers('Job'), gateStarts: numbers('Gate starts') };
+  };
 }
 
 /**
  * What runs after the `Browser gate` step, in seconds. It was the two coverage
- * steps and the post steps until #1280 (4 s, #1128's review); the coverage
- * steps are nightly now and what is left is the Docker logout and the post
- * steps. Kept at the larger, older figure: it is an allowance, and #1280's
- * margin criterion is written with it.
+ * steps and the post steps until #1280 (4 s, #1128's review), then the Docker
+ * logout and the post steps; since #1285 the gate's shard has only the post
+ * steps after it. Kept at the larger, older figure: it is an allowance, and
+ * #1280's margin criterion is written with it.
  */
 const AFTER_GATE_S = 4;
 
@@ -252,7 +281,7 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(script).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
   });
 
-  it('bounds the required gate’s step from outside, inside what the job has left — #1128’s review', () => {
+  it('bounds the required gate’s step from outside, inside what its shard has left — #1128’s review, #1285', () => {
     const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
     const step = /^ +- name: Browser gate\n((?: {8}.+\n)+)/m.exec(rules)?.[1] ?? '';
     const seconds = GATE_STEP_MS / 1000;
@@ -262,14 +291,17 @@ describe('the browser gate is split into a required run and a nightly one — #8
     const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
     // The step's own stop is behind the wrapper and its kill, never in front.
     expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
-    // ...and the step's stop ends at least THREE MINUTES inside the job's
+    // ...and the step's stop ends at least THREE MINUTES inside its job's
     // (#1280's criterion; it was 115 s when #1279 merged), from the latest
-    // start measured — read from docs/agents/ci.md, @see measuredRequiredJob —
-    // with what runs after the gate.
-    const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
-    const { gateStarts } = measuredRequiredJob();
-    expect(gateStarts.length).toBeGreaterThanOrEqual(2);
-    const latestStart = Math.max(...gateStarts);
+    // start measured — read from docs/agents/ci.md, @see measuredShards —
+    // with what runs after the gate. The job is the shard that runs the gate,
+    // found by its command rather than by its name.
+    const shard = [...jobsOf(rules).values()].filter((job) =>
+      job.includes('pnpm run test:browser\n'),
+    );
+    expect(shard).toHaveLength(1);
+    const job = Number(jobField(shard[0] ?? '', 'timeout-minutes'));
+    const latestStart = Math.max(...measuredShards()('Gate starts'));
     expect(job * 60 - (latestStart + minutes * 60 + AFTER_GATE_S)).toBeGreaterThanOrEqual(180);
   });
 
@@ -285,23 +317,6 @@ describe('the browser gate is split into a required run and a nightly one — #8
     const BUILDS_MS = 14_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
   });
-
-  it('keeps the job’s stop at least five minutes clear of the slowest job measured — #651, #1280', () => {
-    // A stop has to be clear of what it stops. Three minutes until #1280,
-    // against 1 522 s typed here (a job with coverage, cancelled at the
-    // 25-minute stop with every test green); five since, against the slowest
-    // job in docs/agents/ci.md §4c §"Coverage out of the required job — #1280"
-    // — @see measuredRequiredJob. When a new row there turns this red, the
-    // answer is that section's "what is next" (shards, #1285), not a smaller
-    // number here and not a longer stop.
-    const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
-    const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
-    const { jobs } = measuredRequiredJob();
-    expect(jobs.length).toBeGreaterThanOrEqual(2);
-    // A figure outside what a 30-minute job can take is a typo, not a run.
-    for (const seconds of jobs) expect(seconds).toBeGreaterThan(600);
-    expect(job * 60 - Math.max(...jobs)).toBeGreaterThanOrEqual(300);
-  });
 });
 
 describe('the nightly workflow runs what left the required job, and cannot pass for it — #866', () => {
@@ -316,7 +331,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     );
   });
 
-  it('leaves the required job running the gate and the suite, with no coverage — #1280', () => {
+  it('leaves the required shards running the gate and the suite, with no coverage — #1280', () => {
     const commands = runCommands(rules);
     expect(commands).toEqual(
       expect.arrayContaining([
@@ -329,6 +344,13 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     // in the required job it is 106 to 133 s of the slower runner's margin,
     // spent twice over the same files.
     expect(commands.filter((command) => /test:coverage|--coverage/.test(command))).toEqual([]);
+  });
+
+  it('instruments nothing by default, so `test:required` cannot take coverage through the config — #1286’s review', () => {
+    // The pin above is on the command. `coverage.enabled: true` in the root
+    // config would instrument `vitest run` with no flag at all, and put back
+    // the 106 to 133 s with nothing red; `test:coverage` passes `--coverage`.
+    expect(read(ROOT, 'vitest.config.ts')).not.toMatch(/\benabled\b/);
   });
 
   it('takes the coverage report nightly and publishes it, so it moved rather than stopped — #1280', () => {
@@ -353,6 +375,38 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     );
   });
 
+  it('still takes and publishes the report when an earlier nightly step went red — #1286’s review', () => {
+    // A step runs only if every step before it succeeded, unless it says
+    // otherwise. Without this condition one red nightly browser check costs
+    // that night's coverage table too.
+    for (const name of [
+      'Tests under coverage',
+      'Publish the coverage summary',
+      'Upload the coverage report',
+    ]) {
+      const step =
+        new RegExp(`^ +- name: ${name}\\n((?: {8}.+\\n)+)`, 'm').exec(nightly)?.[1] ?? '';
+      expect(step, name).toMatch(/^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
+    }
+  });
+
+  it('names the step that failed in the issue a red nightly run opens — #1286’s review', () => {
+    // One issue for every nightly failure, so its body has to say which step:
+    // since #1280 a case that fails only under coverage arrives here too.
+    const report = jobsOf(nightly).get('report') ?? '';
+    expect(report).toContain(
+      'gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs"',
+    );
+    expect(report).toContain(
+      `--jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \\($job): \\(.name) (\\(.conclusion))"'`,
+    );
+    // Reading the run's jobs needs this and nothing more.
+    expect(report).toMatch(/^ {6}actions: read$/m);
+    // What it read is in the body it files, and a read that failed says so
+    // rather than filing an issue that names nothing.
+    expect(report).toContain('${steps:-(the steps could not be read; open the run)}');
+  });
+
   it('reports under a name that is not the required check, on a schedule', () => {
     expect(nightly).not.toMatch(/^\s*name: Repository rules\s*$/m);
     expect(nightly).toMatch(/^\s+schedule:\s*$/m);
@@ -365,5 +419,157 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(workflowLevel).toBe('  contents: read\n');
     const writes = [...nightly.matchAll(/^ +([\w-]+): write *$/gm)].map((m) => String(m[1]));
     expect(writes).toEqual(['issues']);
+  });
+});
+
+describe('the required check is one job over every shard — #1285', () => {
+  const workflow = read(ROOT, '.github', 'workflows', 'rules.yml');
+  const jobs = jobsOf(workflow);
+  const named = [...jobs].filter(([, job]) => jobField(job, 'name') === REQUIRED_CHECK);
+  const aggregate = named[0]?.[1] ?? '';
+  const shards = new Map([...jobs].filter(([, job]) => jobField(job, 'name') !== REQUIRED_CHECK));
+
+  /** What a job runs: every `run:` line, with a concurrent step's commands unfolded. */
+  const commandsOf = (job: string): string[] => {
+    const lines = [...job.matchAll(/^ +run: (.+)$/gm)].map((match) => String(match[1]).trim());
+    const folded =
+      /^ +bash scripts\/run-concurrently\.sh\n((?: +'.+' '.+'\n)+)/m.exec(job)?.[1] ?? '';
+    const concurrent = [...folded.matchAll(/^ +'[^']+' '(.+)'$/gm)].map((match) =>
+      String(match[1]),
+    );
+    const block = [...job.matchAll(/^ +run: \|\n((?: {10}.+\n)+)/gm)].flatMap((match) =>
+      String(match[1])
+        .split('\n')
+        .map((line) => line.trim()),
+    );
+    return [...lines, ...concurrent, ...block];
+  };
+
+  it('reports under the required name from exactly one job, and from the workflow', () => {
+    // `main` requires a status check whose context is this string. Renamed,
+    // the required check never reports and no pull request can merge; given
+    // to a second job, a green shard could report it.
+    expect(workflow).toMatch(new RegExp(`^name: ${REQUIRED_CHECK}$`, 'm'));
+    expect(named).toHaveLength(1);
+    expect(shards.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('waits for every shard: a job it does not need cannot block a merge', () => {
+    const needs = (jobField(aggregate, 'needs') ?? '')
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id !== '');
+    expect(needs.sort()).toEqual([...shards.keys()].sort());
+  });
+
+  it('runs whatever the shards did, and passes only if every one succeeded', () => {
+    // Skipped when a shard fails, without this — and GitHub counts a skipped
+    // required check as passing.
+    expect(jobField(aggregate, 'if')).toBe('always()');
+    // The verdict is the checker over ALL of `needs`, so a shard added to
+    // `needs:` is judged without a second edit; its suite holds that failure,
+    // cancelled and skipped each fail, and so does no shard at all.
+    expect(commandsOf(aggregate)).toEqual(['bash scripts/check-shard-results.sh']);
+    expect(aggregate).toMatch(/^ {10}NEEDS: \$\{\{ toJSON\(needs\) \}\}$/m);
+    expect([...shards.values()].flatMap(commandsOf)).toContain(
+      'bash scripts/check-shard-results.test.sh',
+    );
+    // On a job, this reports a failure to `needs` as success; on a step, it
+    // turns a red step green. Neither belongs in a gate.
+    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toContain('continue-on-error');
+    // A stop of its own, so it cannot be what hangs the required check.
+    expect(Number(jobField(aggregate, 'timeout-minutes'))).toBeLessThanOrEqual(5);
+  });
+
+  it('runs every command the one job ran, each in exactly one shard — nothing left the required check', () => {
+    // The whole of what `Repository rules` ran as one job at #1285's base
+    // (af67cf98), less the two steps that gate nothing (the CPU line and the
+    // Docker logout). A command that leaves this workflow, or lands in the
+    // aggregating job where nothing waits for it, is a red case here; so is
+    // one that runs in two shards.
+    const required = [
+      'bash scripts/run-concurrently.test.sh',
+      'pnpm install --frozen-lockfile',
+      'bash scripts/check-repo-rules.sh',
+      'bash scripts/check-repo-rules.test.sh',
+      'bash scripts/check-licence-hashes.sh',
+      'bash scripts/check-licence-hashes.test.sh',
+      'bash scripts/check-env-example.sh',
+      'bash scripts/check-env-example.test.sh',
+      'bash scripts/check-doc-links.sh',
+      'bash scripts/check-doc-links.test.sh',
+      'shellcheck --version && shellcheck scripts/*.sh',
+      'pnpm run format:check',
+      'pnpm run lint',
+      'pnpm run typecheck',
+      'bash scripts/check-a11y-suite.test.sh',
+      'pnpm run check:test-split',
+      'bash scripts/check-test-split.test.sh',
+      'pnpm run check:wiring',
+      'bash scripts/check-wiring.test.sh',
+      'pnpm run check:cost-model',
+      'bash scripts/check-cost-model.test.sh',
+      'bash scripts/coverage-summary.test.sh',
+      'bash scripts/check-dependency-licences.test.sh',
+      'pnpm run check:licences',
+      'pnpm run build',
+      'bash scripts/check-instance-image.sh',
+      'bash scripts/check-instance-image.test.sh',
+      'pnpm run check:a11y-suite',
+      'pnpm run test:a11y',
+      'pnpm run check:capacitor',
+      'bash scripts/check-capacitor-generated.test.sh',
+      'bash scripts/check-third-party-notices.test.sh',
+      'pnpm run check:notices',
+      'pnpm run test:required',
+      'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium',
+      `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run test:browser`,
+    ];
+    const ran = new Map([...shards].map(([id, job]) => [id, commandsOf(job)]));
+    for (const command of required) {
+      const where = [...ran].filter(([, commands]) => commands.includes(command)).map(([id]) => id);
+      // The install is each shard's own; everything else runs once.
+      const expected = command === 'pnpm install --frozen-lockfile' ? shards.size : 1;
+      expect(where, command).toHaveLength(expected);
+    }
+    // The Vitest halves `check:test-split` reasons about share a runner with
+    // nothing that would slow a case past its timeout: the same shard, and no
+    // concurrent step in it.
+    const vitest = [...ran].filter(([, commands]) => commands.includes('pnpm run test:required'));
+    expect(vitest[0]?.[1]).toContain('pnpm run test:a11y');
+    expect(vitest[0]?.[1].join('\n')).not.toContain('run-concurrently');
+  });
+
+  it('runs every job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {
+    for (const [id, job] of jobs) {
+      expect(jobField(job, 'runs-on'), id).toBe('ubuntu-latest');
+    }
+    const uses = [...workflow.matchAll(/^ +uses: (\S+)/gm)].map((match) => String(match[1]));
+    expect(uses.length).toBeGreaterThan(jobs.size);
+    for (const action of uses) expect(action).toMatch(/^[\w-]+\/[\w-]+@[0-9a-f]{40}$/);
+  });
+
+  it('keeps every shard’s stop at least five minutes clear of its slowest measured run — #651, #1280', () => {
+    // A stop has to be clear of what it stops. The figures are the table in
+    // docs/agents/ci.md §4c §"Shards — #1285", one column per shard and named
+    // for it — @see measuredShards — so a shard added without being measured
+    // is a red case, and so is a new row that leaves a stop too close. When a
+    // row turns this red the answer is that section's "what is next", not a
+    // smaller number here.
+    const measured = measuredShards();
+    for (const [id, job] of shards) {
+      const stop = Number(jobField(job, 'timeout-minutes')) * 60;
+      const slowest = Math.max(...measured(id));
+      // A figure under a minute is a typo, not a shard that installs.
+      expect(slowest, id).toBeGreaterThan(60);
+      expect(stop - slowest, id).toBeGreaterThanOrEqual(300);
+    }
+  });
+
+  it('reports inside fifteen minutes of the push on every run measured — #1285', () => {
+    // The point of the shards: `Wall` is the run being created to the
+    // required check completing, queueing included.
+    expect(Math.max(...measuredShards()('Wall'))).toBeLessThan(900);
   });
 });
