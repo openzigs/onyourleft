@@ -151,7 +151,7 @@ go-signal: one condition trips on a measurement.
 
 ## What was built
 
-On `spike/issue-1273-webgpu-code` (final commit `2d8204d3`, never merged; its `spike-0024/README.md`
+On `spike/issue-1273-webgpu-code` (final commit `2f8ea2a1`, never merged; its `spike-0024/README.md`
 lists every file):
 
 - **The page**, `apps/web/browser/webgpu.html`, runs the product's own `three-renderer.ts`
@@ -219,6 +219,10 @@ stylised world was not ported at all** and was not drawn.
    running; it waited 30 s, 0, 0, 0, 465 s, 15 s, 120 s and 255 s. Load at the start of each run is
    in the table. Two of the ambient-occlusion runs still started at 9.6 and 15.0. **The tablet set
    was running over adb throughout that sitting** (a sleep loop and a log stream on the Mac).
+   ⚠️ **So the order is not the plan's "on the Mac first"**: the sitting thrown away did run first
+   (01:15 to 01:53 UTC), but the sitting kept began at 02:03 UTC, five minutes after the tablet's
+   baseline run began (01:58 UTC). What the plan wanted from the order, a harness shown to work
+   before the tablet was asked anything, was had from the first sitting and the smoke runs before it.
 2. **One frame counter, outside the page, for the control; the page's own for the spike's page.** A
    wrapper on `requestAnimationFrame`, installed before the page's scripts, gave the unchanged
    control the p95 it does not publish. It cannot be used on `WebGPURenderer`: **the renderer keeps
@@ -243,10 +247,13 @@ stylised world was not ported at all** and was not drawn.
 7. **Frame gaps over 100 ms on the tablet** are counted by the same `requestAnimationFrame` wrapper,
    put into each page through the debugger 12 s after navigation (after the first frame, so it is
    "after the warm-up"), and taught to ignore the renderer's own second callback. SurfaceFlinger's
-   count is beside it; it cannot tell a long frame from a hole in its own sampling.
-8. **Time to the first realistic frame has two readings**, and the plan named one. The page's mark
-   (`performance.now()` when the first `view.render` returns) is the planned one. The browser's
-   **first contentful paint** was read as well, and on the tablet the two are 1.7 s apart under the
+   count is the row beneath it in the table; it cannot tell a long frame from a hole in its own
+   sampling.
+8. **Time to the first realistic frame has two readings**, and the plan names neither: W4 and the
+   plan's (vii) give the quantity and its origin (the page's `performance.timeOrigin`) and no
+   instrument. The page's mark (`performance.now()` when the first `view.render` returns) is the
+   instrument the harness had, as the control page has. The browser's **first contentful paint**
+   was read as well, and on the tablet the two are 1.7 s apart under the
    WebGPU backend. Both are reported and W4 is judged on both.
 9. **Ambient occlusion's normals come from depth**, not from a normal target: with the scene's own
    view normals the foliage drew black (two-sided leaves and turned impostor quads have no normal
@@ -318,7 +325,7 @@ throughout all four.
 | | `T20` WebGLRenderer | `G20` WebGPU backend | `F20` WebGL 2 backend | `T20b` WebGLRenderer again |
 |---|---|---|---|---|
 | **GPU DVFS mean, MHz** (median 762 in all) | **795.3** | **785.2** (−1.3 %) | **778.4** (−2.1 %) | 796.7 |
-| by five minutes | 795 / 801 / 793 / 792 | 784 / 787 / 786 / 784 | 772 / 784 / 775 / 782 | 797 / 803 / 793 / 795 |
+| by five minutes | 795 / 801 / 793 / 792 | 784 / 787 / 786 / 784 (and one sample at 1 200 s, 848, left out of this row and inside the mean) | 772 / 784 / 775 / 782 | 797 / 803 / 793 / 795 |
 | **CPU, % of a core** (app + renderer process, mean of 33) | **174.2** (88.4 + 85.7) | **175.2** (89.0 + 86.2) | **179.4** (94.2 + 85.2) | 167.3 (86.8 + 80.5) |
 | Skin at the cool-down's last reading, °C | 23.67 | 23.92 | 23.94 | 23.93 |
 | Skin at the sampler's first reading, °C | 25.67 | 26.25 | 26.17 | 26.58 |
@@ -328,6 +335,7 @@ throughout all four.
 | Presents a second | 59.55 | 59.45 | 59.25 | 59.59 |
 | **Present intervals over 20 ms** | **0.236 %** (169) | **0.314 %** (224) | **0.464 %** (330) | 0.204 % (146) |
 | Page frame gaps over 20 ms / over 100 ms (longest) | 5 / **2** (183 ms) | 19 / **2** (133 ms) | 46 / **7** (499 ms) | 2 / 0 (83 ms) |
+| SurfaceFlinger present intervals of 100 to 250 ms / holes of 250 ms or more | 14 / 21 | 13 / 25 | 14 / 27 | 16 / 17 |
 | **Triangles a frame** (median of windows) | **196 050** | **198 994** (101.5 %) | 198 994 (101.5 %) | 196 051 |
 | Draw calls a frame | 29 | 30 | 30 | 29 |
 | Main-thread time in `view.render`, p50 / p99 ms | not published | 7.3 / 10.3 | 7.5 / 10.4 | not published |
@@ -369,8 +377,8 @@ time origin, after cooling to 26 °C:
 With `WebGLRenderer`, and with `WebGPURenderer`'s own WebGL 2 backend, the page paints about 30 ms
 after the call returns. The likely reason, which was not measured: a WebGL draw waits for its
 program, while a WebGPU `render` hands the frame to the GPU process and returns, and the picture
-arrives when the pipelines have compiled. So by the mark the plan named, WebGPU starts **193 ms earlier** than `WebGLRenderer`; by when the
-rider first sees the world, **1 480 ms later**. The page has nothing but the canvas, so first
+arrives when the pipelines have compiled. So by the page's own mark, WebGPU starts **193 ms earlier** than `WebGLRenderer`; by first
+contentful paint, which this file takes as when the rider first sees the world, **1 480 ms later**. The page has nothing but the canvas, so first
 contentful paint is the canvas's first frame. The five starts are alike (3.73 to 3.87 s), so no
 cache made a later start faster. The fallback is 0.7 s later than `WebGLRenderer` by either reading.
 
@@ -433,11 +441,16 @@ every column), and what changes is **the GPU process, which uses half the CPU un
 against 1.15 cores). At the display's rate the saving is not there: `WebGPURenderer` used **more**
 CPU in both processes (0.45 against 0.27 cores), part of it a second animation callback a frame.
 With the limit off `WebGLRenderer` has a 90 ms pause in every run and the WebGPU backend has none
-over 18 ms. A follow-up of five starts each read first contentful paint 15 to 46 ms after the page's
+over 18 ms. A follow-up of five starts each read first contentful paint 15 to 48 ms after the page's
 mark for all three renderers (`results/mac-first-paint/`).
 
 The first sitting, thrown away (departure 1), had the same ordering under load: 565, 549, 584 and
-535 frames a second (`results/mac/sitting-1-discarded.log`).
+535 frames a second. ⚠️ **Only its console survives** (`results/mac/sitting-1-discarded.txt`): its
+JSON files were overwritten by the second sitting. The console holds the wrapper's count for every
+run, so 565 and 549 (the control and `classic`, medians of 565.2 and 548.7) read straight from it,
+and 584 and 535 are **half** of the 1 168.8 and 1 069.0 it shows for the two `WebGPURenderer`
+backends, which the wrapper counts twice (departure 2). The page's own counts for that sitting were
+not kept.
 
 ### 7. JavaScript (W7)
 
@@ -523,8 +536,8 @@ The tablet's seven show the same things as the Mac's at 2 550 m, the half-resolu
 |---|---|---|
 | W1 | **Not tripped** | In the shell on WebView 154.0.8037.106: `navigator.gpu` present, an `arm` / `valhall` adapter, `isFallbackAdapter` `false`, `requestDevice()` resolved, and `WebGPURenderer` drew on its WebGPU backend in every run (§1) |
 | W2 | **Not tripped** | All six classes drawn by the WebGPU backend from the committed files with `three@0.185.1` unpatched, the rider posed as the product poses it (§2). Seven shader patches and two `ShaderMaterial`s were left out and each loss is listed; the water, which is not one of the six, is a stand-in |
-| W3 | **TRIPPED** | (a) GPU DVFS mean **1.3 % lower** (785.2 against 795.3 MHz), against the 15 % asked. (b) Skin at the end **1.4 °C warmer** (34.00 against 32.59), and thermal status 0 for both; the starts were 0.25 °C apart by the cool-down reading and 0.58 °C by the sampler's first, so by the second the clause's own condition is not met either way. (c) CPU **1.0 point of a core higher** (175.2 against 174.2), against the 25 lower asked. None of the three. Against the repeat baseline the answers are the same: 1.4 % lower, 0.6 °C warmer, 7.9 points higher. W6 holds, so the pair is valid |
-| W4 | **Tripped on one clause as a rider would feel it; not on the clause as instrumented** | Present intervals over 20 ms: 0.314 % against 0.236 %, **+0.08 of a point** (line: 0.5). Thermal status: 0 and 0. Frame gaps over 100 ms after the warm-up: **2 and 2** (the repeat baseline had 0, so this clause rests on two events). **Start-up**: by the page's first-frame mark, the instrument the plan named, WebGPU is 193 ms **earlier** (2 094 against 2 287 ms) and the clause holds; by first contentful paint it is **1 480 ms later** (3 796 against 2 316 ms), over the 1 s line. The mark is shown not to measure what the clause names under WebGPU (§4), so this file reads the clause as tripped and says so plainly rather than taking the pass |
+| W3 | **TRIPPED** | (a) GPU DVFS mean **1.3 % lower** (785.2 against 795.3 MHz), against the 15 % asked. (b) Thermal status 0 for both, so no lower maximum. On the planned pair the skin ended **1.4 °C warmer** (34.00 against 32.59), but those starts were 0.25 °C apart by the cool-down reading and **0.58 °C apart by the sampler's first**, outside the 0.5 °C the clause requires: by rules 1 and 2 the temperature half of (b) is **unmeasured on the planned pair**. It is measured on the repeat baseline, which is not the planned pair: `T20b` and `G20` started 0.01 °C apart by the cool-down reading and 0.33 °C by the sampler's first, both inside 0.5 °C, and there WebGPU ended **0.63 °C warmer** (34.00 against 33.37), where the clause needs 2 °C cooler. (c) CPU **1.0 point of a core higher** (175.2 against 174.2), against the 25 lower asked. (a) and (c) are measured on the planned pair and neither is met; (b) is not met where it is measured. Against the repeat baseline (a) and (c) read the same way: 1.4 % lower, 7.9 points higher. W6 holds, so the pair is valid |
+| W4 | **Tripped on one clause as a rider would feel it; not by the page's own mark** | Present intervals over 20 ms: 0.314 % against 0.236 %, **+0.08 of a point** (line: 0.5). Thermal status: 0 and 0. Frame gaps over 100 ms after the warm-up: **2 and 2** (the repeat baseline had 0, so this clause rests on two events). **Start-up**: the condition names the quantity (time to the first realistic frame from the page's `performance.timeOrigin`) and no instrument. By the page's first-frame mark, the instrument the harness had, WebGPU is 193 ms **earlier** (2 094 against 2 287 ms) and the clause holds; by first contentful paint it is **1 480 ms later** (3 796 against 2 316 ms), over the 1 s line. The mark is shown not to measure what the clause names under WebGPU (§4), so this file reads the clause as tripped and says so plainly rather than taking the pass. ⚠️ First contentful paint was not checked against the screen itself (§"What was not measured") |
 | W5 | **Not tripped** | The WebGL 2 backend over 20 minutes: GPU DVFS mean 2.1 % **lower** (778.4; line: 10 % higher); present intervals over 20 ms 0.464 % against 0.236 %, **+0.23 of a point** (line: 0.5; +0.26 against the repeat); all six classes drawn on the tablet. ⚠️ Not in the condition: it had seven frame gaps over 100 ms to the control's two, one of 499 ms, and its first picture is 0.7 s later |
 | W6 | **Holds** | 198 994 triangles a frame against 196 050: **101.5 %**, inside 90 to 110 % (the Mac: 101.0 %). Where the 1.5 % comes from was not traced |
 | W7 | **Not tripped** | Textures held: **91.6 MiB** (line: 160). `Graphics` half-way: 386.1 against 358.9 MiB, **+7.6 %** (line: 25 %). JavaScript: **+105.2 KiB** gzipped (line: 250). ⚠️ Not in the condition: the app process's total memory is 186 MiB (36 %) larger |
@@ -534,7 +547,7 @@ of it. By rule 2 the result is not a go-signal.** No condition is unmeasured.
 
 ## What a real move would cost
 
-Counted from `apps/web/src/game/three-renderer.ts` at `ed1fd9f4` (13 279 lines) by
+Counted from `apps/web/src/game/three-renderer.ts` at `ed1fd9f4` (13 278 lines by `wc -l`; `count-move.txt` says 13 279 because it counts the empty string after the last newline) by
 `spike-0024/scripts/count-move.py`; the full list with line numbers is `results/count-move.txt`.
 
 | What | Count |
@@ -573,9 +586,14 @@ for seven patches and two `ShaderMaterial`s, and 135 lines of hooks. A move rewr
   WebGL contexts). The harness stubbed it. What a lost WebGPU device does to a ride, and what a
   second ride in a session needs, were not looked at.
 
-**The tests.** Five test files read a patch's or a material's GLSL and assert on it: `terrain-belt.test.ts` (14 lines naming a vertex or fragment shader), `ground-blend.test.ts`
-(10), `three-renderer.test.ts` (6), `road-wear.test.ts` (4), `realistic-water.test.ts` (1). They
-would be rewritten against nodes. `three-seam.test.ts` allows `three` in one file: `three/webgpu`
+**The tests.** Six test files read a patch's or a material's GLSL and assert on it, in 74 lines
+naming a vertex or fragment shader, 34 of them `expect(` lines (counted over every `*.test.ts`,
+`*.test.tsx` and `*.spec.ts` under `apps/` and `packages/` at `ed1fd9f4`):
+`realistic-renderer.test.ts` (39 lines, 17 of them `expect(`), `terrain-belt.test.ts` (14, 7),
+`ground-blend.test.ts` (10, 5), `three-renderer.test.ts` (6, 3), `road-wear.test.ts` (4, 2),
+`realistic-water.test.ts` (1, 0). They would be rewritten against nodes. ⚠️ The largest was missed
+by this file's first count and found in review: `realistic-renderer.test.ts` holds a NUL byte, so
+`grep` took it for a binary file and reported no match. The count now reads each file as text. `three-seam.test.ts` allows `three` in one file: `three/webgpu`
 and `three/tsl` match its pattern only **inside** `three-renderer.ts`, and on the code branch, where
 the ports are a second file, **four of its six cases fail** (run: `pnpm exec vitest run
 src/game/three-seam.test.ts`, "4 failed | 2 passed").
@@ -628,6 +646,14 @@ so the licence gates do not move.
   anything, flattering.
 - **What the 1.5 s before the first picture is made of**, and whether three's `compileAsync` or a
   warm-up frame removes it.
+- **First contentful paint against the screen itself.** That it is when the world appears was not
+  checked with a present that has content in it (SurfaceFlinger's first frame, or a screen
+  recording), so nothing here rules out the WebView reporting a WebGPU canvas's paint late, or on a
+  cleared frame. The evidence is indirect: on the tablet the paint follows the page's mark by 14 to
+  44 ms in all ten starts of `WebGLRenderer` and the WebGL 2 backend (medians 29 and 27 ms) and by
+  1 665 to 1 705 ms in all five of the WebGPU backend; on the Mac it follows by 15 to 48 ms in all
+  twenty starts (medians 19, 15, 46 and 21 ms for the control, `classic`, the WebGPU backend and
+  the WebGL 2 backend).
 - **Why the WebGPU runs end warmer**, and what the 186 MiB of extra process memory is.
 - **Chrome on the same tablet** (#680's second row), and the WebGPU backend in **compatibility
   mode**.
@@ -655,7 +681,7 @@ and its output under `/data/local/tmp`, and the adb forward on port 9224.
 
 ## Reproduce
 
-On `spike/issue-1273-webgpu-code` at `2d8204d3`, with a second checkout of `main` for the control:
+On `spike/issue-1273-webgpu-code` at `2f8ea2a1`, with a second checkout of `main` for the control:
 
 ```bash
 export OYL_MAIN=<a checkout of main> OYL_SCRATCH=<a directory outside the repository>
