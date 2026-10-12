@@ -2,7 +2,9 @@
 
 /**
  * A rider's own hosted model key and hosted consent (#1199): read them, store
- * or clear the key, record or withdraw the consent. `hosted-settings.ts` says
+ * or clear the key, record or withdraw the consent — and, since #1251, send
+ * the service one test question that carries none of the rider's data
+ * (`hosted-test.ts`). `hosted-settings.ts` says
  * what each holds and the owner's ruling it follows (bring-your-own keys only).
  *
  * Every one is `auth: 'session'` and `reaches: 'own'`: the athlete is the
@@ -161,6 +163,43 @@ export const HOSTED_ROUTES: readonly Route[] = [
       const got = ready(context);
       if (got === undefined) return errorResponse('unavailable');
       return json(await got.hostedSettings.withdrawConsent(got.caller));
+    },
+  },
+  {
+    ...COMMON,
+    method: 'POST',
+    path: '/v1/analysis/hosted/test',
+    operationId: 'sendHostedTestQuestion',
+    summary:
+      'Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          result: {
+            type: 'string',
+            enum: [
+              'answered',
+              'no-answer',
+              'not-ready',
+              'refused',
+              'unreachable',
+              'timed-out',
+              'failed',
+            ],
+          },
+          reasoned: { type: 'boolean' },
+        },
+        required: ['result', 'reasoned'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      return json(await got.hostedSettings.testQuestion(got.caller));
     },
   },
 ];

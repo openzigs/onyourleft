@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HOSTED_CONSENT } from '../camera/hosted-model';
 import { COMPUTER_SENDS, INSTANCE_SENDS } from '../detail/write-up';
+import { hostedInstanceConsent } from './hosted-consent';
 import { analysisJobRequest } from './instance-job';
 
 import {
@@ -243,6 +244,27 @@ describe('what a write-up job sends to the instance is what the rider is told is
       return phrase === undefined || !INSTANCE_SENDS.includes(phrase);
     });
     expect(missing, 'a job sends a figure the instance paragraph does not name').toStrictEqual([]);
+  });
+
+  // #1251: the same job, sent on by the instance to a hosted service the
+  // rider agreed to — every figure of it named in that consent (#1104 B1).
+  it('is named, figure by figure, in the hosted consent (#1104 B1)', () => {
+    const sends = hostedInstanceConsent('https://models.example').paragraphs[0] ?? '';
+    expect(sends.length).toBeGreaterThan(300);
+    const hosted = sentKeys(JSON.stringify(analysisJobRequest(FULL, '1', 'instance-hosted').input));
+    expect(hosted.size).toBeGreaterThan(20);
+    const missing = [...hosted].filter((key) => {
+      if (key === 'templateVersion') return false;
+      const phrase = NAMED_BY[key] ?? STRUCTURE[key];
+      return phrase === undefined || !sends.includes(phrase);
+    });
+    expect(missing, 'a hosted job sends a figure the hosted consent does not name').toStrictEqual(
+      [],
+    );
+    // The control: a consent that drops the gradient is caught.
+    expect(sends.replace("each section's gradient", '')).not.toContain(
+      NAMED_BY.meanGradientPercent,
+    );
   });
 });
 

@@ -38,6 +38,8 @@ import type { Caller } from '../auth/identity.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './model-turn.ts';
+import { askHostedTestQuestion, type HostedTestOutcome } from './hosted-test.ts';
+import type { SourceOptions } from './source.ts';
 import {
   hostedKeyFrom,
   hostedModelFrom,
@@ -97,6 +99,12 @@ export interface HostedSettings {
   recordConsent(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<HostedOutcome>;
   /** Withdraw the caller's consent. */
   withdrawConsent(caller: Caller): Promise<HostedStatus>;
+  /**
+   * Send the caller's hosted service one test question carrying none of their
+   * data (#1251, `hosted-test.ts`), through the gate a hosted job goes
+   * through. `not-ready`, with nothing sent, wherever a job would be refused.
+   */
+  testQuestion(caller: Caller): Promise<HostedTestOutcome>;
 }
 
 export interface HostedSettingsOptions {
@@ -114,6 +122,12 @@ export interface HostedSettingsOptions {
   readonly secret: () => Promise<SecretKey | undefined>;
   /** Unix milliseconds. */
   readonly now: () => number;
+  /**
+   * What a hosted job's model is chosen from (`source.ts`): the SAME object the
+   * job engine is handed, so the test question passes the gate a job does.
+   * Absent, every test question is `not-ready` and nothing is sent.
+   */
+  readonly sources?: SourceOptions;
 }
 
 const KEY_FIELDS = ['url', 'model', 'key'] as const;
@@ -248,6 +262,11 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     async withdrawConsent(caller) {
       await store.clearHostedConsent(caller.athleteId);
       return status(caller.athleteId);
+    },
+
+    async testQuestion(caller) {
+      if (options.sources === undefined) return { result: 'not-ready', reasoned: false };
+      return askHostedTestQuestion(caller.athleteId, options.sources);
     },
   };
 }

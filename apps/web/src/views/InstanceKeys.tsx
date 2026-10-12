@@ -120,6 +120,9 @@ export function CardEntry({
   return (
     <form
       className="oyl-trainer__form"
+      // #1251: the Instance screen has a second form once a rider is signed in
+      // (the hosted service's key), so each is a named landmark.
+      aria-label="Use the instance’s card"
       onSubmit={(event) => {
         event.preventDefault();
         onOffer(card);

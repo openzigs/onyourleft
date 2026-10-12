@@ -65,6 +65,12 @@ export interface InstanceAnalysisPort {
   connected(): boolean;
   /** The sources on offer, the instance's own model first. Empty offers no control. */
   availableSources(): readonly InstanceJobSource[];
+  /**
+   * The service `instance-hosted` would send this ride to — the origin the
+   * rider's recorded consent names (#1251) — so the page can NAME it beside
+   * the press. `undefined` exactly when that source is not on offer.
+   */
+  hostedEndpoint(): string | undefined;
   /** Whether a job for this ride was started and has not ended here — so the page resumes it. */
   pendingJob(activityId: ActivityId): boolean;
   /** Start a job for this ride and follow it. Settles; never rejects. */
