@@ -303,6 +303,16 @@ describe('the browser gate is split into a required run and a nightly one — #8
     const job = Number(jobField(shard[0] ?? '', 'timeout-minutes'));
     const latestStart = Math.max(...measuredShards()('Gate starts'));
     expect(job * 60 - (latestStart + minutes * 60 + AFTER_GATE_S)).toBeGreaterThanOrEqual(180);
+    // And with nothing measured at all: the browser install before it has a
+    // stop of its own, so even an install that uses the whole of it leaves
+    // the gate's stop inside the job's. 20 s is what the shard spends before
+    // the install (the checkout, Node, pnpm and the frozen install; 11 s
+    // measured).
+    const install =
+      /^ +- name: Install the pinned Chromium\n((?: {8}.+\n)+)/m.exec(shard[0] ?? '')?.[1] ?? '';
+    const installStop = Number(/^ +timeout-minutes: (\d+)$/m.exec(install)?.[1]) * 60;
+    expect(installStop).toBeGreaterThan(0);
+    expect(20 + installStop + minutes * 60 + AFTER_GATE_S).toBeLessThanOrEqual(job * 60);
   });
 
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
