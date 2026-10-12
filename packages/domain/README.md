@@ -367,6 +367,7 @@ issue that first needs it.
 | `pacer/errors.ts` | `PacerError` and its codes |
 | `workout/format.ts` | the workout file format (ADR 0017): **version 2** since #1239, written only when a workout carries a heart-rate hold, so a workout without one is still a version-1 file an older build opens; a version-1 file carrying a hold is refused |
 | `workout/heart-rate-hold.ts` | the heart-rate hold (#1239, ADR 0048 D-3): the target one hold block should have, decided every 5 s from a heart rate inside an envelope the owner approved (H1–H11, each a named, exported constant). Pure, and asked by `workout/player.ts`, which stays the one writer of a target |
+| `workout/replan.ts` | re-plans during the ride (#1242, ADR 0048 D-4 to D-6): the closed list of moves and reasons an instance agent may propose, a decoder that reads a proposal whole or not at all, and `validateProposal`, which accepts or refuses one on the device against P1–P7 (each number a named, exported constant) and computes the next plan revision. Pure: `now` is a parameter, and `eslint.config.js` refuses `Date` and `Math.random` in this file. Imported by nothing until #1243 and #1244 |
 | `index.ts` | the public surface; consumers import from here and never from a file inside |
 
 `recording/` is the one part of this package that is not a unit or a conversion, and it is here for

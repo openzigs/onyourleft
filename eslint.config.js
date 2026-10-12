@@ -607,6 +607,41 @@ export default tseslint.config(
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
   },
 
+  // --- The re-plan validator reads no clock and rolls no dice ----------------
+  // #1242, ADR 0048 D-5. `replan.ts` decides whether a model's proposal may
+  // change what a trainer is asked for, and its rate limits (P4) and freshness
+  // (P5) are only what its tests say they are while `now` is a parameter.
+  // `Date` and `Math.random` are ECMAScript built-ins, so the `lib` narrowing
+  // cannot see either — packages/physics' note below. This block replaces the
+  // domain block's `no-restricted-globals` for this file, so it repeats it.
+  {
+    files: ['packages/domain/src/workout/replan.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+        })),
+        {
+          name: 'Date',
+          message:
+            'replan.ts is pure (#1242, ADR 0048 D-5): `now` arrives as a parameter. A clock here makes P4 and P5 untestable.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'replan.ts is deterministic (#1242): the same proposal against the same plan gives the same answer.',
+        },
+      ],
+    },
+  },
+
   // --- packages/sensors/src depends on no platform API either ----------------
   // #39 defines the shape every BLE transport implements, and its second
   // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it

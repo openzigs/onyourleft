@@ -1373,6 +1373,32 @@ means, which are test defaults and not a claim about any rider.
 What a real heart, strap and trainer do is
 [validation 0004](validation/0004-heart-rate-hold-and-re-plans.md) Part A, not yet run.
 
+### Re-plans during the ride: the vocabulary and the device's validator (#1242)
+
+[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's slow loop, of which only the
+contract exists: `packages/domain/src/workout/replan.ts`. **Nothing calls it yet.** The instance
+job is #1243 and the device half is #1244, and both import this one module so the vocabulary
+cannot drift between them.
+
+| Part | What it owns |
+|---|---|
+| `decodeProposal` | P1. A proposal is four keys, a move from a closed list whose every value is on a short list, and a reason from a closed list. An unknown key, a value off its list, or a string anywhere but `workoutId` refuses it whole. It carries no watt, no share and no sentence |
+| `validateProposal` | P2 to P7, on the device, pure, with `now` as a parameter. Accepted: the next `PlanRevision`, in which nothing at or before the block being ridden differs, and the workout the player reads from the next boundary. Refused: the rule, and nothing of the proposal |
+| `ReplanRecord` | P9: the move, the rule that decided and the time, for every decision. A refusal keeps its move only when the proposal decoded and, for a swap, named one of the rider's own workouts |
+
+Five things ADR 0048 does not settle are decided in that file's header and are the author's, not
+the owner's: the warm-up and the cool-down are the first and the last block; a scale is counted
+per block in percentage points of the share the block joined the plan with, so +5 % twice is
++10 % exactly; an extension, a +5 % scale, a hold range moved up and every swap are *harder*
+moves; with no duration goal the plan may not grow past the loaded workout's own length; and a
+swapped-in block needs a block of its own kind in the loaded workout, because P3's peak is per
+kind.
+
+⚠️ **`check:wiring` does not watch this file.** #1242 expected the gate to report it until #1244;
+the gate's reach into `packages/` is `TRAINER_COMMAND_SEAM`'s five modules, and this is not one.
+Its `@unwired` tag names #1244 and is honest, but it holds nothing up. Whether the validator
+joins the seam is #1244's to decide when it wires it.
+
 ### The camera seam: one port, one consent, and where each guarantee is actually kept
 
 [#382](https://github.com/openzigs/onyourleft/issues/382) built the camera, and
