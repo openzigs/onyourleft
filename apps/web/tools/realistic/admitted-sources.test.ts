@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ADMITTED_SOURCES,
   admission,
+  ambientCgArchive,
   BARRED_SOURCES,
   licenceVerdict,
   SOURCES,
@@ -63,6 +64,10 @@ function urlsOf(source: AssetSource): readonly string[] {
     return [source.licencePage, ...source.origin.files.map((file) => file.url)];
   }
   if (source.origin.from === 'archive') return [source.licencePage, source.origin.url];
+  // #1274: an ambientCG asset's own page, and the one archive it is read out of.
+  if (source.origin.from === 'ambientcg') {
+    return [source.licencePage, ambientCgArchive(source).url];
+  }
   return [source.licencePage];
 }
 
@@ -192,11 +197,14 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         owners.set(source.id, (owners.get(source.id) ?? new Set()).add(verdict.source.name));
       }
     }
-    // Two sources are used today, and nothing ADR 0049 admits is adopted by #1275.
+    // Three sources are used today — ambientCG since #1274, which ADR 0026 D-4
+    // had already admitted — and nothing ADR 0049 admits is adopted by #1275.
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
       'MakeHuman’s own files',
       'Poly Haven',
+      'ambientCG',
     ]);
+    expect(owners.get('Rock026')).toEqual(new Set(['ambientCG']));
     expect(owners.get('makehuman')).toEqual(new Set(['MakeHuman’s own files']));
     expect(owners.get('makehuman-system-assets')).toEqual(new Set(['MakeHuman’s own files']));
   });

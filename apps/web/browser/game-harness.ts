@@ -5171,6 +5171,17 @@ export interface GroundBlendMeasurement {
   /** The same squares with the rock blend off: the control. */
   readonly bankControl: number;
   readonly levelsControl: readonly number[];
+  /**
+   * #1274 — the same frame with the crag off, so the bank's rock is the
+   * scree's photograph as it was before: the bank square's contrast so drawn,
+   * and how many of the rock's pixels the crag changed. And the control: how
+   * many pixels of the WHOLE frame the crag's switch moves, by so much as a
+   * bit, when the slope's rock is off — which must be none, because the crag
+   * is that rock's share and nothing of its own.
+   */
+  readonly bankScree: number;
+  readonly cragPixels: number;
+  readonly cragWithoutRock: number;
 }
 
 const NO_GROUND_BLEND: GroundBlendMeasurement = {
@@ -5181,6 +5192,9 @@ const NO_GROUND_BLEND: GroundBlendMeasurement = {
   levels: [],
   bankControl: 0,
   levelsControl: [],
+  bankScree: 0,
+  cragPixels: 0,
+  cragWithoutRock: 0,
 };
 
 /**
@@ -5269,6 +5283,14 @@ function groundBlendProbe(
   const rockless = whole(frame);
   groundBlendOf(view, 0, 0, 1);
   const bareGrass = whole(frame);
+  // #1274: every blend on, and the crag alone off — the bank in the scree's
+  // photograph, as it was drawn before.
+  groundBlendOf(view, 1, 1, 1, 0);
+  const cragless = whole(frame);
+  // And the control: the rock off, with the crag off as well. `rockless` is
+  // the same frame with the crag ON, and the two must be one picture.
+  groundBlendOf(view, 1, 0, 1, 0);
+  const rocklessCragless = whole(frame);
   groundBlendOf(view, 1, 1, 1);
   const width = canvas.width;
   const differs = (a: Uint8Array, b: Uint8Array, at: number): boolean =>
@@ -5277,6 +5299,8 @@ function groundBlendProbe(
       Math.abs((a[at + 2] ?? 0) - (b[at + 2] ?? 0)) >
     3;
   let rockPixels = 0;
+  let cragPixels = 0;
+  let cragWithoutRock = 0;
   const rock = new Uint8Array(width * canvas.height);
   const grass = new Uint8Array(width * canvas.height);
   for (let pixel = 0; pixel < rock.length; pixel += 1) {
@@ -5285,8 +5309,17 @@ function groundBlendProbe(
     if (ground && differs(drawn, rockless, at)) {
       rock[pixel] = 1;
       rockPixels += 1;
+      if (differs(drawn, cragless, at)) cragPixels += 1;
     }
     if (ground && !differs(drawn, rockless, at) && !differs(drawn, bareGrass, at)) grass[pixel] = 1;
+    // Exactly, with no allowance: no share of the slope's rock is no crag.
+    if (
+      rockless[at] !== rocklessCragless[at] ||
+      rockless[at + 1] !== rocklessCragless[at + 1] ||
+      rockless[at + 2] !== rocklessCragless[at + 2]
+    ) {
+      cragWithoutRock += 1;
+    }
   }
   const whollyIn = (mask: Uint8Array, x: number, y: number): boolean => {
     for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
@@ -5320,7 +5353,14 @@ function groundBlendProbe(
   // largest on screen); two level squares nearest the same row.
   const bank = [...banks].sort((a, b) => a[1] - b[1])[0];
   if (bank === undefined || levels.length < 2) {
-    return { ...NO_GROUND_BLEND, measured: true, rockPixels, bankSquares: banks.length };
+    return {
+      ...NO_GROUND_BLEND,
+      measured: true,
+      rockPixels,
+      bankSquares: banks.length,
+      cragPixels,
+      cragWithoutRock,
+    };
   }
   const byRow = [...levels].sort(
     (a, b) => Math.abs(a[1] - bank[1]) - Math.abs(b[1] - bank[1]) || a[0] - b[0],
@@ -5346,6 +5386,9 @@ function groundBlendProbe(
     levels: chosen.map((square) => contrast(drawn, square)),
     bankControl: contrast(rockless, bank),
     levelsControl: chosen.map((square) => contrast(rockless, square)),
+    bankScree: contrast(cragless, bank),
+    cragPixels,
+    cragWithoutRock,
   };
 }
 

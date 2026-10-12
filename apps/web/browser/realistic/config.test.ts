@@ -57,6 +57,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     ]);
     // #622's by-eye lever, in the same list.
     expect(parseConfig('?levers=-texture-bias,-air').leversOff).toEqual(['air', 'texture-bias']);
+    // #1274's, the steep bank's rock face against the scree it wore before.
+    expect(LEVERS).toContain('crag');
+    expect(parseConfig('?levers=-crag,-air').leversOff).toEqual(['air', 'crag']);
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);

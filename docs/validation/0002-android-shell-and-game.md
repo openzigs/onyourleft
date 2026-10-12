@@ -3218,6 +3218,8 @@ published figures (its run predates `oyl.txt`).
 | #624 | after (the drawn maps) | #624's merge | — | | | | | | | | |
 | #639 | before (a call a material) | the first parent of #639's merge | — | | | | | | | | |
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
+| #1274 | before (one photograph for rock and scree) | the first parent of #1274's merge | — | | | | | | | | |
+| #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3503,6 +3505,48 @@ material's maps unconditionally; and a tree's bark is now drawn in the canopy's 
 | #639 by eye | Answer |
 |---|---|
 | Do the trees look the same as before #639 (AH-639-4)? | |
+
+### #1274's rows — a steep bank's rock face, from ambientCG
+
+[#1274](https://github.com/openzigs/onyourleft/issues/1274) is the first asset the pipeline takes
+from ambientCG, which ADR 0026 D-4 has admitted from the start: `Rock026`, a fractured rock face,
+CC0, made by surface photogrammetry, as two 512 px KTX2 maps. Where the landform is steeper than
+28° the ground's stone wears it, and `rocks_ground_05` — loose stones on earth, which until now
+wore the banks too — keeps the scree above the tree line
+(`apps/web/src/game/ground-blend.ts` §`stoneBlend`). No triangle and no draw call is added.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-11: texture memory estimated
+**70.1 → 70.6 MiB** of the 160 MiB ceiling (`realistic-budget.test.ts`), the build
+**36 608 346 → 37 025 627 bytes** of the 40 MiB ceiling, transcoder included; and in the gate's own
+frame of a steep bank the crag changes 141 379 of the rock's 146 070 pixels, and not one pixel of
+the frame with the slope's rock off (`game.browser.spec.ts` §"#1274").
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost GPU time, and only this
+row can say whether it does**: the ground's shader holds two more samplers and takes one more pair
+of texture-coordinate derivatives on every ground fragment, steep or not. On a bank it reads the
+crag's two maps where it read the scree's two, so the samples a frame makes do not grow.
+
+⚠️ **On this page's route there is almost no steep ground to see**, and that is measured, not
+assumed: read every 50 m along it, no ground past 40° is in the chase camera's view within 120 m,
+the nearest past 28° is 96 m off at `at=1350`, and there the crag changes **215 of 1 024 000
+pixels** at 1280 × 800.
+So the page's by-eye pair shows a strip on the far hillside and nothing else, and the look is
+judged in the product, on a route with a bank beside the road.
+
+| Step | What to do |
+|---|---|
+| AH-1274-1 | **Before**: build the first parent of #1274's merge with the owner's page staged, and run AH1–AH7 with AH4's URL unchanged. `RUN=1274-before` |
+| AH-1274-2 | **Cool again (AH3, 25–26 °C)**, install #1274's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1274-after` |
+| AH-1274-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all; the measured columns against #616's spread |
+| AH-1274-4 | **By eye, on the page**, on the after build: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1350`, then add `&levers=-crag` (the bank in the scree's photograph, as it was) and compare the far hillside on the left |
+| AH-1274-5 | **By eye, in the product**, with *Game world* on: ride a saved route that has a steep bank or cutting beside the road. Does the bank read as a rock face, or as a pattern that repeats? |
+
+| #1274 by eye | Answer |
+|---|---|
+| On the page (AH-1274-4): can the two be told apart at all, and if so which looks more like a hillside? | |
+| In the product (AH-1274-5): does a steep bank read as rock, and is its 3 m repeat visible? | |
+| Is it worth its 0.4 MiB of build, or should the bank go back to one photograph? | |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

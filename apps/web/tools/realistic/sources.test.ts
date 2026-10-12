@@ -7,11 +7,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  AMBIENTCG_GROUND_TEXTURES,
+  AMBIENTCG_PHRASE,
+  AMBIENTCG_TECHNIQUES_KEPT,
+  ambientCgArchive,
+  ambientCgTechniques,
+  archiveOf,
   DRAWN_FROM,
   WORDMARK_FROM,
   EXPECTED_REPORTS,
   inputDigest,
   licenceVerdict,
+  lockFault,
   encodingWords,
   ktxCreateArguments,
   OUTPUTS,
@@ -85,11 +92,26 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // MakeHuman's own site is one of them: ADR 0026's 2026-09-28 amendment
     // records the owner's ruling that MakeHuman's CC0 system assets pack, from
     // the same author under the same grant, falls under D-4's MakeHuman row.
+    // ⚠️ Since #1274 ambientCG is read too, and that is no new host: D-4's own
+    // table has admitted it from the start, and nothing here had used it.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org)$/,
       );
     }
+    // Every ambientCG asset is read through ambientCG's OWN origin, whose page
+    // is held to `ambientCgVerdict`: one listed as plain URLs would be kept on
+    // its licence sentence alone, however its page said it was made.
+    const fromAmbientCg = SOURCES.filter(
+      (source) => new URL(source.licencePage).hostname === 'ambientcg.com',
+    );
+    expect(fromAmbientCg.map((source) => source.id)).toEqual(
+      AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
+    );
+    for (const source of fromAmbientCg) expect(source.origin.from, source.id).toBe('ambientcg');
+    expect(
+      SOURCES.filter((source) => source.origin.from === 'ambientcg').map((source) => source.id),
+    ).toEqual(fromAmbientCg.map((source) => source.id));
     // And only MakeHuman's own pack is read from MakeHuman's site.
     const fromMakeHumanSite = SOURCES.filter(
       (source) => new URL(source.licencePage).hostname === 'static.makehumancommunity.org',
@@ -504,5 +526,227 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
     expect(reportFaults('island_tree_02.glb', undefined)).toHaveLength(1);
     // A file nothing is required of passes whatever its report says.
     expect(reportFaults('tree_small_02.glb', undefined)).toEqual([]);
+  });
+});
+
+describe('ambientCG — #1274, the source ADR 0026 D-4 admits and nothing had read', () => {
+  const rock = SOURCES.find((source) => source.id === 'Rock026') as AssetSource;
+
+  /**
+   * An ambientCG asset's page, as `ambientcg.com/view?id=Rock026` was read on
+   * 2026-10-12: its downloads, each a link to the archive; its "Technique"
+   * block, a `<span>` an entry; the "Dimensions" block after it, whose value is
+   * a span too; and the licence, in the site's own answer further down.
+   */
+  const page = ({
+    techniques = ['Surface Photogrammetry'],
+    files = ['Rock026_1K-JPG.zip', 'Rock026_2K-JPG.zip'],
+    licence = `Yes. ${AMBIENTCG_PHRASE}, making them free to use without attribution - even in commercial circumstances.`,
+    more = '',
+  }: {
+    techniques?: readonly string[] | 'absent';
+    files?: readonly string[];
+    licence?: string;
+    more?: string;
+  } = {}): string => `
+<title>Rock 045 | ambientCG</title>
+<meta name="description" content="Get this asset for free under the Public Domain license.">
+${files
+  .map(
+    (file) => `<a
+      class="asset-download"
+      data-file-name="${file}"
+      href="https://ambientcg.com/get?file=${file}">download</a>`,
+  )
+  .join('\n')}
+${
+  techniques === 'absent'
+    ? ''
+    : `<div id="techniques">
+  <div class="detail-title">Technique</div>
+  <div class="detail-value">
+${techniques.map((technique) => `    <span title="how it was made">\n\t\t${technique}\t\t</span>`).join('\n')}
+  </div>
+</div>`
+}
+<div id="dimensions">
+  <div class="detail-title">Dimensions</div>
+  <div class="detail-value"><span>ca. 240 cm × 240 cm</span></div>
+</div>
+<div class="faq-item"><h4>Are the assets really free for any purpose?</h4><p>${licence}</p></div>
+${more}`;
+
+  it('keeps an asset whose own page offers its archive, states CC0 and says it was measured', () => {
+    expect(licenceVerdict(rock, page())).toEqual({
+      kept: true,
+      licence: 'CC0-1.0',
+      evidence: AMBIENTCG_PHRASE,
+      technique: 'Surface Photogrammetry',
+    });
+    // The other measured technique, and a page that names both.
+    expect(licenceVerdict(rock, page({ techniques: ['Photometric Stereo'] }))).toMatchObject({
+      kept: true,
+      technique: 'Photometric Stereo',
+    });
+    expect(
+      licenceVerdict(rock, page({ techniques: ['Surface Photogrammetry', 'Photometric Stereo'] })),
+    ).toMatchObject({ kept: true, technique: 'Surface Photogrammetry, Photometric Stereo' });
+  });
+
+  it('reads the technique out of its own block, and nothing after it', () => {
+    // The "Dimensions" value is a span too, directly after: read as a
+    // technique it would refuse every asset there is.
+    expect(ambientCgTechniques(page())).toEqual(['Surface Photogrammetry']);
+    expect(ambientCgTechniques(page({ techniques: 'absent' }))).toEqual([]);
+    expect(ambientCgTechniques(page({ techniques: [] }))).toEqual([]);
+  });
+
+  it('refuses an "approximated" asset, however its licence reads — #1274 item 4', () => {
+    const verdict = licenceVerdict(rock, page({ techniques: ['Approximation'] }));
+    expect(verdict.kept).toBe(false);
+    expect(verdict.kept ? '' : verdict.reason).toMatch(/made by "Approximation"/);
+    // And one that is partly approximated is approximated.
+    expect(
+      licenceVerdict(rock, page({ techniques: ['Surface Photogrammetry', 'Approximation'] })).kept,
+    ).toBe(false);
+  });
+
+  it('refuses every technique it has not read as measured, a new one included', () => {
+    expect(AMBIENTCG_TECHNIQUES_KEPT).toEqual(['Surface Photogrammetry', 'Photometric Stereo']);
+    // The site's own spelling of procedural; its "unknown"; and one it has not invented yet.
+    for (const technique of ['Prodedural', 'Other/Unknown', 'Neural Synthesis']) {
+      const verdict = licenceVerdict(rock, page({ techniques: [technique] }));
+      expect(verdict.kept, technique).toBe(false);
+      expect(verdict.kept ? '' : verdict.reason, technique).toContain(`"${technique}"`);
+    }
+  });
+
+  it('refuses a page that does not say how the asset was made: not known is not measured', () => {
+    for (const techniques of ['absent', []] as const) {
+      const verdict = licenceVerdict(rock, page({ techniques }));
+      expect(verdict.kept).toBe(false);
+      expect(verdict.kept ? '' : verdict.reason).toMatch(/does not say how the asset was made/);
+    }
+  });
+
+  it('refuses a page that is not this asset’s own: another’s CC0 cannot vouch for this file', () => {
+    // Another asset's page, word for word a kept one.
+    const other = licenceVerdict(
+      rock,
+      page({ files: ['Rock027_1K-JPG.zip', 'Rock027_2K-JPG.zip'] }),
+    );
+    expect(other.kept).toBe(false);
+    expect(other.kept ? '' : other.reason).toMatch(/does not offer Rock026_1K-JPG\.zip/);
+    // This asset, at a size it is not published in.
+    expect(licenceVerdict(rock, page({ files: ['Rock026_2K-JPG.zip'] })).kept).toBe(false);
+    // And a longer name that merely ends with this one's is another file.
+    expect(licenceVerdict(rock, page({ files: ['MossyRock026_1K-JPG.zip'] })).kept).toBe(false);
+  });
+
+  it('refuses a page that does not state the licence, or states a stricter one beside it', () => {
+    // The site's own description says "Public Domain license": a label, not the grant.
+    const unstated = licenceVerdict(rock, page({ licence: 'Free textures for everyone.' }));
+    expect(unstated.kept).toBe(false);
+    expect(unstated.kept ? '' : unstated.reason).toContain(AMBIENTCG_PHRASE);
+    expect(licenceVerdict(rock, page({ more: '<p>This asset: CC-BY-NC-4.0</p>' })).kept).toBe(
+      false,
+    );
+  });
+
+  it('names the archive and its files as ambientCG does, and pins the archive whole', () => {
+    expect(ambientCgArchive(rock)).toEqual({
+      name: 'Rock026_1K-JPG.zip',
+      url: 'https://ambientcg.com/get?file=Rock026_1K-JPG.zip',
+      members: [{ path: 'Rock026_1K-JPG_Color.jpg' }, { path: 'Rock026_1K-JPG_NormalGL.jpg' }],
+    });
+    // A PNG archive's files are PNGs.
+    expect(
+      ambientCgArchive({
+        ...rock,
+        origin: { from: 'ambientcg', attribute: '2K-PNG', maps: ['Opacity'] },
+      }).members,
+    ).toEqual([{ path: 'Rock026_2K-PNG_Opacity.png' }]);
+    // And it is refused for a source that is not ambientCG's.
+    expect(() => ambientCgArchive(polyHaven)).toThrow(/not an ambientCG asset/);
+  });
+
+  it('reads an archive for ambientCG and for MakeHuman’s pack, and for nothing else', () => {
+    expect(archiveOf(rock)).toEqual(ambientCgArchive(rock));
+    const pack = SOURCES.find((source) => source.id === 'makehuman-system-assets') as AssetSource;
+    expect(archiveOf(pack)?.name).toBe('makehuman_system_assets_cc0.zip');
+    expect(archiveOf(pack)?.members.length).toBeGreaterThan(0);
+    expect(archiveOf(polyHaven)).toBeUndefined();
+    expect(archiveOf(makeHuman)).toBeUndefined();
+  });
+
+  it('takes each ground surface at 1K, colour and OpenGL normal map, and makes two files of it', () => {
+    expect(AMBIENTCG_GROUND_TEXTURES.length).toBeGreaterThan(0);
+    for (const texture of AMBIENTCG_GROUND_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      expect(source?.licence, texture.id).toBe('CC0-1.0');
+      expect(source?.licencePage, texture.id).toBe(`https://ambientcg.com/view?id=${texture.id}`);
+      expect(source?.licencePhrase, texture.id).toBe(AMBIENTCG_PHRASE);
+      // ⚠️ `NormalGL`, never `NormalDX`: three reads a normal map's green as
+      // up, and the archive holds both.
+      expect(source?.origin, texture.id).toEqual({
+        from: 'ambientcg',
+        attribute: '1K-JPG',
+        maps: ['Color', 'NormalGL'],
+      });
+      const made = OUTPUTS.filter((output) => output.from === texture.id);
+      expect(made.map((output) => output.file).sort(), texture.id).toEqual(
+        [structureMapFiles(texture.id).colour, structureMapFiles(texture.id).normal].sort(),
+      );
+      for (const output of made) {
+        expect(output.recipe, output.file).toMatchObject({
+          how: 'blender',
+          script: TEXTURE_SCRIPT,
+        });
+        const args = output.recipe.how === 'blender' ? output.recipe.args : [];
+        const normal = output.file.includes('_nor_gl_');
+        expect(args, output.file).toEqual([
+          `${texture.id}_1K-JPG_${normal ? 'NormalGL' : 'Color'}.jpg`,
+          '512',
+          normal ? 'data' : 'colour',
+        ]);
+      }
+    }
+  });
+});
+
+describe('the digest lock — ADR 0026 D-5, #1274', () => {
+  const locked = {
+    files: [
+      { path: 'Rock026_1K-JPG.zip', url: 'https://ambientcg.com/a', bytes: 3, sha256: 'aa' },
+      { path: 'Rock026_1K-JPG_Color.jpg', url: 'https://ambientcg.com/b', bytes: 2, sha256: 'bb' },
+    ],
+  };
+
+  it('passes a file whose path and SHA-256 are the ones the lock records', () => {
+    expect(lockFault('Rock026', 'Rock026_1K-JPG.zip', 'aa', locked)).toBeUndefined();
+    expect(lockFault('Rock026', 'Rock026_1K-JPG_Color.jpg', 'bb', locked)).toBeUndefined();
+  });
+
+  it('names a file whose bytes moved, with both digests', () => {
+    expect(lockFault('Rock026', 'Rock026_1K-JPG.zip', 'cc', locked)).toBe(
+      'Rock026/Rock026_1K-JPG.zip: not the input the lock records (aa, got cc); run with --lock only if re-basing on new inputs is intended',
+    );
+  });
+
+  it('names a file the lock does not record at all, and a source it has never seen', () => {
+    expect(lockFault('Rock026', 'Rock026_1K-JPG_Roughness.jpg', 'aa', locked)).toMatch(
+      /Rock026_1K-JPG_Roughness\.jpg: not the input the lock records \(absent, got aa\)/,
+    );
+    expect(lockFault('Rock027', 'Rock027_1K-JPG.zip', 'aa', undefined)).toMatch(
+      /\(absent, got aa\)/,
+    );
+  });
+
+  it('never lets one file’s digest vouch for another: the path is part of the lock', () => {
+    // The archive's digest, offered for the member, and the member's for the archive.
+    expect(lockFault('Rock026', 'Rock026_1K-JPG_Color.jpg', 'aa', locked)).toMatch(
+      /\(bb, got aa\)/,
+    );
+    expect(lockFault('Rock026', 'Rock026_1K-JPG.zip', 'bb', locked)).toMatch(/\(aa, got bb\)/);
   });
 });

@@ -47,6 +47,12 @@
  * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
  * which ADR 0049 keeps).
  *
+ * ⚠️ **ambientCG is one of them since #1274, and it is no new host**: D-10's
+ * table admits it, as ADR 0026 D-4's did, for PBR materials, and until #1274
+ * nothing here read it. Its origin is {@link ambientCg}; what its asset's own page has to say,
+ * and which of its assets are refused however their page reads, is
+ * {@link ambientCgVerdict}.
+ *
  * Pure: no file, no network. The two scripts beside it do the I/O.
  */
 
@@ -378,6 +384,18 @@ export interface AssetSource {
         readonly from: 'archive';
         readonly url: string;
         readonly members: readonly ArchiveMember[];
+      }
+    | {
+        /**
+         * An ambientCG asset — #1274: the one archive ambientCG publishes for
+         * it at `attribute`, downloaded whole and pinned by its digest, and
+         * only `maps` taken out. {@link ambientCgArchive} says which files.
+         */
+        readonly from: 'ambientcg';
+        /** The size and format ambientCG names the archive by: `1K-JPG`. */
+        readonly attribute: string;
+        /** The maps taken, as ambientCG names them: `Color`, `NormalGL`. */
+        readonly maps: readonly string[];
       };
 }
 
@@ -491,6 +509,165 @@ function polyHaven(id: string, select: PolyHavenSelection): AssetSource {
 }
 
 /**
+ * What every ambientCG asset's own page says of its licence, verbatim — read
+ * on 2026-10-12 at `ambientcg.com/view?id=Rock026`.
+ */
+export const AMBIENTCG_PHRASE = 'All assets are released under the Creative Commons CC0 license';
+
+/**
+ * How an ambientCG asset may have been made, as its own page's "Technique"
+ * names it, for the pipeline to take it — #1274.
+ *
+ * ADR 0026 D-4 bars anything **marked or known to be AI-generated**, and
+ * ambientCG says of each asset how its maps were made. Read on 2026-10-12, its
+ * pages name five techniques:
+ *
+ * | The page's "Technique" | What the page says of it | |
+ * |---|---|---|
+ * | `Surface Photogrammetry` | "Photogrammetry is used to create a highly accurate height map for the surface." | **kept** |
+ * | `Photometric Stereo` | "Light from multiple angles is used to create a more accurate approximation of the height map for the surface." | **kept** |
+ * | `Approximation` | "The height profile of the surface is approximated from the color." | refused |
+ * | `Prodedural` (the site's spelling) | "Procedural/algorithmic techniques are used to create a surface." | refused |
+ * | `Other/Unknown` | "(no description)" | refused |
+ *
+ * The two kept are MEASURED from a real surface. `Approximation` is refused
+ * because the page does not say what approximates the height from the colour,
+ * and until that is known it cannot be shown not to be a trained model — #1274
+ * item 4. `Other/Unknown` is refused for the same reason, in the page's own
+ * words. Both follow ADR 0049 D-2: a page that says "approximated" is read
+ * until it is known which kind it is, and an asset whose making cannot be
+ * established is treated as barred. `Prodedural` stays refused, and no longer
+ * as a class: ADR 0049 D-2 rules that a deterministic tool run from committed
+ * parameters is NOT AI-generated, and also that the test is how the asset was
+ * made, not what its page calls it — the pull request that takes one shows
+ * the making. The page's one sentence does not show it, and #1274 takes no
+ * such asset, so adding the technique here is the work of the issue that does.
+ *
+ * ⚠️ **A list of what is kept, not of what is refused**, so a technique
+ * ambientCG adds later is refused until somebody reads what it means.
+ */
+export const AMBIENTCG_TECHNIQUES_KEPT: readonly string[] = [
+  'Surface Photogrammetry',
+  'Photometric Stereo',
+];
+
+/**
+ * One ambientCG asset — #1274: its id, the archive it is published in at
+ * `attribute`, and the maps taken out of that archive.
+ *
+ * - **Its page** is `ambientcg.com/view?id=<id>`, the asset's own, which
+ *   states the licence ({@link AMBIENTCG_PHRASE}), how the asset was made and
+ *   which archives it is published in. {@link ambientCgVerdict} reads all three.
+ * - **Its author** is recorded as ambientCG: the site publishes its own work,
+ *   and an asset's page names no other author.
+ */
+function ambientCg(id: string, attribute: string, maps: readonly string[]): AssetSource {
+  return {
+    id,
+    licencePage: `https://ambientcg.com/view?id=${id}`,
+    licencePhrase: AMBIENTCG_PHRASE,
+    licence: 'CC0-1.0',
+    author: 'ambientCG',
+    origin: { from: 'ambientcg', attribute, maps },
+  };
+}
+
+/** An archive downloaded whole, and the files taken out of it. */
+export interface ArchiveToRead {
+  /** The archive's own file name: under `build/raw/<id>/`, and its path in the lock. */
+  readonly name: string;
+  readonly url: string;
+  readonly members: readonly Pick<ArchiveMember, 'path' | 'mustContain'>[];
+}
+
+/**
+ * The archive an ambientCG asset is published in, and the files taken out of
+ * it — #1274. ambientCG names both by the asset's id and the attribute:
+ * `Rock026_1K-JPG.zip` holds `Rock026_1K-JPG_Color.jpg`.
+ *
+ * ⚠️ **The archive is what the lock pins**, as it is for MakeHuman's pack
+ * (#623): ambientCG publishes no digest of its own and serves the file through
+ * a redirect, so the SHA-256 of the bytes that arrived is the only statement
+ * of what they were. Measured on 2026-10-12: two downloads of
+ * `Rock026_1K-JPG.zip`, minutes apart, were the same bytes.
+ */
+export function ambientCgArchive(source: AssetSource): ArchiveToRead {
+  if (source.origin.from !== 'ambientcg') {
+    throw new Error(`${source.id}: not an ambientCG asset`);
+  }
+  const { attribute, maps } = source.origin;
+  const stem = `${source.id}_${attribute}`;
+  const extension = (attribute.split('-')[1] ?? '').toLowerCase();
+  return {
+    name: `${stem}.zip`,
+    url: `https://ambientcg.com/get?file=${stem}.zip`,
+    members: maps.map((map) => ({ path: `${stem}_${map}.${extension}` })),
+  };
+}
+
+/** The archive a source is read out of, where it is one: MakeHuman's pack, or an ambientCG asset. */
+export function archiveOf(source: AssetSource): ArchiveToRead | undefined {
+  if (source.origin.from === 'ambientcg') return ambientCgArchive(source);
+  if (source.origin.from !== 'archive') return undefined;
+  const { url, members } = source.origin;
+  const path = new URL(url).pathname;
+  return { name: path.slice(path.lastIndexOf('/') + 1), url, members };
+}
+
+/**
+ * The techniques an ambientCG asset's page names: the text of each entry of
+ * its "Technique" block (`<div id="techniques">`), in the page's order.
+ */
+export function ambientCgTechniques(pageHtml: string): readonly string[] {
+  const block = /\bid="techniques"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bid="|$)/i.exec(pageHtml);
+  if (block === null) return [];
+  return [...(block[1] ?? '').matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)]
+    .map((match) => (match[1] ?? '').replace(/\s+/g, ' ').trim())
+    .filter((technique) => technique !== '');
+}
+
+/**
+ * Whether an ambientCG asset may be kept, given the text of its OWN page —
+ * #1274. Three things, none of which a marketplace label gives:
+ *
+ * 1. **The page is this asset's**: it offers the very archive the pipeline is
+ *    about to download. A page that does not — the site's front page, another
+ *    asset's, this asset at a size it is not published in — is refused, so
+ *    another page's CC0 sentence cannot vouch for this file.
+ * 2. **The page states the licence** — {@link licenceVerdict}'s own checks:
+ *    the phrase, no NC, ND or SA term, no barred host.
+ * 3. **The page says how the asset was made, and every technique it names is
+ *    one {@link AMBIENTCG_TECHNIQUES_KEPT} lists.** A page that names none is
+ *    refused too: not known is not the same as measured.
+ */
+export function ambientCgVerdict(source: AssetSource, pageHtml: string): LicenceVerdict {
+  const archive = ambientCgArchive(source);
+  if (!pageHtml.includes(`href="${archive.url}"`)) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not offer ${archive.name} — it is not this asset's own page, or the asset is not published at that size`,
+    };
+  }
+  const stated = statedLicence(source, pageHtml);
+  if (!stated.kept) return stated;
+  const techniques = ambientCgTechniques(pageHtml);
+  if (techniques.length === 0) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not say how the asset was made`,
+    };
+  }
+  const refused = techniques.find((technique) => !AMBIENTCG_TECHNIQUES_KEPT.includes(technique));
+  if (refused !== undefined) {
+    return {
+      kept: false,
+      reason: `${source.id}: its page says it was made by "${refused}", which is not one of ${AMBIENTCG_TECHNIQUES_KEPT.join(', ')} — ADR 0026 D-4 bars AI-generated material, and only an asset measured from a real surface is taken (#1274)`,
+    };
+  }
+  return { ...stated, technique: techniques.join(', ') };
+}
+
+/**
  * The photographic surfaces the realistic structures wear — #475, ADR 0026
  * D-12 layer 3 — each a Poly Haven CC0 texture: its id, and the file name Poly
  * Haven gives its 1K colour map (one of them spells it `diffuse`). How many
@@ -542,6 +719,41 @@ export const GROUND_BLEND_TEXTURES: readonly {
   { id: 'gravelly_sand', colourFile: 'gravelly_sand_diff_1k.jpg' },
   { id: 'rocks_ground_05', colourFile: 'rocks_ground_05_diff_1k.jpg' },
 ];
+
+/**
+ * The ground surfaces taken from ambientCG — #1274, each one of its CC0
+ * materials at 1K: its id, which is also the name its files carry.
+ *
+ * - `Rock026` — bare ROCK where the landform is steep: a fractured rock face,
+ *   made by surface photogrammetry and published on 2019-10-24 (its own page,
+ *   read 2026-10-12). Until #1274 a steep bank wore `rocks_ground_05`, which is
+ *   loose stones on earth — scree, which a bank past the angle of repose is
+ *   exactly not. That photograph keeps the scree above the tree line; this
+ *   one takes the banks.
+ *
+ * ## ⚠️ Measured before it stayed, and the first one tried did not
+ *
+ * #1274 asks that each asset be measured before it stays. `Rock045`, a
+ * weathered face with lichen on it, was fetched, locked, made and drawn first,
+ * and read back **flatter than the grass beside it** in the browser gate's own
+ * frame (`game-harness.ts` §`groundBlendProbe`, #627's measure): a contrast of
+ * 0.0021 on the bank against 0.0017 to 0.0058 for level grass, where the
+ * photograph it replaced read 0.0944 — so #627's own gate went red, rightly.
+ * The ground's shader keeps a photograph's STRUCTURE and gives it the world's
+ * colour, and a rider sees a bank from tens of metres away, where one pixel
+ * covers 5 to 20 cm: a scan whose detail is all finer than that is a flat
+ * slope. `Rock026`'s is fractured rock a metre across, and reads 0.0408 in the
+ * same frame. A candidate for this table is screened the same way: its detail
+ * has to survive a 20 cm footprint.
+ *
+ * Downsized to {@link STRUCTURE_TEXTURE_PIXELS} and encoded as KTX2 by the
+ * same script and recipe as {@link GROUND_BLEND_TEXTURES}.
+ */
+export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ id: 'Rock026' }];
+
+/** The archive every {@link AMBIENTCG_GROUND_TEXTURES} entry is taken from, and the two maps taken. */
+const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
+const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
 
 /** The side, in pixels, the pipeline downsizes a structure's maps to. */
 export const STRUCTURE_TEXTURE_PIXELS = 512;
@@ -618,6 +830,13 @@ export const SOURCES: readonly AssetSource[] = [
   // #627: the ground's verge, rock and scree.
   ...GROUND_BLEND_TEXTURES.map((texture) =>
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
+  ),
+  // #1274: the ground's bare rock, from ambientCG.
+  ...AMBIENTCG_GROUND_TEXTURES.map((texture) =>
+    ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
+      AMBIENTCG_GROUND_MAPS.colour,
+      AMBIENTCG_GROUND_MAPS.normal,
+    ]),
   ),
   {
     id: 'makehuman',
@@ -1093,6 +1312,16 @@ export const OUTPUTS: readonly OutputSpec[] = [
       structureMap(made.normal, texture.id, `${texture.id}_nor_gl_1k.jpg`, 'data'),
     ];
   }),
+  // #1274: ambientCG's, by the same recipe — its files carry its own names.
+  ...AMBIENTCG_GROUND_TEXTURES.flatMap((texture) => {
+    const made = structureMapFiles(texture.id);
+    const upstream = (map: string): string =>
+      `${texture.id}_${AMBIENTCG_GROUND_ATTRIBUTE}_${map}.jpg`;
+    return [
+      structureMap(made.colour, texture.id, upstream(AMBIENTCG_GROUND_MAPS.colour), 'colour'),
+      structureMap(made.normal, texture.id, upstream(AMBIENTCG_GROUND_MAPS.normal), 'data'),
+    ];
+  }),
   {
     file: REALISTIC_RIDER,
     from: 'makehuman',
@@ -1269,7 +1498,13 @@ export function shippedFiles(): readonly string[] {
 
 /** Why a source was refused, or the evidence that it was not. */
 export type LicenceVerdict =
-  | { readonly kept: true; readonly licence: KeptLicence; readonly evidence: string }
+  | {
+      readonly kept: true;
+      readonly licence: KeptLicence;
+      readonly evidence: string;
+      /** How the page says the asset was made, where the source says — #1274, ambientCG's. */
+      readonly technique?: string;
+    }
   | { readonly kept: false; readonly reason: string };
 
 /**
@@ -1280,8 +1515,20 @@ export type LicenceVerdict =
  * the phrase reads — a page that also names a non-commercial, no-derivatives or
  * share-alike term, because a page can carry the CC0 phrase for one file and a
  * stricter licence for the one being fetched. ADR 0026 D-4 excludes all three.
+ *
+ * ⚠️ **The one door, whatever the origin** — #1274: an ambientCG asset is held
+ * to {@link ambientCgVerdict}, which asks all of this and more, from HERE, so
+ * `fetch-assets.ts` cannot keep one on the general checks alone by calling the
+ * wrong function.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
+  return source.origin.from === 'ambientcg'
+    ? ambientCgVerdict(source, pageText)
+    : statedLicence(source, pageText);
+}
+
+/** {@link licenceVerdict}'s checks of the page's own words, which every origin shares. */
+function statedLicence(source: AssetSource, pageText: string): LicenceVerdict {
   const asked: [string, 'licence' | 'file'][] = [
     [source.licencePage, 'licence'],
     ...fixedUrls(source).map((url): [string, 'file'] => [url, 'file']),
@@ -1308,6 +1555,7 @@ export function licenceVerdict(source: AssetSource, pageText: string): LicenceVe
 function fixedUrls(source: AssetSource): readonly string[] {
   if (source.origin.from === 'urls') return source.origin.files.map((file) => file.url);
   if (source.origin.from === 'archive') return [source.origin.url];
+  if (source.origin.from === 'ambientcg') return [ambientCgArchive(source).url];
   return [];
 }
 
@@ -1408,7 +1656,31 @@ export interface LockedSource {
   readonly read: string;
   /** Who made it, as the source names them — recorded even where CC0 asks for nothing. */
   readonly authors: string;
+  /**
+   * How the source's own page said the asset was made, read with its licence —
+   * #1274, for an ambientCG asset: {@link AMBIENTCG_TECHNIQUES_KEPT}.
+   */
+  readonly technique?: string;
   readonly files: readonly LockedFile[];
+}
+
+/**
+ * Why a file that was just downloaded is not the one the lock records, or
+ * nothing — the digest lock, ADR 0026 D-5, as one sentence `fetch-assets.ts`
+ * throws: a file the lock does not name at all, or one whose SHA-256 is not
+ * the one recorded. `--lock` is the only way past it, and that is a decision
+ * to re-base the realistic world on new inputs.
+ */
+export function lockFault(
+  id: string,
+  path: string,
+  sha256: string,
+  locked: Pick<LockedSource, 'files'> | undefined,
+): string | undefined {
+  const was = locked?.files.find((each) => each.path === path);
+  return was !== undefined && was.sha256 === sha256
+    ? undefined
+    : `${id}/${path}: not the input the lock records (${was?.sha256 ?? 'absent'}, got ${sha256}); run with --lock only if re-basing on new inputs is intended`;
 }
 
 /** `inputs.lock.json`. */
@@ -1523,7 +1795,17 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   const source = lock.sources.find((each) => each.id === output.from);
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
-  const origin = source.id === 'makehuman' ? 'MakeHuman' : 'Poly Haven';
+  // #1274: an ambientCG asset says so, and says how its page said it was made.
+  const origin =
+    source.id === 'makehuman'
+      ? 'MakeHuman'
+      : SOURCES.find((each) => each.id === source.id)?.origin.from === 'ambientcg'
+        ? 'ambientCG'
+        : 'Poly Haven';
+  const by =
+    source.technique === undefined
+      ? source.authors
+      : `${source.authors} (its own page: made by ${source.technique})`;
   // #623: a run that reads a second source names it, and digests it too.
   const also =
     output.recipe.how === 'blender'
@@ -1539,10 +1821,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     if (upstream === undefined) throw new Error(`${file}: the lock records no ${recipe.file}`);
     return [
       ['path', path],
-      [
-        'source',
-        `${origin}, ${source.id} by ${source.authors}; upstream bytes, unmodified — ${upstream.url}`,
-      ],
+      ['source', `${origin}, ${source.id} by ${by}; upstream bytes, unmodified — ${upstream.url}`],
       ['licence', source.licence],
       ['read', source.read],
       ['sha256', sha256],
@@ -1587,7 +1866,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ['path', path],
     [
       'source',
-      `${origin}, ${source.id} by ${source.authors}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
+      `${origin}, ${source.id} by ${by}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
     ],
     ['licence', source.licence],
     ['read', source.read],
