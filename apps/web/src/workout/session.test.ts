@@ -41,6 +41,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CADENCE_HISTORY_SECONDS,
   createWorkoutSession,
+  LARGEST_RAISE_WATTS,
+  raiseRefusedText,
   RELEASE_INCOMPLETE,
   type WorkoutSession,
 } from './session';
@@ -293,6 +295,25 @@ describe('a trainer disconnect pauses the workout and preserves it', () => {
     await ride(session, 3, 8);
 
     expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+  });
+
+  it('writes the SAME target again after the link came back, not only the next one — #1305', async () => {
+    // The session remembers the last target it offered so a clamped ramp is
+    // not rewritten every tick (#1297). A lost link forgets it: what the
+    // machine holds after a reconnection is not known to be that target.
+    const { trainer, session } = await loop();
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+
+    session.linkLost(seconds(2));
+    session.resume(seconds(2));
+    await ride(session, 3, 4);
+
+    // Still the first interval (150 W): written before the drop, and again after.
+    const targets = trainer.wire
+      .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+      .map((entry) => [...entry.bytes]);
+    expect(targets).toStrictEqual([targetWrite(150), targetWrite(150)]);
   });
 
   it('resumes where it stopped rather than where the clock is', async () => {
@@ -768,6 +789,36 @@ describe('a workout target under the trainer’s minimum is written as that mini
     expect(targetWrites(trainer)).toStrictEqual([targetWrite(MINIMUM)]);
   });
 
+  it('follows a ramp out from under the minimum: the asks the clamp swallowed do not leave the player waiting — #1305', async () => {
+    // 50 W rising to 200 W over 30 s. Every ask up to 100 W clamps to the one
+    // 100 W already written, so nothing is offered for it; the player must
+    // still be told its ask is answered, or it waits for an answer for ever.
+    const { trainer, session } = await loop(
+      () =>
+        expandWorkout(
+          workout([
+            {
+              kind: 'ramp',
+              seconds: seconds(30),
+              from: thresholdShare(0.2),
+              to: thresholdShare(0.8),
+            },
+          ]),
+        ),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 8);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(MINIMUM)]);
+    expect(session.state().player.pending).toBeUndefined();
+
+    await ride(session, 9, 25);
+
+    // Read from the machine: it has left the minimum and is on the ramp.
+    expect(trainer.targetPowerOnTheTrainer()).toBeGreaterThan(150);
+    expect(session.state().holding).toBe(trainer.targetPowerOnTheTrainer());
+  });
+
   it('writes the minimum again after a refused write, and after a resume', async () => {
     const { trainer, session } = await loop(
       () => expandWorkout(workout([steady(30, 0.3)])),
@@ -799,6 +850,195 @@ describe('a workout target under the trainer’s minimum is written as that mini
 
     expect(trainer.targetPowerOnTheTrainer()).toBe(125);
     expect(session.state().holding).toBe(125);
+  });
+});
+
+describe('a raise of more than 50 W to the trainer’s minimum is refused and told — #1305', () => {
+  /** A machine whose reported minimum is `minimum` W. Read back, never trusted from here. */
+  const machine = (minimum: number) =>
+    ftmsTrainer({ id: 'kickr', retainsTargetsThroughStop: true, minTargetPower: watts(minimum) });
+
+  const targetWrites = (trainer: {
+    readonly wire: readonly { readonly direction: string; readonly bytes: readonly number[] }[];
+  }) =>
+    trainer.wire
+      .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+      .map((entry) => [...entry.bytes]);
+
+  /** 250 W, then a block asking for 75 W (30 % of the 250 W threshold). */
+  const HARD_THEN_EASY = () => expandWorkout(workout([steady(6, 1.0), steady(6, 0.3)]));
+
+  it('is 50 W, one named constant', () => {
+    expect(LARGEST_RAISE_WATTS).toBe(50);
+  });
+
+  it('writes nothing for the block, leaves the trainer on the target before it, and says so', async () => {
+    // 75 W asked, 150 W minimum: a raise of 75 W.
+    const { trainer, session } = await loop(HARD_THEN_EASY, machine(150));
+    expect(trainer.powerRange.minimum).toBe(150);
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+
+    await ride(session, 4, 9);
+
+    // The wire and the machine, not the session: one write, the first block's.
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(250)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+    const state = session.state();
+    expect(state.lastFault).toBe(
+      "This trainer's lowest target is 150 W, more than 50 W above what this block asks for, so no target was sent for it. The trainer was last set to 250 W.",
+    );
+    expect(state.holding).toBe(250);
+    expect(state.raisedFrom).toBeUndefined();
+    // The player is not left waiting on an answer that will never come.
+    expect(state.player.pending).toBeUndefined();
+  });
+
+  it('raises by exactly 50 W, and refuses 51 W', async () => {
+    const atTheLimit = await loop(() => expandWorkout(workout([steady(30, 0.3)])), machine(125));
+    atTheLimit.session.start(seconds(0));
+    await ride(atTheLimit.session, 0, 3);
+    expect(atTheLimit.trainer.targetPowerOnTheTrainer()).toBe(125);
+    expect(atTheLimit.session.state().lastFault).toBeUndefined();
+    expect(atTheLimit.session.state().raisedFrom).toBe(75);
+
+    const pastIt = await loop(() => expandWorkout(workout([steady(30, 0.3)])), machine(126));
+    pastIt.session.start(seconds(0));
+    await ride(pastIt.session, 0, 3);
+    expect(targetWrites(pastIt.trainer)).toStrictEqual([]);
+    // Nothing was ever written, so there is no "last set" to quote.
+    expect(pastIt.session.state().holding).toBeUndefined();
+    expect(pastIt.session.state().lastFault).toBe(raiseRefusedText(watts(126), undefined));
+    expect(pastIt.session.state().lastFault).toBe(
+      "This trainer's lowest target is 126 W, more than 50 W above what this block asks for, so no target was sent for it.",
+    );
+  });
+
+  it('stops saying so once a later block’s target is written', async () => {
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(4, 0.3), steady(6, 0.8)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), undefined));
+
+    await ride(session, 3, 7);
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(200);
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
+  it('writes a ramp once it climbs to within 50 W of the minimum, and its own number above it', async () => {
+    // 50 W rising to 250 W over 40 s, minimum 150 W: refused under 100 W,
+    // raised to 150 W from 100 W, the ramp's own wattage past 150 W.
+    const { trainer, session } = await loop(
+      () =>
+        expandWorkout(
+          workout([
+            {
+              kind: 'ramp',
+              seconds: seconds(40),
+              from: thresholdShare(0.2),
+              to: thresholdShare(1.0),
+            },
+          ]),
+        ),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 8);
+    expect(targetWrites(trainer)).toStrictEqual([]);
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), undefined));
+
+    await ride(session, 9, 18);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(session.state().lastFault).toBeUndefined();
+    expect(session.state().raisedFrom).toBeGreaterThanOrEqual(100);
+
+    await ride(session, 19, 35);
+    expect(trainer.targetPowerOnTheTrainer()).toBeGreaterThan(200);
+    expect(session.state().raisedFrom).toBeUndefined();
+  });
+
+  it('still eases to the minimum on a pause, and words the refusal with it after a resume', async () => {
+    // ⚠️ The pause's ease is NOT covered by the ruling: it writes the minimum
+    // whatever the block asked, as it did before.
+    const { trainer, session } = await loop(HARD_THEN_EASY, machine(150));
+    session.start(seconds(0));
+    await ride(session, 0, 7);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+
+    session.pause(seconds(8));
+    await session.settled();
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(250), targetWrite(150)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    expect(session.state().lastFault).toBeUndefined();
+
+    session.resume(seconds(9));
+    await ride(session, 9, 10);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(250), targetWrite(150)]);
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(150)));
+  });
+
+  it('does not go on calling the target raised once a later block is refused', async () => {
+    // 110 W is raised by 40 W to the 150 W minimum; the 75 W block after it
+    // would be a raise of 75 W. The trainer is left on 150 W, and that is the
+    // block before's target, not this one raised.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(4, 0.44), steady(6, 0.3)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    expect(session.state().raisedFrom).toBe(110);
+
+    await ride(session, 3, 7);
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(session.state().raisedFrom).toBeUndefined();
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(150)));
+  });
+
+  it('stops saying so when the link is lost, and when the workout ends on such a block', async () => {
+    const dropped = await loop(HARD_THEN_EASY, machine(150));
+    dropped.session.start(seconds(0));
+    await ride(dropped.session, 0, 8);
+    expect(dropped.session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(250)));
+    dropped.session.linkLost(seconds(9));
+    expect(dropped.session.state().lastFault).toBeUndefined();
+
+    const ended = await loop(HARD_THEN_EASY, machine(150));
+    ended.session.start(seconds(0));
+    await ride(ended.session, 0, 8);
+    expect(ended.session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(250)));
+    await ride(ended.session, 9, 13);
+    await flush();
+    expect(ended.session.state().player.status).toBe('finished');
+    expect(ended.session.state().lastFault).toBeUndefined();
+  });
+
+  it('still raises the stall relief to the minimum, however far under it the relief falls', async () => {
+    // ⚠️ Not covered by the ruling either. 350 W asked on a machine whose
+    // minimum is 300 W; two thirds of 350 W is 233 W, 67 W under the minimum.
+    // The relief is written as 300 W: it lowers what the trainer holds.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 1.4)])),
+      machine(300),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(350);
+
+    await ride(session, 2, 10, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(300);
+    expect(session.state().lastFault).toBeUndefined();
+    expect(session.state().raisedFrom).toBeUndefined();
   });
 });
 

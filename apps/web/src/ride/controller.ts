@@ -303,6 +303,12 @@ export interface RideWorkoutSnapshot {
   readonly totalSeconds: number;
   /** What the trainer last confirmed it holds, after quantisation. */
   readonly holdingWatts: number | undefined;
+  /**
+   * What the block asks for, when the target offered to the trainer is that
+   * ask raised to the trainer's minimum (#1297, #1305). `undefined` otherwise.
+   * The session's `raisedFrom`, unchanged.
+   */
+  readonly raisedFromWatts?: number | undefined;
   /** The block being ridden, in the words `library.ts` writes. */
   readonly nowRiding: string | undefined;
   /** Why the last workout write could not be made, if any. */
@@ -1274,7 +1280,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * is the ERG spiral this program exists to prevent. What waits is anything
    * that RAISES: a new target, a workout's next interval above the trainer's
    * minimum (one under it is raised to the floor, #1297, so it passes as an
-   * ease), a rescue's restore.
+   * ease, or is not written at all, #1305), a rescue's restore.
    * A gradient has no floor and always waits.
    *
    * ⚠️ **"Below the confirmed target" trusts `targetPower()`, and that is
@@ -2415,6 +2421,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       totalSeconds: workout.timeline.totalSeconds,
       timeline: workout.timeline,
       holdingWatts: state.holding,
+      raisedFromWatts: state.raisedFrom,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.

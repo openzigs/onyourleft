@@ -628,3 +628,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   trainer's reported minimum to that minimum, so the "nothing clamps" reading of 5 above no longer
   holds. A raised target equals the floor, so the forget-hold rule treats it as an ease and does not
   hold it back.
+- **2026-10-12** — #1305 narrowed the clamp, on the owner's ruling of that day. The entry above
+  says the session raises "every workout target" under the minimum; that is now so only for a raise
+  of 50 W or less. For a workout's own target more than 50 W under the trainer's reported minimum
+  the session writes nothing, the trainer keeps the target it last accepted, and the rider is told.
+  An eased target (the stall relief, a pause, a free ride) is raised or written as before.
