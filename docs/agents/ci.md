@@ -182,6 +182,10 @@ from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or 
 
 #### Where the time comes from next — owed before B9 and B12
 
+⚠️ **The stop is 30 minutes since #651 and the job on the 7763 is about 1 460–1 520 s; a reviewer
+who reads "25-minute" and "1 500 s" in the sections below as today's is reading history.** Each
+section here is the measurement of its day; today's is §"Thirty minutes — #651".
+
 ⚠️ **The job is now 1206–1231 s of its 25-minute `timeout-minutes` on the slower runners — about
 20.5 minutes, 82 % of the stop** — and every bundle still to come adds to it: rooms and their
 conformance suite on Node and on `workerd` (#779–#781), and the two-browser room spec. A stop has to
@@ -565,6 +569,8 @@ took 4 s.
 | **inside the job's 1 500** | **1 486** |
 
 `timeout-minutes: 13` (780 s) ends it by 1 487 s plus the runner's own few seconds of cancelling.
+⚠️ **Since #651 the wrapper is 825 s, the step's stop 14 minutes and the job's 30, and this table
+is the old arithmetic**: §"Thirty minutes — #651" has today's.
 ⚠️ **765 s is only 1.09 times the slowest green step** (699 s, 37274106339 attempt 2) — short of the
 1.15 every other stop here keeps, and nothing widens it inside 25 minutes, because the job leaves no
 more: the room is the owner's cuts (PR #1131's questions), not a longer stop. Inside it,
@@ -618,6 +624,96 @@ largest files (`list-detail`, `controls-first`, `links`) decide the tail; the re
 touch. The margin is therefore about 180–200 s and no more, as #1076's was: a spec or step added to
 the job spends it from there.
 
+#### Thirty minutes — #651
+
+⚠️ **By 2026-10-12 a correct pull request could not be relied on to pass the required check.** Four
+jobs on the EPYC 7763 were cancelled by `timeout-minutes: 25` with no test red — two on `main`
+(38055121023, 38077296663) and PR #1277's run twice (38196648879) — and the green ones there ended
+2 to 41 s inside the stop. Sixteen runs on `main` from 2026-10-10 13:16 to 2026-10-12 02:30 UTC, and
+#1277's two, with the CPU each printed (step seconds; the job is `started_at` to `completed_at`;
+"gate starts" is how far into the job the `Browser gate` step began):
+
+| Run | CPU | Job | `Checks, concurrently` | Accessibility | Vitest with coverage | Gate starts | Browser gate |
+|---|---|--:|--:|--:|--:|--:|--:|
+| [38196080162](https://github.com/openzigs/onyourleft/actions/runs/38196080162) | EPYC 7763 | 1474 | 214 | 59 | 497 | 809 | 658 |
+| [38183688472](https://github.com/openzigs/onyourleft/actions/runs/38183688472) | EPYC 7763 | 1498 | 218 | 60 | 497 | 815 | 679 |
+| [38175301433](https://github.com/openzigs/onyourleft/actions/runs/38175301433) | EPYC 7763 | 1464 | 214 | 58 | 490 | 803 | 655 |
+| [38082178257](https://github.com/openzigs/onyourleft/actions/runs/38082178257) | EPYC 7763 | 1459 | 211 | 59 | 486 | 795 | 658 |
+| [38072816087](https://github.com/openzigs/onyourleft/actions/runs/38072816087) | EPYC 7763 | 1487 | 219 | 59 | 489 | 807 | 673 |
+| [38071667023](https://github.com/openzigs/onyourleft/actions/runs/38071667023) | EPYC 7763 | 1467 | 210 | 58 | 482 | 789 | 674 |
+| [38077296663](https://github.com/openzigs/onyourleft/actions/runs/38077296663) | EPYC 7763 | 1507, **cancelled** | 223 | 61 | 497 | 824 | 679, cut short |
+| [38055121023](https://github.com/openzigs/onyourleft/actions/runs/38055121023) | EPYC 7763 | 1520, **cancelled** | 222 | 59 | 497 | 819 | 694, cut short |
+| [38196648879](https://github.com/openzigs/onyourleft/actions/runs/38196648879) attempt 1 (#1277) | EPYC 7763 | 1522, **cancelled** | 226 | 60 | 508 | 835 | 679, cut short |
+| attempt 2 | EPYC 7763 | 1506, **cancelled** | 223 | 61 | 510 | 833 | 670, cut short |
+| [38080586706](https://github.com/openzigs/onyourleft/actions/runs/38080586706) | EPYC 9V74 | 1408 | 200 | 55 | 462 | 759 | 644 |
+| [38171323444](https://github.com/openzigs/onyourleft/actions/runs/38171323444) | Xeon 8573C | 1386 | 196 | 53 | 448 | 740 | 640 |
+| [38187800463](https://github.com/openzigs/onyourleft/actions/runs/38187800463) | Xeon 8573C | 1204 | 174 | 48 | 396 | 653 | 547 |
+| [38075501743](https://github.com/openzigs/onyourleft/actions/runs/38075501743) | Xeon 6973P-C | 1011 | 144 | 38 | 321 | 536 | 470 |
+| [38172521840](https://github.com/openzigs/onyourleft/actions/runs/38172521840) | EPYC 9V45 | 999 | 148 | 38 | 318 | 535 | 459 |
+| [38078919277](https://github.com/openzigs/onyourleft/actions/runs/38078919277) | EPYC 9V45 | 957 | 149 | 36 | 306 | 523 | 429 |
+| [38057483381](https://github.com/openzigs/onyourleft/actions/runs/38057483381) | EPYC 9V45 | 923 | 138 | 35 | 294 | 497 | 422 |
+| [38059256139](https://github.com/openzigs/onyourleft/actions/runs/38059256139) | EPYC 9V45 | 918 | 132 | 33 | 286 | 477 | 437 |
+
+**Two clusters still: 918–1 011 s (EPYC 9V45, Xeon 6973P-C) and 1 386–1 522 s (EPYC 7763, 9V74, one
+Xeon 8573C), with the other 8573C run between them at 1 204 s.** Ten of the eighteen landed on the
+7763. The steps not in the table are about 45 s together on the 7763 (38196080162: 39 s before the
+gate — set-up, the install, `check:capacitor`, the notices checker, their suites — and 7 s after).
+
+**What grew in the seven days since #1137, on the same CPU** (37288932952 attempt 2 against
+38196080162, both logs read): the job 1 329 → 1 474 s.
+
+| Step | #1137 | now | Growth | Where it went |
+|---|--:|--:|--:|---|
+| Vitest with coverage | 391 s | 497 s | +106 s | 618 → 695 files; summed test time 736 → 1 004 s. 83 new files are 152 s of it and the files both runs share grew 117 s. `instance` 169 → 348 s (65 → 90 files: `operator/model-key` 24.6 s, `auth/recovery-addresses` 19.6 s, `tools/replan-round-trip` 17.8 s, all new; `instance.test.ts` 30 → 41 s), `web` 472 → 550 s (`instance/sync` 14 → 26 s) |
+| `Checks, concurrently` | 196 s | 214 s | +18 s | `lint` is still the long pole and is the step's whole length (214 s); `format:check` and the browser install 161 s, `typecheck` 150 s, `build` 135 s, `check-repo-rules`' suite 132 s |
+| Browser gate | 646 s | 658 s | +12 s | 1 172 → 1 216 `chromium` tests, 9.5 → 9.7 min on three workers; `game` 61 tests, 1.2 → 1.1 min |
+| Accessibility | 54 s | 59 s | +5 s | 51 → 58 files |
+
+**The browser gate by spec, on the 7763** (38196080162; summed case seconds, three workers, so the
+`chromium` run's 579 s is about a third of their 1 518 s): `ride` 320 (383 cases, and Playwright
+names it the slow file at 5.4 min), `shell` 140, `rideview` 113, `list-detail` 109,
+`controls-first` 102, `links` 87, `ride-targets` 72, `button-hierarchy` 61, `reflow` 52, and
+twenty-six more under 40 s each. The `game` run after it took 66 s for its 61 cases.
+
+**The candidates, in the order §"Where the time comes from next" lists them, and what is left of
+each.** 1 (heavy Vitest files outside coverage, #852) and 2 (the nightly job, #866, #1076, #1137)
+are done, and each further move under 2 is the owner's ruling, one describe at a time; 3 (a larger
+runner) is §8's. Four more were looked at for this:
+
+| Candidate | Measured | Why it is not what this pull request does |
+|---|---|---|
+| Vitest with no coverage in the required job, the report nightly | Locally, Node 24, two workers, `test:coverage`'s own file list: **210 s with coverage, 162 s without** (n = 1 each), 23 % less. Not measured on the runner; 23 % of the 7763's 482–510 s is about 115 s | It would leave the 7763 at about 1 350–1 410 s, 90–150 s clear of 25 minutes and not the 180 asked for, so the stop moves either way. And it takes the coverage table out of every pull request's run summary, which ADR 0005 decision C keeps so a reviewer sees an untested branch: the owner's to rule on, as #651's comment of 2026-10-05 put it |
+| Vitest's `threads` pool in place of `forks` | The same run: **205 s against 210 s** | no gain |
+| A faster fixture for the `instance` files | 170 s of case time locally over 90 files; the 60 slowest cases are 74 s of it, led by two race cases of about 7 s that run real ticks | no one fixture holds the time: it is ninety files each a little slow, and what they wait on is what they assert |
+| Shard the work over several jobs and have a job named `Repository rules` fail unless every shard passed | not measured | it would roughly halve the wall time on standard, free runners and nothing would be removed, but §4 says to extend the one job and add no second, so it is a change to that rule and the owner's to make |
+
+**So the stop is what moved, to 30 minutes, with every stop inside it.**
+`nightly-split.test.ts` holds each line of this to the workflow and `playwright.config.ts`:
+
+| | seconds |
+|---|--:|
+| the latest the gate's step has started on the 7763 (38196648879 attempt 1) | 835 |
+| the wrapper, `GATE_STEP_MS` 825 s (765 s until now), and its kill, 10 s | 835 |
+| so the step's own `timeout-minutes: 14` (13 until now), 840 s, ends it by | 1 675 |
+| the coverage steps after it | 4 |
+| **inside the job's 1 800** | **1 679** |
+
+- **The job's stop is 278 s clear of the slowest job with nothing red** (1 522 s), and 302–341 s
+  clear of the six green 7763 runs. The test fails under 180 s.
+- **`GATE_STEP_MS` 825 s is 1.19 times the longest the step has run** (694 s, a step the job's stop
+  cut short, so a floor; the slowest that finished took 679 s) — it was 1.09 times at 765 s.
+- **The wrapper now holds both Playwright stops and the builds**: `CHROMIUM_PART_MS` 720 s,
+  `GAME_PART_MS` 85 s and about 10 s of `vite build` are 815 s. At 765 s a `chromium` run that used
+  all of its 720 s left the game run 35 s. Neither Playwright stop moved: the `chromium` run took
+  579 s and the game run 66 s on 38196080162, against 625 s and 71 s when they were set.
+- **`GATE_BUDGET_MS` (840 s) and the per-load budgets did not move.** `GATE_BUDGET_MS` bounds the
+  nightly run inside `nightly.yml`'s own 30 minutes, and `game.browser.spec.ts`
+  §`paysForTheRealisticLoad` is that run's arithmetic.
+
+⚠️ **Thirty is a stop, and the job will reach it too**: it grew 145 s in a week with no step
+added, about 21 s a day, so 278 s is about two weeks at that rate. The next answer is one of the
+last two rows of the candidates table, and both are rulings.
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
@@ -637,8 +733,8 @@ file is wrong and gets fixed in the same PR**; CI must not accumulate private kn
 that is how a contributor's local green becomes CI's red with no explanation.
 
 ⚠️ **There are exactly three steps that are not §4a commands** (two until #1231), and since #1128's review one §4a
-command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 765s pnpm run
-test:browser`, for the reason §"What bounds the browser gate's step" gives — locally the command is
+command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 825s pnpm run
+test:browser` (765 s until #651), for the reason §"What bounds the browser gate's step" gives — locally the command is
 the same without it. The first, since #866, is `Record
 the runner's CPU` — `lscpu`, filtered to the model and the core count — because two CPU models at
 different speeds serve `ubuntu-latest` and a duration means nothing without it (#864); it gates
@@ -697,6 +793,10 @@ step on #682's own pull request, for a 1 113 s job (run 36412215912). The slowes
 waiting for the concurrency group before its job was created and a 16m45s job. Twenty-five leaves a
 green job 372 s clear and pays for the browser gate's own stop to grow with it (below); it is still
 a stop and not a budget.
+⚠️ **It is 30 since [#651](https://github.com/openzigs/onyourleft/issues/651), and a reviewer who
+remembers 25 is reading the old file.** Four jobs were cancelled at 25 minutes with no test red —
+§"Thirty minutes — #651" has the runs, the arithmetic for every stop inside it, and why it was the
+last resort.
 ⚠️ **Since [#456](https://github.com/openzigs/onyourleft/issues/456) the cases in
 `game.browser.spec.ts` share ONE load of their harness, and a reviewer who remembers "every case
 reloads a harness that takes ten seconds" is reading the old file.** They did reload it, and that was
