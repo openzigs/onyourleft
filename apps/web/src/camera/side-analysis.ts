@@ -239,7 +239,7 @@ export interface SideAnalysisOptions {
    * Where that model is: `tablet` unless said otherwise. `side-analyser.ts`
    * §`chooseSideAnalyser` answers it together with {@link estimator} (#553).
    */
-  readonly place?: 'tablet' | 'computer' | undefined;
+  readonly place?: 'tablet' | 'computer' | 'instance' | undefined;
   /** Where the reference lives. Without it there is no check and nothing is kept between sessions. */
   readonly references?: FramingReferenceKeeping | undefined;
   /**
@@ -453,7 +453,10 @@ export class SideAnalysis implements SideAnalysisPort, SideLiveViewPort {
         return;
       case 'unavailable':
         this.#waiting = undefined;
-        this.#set({ model: 'unavailable' });
+        this.#set({
+          model: 'unavailable',
+          ...(outcome.why === undefined ? {} : { unavailableBecause: outcome.why }),
+        });
         // Nothing will be shown again (`#arrive` takes no picture now), so the
         // one on screen goes at once rather than at the end of the session —
         // the setup view says pictures are not being looked at (#1123, N2).

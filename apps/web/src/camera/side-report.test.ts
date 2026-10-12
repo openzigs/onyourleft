@@ -19,6 +19,7 @@ import {
   observedChanges,
   renderableChanges,
   sideSessionFrom,
+  storedPoseSource,
   type SideReport,
   type SideReportLooked,
   type SideSessionLooked,
@@ -512,6 +513,15 @@ describe('the pose summary, from the same pass as the sentences (#801)', () => {
     expect(summary?.noRider).toBe(40);
     expect(summary?.unreadable).toBe(7);
     expect(outcome(samples, 'tablet').summary?.source).toBe('tablet');
+  });
+
+  it('records the rider’s instance as `computer`: a general vision model off the tablet (#1106)', () => {
+    const samples = session(BASE);
+    const { summary } = sideSessionFrom(samples, { ...lookedAt(samples), place: 'instance' });
+    expect(summary?.source).toBe('computer');
+    expect(storedPoseSource('instance')).toBe('computer');
+    expect(storedPoseSource('computer')).toBe('computer');
+    expect(storedPoseSource('tablet')).toBe('tablet');
   });
 
   it('leaves out a kind it could not compare — absent, never zero', () => {

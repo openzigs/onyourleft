@@ -88,6 +88,7 @@ import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
+import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
@@ -234,6 +235,12 @@ export interface AppShellProps {
    * `undefined` where this platform has no WebRTC; both screens then say so.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The rider's instance, as the Camera page asks about it to offer it the
+   * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
+   * and the page then has no such section.
+   */
+  readonly sidePictures?: SideInstancePicturesPort | undefined;
   /**
    * Other real riders — #782, #783: the room port `main.tsx` builds over the
    * instance this device is connected to. Handed to the game, which joins a
@@ -631,6 +638,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1106: the rider's instance, for the side camera's pictures.
+          {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
       );
     case 'side-camera':

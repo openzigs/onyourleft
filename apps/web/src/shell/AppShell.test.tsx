@@ -25,6 +25,10 @@ import { athleteId, type AthleteRecord, type KitColour } from '@onyourleft/store
 
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteMassPort } from '../athlete/store-port';
+import { SIDE_INSTANCE_WHAT_IS_SENT } from '../camera/instance-pose';
+import { browserSecureWindow } from '../camera/secure-window-testing';
+import { CameraController } from '../camera/session';
+import { manualSchedule, scriptedCamera } from '../camera/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import type { ThermalPort } from '../game/thermal-port';
@@ -117,6 +121,31 @@ describe('the router', () => {
     // Generated from `ASSETS.toml`, so this is what the manifest says today
     // rather than a string in a view.
     expect(document.querySelector('main')?.textContent ?? '').toContain('Kenney');
+  });
+
+  it('hands the Camera page the rider’s instance, for the side camera’s pictures — #1106', async () => {
+    // An optional prop passed through two components: left out of either, the
+    // section silently is not there, and no other test mounts the shell with it.
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: scriptedCamera().port,
+      schedule: manualSchedule().schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    globalThis.location.hash = '#/camera';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        camera={controller}
+        sidePictures={{
+          sideInstanceOrigin: () => 'https://rides.example',
+          askHostedPictureService: () => Promise.resolve({ kind: 'none' }),
+        }}
+      />,
+    );
+    await settle();
+    expect(document.querySelector('main')?.textContent ?? '').toContain(SIDE_INSTANCE_WHAT_IS_SENT);
+    expect(document.querySelector('[aria-labelledby="oyl-camera-instance"]')).not.toBeNull();
   });
 
   it('stops listening for navigation once it is unmounted', async () => {

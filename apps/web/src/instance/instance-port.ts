@@ -424,9 +424,24 @@ export function instanceEraser(storage: Pick<InstanceStorage, 'removeItem'> | un
     forget: () => {
       storage?.removeItem(INSTANCE_SESSION_STORAGE_KEY);
       storage?.removeItem(INSTANCE_ACCOUNT_STORAGE_KEY);
+      // #1106: what the rider agreed to send THIS instance names its address, so it goes too.
+      for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage?.removeItem(key);
     },
   };
 }
+
+/**
+ * The device's keys for what a rider agreed to have sent to ONE instance,
+ * each holding that instance's address or a service's (#1106): the side
+ * camera's switch, and under it the hosted service agreed to by name. Their
+ * reader and writer is `camera/instance-pose.ts`; they are named here because
+ * they hold an instance's address, which {@link instanceEraser} must forget
+ * with the sign-in, and no module in this directory may import that one.
+ */
+export const INSTANCE_AGREEMENT_STORAGE_KEYS = [
+  'oyl.side-analyser-instance.v1',
+  'oyl.side-analyser-instance-hosted.v1',
+] as const;
 
 /** The instance this device is signed in to, and the token it holds for it. */
 export interface HeldInstanceSession {
