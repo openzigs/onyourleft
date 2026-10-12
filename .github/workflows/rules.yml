@@ -88,7 +88,21 @@ jobs:
     # bound on a Vitest hang: Vitest cannot interrupt a synchronous case, so
     # one that never returns runs until this cancels the job.
     # Still a stop, not a budget: nothing here waits for it.
-    timeout-minutes: 25
+    #
+    # Raised from 25 with #651, and this time it is the last resort rather than
+    # the first: docs/agents/ci.md section 4c "Thirty minutes -- #651" has the
+    # measurement and every candidate that was tried or is the owner's. On the
+    # slower runner (an AMD EPYC 7763) eight green runs on main and its pull
+    # requests from 2026-10-10 to 2026-10-12 took 1 459 s to 1 498 s, and four
+    # more were CANCELLED here at 1 506 s to 1 522 s with no test red (runs
+    # 38055121023 and 38077296663 on main, 38196648879 twice). Thirty leaves
+    # the slowest of those 278 s clear. The stops nested inside it move with
+    # it and nightly-split.test.ts holds each: the browser gate's step starts
+    # as late as 835 s in, runs under `timeout` for 825 s
+    # (playwright.config.ts GATE_STEP_MS) with its own `timeout-minutes: 14`
+    # (840 s) behind that, and 4 s of coverage steps follow -- 1 679 s, 121 s
+    # inside this.
+    timeout-minutes: 30
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
@@ -533,7 +547,8 @@ jobs:
       # (`playwright.config.ts` §`CHROMIUM_PART_MS`), the game run starting
       # whatever the first run's result. ⚠️ Since #1128's review the STEP is
       # bounded from outside as well (`playwright.config.ts` §`GATE_STEP_MS`):
-      # 765 s under `timeout`, which signals the whole process group and
+      # 825 s under `timeout` (765 s until #651 raised the job's stop to 30
+      # minutes), which signals the whole process group and
       # prints that it did, then KILLs it 10 s later; `timeout-minutes` is the
       # backstop behind that. A hang anywhere in the step -- a build, a server,
       # a run that does not exit -- ends as this step, red and named, with the
@@ -541,8 +556,8 @@ jobs:
       # coreutils `timeout`, on the runner image; locally `pnpm run
       # test:browser` is the same command without it.
       - name: Browser gate
-        timeout-minutes: 13
-        run: timeout --verbose --kill-after=10s 765s pnpm run test:browser
+        timeout-minutes: 14
+        run: timeout --verbose --kill-after=10s 825s pnpm run test:browser
 
       # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
       # §5 make the mutation list the gate and forbid a percentage floor. This
