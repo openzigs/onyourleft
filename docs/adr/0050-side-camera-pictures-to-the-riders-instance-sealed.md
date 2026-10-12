@@ -9,8 +9,11 @@
 - **Date**: 2026-10-12
 - **Deciders**: **the owner**, in the two comments above and in
   [#1092](https://github.com/openzigs/onyourleft/issues/1092)'s ruling 1 of 2026-10-04. The author
-  wrote the wording and decided the engineering content the rulings do not settle; each such point
-  is marked *the author's choice*
+  wrote the wording and decided the engineering content the rulings do not settle. Each such point
+  is marked *the author's choice* where it is decided, and D-11 lists them all. ⚠️ **The text of
+  this ADR was written after the owner's decisions and no comment says the owner has read it**:
+  the first ruling says nothing merges *"before the owner approves the ADR text"*, the merge is the
+  owner's, and it is this file's text that the merge accepts
 - **Issue**: [#1106](https://github.com/openzigs/onyourleft/issues/1106). Parent epic
   [#1092](https://github.com/openzigs/onyourleft/issues/1092)
 - **Number**: **0050**, read from [`docs/architecture.md`](../architecture.md)'s ownership table on
@@ -32,6 +35,20 @@
   D-10 below says, decision by decision, what is superseded and **what stays**. Each of those three
   ADRs, and [ADR 0033](0033-side-camera-link.md), carries one dated pointer here under its
   `## Amendments`; no body and no `Status` line is edited ([ADR 0013](0013-adr-amendments.md))
+
+  ⚠️ **This list is wider than the owner's decision 2 named**, which is *"ADR 0029 D-6/D-7, ADR
+  0047 D-14 Q4, ADR 0046 D-1"*. Four things here are *the author's reading* of what follows from
+  those, and no comment decided them:
+  - **ADR 0047 D-12**, because it is the decision that records Q4 and says *"ADR 0029 D-6 stands"*:
+    superseding the answer and leaving the section that states it would leave two accepted texts
+    disagreeing
+  - **ADR 0046 D-14(d)'s closing paragraph**, itself the owner's Q3 ruling of 2026-10-07, because
+    it says in so many words *"never through the Cloudflare tunnel"*, which is what D-1's *"pictures
+    do not leave the room"* means for a rider away from home
+  - **ADR 0029 D-7's consent sentences**, because the owner approved different words for this path
+    (D-7 here), and D-7's are about one picture on a press
+  - **The pointer in ADR 0033**, which reverses nothing: its 2026-10-07 entry said this path was due
+    to move, and a reader of D-6 and D-11 there needs to find where it went
 - **Related, and not superseded**: ADR 0029 D-1 (a frame is its own data class), D-4 (erase), D-8
   (no frame in an error) and D-9 (stripping at capture), which this ADR applies; ADR 0033 D-3, D-6
   and D-11; ADR 0046 D-8 (one module reaches a model) and D-9 (the rider's own key); ADR 0047 D-7 to
@@ -109,6 +126,11 @@ how it could be undone.
 >    removed afterwards by the owner.
 > 5. **One real test against DeepSeek with the owner's key is allowed**, with a test picture that is
 >    not of a person.
+>
+> Items 2 to 4 were my recommendations; the owner answered "yes" to the list and named 1 and 5.
+
+That comment is quoted in full. It answers the five things put to the owner and **says nothing of
+the three other questions #1284 raised** (D-11 rows 2, 3 and 5): those were not ruled on.
 
 ### Why this is an ADR and not the amendments it was drafted as
 
@@ -154,7 +176,8 @@ network primitive and no new permit in `privacy/no-network.test.ts`.
   list, and its handler answers `sealed_required` itself to anything that did not arrive inside
   `POST /v1/sealed`. ⚠️ **This is stricter than ADR 0047 D-7's rule for an instance with no keys**,
   which *"has no sealed routes"* and answers them in plaintext: this one route is refused there too,
-  so a keyless instance takes no picture at all (`camera/routes.ts`).
+  so a keyless instance takes no picture at all (`camera/routes.ts`). *The author's choice*, read
+  from the owner's *"refused, never sent unsealed"*; the ruling does not name a keyless instance.
 - **The row ADR 0047 D-7's table gains**, in phase 1 and born sealed: *a side-camera picture and the
   model's answer about it* — `POST /v1/camera/side-pose` — both directions.
 
@@ -177,7 +200,7 @@ to. Coming down, the sealed answer: a few hundred bytes of a model's text.
 | That this rider's device is sending this instance something, from which address, when and how often | The picture |
 | Each envelope's size to within its padding bucket: the next 64 KiB above 64 KiB, so a picture's size to within that, which says roughly how much detail was in it | The model's answer |
 | The bearer session token in the header, as for every request (ADR 0047 D-11) | Which model was asked, or whether a hosted service was |
-| From the rhythm, about one a second for as long as it lasts: that a side camera is filming, and for how long | |
+| From the rhythm, at most one a second and as slow as the model answers (one every five to seven seconds with the local models asked), for as long as it lasts: that a side camera is filming, and for how long | |
 
 The first consent says this in a sentence (D-7): *"That service can still see that something is
 being sent, how often and roughly how large."* The privacy policy repeats it.
@@ -197,6 +220,8 @@ The owner's point 2. A picture is in transit, analysed, and discarded.
   has been through, one of them through a model that failed.
 - **At most one picture an athlete is held at a time.** A second while one is with the model is
   refused `rate_limited`, unread: a queue of photographs in memory is refused (ADR 0033 D-6).
+  *The author's choice*, and so is that there is **no other cap on a rider**: inside the
+  120-a-minute allowance a rider may keep the local picture model busy for as long as they film.
 - **Per-athlete scoping.** The route is the session's own (`reaches: 'own'`); no body or path names
   an athlete; the one thing read about an athlete is their OWN hosted key, and a key held for
   anybody else is refused there as well as by the lookup.
@@ -239,8 +264,13 @@ app says *"The model answered that it does not take pictures"* and stops for the
 refusal that merely names an image is not that.** The draft matched any such refusal containing
 *image*, *vision* or *multimodal*, and the real models of §"What was verified" showed it wrong: two
 models that DO take pictures, sent bytes they could not decode, answered with words naming an image.
-Those are now one failed picture each. Of the five patterns, one was observed and four are the
-author's reading of what other servers say (`analysis/model.ts` §`WITHOUT_PICTURES`).
+Those are now one failed picture each. **One sentence was observed** from a server refusing a model
+that takes no picture; every other wording the patterns take is the author's reading of what
+servers say (`analysis/model.ts` §`WITHOUT_PICTURES`, six patterns, each written to stop where a
+statement about the picture itself would go on). A status that is not one of the three, a 429 or a
+5xx, is never read this way whatever it says. ⚠️ **A model that takes no picture and words it
+otherwise is `picture_model_failed`**: three failed pictures and a stop that says *"gave no usable
+answer"*, the wrong sentence, with no picture sent on regardless.
 
 ⚠️ **A server that silently drops a picture it cannot read is not detected.** Its answer is then
 about nothing, and what stands between it and the report is the device's check that the points
@@ -250,7 +280,7 @@ found to.
 
 ### D-6 — The hosted consent travels with every picture, and is not a row on the instance
 
-*The author's choice, put to the owner as a question on #1284 and left standing (D-11).* The hosted
+*The author's choice, put to the owner as a question on #1284 and not ruled on (D-11).* The hosted
 consent is given on the device, stored there, and sent with every picture as the origin it named,
 inside the sealed and device-signed request. The instance sends a picture on only when that origin
 is the origin the rider's key goes to. It is a different consent from the write-up's (ADR 0046 Q10,
@@ -267,7 +297,8 @@ The owner's point 4, and decision 1 of the second comment: **the wording is appr
 - **Two switches on the Camera page**, each beside the sentence it is consent to, both `false` on
   every device until the rider ticks them. The second sits under the first and is withdrawn with it.
 - **Neither is the write-up's consent**, and this path never reads that one.
-- **Stored on the device, not the instance.** The first is stored as the address of the instance it
+- **Stored on the device, not the instance**, the first consent as well as the hosted one (D-6):
+  *the author's choice*, and not ruled on. The first is stored as the address of the instance it
   was given for: a device that later signs in to another instance holds no agreement for that one.
   *Erase this device* forgets both with the sign-in, and so does disconnecting from the instance, so
   the next account on a shared tablet inherits neither.
@@ -349,19 +380,24 @@ modified client could send one, and only of its own rider.
 - **Five a second is not reachable, and not for bandwidth.** An instance allows one session 120
   sealed requests a minute (`auth/identity.ts` §`DEFAULT_LIMITS`), and offered a picture every
   200 ms it refused 180 of 450 in ninety seconds. That allowance is shared with sync and with a
-  write-up's stream, and this ADR does not raise it.
+  write-up's stream, and this ADR does not raise it. *Not raising it is the author's choice.* The
+  owner approved wording that says *"about one a second"*, which is not a ruling on the allowance.
 - **So the app sends at most one a second, one at a time** (`INSTANCE_POSE_INTERVAL_MILLISECONDS`),
-  and a model slower than that sets the rate. At one a second, 130 of 130 of the largest pictures
-  were answered over 129 s with none refused.
+  and a model slower than that sets the rate. **One a second is the cap on sending, not a rate
+  that was achieved with a real model.** With a SCRIPTED model that answers at once, 130 of 130 of
+  the largest pictures offered a second apart were answered over 129 s with none refused, which
+  shows the transport and the allowance carry it. With the two real local models asked, on a
+  machine at a load average of 11 to 23, a picture was sent about once every five to seven seconds
+  (16 of 90 and 27 of 200 offered a second apart).
 - **What it costs.** A sealed picture is 22 KB up for an 8 KiB picture, 87 KB for 24 KiB and 175 KB
   for the largest the side link carries (64 KiB), and about 0.4 KB down: 176 KB a second up at the
   largest, 1.4 Mbit/s. Sealing, the round trip and opening took 8 to 31 ms at the median with a
   model that answered at once, so the model is the whole of the latency.
 - **What the side analysis needs** is ten pictures with a rider in them for the framing check, and
   a session's worth for the report. It needs no particular rate. A rider waits for the check as long
-  as ten answers take: about ten seconds with a model that answers inside a second, where the
-  tablet's own model takes two, and **about a minute with the local models asked on this machine**
-  (§"What was verified").
+  as ten answers take, where the tablet's own model takes two seconds: about ten seconds with a
+  model that answers inside a second, which no model asked did, and **67 s and 80 s with the two
+  local models asked on this machine** (§"What was verified").
 - A picture's envelope is at most 175 KB, inside `/v1/sealed`'s own limit for the 1 MiB body an
   instance starts with.
 
@@ -386,13 +422,18 @@ general vision model off the tablet (D-11).
 | # | The question | The answer taken | Whose |
 |---|---|---|---|
 | 1 | Amendments, or a superseding ADR? | **A superseding ADR**: this one | The owner, decision 2 |
-| 2 | The hosted consent is not a row on the instance; should it be? | **Not a row.** It is the device's, sent sealed and signed with every picture (D-6) | *The author's choice.* The owner read the question and approved the draft without ruling otherwise. A second consent table is a later ADR's to add |
-| 3 | The local picture model is its own setting, never the analysis model; a rider on a hosted key uses that key's one model for pictures and write-ups | **As built** (D-5) | *The author's choice*, on the same footing. A separate picture model per key would change the stored key |
+| 2 | The hosted consent is not a row on the instance; should it be? | **Not a row.** It is the device's, sent sealed and signed with every picture (D-6) | *The author's choice.* **Not ruled on**: the owner's decisions comment does not mention it. A second consent table is a later ADR's to add |
+| 3 | The local picture model is its own setting, never the analysis model; a rider on a hosted key uses that key's one model for pictures and write-ups | **As built** (D-5) | *The author's choice*, not ruled on. A separate picture model per key would change the stored key |
 | 4 | Play Data Safety: the Photos and videos row `shared: true`? | **Yes** (D-7) | The owner, decision 3 |
-| 5 | A session looked at by the instance is recorded with source `computer`; a third stored value? | **`computer`.** A third value would change the stored record, the account export and what an instance accepts in a job | *The author's choice*, on the same footing |
+| 5 | A session looked at by the instance is recorded with source `computer`; a third stored value? | **`computer`.** A third value would change the stored record, the account export and what an instance accepts in a job | *The author's choice*, not ruled on |
 | — | The rider-facing wording | **Approved as written** | The owner, decision 1 |
 | — | The run through the tunnel | **May be made on the Mac home instance**, by the owner's arrangement, and is still owed | The owner, decision 4 |
-| — | A real hosted model | **One test against DeepSeek, made** (§"What was verified") | The owner, decision 5 |
+| — | A real hosted model | The owner allowed **one real test** against DeepSeek. **Two requests were made on the owner's key**: the test, and a second with a deliberately undecodable picture to obtain a real refusal (§"What was verified") | The owner, decision 5, for the one test. The second request was the author's and was not asked for |
+| — | The sealed-request allowance is not raised, so the cap is one a second (D-9) | **As built** | *The author's choice*, not ruled on |
+| — | The route is refused on a keyless instance, stricter than ADR 0047 D-7 (D-2) | **As built** | *The author's choice*, not ruled on |
+| — | The first consent is stored on the device, as the hosted one is (D-7) | **As built** | *The author's choice*, not ruled on |
+| — | One picture an athlete at a time, and no other cap on a rider (D-4) | **As built** | *The author's choice*, not ruled on |
+| — | The supersession list beyond the four the owner named: ADR 0047 D-12, ADR 0046 D-14(d)'s closing paragraph, ADR 0029 D-7's consent sentences, the pointer in ADR 0033 | **As listed under Supersedes**, with why each follows | *The author's reading* |
 
 ### D-12 — How it is held
 
@@ -418,15 +459,16 @@ general vision model off the tablet (D-11).
 
 ### What this costs, stated plainly
 
-- **A photograph of the rider leaves the room**, about one a second while the side camera films,
-  when they switch this on. Until this ADR no picture left the rider's own network.
+- **A photograph of the rider leaves the room**, at most one a second while the side camera films
+  (one every five to seven seconds with the local models asked), when they switch this on. Until this ADR no picture left the rider's own network.
 - **Cloudflare learns that a side camera is filming, for how long, and roughly how detailed each
   picture is** (D-3). The seal does not hide that, and nothing here pads timing.
 - **With the hosted switch on, a company holds pictures of the rider under its own terms**, and
   neither the rider's instance nor this project can delete them. The erase screen says so.
 - **The Play listing's Photos and videos row reads "shared"** for every user of the app, including
   the many who never switch this on.
-- **The framing check takes five times as long or more** than on the tablet's own model (D-9).
+- **The framing check took 67 s and 80 s with the two local models asked, against 2 s on the
+  tablet's own model** (D-9): thirty to forty times as long, on a busy machine.
 - **An operator's model is busy for as long as a rider films.** A rider with an account can ask the
   local picture model about one picture at a time, inside the 120-a-minute limit, with no cap of its
   own. Write-ups have a start limit; this has none.
@@ -474,10 +516,15 @@ committed. **No model was shown a rider, so no model's landmarks were read.**
 | `gemma4:12b` | the owner's Ollama 0.30.5, local | **Yes**, 27 of 27 sent | 6.6 s p50, 11.7 s p95, 12.8 s at most (4.5 s at least) | `{"rider":false}` every time, 19 of 27 inside a Markdown code fence, which the app's reader takes |
 | `gemma3:4b` | the same, local | **Yes**, 15 of 16 sent; one was answered `picture_model_failed`, and why was not established (the 25 s bound while the model loaded is the likely cause) | 4.7 s p50, 6.5 s at most (0.5 s at least) | `{"rider":false}` every time |
 | `qwen2.5:3b` | the same, local, a text-only model | **No**: HTTP 400, *"Multimodal data provided, but model does not support multimodal requests."* | 10.4 s, loading included | The instance answered `model_without_pictures`: **read correctly** |
-| `deepseek-flash` | `https://api.deepseek.com/v1`, on the owner's key, **two requests in all** | **Yes**: HTTP 200 | 2.0 s (1 972 ms at the service) | `{"rider":false}`; its reasoning named *"shapes only"*, so it saw the picture |
+| `deepseek-flash` | `https://api.deepseek.com/v1`, on the owner's key | **Yes**: HTTP 200 | 2.0 s (1 972 ms at the service) | `{"rider":false}`; its reasoning named *"shapes only"*, so it saw the picture |
 
+- **DeepSeek: the owner allowed one real test, and two requests were made on the owner's key.**
+  The first is the row above. The second sent a deliberately undecodable picture (the tool's filler
+  bytes) to obtain a real refusal; it was the author's decision, not something the owner's decision
+  5 asked for, and it is said here because it cannot be undone.
 - **One a second was offered and the local models set the rate**: of 200 pictures offered a second
-  apart, `gemma4:12b` was sent 27, because each was still out when the next fell due. Ten answers,
+  apart, `gemma4:12b` was sent 27, and of 90 `gemma3:4b` was sent 16, because each was still out
+  when the next fell due: about one every seven seconds and one every five to six. Ten answers,
   the framing check's count, took 67 s (`gemma4:12b`) and 80 s (`gemma3:4b`). ⚠️ The machine was
   busy with other work (a one-minute load average of 11 to 23), so these are slower than the models
   alone.

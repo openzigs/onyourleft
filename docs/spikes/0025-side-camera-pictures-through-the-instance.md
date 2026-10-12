@@ -243,8 +243,9 @@ skipped unsent, as the tablet does.
   Ollama was swapping the model in, running past the instance's 25 s bound; that was not
   established.
 
-**One a second is what was offered, and it is not what a local model here took.** About one picture
-in seven was sent. The rate the app sends at is the model's, as §5 said it would be.
+**One a second is what was offered, and it is not what a local model here took.** `gemma4:12b` was
+sent 27 of 200, about one picture in seven; `gemma3:4b` was sent 16 of 90, between one in five and
+one in six. The rate the app sends at is the model's, as §5 said it would be.
 
 ### 8.3 A text-only model, and what the code made of it
 
@@ -258,8 +259,10 @@ a picture it had dropped.
 
 ### 8.4 A hosted model: DeepSeek, two requests in all
 
-The owner allowed one real test with their key. **Two requests were made and no more**: one with the
-drawn picture, and one with the tool's filler bytes to see a real refusal.
+The owner allowed **one real test** with their key (decision 5). **Two requests were made on the
+owner's key, and no more**: the test, with the drawn picture, and a second with a deliberately
+undecodable picture (the tool's filler bytes) to obtain a real refusal. The second was the author's
+decision and was not something the owner's decision asked for.
 
 - **Where**: `https://api.deepseek.com/v1`, model `deepseek-flash`, the model spike 0023 §11 used.
 - **How**: an instance on loopback as in §8.1, a throwaway account, the key stored through
@@ -305,9 +308,13 @@ The app stops for the session on `model_without_pictures` and tells the rider to
 model, so one picture a service could not decode would have ended the session with the wrong
 reason. The pattern now matches statements about the MODEL only (`model.ts` §`WITHOUT_PICTURES`),
 and both of these are `picture_model_failed`. `model.test.ts` holds the three real sentences of
-§8.3 and this table. ⚠️ Of the five patterns, **one was observed** (§8.3's). The other four are the
-author's reading of what other servers say, and a server that words it differently is three failed
-pictures and a stop that says *"gave no usable answer"*.
+§8.3 and this table. ⚠️ **One sentence was observed** from a server refusing a model that takes no
+picture (§8.3's). Every other wording the six patterns take is the author's reading of what servers
+say, and a server that words it differently is three failed pictures and a stop that says *"gave no
+usable answer"*. The review of this change found the first version of the patterns still took
+statements about the picture (*"does not support images larger than…"*) and missed plain ones
+(*"doesn't support images"*); both lists are in `model.test.ts`, and so is a 503 carrying §8.3's
+sentence, which is not read as a model that takes no picture.
 
 This is also why **a run against a real model needs `--picture drawn`**: §6's command, as written,
 sends filler, which a real model refuses.

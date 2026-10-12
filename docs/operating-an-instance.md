@@ -190,8 +190,12 @@ D-2 admits. ⚠️ **Your model server's list is not a reliable "no"**: on 2026-
 one model with no `vision` capability, and that model read a picture (spike 0025 §8). To find out,
 ask it. From a checkout of this repository, in `apps/instance`, `node
 tools/side-picture-round-trip.ts --loopback --picture drawn --model-url http://localhost:11434/v1
---picture-model <name> --pictures 1` starts a throwaway instance on your machine, shows the model a drawing of three shapes, and prints what it said. A model that takes no
-picture is reported as `model_without_pictures`.
+--picture-model <name> --pictures 1` starts a throwaway instance on your machine, shows the model a
+drawing of three shapes, and prints what it said under `answers`. **Nothing under `answers` means
+the model did not take the picture**, whichever code is under `refused`: `model_without_pictures`
+when its server's refusal is worded in a way this software recognises (one such sentence has been
+seen from a real server), and `picture_model_failed` otherwise, which is also what a model that is
+merely slow or broken gives.
 
 **What your instance does with a picture, and what you must not make it do.** A picture arrives
 sealed to your instance's key and signed by the rider's device; it is checked (a JPEG of at most
