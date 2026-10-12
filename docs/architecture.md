@@ -1387,13 +1387,19 @@ cannot drift between them.
 | `ReplanRecord` | P9: the move, the rule that decided and the time, for every decision. A refusal keeps its move only when the proposal decoded and, for a swap, named one of the rider's own workouts |
 
 **Eleven things ADR 0048's words leave open are the owner's rulings of 2026-10-12 (#1296).** They
-are recorded in the ADR's amendment of that date and in that file's header, under these numbers:
+are recorded in the ADR's amendment of that date and in that file's header, under these numbers.
+How 2's +10 % and a replaced hold are measured is the owner's ruling of the same day on
+[#1300](https://github.com/openzigs/onyourleft/issues/1300), in the amendment after it:
 
 1. A scale reaches steady and ramp blocks as well as intervals blocks; a hold and a free ride are
    not scaled.
-2. A swap is bound by P4's +5 % a move and +10 % in total, measured on the highest share of the
-   block swapped in against the block it replaces. The count is carried by the new block and does
-   not go back to 0. Every swap is a harder move.
+2. A swap is bound by P4's +5 % a move and +10 % in total. A move's +5 % is measured on the highest
+   share of the block swapped in against the block it replaces as ridden now, **a replaced hold at
+   its start share** (#1300; two holds are compared start with start and ceiling with ceiling).
+   **The +10 % is of the share the place was loaded with, so it is a true 10 %** (#1300): 0.7,
+   then 0.735, then 0.77175 is refused, as is a +5 % scale of a block swapped in at +5 %. The count
+   is carried by the new block in points of that share and does not go back to 0. Every swap is a
+   harder move.
 3. Shortening a recovery (a block whose lowest share is under the highest share of the block after
    it) is a harder move, as an extension and a hold range moved up are.
 4. A free ride may be swapped in with none loaded; every other kind needs a block of its own kind

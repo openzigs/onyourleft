@@ -39,16 +39,23 @@
  * ## The eleven decisions ADR 0048's words leave open
  *
  * All eleven are the owner's rulings of 2026-10-12 (#1296), recorded as ADR
- * 0048's amendment of that date under the same numbers. `docs/architecture.md`
- * carries the same list. Changing one is a further amendment.
+ * 0048's amendment of that date under the same numbers, with the rulings of
+ * the same day on #1300 (how 2's +10 % and a replaced hold are measured) in
+ * the amendment after it. `docs/architecture.md` carries the same list.
+ * Changing one is a further amendment.
  *
  * 1. **"Scale the remaining intervals" reaches steady and ramp blocks as well
  *    as intervals blocks.** A hold and a free ride are not scaled.
  * 2. **A swap is bound by P4's +5 % a move and +10 % in total.** The highest
  *    share of the block swapped in may be at most 5 % above the highest share
- *    of the block it replaces, as ridden now. What the replaced block had
- *    already been raised by, and the swap's own rise, are carried by the new
- *    block ({@link PlanBlock.carried}) and count toward the +10 %; a fall
+ *    of the block it replaces, as ridden now. **A replaced hold is read at
+ *    its start share**, its ceiling being a cap and not a target (#1300); a
+ *    hold swapped in for a hold is compared start with start and ceiling with
+ *    ceiling. **The +10 % is of the share the place was loaded with**
+ *    ({@link PlanBlock.loadedShare}), so it is a true 10 % and rises do not
+ *    compound (#1300): what the replaced block had already been raised by,
+ *    and the swap's own rise, are carried by the new block
+ *    ({@link PlanBlock.carried}) in percentage points of that share; a fall
  *    earns nothing back. A block with a target may not replace a free ride,
  *    which has no target to measure a rise from, and a hold swapped in for a
  *    hold may have a range at most 5 bpm higher. Every swap is a harder move.
@@ -76,7 +83,8 @@
  * 7. **A scale is in percentage points of the share a block joined the plan
  *    with**, kept for each share ({@link PlanBlock.percents}). Two +5 moves
  *    are +10 % exactly, and no sequence of moves takes a target more than
- *    10 % above that share. **What is kept is the change reached**: a share
+ *    10 % above that share, nor a block swapped in more than 10 % above the
+ *    share its place was loaded with. **What is kept is the change reached**: a share
  *    held at its ceiling or at the floor by a move keeps the count it had,
  *    so the next move the other way takes full effect (#1296).
  * 8. **With no duration goal, total time may not grow past the loaded
@@ -212,9 +220,17 @@ export interface PlanBlock {
    */
   readonly percents: readonly number[];
   /**
-   * P4: the percentage points of rise already spent in this place before
-   * {@link base} joined the plan, by swaps and by scales of the blocks it
-   * replaced. 0 for a loaded block. It counts toward the +10 %.
+   * P4: the share this place in the plan was loaded with, which the +10 % is
+   * measured against whatever has been swapped in since (#1300). The loaded
+   * block's highest share, or its start share for a hold; `undefined` for a
+   * free ride, which sets none.
+   */
+  readonly loadedShare: number | undefined;
+  /**
+   * P4: the rise already spent in this place before {@link base} joined the
+   * plan, by swaps and by scales of the blocks it replaced, in percentage
+   * points of {@link loadedShare}. 0 for a loaded block. It counts toward
+   * the +10 %.
    */
   readonly carried: number;
   /** What is ridden: {@link base} at {@link percents}, inside the bounds of the day. */
@@ -320,6 +336,7 @@ export function loadPlan(workout: Workout): PlanRevision {
     blocks: workout.blocks.map((block) => ({
       base: block,
       percents: sharesOf(block).map(() => 0),
+      loadedShare: measuredShare(block),
       carried: 0,
       block,
     })),
@@ -443,6 +460,15 @@ function peakShare(block: WorkoutBlock): number | undefined {
     case 'free-ride':
       return undefined;
   }
+}
+
+/**
+ * The share a block is measured at when a rise over it is counted: its
+ * highest, but a hold's start share, since its ceiling is a cap and not a
+ * target (#1300).
+ */
+function measuredShare(block: WorkoutBlock): number | undefined {
+  return block.kind === 'heart-rate-hold' ? block.startShare : peakShare(block);
 }
 
 /** The bounds of the day, read once per proposal from the validator's own arguments. */
@@ -587,10 +613,45 @@ function replaced(
 
 /**
  * A ratio of two shares is not exact: 0.735 / 0.7 is a hair over 1.05. A rise
- * this far over a move's limit is the limit, and is stored as it, so the
- * count carried never holds a hair over +5.
+ * this far over a limit is at the limit.
  */
 const ROUNDING_PERCENT = 1e-9;
+
+/**
+ * A change of share as percentage points of the share the place was loaded
+ * with, which is what the +10 % is counted in (#1300). A place loaded with no
+ * target has no share to measure from, so anything there is over.
+ */
+function loadedPoints(rise: number, entry: PlanBlock): number {
+  return entry.loadedShare === undefined
+    ? Number.POSITIVE_INFINITY
+    : (rise / entry.loadedShare) * 100;
+}
+
+/**
+ * What a swap is measured on: each share of the block swapped in, beside the
+ * share of the replaced block it is compared with. A replaced hold is read at
+ * its start share, and against another hold like with like. Nothing for a
+ * free ride swapped in; `undefined` for a target in place of a free ride,
+ * which has none to measure a rise from.
+ */
+function swapPairs(
+  incoming: WorkoutBlock,
+  outgoing: WorkoutBlock,
+): readonly (readonly [number, number])[] | undefined {
+  const peak = peakShare(incoming);
+  if (peak === undefined) {
+    return [];
+  }
+  if (incoming.kind === 'heart-rate-hold' && outgoing.kind === 'heart-rate-hold') {
+    return [
+      [incoming.startShare, outgoing.startShare],
+      [incoming.ceilingShare, outgoing.ceilingShare],
+    ];
+  }
+  const from = measuredShare(outgoing);
+  return from === undefined ? undefined : [[peak, from]];
+}
 
 /**
  * Whether a block is a recovery before the block after it: its lowest share is
@@ -661,11 +722,20 @@ function applyScale(
     }
     reached = true;
     const nets = entry.percents.map((each) => each + percent);
-    if (nets.some((net) => entry.carried + net > REPLAN_MAXIMUM_CUMULATIVE_PERCENT)) {
+    const joined = sharesOf(base);
+    // P4, twice: +10 % of the share the block joined with, and, with what the
+    // place had already spent, +10 % of the share it was loaded with.
+    if (
+      nets.some(
+        (net, at) =>
+          net > REPLAN_MAXIMUM_CUMULATIVE_PERCENT ||
+          entry.carried + loadedPoints(((joined[at] ?? 0) * net) / 100, entry) >
+            REPLAN_MAXIMUM_CUMULATIVE_PERCENT + ROUNDING_PERCENT,
+      )
+    ) {
       over = true;
       return entry;
     }
-    const joined = sharesOf(base);
     const before = sharesOf(entry.block) as readonly ThresholdShare[];
     const ceiling = bounds.ceiling(base.kind);
     const scaled = before.map((ridden, at) =>
@@ -682,6 +752,7 @@ function applyScale(
     return {
       base,
       percents: scaled.map((each) => each.percent),
+      loadedShare: entry.loadedShare,
       carried: entry.carried,
       block: withShares(
         entry.block,
@@ -747,25 +818,26 @@ function applySwap(
   if (incoming.kind === 'heart-rate-hold' && incoming.range.high > bounds.holdTop) {
     return { rule: 'P3' };
   }
-  // P4: at most +5 % over the block it replaces, as ridden now, and what that
+  // P4: at most +5 % over the block it replaces, as ridden now, and at most
+  // +10 % in all over the share the place was loaded with: what the replaced
   // block had been raised by is not forgotten. Neither a fall nor a cut earns
   // anything back.
-  const replacedPeak = peakShare(entry.block);
-  let rise = 0;
-  if (peak !== undefined) {
-    if (replacedPeak === undefined) {
-      // A free ride has no target to measure a rise from.
-      return { rule: 'P4' };
-    }
-    rise = Math.max(0, (peak / replacedPeak - 1) * 100);
-    if (
-      rise > REPLAN_MAXIMUM_MOVE_PERCENT &&
-      rise <= REPLAN_MAXIMUM_MOVE_PERCENT + ROUNDING_PERCENT
-    ) {
-      rise = REPLAN_MAXIMUM_MOVE_PERCENT;
-    }
+  const pairs = swapPairs(incoming, entry.block);
+  if (pairs === undefined) {
+    return { rule: 'P4' };
   }
-  const carried = entry.carried + Math.max(0, ...entry.percents) + rise;
+  let rise = 0;
+  let risen = 0;
+  for (const [to, from] of pairs) {
+    rise = Math.max(rise, (to / from - 1) * 100);
+    risen = Math.max(risen, loadedPoints(to - from, entry));
+  }
+  const joined = sharesOf(entry.base);
+  let scaled = 0;
+  for (const [at, percent] of entry.percents.entries()) {
+    scaled = Math.max(scaled, loadedPoints(((joined[at] ?? 0) * percent) / 100, entry));
+  }
+  const carried = entry.carried + scaled + risen;
   if (
     rise > REPLAN_MAXIMUM_MOVE_PERCENT + ROUNDING_PERCENT ||
     carried > REPLAN_MAXIMUM_CUMULATIVE_PERCENT + ROUNDING_PERCENT
@@ -782,6 +854,7 @@ function applySwap(
   const next = replaced(blocks, index, {
     base: incoming,
     percents: sharesOf(incoming).map(() => 0),
+    loadedShare: entry.loadedShare,
     carried,
     block: incoming,
   });

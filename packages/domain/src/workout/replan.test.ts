@@ -199,6 +199,29 @@ function totalOf(blocks: readonly WorkoutBlock[]): number {
   return blocks.reduce((total, block) => total + lengthOf(block), 0);
 }
 
+/**
+ * Each share of a block beside the share of another block it is measured
+ * against (#1300): a hold's start share, since its ceiling is a cap, and two
+ * holds like with like. A free ride gives every share nothing to rise from.
+ */
+function comparedWith(block: WorkoutBlock, against: WorkoutBlock): [number, number][] {
+  if (block.kind === 'heart-rate-hold' && against.kind === 'heart-rate-hold') {
+    return [
+      [block.startShare, against.startShare],
+      [block.ceilingShare, against.ceilingShare],
+    ];
+  }
+  const from =
+    against.kind === 'heart-rate-hold'
+      ? against.startShare
+      : Math.max(Number.NEGATIVE_INFINITY, ...sharesOf(against));
+  return sharesOf(block).map((value) => [value, from]);
+}
+
+function steadyAt(length: Seconds, target: number): WorkoutBlock {
+  return { kind: 'steady', seconds: length, target: thresholdShare(target) };
+}
+
 /** A seeded generator, so a failure is a seed and not a mystery. */
 function generator(seed: number): () => number {
   let state = seed >>> 0;
@@ -271,9 +294,24 @@ describe('the safety criteria, by name — #1242', () => {
       });
 
       const loaded = aWorkout('loaded');
+      // Two blocks for each block loaded, one 5 % above it (to a thousandth)
+      // and one 5 % above that, so that a rise can follow a rise in the same
+      // place: two random workouts almost never offer one (#1300).
+      const near: WorkoutBlock[] = [];
+      const nearOf = new Map<WorkoutBlock | undefined, number>();
+      const above = (from: number): number => Math.floor(from * 1.05 * 1000) / 1000;
+      for (const block of loaded.blocks) {
+        const [, from] = comparedWith(block, block)[0] ?? [];
+        if (from !== undefined) {
+          const first = above(from);
+          nearOf.set(block, near.length);
+          near.push(steadyAt(aLength(), first), steadyAt(aLength(), above(first)));
+        }
+      }
       const library: SavedWorkout[] = [
         { id: 'a', workout: aWorkout('a') },
         { id: 'b', workout: aWorkout('b') },
+        { id: 'near', workout: { name: 'near', blocks: [...near, aBlock()] } },
       ];
       const libraryBlocks = new Set(library.flatMap((saved) => saved.workout.blocks));
       const goals: WorkoutGoals = {
@@ -322,11 +360,27 @@ describe('the safety criteria, by name — #1242', () => {
       };
 
       let plan = loadPlan(loaded);
+      // The block each place in the plan was loaded with, kept here and not
+      // read from the module under test (#1300).
+      let places: readonly (WorkoutBlock | undefined)[] = loaded.blocks;
       let now = 0;
+      let stayed = 0;
       for (let step = 0; step < 30; step += 1) {
-        now += whole(0, 700);
+        // Often long enough for a second harder move.
+        now += random() < 0.3 ? 700 : whole(0, 700);
         const total = totalOf(plan.blocks.map((entry) => entry.block));
-        const position = random() * total * 1.02;
+        // Half the time the rider has not moved on, so the next block is the
+        // same place and a second move can land on the first (#1300).
+        const position = random() < 0.5 ? Math.min(stayed, total) : random() * total * 1.02;
+        stayed = position;
+        // The place after the one being ridden, which is the one a swap changes.
+        let ahead = 0;
+        let passed = 0;
+        for (const entry of plan.blocks) {
+          passed += lengthOf(entry.block);
+          ahead += 1;
+          if (position < passed) break;
+        }
         const aMove = (): PlanMove =>
           pick<PlanMove>([
             {
@@ -343,6 +397,16 @@ describe('the safety criteria, by name — #1242', () => {
             },
             { kind: 'swap-next-block', workoutId: pick(['a', 'b', 'c']), blockIndex: whole(0, 8) },
             { kind: 'swap-next-block', workoutId: pick(['a', 'b']), blockIndex: whole(0, 3) },
+            {
+              kind: 'swap-next-block',
+              workoutId: 'near',
+              blockIndex: (nearOf.get(places[ahead]) ?? near.length) + whole(0, 1),
+            },
+            {
+              kind: 'swap-next-block',
+              workoutId: 'near',
+              blockIndex: (nearOf.get(places[ahead]) ?? near.length) + whole(0, 1),
+            },
             { kind: 'end-main-set' },
           ]);
         const valid = random() < 0.75;
@@ -400,6 +464,9 @@ describe('the safety criteria, by name — #1242', () => {
 
         const before = plan.blocks;
         const next = result.plan.blocks;
+        if (next.length !== before.length) {
+          places = next.map((entry) => places[before.indexOf(entry)]);
+        }
         // The block being ridden, everything before it, and so the warm-up.
         for (let index = 0; index <= current; index += 1) {
           expect(next[index]).toBe(before[index]);
@@ -430,14 +497,22 @@ describe('the safety criteria, by name — #1242', () => {
             // P4: never more than 10 % above the share it joined the plan with.
             expect(value).toBeLessThanOrEqual((sharesOf(entry.base)[at] ?? 0) * 1.1 + EPSILON);
           }
-          if (swappedIn && old !== undefined && sharesOf(entry.block).length > 0) {
-            // P4, #1296: a swap raises the highest share by 5 % at most.
-            expect(Math.max(...sharesOf(entry.block))).toBeLessThanOrEqual(
-              Math.max(...sharesOf(old.block)) * 1.05 + EPSILON,
-            );
+          if (swappedIn && old !== undefined) {
+            // P4, #1296: a swap raises the highest share by 5 % at most; #1300:
+            // over a hold's start share, and hold against hold like with like.
+            for (const [value, from] of comparedWith(entry.block, old.block)) {
+              expect(value).toBeLessThanOrEqual(from * 1.05 + EPSILON);
+            }
           }
-          for (const percent of entry.percents) {
-            expect(entry.carried + percent).toBeLessThanOrEqual(10 + EPSILON);
+          // P4, #1300: whatever has been swapped in and scaled since, never more
+          // than 10 % above the share this place was LOADED with. A rise that
+          // compounds over the block replaced each time is seen here.
+          const place = places[index];
+          expect(place).toBeDefined();
+          if (place !== undefined) {
+            for (const [value, from] of comparedWith(entry.block, place)) {
+              expect(value).toBeLessThanOrEqual(from * 1.1 + EPSILON);
+            }
           }
         }
 
@@ -1283,18 +1358,20 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
     it('counts the rise, and what the replaced block was raised by, toward the +10 %', () => {
       const library = saved(0.77, 0.772, 0.7);
       const state = (plan: PlanRevision) => ({ library, plan });
-      // +5 % by a scale: 0.735. A swap to 0.77 is 4.76 more, 9.76 in all.
+      // +5 % by a scale: 0.735. A swap to 0.77 is 5 more points of the loaded
+      // 0.7, 10 in all (#1300; 9.76 when each rise was counted over the last).
       const raised = sequence(ROOMY, [scale(5)], { library });
       expect(raised.blocks[1]?.percents).toStrictEqual([5]);
       const swapped = accepted(later(swapOf('s', 0), raised), after(raised, 9000, state(raised)));
       const entry = swapped.plan.blocks[1];
       expect(entry?.block).toStrictEqual(steady(0.77));
       expect(entry?.percents).toStrictEqual([0]);
-      expect(entry?.carried).toBeCloseTo(5 + (0.77 / 0.735 - 1) * 100, 9);
+      expect(entry?.loadedShare).toBe(0.7);
+      expect(entry?.carried).toBeCloseTo(10, 9);
       // 0.772 is 5.03 % over 0.735: over a move's +5 %.
       expect(ruleOf(later(swapOf('s', 1), raised), after(raised, 9000, state(raised)))).toBe('P4');
 
-      // The count did not go back to 0: another +5 % would be 14.76.
+      // The count did not go back to 0: another +5 % would be 15.5.
       const plan = swapped.plan;
       expect(ruleOf(later(scale(5), plan), after(plan, 12000, state(plan)))).toBe('P4');
       // An easier move is still taken, in full, from the share swapped in.
@@ -1305,7 +1382,7 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
       const full = sequence(ROOMY, [scale(5), scale(5)], { library });
       expect(ruleOf(later(swapOf('s', 1), full), after(full, 9000, state(full)))).toBe('P4');
       const fallen = accepted(later(swapOf('s', 2), full), after(full, 9000, state(full)));
-      expect(fallen.plan.blocks[1]?.carried).toBe(10);
+      expect(fallen.plan.blocks[1]?.carried).toBeCloseTo(10, 9);
       expect(
         ruleOf(later(scale(5), fallen.plan), after(fallen.plan, 12000, state(fallen.plan))),
       ).toBe('P4');
@@ -1314,23 +1391,24 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
     it('carries the count from one swap to the next in the same place', () => {
       const library = saved(0.735, 0.77, 0.8);
       const state = (plan: PlanRevision) => ({ library, plan });
-      // +5 %, then +4.76 %: 9.76 in all.
+      // +5 %, then +4.76 % of that: 10 % of the loaded 0.7 in all (#1300).
       const twice = sequence(ROOMY, [swapOf('s', 0), swapOf('s', 1)], { library });
       expect(twice.blocks[1]?.block).toStrictEqual(steady(0.77));
-      expect(twice.blocks[1]?.carried).toBeCloseTo(5 + (0.77 / 0.735 - 1) * 100, 9);
-      // 0.8 is 3.9 % over 0.77, a move's worth, and 13.66 % over the loaded 0.7.
+      expect(twice.blocks[1]?.carried).toBeCloseTo(10, 9);
+      // 0.8 is 3.9 % over 0.77, a move's worth, and 14.3 % over the loaded 0.7.
       expect(ruleOf(later(swapOf('s', 2), twice), after(twice, 9000, state(twice)))).toBe('P4');
     });
 
-    it('takes a swap of exactly +5 % as 5, so a later +5 % is not refused for rounding', () => {
-      const library = saved(0.735);
+    it('takes a swap of exactly +5 % as 5, and a second rise of exactly 5 as 10', () => {
+      const library = saved(0.735, 0.77);
       const state = (plan: PlanRevision) => ({ library, plan });
       const swapped = sequence(ROOMY, [swapOf('s', 0)], { library });
-      // 0.735 / 0.7 is 1.05 only to within rounding; the count is the limit, not a hair over.
-      expect(swapped.blocks[1]?.carried).toBe(5);
-      const scaled = accepted(later(scale(5), swapped), after(swapped, 9000, state(swapped)));
-      expect(scaled.plan.blocks[1]?.carried).toBe(5);
-      expect(scaled.plan.blocks[1]?.percents).toStrictEqual([5]);
+      // 0.735 / 0.7 is 1.05 only to within rounding, and neither limit refuses it for that.
+      expect(swapped.blocks[1]?.carried).toBeCloseTo(5, 9);
+      // 0.77 is 10 % over the loaded 0.7, again only to within rounding.
+      expect(ruleOf(later(swapOf('s', 1), swapped), after(swapped, 9000, state(swapped)))).toBe(
+        'accepted',
+      );
       // Eased by 5 and brought back by 5: not refused either.
       const undone = sequence(ROOMY, [swapOf('s', 0), scale(-5), scale(5)], { library });
       expect(undone.blocks[1]?.percents).toStrictEqual([0]);
@@ -1364,6 +1442,145 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
       expect(ruleOf(proposalOf(swapOf('h', 0)), { state })).toBe('accepted');
       // 136 is inside the highest range loaded (140), and 6 above the hold it replaces.
       expect(ruleOf(proposalOf(swapOf('h', 1)), { state })).toBe('P4');
+    });
+  });
+
+  describe('#1300, ruling a: the +10 % is of the share the place was loaded with', () => {
+    const saved = (...targets: number[]): readonly SavedWorkout[] => [
+      { id: 's', workout: { name: 'S', blocks: targets.map((target) => steady(target)) } },
+    ];
+    // The loaded steady peak is 1.0, so P3 refuses none of these.
+    const ROOMY: Workout = {
+      name: 'Roomy',
+      blocks: [WARM_UP, steady(0.7), steady(1), COOL_DOWN],
+    };
+    const state = (library: readonly SavedWorkout[]) => (plan: PlanRevision) => ({
+      library,
+      plan,
+    });
+
+    it("refuses the issue's own measurement: 0.7, 0.735, then 0.77175", () => {
+      const library = saved(0.735, 0.77175, 0.77);
+      const once = sequence(ROOMY, [swapOf('s', 0)], { library });
+      const call = after(once, 9000, state(library)(once));
+      // +5 % of +5 % is 10.25 % over the loaded 0.7. Each move is 5 % or less.
+      expect(ruleOf(later(swapOf('s', 1), once), call)).toBe('P4');
+      // A true 10 % is the most there is.
+      const twice = accepted(later(swapOf('s', 2), once), call).plan;
+      expect(twice.blocks[1]?.block).toStrictEqual(steady(0.77));
+      expect(twice.blocks[1]?.loadedShare).toBe(0.7);
+    });
+
+    it('refuses a +5 % scale of a block swapped in at +5 %, which would compound', () => {
+      const library = saved(0.735);
+      const swapped = sequence(ROOMY, [swapOf('s', 0)], { library });
+      // 0.735 × 1.05 is 0.77175: 5 points, and 5.25 more.
+      expect(ruleOf(later(scale(5), swapped), after(swapped, 9000, state(library)(swapped)))).toBe(
+        'P4',
+      );
+    });
+
+    it('counts a rise in points of the loaded share, not of the share ridden', () => {
+      const library = saved(0.66);
+      // Cut to 0.63, then 0.66: 4.76 % over what is ridden, 4.29 % of the loaded 0.7.
+      const plan = sequence(ROOMY, [scale(-10), swapOf('s', 0)], { library });
+      expect(plan.blocks[1]?.block).toStrictEqual(steady(0.66));
+      expect(plan.blocks[1]?.carried).toBeCloseTo((0.03 / 0.7) * 100, 9);
+    });
+
+    it('counts a scale of a block swapped in by the share it moves, in the same points', () => {
+      const library = saved(0.35);
+      // +5 by a scale (5 points), then a fall to 0.35, which earns nothing back.
+      const fallen = sequence(ROOMY, [scale(5), swapOf('s', 0)], { library });
+      expect(fallen.blocks[1]?.carried).toBeCloseTo(5, 9);
+      // +10 % of 0.35 is 0.035, which is 5 points of the loaded 0.7: 10 in all.
+      const raised = sequence(ROOMY, [scale(5), swapOf('s', 0), scale(5), scale(5)], { library });
+      expect(sharesOf(raised.blocks[1]?.block as WorkoutBlock)[0]).toBeCloseTo(0.385, 12);
+      expect(raised.blocks[1]?.percents).toStrictEqual([10]);
+    });
+
+    it('still holds a block swapped in to +10 % of the share it joined with (ruling 7)', () => {
+      const plain: Workout = { name: 'Plain', blocks: [WARM_UP, steady(0.7), COOL_DOWN] };
+      const library = saved(0.3);
+      // 0.3 for 0.7, then +5 twice: 0.33, which is far under the loaded share.
+      const plan = sequence(plain, [swapOf('s', 0), scale(5), scale(5)], { library });
+      expect(sharesOf(plan.blocks[1]?.block as WorkoutBlock)[0]).toBeCloseTo(0.33, 12);
+      expect(plan.blocks[1]?.carried).toBe(0);
+      expect(ruleOf(later(scale(5), plan), after(plan, 9000, state(library)(plan)))).toBe('P4');
+    });
+
+    it('ruling c, kept: one block with nothing left refuses a +5 % for them all', () => {
+      const three: Workout = {
+        name: 'Three',
+        blocks: [WARM_UP, steady(0.7), steady(0.6), steady(1), COOL_DOWN],
+      };
+      const library = saved(0.735);
+      const swapped = sequence(three, [swapOf('s', 0)], { library });
+      const call = after(swapped, 9000, state(library)(swapped));
+      // The 0.6 block has all of its +10 % left, and is not raised alone.
+      expect(ruleOf(later(scale(5), swapped), call)).toBe('P4');
+      expect(ruleOf(later(scale(-5), swapped), call)).toBe('accepted');
+    });
+  });
+
+  describe('#1300, ruling b: a replaced hold is measured at its start share', () => {
+    const hold = (start: number, ceiling: number): WorkoutBlock => ({
+      kind: 'heart-rate-hold',
+      seconds: seconds(600),
+      range: { low: beatsPerMinute(120), high: beatsPerMinute(130) },
+      startShare: share(start),
+      ceilingShare: share(ceiling),
+    });
+    const libraryOf = (...blocks: WorkoutBlock[]): readonly SavedWorkout[] => [
+      { id: 'b', workout: { name: 'B', blocks } },
+    ];
+    // The loaded peaks are 1.0 for a steady block and 0.85 for a hold.
+    const HELD: Workout = {
+      name: 'Held',
+      blocks: [WARM_UP, hold(0.5, 0.85), steady(1), COOL_DOWN],
+    };
+    const CAPPED: Workout = {
+      name: 'Capped',
+      blocks: [WARM_UP, hold(0.5, 0.7), hold(0.5, 0.85), COOL_DOWN],
+    };
+    const rule = (workout: Workout, library: readonly SavedWorkout[], blockIndex: number) =>
+      ruleOf(proposalOf(swapOf('b', blockIndex)), {
+        state: stateOf({ plan: loadPlan(workout), library }),
+      });
+
+    it("refuses the issue's own measurement: steady 0.89 for a hold that starts at 0.5", () => {
+      const library = libraryOf(steady(0.89), steady(0.525), steady(0.53));
+      expect(loadPlan(HELD).blocks[1]?.loadedShare).toBe(0.5);
+      // 4.7 % over the ceiling of 0.85, and 78 % over where the hold starts.
+      expect(rule(HELD, library, 0)).toBe('P4');
+      // +5 % of the start share is the most.
+      expect(rule(HELD, library, 1)).toBe('accepted');
+      expect(rule(HELD, library, 2)).toBe('P4');
+    });
+
+    it('measures the +10 % in that place against the start share too', () => {
+      const library = libraryOf(steady(0.525), steady(0.55), steady(0.5513));
+      const swapped = sequence(HELD, [swapOf('b', 0)], { library });
+      expect(swapped.blocks[1]?.carried).toBeCloseTo(5, 9);
+      const call = after(swapped, 9000, { library, plan: swapped });
+      // Each is 5 % or less over 0.525. 0.55 is 10 % over 0.5, and 0.5513 is more.
+      expect(ruleOf(later(swapOf('b', 1), swapped), call)).toBe('accepted');
+      expect(ruleOf(later(swapOf('b', 2), swapped), call)).toBe('P4');
+    });
+
+    it('compares a hold swapped in for a hold start with start and ceiling with ceiling', () => {
+      const library = libraryOf(hold(0.5, 0.7), hold(0.53, 0.7), hold(0.5, 0.74), hold(0.5, 0.735));
+      // The same hold again: its ceiling is not read against the other's start.
+      expect(rule(CAPPED, library, 0)).toBe('accepted');
+      // A start 6 % higher.
+      expect(rule(CAPPED, library, 1)).toBe('P4');
+      // A ceiling 5.7 % higher, inside the loaded peak of 0.85.
+      expect(rule(CAPPED, library, 2)).toBe('P4');
+      // A ceiling 5 % higher is 0.035, which is 7 points of the loaded start share.
+      const raised = accepted(proposalOf(swapOf('b', 3)), {
+        state: stateOf({ plan: loadPlan(CAPPED), library }),
+      });
+      expect(raised.plan.blocks[1]?.carried).toBeCloseTo(7, 9);
     });
   });
 
