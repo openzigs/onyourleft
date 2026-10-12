@@ -1386,13 +1386,28 @@ cannot drift between them.
 | `validateProposal` | P2 to P7, on the device, pure, with `now` as a parameter. Accepted: the next `PlanRevision`, in which nothing at or before the block being ridden differs, and the workout the player reads from the next boundary. Refused: the rule, and nothing of the proposal |
 | `ReplanRecord` | P9: the move, the rule that decided and the time, for every decision. A refusal keeps its move only when the proposal decoded and, for a swap, named one of the rider's own workouts |
 
-Five things ADR 0048 does not settle are decided in that file's header and are the author's, not
-the owner's: the warm-up and the cool-down are the first and the last block; a scale is counted
-per block in percentage points of the share the block joined the plan with, so +5 % twice is
-+10 % exactly; an extension, a +5 % scale, a hold range moved up and every swap are *harder*
-moves; with no duration goal the plan may not grow past the loaded workout's own length; and a
-swapped-in block needs a block of its own kind in the loaded workout, because P3's peak is per
-kind.
+**Eleven things ADR 0048's words leave open are the owner's rulings of 2026-10-12 (#1296).** They
+are recorded in the ADR's amendment of that date and in that file's header, under these numbers:
+
+1. A scale reaches steady and ramp blocks as well as intervals blocks; a hold and a free ride are
+   not scaled.
+2. A swap is bound by P4's +5 % a move and +10 % in total, measured on the highest share of the
+   block swapped in against the block it replaces. The count is carried by the new block and does
+   not go back to 0. Every swap is a harder move.
+3. Shortening a recovery (a block whose lowest share is under the highest share of the block after
+   it) is a harder move, as an extension and a hold range moved up are.
+4. A free ride may be swapped in with none loaded; every other kind needs a block of its own kind
+   in the loaded workout.
+5. The validator does not read the machine's minimum. ⚠️ Nothing clamps a workout's own target to
+   it today (#1297).
+6. Warm-up and cool-down are the first and the last block.
+7. A scale is counted for each share in percentage points of the share the block joined the plan
+   with, so +5 % twice is +10 % exactly; what is counted is the change reached, so a share a bound
+   stopped keeps its count.
+8. With no duration goal the plan may not grow past the loaded workout's own length.
+9. A hold range moves up only to the highest range loaded, and never above threshold heart rate.
+10. An intervals block is neither extended nor shortened.
+11. A proposal must name the latest summary sent.
 
 ⚠️ **`check:wiring` does not watch this file.** #1242 expected the gate to report it until #1244;
 the gate's reach into `packages/` is `TRAINER_COMMAND_SEAM`'s five modules, and this is not one.
