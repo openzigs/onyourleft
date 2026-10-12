@@ -59,6 +59,7 @@ import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER_MAP_NAMES,
+  REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
@@ -846,6 +847,13 @@ const BLEND_MINIMUM_ROCK_PIXELS = 200;
  */
 const BLEND_FACTOR = 4;
 const BLEND_LIGHT_FACTOR = 1.5;
+/**
+ * How much of the bank's rock the crag must be seen to have changed — #1274:
+ * **half** its pixels. The figure measured is in the test's own line; half is
+ * a floor under it, because a pixel where the two photographs read within a
+ * rounding of each other counts as unchanged.
+ */
+const CRAG_ROCK_SHARE = 0.5;
 
 /**
  * #629: how much larger the grazing water's Fresnel term, read back, must be
@@ -1189,7 +1197,7 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 
 /**
  * How many images the realistic world holds, once per image — #618's review:
- * eight surface maps (#627 added the verge and the rock), two a photographic structure surface, the bicycle's four
+ * two a surface (#627 added the verge and the rock, #1274 the crag: ten), two a photographic structure surface, the bicycle's four
  * (#624), and every image in
  * a vegetation model plus its impostor, read off the committed files exactly as
  * `realistic-textures.test.ts` reads them.
@@ -1197,8 +1205,9 @@ const REALISTIC_PUBLIC = fileURLToPath(new URL('../public/realistic/', import.me
 function realisticImageCount(): number {
   const models = REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]);
   return (
-    // The road, the grass, and #627's verge and rock: two maps each.
-    8 +
+    // The road, the grass, #627's verge and rock and #1274's crag: two maps
+    // each, counted off the table so a surface added to it is counted here.
+    2 * Object.keys(REALISTIC_SURFACES).length +
     2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
     // #624: the bicycle's four drawn maps.
     REALISTIC_BICYCLE_MAP_NAMES.length +
@@ -3676,6 +3685,35 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(blend.bankControl).toBeGreaterThanOrEqual(grassControl.low / BLEND_LIGHT_FACTOR);
   });
 
+  test('wears ambientCG’s rock face where the slope’s rock is, and nowhere the slope’s rock is not — #1274', async ({
+    harnessRun,
+  }) => {
+    const { groundBlend: blend } = await realistic(harnessRun);
+    expect(blend.measured).toBe(true);
+    console.log(
+      `#1274: the bank's contrast is ${blend.bank.toFixed(4)} in the crag's photograph and ` +
+        `${blend.bankScree.toFixed(4)} in the scree's (the crag off), against ` +
+        `${blend.bankControl.toFixed(4)} as grass; the crag changed ` +
+        `${String(blend.cragPixels)} of the rock's ${String(blend.rockPixels)} px, and ` +
+        `${String(blend.cragWithoutRock)} px of the frame with the slope's rock off`,
+    );
+    // Non-vacuity: there is a bank of rock in the frame to wear anything.
+    expect(blend.rockPixels).toBeGreaterThan(BLEND_MINIMUM_ROCK_PIXELS);
+    // The crag is what the bank is drawn in: taking it off changes most of
+    // the rock's pixels — every one but those the two photographs happen to
+    // agree on to within a rounding.
+    expect(blend.cragPixels).toBeGreaterThan(blend.rockPixels * CRAG_ROCK_SHARE);
+    // The control: with the slope's rock off there is no crag ANYWHERE. Not
+    // one pixel of the frame moves with the crag's switch, to the last bit —
+    // so what the crag is drawn on is the slope's rock and nothing else.
+    expect(blend.cragWithoutRock).toBe(0);
+    // And the switch's other position is the bank as it was before #1274 —
+    // the scree's photograph, which reads unlike the grass the same bank is
+    // with its rock off, by #627's own margin — rather than grass, or nothing.
+    expect(blend.bankScree - blend.bankControl).toBeGreaterThan(BLEND_MARGIN);
+    expect(blend.bankScree).toBeLessThan(BLEND_CEILING);
+  });
+
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
     harnessRun,
   }) => {
@@ -3776,7 +3814,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   }) => {
     const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
     // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
-    // missing): eight surface maps, fourteen structure maps, and every map in a
+    // missing): ten surface maps, fourteen structure maps, and every map in a
     // model plus its impostor, once per IMAGE, read off the committed files the
     // way `realistic-textures.test.ts` reads them.
     expect(textures.worn.length).toBe(realisticImageCount());

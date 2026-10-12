@@ -162,13 +162,12 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
       return Math.max(size.width, size.height);
     };
     expect(largest(REALISTIC_SKY)).toBeLessThanOrEqual(REALISTIC_TEXTURE_PIXELS.sky);
-    for (const maps of [
-      REALISTIC_SURFACES.road,
-      REALISTIC_SURFACES.ground,
-      // #627: the ground's verge, rock and scree.
-      REALISTIC_SURFACES.verge,
-      REALISTIC_SURFACES.rock,
-    ]) {
+    // #627: the ground's verge, rock and scree; #1274: its crag. ⚠️ EVERY
+    // surface the table names, rather than a list of them typed here: the
+    // crag was a file in the build that neither this nor the memory sum below
+    // read until they were derived.
+    expect(Object.keys(REALISTIC_SURFACES)).toEqual(['road', 'ground', 'verge', 'rock', 'crag']);
+    for (const maps of Object.values(REALISTIC_SURFACES)) {
       expect(largest(maps.colour), maps.colour).toBeLessThanOrEqual(
         REALISTIC_TEXTURE_PIXELS.surface,
       );
@@ -480,12 +479,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       role: 'bicycle' as const,
       facts: fileKtx2Facts(at(REALISTIC_BICYCLE_MAPS[map])),
     })),
-    ...[
-      REALISTIC_SURFACES.road,
-      REALISTIC_SURFACES.ground,
-      REALISTIC_SURFACES.verge,
-      REALISTIC_SURFACES.rock,
-    ].flatMap((maps) =>
+    // Every surface the table names — #1274's crag with them.
+    ...Object.values(REALISTIC_SURFACES).flatMap((maps) =>
       [maps.colour, maps.normal].map((file) => ({
         role: 'surface' as const,
         facts: fileKtx2Facts(at(file)),

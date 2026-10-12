@@ -549,6 +549,35 @@
       ]
     },
     {
+      "id": "Rock026",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Rock026",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-12",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Rock026_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Rock026_1K-JPG.zip",
+          "bytes": 7285475,
+          "sha256": "42217ec3ac5798b423ad86811062a247e7324c993b04d755889a0a8fbdf0381b"
+        },
+        {
+          "path": "Rock026_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Rock026_1K-JPG.zip#Rock026_1K-JPG_Color.jpg",
+          "bytes": 1369157,
+          "sha256": "6f2595c1a1e96b5cb69855787386e5d8804e29a0bc2074cbca572fb920afc7d6"
+        },
+        {
+          "path": "Rock026_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Rock026_1K-JPG.zip#Rock026_1K-JPG_NormalGL.jpg",
+          "bytes": 1789482,
+          "sha256": "ed9cb8439aa247e9ed4324fcc5d286f54d513c0da332b7b9b77bf9ca0f3dfbc2"
+        }
+      ]
+    },
+    {
       "id": "makehuman",
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",

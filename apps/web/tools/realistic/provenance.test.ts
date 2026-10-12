@@ -37,6 +37,8 @@ import {
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
 import {
+  AMBIENTCG_TECHNIQUES_KEPT,
+  ambientCgArchive,
   assetRecord,
   DRAW_SCRIPT,
   DRAWN_TOOL,
@@ -405,6 +407,50 @@ describe('the input lock', () => {
       expect(source.evidence, source.id).toBe(wanted?.licencePhrase);
       expect(source.licencePage, source.id).toBe(wanted?.licencePage);
       expect(['CC0-1.0', 'CC-BY-4.0']).toContain(source.licence);
+    }
+  });
+
+  it('records, for every ambientCG asset, how its page said it was made, and pins its archive whole — #1274', () => {
+    const fromAmbientCg = SOURCES.filter((source) => source.origin.from === 'ambientcg');
+    // Non-vacuity: #1274 took at least one.
+    expect(fromAmbientCg.length).toBeGreaterThan(0);
+    for (const wanted of fromAmbientCg) {
+      const source = lock.sources.find((each) => each.id === wanted.id);
+      // What `fetch-assets.ts` wrote when it read the page: a lock entry made
+      // without `ambientCgVerdict` has no technique, and one made from an
+      // "approximated" asset names a technique the list does not keep.
+      expect(source?.technique?.split(', ') ?? [], wanted.id).not.toEqual([]);
+      for (const technique of source?.technique?.split(', ') ?? []) {
+        expect(AMBIENTCG_TECHNIQUES_KEPT, `${wanted.id}: ${technique}`).toContain(technique);
+      }
+      // The archive itself, then each file taken out of it and nothing else.
+      const archive = ambientCgArchive(wanted);
+      expect(
+        source?.files.map((file) => ({ path: file.path, url: file.url })),
+        wanted.id,
+      ).toEqual([
+        { path: archive.name, url: archive.url },
+        ...archive.members.map((member) => ({
+          path: member.path,
+          url: `${archive.url}#${member.path}`,
+        })),
+      ]);
+      // And every file its outputs are made from is one of those members.
+      for (const output of OUTPUTS.filter((each) => each.from === wanted.id)) {
+        const read = output.recipe.how === 'blender' ? output.recipe.args[0] : undefined;
+        expect(
+          archive.members.map((member) => member.path),
+          output.file,
+        ).toContain(read);
+        // Its row says where it is from and how that page said it was made.
+        const entry = manifest.entries.find(
+          (each) => each.path === `${OUTPUT_DIRECTORY}/${output.file}`,
+        );
+        expect(entry?.source, output.file).toContain(
+          `ambientCG, ${wanted.id} by ambientCG (its own page: made by ${source?.technique ?? ''})`,
+        );
+        expect(entry?.licence, output.file).toBe('CC0-1.0');
+      }
     }
   });
 });
