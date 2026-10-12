@@ -242,8 +242,8 @@ runtime dependency of `apps/web` reached only from the list–detail layout's la
 [ADR 0041](../adr/0041-motion-for-menu-animation.md)), and — since #1283 — `@dgreenheck/ez-tree`
 **1.1.0** exactly (MIT, **zero dependencies**, `three` its peer; a devDependency of `apps/web` and a
 pinned TOOL like Blender, not a library: one module loads it, `tools/realistic/ez-tree.ts`, and
-`generated-trees.test.ts` fails if anything under `src/`, `browser/` or elsewhere in `tools/`
-imports it — [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1), are
+`generated-trees.test.ts` fails if any file under `src/` or `browser/` so much as names the package,
+or anything else in `tools/` imports it — [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1), are
 installed;
 
 ⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489

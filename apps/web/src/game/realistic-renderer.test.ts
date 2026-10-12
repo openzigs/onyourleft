@@ -1598,8 +1598,8 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
         .flatMap((model) => [model.file, model.middle, model.impostor, model.impostorNormals])
         .filter((file): file is string => file !== undefined)
         .map(realisticUrl);
-    // Non-vacuity: four files a tree, six trees and two.
-    expect(filesOf('generated')).toHaveLength(24);
+    // Non-vacuity: four files a tree, four trees and two.
+    expect(filesOf('generated')).toHaveLength(16);
     expect(filesOf('scanned')).toHaveLength(8);
     const conifers = realisticVegetation('generated')['tree-conifer'].map((model) =>
       realisticUrl(model.file),
@@ -1633,9 +1633,9 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
 
     // A generated tree's file is as load-bearing as any other: without one
     // strip's normals there is no world, never one with a tree missing.
-    const outcome = await loadRealisticWorld(loaders('generated_oak_b-impostor-normals'));
+    const outcome = await loadRealisticWorld(loaders('generated_oak_c-impostor-normals'));
     expect(outcome).toMatchObject({ loaded: false });
-    expect(outcome.loaded ? '' : outcome.detail).toMatch(/generated_oak_b-impostor-normals/);
+    expect(outcome.loaded ? '' : outcome.detail).toMatch(/generated_oak_c-impostor-normals/);
   });
 
   it('loads none of it when one file fails, and says why — never half a world', async () => {

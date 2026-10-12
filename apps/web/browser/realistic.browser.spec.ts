@@ -181,7 +181,11 @@ test.describe('the realistic page’s tree lever — #1283', { tag: NIGHTLY }, (
       scanned.result.lastFrame.triangles,
     );
     // Both inside #639's ceiling, which did not move; and less texture memory
-    // held, with six trees for two.
+    // held, with four trees for two. Measured on 2026-10-12: 33 calls with
+    // the generated trees in seven runs of seven, 31 with the scans and 32
+    // once. ⚠️ With THREE seeds a species, as #1283 was first written, this
+    // was 35 of 35 on a Mac and 34 on the CI runner, on a frame whose count
+    // moves by one between runs — which is why there are two (#1289's review).
     expect(generated.result.drawCalls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(scanned.result.drawCalls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(generated.page.textures?.bytes ?? Infinity).toBeLessThan(

@@ -339,9 +339,9 @@ export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = ['generated', 'sca
  * Measured in the browser gate on 2026-10-12, same route position, same
  * camera (`realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated trees,
  * measured", has the table): the generated trees submit fewer triangles a
- * frame, ask for less texture memory, and are six shapes of two species where
- * the scans are two trees — and they make MORE draw calls, a call a shape,
- * inside a ceiling that did not move and that the owner's page now sits at.
+ * frame, ask for less texture memory, and are four shapes of two species where
+ * the scans are two trees — and they make two MORE draw calls, a call a shape,
+ * inside a ceiling that did not move and that the owner's page is two under.
  * On the page's own pictures they read as trees in leaf where the scans read
  * as bare limbs; that is this change's author looking at two screenshots, not
  * the owner looking at a tablet. What none of it can say is how they look
@@ -371,8 +371,9 @@ const tree = (name: string): RealisticModel => ({
 /**
  * The broadleaf trees of each set, in variant order.
  *
- * - `generated` — #1283: three oaks and three hornbeams, each a seed of its
- *   species (`tools/realistic/generated-trees.ts`), interleaved so that two
+ * - `generated` — #1283: two oaks and two hornbeams, each a seed of its
+ *   species (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`, which
+ *   says why two and why there is no `_b`), interleaved so that two
  *   neighbouring variant slots are different species as well as different
  *   seeds.
  * - `scanned` — the two Poly Haven photoscans every realistic world drew until
@@ -382,8 +383,6 @@ export const REALISTIC_BROADLEAVES: Readonly<Record<RealisticTrees, readonly Rea
   generated: [
     tree('generated_oak_a'),
     tree('generated_hornbeam_a'),
-    tree('generated_oak_b'),
-    tree('generated_hornbeam_b'),
     tree('generated_oak_c'),
     tree('generated_hornbeam_c'),
   ],

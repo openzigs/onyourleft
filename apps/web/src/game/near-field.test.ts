@@ -173,12 +173,12 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
     }
     // Every committed natural model, so a table that forgot one is a red count
     // rather than a shape nobody checked: the stylised kit's, and the realistic
-    // world's six generated broadleaves, two conifers, two shrubs and a rock,
+    // world's four generated broadleaves, two conifers, two shrubs and a rock,
     // with the two scanned broadleaves.
     const stylisedFiles = readdirSync(STYLISED_MODELS).filter(
       (file) => file.endsWith('.glb') && !file.startsWith('building-'),
     ).length;
-    expect(checked).toBe(stylisedFiles + 13);
+    expect(checked).toBe(stylisedFiles + 11);
   });
 
   it('holds the stylised house, fitted and centred, as a box turned with the item', () => {

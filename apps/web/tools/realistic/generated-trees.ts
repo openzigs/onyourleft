@@ -406,10 +406,28 @@ export function speciesOf(tree: GeneratedTree): GeneratedSpecies {
 }
 
 /**
- * Every generated tree, in the order the pipeline makes them. Three seeds a
+ * Every generated tree, in the order the pipeline makes them. Two seeds a
  * species, so the trees along a road differ in SHAPE (#621 already varies
  * their size and tint): the seed is the only number that differs between two
  * trees of a species, and it moves every limb.
+ *
+ * ⚠️ **Two, not three, and the names skip `_b` on purpose.** A tree is a draw
+ * call a level a SHAPE, and three seeds a species put the owner's page at
+ * `REALISTIC_WOODED_DRAW_CALLS` exactly (#1289's review). Three were made and
+ * the two of each species that differ most in silhouette were kept: each
+ * full level drawn from eight sides onto a 0.125 m grid, and two seeds
+ * compared by the share of covered cells they have in common, the same side
+ * to the same side —
+ *
+ * | Species | a and b | a and c | b and c |
+ * |---|--:|--:|--:|
+ * | oak (seeds 1283, 2566, 3849) | 0.701 | **0.689** | 0.727 |
+ * | hornbeam (seeds 617, 621, 639) | 0.766 | **0.699** | 0.763 |
+ *
+ * — so `a` and `c` of both, the pair with least in common, and averaged over
+ * the eight turns one may stand at to the other it is the same pair (0.696
+ * and 0.699). They keep their names and their seeds, so the files kept are
+ * byte for byte the ones first committed; seeds 2566 and 621 make no tree.
  */
 export const GENERATED_TREES: readonly GeneratedTree[] = [
   {
@@ -419,15 +437,6 @@ export const GENERATED_TREES: readonly GeneratedTree[] = [
     geometry: {
       full: 'fbfb235a6127720c1862f52dddd1b038664da820546c9385d5238f6ad9f95d12',
       middle: 'a289191e6c64d96c0d1148377e619d5c6e1669c6363e6c6c7ddd8d3b80965b01',
-    },
-  },
-  {
-    name: 'generated_oak_b',
-    species: 'oak',
-    seed: 2566,
-    geometry: {
-      full: '83ee9f429d46dfa27f9e9654c396103b7edcf4867b695d51f3532803d9497899',
-      middle: 'ee37b838d2ceadb66d07b6bbe95cfbd15689d7c1e1cba955fe0781f1f14e604a',
     },
   },
   {
@@ -446,15 +455,6 @@ export const GENERATED_TREES: readonly GeneratedTree[] = [
     geometry: {
       full: '6eafa3703a8a3229b8fc2be1cebb108536ea3abb24b6957b3e3be750dbde6062',
       middle: 'c746479543729d4a231a45423c685d6017694e0778fb008b0519af1f7c64a854',
-    },
-  },
-  {
-    name: 'generated_hornbeam_b',
-    species: 'hornbeam',
-    seed: 621,
-    geometry: {
-      full: '2a0446d6ec73e5d0c0e8ea389b6eb83417ee21eee94d7208307cccf4b7c08472',
-      middle: '5d949b0f9b2860c04a513eca7269fb9178a9c50337484f204a854ed0097c2e8e',
     },
   },
   {
@@ -786,8 +786,71 @@ export interface RunPaths {
 }
 
 /**
+ * Every number of a run that is this file's and NOT the geometry's: what
+ * `blender/process_generated_tree.py` reads beside the level it imports — the
+ * sprig's leaves, its atlas's grid and turn, its tone, the sizes of every map
+ * and of the impostor's frames, and whether the level has maps at all.
+ *
+ * ⚠️ **{@link geometryDigest} sees none of these.** The generator does not
+ * read them, so a shoot's heading can be edited and every tree's geometry is
+ * the recorded one — while the leaf card Blender would draw is not the one
+ * committed (#1289's review, which did exactly that and saw nothing go red).
+ * {@link runNumbersDigest} is therefore part of a tree's recorded input
+ * (`sources.ts` §`generatedInputDigest`), and {@link runPlan} is built from
+ * this and nothing else of the species, so a number Blender is told cannot be
+ * one the record leaves out; `generated-trees.test.ts` holds that.
+ */
+export interface RunNumbers {
+  readonly name: string;
+  readonly level: GeneratedLevel;
+  /** A middle level wears the full level's maps at runtime (#617). */
+  readonly maps: boolean;
+  readonly impostor: GeneratedSpecies['impostor'] | null;
+  readonly bark: { readonly pixels: number };
+  readonly sprig: Pick<
+    GeneratedSpecies['sprig'],
+    'grid' | 'atlasTurn' | 'tone' | 'leaves' | 'pixels' | 'normalPixels'
+  >;
+}
+
+/** @see RunNumbers. `species` is the tree's own unless a test hands it another. */
+export function runNumbers(
+  tree: GeneratedTree,
+  level: GeneratedLevel,
+  species: GeneratedSpecies = speciesOf(tree),
+): RunNumbers {
+  return {
+    name: tree.name,
+    level,
+    maps: level === 'full',
+    impostor: level === 'full' ? species.impostor : null,
+    bark: { pixels: species.bark.pixels },
+    sprig: {
+      grid: species.sprig.grid,
+      atlasTurn: species.sprig.atlasTurn,
+      tone: species.sprig.tone,
+      leaves: species.sprig.leaves,
+      pixels: species.sprig.pixels,
+      normalPixels: species.sprig.normalPixels,
+    },
+  };
+}
+
+/** SHA-256 of {@link runNumbers} as JSON: the half of a run's plan no geometry digest covers. */
+export function runNumbersDigest(
+  tree: GeneratedTree,
+  level: GeneratedLevel,
+  species: GeneratedSpecies = speciesOf(tree),
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify(runNumbers(tree, level, species)))
+    .digest('hex');
+}
+
+/**
  * What `blender/process_generated_tree.py` is told about one level of one
- * tree: every number is this file's, and only the paths are the machine's.
+ * tree: {@link runNumbers}, what the geometry measures, and the machine's
+ * paths. Every number is this file's, and only the paths are the machine's.
  */
 export function runPlan(
   tree: GeneratedTree,
@@ -796,27 +859,21 @@ export function runPlan(
   size: TreeSize,
   paths: RunPaths,
 ): Readonly<Record<string, unknown>> {
-  const species = speciesOf(tree);
+  const numbers = runNumbers(tree, level);
   return {
-    name: tree.name,
-    level,
-    // A middle level wears the full level's maps at runtime (#617).
-    maps: level === 'full',
+    name: numbers.name,
+    level: numbers.level,
+    maps: numbers.maps,
     triangles: trianglesOf(geometry),
     heightMetres: size.heightMetres,
     widthMetres: size.widthMetres,
-    impostor: level === 'full' ? species.impostor : null,
-    bark: { colour: paths.barkColour, normal: paths.barkNormal, pixels: species.bark.pixels },
+    impostor: numbers.impostor,
+    bark: { colour: paths.barkColour, normal: paths.barkNormal, ...numbers.bark },
     sprig: {
       colour: paths.leafColour,
       opacity: paths.leafOpacity,
       normal: paths.leafNormal,
-      grid: species.sprig.grid,
-      atlasTurn: species.sprig.atlasTurn,
-      tone: species.sprig.tone,
-      leaves: species.sprig.leaves,
-      pixels: species.sprig.pixels,
-      normalPixels: species.sprig.normalPixels,
+      ...numbers.sprig,
     },
   };
 }

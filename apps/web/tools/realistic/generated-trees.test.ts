@@ -10,7 +10,9 @@
  * D-1 makes that a condition of committing a tree, to be measured by the
  * adopting issue."* Measured on 2026-10-12, EZ-Tree 1.1.0 on three 0.185.1,
  * every tree at both levels, by `geometryDigest` — the float32 bytes Blender
- * is handed:
+ * is handed. Twelve digests, because three seeds a species were measured; the
+ * eight of the two seeds kept (`generated-trees.ts` §`GENERATED_TREES`) are
+ * among them and did not move:
  *
  * | Machine | Node | Result |
  * |---|---|---|
@@ -67,6 +69,7 @@ import {
   geometryDigest,
   levelGltf,
   levelPlan,
+  runNumbers,
   runPlan,
   speciesOf,
   sprigLeaves,
@@ -166,8 +169,22 @@ describe('the generator is a pinned tool — ADR 0049 D-1, ADR 0026 D-5', () => 
     await expect(loadEzTree('1.1.1')).rejects.toThrow(/is 1\.1\.1/);
   });
 
-  it('is imported by one pipeline module, and by nothing the product or its harness builds', () => {
-    const importers: string[] = [];
+  /**
+   * Where the generator's package is named — #1289's review. Under `tools/`
+   * it is loaded by one module, so every form of loading it is looked for;
+   * under `src/` and `browser/`, which are what the product and its harness
+   * build, nothing has a reason to NAME it at all, so the bare name in any
+   * file is a finding. The first guard read `from '…'` and `import('…')` only,
+   * and a side-effect `import '…'` or a double-quoted `import("…")` under
+   * `src/` went past it.
+   */
+  const loadsGenerator = (source: string): boolean =>
+    new RegExp(
+      `(?:\\bimport|\\bfrom|\\brequire)\\s*\\(?\\s*['"\`]${EZ_TREE_PACKAGE.replace('/', '\\/')}['"\`]`,
+    ).test(source);
+  const namesGenerator = (source: string): boolean => source.includes(EZ_TREE_PACKAGE);
+  const filesWhere = (roots: readonly string[], found: (source: string) => boolean): string[] => {
+    const files: string[] = [];
     const walk = (directory: string): void => {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'build') {
@@ -175,16 +192,52 @@ describe('the generator is a pinned tool — ADR 0049 D-1, ADR 0026 D-5', () => 
         }
         const path = join(directory, entry.name);
         if (entry.isDirectory()) walk(path);
-        else if (/\.(?:[cm]?[jt]sx?)$/.test(entry.name)) {
-          const source = readFileSync(path, 'utf8');
-          if (/from '@dgreenheck\/ez-tree'|import\('@dgreenheck\/ez-tree'\)/.test(source)) {
-            importers.push(path.slice(WEB.length));
-          }
-        }
+        // Every file, whatever its extension: a package can be named in an
+        // HTML page's script, a worker or a JSON import map as well.
+        else if (found(readFileSync(path, 'latin1'))) files.push(path.slice(WEB.length));
       }
     };
-    for (const root of ['src', 'browser', 'tools']) walk(join(WEB, root));
-    expect(importers).toEqual(['tools/realistic/ez-tree.ts']);
+    for (const root of roots) walk(join(WEB, root));
+    return files;
+  };
+
+  it('is imported by one pipeline module, and named by nothing the product or its harness builds', () => {
+    expect(filesWhere(['tools'], loadsGenerator)).toEqual(['tools/realistic/ez-tree.ts']);
+    expect(filesWhere(['src', 'browser'], namesGenerator)).toEqual([]);
+    // Non-vacuity: the walk reads these trees, and it reads more than scripts.
+    expect(filesWhere(['src'], (source) => source.includes('three')).length).toBeGreaterThan(10);
+    expect(
+      filesWhere(['browser'], (source) => source.includes('<!doctype html>')).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('sees every form of import, the two the first guard missed among them', () => {
+    // Written from the constant, so this file names no import of its own.
+    const name = EZ_TREE_PACKAGE;
+    const forms = [
+      `import { Tree } from '${name}';`,
+      `import { Tree } from "${name}";`,
+      `export * from '${name}';`,
+      `const loaded = await import('${name}');`,
+      // #1289's review: a side-effect import has no `from`…
+      `import '${name}';`,
+      `import "${name}";`,
+      // …and the dynamic form was matched in single quotes only.
+      `const loaded = await import("${name}");`,
+      `const loaded = await import(\`${name}\`);`,
+      `const loaded = await import(\n  '${name}'\n);`,
+      `const { Tree } = require('${name}');`,
+    ];
+    for (const form of forms) {
+      expect(loadsGenerator(form), form).toBe(true);
+      expect(namesGenerator(form), form).toBe(true);
+    }
+    // A sentence about the generator loads nothing; under `src/` its package's
+    // name is still refused, and its repository's address is not that name.
+    expect(loadsGenerator(`// ${name} is pinned in sources.ts`)).toBe(false);
+    expect(namesGenerator(`// ${name} is pinned in sources.ts`)).toBe(true);
+    expect(namesGenerator('https://github.com/dgreenheck/ez-tree')).toBe(false);
+    expect(loadsGenerator("import { Tree } from '@dgreenheck/ez-tree-fork';")).toBe(false);
   });
 
   it('takes none of the generator’s own images: each one it asks for at load is answered with nothing', () => {
@@ -264,11 +317,12 @@ describe('every tree is reproducible from its committed numbers — ADR 0049 D-1
 });
 
 describe('two species, each several seeded shapes — #1283, #621', () => {
-  it('names at least two species, and three trees of each, every one a seed of its own', () => {
+  it('names at least two species, and two trees of each, every one a seed of its own', () => {
     expect(GENERATED_SPECIES.length).toBeGreaterThanOrEqual(2);
     for (const species of GENERATED_SPECIES) {
       const trees = GENERATED_TREES.filter((tree) => tree.species === species.id);
-      expect(trees.length, species.id).toBeGreaterThanOrEqual(3);
+      // Two, exactly: a third seed is three more draw calls a wood (#1289's review).
+      expect(trees.length, species.id).toBe(2);
       expect(new Set(trees.map((tree) => tree.seed)).size, species.id).toBe(trees.length);
     }
     expect(new Set(GENERATED_TREES.map((tree) => tree.name)).size).toBe(GENERATED_TREES.length);
@@ -657,6 +711,49 @@ describe('what Blender is handed — the level as glTF, and its plan', () => {
       expect(bounds?.max?.[0]).toBe(Math.max(...xs));
       expect(bounds?.count).toBe(part.positions.length / 3);
     }
+  });
+
+  it('tells a run nothing of the species but the numbers its recorded input digests — #1289’s review', () => {
+    // `sources.ts` §`generatedInputDigest` records `runNumbers`; this holds
+    // that a plan is that, what the geometry measures and the machine's
+    // paths, so a number added to the plan alone is a red test here rather
+    // than a parameter that can be edited beside stale files.
+    for (const tree of GENERATED_TREES) {
+      const size = treeSize(level(tree, 'full'));
+      for (const which of ['full', 'middle'] as const) {
+        const geometry = level(tree, which);
+        const plan = runPlan(tree, which, geometry, size, PATHS) as Record<string, unknown>;
+        const { triangles, heightMetres, widthMetres, bark, sprig, ...rest } = plan;
+        expect({ triangles, heightMetres, widthMetres }).toEqual({
+          triangles: trianglesOf(geometry),
+          ...size,
+        });
+        const {
+          colour: barkColour,
+          normal: barkNormal,
+          ...barkNumbers
+        } = bark as Record<string, unknown>;
+        const { colour, opacity, normal, ...sprigNumbers } = sprig as Record<string, unknown>;
+        expect({
+          barkColour,
+          barkNormal,
+          leafColour: colour,
+          leafOpacity: opacity,
+          leafNormal: normal,
+        }).toEqual(PATHS);
+        expect({ ...rest, bark: barkNumbers, sprig: sprigNumbers }).toEqual(
+          runNumbers(tree, which),
+        );
+      }
+    }
+    // Non-vacuity: the numbers Blender alone reads are in it.
+    const [first] = GENERATED_TREES;
+    if (first === undefined) throw new Error('there are generated trees');
+    const numbers = runNumbers(first, 'full');
+    expect(numbers.sprig.leaves.length).toBeGreaterThan(10);
+    expect(Object.keys(numbers.sprig).sort()).toEqual(
+      ['atlasTurn', 'grid', 'leaves', 'normalPixels', 'pixels', 'tone'].sort(),
+    );
   });
 
   it('asks a full level for its maps and its impostor, and a middle level for neither', () => {

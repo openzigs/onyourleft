@@ -61,8 +61,8 @@ describe('the far band’s light and the breeze — #630', () => {
         }
       }
     }
-    // Non-vacuity: six generated broadleaves, two scanned, and two conifers in each set.
-    expect(strips).toBe(12);
+    // Non-vacuity: four generated broadleaves, two scanned, and two conifers in each set.
+    expect(strips).toBe(10);
   });
 
   it('sways with the ride’s clock, is still when the clock is, and no two phases move alike', () => {

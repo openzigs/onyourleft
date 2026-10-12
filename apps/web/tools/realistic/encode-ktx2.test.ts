@@ -151,9 +151,9 @@ describe('a GLB with its maps encoded as KTX2 — #618', () => {
         expect(texture.extensions?.[BASISU_EXTENSION], file).toBeDefined();
       }
     }
-    // Four scanned trees, two shrubs and the rock — and since #1283 the six
+    // Four scanned trees, two shrubs and the rock — and since #1283 the four
     // generated trees' full levels. A middle level and the rider embed none.
-    expect(withMaps).toBe(13);
+    expect(withMaps).toBe(11);
   });
 });
 

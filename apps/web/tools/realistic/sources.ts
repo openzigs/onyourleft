@@ -86,6 +86,7 @@ import {
 import {
   GENERATED_SPECIES,
   GENERATED_TREES,
+  runNumbersDigest,
   speciesOf,
   type GeneratedLevel,
   type GeneratedSpecies,
@@ -1670,20 +1671,37 @@ function generatedMiddle(tree: GeneratedTree): OutputSpec {
  * One digest for everything a generated tree was made from — #1283, ADR 0049
  * D-1: {@link inputDigest} over the geometry its seed and parameters make at
  * each level (`generated-trees.ts` §`geometryDigest`, named
- * `generated-trees.ts#<tree>.<level>`) and every locked file of the two
- * ambientCG assets it wears, each under its source's id. So a row moves when a
- * parameter, the seed, the generator, or either download does.
+ * `generated-trees.ts#<tree>.<level>`), the numbers of each level's run that
+ * only Blender reads (§`runNumbersDigest`, named `…#<tree>.<level>.run`), and
+ * every locked file of the two ambientCG assets it wears, each under its
+ * source's id. So a row moves when a parameter, the seed, the generator, or
+ * either download does.
+ *
+ * ⚠️ **The `.run` lines are what make "a parameter" true.** The geometry
+ * moves only for a number the GENERATOR reads. The sprig's shoots, its
+ * atlas's grid and turn, its tone and every map's size are read by Blender
+ * alone, and until #1289's review one of them could be edited with every
+ * test green and stale files committed — CI has no Blender to run `--check`.
+ * `species` is the tree's own unless a test hands it another.
  */
-export function generatedInputDigest(tree: GeneratedTree, lock: InputLock): string {
-  const species = speciesOf(tree);
+export function generatedInputDigest(
+  tree: GeneratedTree,
+  lock: InputLock,
+  species: GeneratedSpecies = speciesOf(tree),
+): string {
   const locked = (id: string): LockedSource => {
     const source = lock.sources.find((each) => each.id === id);
     if (source === undefined) throw new Error(`${tree.name}: ${id} is not in the lock`);
     return source;
   };
   return inputDigest([
-    { path: `generated-trees.ts#${tree.name}.full`, sha256: tree.geometry.full },
-    { path: `generated-trees.ts#${tree.name}.middle`, sha256: tree.geometry.middle },
+    ...(['full', 'middle'] as const).flatMap((level) => [
+      { path: `generated-trees.ts#${tree.name}.${level}`, sha256: tree.geometry[level] },
+      {
+        path: `generated-trees.ts#${tree.name}.${level}.run`,
+        sha256: runNumbersDigest(tree, level, species),
+      },
+    ]),
     ...[species.bark.source, species.sprig.source].flatMap((id) =>
       locked(id).files.map((file) => ({ path: `${id}/${file.path}`, sha256: file.sha256 })),
     ),

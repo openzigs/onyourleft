@@ -700,9 +700,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(generated).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
     expect(scanned).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
     expect(REALISTIC_TEXTURE_MEMORY_BYTES).toBe(160 * 2 ** 20);
-    // Six trees for two, and still less: smaller maps and smaller strips.
+    // Four trees for two, and still less: smaller maps and smaller strips.
     expect(generated).toBeLessThan(scanned);
-    // Non-vacuity: the six generated trees are read, each with four maps and two strips.
+    // Non-vacuity: the four generated trees are read, each with four maps and two strips.
     const generatedTextures = textures('generated').length - textures('scanned').length;
     expect(generatedTextures).toBe(
       REALISTIC_BROADLEAVES.generated.length * 6 -

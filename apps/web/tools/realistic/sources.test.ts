@@ -48,7 +48,13 @@ import {
   type Ktx2Step,
 } from './sources';
 import { sameFiles } from './fetch-assets';
-import { GENERATED_SPECIES, GENERATED_TREES, speciesOf } from './generated-trees';
+import {
+  GENERATED_SPECIES,
+  GENERATED_TREES,
+  runNumbersDigest,
+  speciesOf,
+  type GeneratedSpecies,
+} from './generated-trees';
 import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
@@ -863,6 +869,15 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
       inputDigest([
         { path: `generated-trees.ts#${tree.name}.full`, sha256: tree.geometry.full },
         { path: `generated-trees.ts#${tree.name}.middle`, sha256: tree.geometry.middle },
+        // #1289's review: and what only Blender reads of each level's run.
+        {
+          path: `generated-trees.ts#${tree.name}.full.run`,
+          sha256: runNumbersDigest(tree, 'full'),
+        },
+        {
+          path: `generated-trees.ts#${tree.name}.middle.run`,
+          sha256: runNumbersDigest(tree, 'middle'),
+        },
         { path: `${species.bark.source}/${species.bark.source}.zip`, sha256: 'a'.repeat(64) },
         { path: `${species.sprig.source}/${species.sprig.source}.zip`, sha256: 'b'.repeat(64) },
       ]),
@@ -892,5 +907,56 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
     ).not.toBe(digest);
     // A lock that does not hold what the tree wears is refused, not digested short.
     expect(() => generatedInputDigest(tree, { sources: [] })).toThrow(/is not in the lock/);
+  });
+
+  it('moves a tree’s input with every number only Blender reads — #1289’s review', () => {
+    // The reviewer turned one shoot of the oak's sprig from 48° to 30° and
+    // every test stayed green, although the shipped leaf card is drawn from
+    // it: the generator reads none of these, so no geometry digest moves.
+    const lock = lockOf((id) => (id === species.bark.source ? 'a' : 'b').repeat(64));
+    const digest = generatedInputDigest(tree, lock);
+    const { sprig } = species;
+    const firstLeaf = sprig.leaves[0];
+    if (firstLeaf === undefined) throw new Error('a sprig has leaves');
+    const turned = [{ ...firstLeaf, turn: firstLeaf.turn + 1 }, ...sprig.leaves.slice(1)];
+    const edits: Readonly<Record<string, GeneratedSpecies>> = {
+      'a leaf’s turn, which a shoot’s heading sets': {
+        ...species,
+        sprig: { ...sprig, leaves: turned },
+      },
+      'a leaf fewer': { ...species, sprig: { ...sprig, leaves: sprig.leaves.slice(1) } },
+      'the atlas’s grid': { ...species, sprig: { ...sprig, grid: [sprig.grid[1], sprig.grid[0]] } },
+      'the atlas’s turn': { ...species, sprig: { ...sprig, atlasTurn: sprig.atlasTurn + 90 } },
+      'the tone': { ...species, sprig: { ...sprig, tone: [sprig.tone[0], sprig.tone[1], 0.51] } },
+      'the card’s pixels': { ...species, sprig: { ...sprig, pixels: sprig.pixels * 2 } },
+      'the card’s normal pixels': {
+        ...species,
+        sprig: { ...sprig, normalPixels: sprig.normalPixels * 2 },
+      },
+      'the bark’s pixels': {
+        ...species,
+        bark: { ...species.bark, pixels: species.bark.pixels * 2 },
+      },
+      'the impostor’s frame': {
+        ...species,
+        impostor: { ...species.impostor, frame: [species.impostor.frame[0] + 16, 256] },
+      },
+      'the impostor’s normal frame': {
+        ...species,
+        impostor: { ...species.impostor, normalFrame: [species.impostor.normalFrame[0] + 16, 96] },
+      },
+    };
+    const seen = new Set([digest]);
+    for (const [what, edited] of Object.entries(edits)) {
+      const moved = generatedInputDigest(tree, lock, edited);
+      expect(moved, what).not.toBe(digest);
+      seen.add(moved);
+    }
+    // Each its own digest: none of the ten is read as another.
+    expect(seen.size).toBe(Object.keys(edits).length + 1);
+    // And the species handed in unchanged is the tree's own.
+    expect(generatedInputDigest(tree, lock, species)).toBe(digest);
+    // A full level and a middle level are told different things, and both are recorded.
+    expect(runNumbersDigest(tree, 'full')).not.toBe(runNumbersDigest(tree, 'middle'));
   });
 });

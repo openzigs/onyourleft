@@ -822,6 +822,11 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * keeps, and not raised here. The `?realistic` load beside it was 149 s of its
  * 165 s on that run, where `main` is 146 s to 148 s: six broadleaf shapes for
  * two cost it a second or two, and it was at 90 % of its budget before them.
+ *
+ * ⚠️ **Every figure of #1283's above was measured with three seeds a species,
+ * six shapes.** #1289's review took one of each out again, for the draw
+ * calls, so a load reads eight fewer files than those runs did; neither
+ * budget was raised, and re-measuring both on the 7763 is #1293's.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 
@@ -4499,7 +4504,9 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
       GENERATED_WOODED_TRIANGLES_SAVED,
     );
     // More shapes are more calls — a call a level a variant — and both sets
-    // stay inside the one ceiling, which did not move.
+    // stay inside the one ceiling, which did not move: 29 with the four
+    // generated shapes and 27 with the two scans, 2026-10-12 (32 with the six
+    // shapes #1283 first made).
     expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(measured.scanned.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
