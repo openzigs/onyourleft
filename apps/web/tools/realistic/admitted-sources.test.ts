@@ -25,6 +25,8 @@ import {
   admission,
   ambientCgArchive,
   BARRED_SOURCES,
+  GENERATED_TREE_TEXTURES,
+  GENERATED_TREE_WEARS,
   licenceVerdict,
   SOURCES,
   type AssetSource,
@@ -370,5 +372,85 @@ describe('ADR 0026 points at the list that replaced its own — ADR 0013', () =>
     expect(old).toContain(
       '| **MakeHuman**, exports only | `CC0-1.0` for exports (#430, read 2026-09-20) |',
     );
+  });
+});
+
+describe('what a generated tree may wear — ADR 0049 D-1 and its amendment of 2026-10-12, #1294', () => {
+  const amendments = ADR.slice(ADR.indexOf('\n## Amendments\n'));
+  const entry = amendments.split('\n- **').find((text) => text.startsWith('2026-10-12**')) ?? '';
+
+  it('records the owner’s ruling as a dated amendment, below an unedited D-1', () => {
+    expect(ADR).toContain('\n## Amendments\n');
+    expect(entry).toContain('needles and bark come from Poly Haven');
+    expect(entry).toContain('D-1');
+    expect(entry).toContain('#1294');
+    // D-1's own sentences are still there, word for word: the body is never edited.
+    const body = ADR.slice(0, ADR.indexOf('\n## Amendments\n'));
+    expect(body).toContain(
+      '- **Bark and leaves come from ambientCG**, as the recommendation says.',
+    );
+    expect(body).toContain('repository are **not** taken.');
+    // And the ruling added no source: D-10's In table names what it named.
+    expect(rowsAfter('**In**').map(([name]) => name)).toEqual(
+      ADMITTED_SOURCES.map((source) => plain(source.name)),
+    );
+  });
+
+  it('lets a generated tree wear ambientCG’s and Poly Haven’s, the two the ADR now names', () => {
+    expect(GENERATED_TREE_WEARS).toEqual(['ambientCG', 'Poly Haven']);
+    for (const name of GENERATED_TREE_WEARS) {
+      // Each is a row of D-10's In table, of downloaded files, and CC0.
+      const row = ADMITTED_SOURCES.find((source) => source.name === name);
+      expect(row, name).toMatchObject({ kind: 'files', licence: 'CC0-1.0' });
+      // And each is named by the decision that lets a tree wear it.
+      expect(name === 'ambientCG' ? ADR : entry, name).toContain(name);
+    }
+  });
+
+  it('reads every asset a generated tree wears from one of those two, by its own page and files', () => {
+    const lock = JSON.parse(
+      readFileSync(join(REPOSITORY, 'apps/web/tools/realistic/inputs.lock.json'), 'utf8'),
+    ) as { sources: { id: string; licencePage: string; files: { url: string }[] }[] };
+    const from = new Set<string>();
+    expect(GENERATED_TREE_TEXTURES.length).toBeGreaterThan(0);
+    for (const texture of GENERATED_TREE_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      const locked = lock.sources.find((each) => each.id === texture.id);
+      if (source === undefined || locked === undefined) {
+        throw new Error(`${texture.id} is not a source the lock records`);
+      }
+      const page = admission(source.licencePage, 'licence');
+      if (!page.admitted) throw new Error(page.reason);
+      expect(GENERATED_TREE_WEARS, texture.id).toContain(page.source.name);
+      expect(page.source.name, texture.id).toBe(
+        texture.from === 'polyhaven' ? 'Poly Haven' : 'ambientCG',
+      );
+      from.add(page.source.name);
+      // Every file the lock pins for it is that same source's, by address.
+      expect(locked.files.length, texture.id).toBeGreaterThan(0);
+      for (const file of locked.files) {
+        const verdict = admission(file.url.split('#')[0] ?? '', 'file');
+        if (!verdict.admitted) throw new Error(verdict.reason);
+        expect(verdict.source.name, file.url).toBe(page.source.name);
+      }
+      // …and it goes through the one door: the same licence check as any source.
+      expect(licenceVerdict(source, 'no licence is stated here'), texture.id).toMatchObject({
+        kept: false,
+      });
+    }
+    // Non-vacuity: both are worn today — the broadleaves' and the fir's.
+    expect([...from].sort()).toEqual([...GENERATED_TREE_WEARS].sort());
+  });
+
+  it('takes nothing a tree wears from the generator’s own repository', () => {
+    for (const texture of GENERATED_TREE_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      expect(source?.licencePage, texture.id).not.toContain('dgreenheck');
+    }
+    expect(
+      admission('https://github.com/dgreenheck/ez-tree/raw/main/src/lib/assets/bark.png'),
+    ).toMatchObject({
+      admitted: false,
+    });
   });
 });

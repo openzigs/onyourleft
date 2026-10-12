@@ -4762,7 +4762,8 @@ export interface TreeLevelMeasurement {
   readonly foliage: FoliageMeasurement;
   /**
    * #1283: the same wooded frame from a world loaded with the SCANNED
-   * broadleaves (`three-renderer.ts` §`setRealisticTrees`) — the trees every
+   * trees — since #1294 the firs' scans as well as the broadleaves'
+   * (`three-renderer.ts` §`setRealisticTrees`) — the trees every
    * measurement above was first taken on — at the same route position, with
    * the same camera: its triangles and draw calls as the product's levels draw
    * it. Everything above is the GENERATED trees', which is what a ride draws.
@@ -8515,7 +8516,7 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     setRealisticMaterialsMerged(true);
   }
   phaseEnds('trees: unmerged control');
-  // #1283: the scans the generated broadleaves replaced, on the same frame.
+  // #1283, #1294: the scans the generated trees replaced, on the same frame.
   // LAST, because it replaces the loaded world and nothing after it reads one;
   // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644),
   // and on ONE view: a view is the dearest thing on this load.

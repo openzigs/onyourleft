@@ -34,6 +34,23 @@
  * are not committed", enforced rather than promised. The pipeline's Node is
  * the repository's (`.nvmrc`).
  *
+ * ## The evergreen, measured again — #1294
+ *
+ * The fir is the generator's other branch: `type: 'evergreen'` tapers, forks
+ * and shortens a bough by different arithmetic from a deciduous tree's, so
+ * the broadleaves' table says nothing of it. Measured on 2026-10-12, the two
+ * firs at both levels, four digests, by the same `geometryDigest`:
+ *
+ * | Machine | Node | Result |
+ * |---|---|---|
+ * | macOS, Darwin 25.6.0, arm64 (where the committed files were made) | 24.20.0 | the committed digests, all four |
+ * | the same | 22.22.3 | the same four |
+ * | the same | 20.14.0 | the same four |
+ * | CI, `ubuntu-latest`, x64 | the workflow's | this file, on #1294's own pull request and every one since: a different digest is a red build. The run is named in that pull request |
+ *
+ * As float32, like the broadleaves'; whether the doubles agree was not looked
+ * at again.
+ *
  * Blender does not run in CI, so the half that dresses a tree and renders its
  * impostor is `realistic:process --check`, run by hand, as for every other
  * derived file. What these tests hold beyond the digests is that the committed
@@ -48,7 +65,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { REALISTIC_BROADLEAVES } from '../../src/game/realistic-assets';
+import { REALISTIC_BROADLEAVES, REALISTIC_CONIFERS } from '../../src/game/realistic-assets';
 import { readGlb } from '../../src/game/model-bytes-testing';
 import { modelFacts } from '../../src/game/realistic-bytes-testing';
 import { REALISTIC_TRIANGLES } from '../../src/game/realistic-budget';
@@ -62,6 +79,7 @@ import {
   type EzTreeModule,
 } from './ez-tree';
 import {
+  cellCount,
   fullPlan,
   GENERATED_MATERIALS,
   GENERATED_SPECIES,
@@ -70,6 +88,7 @@ import {
   levelGltf,
   levelPlan,
   runNumbers,
+  runNumbersDigest,
   runPlan,
   speciesOf,
   sprigLeaves,
@@ -138,6 +157,10 @@ function cardLength(leaves: MeshPart, card: number, perCard: number): number {
   );
   return Math.hypot(...tip.map((value, axis) => value - (root[axis] ?? NaN)));
 }
+
+/** Whether a generated tree stands where the world draws a conifer — #1294. */
+const isConifer = (tree: GeneratedTree): boolean =>
+  REALISTIC_CONIFERS.generated.some((model) => model.name === tree.name);
 
 beforeAll(async () => {
   generator = await loadEzTree();
@@ -366,9 +389,81 @@ describe('two species, each several seeded shapes — #1283, #621', () => {
   });
 
   it('draws every generated tree a ride loads, and loads nothing generated that is not here', () => {
-    expect(REALISTIC_BROADLEAVES.generated.map((model) => model.name).sort()).toEqual(
+    // #1294: as a broadleaf or as a conifer, and none as both.
+    const drawn = [...REALISTIC_BROADLEAVES.generated, ...REALISTIC_CONIFERS.generated];
+    expect(drawn.map((model) => model.name).sort()).toEqual(
       GENERATED_TREES.map((tree) => tree.name).sort(),
     );
+    expect(new Set(drawn.map((model) => model.name)).size).toBe(drawn.length);
+    // A fir stands where a conifer is placed, and nothing else does.
+    expect(GENERATED_TREES.filter(isConifer).map((tree) => tree.species)).toEqual(['fir', 'fir']);
+  });
+});
+
+describe('the fir is the generator’s evergreen — #1294', () => {
+  const firs = (): GeneratedTree[] => GENERATED_TREES.filter((tree) => tree.species === 'fir');
+
+  it('is one stem whose boughs carry the sprig cards themselves', () => {
+    const species = GENERATED_SPECIES.find((each) => each.id === 'fir');
+    if (species === undefined) throw new Error('there is a fir');
+    expect(species.parameters.type).toBe('evergreen');
+    expect(species.parameters.levels).toBe(1);
+    // The broadleaves are not: the type is a species' own, never a default.
+    for (const each of GENERATED_SPECIES.filter((other) => other.id !== 'fir')) {
+      expect(each.parameters.type, each.id).toBe('deciduous');
+    }
+    for (const tree of firs()) {
+      const { leaves } = level(tree, 'full');
+      // One quad a card: a bough's cards, eleven to each of a hundred boughs.
+      const cards = leaves.positions.length / 3 / 4;
+      expect(cards, tree.name).toBe(
+        (species.parameters.children[0] ?? 0) * species.parameters.leaves.count,
+      );
+      expect(leaves.indices.length / 3, tree.name).toBe(cards * 2);
+    }
+  });
+
+  it('is a cone: much taller than wide, and its boughs shorten up the trunk', () => {
+    expect(firs()).toHaveLength(2);
+    for (const tree of firs()) {
+      const full = level(tree, 'full');
+      const size = treeSize(full);
+      expect(size.heightMetres / size.widthMetres, tree.name).toBeGreaterThan(1.5);
+      // The wood's furthest reach from the trunk, in each third of its height.
+      const reach = [0, 0, 0];
+      for (let at = 0; at < full.bark.positions.length; at += 3) {
+        const third = Math.min(
+          2,
+          Math.floor(((full.bark.positions[at + 1] ?? 0) / size.heightMetres) * 3),
+        );
+        reach[third] = Math.max(
+          reach[third] ?? 0,
+          Math.hypot(full.bark.positions[at] ?? 0, full.bark.positions[at + 2] ?? 0),
+        );
+      }
+      const [low, mid, high] = reach as [number, number, number];
+      expect(low, tree.name).toBeGreaterThan(mid);
+      expect(mid, tree.name).toBeGreaterThan(high);
+      // A deciduous tree of the same numbers would not taper: the lowest
+      // boughs reach more than twice as far as the highest.
+      expect(low, tree.name).toBeGreaterThan(high * 2);
+    }
+  });
+
+  it('keeps only the stem’s wood at the middle level, and one sprig card in three', () => {
+    for (const tree of firs()) {
+      const species = speciesOf(tree);
+      expect(species.middle.deepestWood).toBe(0);
+      const full = level(tree, 'full');
+      const middle = level(tree, 'middle');
+      // The stem alone: every sixth-sided ring of it, and no bough.
+      const [sides] = species.middle.segments;
+      const [sections] = species.parameters.sections;
+      expect(middle.bark.indices.length / 3, tree.name).toBe(sides * sections * 2);
+      expect(middle.leaves.indices.length, tree.name).toBe(
+        Math.ceil(full.leaves.indices.length / 6 / species.middle.leafEvery) * 6,
+      );
+    }
   });
 });
 
@@ -379,8 +474,10 @@ describe('each level is made to its budget, not cut down to it — #1283, #617',
       const middle = modelFacts(shipped(`${tree.name}-middle.glb`));
       expect(full.triangles, tree.name).toBe(trianglesOf(level(tree, 'full')));
       expect(middle.triangles, tree.name).toBe(trianglesOf(level(tree, 'middle')));
-      // Under the class's ceiling with room, which is the point of generating.
-      expect(full.triangles, tree.name).toBeLessThanOrEqual(REALISTIC_TRIANGLES['tree-broadleaf']);
+      // Under its class's ceiling with room, which is the point of generating.
+      expect(full.triangles, tree.name).toBeLessThanOrEqual(
+        REALISTIC_TRIANGLES[isConifer(tree) ? 'tree-conifer' : 'tree-broadleaf'],
+      );
       expect(middle.triangles, tree.name).toBeLessThanOrEqual(REALISTIC_TRIANGLES['tree-middle']);
       expect(middle.triangles, tree.name).toBeLessThan(full.triangles / 2);
     }
@@ -395,12 +492,14 @@ describe('each level is made to its budget, not cut down to it — #1283, #617',
         expect(extras['oyl_scan_width'], file).toBe(size.widthMetres);
       }
       // A small tree, in metres — about the 4.4 m the world draws a broadleaf
-      // at (`three-renderer.ts` §`sceneryFitMetres`), so the occlusion bake's
-      // reach is the reach it has on the tree as drawn. The generator's own
-      // units would make it sixty-odd metres.
+      // at, or the 7 m it draws a conifer at (`three-renderer.ts`
+      // §`sceneryFitMetres`), so the occlusion bake's reach is the reach it
+      // has on the tree as drawn. The generator's own units would make it
+      // sixty-odd metres.
       const extent = Math.max(size.heightMetres, size.widthMetres);
-      expect(extent, tree.name).toBeGreaterThan(3.3);
-      expect(extent, tree.name).toBeLessThan(5.5);
+      const [least, most] = isConifer(tree) ? [6.3, 7.1] : [3.3, 5.5];
+      expect(extent, tree.name).toBeGreaterThan(least);
+      expect(extent, tree.name).toBeLessThan(most);
     }
   });
 
@@ -754,6 +853,41 @@ describe('what Blender is handed — the level as glTF, and its plan', () => {
     expect(Object.keys(numbers.sprig).sort()).toEqual(
       ['atlasTurn', 'grid', 'leaves', 'normalPixels', 'pixels', 'tone'].sort(),
     );
+    // #1294: an atlas of rectangles hands Blender those, and no grid.
+    const fir = GENERATED_TREES.find((tree) => tree.species === 'fir');
+    if (fir === undefined) throw new Error('there is a generated fir');
+    const firSprig = runNumbers(fir, 'full').sprig;
+    const firAtlas = speciesOf(fir).sprig;
+    expect(Object.keys(firSprig).sort()).toEqual(
+      ['leaves', 'normalPixels', 'pixels', 'rects', 'tone'].sort(),
+    );
+    if (!('rects' in firSprig) || !('rects' in firAtlas)) {
+      throw new Error('the fir’s atlas is rectangles');
+    }
+    expect(firSprig.rects).toEqual(firAtlas.rects);
+    expect(firSprig.rects.length).toBeGreaterThan(0);
+  });
+
+  it('writes a grid’s numbers into a run’s digested JSON as #1283 wrote them — #1294', () => {
+    // Sixteen committed rows record a digest of this JSON. Adding rectangles
+    // must not move a byte of what a grid's species digests.
+    const [oak] = GENERATED_TREES;
+    if (oak === undefined) throw new Error('there are generated trees');
+    const species = speciesOf(oak);
+    if ('rects' in species.sprig) throw new Error('the oak’s atlas is a grid');
+    expect(JSON.stringify(runNumbers(oak, 'full').sprig)).toBe(
+      JSON.stringify({
+        grid: species.sprig.grid,
+        atlasTurn: species.sprig.atlasTurn,
+        tone: species.sprig.tone,
+        leaves: species.sprig.leaves,
+        pixels: species.sprig.pixels,
+        normalPixels: species.sprig.normalPixels,
+      }),
+    );
+    expect(runNumbersDigest(oak, 'full')).toBe(
+      'e614b8f694b20d934879f4a1d508181e0f4b205fc08f3de3aab17d7b47d672c3',
+    );
   });
 
   it('asks a full level for its maps and its impostor, and a middle level for neither', () => {
@@ -789,7 +923,9 @@ describe('what Blender is handed — the level as glTF, and its plan', () => {
         opacity: PATHS.leafOpacity,
         normal: PATHS.leafNormal,
         leaves: species.sprig.leaves,
-        grid: species.sprig.grid,
+        ...('rects' in species.sprig
+          ? { rects: species.sprig.rects }
+          : { grid: species.sprig.grid, atlasTurn: species.sprig.atlasTurn }),
       });
     }
   });
@@ -832,9 +968,14 @@ describe('a sprig’s leaves — arithmetic over its shoots', () => {
 
   it('keeps every species’ sprig on its card, and names only leaves its atlas holds', () => {
     for (const species of GENERATED_SPECIES) {
-      const cells = species.sprig.grid[0] * species.sprig.grid[1];
-      expect(species.sprig.leaves.length, species.id).toBeGreaterThan(8);
+      const cells = cellCount(species.sprig);
+      // A grid's cell is one leaf and a sprig is many; a rectangle is a whole
+      // sprig already (#1294), and a card is a few of those.
+      expect(species.sprig.leaves.length, species.id).toBeGreaterThan(
+        'rects' in species.sprig ? 0 : 8,
+      );
       for (const leaf of species.sprig.leaves) {
+        expect(Number.isInteger(leaf.cell) && leaf.cell >= 0, species.id).toBe(true);
         expect(leaf.cell, species.id).toBeLessThan(cells);
         for (const share of leaf.at) {
           expect(share, species.id).toBeGreaterThanOrEqual(0);
@@ -842,6 +983,49 @@ describe('a sprig’s leaves — arithmetic over its shoots', () => {
         }
       }
     }
+  });
+});
+
+describe('an atlas of rectangles — #1294', () => {
+  const fir = GENERATED_SPECIES.find((each) => each.id === 'fir');
+  if (fir === undefined || !('rects' in fir.sprig))
+    throw new Error('the fir’s atlas is rectangles');
+  const { rects } = fir.sprig;
+
+  it('counts a grid’s cells by its columns and rows, and rectangles one by one', () => {
+    expect(cellCount({ grid: [3, 2], atlasTurn: 0 })).toBe(6);
+    expect(cellCount({ rects })).toBe(rects.length);
+    expect(cellCount({ rects: [] })).toBe(0);
+  });
+
+  it('names each of the fir’s sprigs by a rectangle inside the 1K atlas, none over another', () => {
+    expect(rects.length).toBeGreaterThanOrEqual(2);
+    for (const rect of rects) {
+      for (const value of [rect.x, rect.y, rect.width, rect.height]) {
+        expect(Number.isInteger(value)).toBe(true);
+      }
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.y).toBeGreaterThanOrEqual(0);
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.height).toBeGreaterThan(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(1024);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(1024);
+    }
+    // Two rectangles that overlap would draw one sprig's needles into another's card.
+    rects.forEach((a, at) => {
+      for (const b of rects.slice(at + 1)) {
+        const apart =
+          a.x + a.width <= b.x ||
+          b.x + b.width <= a.x ||
+          a.y + a.height <= b.y ||
+          b.y + b.height <= a.y;
+        expect(apart, `${JSON.stringify(a)} and ${JSON.stringify(b)}`).toBe(true);
+      }
+    });
+    // Every rectangle is drawn: none is named and left unused.
+    expect([...new Set(fir.sprig.leaves.map((leaf) => leaf.cell))].sort()).toEqual(
+      rects.map((_, at) => at),
+    );
   });
 });
 

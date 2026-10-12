@@ -45,6 +45,7 @@ import {
   DRAWN_TOOL,
   GENERATED_TOOL,
   GENERATED_TREE_SCRIPT,
+  POLY_HAVEN_TREE_MAPS,
   GENERATED_TREES_PATH,
   generatedInputDigest,
   inputDigest,
@@ -369,7 +370,9 @@ describe('the generated trees — #1283, ADR 0049 D-1', () => {
       for (const file of filesOf(tree.name)) {
         const row = rowOf(file);
         expect(row['licence'], file).toBe('CC0-1.0');
-        expect(row['source'], file).toContain('This repository, #1283');
+        // The issue that adopted its species (ADR 0049 D-11): #1294 for the fir.
+        expect(row['source'], file).toContain(`This repository, ${speciesOf(tree).adoptedBy} —`);
+        expect(['#1283', '#1294']).toContain(speciesOf(tree).adoptedBy);
         expect(row['source'], file).toContain(PINNED_EZ_TREE);
         expect(row['source'], file).toContain('MIT, https://github.com/dgreenheck/ez-tree');
         expect(row['source'], file).toContain(GENERATED_TREES_PATH);
@@ -383,7 +386,8 @@ describe('the generated trees — #1283, ADR 0049 D-1', () => {
     }
   });
 
-  it('names the two ambientCG assets each wears, with what each one’s own page said', () => {
+  it('names the assets each wears, ambientCG’s or Poly Haven’s, with what each one’s own page said', () => {
+    let fromPolyHaven = 0;
     for (const tree of GENERATED_TREES) {
       const species = speciesOf(tree);
       for (const file of filesOf(tree.name)) {
@@ -391,6 +395,18 @@ describe('the generated trees — #1283, ADR 0049 D-1', () => {
         for (const id of [species.bark.source, species.sprig.source]) {
           const source = lock.sources.find((each) => each.id === id);
           expect(source, id).toBeDefined();
+          if (id in POLY_HAVEN_TREE_MAPS) {
+            // #1294: a Poly Haven asset's row names who made it, from its API,
+            // and its own page — once, though it is the bark and the sprigs.
+            fromPolyHaven += 1;
+            const words = `Poly Haven's ${id} (CC0-1.0; its own page, read on ${source?.read ?? ''}: by ${source?.authors ?? ''})`;
+            expect(row['source'], file).toContain(words);
+            expect(row['source']?.split(words), file).toHaveLength(2);
+            expect(row['input'], file).toContain(`https://polyhaven.com/a/${id}`);
+            expect(source?.authors, id).toMatch(/\S/);
+            expect(row['source'], file).not.toContain(`ambientCG's ${id} `);
+            continue;
+          }
           expect(row['source'], file).toContain(
             `ambientCG's ${id} (CC0-1.0; its own page, read on ${source?.read ?? ''}: made by ${source?.technique ?? ''})`,
           );
@@ -403,9 +419,12 @@ describe('the generated trees — #1283, ADR 0049 D-1', () => {
           if (other.id === species.id) continue;
           expect(row['source'], file).not.toContain(`ambientCG's ${other.bark.source} `);
           expect(row['source'], file).not.toContain(`ambientCG's ${other.sprig.source} `);
+          expect(row['source'], file).not.toContain(`Poly Haven's ${other.sprig.source} `);
         }
       }
     }
+    // Non-vacuity: the fir's eight rows, its bark and its sprigs in each.
+    expect(fromPolyHaven).toBe(2 * 4 * 2);
   });
 
   it('records, as each row’s input, the digest of its committed numbers and its locked downloads', () => {

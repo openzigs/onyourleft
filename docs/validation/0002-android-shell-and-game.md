@@ -3220,8 +3220,10 @@ published figures (its run predates `oyl.txt`).
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
 | #1274 | before (one photograph for rock and scree) | the first parent of #1274's merge | — | | | | | | | | |
 | #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
-| #1283 | before (the scanned broadleaves) | #1283's merge | — ; `levers=-generated-trees` | | | | | | | | |
-| #1283 | after (the generated broadleaves) | #1283's merge | — | | | | | | | | |
+| #1283 | before (the scanned broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-trees` | | | | | | | | |
+| #1283 | after (the generated broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
+| #1294 | before (the scanned firs, beside the generated broadleaves) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
+| #1294 | after (the generated firs) | #1294's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3565,12 +3567,20 @@ ADR 0049 D-1 keeps a generated tree *"only where the tablet measurement says it 
 scans are still in the build and one lever away** — and unlike every pair above, **both rows are one
 build**: `levers=-generated-trees` loads the scans instead, and only the set asked for is fetched.
 
+**Since [#1294](https://github.com/openzigs/onyourleft/issues/1294) that lever loads every tree's
+scan, the firs' too**, and the bare URL draws generated firs. So this pair is run with a lever on
+both rows, which holds the firs at their scans and changes the broadleaves alone:
+`levers=-generated-trees` (before) against `levers=-generated-conifers` (after). The steps below
+say so. The figures in the table below are that pair's: its "Generated" column is the generated
+broadleaves beside the scanned firs.
+
 Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, the scans first:
 
 | | Scanned | Generated |
 |---|--:|--:|
 | This page held at `at=2550`: triangles a frame | 199 676 | **195 692** |
-| The same: draw calls | 31, and 32 in one run of seven | **33** in seven runs of seven |
+| The same: draw calls, as the page read then | 31, and 32 in one run of seven | **33** in seven runs of seven |
+| The same frame's own draw calls, which the page reports since #1294 | 29 | **31** |
 | The same: bytes of texture the load holds (`textures.bytes`) | 31 393 488 | **26 173 344** |
 | The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 181 232 / 27 | **169 482 / 29** |
 | Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 70.56 MiB | **65.58 MiB** |
@@ -3591,17 +3601,17 @@ build above are the four trees'.
 **Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
 mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost, and only this row can
 say whether it does**: the frame makes **two more draw calls**, a call a tree shape a level, and
-this page is at 33 of #639's 35. The triangles and the texture memory both fall. ⚠️ **On this
+this page is at 31 of #639's 35 (33 as it read before #1294). The triangles and the texture memory both fall. ⚠️ **On this
 page's route most trees are conifers**, which did not change, so the page's triangles fall by 2 %
 where a broadleaf wood's would fall by two thirds: the by-eye half matters more than the cost half
 here, and the product on a lowland route is where the difference is largest.
 
 | Step | What to do |
 |---|---|
-| AH-1283-1 | **Before**: build #1283's merge with the owner's page staged, and run AH1–AH7 with `&levers=-generated-trees` added to AH4's URL. `RUN=1283-before` |
-| AH-1283-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1283-after` |
-| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall and **draw calls** rise by about two, to 33; the measured columns against #616's spread |
-| AH-1283-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1950`, then add `&levers=-generated-trees`, and compare the broadleaves behind the wall on the right and the one at the far left. Then the same pair at `at=1100` (one left of the road, one against the hedge), `at=150` and `at=3150`. Most of this route's trees are conifers: these four are where its broadleaves stand nearest |
+| AH-1283-1 | **Before**: build #1294's merge with the owner's page staged (the build AH-1294-1 uses), and run AH1–AH7 with `&levers=-generated-trees` added to AH4's URL: every tree a scan. `RUN=1283-before` |
+| AH-1283-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7 with `&levers=-generated-conifers` added to AH4's URL instead: the generated broadleaves beside the scanned firs. ⚠️ Not the bare URL, which draws the generated firs as well. `RUN=1283-after`. This run is also AH-1294-1's, and need not be made twice |
+| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall by about 2 % (199 676 to 195 692) and **draw calls** rise by two, from 29 to 31; the measured columns against #616's spread |
+| AH-1283-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1950&levers=-generated-conifers`, then change the lever to `-generated-trees`, and compare the broadleaves behind the wall on the right and the one at the far left. Then the same pair at `at=1100` (one left of the road, one against the hedge), `at=150` and `at=3150`. Most of this route's trees are conifers: these four are where its broadleaves stand nearest |
 | AH-1283-5 | **By eye, in the product**, with *Game world* on: ride a saved lowland route with broadleaf trees beside the road. Do neighbouring trees differ in shape? Does a tree change visibly as it is passed (the hand-over between its three levels)? |
 
 | #1283 by eye | Answer |
@@ -3610,6 +3620,83 @@ here, and the product on a lowland route is where the difference is largest.
 | In the product (AH-1283-5): do the trees along a road read as different trees, and is any level's change visible? | |
 | Up close: do the leaf cards read as foliage, or as flat cards? | |
 | Keep the generated broadleaves and delete the scans (10.6 MB of build back), or go back to the scans? | |
+
+### #1294's rows — the firs, generated to their budget
+
+[#1294](https://github.com/openzigs/onyourleft/issues/1294) generates the conifers as #1283
+generated the broadleaves: a ride's firs are no longer two photoscans cut down to 24 000 triangles —
+which keeps about 1 900 of a scan's 84 000 needles and draws the tree nearly bare — but **two firs
+generated at their size**, the pinned EZ-Tree 1.1.0's evergreen from numbers committed in
+`apps/web/tools/realistic/generated-trees.ts`, each bough carrying cards cut from **Poly Haven's
+photographed fir sprigs** (`fir_tree_01`, CC0, its own page read on 2026-10-12) and wearing the same
+asset's bark. The owner's ruling that a generated tree's needles and bark may come from Poly Haven
+is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)'s amendment of 2026-10-12.
+
+**The scanned firs are still in the build and one lever away**, and as with #1283 **both rows are
+one build**: `levers=-generated-conifers` loads the scanned firs instead, beside the generated
+broadleaves, and only the set asked for is fetched.
+
+**`levers=-generated-trees` loads EVERY tree's scan, the firs' too**, so #1283's pair above is
+`levers=-generated-trees` against `levers=-generated-conifers`, and this pair is
+`levers=-generated-conifers` against the bare URL. Three runs make both pairs: every tree a scan,
+the generated broadleaves beside the scanned firs, every tree generated.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, nothing on a device:
+
+| | Scanned firs (`-generated-conifers`) | Generated firs |
+|---|--:|--:|
+| This page held at `at=2550`: triangles a frame | 195 692 | **131 684** |
+| The same frame: draw calls | 31 | **31** |
+| This page held at `at=700`: triangles a frame | 161 227 | **135 627** |
+| The same frame: draw calls | 38 | **38** |
+| At `at=150`, `1100`, `1950`, `2350`, `3150`: triangles a frame | 173 458, 171 794, 172 108, 194 106, 168 784 | **133 774, 112 910, 132 426, 130 100, 129 100** |
+| The same five frames: draw calls | 31, 30, 30, 30, 30 | **31, 30, 30, 30, 30** |
+| Bytes of texture the load holds (`textures.bytes`) | 26 173 344 | **19 838 224** |
+| The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 169 482 / 29 | **115 718 / 29** |
+| Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 65.58 MiB | **59.54 MiB** |
+| One fir at full detail / at the middle level, triangles | 23 996 / 5 998 | **4 792 / 878** |
+| One fir's cut-out cards at full detail / at the middle level, square metres | none: its needles are geometry | **196 / 129** |
+
+⚠️ **The draw calls above are one frame's, and since #1294 they are also what the page reports.**
+The page's `drawCalls` is a mean over its window. Until #1294 that window also held the warm-up
+and the page's very first render, which makes about twice the calls of every later frame (60 and
+then 31 at `at=2550`, read frame by frame). So the page said 33 where the frame made 31, and 32 to
+35 as a busier machine drew fewer frames before its sample — which is the count #1283 saw "move by
+one between runs". The page now counts from the end of the warm-up: held at `at=2550` it reads 31
+with either set of firs and 29 with every tree a scan, and at `at=700` 38, 38 and 35, the same as
+`result.lastFrame.calls` in every run (pinned Chromium, 2026-10-12). Either figure may be written
+down. ⚠️ A row taken on a build before #1294 has the old mean in it.
+
+The build is **41 144 981 bytes** of the 40 MiB ceiling (41 943 040) with the transcoder, where it
+was 39 836 999: **798 059 bytes spare**. It carries every set until these rows are in: the two
+generated firs are 1 307 982 of those bytes, the scanned firs 8 681 763 and the scanned broadleaves
+10 616 301 ([#1293](https://github.com/openzigs/onyourleft/issues/1293)).
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost, and only this row can
+say whether it does: the cut-out.** The triangles fall by a third and the texture memory by 6 MiB,
+and the draw calls do not move. But a scanned fir's needles are geometry and a generated fir's are
+1 100 alpha-tested cards, under a quarter of each covered — 196 m² of card to a tree at full detail
+and 129 m² at the middle level — and a GPU shades a card's fragments up to the cut before it
+discards them. Nothing in this repository measures that: the browser gate's rasteriser is
+software, and its frame times for the two sets were inside each other's run-to-run spread. **If the
+GPU DVFS mean or present p95 rises on the after row, that is this, and the scans are the answer
+until the cards are fewer.**
+
+| Step | What to do |
+|---|---|
+| AH-1294-1 | **Before**: build #1294's merge with the owner's page staged, and run AH1–AH7 with `&levers=-generated-conifers` added to AH4's URL. `RUN=1294-before`. This is AH-1283-2's run: one run fills both rows |
+| AH-1294-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1294-after` |
+| AH-1294-3 | Write both rows into the table above. **Triangles / frame** should fall by about a third and **draw calls** should not move (31 on both, `drawCalls` and `result.lastFrame.calls` alike); the measured columns against #616's spread — the GPU's most of all |
+| AH-1294-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550`, then add `&levers=-generated-conifers`, and compare the firs down both sides of the road and the two at the right. Then the same pair at `at=2350`, `at=1950`, `at=700` and `at=150`. This route is mostly conifers, so every one of these frames is the difference |
+| AH-1294-5 | **By eye, in the product**, with *Game world* on: ride a saved route through conifers. Do the firs read as trees in needle, near and far? Does one change visibly as it is passed (full level to middle at about 20 m, middle to its impostor at about 60 m)? Do the needles shimmer or crawl as the camera moves? |
+
+| #1294 by eye | Answer |
+|---|---|
+| On the page (AH-1294-4): which set reads more like firs, and do the generated ones sit in the same light and colour as the trees beside them, or darker, greener, flatter? | |
+| In the product (AH-1294-5): is any level's change visible, and do the needles shimmer at a distance? | |
+| Up close: do the sprig cards read as boughs, or as flat cards? Is the top of the tree a fir's, or a blob? | |
+| Keep the generated firs and delete the scanned ones (8.7 MB of build back), or go back to the scans? | |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

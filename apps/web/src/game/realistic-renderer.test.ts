@@ -74,6 +74,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
   REALISTIC_SKY,
   REALISTIC_BOUNDARY_PARTS,
   REALISTIC_BUILDING_SURFACES,
@@ -83,7 +84,7 @@ import {
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
-  realisticVegetation,
+  type RealisticModel,
   type StructureSurface,
 } from './realistic-assets';
 import { HORIZON_AZIMUTH_BINS } from './realistic-light';
@@ -1593,24 +1594,29 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
   });
 
   it('asks for the generated broadleaves, or the scans when told to, and never both — #1283', async () => {
-    const filesOf = (trees: 'generated' | 'scanned'): string[] =>
-      REALISTIC_BROADLEAVES[trees]
+    const urlsOf = (models: readonly RealisticModel[]): string[] =>
+      models
         .flatMap((model) => [model.file, model.middle, model.impostor, model.impostorNormals])
         .filter((file): file is string => file !== undefined)
         .map(realisticUrl);
-    // Non-vacuity: four files a tree, four trees and two.
+    const filesOf = (trees: 'generated' | 'scanned'): string[] =>
+      urlsOf(REALISTIC_BROADLEAVES[trees]);
+    // #1294: and the firs, generated or scanned.
+    const firsOf = (trees: 'generated' | 'scanned'): string[] => urlsOf(REALISTIC_CONIFERS[trees]);
+    // Non-vacuity: four files a tree, four trees and two; two firs of each making.
     expect(filesOf('generated')).toHaveLength(16);
     expect(filesOf('scanned')).toHaveLength(8);
-    const conifers = realisticVegetation('generated')['tree-conifer'].map((model) =>
-      realisticUrl(model.file),
-    );
+    expect(firsOf('generated')).toHaveLength(8);
+    expect(firsOf('scanned')).toHaveLength(8);
+    expect(firsOf('generated').some((url) => firsOf('scanned').includes(url))).toBe(false);
 
     // What a ride loads, asked nothing: the generated trees, and no scan.
     const product = loaders();
     await expect(loadRealisticWorld(product)).resolves.toEqual({ loaded: true });
     for (const url of filesOf('generated')) expect(product.asked, url).toContain(url);
     for (const url of filesOf('scanned')) expect(product.asked, url).not.toContain(url);
-    for (const url of conifers) expect(product.asked, url).toContain(url);
+    for (const url of firsOf('generated')) expect(product.asked, url).toContain(url);
+    for (const url of firsOf('scanned')) expect(product.asked, url).not.toContain(url);
 
     try {
       // The owner's page with the lever off: the scans, and no generated tree.
@@ -1619,23 +1625,36 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
       await expect(loadRealisticWorld(scans)).resolves.toEqual({ loaded: true });
       for (const url of filesOf('scanned')) expect(scans.asked, url).toContain(url);
       for (const url of filesOf('generated')) expect(scans.asked, url).not.toContain(url);
-      // The conifers are the same scans in both sets.
-      for (const url of conifers) expect(scans.asked, url).toContain(url);
+      // Since #1294 the firs are scans in that set too, and no generated one.
+      for (const url of firsOf('scanned')) expect(scans.asked, url).toContain(url);
+      for (const url of firsOf('generated')) expect(scans.asked, url).not.toContain(url);
+      // #1294's own lever: the scanned firs beside the GENERATED broadleaves.
+      setRealisticTrees('scanned-conifers');
+      const firs = loaders();
+      await expect(loadRealisticWorld(firs)).resolves.toEqual({ loaded: true });
+      for (const url of firsOf('scanned')) expect(firs.asked, url).toContain(url);
+      for (const url of firsOf('generated')) expect(firs.asked, url).not.toContain(url);
+      for (const url of filesOf('generated')) expect(firs.asked, url).toContain(url);
+      for (const url of filesOf('scanned')) expect(firs.asked, url).not.toContain(url);
       // The choice is the NEXT load's, and stays until it is changed back.
       setRealisticTrees('generated');
       const again = loaders();
       await expect(loadRealisticWorld(again)).resolves.toEqual({ loaded: true });
       for (const url of filesOf('generated')) expect(again.asked, url).toContain(url);
       for (const url of filesOf('scanned')) expect(again.asked, url).not.toContain(url);
+      for (const url of firsOf('generated')) expect(again.asked, url).toContain(url);
+      for (const url of firsOf('scanned')) expect(again.asked, url).not.toContain(url);
     } finally {
       setRealisticTrees(REALISTIC_TREES_DEFAULT);
     }
 
     // A generated tree's file is as load-bearing as any other: without one
     // strip's normals there is no world, never one with a tree missing.
-    const outcome = await loadRealisticWorld(loaders('generated_oak_c-impostor-normals'));
-    expect(outcome).toMatchObject({ loaded: false });
-    expect(outcome.loaded ? '' : outcome.detail).toMatch(/generated_oak_c-impostor-normals/);
+    for (const strip of ['generated_oak_c-impostor-normals', 'generated_fir_b-impostor-normals']) {
+      const outcome = await loadRealisticWorld(loaders(strip));
+      expect(outcome).toMatchObject({ loaded: false });
+      expect(outcome.loaded ? '' : outcome.detail).toMatch(new RegExp(strip));
+    }
   });
 
   it('loads none of it when one file fails, and says why — never half a world', async () => {

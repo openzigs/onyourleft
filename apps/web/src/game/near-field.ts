@@ -143,6 +143,11 @@ function natural(across: number, top: number): Reach {
  * and 2.65 m. A third oak seed made for #1283 and not kept was 3.03 m: a seed
  * added later may need this bound moved, and `near-field.test.ts` is what
  * will say so.
+ *
+ * ⚠️ **A generated fir (#1294) is well inside the scanned firs' 3.65 m and
+ * 7.1 m**, which are still the conifer's bound because the scans still ship:
+ * the two committed are 4.03 m and 3.84 m across about the trunk and 6.91 m
+ * and 6.75 m tall, and the world fits either to 7 m.
  */
 const NATURAL_REACH: Readonly<Record<DrawnWorld, Readonly<Record<NaturalKind, Reach>>>> = {
   stylised: {

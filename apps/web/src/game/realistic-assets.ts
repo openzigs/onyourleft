@@ -317,18 +317,47 @@ export interface RealisticModel {
   readonly middle?: string;
 }
 
-/** Which broadleaf trees a realistic world is drawn with — #1283. */
-export type RealisticTrees = 'generated' | 'scanned';
+/** How a tree was made: generated to its size (ADR 0049 D-1), or a photoscan cut down to it. */
+export type TreeMaking = 'generated' | 'scanned';
 
 /**
- * Both, in a fixed order.
+ * Which trees a realistic world is drawn with — #1283, and since #1294 three
+ * sets where there were two:
+ *
+ * - `generated` — every tree generated: the broadleaves (#1283) and the firs
+ *   (#1294). What a ride draws.
+ * - `scanned-conifers` — the generated broadleaves beside the SCANNED firs:
+ *   the world #1283 left, and the other half of the fir's own before/after
+ *   pair.
+ * - `scanned` — every tree a scan: the world before #1283.
+ *
+ * Three and not four: scanned broadleaves beside generated firs is a world
+ * nobody drew and no row of validation 0002 asks for.
+ */
+export type RealisticTrees = 'generated' | 'scanned-conifers' | 'scanned';
+
+/**
+ * All of them, in a fixed order.
  *
  * @test-facing held by `realistic-budget.test.ts`, `realistic-assets.test.ts`
  * and `realistic-textures.test.ts`, which hold EACH set to the budget and load
  * each for real, and read by {@link realisticFiles}; a ride draws one set and
  * never asks which others there are
  */
-export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = ['generated', 'scanned'];
+export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = [
+  'generated',
+  'scanned-conifers',
+  'scanned',
+];
+
+/** How each kind of tree in a set was made. */
+export const REALISTIC_TREE_MAKING: Readonly<
+  Record<RealisticTrees, { readonly broadleaves: TreeMaking; readonly conifers: TreeMaking }>
+> = {
+  generated: { broadleaves: 'generated', conifers: 'generated' },
+  'scanned-conifers': { broadleaves: 'generated', conifers: 'scanned' },
+  scanned: { broadleaves: 'scanned', conifers: 'scanned' },
+};
 
 /**
  * The broadleaf trees a ride draws: the **generated** ones — #1283, ADR 0049
@@ -354,9 +383,9 @@ export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = ['generated', 'sca
  * and `three-renderer.ts` §`setRealisticTrees`. Removing them, or making them
  * the default again, is the change after the rows.
  *
- * ⚠️ **Broadleaves only.** A conifer is still its scan in both sets:
- * ambientCG publishes no needles the pipeline may take
- * (`tools/realistic/sources.ts` §`GENERATED_TREE_TEXTURES`).
+ * ⚠️ **Since #1294 the firs are generated too** ({@link REALISTIC_CONIFERS},
+ * which says what that default rests on), and a reviewer who remembers this
+ * note saying "broadleaves only" is reading #1283's file.
  */
 export const REALISTIC_TREES_DEFAULT: RealisticTrees = 'generated';
 
@@ -379,7 +408,7 @@ const tree = (name: string): RealisticModel => ({
  * - `scanned` — the two Poly Haven photoscans every realistic world drew until
  *   #1283, decimated to their budget.
  */
-export const REALISTIC_BROADLEAVES: Readonly<Record<RealisticTrees, readonly RealisticModel[]>> = {
+export const REALISTIC_BROADLEAVES: Readonly<Record<TreeMaking, readonly RealisticModel[]>> = {
   generated: [
     tree('generated_oak_a'),
     tree('generated_hornbeam_a'),
@@ -390,35 +419,59 @@ export const REALISTIC_BROADLEAVES: Readonly<Record<RealisticTrees, readonly Rea
 };
 
 /**
+ * The conifers of each making, in variant order — #1294.
+ *
+ * - `generated` — two firs, two seeds of one species
+ *   (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`): the pinned
+ *   generator's evergreen, each bough carrying cards of Poly Haven's
+ *   photographed fir sprigs (ADR 0049 D-1 and its amendment of 2026-10-12).
+ * - `scanned` — the two Poly Haven fir photoscans every realistic world drew
+ *   until #1294, decimated to their budget.
+ *
+ * ## Why generated is the default, and what that rests on
+ *
+ * A scanned fir's needles are each an eight-triangle prism: the source tree
+ * has about 84 000 of them and a 24 000-triangle budget keeps about 1 900, so
+ * the scan is drawn nearly bare, and the owner's route is mostly conifers. A
+ * generated fir carries 1 100 sprig cards in 4 792 triangles, a fifth of the
+ * scan's, and 878 at its middle level against 5 998;
+ * `realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated firs,
+ * measured", has the frame's figures. That it reads as a fir in needle is
+ * this change's author looking at screenshots, and nothing here was measured
+ * on a device.
+ *
+ * ⚠️ **So the scanned firs are still committed and still loadable**, as the
+ * scanned broadleaves are: the owner's page loads them with
+ * `?levers=-generated-conifers` (`browser/realistic/config.ts` §`LEVERS`).
+ * ADR 0049 D-1 keeps a generated tree "only where the tablet measurement
+ * says it should", and those rows are the owner's (validation 0002).
+ *
+ * ⚠️ **A sprig card has more cut-out edge than a leaf card**, and a fragment
+ * that is cut away was still shaded up to the cut. What that costs a tablet's
+ * GPU is not measured by anything in this repository.
+ */
+export const REALISTIC_CONIFERS: Readonly<Record<TreeMaking, readonly RealisticModel[]>> = {
+  generated: [tree('generated_fir_a'), tree('generated_fir_b')],
+  scanned: [tree('fir_sapling_medium_a'), tree('fir_sapling_medium_b')],
+};
+
+/**
  * The shapes one set draws, by kind, in variant order. An item's `variant`
  * picks among them modulo their count, exactly as `three-renderer.ts`
  * §`ScatterBelt` does for the stylised world — so the same item wears the same
  * variant slot in both worlds and only the shape changes (ADR 0026 D-2).
  *
- * ⚠️ **The two sets differ only in their broadleaves** (#1283): the conifers,
- * the shrubs and the rock are the same files in both.
+ * ⚠️ **The sets differ only in their trees** (#1283, #1294,
+ * {@link REALISTIC_TREE_MAKING}): the shrubs and the rock are the same files
+ * in all of them.
  */
 export function realisticVegetation(
   trees: RealisticTrees,
 ): Readonly<Record<RealisticVegetationKind, readonly RealisticModel[]>> {
+  const making = REALISTIC_TREE_MAKING[trees];
   return {
-    'tree-broadleaf': REALISTIC_BROADLEAVES[trees],
-    'tree-conifer': [
-      {
-        name: 'fir_sapling_medium_a',
-        file: 'fir_sapling_medium_a.glb',
-        impostor: 'fir_sapling_medium_a-impostor.ktx2',
-        impostorNormals: 'fir_sapling_medium_a-impostor-normals.ktx2',
-        middle: 'fir_sapling_medium_a-middle.glb',
-      },
-      {
-        name: 'fir_sapling_medium_b',
-        file: 'fir_sapling_medium_b.glb',
-        impostor: 'fir_sapling_medium_b-impostor.ktx2',
-        impostorNormals: 'fir_sapling_medium_b-impostor-normals.ktx2',
-        middle: 'fir_sapling_medium_b-middle.glb',
-      },
-    ],
+    'tree-broadleaf': REALISTIC_BROADLEAVES[making.broadleaves],
+    'tree-conifer': REALISTIC_CONIFERS[making.conifers],
     shrub: [
       { name: 'shrub_02_a', file: 'shrub_02_a.glb' },
       { name: 'shrub_02_c', file: 'shrub_02_c.glb' },
@@ -565,8 +618,8 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.rock.normal,
     REALISTIC_SURFACES.crag.colour,
     REALISTIC_SURFACES.crag.normal,
-    // #1283: BOTH sets' trees, each file once — the set a ride does not draw
-    // still ships, and is still held to its budget.
+    // #1283, #1294: EVERY set's trees, each file once — the sets a ride does
+    // not draw still ship, and are still held to their budget.
     ...new Set(
       REALISTIC_TREE_SETS.flatMap((trees) =>
         REALISTIC_VEGETATION_KINDS.flatMap((kind) =>

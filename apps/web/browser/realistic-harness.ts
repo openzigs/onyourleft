@@ -103,6 +103,22 @@ export interface RealisticSample {
   readonly frameCap: 'display' | number;
   /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
+  /**
+   * Draw calls per drawn frame over the window, a MEAN, rounded: the window
+   * is the frames drawn after the warm-up, the ones the clock samples.
+   *
+   * ⚠️ **Until #1294 it also counted the warm-up's frames, the page's very
+   * first render among them, and so read higher the fewer frames there were.**
+   * Read frame by frame on 2026-10-12 in the pinned Chromium, held at
+   * `at=2550`: the first render made 60 calls and every later frame 31, in
+   * the warm-up and after it. The first published figure was therefore
+   * `(60 + 31·n) / (n + 1)` for `n` later frames, 32 to 35 for one unchanged
+   * frame depending on how busy the machine was, which is what #1289 saw
+   * move. The counts are now reset when the warm-up ends, so a held frame's
+   * mean is its own count and equals {@link lastFrame}'s `calls`. A soak's
+   * later windows never held the first render. What the first render's other
+   * 29 calls are was not looked for (#1293).
+   */
   readonly drawCalls: number;
   /**
    * Triangles submitted per drawn frame over the window, counted at the WebGL
@@ -118,6 +134,8 @@ export interface RealisticSample {
   readonly lastFrame: {
     readonly triangles: number;
     readonly rendererTriangles: number | undefined;
+    /** Its draw calls, counted at the WebGL draw calls — #1294. @see drawCalls */
+    readonly calls: number;
   };
   /** The layers switched off for this run — #616. Empty for an ordinary ride. */
   readonly layersOff: readonly Layer[];
@@ -325,6 +343,7 @@ async function run(): Promise<void> {
   let trianglesInWindow = 0;
   let framesInWindow = 0;
   let lastFrameTriangles = 0;
+  let lastFrameCalls = 0;
   let lastFrameRendererTriangles: number | undefined;
   let shownAt = 0;
   const soak: (RealisticSample & { minute: number })[] = [];
@@ -336,7 +355,11 @@ async function run(): Promise<void> {
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
     trianglesPerFrame: framesInWindow === 0 ? 0 : Math.round(trianglesInWindow / framesInWindow),
-    lastFrame: { triangles: lastFrameTriangles, rendererTriangles: lastFrameRendererTriangles },
+    lastFrame: {
+      triangles: lastFrameTriangles,
+      rendererTriangles: lastFrameRendererTriangles,
+      calls: lastFrameCalls,
+    },
     layersOff: config.layersOff,
     leversOff: config.leversOff,
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
@@ -372,7 +395,16 @@ async function run(): Promise<void> {
     // Only drawn frames reach the clock, so what it publishes is the time
     // between frames a rider SEES — at a capped rung, at least the cap.
     const { elapsedSeconds: elapsed } = clock.frame(now);
+    const warmBefore = warmedUp;
     warmedUp = elapsed > WARM_UP_SECONDS;
+    // #1294: the counts start where the clock's samples do. The warm-up's
+    // frames are not the window's, and the page's very first render makes
+    // about twice a frame's calls. @see RealisticSample.drawCalls
+    if (warmedUp && !warmBefore) {
+      callsInWindow = 0;
+      trianglesInWindow = 0;
+      framesInWindow = 0;
+    }
     const distance =
       config.at ??
       LOOP_FROM_METRES +
@@ -388,7 +420,8 @@ async function run(): Promise<void> {
         rung: worldRung(state),
       }),
     );
-    callsInWindow += counter.takeCalls();
+    lastFrameCalls = counter.takeCalls();
+    callsInWindow += lastFrameCalls;
     lastFrameTriangles = counter.takeTriangles();
     trianglesInWindow += lastFrameTriangles;
     // three resets its own count at the start of every `render`, so after the

@@ -35,6 +35,7 @@ import {
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
   REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
   REALISTIC_TREE_SETS,
   REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION,
@@ -163,6 +164,11 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     expect(everyModel('tree-broadleaf')).toHaveLength(
       REALISTIC_BROADLEAVES.generated.length + REALISTIC_BROADLEAVES.scanned.length,
     );
+    // And for #1294: both makings' conifers, four files.
+    expect(everyModel('tree-conifer')).toHaveLength(
+      REALISTIC_CONIFERS.generated.length + REALISTIC_CONIFERS.scanned.length,
+    );
+    expect(everyModel('tree-conifer').map((model) => model.name)).toContain('generated_fir_a');
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       for (const model of everyModel(kind)) {
         const { triangles } = modelFacts(at(model.file));
@@ -244,9 +250,14 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
         // A scan is cut DOWN to the ceiling, so it sits just under it. A
         // generated tree is asked for at its size (#1283), which is a third of
         // the ceiling — and under half its own full level, or it is no level.
-        const generated = REALISTIC_BROADLEAVES.generated.includes(model);
+        const generated =
+          REALISTIC_BROADLEAVES.generated.includes(model) ||
+          REALISTIC_CONIFERS.generated.includes(model);
+        // The floor is non-vacuity — a level of a few hundred triangles is a
+        // stick: a generated fir's (#1294) is its stem and one sprig card in
+        // three, 878, and a generated broadleaf's about 2 000.
         expect(facts.triangles, file).toBeGreaterThan(
-          generated ? 1_000 : REALISTIC_TRIANGLES['tree-middle'] / 2,
+          generated ? 800 : REALISTIC_TRIANGLES['tree-middle'] / 2,
         );
         expect(facts.triangles, file).toBeLessThan(modelFacts(at(model.file)).triangles / 2);
         expect(facts.triangles, file).toBeLessThanOrEqual(REALISTIC_TRIANGLES['tree-middle']);
@@ -537,13 +548,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       slots.full * heaviestNear('tree-broadleaf', trees) +
       slots.middle *
         Math.max(
-          ...REALISTIC_BROADLEAVES[trees].map((model) =>
+          ...realisticVegetation(trees)['tree-broadleaf'].map((model) =>
             model.middle === undefined ? Infinity : modelFacts(at(model.middle)).triangles,
           ),
         );
     console.log(
       `#1283: worst vegetation ${String(generated)} triangles generated, ${String(scanned)} scanned ` +
-        `(the worst tree is a conifer in the first, a broadleaf in the second); ` +
+        `(since #1294 the worst tree is a broadleaf in both); ` +
         `a broadleaf wood's trees ${String(broadleafWood('generated'))} generated, ${String(broadleafWood('scanned'))} scanned; ` +
         `the heaviest generated tree ${String(heaviestNear('tree-broadleaf', 'generated'))}, ` +
         `the heaviest scanned ${String(heaviestNear('tree-broadleaf', 'scanned'))}`,
@@ -561,6 +572,55 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     );
     expect(REALISTIC_TRIANGLES['tree-broadleaf']).toBe(28_000);
     expect(REALISTIC_TRIANGLES['tree-middle']).toBe(6_000);
+  });
+
+  it('draws fewer triangles with the generated firs than with the scanned ones, slot for slot — #1294', () => {
+    // The fir's own pair: the generated broadleaves in both, so what differs
+    // is the conifers and nothing else.
+    const scanned = worstVegetation(REALISTIC_TREE_LEVELS, 'scanned-conifers');
+    const generated = worstVegetation(REALISTIC_TREE_LEVELS, 'generated');
+    const slots = treeSlots(REALISTIC_TREE_LEVELS);
+    // Every tree slot filled with a CONIFER: the owner's route, mostly.
+    const coniferWood = (trees: RealisticTrees): number =>
+      slots.full * heaviestNear('tree-conifer', trees) +
+      slots.middle *
+        Math.max(
+          ...realisticVegetation(trees)['tree-conifer'].map((model) =>
+            model.middle === undefined ? Infinity : modelFacts(at(model.middle)).triangles,
+          ),
+        );
+    console.log(
+      `#1294: worst vegetation ${String(generated)} triangles with the generated firs, ` +
+        `${String(scanned)} with the scanned ones; a conifer wood's trees ` +
+        `${String(coniferWood('generated'))} generated, ${String(coniferWood('scanned-conifers'))} scanned; ` +
+        `the heaviest generated fir ${String(heaviestNear('tree-conifer', 'generated'))}, ` +
+        `the heaviest scanned ${String(heaviestNear('tree-conifer', 'scanned-conifers'))}`,
+    );
+    // With the scanned firs the worst tree a frame can draw IS a fir; with
+    // the generated ones it is an oak, so the worst frame falls.
+    expect(generated).toBeLessThan(scanned);
+    expect(heaviestNear('tree-conifer', 'scanned-conifers')).toBeGreaterThan(
+      heaviestNear('tree-broadleaf', 'scanned-conifers'),
+    );
+    expect(heaviestNear('tree-conifer', 'generated')).toBeLessThan(
+      heaviestNear('tree-broadleaf', 'generated'),
+    );
+    // Where the trees ARE conifers it falls to under a quarter.
+    expect(coniferWood('generated')).toBeLessThan(coniferWood('scanned-conifers') / 4);
+    // Non-vacuity: the scans' figure is a real one, near their ceilings.
+    expect(coniferWood('scanned-conifers')).toBeGreaterThan(70_000);
+    // The ceiling on what a conifer may spend did not move.
+    expect(heaviestNear('tree-conifer', 'generated')).toBeLessThan(
+      REALISTIC_TRIANGLES['tree-conifer'] / 4,
+    );
+    expect(REALISTIC_TRIANGLES['tree-conifer']).toBe(24_000);
+    // The sets differ in their conifers alone, and the scans' set is #1283's.
+    expect(realisticVegetation('scanned-conifers')['tree-broadleaf']).toBe(
+      realisticVegetation('generated')['tree-broadleaf'],
+    );
+    expect(realisticVegetation('scanned-conifers')['tree-conifer']).toBe(
+      realisticVegetation('scanned')['tree-conifer'],
+    );
   });
 
   /**
@@ -702,14 +762,26 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(REALISTIC_TEXTURE_MEMORY_BYTES).toBe(160 * 2 ** 20);
     // Four trees for two, and still less: smaller maps and smaller strips.
     expect(generated).toBeLessThan(scanned);
-    // Non-vacuity: the four generated trees are read, each with four maps and two strips.
+    // Non-vacuity: every generated tree is read — since #1294 the two firs
+    // with the four broadleaves — each with four maps and two strips.
+    const scannedTextures = (models: readonly RealisticModel[]): number =>
+      models.reduce((sum, model) => sum + modelFacts(at(model.file)).ktx2.length + 2, 0);
     const generatedTextures = textures('generated').length - textures('scanned').length;
     expect(generatedTextures).toBe(
-      REALISTIC_BROADLEAVES.generated.length * 6 -
-        REALISTIC_BROADLEAVES.scanned.reduce(
-          (sum, model) => sum + modelFacts(at(model.file)).ktx2.length + 2,
-          0,
-        ),
+      (REALISTIC_BROADLEAVES.generated.length + REALISTIC_CONIFERS.generated.length) * 6 -
+        scannedTextures([...REALISTIC_BROADLEAVES.scanned, ...REALISTIC_CONIFERS.scanned]),
+    );
+    // #1294: and the firs alone, against the scanned firs beside the same broadleaves.
+    const scannedFirs = estimatedMemory('scanned-conifers');
+    console.log(
+      `#1294: texture memory estimated ${mib(generated)} MiB with the generated firs, ` +
+        `${mib(scannedFirs)} MiB with the scanned ones — ${mib(scannedFirs - generated)} MiB less`,
+    );
+    expect(scannedFirs).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    expect(generated).toBeLessThan(scannedFirs);
+    expect(scannedFirs).toBeLessThan(scanned);
+    expect(textures('generated').length - textures('scanned-conifers').length).toBe(
+      REALISTIC_CONIFERS.generated.length * 6 - scannedTextures(REALISTIC_CONIFERS.scanned),
     );
   });
 
