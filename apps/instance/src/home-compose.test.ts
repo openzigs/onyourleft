@@ -133,7 +133,8 @@ describe('deploy/home/compose.yaml — every setting the server reads reaches it
   const imageSets = new Set(
     [...read('../Dockerfile').matchAll(/\b(OYL_INSTANCE_[A-Z_]+)=/g)].map((m) => m[1]),
   );
-  const instance = /^ {2}instance:\n([\s\S]*?)^ {2}\w/m.exec(COMPOSE)?.[1] ?? '';
+  // `\r?`: a Windows checkout (core.autocrlf) reads this file with CRLF.
+  const instance = /^ {2}instance:\r?\n([\s\S]*?)^ {2}\w/m.exec(COMPOSE)?.[1] ?? '';
 
   it('reads the lists it compares from the files themselves', () => {
     expect(serverReads.size).toBeGreaterThan(10);
