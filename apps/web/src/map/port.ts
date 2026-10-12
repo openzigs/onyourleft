@@ -21,7 +21,9 @@
  * `apps/web/browser/`, inside the existing `Repository rules` job rather than
  * beside it, for exactly the reason the old paragraph gave: docs/agents/ci.md §4c
  * records that a second job reports under a different context and could not
- * block a merge. §4f is what that gate is and is not.
+ * block a merge. (Since #1285 it is a shard of that check: a job of its own
+ * that the job named `Repository rules` waits for.) §4f is what that gate is
+ * and is not.
  *
  * What the seam buys is not a workaround. Most of #63's criteria are about
  * **what this client does** — how many times it registers a protocol, which

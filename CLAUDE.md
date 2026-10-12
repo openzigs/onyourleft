@@ -190,11 +190,12 @@ Capacitor does (§4k), `check:cost-model` when `docs/cost-model.md` does (§4l).
 process never belongs in a gate. `pnpm run test` is already the run-once form; `pnpm exec vitest` is
 not.
 
-> ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
-> a status check whose context is exactly that string.** Rename either and the required check never
-> reports, which makes every subsequent pull request unmergeable — including the one doing the
-> renaming. Extend the existing job; do not add a second job for a new gate, because a second job
-> reports under a different context and its failure would not block a merge.
+> ⚠️ **The workflow's `name:` and its last job's `name:` are both `Repository rules`, and `main`
+> requires a status check whose context is exactly that string.** Rename either and the required
+> check never reports, which makes every subsequent pull request unmergeable — including the one
+> doing the renaming. Since #1285 that job only fails unless every shard (`checks`, `tests`,
+> `browser`) succeeded. Put a new gate inside a shard; a job it does not `needs` reports under a
+> different context and its failure would not block a merge (§4c).
 
 ---
 

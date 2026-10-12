@@ -67,7 +67,7 @@ bash scripts/check-doc-links.sh
 bash scripts/check-doc-links.test.sh
 
 # Run several commands at once and fail if ANY of them fails (#651). Not a
-# check: it is how CI runs the checks, in one of its steps — see §4c. Every
+# check: it is how CI runs the checks, in one step of its `checks` shard — see §4c. Every
 # line is labelled with its command as it arrives, each process is waited on by
 # itself, and a failing command's whole output is printed again at the end.
 # No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
@@ -78,6 +78,18 @@ bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run ty
 # must NOT swallow — in every position, ending before and after a success —
 # plus a rendezvous that fails if the commands were quietly run one at a time.
 bash scripts/run-concurrently.test.sh
+
+# The required check's verdict (#1285, §4c §"Shards"). CI's work is three jobs
+# side by side and a fourth, named `Repository rules`, that runs this over
+# their results: anything but `success` fails (SHARD001) — `failure`,
+# `cancelled` and, the one that matters, `skipped`, which GitHub would
+# otherwise count as a pass — and so does no result at all (SHARD002). It
+# reads the workflow's `toJSON(needs)` from NEEDS. Bash only. Not a check to
+# run before pushing: there is nothing for it to read outside a workflow run.
+NEEDS='{"checks":{"result":"success","outputs":{}}}' bash scripts/check-shard-results.sh
+
+# Its own suite. 17 cases, most of them a pass it must not give.
+bash scripts/check-shard-results.test.sh
 
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
@@ -255,8 +267,8 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One CI job, because a second job reports under
-# a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319. One CI job — since #1285 the `browser` shard,
+# which the job named `Repository rules` waits for (§4c). ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,

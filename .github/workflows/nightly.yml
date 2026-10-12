@@ -196,11 +196,11 @@ jobs:
     timeout-minutes: 5
     # This job's token may write issues and nothing else -- not contents, not
     # pull requests. It checks nothing out and runs no repository code.
-    # `actions: read` (#1285, from #1286's review) is what lets it read which
-    # step of this run failed, so the issue can name it.
+    # Reading which step of this run failed (below) needs no more than that
+    # on a public repository: measured with this permission block exactly,
+    # run 38262275064 (#1285).
     permissions:
       issues: write
-      actions: read
     steps:
       - name: Open or update the nightly issue
         env:

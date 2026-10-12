@@ -126,8 +126,8 @@ jsdom has no service worker, no Cache Storage and no network stack to switch off
 claim ADR 0002 makes and [#404](https://github.com/openzigs/onyourleft/issues/404) had to retract
 is checkable nowhere else. `playwright.config.ts` therefore serves `apps/web/dist` on a **second**
 `webServer`; `test:browser` builds it first. ⚠️ **It is not a second CI job and must not become
-one** — `main` requires a status check whose context is exactly `Repository rules`, and a second
-job could not block a merge.
+one** — the whole gate is the `browser` shard, which the job named `Repository rules` waits for
+(§4c §"Shards — #1285"); a job that one does not `needs` could not block a merge.
 
 ⚠️ **It launches its own persistent context, and that is load-bearing.** A service-worker
 registration and a Cache Storage entry live in a **profile directory**, and `browser.newContext()`

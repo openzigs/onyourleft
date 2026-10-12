@@ -410,8 +410,6 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(report).toContain(
       `--jq '.jobs[] | .name as $job | .steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | "- \\($job): \\(.name) (\\(.conclusion))"'`,
     );
-    // Reading the run's jobs needs this and nothing more.
-    expect(report).toMatch(/^ {6}actions: read$/m);
     // What it read is in the body it files, and a read that failed says so
     // rather than filing an issue that names nothing.
     expect(report).toContain('${steps:-(the steps could not be read; open the run)}');

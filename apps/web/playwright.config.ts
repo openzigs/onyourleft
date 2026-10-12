@@ -57,10 +57,9 @@ const PORT = 4319;
  * ⚠️ The one above previews `browser/` — the harness — and an offline claim
  * about the product has to be measured against `apps/web/dist`, which that
  * server does not serve. So there are two `webServer` entries, not two
- * Playwright projects and emphatically not two CI jobs: `main` requires a
- * status check whose context is exactly `Repository rules`, and a second job
- * reports under a different context and could not block a merge (docs/agents/ci.md
- * §4c).
+ * Playwright projects and emphatically not two CI jobs: the gate is one job,
+ * the `browser` shard since #1285, which the job named `Repository rules`
+ * waits for (docs/agents/ci.md §4c).
  *
  * ⚠️ **The product server serves a single-page app**, with Vite's default
  * `appType`. That is deliberate and is the opposite of the harness's `'mpa'`:
@@ -140,6 +139,10 @@ export const LAUNCH_ARGS = [
 
 /**
  * How long the whole run may take before it stops itself — #651.
+ *
+ * ⚠️ **Since #1285 "the job" in everything below is history**: the gate is
+ * the `browser` shard, a job of its own with a 25-minute stop, and
+ * {@link GATE_STEP_MS} has today's arithmetic. This value did not move.
  *
  * ⚠️ **The job's `timeout-minutes` is 25, and this has to END before it does,
  * or the run reports nothing**: a job the runner cancels says "cancelled" and
@@ -281,6 +284,20 @@ export const GAME_PART_MS = 85_000;
  * minutes inside the job's, and the job's stop at least five clear of the
  * slowest job — from the measurements in `docs/agents/ci.md` §"Coverage out
  * of the required job — #1280", which it reads rather than repeats.
+ *
+ * ⚠️ **Since #1285 the gate is a job of its own — the `browser` shard of
+ * `Repository rules` — and every "into the job" above is the one job's
+ * history.** The step starts 35–39 s into its job, not 700: before it are
+ * the checkout, the install and the browser install, which has a ten-minute
+ * stop of its own. The job's stop is 25 minutes, so 39 + 840 + 4 s is 883 s,
+ * 617 s inside 1 500, and with the install at its stop 20 + 600 + 840 + 4 is
+ * 1 464 s, still inside. **No stop here moved**: on the EPYC 7763 in a shard
+ * the step took 663 s and 714 s (825 is 1.16 times the slower), the
+ * `chromium` run 583 s and 632 s ({@link CHROMIUM_PART_MS} is 1.14 times)
+ * and the `game` run 66 s and 68 s (run 38262894650, attempts 5 and 2).
+ * `nightly-split.test.ts` holds the two sums above, and each shard's stop at
+ * least five minutes clear of its slowest run, from the table in
+ * `docs/agents/ci.md` §"Shards — #1285".
  */
 export const GATE_STEP_MS = 825_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
@@ -398,7 +415,7 @@ export default defineConfig({
   // whenever any other spec failed, which a gate must not do.
   //
   // Not a second browser and not a second job — one `playwright test`, one
-  // Chromium, the one `Repository rules` check (docs/agents/ci.md §4c).
+  // Chromium, one shard of the `Repository rules` check (docs/agents/ci.md §4c).
   //
   // ⚠️ **A third project since #866, `nightly`, and it is NOT part of the
   // gate.** Every test tagged `@nightly` (`browser/nightly.ts`, a reviewed

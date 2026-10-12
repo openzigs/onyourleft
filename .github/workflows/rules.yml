@@ -74,7 +74,8 @@ jobs:
     # every shard's measured time on the slower runner (an AMD EPYC 7763) and
     # the arithmetic of every stop in this file; nightly-split.test.ts holds
     # each shard's stop at least five minutes clear of the slowest run in that
-    # section's table, which it reads rather than repeats.
+    # section's table, which it reads rather than repeats. This shard took
+    # 250 to 279 s there.
     timeout-minutes: 12
     steps:
       - name: Check out the repository
@@ -411,6 +412,7 @@ jobs:
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
+    # 455 to 461 s on the slower runner.
     timeout-minutes: 15
     steps:
       - name: Check out the repository
@@ -554,7 +556,9 @@ jobs:
     # this job's 1 500: a hang in either ends as a red, named STEP and never
     # as a cancelled job. nightly-split.test.ts holds that sum, and holds the
     # gate's stop at least three minutes inside this from the latest start
-    # measured.
+    # measured (39 s). The shard itself took 705 s and 757 s on the slower
+    # runner, so this is not what bounds a green run: the required check
+    # reported 723 s and 772 s after the run began.
     timeout-minutes: 25
     steps:
       - name: Check out the repository
