@@ -513,7 +513,7 @@ jobs:
       # also excludes the `.a11y.test.` files, which the Accessibility step
       # above runs, so they run once rather than twice.
       - name: Tests and coverage report
-        run: pnpm run test:coverage
+        run: pnpm run test:coverage --coverage.enabled=false
 
       # ⚠️ The other half of #852's split, `test:uninstrumented`, is NOT here
       # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is

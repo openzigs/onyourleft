@@ -251,7 +251,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     const commands = runCommands(rules);
     expect(commands).toEqual(
       expect.arrayContaining([
-        'pnpm run test:coverage',
+        'pnpm run test:coverage --coverage.enabled=false',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser',
       ]),
     );
