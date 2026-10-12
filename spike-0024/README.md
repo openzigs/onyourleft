@@ -13,8 +13,8 @@ holds what made its numbers. **It is not merged and must not be.**
   `js-size.mjs` (W7), `gate-probe.mjs` (the browser gate's browser), `count-move.py` (the cost of a
   move), and `tablet/` (`build.sh`, `chain.sh`, `chain2.sh`, `run.sh`, `cool.sh`, `coldstart.sh`,
   `analyse.py`, `table.py`, the W1 probe and the frame counter).
-- `spike-0024/results/`: `mac/` (the one sitting that counts; `sitting-1-discarded.log` is the
-  console of the sitting that was thrown away), `mac-first-paint/`, `tablet/` (one directory a run;
+- `spike-0024/results/`: `mac/` (the one sitting that counts; `sitting-1-discarded.txt` is the
+  console of the sitting that was thrown away; its JSON files were overwritten by the second sitting and are not kept), `mac-first-paint/`, `tablet/` (one directory a run;
   `latency.txt.gz` is SurfaceFlinger's raw present times), `js-size.txt`, `gate-probe.txt`,
   `count-move.txt`, `screenshots-sha256.txt`.
 
