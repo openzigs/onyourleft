@@ -1,0 +1,76 @@
+{
+ "label": "control-first-2",
+ "query": "world=realistic&panel=0&ladder=0&seconds=60",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--out=spike-0024/results/mac",
+  "--first"
+ ],
+ "when": "2026-10-12T02:06:18.041Z",
+ "loadAverageBefore": [
+  5.181640625,
+  7.8896484375,
+  10.9091796875
+ ],
+ "loadAverageAfter": [
+  5.181640625,
+  7.8896484375,
+  10.9091796875
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 100,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 46.5,
+   "command": "node spike-0024/scripts/run.mjs control-first-2 world=realistic&panel=0&ladder=0&seconds=6"
+  },
+  {
+   "cpu": 31.6,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 15.8,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 8.8,
+   "command": "/usr/libexec/syspolicyd"
+  }
+ ],
+ "firstFrameWallMs": 695,
+ "firstFrameMs": 691.2999997138977,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&seconds=60",
+  "outcome": {
+   "loaded": true
+  },
+  "soak": [],
+  "firstFrameMs": 691.2999997138977,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 691",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}"
+ ]
+}

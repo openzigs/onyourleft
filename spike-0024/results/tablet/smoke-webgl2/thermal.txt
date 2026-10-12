@@ -1,0 +1,112 @@
+== 1791770154
+Thermal Status: 0
+	Temperature{mValue=57.000004, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=36.847, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=28.055002, mType=-1, mName=charger_skin_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=25.160002, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=31.015001, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=23.1, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=46.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=70.0, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=46.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=48.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=57.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=47.000004, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=27.408, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=37.06405, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=23.708, mType=-1, mName=usb_pwr_therm, mStatus=0}
+Current temperatures from HAL:
+	Temperature{mValue=51.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=57.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=66.0, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=25.97105, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=29.657001, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=55.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=52.000004, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=26.261002, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=67.0, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=21.323002, mType=-1, mName=usb_pwr_therm, mStatus=0}
+	Temperature{mValue=20.0, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=63.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=35.935, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=20.598001, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=26.869001, mType=-1, mName=charger_skin_therm, mStatus=0}
+Current cooling devices from HAL:
+	TemperatureThreshold{mType=1, mName=G3D, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=LITTLE, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=3, mName=VIRTUAL-SKIN, mHotThrottlingThresholds=[NaN, 39.0, 43.0, 45.0, 47.0, 51.5, 56.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=BIG, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=2, mName=battery, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=MID, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+16352 u0_a392       0 -10  44G 623M 501M S 48.1   8.3   0:19.88 dev.openzigs.onyourleft.webgpuspike
+-- top
+16386 77.7 339M com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+16352 55.5 620M dev.openzigs.onyourleft.webgpuspike
+   92 33.3    0 [kswapd0]
+ 8594 29.6 127M com.amazon.avod.thirdpartyclient
+21004 25.9 114M com.amazon.mp3
+ 1461 25.9 581M system_server
+  526 22.2  70M surfaceflinger
+24631 14.8  98M com.google.android.videos
+13583 11.1 196M com.google.android.googlequicksearchbox:googleapp
+20273 11.1  67M com.google.android.apps.setupwizard.searchselector
+ 5692 11.1  61M com.android.providers.partnerbookmarks
+  221 11.1    0 [eh_comp_thread]
+== 1791770190
+Thermal Status: 0
+	Temperature{mValue=57.000004, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=36.847, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=28.055002, mType=-1, mName=charger_skin_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=25.160002, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=31.015001, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=23.1, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=46.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=70.0, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=46.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=48.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=57.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=47.000004, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=27.408, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=37.06405, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=23.708, mType=-1, mName=usb_pwr_therm, mStatus=0}
+Current temperatures from HAL:
+	Temperature{mValue=50.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=59.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=57.000004, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=27.634897, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=31.839, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=56.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=54.000004, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=27.361002, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=55.000004, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=21.548, mType=-1, mName=usb_pwr_therm, mStatus=0}
+	Temperature{mValue=20.1, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=55.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=38.495003, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=20.773, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=28.233002, mType=-1, mName=charger_skin_therm, mStatus=0}
+Current cooling devices from HAL:
+	TemperatureThreshold{mType=1, mName=G3D, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=LITTLE, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=3, mName=VIRTUAL-SKIN, mHotThrottlingThresholds=[NaN, 39.0, 43.0, 45.0, 47.0, 51.5, 56.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=BIG, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=2, mName=battery, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+	TemperatureThreshold{mType=0, mName=MID, mHotThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}
+16352 u0_a392       0 -10  44G 596M 480M S  103   8.0   0:51.53 dev.openzigs.onyourleft.webgpuspike
+-- top
+16352  114 596M dev.openzigs.onyourleft.webgpuspike
+16386 81.4 319M com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+  526 22.2  70M surfaceflinger
+17282 11.1 5.3M top -b -n 1 -s 2 -m 12 -o PID,%CPU,RES,ARGS
+  531  7.4 8.6M android.hardware.composer.hwc3-service.pixel
+16425  3.7    0 [csf_kcpu_worker]
+15362  3.7    0 [kworker/u16:1-async_vote_wq]
+ 8594  3.7 110M com.amazon.avod.thirdpartyclient
+21004  3.7 152M com.amazon.mp3
+  641  3.7    0 [mali-gpuq-kthread]
+  491  3.7    0 [sugov:0]
+  268  3.7    0 [decon0_kthread]

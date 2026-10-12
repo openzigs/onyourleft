@@ -1,0 +1,223 @@
+{
+ "label": "webgl2-uncapped-3",
+ "query": "backend=webgl2&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--uncapped"
+ ],
+ "when": "2026-10-12T02:20:27.355Z",
+ "loadAverageBefore": [
+  5.08154296875,
+  5.021484375,
+  7.2138671875
+ ],
+ "loadAverageAfter": [
+  26.35302734375,
+  10.73095703125,
+  9.1611328125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 115.9,
+   "command": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc -p tsconfig.test.json"
+  },
+  {
+   "cpu": 44.4,
+   "command": "node spike-0024/scripts/run.mjs webgl2-uncapped-3 backend=webgl2&seconds=60 --page=/webgpu"
+  },
+  {
+   "cpu": 24.5,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 18.8,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 7.8,
+   "command": "/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtu"
+  }
+ ],
+ "firstFrameWallMs": 1205,
+ "firstFrameMs": 1200.5999999046326,
+ "wallSeconds": 60.089,
+ "cpuSeconds": {
+  "renderer": 69.03999999999999,
+  "gpu": 39.62,
+  "browser": 0.20999999999999996
+ },
+ "external": {
+  "frames": 57347,
+  "fps": 955.7833333333333,
+  "p50": 0,
+  "p90": 2.2999999999992724,
+  "p95": 2.400000000001455,
+  "p99": 2.7000000000007276,
+  "max": 20.5,
+  "over20Ms": 1,
+  "over100Ms": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&seconds=60",
+  "windows": [
+   {
+    "window": 1,
+    "frames": 14894,
+    "fps": 496.46666666666664,
+    "frameMs": {
+     "p50": 2,
+     "p90": 2.3000000000029104,
+     "p95": 2.5,
+     "p99": 2.7999999999992724,
+     "max": 20.5,
+     "count": 14894
+    },
+    "renderMs": {
+     "p50": 1.4000000953674316,
+     "p90": 1.700000286102295,
+     "p95": 1.8000001907348633,
+     "p99": 2.0999999046325684,
+     "max": 36.200000286102295,
+     "count": 14894
+    },
+    "trianglesPerFrame": 201793,
+    "drawCallsPerFrame": 32,
+    "gapsOver100Ms": 0,
+    "texturesSize": 96054887,
+    "textures": 68
+   },
+   {
+    "window": 2,
+    "frames": 13835,
+    "fps": 461.1666666666667,
+    "frameMs": {
+     "p50": 2.1999999999970896,
+     "p90": 2.400000000001455,
+     "p95": 2.599999999998545,
+     "p99": 2.900000000001455,
+     "max": 6.399999999994179,
+     "count": 13835
+    },
+    "renderMs": {
+     "p50": 1.5,
+     "p90": 1.799999713897705,
+     "p95": 1.8000001907348633,
+     "p99": 2.0999999046325684,
+     "max": 4.800000190734863,
+     "count": 13835
+    },
+    "trianglesPerFrame": 200382,
+    "drawCallsPerFrame": 30,
+    "gapsOver100Ms": 0,
+    "texturesSize": 96054887,
+    "textures": 68
+   }
+  ],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 1200.5999999046326,
+  "result": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "world": "realistic",
+   "rung": "realistic",
+   "seconds": 60,
+   "frames": 28729,
+   "fps": 478.81666666666666,
+   "frameMs": {
+    "p50": 2.099999999998545,
+    "p90": 2.400000000001455,
+    "p95": 2.5,
+    "p99": 2.8000000000029104,
+    "max": 20.5,
+    "count": 28729
+   },
+   "renderMs": {
+    "p50": 1.5,
+    "p90": 1.700000286102295,
+    "p95": 1.8000001907348633,
+    "p99": 2.0999999046325684,
+    "max": 36.200000286102295,
+    "count": 28729
+   },
+   "gapsOver100Ms": 0,
+   "lastFrame": {
+    "calls": 59613,
+    "frameCalls": 2,
+    "drawCalls": 28,
+    "triangles": 198987,
+    "points": 0,
+    "lines": 0,
+    "timestamp": 0
+   },
+   "memory": {
+    "attributes": 172,
+    "attributesSize": 15499592,
+    "geometries": 32,
+    "indexAttributes": 25,
+    "indexAttributesSize": 1010058,
+    "indirectStorageAttributes": 0,
+    "indirectStorageAttributesSize": 0,
+    "programs": 60,
+    "programsSize": 634117,
+    "readbackBuffers": 0,
+    "readbackBuffersSize": 0,
+    "renderTargets": 3,
+    "storageAttributes": 0,
+    "storageAttributesSize": 0,
+    "textures": 68,
+    "texturesSize": 96054887,
+    "uniformBuffers": 105,
+    "uniformBuffersSize": 155840,
+    "total": 113354494
+   },
+   "textures": {
+    "bytes": 30869160,
+    "formats": {
+     "ETC2 RGB": 25,
+     "ASTC 4x4": 34,
+     "ETC2 RGBA": 5
+    },
+    "sky": "half-float"
+   },
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "gl": true,
+   "layers": {
+    "traa": false,
+    "ao": false,
+    "wind": false
+   },
+   "firstFrameMs": 1200.5999999046326
+  }
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 1201",
+  "OYL-SPIKE {\"window\":1,\"frames\":14894,\"fps\":496.46666666666664,\"frameMs\":{\"p50\":2,\"p90\":2.3000000000029104,\"p95\":2.5,\"p99\":2.7999999999992724,\"max\":20.5,\"count\":14894},\"renderMs\":{\"p50\":1.4000000953674316,\"p90\":1.700000286102295,\"p95\":1.8000001907348633,\"p99\":2.0999999046325684,\"max\":36.200000286102295,\"count\":14894},\"trianglesPerFrame\":201793,\"drawCallsPerFrame\":32,\"gapsOver100Ms\":0,\"texturesSize\":96054887,\"textures\":68}",
+  "OYL-SPIKE {\"window\":2,\"frames\":13835,\"fps\":461.1666666666667,\"frameMs\":{\"p50\":2.1999999999970896,\"p90\":2.400000000001455,\"p95\":2.599999999998545,\"p99\":2.900000000001455,\"max\":6.399999999994179,\"count\":13835},\"renderMs\":{\"p50\":1.5,\"p90\":1.799999713897705,\"p95\":1.8000001907348633,\"p99\":2.0999999046325684,\"max\":4.800000190734863,\"count\":13835},\"trianglesPerFrame\":200382,\"drawCallsPerFrame\":30,\"gapsOver100Ms\":0,\"texturesSize\":96054887,\"textures\":68}",
+  "OYL-SPIKE-RESULT {\"asked\":\"webgl2\",\"renderer\":\"WebGPURenderer\",\"webgpuBackend\":false,\"adapter\":null,\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\",\"world\":\"realistic\",\"rung\":\"realistic\",\"seconds\":60,\"frames\":28729,\"fps\":478.81666666666666,\"frameMs\":{\"p50\":2.099999999998545,\"p90\":2.400000000001455,\"p95\":2.5,\"p99\":2.8000000000029104,\"max\":20.5,\"count\":28729},\"renderMs\":{\"p50\":1.5,\"p90\":1.700000286102295,\"p95\":1.8000001907348633,\"p99\":2.0999999046325684,\"max\":36.200000286102295,\"count\":28729},\"gapsOver100Ms\":0,\"lastFrame\":{\"calls\":59613,\"frameCalls\":2,\"drawCalls\":28,\"triangles\":198987,\"points\":0,\"lines\":0,\"timestamp\":0},\"memory\":{\"attributes\":172,\"attributesSize\":15499592,\"geometries\":32,\"indexAttributes\":25,\"indexAttributesSize\":1010058,\"indirectStorageAttributes\":0,\"indirectStorageAttributesSize\":0,\"programs\":60,\"programsSize\":634117,\"readbackBuffers\":0,\"readbackBuffersSize\":0,\"renderTargets\":3,\"storageAttributes\":0,\"storageAttributesSize\":0,\"textures\":68,\"texturesSize\":96054887,\"uniformBuffers\":105,\"uniformBuffersSize\":155840,\"total\":113354494},\"textures\":{\"bytes\":30869160,\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"sky\":\"half-float\"},\"drawingBuffer\":[2560,1600],\"devicePixelRatio\":2,\"gl\":true,\"layers\":{\"traa\":false,\"ao\":false,\"wind\":false},\"firstFrameMs\":1200.5999999046326}"
+ ]
+}

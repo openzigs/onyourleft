@@ -1,0 +1,139 @@
+{
+ "label": "ao-shot-1600",
+ "query": "backend=webgpu&ao=1&aon=depth&at=1600",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/ao-at1600.png"
+ ],
+ "when": "2026-10-12T02:38:47.209Z",
+ "loadAverageBefore": [
+  13.98974609375,
+  11.31640625,
+  11.5625
+ ],
+ "loadAverageAfter": [
+  15.111328125,
+  11.59326171875,
+  11.65869140625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 148.4,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 103.6,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 97.5,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 92.8,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 84.5,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/node --experimental-import-meta-resol"
+  }
+ ],
+ "firstFrameWallMs": 966,
+ "firstFrameMs": 959.5999999046326,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&ao=1&aon=depth&at=1600",
+  "windows": [],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "at": 1600,
+   "traa": false,
+   "ao": true,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 959.5999999046326
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 960"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/ao-at1600.png"
+}

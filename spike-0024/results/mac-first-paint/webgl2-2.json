@@ -1,0 +1,69 @@
+{
+ "label": "webgl2-2",
+ "query": "backend=webgl2&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:24:04.413Z",
+ "loadAverageBefore": [
+  6.2333984375,
+  9.529296875,
+  6.8720703125
+ ],
+ "loadAverageAfter": [
+  6.29443359375,
+  9.4873046875,
+  6.87255859375
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 117.9,
+   "command": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc -p tsconfig.test.json"
+  },
+  {
+   "cpu": 48.3,
+   "command": "node spike-0024/scripts/run.mjs webgl2-2 backend=webgl2&seconds=60 --first --out=spike-002"
+  },
+  {
+   "cpu": 30.1,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 14.2,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 13.8,
+   "command": "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow console"
+  }
+ ],
+ "firstFrameWallMs": 922,
+ "firstFrameMs": 917.7000002861023,
+ "firstContentfulPaintMs": 940,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 917.7000002861023
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 918"
+ ]
+}

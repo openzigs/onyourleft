@@ -1,0 +1,10 @@
+== gate flags: 153.0.8010.12
+  probe {"gpu":true,"adapter":null}
+  webgpu: settled=true after 21103 ms {"ready":true,"errors":[],"webgpuBackend":false,"first":20972.300000190735}
+  webgl2: settled=true after 20232 ms {"ready":true,"errors":[],"webgpuBackend":false,"first":20219.5}
+  webglrenderer: settled=true after 17691 ms {"ready":true,"errors":[],"webgpuBackend":false,"first":17680.699999809265}
+== gate flags + --enable-unsafe-webgpu: 153.0.8010.12
+  probe {"gpu":true,"adapter":{"vendor":"google","architecture":"swiftshader","description":"","isFallbackAdapter":true}}
+  webgpu: settled=true after 836 ms {"ready":true,"errors":[],"webgpuBackend":true,"first":824.6999998092651}
+  webgl2: settled=true after 21070 ms {"ready":true,"errors":[],"webgpuBackend":false,"first":21059.699999809265}
+  webglrenderer: settled=true after 16111 ms {"ready":true,"errors":[],"webgpuBackend":false,"first":16100.5}

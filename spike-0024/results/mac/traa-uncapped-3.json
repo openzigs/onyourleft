@@ -1,0 +1,357 @@
+{
+ "label": "traa-uncapped-3",
+ "query": "backend=webgpu&traa=1&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--uncapped"
+ ],
+ "when": "2026-10-12T02:33:20.798Z",
+ "loadAverageBefore": [
+  4.98828125,
+  10.38671875,
+  12.02197265625
+ ],
+ "loadAverageAfter": [
+  6.30029296875,
+  9.82763671875,
+  11.69677734375
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 35.6,
+   "command": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Vers"
+  },
+  {
+   "cpu": 33.1,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 16.2,
+   "command": "node spike-0024/scripts/run.mjs traa-uncapped-3 backend=webgpu&traa=1&seconds=60 --page=/w"
+  },
+  {
+   "cpu": 12.9,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 6.8,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework"
+  }
+ ],
+ "firstFrameWallMs": 924,
+ "firstFrameMs": 918.3000001907349,
+ "wallSeconds": 60.034,
+ "cpuSeconds": {
+  "renderer": 65.94,
+  "gpu": 63.900000000000006,
+  "browser": 0.4
+ },
+ "external": {
+  "frames": 56299,
+  "fps": 938.3166666666667,
+  "p50": 0,
+  "p90": 2.2999999999992724,
+  "p95": 2.5,
+  "p99": 3.0999999999994543,
+  "max": 19.69999999999891,
+  "over20Ms": 0,
+  "over100Ms": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&traa=1&seconds=60",
+  "windows": [
+   {
+    "window": 1,
+    "frames": 13622,
+    "fps": 454.06666666666666,
+    "frameMs": {
+     "p50": 2,
+     "p90": 2.600000000002183,
+     "p95": 2.899999999999636,
+     "p99": 6.399999999997817,
+     "max": 19.69999999999891,
+     "count": 13622
+    },
+    "renderMs": {
+     "p50": 1.5,
+     "p90": 2,
+     "p95": 2.1999998092651367,
+     "p99": 5.799999713897705,
+     "max": 19.700000286102295,
+     "count": 13622
+    },
+    "trianglesPerFrame": 201722,
+    "drawCallsPerFrame": 33,
+    "gapsOver100Ms": 0,
+    "texturesSize": 177974899,
+    "textures": 73
+   },
+   {
+    "window": 2,
+    "frames": 14535,
+    "fps": 484.5,
+    "frameMs": {
+     "p50": 2,
+     "p90": 2.3999999999941792,
+     "p95": 2.5,
+     "p99": 2.8000000000029104,
+     "max": 6.900000000001455,
+     "count": 14535
+    },
+    "renderMs": {
+     "p50": 1.5,
+     "p90": 1.700000286102295,
+     "p95": 1.8000001907348633,
+     "p99": 2.0999999046325684,
+     "max": 5.400000095367432,
+     "count": 14535
+    },
+    "trianglesPerFrame": 200387,
+    "drawCallsPerFrame": 31,
+    "gapsOver100Ms": 0,
+    "texturesSize": 177974899,
+    "textures": 73
+   }
+  ],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "traa": true,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 918.3000001907349,
+  "result": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "world": "realistic",
+   "rung": "realistic",
+   "seconds": 60,
+   "frames": 28157,
+   "fps": 469.28333333333336,
+   "frameMs": {
+    "p50": 2,
+    "p90": 2.5,
+    "p95": 2.7000000000007276,
+    "p99": 4.599999999998545,
+    "max": 19.69999999999891,
+    "count": 28157
+   },
+   "renderMs": {
+    "p50": 1.5,
+    "p90": 1.8000001907348633,
+    "p95": 2,
+    "p99": 3.799999713897705,
+    "max": 19.700000286102295,
+    "count": 28157
+   },
+   "gapsOver100Ms": 0,
+   "lastFrame": {
+    "calls": 87590,
+    "frameCalls": 3,
+    "drawCalls": 29,
+    "triangles": 198988,
+    "points": 0,
+    "lines": 0,
+    "timestamp": 0
+   },
+   "memory": {
+    "attributes": 173,
+    "attributesSize": 15557924,
+    "geometries": 32,
+    "indexAttributes": 25,
+    "indexAttributesSize": 1931292,
+    "indirectStorageAttributes": 0,
+    "indirectStorageAttributesSize": 0,
+    "programs": 62,
+    "programsSize": 747823,
+    "readbackBuffers": 0,
+    "readbackBuffersSize": 0,
+    "renderTargets": 5,
+    "storageAttributes": 0,
+    "storageAttributesSize": 0,
+    "textures": 73,
+    "texturesSize": 177974899,
+    "uniformBuffers": 137,
+    "uniformBuffersSize": 305568,
+    "total": 196517506
+   },
+   "textures": {
+    "bytes": 30869160,
+    "formats": {
+     "ETC2 RGB": 25,
+     "ASTC 4x4": 34,
+     "ETC2 RGBA": 5
+    },
+    "sky": "half-float"
+   },
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "gl": false,
+   "layers": {
+    "traa": true,
+    "ao": false,
+    "wind": false
+   },
+   "firstFrameMs": 918.3000001907349
+  }
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 918",
+  "OYL-SPIKE {\"window\":1,\"frames\":13622,\"fps\":454.06666666666666,\"frameMs\":{\"p50\":2,\"p90\":2.600000000002183,\"p95\":2.899999999999636,\"p99\":6.399999999997817,\"max\":19.69999999999891,\"count\":13622},\"renderMs\":{\"p50\":1.5,\"p90\":2,\"p95\":2.1999998092651367,\"p99\":5.799999713897705,\"max\":19.700000286102295,\"count\":13622},\"trianglesPerFrame\":201722,\"drawCallsPerFrame\":33,\"gapsOver100Ms\":0,\"texturesSize\":177974899,\"textures\":73}",
+  "OYL-SPIKE {\"window\":2,\"frames\":14535,\"fps\":484.5,\"frameMs\":{\"p50\":2,\"p90\":2.3999999999941792,\"p95\":2.5,\"p99\":2.8000000000029104,\"max\":6.900000000001455,\"count\":14535},\"renderMs\":{\"p50\":1.5,\"p90\":1.700000286102295,\"p95\":1.8000001907348633,\"p99\":2.0999999046325684,\"max\":5.400000095367432,\"count\":14535},\"trianglesPerFrame\":200387,\"drawCallsPerFrame\":31,\"gapsOver100Ms\":0,\"texturesSize\":177974899,\"textures\":73}",
+  "OYL-SPIKE-RESULT {\"asked\":\"webgpu\",\"renderer\":\"WebGPURenderer\",\"webgpuBackend\":true,\"adapter\":{\"vendor\":\"apple\",\"architecture\":\"metal-3\",\"device\":\"\",\"description\":\"\",\"features\":[\"bgra8unorm-storage\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"primitive-index\",\"rg11b10ufloat-renderable\",\"shader-f16\",\"subgroup-size-control\",\"subgroups\",\"texture-component-swizzle\",\"texture-compression-astc\",\"texture-compression-astc-sliced-3d\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-etc2\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"],\"limits\":{\"maxTextureDimension2D\":16384,\"maxTextureArrayLayers\":2048,\"maxBindGroups\":4,\"maxSampledTexturesPerShaderStage\":48,\"maxSamplersPerShaderStage\":16,\"maxUniformBufferBindingSize\":65536,\"maxStorageBufferBindingSize\":4294967292,\"maxVertexAttributes\":30,\"maxColorAttachments\":8,\"maxComputeWorkgroupStorageSize\":32768,\"maxComputeInvocationsPerWorkgroup\":1024}},\"deviceFeatures\":[\"bgra8unorm-storage\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"rg11b10ufloat-renderable\",\"shader-f16\",\"subgroups\",\"texture-compression-astc\",\"texture-compression-astc-sliced-3d\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-etc2\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"],\"compatibilityMode\":false,\"canvasFormat\":\"bgra8unorm\",\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\",\"world\":\"realistic\",\"rung\":\"realistic\",\"seconds\":60,\"frames\":28157,\"fps\":469.28333333333336,\"frameMs\":{\"p50\":2,\"p90\":2.5,\"p95\":2.7000000000007276,\"p99\":4.599999999998545,\"max\":19.69999999999891,\"count\":28157},\"renderMs\":{\"p50\":1.5,\"p90\":1.8000001907348633,\"p95\":2,\"p99\":3.799999713897705,\"max\":19.700000286102295,\"count\":28157},\"gapsOver100Ms\":0,\"lastFrame\":{\"calls\":87590,\"frameCalls\":3,\"drawCalls\":29,\"triangles\":198988,\"points\":0,\"lines\":0,\"timestamp\":0},\"memory\":{\"attributes\":173,\"attributesSize\":15557924,\"geometries\":32,\"indexAttributes\":25,\"indexAttributesSize\":1931292,\"indirectStorageAttributes\":0,\"indirectStorageAttributesSize\":0,\"programs\":62,\"programsSize\":747823,\"readbackBuffers\":0,\"readbackBuffersSize\":0,\"renderTargets\":5,\"storageAttributes\":0,\"storageAttributesSize\":0,\"textures\":73,\"texturesSize\":177974899,\"uniformBuffers\":137,\"uniformBuffersSize\":305568,\"total\":196517506},\"textures\":{\"bytes\":30869160,\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"sky\":\"half-float\"},\"drawingBuffer\":[2560,1600],\"devicePixelRatio\":2,\"gl\":false,\"layers\":{\"traa\":true,\"ao\":false,\"wind\":false},\"firstFrameMs\":918.3000001907349}"
+ ]
+}

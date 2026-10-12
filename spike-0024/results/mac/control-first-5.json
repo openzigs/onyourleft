@@ -1,0 +1,76 @@
+{
+ "label": "control-first-5",
+ "query": "world=realistic&panel=0&ladder=0&seconds=60",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--out=spike-0024/results/mac",
+  "--first"
+ ],
+ "when": "2026-10-12T02:06:22.192Z",
+ "loadAverageBefore": [
+  5.1669921875,
+  7.84130859375,
+  10.87451171875
+ ],
+ "loadAverageAfter": [
+  5.1669921875,
+  7.84130859375,
+  10.87451171875
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 100,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 32.4,
+   "command": "node spike-0024/scripts/run.mjs control-first-5 world=realistic&panel=0&ladder=0&seconds=6"
+  },
+  {
+   "cpu": 31.4,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 13.4,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 7.1,
+   "command": "/usr/sbin/coreaudiod"
+  }
+ ],
+ "firstFrameWallMs": 663,
+ "firstFrameMs": 659.1000003814697,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&seconds=60",
+  "outcome": {
+   "loaded": true
+  },
+  "soak": [],
+  "firstFrameMs": 659.1000003814697,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 659",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}"
+ ]
+}

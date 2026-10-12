@@ -1,0 +1,8 @@
+control waited=30s load={ 4.89 11.94 13.06 }
+classic waited=0s load={ 4.46 7.55 10.72 }
+webgpu waited=0s load={ 4.97 6.21 9.19 }
+webgl2 waited=0s load={ 4.87 5.29 7.88 }
+traa waited=465s load={ 4.29 15.65 13.94 }
+ao waited=15s load={ 4.67 8.99 11.31 }
+aofull waited=120s load={ 4.88 9.41 10.83 }
+wind waited=255s load={ 4.29 13.48 12.86 }

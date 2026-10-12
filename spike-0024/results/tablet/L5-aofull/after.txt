@@ -1,0 +1,4 @@
+end 2026-10-12T04:11:03Z
+skin 33.64098
+brightness 3
+ 0:11  up 40 days, 18:37, 8 users, load averages: 1.61 1.84 3.05

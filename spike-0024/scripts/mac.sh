@@ -22,8 +22,20 @@ CONFIGS=(
   "aofull|/webgpu.html|4331|backend=webgpu&ao=1&aon=depth&aos=1"
   "wind|/webgpu.html|4331|backend=webgpu&wind=1"
 )
+# Other agents share this machine. Before each configuration, wait (at most 20 minutes) for the
+# one-minute load average to fall under 5 with no test browser running, and write down what was found.
+quiet() {
+  local waited=0
+  while [ "$waited" -lt 1200 ]; do
+    local load; load=$(sysctl -n vm.loadavg | awk '{print $2}')
+    if awk "BEGIN{exit !($load < 5.0)}" && ! pgrep -qf "chrome-headless-shell|playwright test"; then break; fi
+    sleep 15; waited=$((waited + 15))
+  done
+  echo "$1 waited=${waited}s load=$(sysctl -n vm.loadavg)" >> "$OUT/quiet.txt"
+}
 for each in "${CONFIGS[@]}"; do
   IFS='|' read -r L P PORT Q <<< "$each"
+  quiet "$L"
   A="--page=$P --port=$PORT --out=$OUT"
   $R "$L-capped" "$Q&seconds=60" $A
   for i in 1 2 3; do $R "$L-uncapped-$i" "$Q&seconds=60" $A --uncapped; done

@@ -1,0 +1,223 @@
+{
+ "label": "webgpu-dump",
+ "query": "backend=webgpu&at=2550",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/.dump.png",
+  "--dump"
+ ],
+ "when": "2026-10-12T02:54:56.416Z",
+ "loadAverageBefore": [
+  4.58349609375,
+  7.8046875,
+  10.37890625
+ ],
+ "loadAverageAfter": [
+  4.45654296875,
+  7.724609375,
+  10.33544921875
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 31.8,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 19.7,
+   "command": "node spike-0024/scripts/run.mjs webgpu-dump backend=webgpu&at=2550 --page=/webgpu.html --p"
+  },
+  {
+   "cpu": 17.5,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 6.7,
+   "command": "/usr/sbin/coreaudiod"
+  },
+  {
+   "cpu": 6.4,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework"
+  }
+ ],
+ "firstFrameWallMs": 720,
+ "firstFrameMs": 715.9000000953674,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&at=2550",
+  "windows": [],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 715.9000000953674
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 716"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/.dump.png",
+ "dump": {
+  "rows": [
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=1 | map=- | normalMap=- | idx=576",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=19296",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=1 | map=- | normalMap=- | idx=216",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=42 | map=512x512 | normalMap=yes | idx=36",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=2694",
+   "Mesh |  | MeshLambertNodeMaterial |  | inst=0 | map=- | normalMap=- | idx=2412",
+   "Mesh |  | MeshLambertNodeMaterial |  | inst=0 | map=- | normalMap=- | idx=420",
+   "Mesh |  | MeshLambertNodeMaterial |  | inst=0 | map=- | normalMap=- | idx=504",
+   "Mesh |  | MeshLambertNodeMaterial |  | inst=0 | map=- | normalMap=- | idx=72",
+   "Mesh |  | MeshStandardNodeMaterial | tree_small_02 | inst=1 | map=tree_small_02_branch_diff_1k | normalMap=yes | idx=17964",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=10 | map=- | normalMap=- | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=10 | map=- | normalMap=- | idx=6",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_a | inst=2 | map=fir_sapling_medium_branches_diff_1k | normalMap=yes | idx=71988",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_a | inst=2 | map=fir_sapling_medium_branches_diff_1k | normalMap=yes | idx=17994",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_b | inst=3 | map=fir_sapling_medium_branches_diff_1k | normalMap=yes | idx=17994",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=67 | map=- | normalMap=- | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=65 | map=- | normalMap=- | idx=6",
+   "Mesh |  | MeshStandardNodeMaterial | shrub_02 | inst=2 | map=shrub_02_diff_1k | normalMap=yes | idx=17940",
+   "Mesh |  | MeshStandardNodeMaterial | shrub_02 | inst=6 | map=shrub_02_diff_1k | normalMap=yes | idx=17964",
+   "Mesh |  | MeshStandardNodeMaterial | boulder_01 | inst=12 | map=boulder_01_diff_1k | normalMap=yes | idx=7200",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=16 | map=512x512 | normalMap=yes | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=20 | map=512x512 | normalMap=yes | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=14 | map=- | normalMap=- | idx=60",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=2 | map=- | normalMap=- | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=2 | map=- | normalMap=yes | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=2 | map=- | normalMap=yes | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=2 | map=- | normalMap=yes | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | inst=2 | map=- | normalMap=- | idx=1086",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | inst=1 | map=1024x1024 | normalMap=yes | idx=25908",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=2 | map=- | normalMap=- | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | inst=62 | map=- | normalMap=- | idx=6"
+  ],
+  "ported": [
+   [
+    "impostor strip",
+    4
+   ],
+   [
+    "material layers",
+    4
+   ],
+   [
+    "foliage sway",
+    6
+   ],
+   [
+    "instance channels: tint and dither",
+    4
+   ],
+   [
+    "instance channels: tint",
+    21
+   ],
+   [
+    "rider kit colour",
+    5
+   ],
+   [
+    "rider silhouette shadow",
+    1
+   ],
+   [
+    "ground blob",
+    1
+   ],
+   [
+    "photographic road",
+    1
+   ],
+   [
+    "photographic ground",
+    1
+   ]
+  ],
+  "background": "texture",
+  "environment": "texture"
+ }
+}

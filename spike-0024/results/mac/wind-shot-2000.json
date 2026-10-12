@@ -1,0 +1,139 @@
+{
+ "label": "wind-shot-2000",
+ "query": "backend=webgpu&wind=1&at=2000",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/wind-at2000.png"
+ ],
+ "when": "2026-10-12T02:54:50.480Z",
+ "loadAverageBefore": [
+  4.634765625,
+  7.869140625,
+  10.4169921875
+ ],
+ "loadAverageAfter": [
+  4.58349609375,
+  7.8046875,
+  10.37890625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 28.1,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 17.7,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 9.7,
+   "command": "node spike-0024/scripts/run.mjs wind-shot-2000 backend=webgpu&wind=1&at=2000 --page=/webgp"
+  },
+  {
+   "cpu": 7.2,
+   "command": "/usr/sbin/coreaudiod"
+  },
+  {
+   "cpu": 4.5,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework"
+  }
+ ],
+ "firstFrameWallMs": 675,
+ "firstFrameMs": 671.2000002861023,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&wind=1&at=2000",
+  "windows": [],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "at": 2000,
+   "traa": false,
+   "ao": false,
+   "wind": true
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 671.2000002861023
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 671"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/wind-at2000.png"
+}

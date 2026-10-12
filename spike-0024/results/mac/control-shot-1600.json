@@ -1,0 +1,77 @@
+{
+ "label": "control-shot-1600",
+ "query": "world=realistic&panel=0&ladder=0&at=1600",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/control-at1600.png"
+ ],
+ "when": "2026-10-12T02:06:33.908Z",
+ "loadAverageBefore": [
+  4.9931640625,
+  7.7607421875,
+  10.828125
+ ],
+ "loadAverageAfter": [
+  4.67333984375,
+  7.6484375,
+  10.7705078125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 100,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 30.7,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 15.5,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 10.5,
+   "command": "/usr/libexec/syspolicyd"
+  },
+  {
+   "cpu": 9.6,
+   "command": "node spike-0024/scripts/run.mjs control-shot-1600 world=realistic&panel=0&ladder=0&at=1600"
+  }
+ ],
+ "firstFrameWallMs": 714,
+ "firstFrameMs": 710.6999998092651,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&at=1600",
+  "outcome": {
+   "loaded": true
+  },
+  "soak": [],
+  "firstFrameMs": 710.6999998092651,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 711",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/control-at1600.png"
+}

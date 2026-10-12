@@ -1,0 +1,31 @@
+start 2026-10-12T01:57:58Z
+url /harness/realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=21
+skin 23.67069
+brightness 3
+Thermal Status: 0
+	Temperature{mValue=57.000004, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=36.847, mType=-1, mName=neutral_therm, mStatus=0}
+	Temperature{mValue=28.055002, mType=-1, mName=charger_skin_therm, mStatus=0}
+	Temperature{mValue=0.0, mType=4, mName=VIRTUAL-USB-UI, mStatus=0}
+	Temperature{mValue=25.160002, mType=-1, mName=disp_therm, mStatus=0}
+	Temperature{mValue=31.015001, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=23.1, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=46.000004, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=70.0, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=46.000004, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=48.000004, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=57.000004, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=27.000002, mType=9, mName=ISP, mStatus=0}
+	Temperature{mValue=26.000002, mType=1, mName=G3D, mStatus=0}
+	Temperature{mValue=29.000002, mType=0, mName=LITTLE, mStatus=0}
+	Temperature{mValue=23.67069, mType=3, mName=VIRTUAL-SKIN, mStatus=0}
+	Temperature{mValue=24.738, mType=-1, mName=quiet_therm, mStatus=0}
+	Temperature{mValue=26.000002, mType=9, mName=AUR, mStatus=0}
+	Temperature{mValue=27.000002, mType=9, mName=TPU, mStatus=0}
+	Temperature{mValue=24.387001, mType=-1, mName=usb_pwr_therm2, mStatus=0}
+	Temperature{mValue=27.000002, mType=0, mName=BIG, mStatus=0}
+	Temperature{mValue=21.717001, mType=-1, mName=usb_pwr_therm, mStatus=0}
+	Temperature{mValue=20.400002, mType=2, mName=battery, mStatus=0}
+	Temperature{mValue=28.000002, mType=0, mName=MID, mStatus=0}
+	Temperature{mValue=25.652, mType=-1, mName=neutral_therm, mStatus=0}
+21:57  up 40 days, 16:24, 8 users, load averages: 11.27 15.28 13.96

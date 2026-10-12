@@ -1,0 +1,69 @@
+{
+ "label": "webglrenderer-5",
+ "query": "backend=webglrenderer&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:23:32.784Z",
+ "loadAverageBefore": [
+  8.08154296875,
+  10.2216796875,
+  6.994140625
+ ],
+ "loadAverageAfter": [
+  7.75439453125,
+  10.1181640625,
+  6.9765625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 149.7,
+   "command": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc -p tsconfig.test.json"
+  },
+  {
+   "cpu": 45.2,
+   "command": "node spike-0024/scripts/run.mjs webglrenderer-5 backend=webglrenderer&seconds=60 --first -"
+  },
+  {
+   "cpu": 42.3,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 31.4,
+   "command": "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git reset --hard --no-recu"
+  },
+  {
+   "cpu": 25.2,
+   "command": "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git pack-objects --local -"
+  }
+ ],
+ "firstFrameWallMs": 715,
+ "firstFrameMs": 710.9000000953674,
+ "firstContentfulPaintMs": 732,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 710.9000000953674
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 711"
+ ]
+}

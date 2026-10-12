@@ -1,0 +1,109 @@
+{
+ "label": "classic-only",
+ "url": "http://127.0.0.1:4333/webgpu.html?backend=webglrenderer&at=2550",
+ "state": {
+  "ready": true,
+  "errors": [],
+  "backend": false
+ },
+ "js": {
+  "files": 2,
+  "raw": 964570,
+  "gz": 275340,
+  "gzKiB": 268.9
+ },
+ "wasm": {
+  "raw": 527333,
+  "gz": 247535
+ },
+ "rows": [
+  "/assets/webgpu-BAnpQ0am.js 907041 260197",
+  "/realistic/basis/basis_transcoder.js 57529 15143",
+  "/realistic/basis/basis_transcoder.wasm 527333 247535"
+ ]
+}
+{
+ "label": "control",
+ "url": "http://127.0.0.1:4332/realistic.html?world=realistic&panel=0&ladder=0&at=2550",
+ "state": {
+  "ready": true,
+  "errors": []
+ },
+ "js": {
+  "files": 16,
+  "raw": 1027920,
+  "gz": 300841,
+  "gzKiB": 293.8
+ },
+ "wasm": {
+  "raw": 527333,
+  "gz": 247535
+ },
+ "rows": [
+  "/assets/basemap-C3CKxQYX.js 1642 786",
+  "/assets/draws-CBU4gLfl.js 563 326",
+  "/assets/format-CW4Veai5.js 1184 502",
+  "/assets/frame-pacer-DURmSqsS.js 558 382",
+  "/assets/interest-C6mnLJpN.js 58415 22596",
+  "/assets/mass-XDm36DfF.js 107 124",
+  "/assets/modulepreload-polyfill-P2Xu9kJm.js 670 389",
+  "/assets/profile-B0wXM2e8.js 3996 1834",
+  "/assets/realistic-B4R_cBpJ.js 12555 5445",
+  "/assets/replay-QxRIbiJt.js 1468 754",
+  "/assets/seeded-CDgNn1oV.js 10986 4700",
+  "/assets/src-DYyfF6Ug.js 5258 2123",
+  "/assets/src-hVCLc7bk.js 37880 13702",
+  "/assets/three-renderer-BL_1t75e.js 834622 231693",
+  "/assets/wind-CDbBtHk2.js 487 342",
+  "/realistic/basis/basis_transcoder.js 57529 15143",
+  "/realistic/basis/basis_transcoder.wasm 527333 247535"
+ ]
+}
+{
+ "label": "webgpu-only",
+ "url": "http://127.0.0.1:4334/webgpu.html?backend=webgpu&at=2550",
+ "state": {
+  "ready": true,
+  "errors": [],
+  "backend": true
+ },
+ "js": {
+  "files": 2,
+  "raw": 1304483,
+  "gz": 383038,
+  "gzKiB": 374.1
+ },
+ "wasm": {
+  "raw": 527333,
+  "gz": 247535
+ },
+ "rows": [
+  "/assets/webgpu-mvZFeaZT.js 1246954 367895",
+  "/realistic/basis/basis_transcoder.js 57529 15143",
+  "/realistic/basis/basis_transcoder.wasm 527333 247535"
+ ]
+}
+{
+ "label": "webgpu-only-forced-webgl2",
+ "url": "http://127.0.0.1:4334/webgpu.html?backend=webgl2&at=2550",
+ "state": {
+  "ready": true,
+  "errors": [],
+  "backend": false
+ },
+ "js": {
+  "files": 2,
+  "raw": 1304483,
+  "gz": 383038,
+  "gzKiB": 374.1
+ },
+ "wasm": {
+  "raw": 527333,
+  "gz": 247535
+ },
+ "rows": [
+  "/assets/webgpu-mvZFeaZT.js 1246954 367895",
+  "/realistic/basis/basis_transcoder.js 57529 15143",
+  "/realistic/basis/basis_transcoder.wasm 527333 247535"
+ ]
+}

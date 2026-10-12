@@ -1,0 +1,139 @@
+{
+ "label": "traa-shot-2000",
+ "query": "backend=webgpu&traa=1&at=2000",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/traa-at2000.png"
+ ],
+ "when": "2026-10-12T02:33:46.460Z",
+ "loadAverageBefore": [
+  5.73583984375,
+  9.47900390625,
+  11.5283203125
+ ],
+ "loadAverageAfter": [
+  5.5166015625,
+  9.37109375,
+  11.47802734375
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 202.6,
+   "command": "node /private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c"
+  },
+  {
+   "cpu": 44.2,
+   "command": "node spike-0024/scripts/run.mjs traa-shot-2000 backend=webgpu&traa=1&at=2000 --page=/webgp"
+  },
+  {
+   "cpu": 33.7,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 15.6,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 7.5,
+   "command": "/usr/sbin/coreaudiod"
+  }
+ ],
+ "firstFrameWallMs": 744,
+ "firstFrameMs": 739.0999999046326,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&traa=1&at=2000",
+  "windows": [],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "at": 2000,
+   "traa": true,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ],
+    "limits": {
+     "maxTextureDimension2D": 16384,
+     "maxTextureArrayLayers": 2048,
+     "maxBindGroups": 4,
+     "maxSampledTexturesPerShaderStage": 48,
+     "maxSamplersPerShaderStage": 16,
+     "maxUniformBufferBindingSize": 65536,
+     "maxStorageBufferBindingSize": 4294967292,
+     "maxVertexAttributes": 30,
+     "maxColorAttachments": 8,
+     "maxComputeWorkgroupStorageSize": 32768,
+     "maxComputeInvocationsPerWorkgroup": 1024
+    }
+   },
+   "deviceFeatures": [
+    "bgra8unorm-storage",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "subgroups",
+    "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-etc2",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ],
+   "compatibilityMode": false,
+   "canvasFormat": "bgra8unorm",
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 739.0999999046326
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 739"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/traa-at2000.png"
+}

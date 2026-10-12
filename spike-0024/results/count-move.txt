@@ -1,0 +1,85 @@
+file lines 13279
+
+== material construction sites
+    3058 MeshBasicMaterial      in ContactShadowBelt
+    3248 ShaderMaterial         in RiderSilhouetteBelt
+    3453 MeshBasicMaterial      in GroundBlobBelt
+    3903 MeshLambertMaterial    in vertexColouredMaterials
+    3904 MeshBasicMaterial      in vertexColouredMaterials
+    3920 MeshStandardMaterial   in physicalMaterials
+    3922 MeshBasicMaterial      in physicalMaterials
+    4023 MeshLambertMaterial    in TerrainBelt
+    4029 MeshBasicMaterial      in TerrainBelt
+    4212 MeshBasicMaterial      in HorizonRing
+    4600 MeshBasicMaterial      in SkyDome
+    4886 ShaderMaterial         in WaterBelt
+    4907 MeshBasicMaterial      in WaterBelt
+    5122 ShaderMaterial         in reflectingWaterMaterial
+    5178 MeshStandardMaterial   in BridgeBelt
+    5346 MeshStandardMaterial   in stoneBridgeMaterial
+    6351 MeshStandardMaterial   in prepareRealisticShape
+    6589 MeshStandardMaterial   in mergeShapeMaterials
+    7693 MeshStandardMaterial   in GantryBelt
+    7696 MeshLambertMaterial    in GantryBelt
+    7701 MeshBasicMaterial      in GantryBelt
+    7858 MeshStandardMaterial   in bannerMaterial
+    7970 MeshStandardMaterial   in logoMaterial
+    7979 MeshBasicMaterial      in logoMaterial
+    7980 MeshLambertMaterial    in logoMaterial
+    8218 ShaderMaterial         in impostorMaterial
+    9080 MeshStandardMaterial   in photographicRoadMaterial
+    9424 MeshStandardMaterial   in photographicGroundMaterial
+    9617 MeshStandardMaterial   in RealisticRiderBelt
+   10163 MeshStandardMaterial   in riderBodyMaterial
+   10290 MeshStandardMaterial   in realisticBicycleMeshes
+   10301 MeshStandardMaterial   in realisticBicycleMeshes
+   10312 MeshStandardMaterial   in realisticBicycleMeshes
+   10924 MeshStandardMaterial   in structureMaterials
+   10935 MeshBasicMaterial      in structureMaterials
+   12065 ShadowMaterial         in ThreeGameView
+   12212 MeshBasicMaterial      in ThreeGameView
+{'MeshBasicMaterial': 12, 'ShaderMaterial': 4, 'MeshLambertMaterial': 4, 'MeshStandardMaterial': 16, 'ShadowMaterial': 1} total 37
+
+== onBeforeCompile patches (assignment sites)
+    3663   31 lines,  0 replace(), in withGroundBlobShading
+    3828   20 lines,  0 replace(), in withKitPerInstance
+    4536   31 lines,  4 replace(), in withSurfaceDetail
+    5354    6 lines,  2 replace(), in stoneBridgeMaterial
+    6871   54 lines,  0 replace(), in withMaterialLayers
+    7041   11 lines,  1 replace(), in withTextureLodBias
+    7219   39 lines,  0 replace(), in withAtmosphere
+    7397   38 lines,  2 replace(), in withInstanceChannels
+    7536   32 lines,  0 replace(), in withFoliageSwayOf
+    7866   37 lines,  0 replace(), in bannerMaterial
+    7983   31 lines,  0 replace(), in logoMaterial
+    9096   72 lines, 10 replace(), in photographicRoadMaterial
+    9438   55 lines,  7 replace(), in photographicGroundMaterial
+   10174   25 lines,  0 replace(), in riderBodyMaterial
+  total lines inside patches 482
+
+== GLSL template literals (/* glsl */ `...`)
+  literals 34 lines 548
+
+== three internals a node material does not have
+  ShaderChunk                             7 code lines [208, 6849, 6860, 7391, 7408, 9142, 9463]
+  UniformsLib                             4 code lines [209, 4896, 5129, 8220]
+  UniformsUtils                           4 code lines [210, 4895, 5128, 8219]
+  customProgramCacheKey                  19 code lines [3848, 4535, 4567, 5360, 6808, 6925, 7040, 7052, 7217, 7258, 7395, 7435, 7535, 7568]
+  #include <                            108 code lines [3667, 3668, 3675, 3676, 3683, 3684, 3688, 3689, 3832, 3833, 3837, 4542, 4543, 4548]
+  ShaderMaterial                         11 code lines [189, 3219, 3248, 4886, 4912, 5119, 5122, 5421, 8204, 8218, 12741]
+  onBeforeCompile                        20 code lines [3663, 3828, 4534, 4536, 5354, 6807, 6871, 7039, 7041, 7216, 7219, 7394, 7397, 7534]
+  WebGLRenderer                           6 code lines [214, 5631, 11155, 12009, 12186, 12188]
+  WebGLProgramParametersWithUniforms      0 code lines []
+  renderer.getContext                     2 code lines [12428, 12442]
+  renderer.compile                        1 code lines [12426]
+  renderer.info.programs                  1 code lines [12429]
+  capabilities.                           1 code lines [11168]
+  PMREMGenerator                          2 code lines [184, 11204]
+  shadowMap                               1 code lines [12831]
+  forceContextLoss                        1 code lines [12914]
+  WebGLRenderTarget                       0 code lines []
+  readRenderTargetPixels                  0 code lines []
+  gl.                                    10 code lines [5581, 13212, 13219, 13223, 13236, 13239, 13243, 13245, 13247, 13248]
+  KHR_parallel_shader_compile             1 code lines [13212]
+  fenceSync                               2 code lines [13236, 13239]
+  detectSupport                           1 code lines [5631]

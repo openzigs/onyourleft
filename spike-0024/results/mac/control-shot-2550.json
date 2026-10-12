@@ -1,0 +1,77 @@
+{
+ "label": "control-shot-2550",
+ "query": "world=realistic&panel=0&ladder=0&at=2550",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/control-at2550.png"
+ ],
+ "when": "2026-10-12T02:06:28.016Z",
+ "loadAverageBefore": [
+  5.1669921875,
+  7.84130859375,
+  10.87451171875
+ ],
+ "loadAverageAfter": [
+  4.9931640625,
+  7.7607421875,
+  10.828125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 98.9,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 38.9,
+   "command": "node spike-0024/scripts/run.mjs control-shot-2550 world=realistic&panel=0&ladder=0&at=2550"
+  },
+  {
+   "cpu": 31.7,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 12.7,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 7.9,
+   "command": "/usr/libexec/syspolicyd"
+  }
+ ],
+ "firstFrameWallMs": 665,
+ "firstFrameMs": 661,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&at=2550",
+  "outcome": {
+   "loaded": true
+  },
+  "soak": [],
+  "firstFrameMs": 661,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 661",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/control-at2550.png"
+}

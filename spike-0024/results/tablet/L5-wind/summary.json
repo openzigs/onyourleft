@@ -1,0 +1,178 @@
+{
+ "run": "L5-wind",
+ "skinBefore": 25.88491,
+ "brightnessBefore": 3,
+ "macLoadBefore": "3.73 3.32 4.96",
+ "skinAfter": 33.05415,
+ "brightnessAfter": 3,
+ "macLoadAfter": "3.09 3.15 4.35",
+ "layer": "VRI-dev.openzigs.onyourleft.webgpuspike/dev.openzigs.onyourleft.MainActivity#11924",
+ "present": {
+  "frames": 17775,
+  "seconds": 299.8,
+  "fps": 59.29,
+  "p50": 16.63,
+  "p90": 16.66,
+  "p95": 16.68,
+  "p99": 16.73,
+  "max": 216.3,
+  "over20msShare": 0.371,
+  "over20ms": 66,
+  "over50msShare": 0.045,
+  "over100msUnder250": 6,
+  "holesOver250ms": 8
+ },
+ "gpuFreqMHz": {
+  "mean": 785.4,
+  "p50": 762.0,
+  "p90": 848.0,
+  "min": 633.0,
+  "max": 848.0,
+  "samples": 243,
+  "meanPer5Min": [
+   785.4
+  ]
+ },
+ "thermal": [
+  {
+   "t": "1791777419",
+   "status": 0,
+   "skin": 28.19,
+   "g3d": 60.0,
+   "big": 69.0,
+   "cpuPct": 62.9,
+   "rendererCpuPct": 70.0
+  },
+  {
+   "t": "1791777456",
+   "status": 0,
+   "skin": 30.82,
+   "g3d": 61.0,
+   "big": 56.0,
+   "cpuPct": 88.8,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791777492",
+   "status": 0,
+   "skin": 31.7,
+   "g3d": 62.0,
+   "big": 64.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 110.0
+  },
+  {
+   "t": "1791777529",
+   "status": 0,
+   "skin": 32.16,
+   "g3d": 63.0,
+   "big": 66.0,
+   "cpuPct": 107.0,
+   "rendererCpuPct": 81.4
+  },
+  {
+   "t": "1791777566",
+   "status": 0,
+   "skin": 32.52,
+   "g3d": 62.0,
+   "big": 57.0,
+   "cpuPct": 107.0,
+   "rendererCpuPct": 89.2
+  },
+  {
+   "t": "1791777603",
+   "status": 0,
+   "skin": 32.9,
+   "g3d": 67.0,
+   "big": 65.0,
+   "cpuPct": 103.0,
+   "rendererCpuPct": 85.7
+  },
+  {
+   "t": "1791777640",
+   "status": 0,
+   "skin": 32.98,
+   "g3d": 65.0,
+   "big": 58.0,
+   "cpuPct": 107.0,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791777677",
+   "status": 0,
+   "skin": 32.55,
+   "g3d": 61.0,
+   "big": 55.0,
+   "cpuPct": 96.4,
+   "rendererCpuPct": 89.2
+  },
+  {
+   "t": "1791777714",
+   "status": 0,
+   "skin": 32.89,
+   "g3d": 65.0,
+   "big": 62.0,
+   "cpuPct": 81.4,
+   "rendererCpuPct": 92.5
+  }
+ ],
+ "thermalSummary": {
+  "samples": 9,
+  "maxStatus": 0,
+  "skinFirst": 28.19,
+  "skinLast": 32.89,
+  "skinMax": 32.98,
+  "g3dMean": 62.9,
+  "appCpuPctMean": 89.9,
+  "rendererCpuPctMean": 85.3,
+  "appPlusRendererCpuPctMean": 175.2
+ },
+ "memMiB": {
+  "totalPss": 693.9,
+  "graphics": 402.2,
+  "nativeHeap": 133.0,
+  "glMtrack": 307.0,
+  "egl": 95.2,
+  "gfxDev": null
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.webgpuspike": 855.8,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 337.3,
+  "com.google.android.webview:webview_service": 72.2,
+  "webview_zygote": 50.6
+ },
+ "raf": {
+  "since": 12129.800000190735,
+  "frames": 18799,
+  "over20": 17,
+  "over34": 9,
+  "over50": 5,
+  "over100": 0,
+  "max": 99.90000000000873,
+  "last": 325467.6,
+  "over20Share": 0.09,
+  "seconds": 313.3
+ },
+ "spikePage": {
+  "errors": [],
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "compatibilityMode": false
+  },
+  "firstFrameMs": 2192.800000190735,
+  "windows": 10,
+  "trianglesPerFrameMedian": 195011.0,
+  "drawCallsPerFrameMedian": 30.5,
+  "frameP50Median": 16.60000000000582,
+  "frameP99Median": 16.79999999998836,
+  "renderMsP50Median": 7.049999952316284,
+  "renderMsP99Median": 10.050000071525574,
+  "fpsMedian": 60.06666666666666,
+  "gapsOver100Ms": 1,
+  "texturesSizeMiB": 91.6,
+  "textures": 75,
+  "result": true
+ }
+}

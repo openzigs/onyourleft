@@ -5,7 +5,7 @@ android {
     namespace = "dev.openzigs.onyourleft"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "dev.openzigs.onyourleft"
+        applicationId "dev.openzigs.onyourleft.webgpuspike" // spike 0024: its own package, beside the owner's app, never over it
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

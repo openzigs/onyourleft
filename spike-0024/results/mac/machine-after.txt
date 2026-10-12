@@ -1,0 +1,15 @@
+2026-10-12T02:54:56Z
+22:54  up 40 days, 17:21, 8 users, load averages: 4.46 7.72 10.34
+-- busiest
+120.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd
+ 53.2 claude --resume
+ 14.5 /Applications/iTerm.app/Contents/MacOS/iTerm2
+ 14.3 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+ 13.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+  8.7 /System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/com.apple.appkit.xpc.openAndSavePanelService.xpc/Contents/MacOS/com.apple.appkit.xpc.op
+  5.1 /usr/sbin/coreaudiod
+  3.9 /System/Library/CoreServices/WindowManager.app/Contents/MacOS/WindowManager
+  2.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon
+  1.9 /System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualiza
+  1.9 /System/Library/CoreServices/launchservicesd
+  1.7 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN com.apple.bcmwlan 0x100000fd2 com.apple.DriverKit-

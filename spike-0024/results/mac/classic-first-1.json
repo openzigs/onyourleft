@@ -1,0 +1,70 @@
+{
+ "label": "classic-first-1",
+ "query": "backend=webglrenderer&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--first"
+ ],
+ "when": "2026-10-12T02:11:00.075Z",
+ "loadAverageBefore": [
+  5.3837890625,
+  6.369140625,
+  9.3349609375
+ ],
+ "loadAverageAfter": [
+  5.3837890625,
+  6.369140625,
+  9.3349609375
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 104.2,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 93.4,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 49.8,
+   "command": "node /Users/matthewcronin/Development/metis-clean/.claude/worktrees/agent-a390acb4a89b8268"
+  },
+  {
+   "cpu": 46.7,
+   "command": "node spike-0024/scripts/run.mjs classic-first-1 backend=webglrenderer&seconds=60 --page=/w"
+  },
+  {
+   "cpu": 40.1,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  }
+ ],
+ "firstFrameWallMs": 787,
+ "firstFrameMs": 782.7000002861023,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 782.7000002861023
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 783"
+ ]
+}

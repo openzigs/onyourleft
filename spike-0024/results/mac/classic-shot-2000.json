@@ -1,0 +1,72 @@
+{
+ "label": "classic-shot-2000",
+ "query": "backend=webglrenderer&at=2000",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/classic-at2000.png"
+ ],
+ "when": "2026-10-12T02:11:23.855Z",
+ "loadAverageBefore": [
+  5.05615234375,
+  6.24365234375,
+  9.220703125
+ ],
+ "loadAverageAfter": [
+  4.97119140625,
+  6.2060546875,
+  9.18994140625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 43.7,
+   "command": "node spike-0024/scripts/run.mjs classic-shot-2000 backend=webglrenderer&at=2000 --page=/we"
+  },
+  {
+   "cpu": 26.7,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 15.3,
+   "command": "/usr/libexec/syspolicyd"
+  },
+  {
+   "cpu": 12.7,
+   "command": "claude --resume"
+  },
+  {
+   "cpu": 11.2,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  }
+ ],
+ "firstFrameWallMs": 677,
+ "firstFrameMs": 672.3999996185303,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&at=2000",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "at": 2000,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 672.3999996185303
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 672"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/classic-at2000.png"
+}

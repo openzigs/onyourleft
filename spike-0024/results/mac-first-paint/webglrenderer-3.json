@@ -1,0 +1,69 @@
+{
+ "label": "webglrenderer-3",
+ "query": "backend=webglrenderer&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:23:23.867Z",
+ "loadAverageBefore": [
+  8.611328125,
+  10.36083984375,
+  7.02392578125
+ ],
+ "loadAverageAfter": [
+  8.08154296875,
+  10.2216796875,
+  6.994140625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 120.1,
+   "command": "node /Users/matthewcronin/Development/metis-clean/.claude/worktrees/agent-a1362c03321363ad"
+  },
+  {
+   "cpu": 40.4,
+   "command": "node spike-0024/scripts/run.mjs webglrenderer-3 backend=webglrenderer&seconds=60 --first -"
+  },
+  {
+   "cpu": 29.4,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 10.7,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 7.1,
+   "command": "/usr/sbin/coreaudiod"
+  }
+ ],
+ "firstFrameWallMs": 689,
+ "firstFrameMs": 685.3000001907349,
+ "firstContentfulPaintMs": 700,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 685.3000001907349
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 685"
+ ]
+}

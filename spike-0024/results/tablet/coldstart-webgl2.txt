@@ -1,0 +1,5 @@
+"{\"first\":2637.0999999046326,\"errors\":[],\"fcp\":2656,\"backend\":false}"
+"{\"first\":3045,\"errors\":[],\"fcp\":3072,\"backend\":false}"
+"{\"first\":3124.399999856949,\"errors\":[],\"fcp\":3152,\"backend\":false}"
+"{\"first\":2556.9000000953674,\"errors\":[],\"fcp\":2580,\"backend\":false}"
+"{\"first\":2994.5999999046326,\"errors\":[],\"fcp\":3028,\"backend\":false}"

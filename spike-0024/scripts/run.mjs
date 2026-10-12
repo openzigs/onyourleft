@@ -154,6 +154,12 @@ try {
     );
   }
   const published = await page.evaluate((name) => JSON.parse(JSON.stringify(window[name])), global_);
+  // Added AFTER the one-sitting set (the tablet's cold starts showed the page's own first-frame
+  // mark and the first paint apart under WebGPU): when the browser first painted the canvas.
+  if (flag('first')) await page.waitForTimeout(3_000);
+  const firstContentfulPaintMs = await page.evaluate(
+    () => performance.getEntriesByName('first-contentful-paint')[0]?.startTime,
+  );
   const dump = !flag('dump')
     ? undefined
     : await page.evaluate(() => {
@@ -193,6 +199,7 @@ try {
     busiestBefore: busyBefore,
     firstFrameWallMs,
     firstFrameMs: published?.firstFrameMs,
+    firstContentfulPaintMs,
     wallSeconds,
     cpuSeconds,
     external,
@@ -209,6 +216,7 @@ try {
     JSON.stringify({
       errors: published?.errors,
       first: Math.round(published?.firstFrameMs ?? -1),
+      fcp: firstContentfulPaintMs,
       ext: external && { fps: +external.fps.toFixed(1), p50: external.p50, p95: external.p95, p99: external.p99, o100: external.over100Ms },
       renderMs: own?.renderMs && { p50: own.renderMs.p50, p99: own.renderMs.p99 },
       tri: own?.lastFrame?.triangles ?? own?.trianglesPerFrame,

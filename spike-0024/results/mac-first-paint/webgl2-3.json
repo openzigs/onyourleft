@@ -1,0 +1,69 @@
+{
+ "label": "webgl2-3",
+ "query": "backend=webgl2&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:24:09.092Z",
+ "loadAverageBefore": [
+  6.29443359375,
+  9.4873046875,
+  6.87255859375
+ ],
+ "loadAverageAfter": [
+  5.9501953125,
+  9.36279296875,
+  6.84375
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 117.4,
+   "command": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc -p tsconfig.test.json"
+  },
+  {
+   "cpu": 28.6,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 25.3,
+   "command": "node spike-0024/scripts/run.mjs webgl2-3 backend=webgl2&seconds=60 --first --out=spike-002"
+  },
+  {
+   "cpu": 11.3,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 6.9,
+   "command": "/usr/sbin/coreaudiod"
+  }
+ ],
+ "firstFrameWallMs": 910,
+ "firstFrameMs": 905.7000002861023,
+ "firstContentfulPaintMs": 924,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 905.7000002861023
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 906"
+ ]
+}

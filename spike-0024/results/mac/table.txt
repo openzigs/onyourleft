@@ -1,0 +1,53 @@
+label              when     load1  fps    p50   p90   p95   p99   max  >100  render p50/p99  cpu r/g per s   tri    calls
+control-capped     02:03:00   4.9  120.0   8.3   8.9   9.6  10.3  17.5    0   None/None     0.2/0.07    198935    30 err=0
+control-uncapped-1 02:04:05   4.4    587   1.5   2.7   2.8   2.9  91.8    0   None/None    0.95/1.09    199132    30 err=0
+control-uncapped-2 02:05:10   4.4  583.1   1.5   2.6   2.8   2.9  89.5    0   None/None    0.99/1.15    199123    30 err=0
+control-uncapped-3 02:06:15   5.1  584.8   1.5   2.7   2.8   2.9  92.5    0   None/None    0.97/1.15    199123    30 err=0
+control-first      n=5 median=691 ms  all=[698, 691, 716, 689, 659]
+control-uncapped   fps median=584.8 all=[587, 583.1, 584.8]
+classic-capped     02:07:44   4.5    120   8.3   9.1   9.5  10.1  16.4    0    0.9/1.2     0.19/0.07   198928.5  30.0 err=0
+classic-uncapped-1 02:08:48   4.3  582.2   1.4   2.8   2.8   2.9  89.5    0      1/2.5      0.9/1.24   199135.0  30.0 err=0
+classic-uncapped-2 02:09:53   4.9  580.9   1.5   2.7   2.8   2.9  88.9    0    1.1/2.5     0.96/1.24   199134.0  30.0 err=0
+classic-uncapped-3 02:10:58   5.7  580.6   1.5   2.7   2.8   2.9  90.5    0    1.1/2.5     0.96/1.24   199130.5  30.0 err=0
+classic-first      n=5 median=782 ms  all=[783, 753, 891, 782, 706]
+classic-uncapped   fps median=580.9 all=[582.2, 580.9, 580.6]
+webgpu-capped      02:12:28   5.0    120   8.3   9.5   9.9  10.3  16.7    0    1.4/2.1      0.3/0.15   200902.5  31.0 err=0
+webgpu-uncapped-1  02:13:33   3.6  643.5   1.5   1.8   1.9   2.2  12.3    0    1.1/1.6     1.12/0.53   201078.0  31.0 err=0
+webgpu-uncapped-2  02:14:37   4.0  586.7   1.7   1.9   2.1   2.3    18    0    1.2/1.8     1.11/0.51   201075.5  31.0 err=0
+webgpu-uncapped-3  02:15:42   5.9  618.9   1.6   1.8   1.9   2.2  12.9    0    1.2/1.6     1.12/0.52   201077.0  31.0 err=0
+webgpu-first       n=5 median=687 ms  all=[687, 711, 689, 681, 676]
+webgpu-uncapped    fps median=618.9 all=[643.5, 586.7, 618.9]
+webgl2-capped      02:17:12   4.9    120   8.3   9.1   9.5  10.2  24.3    0    1.1/2.4     0.25/0.11   200902.0  31.0 err=0
+webgl2-uncapped-1  02:18:17   4.4  570.7   1.6   2.2   2.6   3.1  72.2    0    1.2/2.6     1.05/1.03   201080.0  31.0 err=0
+webgl2-uncapped-2  02:19:22   4.9  574.2   1.7   2.1   2.4     3  74.3    0    1.2/2.4     1.08/1.02   201069.5  31.0 err=0
+webgl2-uncapped-3  02:20:27   5.1  478.8   2.1   2.4   2.5   2.8  20.5    0    1.5/2.1     1.15/0.66   201087.5  31.0 err=0
+webgl2-first       n=5 median=1369 ms  all=[1348, 1369, 1357, 1491, 1431]
+webgl2-uncapped    fps median=570.7 all=[570.7, 574.2, 478.8]
+traa-capped        02:30:06   4.3  120.0   8.3   9.4   9.9  10.3  16.5    0    1.7/2.1     0.33/0.18   200904.0  32.0 err=0
+traa-uncapped-1    02:31:11   3.4  510.7   1.7   2.2   2.6     8  12.6    0    1.3/7.5     1.01/1.36   201090.5  32.0 err=0
+traa-uncapped-2    02:32:15   4.7  504.9   1.8   2.2   2.5   5.7    15    0    1.4/5.2     1.07/1.37   201088.0  32.0 err=0
+traa-uncapped-3    02:33:20   5.0  469.3     2   2.5   2.7   4.6  19.7    0    1.5/3.8      1.1/1.06   201054.5  32.0 err=0
+traa-first         n=5 median=735 ms  all=[780, 731, 785, 718, 735]
+traa-uncapped      fps median=504.9 all=[510.7, 504.9, 469.3]
+ao-capped          02:35:06   4.7  120.0   8.3   9.6   9.9  10.2  10.4    0    1.5/1.9     0.32/0.17   200901.0  32.0 err=0
+ao-uncapped-1      02:36:10   3.9  472.5   1.9   2.6   2.9   9.9  16.2    0    1.4/9.5     1.04/1.08   201062.0  32.0 err=0
+ao-uncapped-2      02:37:17   9.6  396.3   2.5   2.8     3   3.5  19.3    0    1.8/2.5     1.15/0.84   201089.0  32.0 err=0
+ao-uncapped-3      02:38:22  15.0  437.8   2.3   2.7   2.9   6.7  18.5    0    1.7/6        1.1/0.99   200993.0  32.0 err=0
+ao-first           n=5 median=1064 ms  all=[1064, 1272, 1064, 945, 852]
+ao-uncapped        fps median=437.8 all=[472.5, 396.3, 437.8]
+aofull-capped      02:41:58   4.9  120.0   8.3   9.6   9.9  10.2  10.4    0    1.5/2.2     0.31/0.15   200903.0  32.0 err=0
+aofull-uncapped-1  02:43:03   4.5  250.6     2   9.8  19.7  23.1  40.5    0    1.4/31.9    0.53/1.23   201031.0  32.0 err=0
+aofull-uncapped-2  02:44:08   6.0  248.1     2   8.6  19.5  23.1  41.3    0    1.4/32.9    0.55/1.23   201031.5  32.0 err=0
+aofull-uncapped-3  02:45:13   4.6  246.4   3.2   4.4  12.1  21.7  39.4    0    2.3/30.4    0.87/1.36   201033.0  32.0 err=0
+aofull-first       n=5 median=1022 ms  all=[1079, 1020, 1010, 1022, 1299]
+aofull-uncapped    fps median=248.1 all=[250.6, 248.1, 246.4]
+wind-capped        02:51:11   4.3    120   8.3   9.5   9.9  10.3  16.1    0    1.5/2       0.31/0.17   200900.5  31.0 err=0
+wind-uncapped-1    02:52:16   3.3  622.4   1.6   1.8     2   2.2  13.5    0    1.1/1.6     1.13/0.59   201076.5  31.0 err=0
+wind-uncapped-2    02:53:20   4.3  589.1   1.7     2   2.1   2.4  13.1    0    1.2/1.7     1.13/0.57   201089.0  31.0 err=0
+wind-uncapped-3    02:54:25   4.0  566.8   1.7   2.1   2.2   2.5  13.4    0    1.2/1.8     1.13/0.58   201084.5  31.0 err=0
+wind-first         n=5 median=686 ms  all=[732, 686, 685, 667, 702]
+wind-uncapped      fps median=589.1 all=[622.4, 589.1, 566.8]
+webgpu memory {"attributes": 172, "attributesSize": 15557900, "geometries": 32, "indexAttributes": 25, "indexAttributesSize": 1931292, "indirectStorageAttributes": 0, "indirectStorageAttributesSize": 0, "programs": 60, "programsSize": 693597, "readbackBuffers": 0, "readbackBuffersSize": 0, "renderTargets": 3, "storageAttributes": 0, "storageAttributesSize": 0, "textures": 68, "texturesSize": 96054887, "uniformBuffers": 105, "uniformBuffersSize": 154288, "total": 114391964} textures {"bytes": 30869160, "formats": {"ETC2 RGB": 25, "ASTC 4x4": 34, "ETC2 RGBA": 5}, "sky": "half-float"} buffer [2560, 1600]
+classic memory {"geometries": 31, "textures": 63} textures {"bytes": 30869160, "formats": {"ETC2 RGB": 25, "ASTC 4x4": 34, "ETC2 RGBA": 5}, "sky": "half-float"} buffer [2560, 1600]
+webgl2 memory {"attributes": 172, "attributesSize": 15499592, "geometries": 32, "indexAttributes": 25, "indexAttributesSize": 1010058, "indirectStorageAttributes": 0, "indirectStorageAttributesSize": 0, "programs": 60, "programsSize": 634117, "readbackBuffers": 0, "readbackBuffersSize": 0, "renderTargets": 3, "storageAttributes": 0, "storageAttributesSize": 0, "textures": 68, "texturesSize": 96054887, "uniformBuffers": 105, "uniformBuffersSize": 155840, "total": 113354494} textures {"bytes": 30869160, "formats": {"ETC2 RGB": 25, "ASTC 4x4": 34, "ETC2 RGBA": 5}, "sky": "half-float"} buffer [2560, 1600]
+control memory null textures {"formats": {"ETC2 RGB": 25, "ASTC 4x4": 34, "ETC2 RGBA": 5}, "bytes": 30869160, "sky": "half-float"} buffer [2560, 1600]

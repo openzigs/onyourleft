@@ -1,0 +1,23 @@
+2026-10-12T04:54:17Z
+package:dev.openzigs.onyourleft.webgpuspike
+package:dev.openzigs.onyourleft
+    versionCode=1 minSdk=24 targetSdk=36
+    versionName=1.0
+    lastUpdateTime=2026-10-04 19:00:02
+    signatures=PackageSignatures{b975979 version:2, signatures:[449ffabc], past signatures:[]}
+      firstInstallTime=2026-09-20 14:41:58
+    versionName=154.0.8037.106
+google/tangorpro/tangorpro:17/CP2A.260705.006/15641320:user/release-keys
+global stay_on_while_plugged_in=2
+system accelerometer_rotation=1
+system user_rotation=0
+system screen_brightness=3
+system screen_brightness_mode=1
+system screen_off_timeout=60000
+  AC powered: true
+  USB powered: false
+  Wireless powered: false
+  Dock powered: false
+  level: 100
+  Capacity level: 5
+skin=31.243881

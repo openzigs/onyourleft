@@ -1,0 +1,77 @@
+{
+ "label": "control-1",
+ "query": "world=realistic&panel=0&ladder=0&seconds=60",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:22:52.988Z",
+ "loadAverageBefore": [
+  6.14453125,
+  10.14990234375,
+  6.8115234375
+ ],
+ "loadAverageAfter": [
+  6.453125,
+  10.14697265625,
+  6.830078125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 242.7,
+   "command": "node /Users/matthewcronin/Development/metis-clean/.claude/worktrees/agent-a1362c03321363ad"
+  },
+  {
+   "cpu": 38.8,
+   "command": "node spike-0024/scripts/run.mjs control-1 world=realistic&panel=0&ladder=0&seconds=60 --pa"
+  },
+  {
+   "cpu": 35.6,
+   "command": "/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtu"
+  },
+  {
+   "cpu": 12.3,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 12.3,
+   "command": "node ./node_modules/.bin/../vite/bin/vite.js preview --config vite.browser.config.ts --out"
+  }
+ ],
+ "firstFrameWallMs": 732,
+ "firstFrameMs": 728.2999997138977,
+ "firstContentfulPaintMs": 748,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&seconds=60",
+  "outcome": {
+   "loaded": true
+  },
+  "soak": [],
+  "firstFrameMs": 728.2999997138977,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 728",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}"
+ ]
+}

@@ -1,0 +1,72 @@
+{
+ "label": "webgl2-shot-2000",
+ "query": "backend=webgl2&at=2000",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/webgl2-at2000.png"
+ ],
+ "when": "2026-10-12T02:21:15.592Z",
+ "loadAverageBefore": [
+  35.52685546875,
+  15.3271484375,
+  10.93359375
+ ],
+ "loadAverageAfter": [
+  35.32421875,
+  15.6201171875,
+  11.0625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 89,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 71.9,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 63.5,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 60.7,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 54,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  }
+ ],
+ "firstFrameWallMs": 1324,
+ "firstFrameMs": 1317.2999997138977,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&at=2000",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "at": 2000,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 1317.2999997138977
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 1317"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/webgl2-at2000.png"
+}

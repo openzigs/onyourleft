@@ -1,0 +1,114 @@
+{
+ "run": "smoke-webgl2",
+ "skinBefore": 25.863062,
+ "brightnessBefore": 3,
+ "macLoadBefore": "22.00 18.70 14.73",
+ "skinAfter": 28.098127,
+ "brightnessAfter": 3,
+ "macLoadAfter": "13.05 16.51 14.27",
+ "layer": "VRI-dev.openzigs.onyourleft.webgpuspike/dev.openzigs.onyourleft.MainActivity#11693",
+ "present": {
+  "frames": 3556,
+  "seconds": 60.0,
+  "fps": 59.28,
+  "p50": 16.63,
+  "p90": 16.65,
+  "p95": 16.67,
+  "p99": 16.74,
+  "max": 249.5,
+  "over20msShare": 0.366,
+  "over20ms": 13,
+  "over50msShare": 0.113,
+  "over100msUnder250": 3,
+  "holesOver250ms": 0
+ },
+ "gpuFreqMHz": {
+  "mean": 775.1,
+  "p50": 762.0,
+  "p90": 848.0,
+  "min": 701.0,
+  "max": 848.0,
+  "samples": 49,
+  "meanPer5Min": [
+   775.1
+  ]
+ },
+ "thermal": [
+  {
+   "t": "1791770154",
+   "status": 0,
+   "skin": 25.97,
+   "g3d": 57.0,
+   "big": 67.0,
+   "cpuPct": 48.1,
+   "rendererCpuPct": 77.7
+  },
+  {
+   "t": "1791770190",
+   "status": 0,
+   "skin": 27.63,
+   "g3d": 59.0,
+   "big": 55.0,
+   "cpuPct": 103.0,
+   "rendererCpuPct": 81.4
+  }
+ ],
+ "thermalSummary": {
+  "samples": 2,
+  "maxStatus": 0,
+  "skinFirst": 25.97,
+  "skinLast": 27.63,
+  "skinMax": 27.63,
+  "g3dMean": 58.0,
+  "appCpuPctMean": 75.5,
+  "rendererCpuPctMean": 79.6,
+  "appPlusRendererCpuPctMean": 155.1
+ },
+ "memMiB": {
+  "totalPss": 547.7,
+  "graphics": 398.9,
+  "nativeHeap": 54.2,
+  "glMtrack": 287.8,
+  "egl": 111.1,
+  "gfxDev": null
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.webgpuspike": 706.5,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 323.0,
+  "com.google.android.webview:webview_service": 70.9,
+  "webview_zygote": 50.6
+ },
+ "raf": {
+  "since": 12166.5,
+  "frames": 4509,
+  "over20": 5,
+  "over34": 2,
+  "over50": 2,
+  "over100": 1,
+  "max": 232.79999999999563,
+  "last": 87494.6,
+  "over20Share": 0.111,
+  "seconds": 75.3
+ },
+ "spikePage": {
+  "errors": [],
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false
+  },
+  "firstFrameMs": 4570.299999952316,
+  "windows": 2,
+  "trianglesPerFrameMedian": 200645.0,
+  "drawCallsPerFrameMedian": 31.0,
+  "frameP50Median": 16.600000000000364,
+  "frameP99Median": 16.799999999998363,
+  "renderMsP50Median": 7.200000166893005,
+  "renderMsP99Median": 10.149999976158142,
+  "fpsMedian": 58.38333333333333,
+  "gapsOver100Ms": 7,
+  "texturesSizeMiB": 91.6,
+  "textures": 68,
+  "result": true
+ }
+}

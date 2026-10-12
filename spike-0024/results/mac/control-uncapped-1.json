@@ -1,0 +1,133 @@
+{
+ "label": "control-uncapped-1",
+ "query": "world=realistic&panel=0&ladder=0&seconds=60",
+ "page": "/realistic.html",
+ "flags": [
+  "--page=/realistic.html",
+  "--port=4332",
+  "--out=spike-0024/results/mac",
+  "--uncapped"
+ ],
+ "when": "2026-10-12T02:04:05.651Z",
+ "loadAverageBefore": [
+  4.3818359375,
+  10.40966796875,
+  12.404296875
+ ],
+ "loadAverageAfter": [
+  4.4169921875,
+  9.25439453125,
+  11.82275390625
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 99.5,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 36.7,
+   "command": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon"
+  },
+  {
+   "cpu": 32.4,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 19.9,
+   "command": "node spike-0024/scripts/run.mjs control-uncapped-1 world=realistic&panel=0&ladder=0&second"
+  },
+  {
+   "cpu": 15.3,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  }
+ ],
+ "firstFrameWallMs": 836,
+ "firstFrameMs": 831.5,
+ "wallSeconds": 60.01,
+ "cpuSeconds": {
+  "renderer": 57.27,
+  "gpu": 65.64,
+  "browser": 0.42999999999999994
+ },
+ "external": {
+  "frames": 35220,
+  "fps": 587,
+  "p50": 1.5,
+  "p90": 2.699999999999818,
+  "p95": 2.7999999999992724,
+  "p99": 2.900000000001455,
+  "max": 91.79999999999927,
+  "over20Ms": 2,
+  "over100Ms": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "bridge": {
+   "capacitorAtStart": "undefined",
+   "androidBridgeAtStart": "undefined",
+   "standIn": true,
+   "events": []
+  },
+  "query": "?world=realistic&panel=0&ladder=0&seconds=60",
+  "outcome": {
+   "loaded": true
+  },
+  "result": {
+   "world": "realistic",
+   "rung": "realistic",
+   "frameCap": "display",
+   "frameMs": {
+    "p50": 1.5,
+    "p90": 2.699999999999818,
+    "p99": 2.900000000001455,
+    "count": 35207
+   },
+   "drawCalls": 30,
+   "trianglesPerFrame": 199132,
+   "lastFrame": {
+    "triangles": 197014,
+    "rendererTriangles": 197014
+   },
+   "layersOff": [],
+   "leversOff": [],
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "stalls": 0,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "soak": [],
+  "layers": {
+   "objects": {
+    "sky": 1,
+    "surfaces": 3,
+    "vegetation": 19,
+    "impostors": 4,
+    "structures": 56,
+    "water": 2,
+    "riders": 5,
+    "grounding": 1
+   },
+   "unplaced": []
+  },
+  "firstFrameMs": 831.5,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  }
+ },
+ "lines": [
+  "OYL-REALISTIC-LOAD {\"bridge\":{\"capacitorAtStart\":\"undefined\",\"androidBridgeAtStart\":\"undefined\",\"standIn\":true,\"events\":[]}}",
+  "OYL-REALISTIC-FIRST-FRAME 832",
+  "OYL-REALISTIC-TEXTURES {\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"bytes\":30869160,\"sky\":\"half-float\"}",
+  "OYL-REALISTIC {\"world\":\"realistic\",\"rung\":\"realistic\",\"frameCap\":\"display\",\"frameMs\":{\"p50\":1.5,\"p90\":2.699999999999818,\"p99\":2.900000000001455,\"count\":35207},\"drawCalls\":30,\"trianglesPerFrame\":199132,\"lastFrame\":{\"triangles\":197014,\"rendererTriangles\":197014},\"layersOff\":[],\"leversOff\":[],\"drawingBuffer\":[2560,1600],\"devicePixelRatio\":2,\"stalls\":0,\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+ ]
+}

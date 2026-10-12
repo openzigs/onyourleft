@@ -1,0 +1,69 @@
+{
+ "label": "webgl2-1",
+ "query": "backend=webgl2&seconds=60",
+ "page": "/webgpu.html",
+ "flags": [
+  "--first",
+  "--out=spike-0024/results/mac-first-paint"
+ ],
+ "when": "2026-10-12T04:23:59.725Z",
+ "loadAverageBefore": [
+  6.42822265625,
+  9.623046875,
+  6.88916015625
+ ],
+ "loadAverageAfter": [
+  6.2333984375,
+  9.529296875,
+  6.8720703125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 115.3,
+   "command": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc -p tsconfig.test.json"
+  },
+  {
+   "cpu": 42,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 20.2,
+   "command": "node spike-0024/scripts/run.mjs webgl2-1 backend=webgl2&seconds=60 --first --out=spike-002"
+  },
+  {
+   "cpu": 14.9,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 9.5,
+   "command": "/System/Applications/News.app/Contents/PlugIns/NewsToday2.appex/Contents/MacOS/NewsToday2 "
+  }
+ ],
+ "firstFrameWallMs": 922,
+ "firstFrameMs": 917.4000000953674,
+ "firstContentfulPaintMs": 940,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&seconds=60",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 917.4000000953674
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 917"
+ ]
+}

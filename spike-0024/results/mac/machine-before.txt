@@ -1,0 +1,21 @@
+2026-10-12T02:01:26Z
+22:01  up 40 days, 16:27, 8 users, load averages: 5.78 12.83 13.41
+ProductName:		macOS
+ProductVersion:		26.6.2
+BuildVersion:		25G83
+Apple M4 Pro
+ -InternalBattery-0 (id=34799715)	80%; AC attached; not charging present: true
+Google Chrome 154.0.8037.98 
+-- busiest
+ 99.0 /Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resolve --require /Users/matthewcronin/Development/metis-clean/.claud
+ 30.0 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon
+ 22.8 node ./node_modules/.bin/../vite/bin/vite.js preview --config vite.browser.config.ts --outDir /private/tmp/claude-501/-Users-matthewcronin-Development-ony
+ 20.3 /Applications/iTerm.app/Contents/MacOS/iTerm2
+ 18.2 node /Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/pnpm exec vite preview --config vite.webgpu.config.ts --host 127.0.0.1 --port 4331 --strictPort
+ 18.0 node /Users/matthewcronin/.nvm/versions/node/v24.20.0/bin/pnpm exec vite preview --config vite.browser.config.ts --outDir /private/tmp/claude-501/-Users-m
+ 16.6 node ./node_modules/.bin/../vite/bin/vite.js preview --config vite.webgpu.config.ts --host 127.0.0.1 --port 4331 --strictPort
+  9.4 /System/Library/ExtensionKit/Extensions/WallpaperAerialsExtension.appex/Contents/MacOS/WallpaperAerialsExtension -LaunchArguments eyJzZXJ2aWNlTmFtZSI6ImNv
+  9.1 /usr/sbin/coreaudiod
+  4.7 /usr/libexec/syspolicyd
+  2.4 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+  1.5 /usr/libexec/trustd

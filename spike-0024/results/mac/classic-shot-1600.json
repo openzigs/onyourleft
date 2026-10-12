@@ -1,0 +1,72 @@
+{
+ "label": "classic-shot-1600",
+ "query": "backend=webglrenderer&at=1600",
+ "page": "/webgpu.html",
+ "flags": [
+  "--page=/webgpu.html",
+  "--port=4331",
+  "--out=spike-0024/results/mac",
+  "--shot=/Users/matthewcronin/Development/oyl-spike-0024-screenshots/classic-at1600.png"
+ ],
+ "when": "2026-10-12T02:11:17.996Z",
+ "loadAverageBefore": [
+  5.40966796875,
+  6.33251953125,
+  9.26953125
+ ],
+ "loadAverageAfter": [
+  5.05615234375,
+  6.24365234375,
+  9.220703125
+ ],
+ "busiestBefore": [
+  {
+   "cpu": 100,
+   "command": "/Users/matthewcronin/.nvm/versions/node/v22.22.3/bin/node --experimental-import-meta-resol"
+  },
+  {
+   "cpu": 24.6,
+   "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework"
+  },
+  {
+   "cpu": 15.1,
+   "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+  },
+  {
+   "cpu": 12,
+   "command": "/usr/libexec/syspolicyd"
+  },
+  {
+   "cpu": 9.6,
+   "command": "node spike-0024/scripts/run.mjs classic-shot-1600 backend=webglrenderer&at=1600 --page=/we"
+  }
+ ],
+ "firstFrameWallMs": 672,
+ "firstFrameMs": 667.5999999046326,
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&at=1600",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "at": 1600,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 667.5999999046326
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 668"
+ ],
+ "shot": "/Users/matthewcronin/Development/oyl-spike-0024-screenshots/classic-at1600.png"
+}

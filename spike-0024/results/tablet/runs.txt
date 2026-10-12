@@ -1,0 +1,36 @@
+T20-webglrenderer  skin0=23.67 first=25.67 last=32.59 max=32.59 st=0 | dvfs=795.3 p50=762.0 n=984 per5=[795.1, 801.0, 792.8, 792.3] | cpu app=88.4 ren=85.7 sum=174.2 g3d=59.9
+   present fps=59.55 p50=16.63 p90=16.65 p95=16.66 p99=16.73 >20=0.236% (169) >100=14 holes=21 | raf frames=72931 >20=5 >50=3 >100=2 max=183
+   mem graphics=358.9 gl=247.8 egl=111.1 pss=512.6 all={'dev.openzigs.onyourleft.webgpuspike': 667.3, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 311.2, 'com.google.android.webview:webview_service': 72.4, 'webview_zygote': 50.6}
+   page tri=196050 calls=29 first=3372 renderMs=None/None gaps100=None tex=None errors=[] backend={} windows=19 bright=3/3
+T20b-webglrenderer-repeat skin0=23.93 first=26.58 last=33.37 max=33.37 st=0 | dvfs=796.7 p50=762.0 n=984 per5=[796.5, 802.8, 792.9, 794.5] | cpu app=86.8 ren=80.5 sum=167.3 g3d=61.5
+   present fps=59.59 p50=16.63 p90=16.65 p95=16.66 p99=16.73 >20=0.204% (146) >100=16 holes=17 | raf frames=72988 >20=2 >50=1 >100=0 max=83.10000000000582
+   mem graphics=354.3 gl=243.2 egl=111.1 pss=499.8 all={'dev.openzigs.onyourleft.webgpuspike': 653.1, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 302.6, 'com.google.android.webview:webview_service': 71.9, 'webview_zygote': 50.6}
+   page tri=196051 calls=29 first=2448.5 renderMs=None/None gaps100=None tex=None errors=[] backend={} windows=19 bright=3/3
+G20-webgpu         skin0=23.92 first=26.25 last=34.0 max=34.0 st=0 | dvfs=785.2 p50=762.0 n=976 per5=[783.7, 787.1, 785.7, 784.1, 848.0] | cpu app=89.0 ren=86.2 sum=175.2 g3d=63.2
+   present fps=59.45 p50=16.63 p90=16.66 p95=16.68 p99=16.73 >20=0.314% (224) >100=13 holes=25 | raf frames=72922 >20=19 >50=7 >100=2 max=133.09999999999127
+   mem graphics=386.1 gl=306.7 egl=79.4 pss=698.8 all={'dev.openzigs.onyourleft.webgpuspike': 883.1, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 343.2, 'com.google.android.webview:webview_service': 72.1, 'webview_zygote': 50.6}
+   page tri=198993.5 calls=30.0 first=2021.7999999523163 renderMs=7.300000071525574/10.299999952316284 gaps100=3 tex=91.6 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=40 bright=3/3
+F20-webgl2         skin0=23.94 first=26.17 last=33.86 max=33.86 st=0 | dvfs=778.4 p50=762.0 n=978 per5=[772.2, 784.3, 774.9, 782.4] | cpu app=94.2 ren=85.2 sum=179.4 g3d=63.0
+   present fps=59.25 p50=16.63 p90=16.65 p95=16.67 p99=16.74 >20=0.464% (330) >100=14 holes=27 | raf frames=72845 >20=46 >50=9 >100=7 max=499
+   mem graphics=423.2 gl=296.2 egl=127.0 pss=584.9 all={'dev.openzigs.onyourleft.webgpuspike': 724.9, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 324.7, 'com.google.android.webview:webview_service': 72.0, 'webview_zygote': 50.6}
+   page tri=198993.5 calls=30.0 first=2685.9000000953674 renderMs=7.450000047683716/10.399999856948853 gaps100=8 tex=91.6 errors=[] backend={'asked': 'webgl2', 'renderer': 'WebGPURenderer', 'webgpuBackend': False} windows=40 bright=3/3
+L5-base            skin0=25.97 first=27.99 last=33.08 max=33.11 st=0 | dvfs=785.2 p50=762.0 n=244 per5=[785.2] | cpu app=89.3 ren=82.1 sum=171.3 g3d=63.0
+   present fps=59.35 p50=16.63 p90=16.66 p95=16.67 p99=16.73 >20=0.286% (51) >100=7 holes=7 | raf frames=18808 >20=15 >50=5 >100=0 max=99.89999999999418
+   mem graphics=399.4 gl=304.1 egl=95.2 pss=674.6 all={'dev.openzigs.onyourleft.webgpuspike': 840.5, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 324.9, 'com.google.android.webview:webview_service': 72.1, 'webview_zygote': 50.6}
+   page tri=195012.5 calls=30.5 first=2111.9000000953674 renderMs=7.299999952316284/10.150000095367432 gaps100=1 tex=91.6 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=10 bright=3/3
+L5-traa            skin0=25.98 first=28.18 last=35.94 max=35.94 st=0 | dvfs=848.0 p50=848.0 n=242 per5=[848.0] | cpu app=82.2 ren=82.5 sum=164.7 g3d=75.4
+   present fps=47.77 p50=16.64 p90=33.28 p95=33.3 p99=49.91 >20=23.672% (3396) >100=4 holes=0 | raf frames=15772 >20=2869 >50=7 >100=2 max=149.6999999999971
+   mem graphics=566.1 gl=455.0 egl=111.1 pss=916.5 all={'dev.openzigs.onyourleft.webgpuspike': 1082.9, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 337.9, 'com.google.android.webview:webview_service': 72.2, 'webview_zygote': 50.6}
+   page tri=194900.0 calls=32.0 first=2208.5999999046326 renderMs=8.700000166893005/13.350000023841858 gaps100=5 tex=169.7 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=10 bright=3/3
+L5-ao              skin0=25.89 first=27.8 last=34.27 max=34.27 st=0 | dvfs=847.3 p50=848.0 n=244 per5=[847.3] | cpu app=63.8 ren=70.6 sum=134.4 g3d=68.7
+   present fps=40.34 p50=16.65 p90=33.3 p95=49.9 p99=49.94 >20=41.784% (5073) >100=3 holes=0 | raf frames=13852 >20=4318 >50=35 >100=2 max=133.10000000000582
+   mem graphics=427.4 gl=316.3 egl=111.1 pss=744.1 all={'dev.openzigs.onyourleft.webgpuspike': 911.5, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 330.0, 'com.google.android.webview:webview_service': 72.1, 'webview_zygote': 50.6}
+   page tri=194823.0 calls=32.0 first=2243.300000190735 renderMs=9.049999952316284/14.100000143051147 gaps100=3 tex=92.6 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=10 bright=3/3
+L5-aofull          skin0=25.91 first=28.47 last=33.52 max=33.52 st=0 | dvfs=847.6 p50=848.0 n=222 per5=[847.6] | cpu app=40.5 ren=49.3 sum=89.8 g3d=66.5
+   present fps=21.13 p50=49.9 p90=49.96 p95=50.08 p99=99.82 >20=98.295% (6285) >100=11 holes=0 | raf frames=6793 >20=5604 >50=1982 >100=79 max=167.20000000001164
+   mem graphics=421.5 gl=310.4 egl=111.1 pss=688.8 all={'dev.openzigs.onyourleft.webgpuspike': 859.0, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 337.3, 'com.google.android.webview:webview_service': 72.1, 'webview_zygote': 50.6}
+   page tri=194380.0 calls=32.0 first=2187.4000000953674 renderMs=12.699999928474426/20.950000047683716 gaps100=75 tex=95.5 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=10 bright=3/3
+L5-wind            skin0=25.88 first=28.19 last=32.89 max=32.98 st=0 | dvfs=785.4 p50=762.0 n=243 per5=[785.4] | cpu app=89.9 ren=85.3 sum=175.2 g3d=62.9
+   present fps=59.29 p50=16.63 p90=16.66 p95=16.68 p99=16.73 >20=0.371% (66) >100=6 holes=8 | raf frames=18799 >20=17 >50=5 >100=0 max=99.90000000000873
+   mem graphics=402.2 gl=307.0 egl=95.2 pss=693.9 all={'dev.openzigs.onyourleft.webgpuspike': 855.8, 'com.google.android.webview:sandboxed_process0:org.chromium.c': 337.3, 'com.google.android.webview:webview_service': 72.2, 'webview_zygote': 50.6}
+   page tri=195011.0 calls=30.5 first=2192.800000190735 renderMs=7.049999952316284/10.050000071525574 gaps100=1 tex=91.6 errors=[] backend={'asked': 'webgpu', 'renderer': 'WebGPURenderer', 'webgpuBackend': True, 'compatibilityMode': False} windows=10 bright=3/3

@@ -1,0 +1,423 @@
+{
+ "run": "T20-webglrenderer",
+ "skinBefore": 23.67069,
+ "brightnessBefore": 3,
+ "macLoadBefore": "11.27 15.28 13.96",
+ "skinAfter": 32.363663,
+ "brightnessAfter": 3,
+ "macLoadAfter": "4.83 4.99 7.35",
+ "layer": "VRI-dev.openzigs.onyourleft.webgpuspike/dev.openzigs.onyourleft.MainActivity#11726",
+ "present": {
+  "frames": 71505,
+  "seconds": 1200.8,
+  "fps": 59.55,
+  "p50": 16.63,
+  "p90": 16.65,
+  "p95": 16.66,
+  "p99": 16.73,
+  "max": 249.5,
+  "over20msShare": 0.236,
+  "over20ms": 169,
+  "over50msShare": 0.021,
+  "over100msUnder250": 14,
+  "holesOver250ms": 21
+ },
+ "gpuFreqMHz": {
+  "mean": 795.3,
+  "p50": 762.0,
+  "p90": 848.0,
+  "min": 633.0,
+  "max": 848.0,
+  "samples": 984,
+  "meanPer5Min": [
+   795.1,
+   801.0,
+   792.8,
+   792.3
+  ]
+ },
+ "thermal": [
+  {
+   "t": "1791770303",
+   "status": 0,
+   "skin": 25.67,
+   "g3d": 55.0,
+   "big": 54.0,
+   "cpuPct": 55.5,
+   "rendererCpuPct": 60.7
+  },
+  {
+   "t": "1791770339",
+   "status": 0,
+   "skin": 27.36,
+   "g3d": 56.0,
+   "big": 49.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791770376",
+   "status": 0,
+   "skin": 28.15,
+   "g3d": 57.0,
+   "big": 50.0,
+   "cpuPct": 57.1,
+   "rendererCpuPct": 72.4
+  },
+  {
+   "t": "1791770413",
+   "status": 0,
+   "skin": 28.78,
+   "g3d": 58.0,
+   "big": 51.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 85.1
+  },
+  {
+   "t": "1791770449",
+   "status": 0,
+   "skin": 29.01,
+   "g3d": 58.0,
+   "big": 50.0,
+   "cpuPct": 92.8,
+   "rendererCpuPct": 77.7
+  },
+  {
+   "t": "1791770486",
+   "status": 0,
+   "skin": 29.31,
+   "g3d": 58.0,
+   "big": 54.0,
+   "cpuPct": 96.2,
+   "rendererCpuPct": 85.1
+  },
+  {
+   "t": "1791770523",
+   "status": 0,
+   "skin": 29.43,
+   "g3d": 61.0,
+   "big": 52.0,
+   "cpuPct": 92.8,
+   "rendererCpuPct": 144.0
+  },
+  {
+   "t": "1791770559",
+   "status": 0,
+   "skin": 29.08,
+   "g3d": 55.0,
+   "big": 53.0,
+   "cpuPct": 96.4,
+   "rendererCpuPct": 77.7
+  },
+  {
+   "t": "1791770596",
+   "status": 0,
+   "skin": 29.38,
+   "g3d": 61.0,
+   "big": 55.0,
+   "cpuPct": 84.6,
+   "rendererCpuPct": 85.1
+  },
+  {
+   "t": "1791770632",
+   "status": 0,
+   "skin": 29.88,
+   "g3d": 60.0,
+   "big": 53.0,
+   "cpuPct": 85.7,
+   "rendererCpuPct": 111.0
+  },
+  {
+   "t": "1791770668",
+   "status": 0,
+   "skin": 30.22,
+   "g3d": 59.0,
+   "big": 54.0,
+   "cpuPct": 85.1,
+   "rendererCpuPct": 73.3
+  },
+  {
+   "t": "1791770705",
+   "status": 0,
+   "skin": 30.32,
+   "g3d": 57.0,
+   "big": 52.0,
+   "cpuPct": 103.0,
+   "rendererCpuPct": 83.3
+  },
+  {
+   "t": "1791770742",
+   "status": 0,
+   "skin": 30.26,
+   "g3d": 59.0,
+   "big": 52.0,
+   "cpuPct": 70.3,
+   "rendererCpuPct": 82.1
+  },
+  {
+   "t": "1791770778",
+   "status": 0,
+   "skin": 30.63,
+   "g3d": 62.0,
+   "big": 53.0,
+   "cpuPct": 81.4,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791770815",
+   "status": 0,
+   "skin": 30.69,
+   "g3d": 60.0,
+   "big": 60.0,
+   "cpuPct": 96.2,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791770851",
+   "status": 0,
+   "skin": 30.86,
+   "g3d": 62.0,
+   "big": 57.0,
+   "cpuPct": 96.4,
+   "rendererCpuPct": 78.5
+  },
+  {
+   "t": "1791770888",
+   "status": 0,
+   "skin": 30.98,
+   "g3d": 60.0,
+   "big": 52.0,
+   "cpuPct": 67.8,
+   "rendererCpuPct": 78.5
+  },
+  {
+   "t": "1791770924",
+   "status": 0,
+   "skin": 31.55,
+   "g3d": 58.0,
+   "big": 52.0,
+   "cpuPct": 92.8,
+   "rendererCpuPct": 79.3
+  },
+  {
+   "t": "1791770961",
+   "status": 0,
+   "skin": 30.76,
+   "g3d": 58.0,
+   "big": 52.0,
+   "cpuPct": 88.8,
+   "rendererCpuPct": 75.0
+  },
+  {
+   "t": "1791770998",
+   "status": 0,
+   "skin": 31.28,
+   "g3d": 61.0,
+   "big": 53.0,
+   "cpuPct": 96.2,
+   "rendererCpuPct": 107.0
+  },
+  {
+   "t": "1791771034",
+   "status": 0,
+   "skin": 31.45,
+   "g3d": 62.0,
+   "big": 56.0,
+   "cpuPct": 70.3,
+   "rendererCpuPct": 103.0
+  },
+  {
+   "t": "1791771071",
+   "status": 0,
+   "skin": 31.49,
+   "g3d": 61.0,
+   "big": 56.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 85.1
+  },
+  {
+   "t": "1791771108",
+   "status": 0,
+   "skin": 31.59,
+   "g3d": 57.0,
+   "big": 55.0,
+   "cpuPct": 88.8,
+   "rendererCpuPct": 88.8
+  },
+  {
+   "t": "1791771144",
+   "status": 0,
+   "skin": 31.51,
+   "g3d": 64.0,
+   "big": 53.0,
+   "cpuPct": 88.8,
+   "rendererCpuPct": 89.2
+  },
+  {
+   "t": "1791771181",
+   "status": 0,
+   "skin": 31.94,
+   "g3d": 61.0,
+   "big": 55.0,
+   "cpuPct": 96.2,
+   "rendererCpuPct": 118.0
+  },
+  {
+   "t": "1791771218",
+   "status": 0,
+   "skin": 31.99,
+   "g3d": 62.0,
+   "big": 55.0,
+   "cpuPct": 81.4,
+   "rendererCpuPct": 82.7
+  },
+  {
+   "t": "1791771255",
+   "status": 0,
+   "skin": 31.97,
+   "g3d": 64.0,
+   "big": 56.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 85.7
+  },
+  {
+   "t": "1791771291",
+   "status": 0,
+   "skin": 32.01,
+   "g3d": 61.0,
+   "big": 58.0,
+   "cpuPct": 92.5,
+   "rendererCpuPct": 81.4
+  },
+  {
+   "t": "1791771328",
+   "status": 0,
+   "skin": 31.85,
+   "g3d": 59.0,
+   "big": 57.0,
+   "cpuPct": 81.4,
+   "rendererCpuPct": 75.8
+  },
+  {
+   "t": "1791771365",
+   "status": 0,
+   "skin": 31.84,
+   "g3d": 61.0,
+   "big": 54.0,
+   "cpuPct": 92.5,
+   "rendererCpuPct": 85.7
+  },
+  {
+   "t": "1791771401",
+   "status": 0,
+   "skin": 32.27,
+   "g3d": 64.0,
+   "big": 61.0,
+   "cpuPct": 84.6,
+   "rendererCpuPct": 85.7
+  },
+  {
+   "t": "1791771438",
+   "status": 0,
+   "skin": 32.57,
+   "g3d": 63.0,
+   "big": 58.0,
+   "cpuPct": 103.0,
+   "rendererCpuPct": 85.7
+  },
+  {
+   "t": "1791771474",
+   "status": 0,
+   "skin": 32.59,
+   "g3d": 64.0,
+   "big": 56.0,
+   "cpuPct": 100.0,
+   "rendererCpuPct": 81.4
+  }
+ ],
+ "thermalSummary": {
+  "samples": 33,
+  "maxStatus": 0,
+  "skinFirst": 25.67,
+  "skinLast": 32.59,
+  "skinMax": 32.59,
+  "g3dMean": 59.9,
+  "appCpuPctMean": 88.4,
+  "rendererCpuPctMean": 85.7,
+  "appPlusRendererCpuPctMean": 174.2
+ },
+ "memMiB": {
+  "totalPss": 512.6,
+  "graphics": 358.9,
+  "nativeHeap": 54.8,
+  "glMtrack": 247.8,
+  "egl": 111.1,
+  "gfxDev": null
+ },
+ "memAllMiB": {
+  "dev.openzigs.onyourleft.webgpuspike": 667.3,
+  "com.google.android.webview:sandboxed_process0:org.chromium.c": 311.2,
+  "com.google.android.webview:webview_service": 72.4,
+  "webview_zygote": 50.6
+ },
+ "raf": {
+  "since": 12125.300000190735,
+  "frames": 72931,
+  "over20": 5,
+  "over34": 3,
+  "over50": 3,
+  "over100": 2,
+  "max": 183,
+  "last": 1225656.9,
+  "over20Share": 0.007,
+  "seconds": 1213.5
+ },
+ "threePage": {
+  "errors": [],
+  "firstFrameMs": 3372,
+  "textures": {
+   "formats": {
+    "ETC2 RGB": 25,
+    "ASTC 4x4": 34,
+    "ETC2 RGBA": 5
+   },
+   "bytes": 30869160,
+   "sky": "half-float"
+  },
+  "result": {
+   "world": "realistic",
+   "rung": "realistic",
+   "frameCap": "display",
+   "frameMs": {
+    "p50": 16.600000000002183,
+    "p90": 16.700000000000728,
+    "p99": 16.799999999999272,
+    "count": 1790
+   },
+   "drawCalls": 31,
+   "trianglesPerFrame": 199205,
+   "lastFrame": {
+    "triangles": 197506,
+    "rendererTriangles": 197506
+   },
+   "layersOff": [],
+   "leversOff": [],
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "stalls": 0,
+   "userAgent": "Mozilla/5.0 (Linux; Android 17; Pixel Tablet Build/CP2A.260705.006; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/154.0.8037.106 Safari/537.36"
+  },
+  "soakMinutes": 19,
+  "trianglesPerFrameMedian": 196050,
+  "drawCallsMedian": 29,
+  "frameP50Median": 16.60000000000582,
+  "frameP99Median": 16.70000000006985,
+  "stalls": 0,
+  "rungs": [
+   "realistic"
+  ]
+ }
+}
