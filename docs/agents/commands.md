@@ -126,7 +126,15 @@ pnpm run test
 # #1076 — every `.a11y.test.` file, which `test:a11y` runs (so CI runs them
 # once, not twice). The a11y exclude is a glob in SINGLE quotes, because the
 # script goes through `sh`; `check:test-split` reads a whole single-quoted word.
+# ⚠️ Since #1280 CI runs this NIGHTLY (`.github/workflows/nightly.yml`), which
+# publishes the table and the HTML artefact; the required job runs the next
+# command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
+
+# The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
+# `test:coverage` with no `--coverage`, the same files, 106–133 s less on the
+# slower runner. `check:test-split` fails the two if their excludes differ.
+pnpm run test:required
 
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
@@ -141,15 +149,17 @@ pnpm run test:uninstrumented
 # What stops those lists coming apart (#852). Reads the scripts out of
 # package.json, asks `vitest list` what the whole suite and each run selects,
 # and fails on a file in NO run (CI would never run it) or in two. ⚠️ Since
-# #1076 there are THREE runs — `test:coverage`, `test:uninstrumented` and
-# `test:a11y` — and a reviewer who remembers "both halves" is reading the old
-# file. ⚠️ An
+# #1076 there are THREE runs — `test:required` (`test:coverage` until #1280),
+# `test:uninstrumented` and `test:a11y` — and a reviewer who remembers "both
+# halves" is reading the old file. ⚠️ Since #1280 it also fails a
+# `test:coverage` that is not `test:required` with `--coverage` after `run`:
+# the nightly report is of the files the required job runs. ⚠️ An
 # `--exclude` glob is matched against each Vitest PROJECT's root, not the
 # repository's, which is why it compares selections rather than globs. Lists,
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 51 cases on 2026-10-03 (33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 60 cases on 2026-10-12 (51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -158,7 +168,8 @@ bash scripts/check-test-split.test.sh
 # is a SUBSET of `pnpm run test` — the same files, run under a name that says
 # what broke. Unlike coverage it DOES gate: criterion 4 of #48 is that a
 # violation fails the build. See §4e. ⚠️ Since #1076 it is the ONLY CI run of
-# these files: `test:coverage` excludes them, so they are not in the report.
+# these files: `test:required` and `test:coverage` exclude them, so they are
+# not in the report.
 pnpm run test:a11y
 
 # What proves that gate selects every accessibility test there is (#142). Runs

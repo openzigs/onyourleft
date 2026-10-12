@@ -24,7 +24,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="${SCRIPT_DIR}/check-test-split.mjs"
 
-COVERAGE='vitest run --coverage --exclude src/slow.test.ts'
+REQUIRED='vitest run --exclude src/slow.test.ts'
 UNINSTRUMENTED='vitest run apps/web/src/slow.test.ts'
 A11Y='vitest run --project web .a11y.test.'
 
@@ -35,27 +35,30 @@ tmp=""
 cleanup() { [ -n "${tmp}" ] && rm -rf "${tmp}"; }
 trap cleanup EXIT
 
-# new_fixture [test:coverage] [test:uninstrumented] [test:a11y] -- a root whose
-# package.json carries the three scripts. An argument of `-` leaves that
-# script out.
+# new_fixture [test:required] [test:uninstrumented] [test:a11y] [test:coverage]
+# -- a root whose package.json carries the four scripts. An argument of `-`
+# leaves that script out. `test:coverage` defaults to what it must be since
+# #1280: `test:required` with `--coverage` after `run`.
 new_fixture() {
   cleanup
   tmp="$(mktemp -d)"
-  local coverage="${1-${COVERAGE}}" uninstrumented="${2-${UNINSTRUMENTED}}" a11y="${3-${A11Y}}"
+  local required="${1-${REQUIRED}}" uninstrumented="${2-${UNINSTRUMENTED}}" a11y="${3-${A11Y}}"
+  local coverage="${4-${required/#vitest run/vitest run --coverage}}"
   {
     printf '{"name":"f","scripts":{"test":"vitest run"'
+    [ "${required}" != '-' ] && printf ',"test:required":"%s"' "${required}"
     [ "${coverage}" != '-' ] && printf ',"test:coverage":"%s"' "${coverage}"
     [ "${uninstrumented}" != '-' ] && printf ',"test:uninstrumented":"%s"' "${uninstrumented}"
     [ "${a11y}" != '-' ] && printf ',"test:a11y":"%s"' "${a11y}"
     printf '}}'
   } > "${tmp}/package.json"
   lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts
-  lists instrumented apps/web/src/fast.test.ts
+  lists required apps/web/src/fast.test.ts
   lists uninstrumented apps/web/src/slow.test.ts
   lists a11y apps/web/src/form.a11y.test.ts
 }
 
-# lists <all|instrumented|uninstrumented|a11y> <path...> -- what `vitest list
+# lists <all|required|uninstrumented|a11y> <path...> -- what `vitest list
 # --filesOnly` would print for that selection.
 lists() {
   local name="$1"
@@ -92,13 +95,13 @@ assert_says() {
 new_fixture
 run_check
 assert_green 'three runs that are the whole suite, once each, pass'
-assert_says 'and say what each run holds' 'all 3 test files run once — 1 under coverage, 1 without it (nightly), 1 in the Accessibility step'
+assert_says 'and say what each run holds' 'all 3 test files run once — 1 in the required run, 1 without it (nightly), 1 in the Accessibility step'
 
-new_fixture 'vitest run --coverage --exclude src/a.test.ts --exclude tools/b.test.ts' \
+new_fixture 'vitest run --exclude src/a.test.ts --exclude tools/b.test.ts' \
   'vitest run apps/web/src/a.test.ts packages/fit/tools/b.test.ts'
 lists all apps/web/src/a.test.ts apps/web/src/c.test.ts packages/fit/tools/b.test.ts \
   apps/web/src/form.a11y.test.ts
-lists instrumented apps/web/src/c.test.ts
+lists required apps/web/src/c.test.ts
 lists uninstrumented apps/web/src/a.test.ts packages/fit/tools/b.test.ts
 run_check
 assert_green 'two excludes and two filters, one file each, pass'
@@ -116,10 +119,10 @@ assert_says 'and names it' 'packages/protocol/src/slow.test.ts runs in NONE'
 # --- A file in both runs ------------------------------------------------------
 # The exclude no longer matches (a repository-relative glob, or a rename).
 new_fixture
-lists instrumented apps/web/src/fast.test.ts apps/web/src/slow.test.ts
+lists required apps/web/src/fast.test.ts apps/web/src/slow.test.ts
 run_check
 assert_red 'a file in both runs fails'
-assert_says 'and names it' 'apps/web/src/slow.test.ts runs in `test:coverage` and `test:uninstrumented`'
+assert_says 'and names it' 'apps/web/src/slow.test.ts runs in `test:required` and `test:uninstrumented`'
 
 # --- An uninstrumented run over nothing --------------------------------------
 new_fixture
@@ -131,7 +134,7 @@ assert_says 'and says so' 'selects no files at all'
 assert_says 'and says its filter selects nothing' 'selects 0 files'
 
 # --- A filter that selects two files -----------------------------------------
-new_fixture "${COVERAGE} --exclude src/slow.test.tsx" 'vitest run apps/web/src/slow.test.ts'
+new_fixture "${REQUIRED} --exclude src/slow.test.tsx" 'vitest run apps/web/src/slow.test.ts'
 lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/slow.test.tsx \
   apps/web/src/form.a11y.test.ts
 lists uninstrumented apps/web/src/slow.test.ts apps/web/src/slow.test.tsx
@@ -142,7 +145,7 @@ assert_says 'and says how many' 'selects 2 files where it must select exactly on
 # --- The whole suite selecting nothing ---------------------------------------
 new_fixture
 lists all
-lists instrumented
+lists required
 lists uninstrumented
 lists a11y
 run_check
@@ -150,35 +153,64 @@ assert_red 'a suite that selects nothing fails rather than comparing nothing'
 assert_says 'and says so' 'the whole suite selects no files'
 
 # --- Shapes this cannot check ------------------------------------------------
-new_fixture - "${UNINSTRUMENTED}"
+new_fixture - "${UNINSTRUMENTED}" "${A11Y}" 'vitest run --coverage --exclude src/slow.test.ts'
+run_check
+assert_red 'no test:required fails'
+assert_says 'and names the script' 'no `test:required` script'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" -
 run_check
 assert_red 'no test:coverage fails'
 assert_says 'and names the script' 'no `test:coverage` script'
 
-new_fixture 'vitest run' "${UNINSTRUMENTED}"
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED}"
 run_check
 assert_red 'a test:coverage without --coverage fails'
+assert_says 'and names the script' '`test:coverage` is'
 
-new_fixture 'vitest run --coverage --exclude' "${UNINSTRUMENTED}"
+# --- The required run and the nightly report (#1280) --------------------------
+new_fixture 'vitest run --coverage --exclude src/slow.test.ts' "${UNINSTRUMENTED}" "${A11Y}" \
+  'vitest run --coverage --exclude src/slow.test.ts'
+run_check
+assert_red 'coverage on the required run fails'
+assert_says 'and names the script' '`test:required` is'
+
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" \
+  'vitest run --coverage --exclude src/slow.test.ts --exclude src/fast.test.ts'
+run_check
+assert_red 'a report that leaves out a file the required run keeps fails'
+assert_says 'and says why' 'the nightly coverage report is of the files the required job runs'
+
+new_fixture "${REQUIRED} --exclude src/fast.test.ts" "${UNINSTRUMENTED}" "${A11Y}" \
+  'vitest run --coverage --exclude src/slow.test.ts'
+run_check
+assert_red 'a required run that leaves out a file the report keeps fails'
+
+new_fixture 'vitest run --exclude src/a.test.ts --exclude src/slow.test.ts' "${UNINSTRUMENTED}" \
+  "${A11Y}" 'vitest run --coverage --exclude src/slow.test.ts --exclude src/a.test.ts'
+run_check
+assert_red 'the same globs in another order fail: the two scripts are kept identical'
+
+new_fixture 'vitest run --exclude' "${UNINSTRUMENTED}"
 run_check
 assert_red 'a dangling --exclude fails'
 
-new_fixture 'vitest run --coverage --exclude src/slow.test.ts --bail 1' "${UNINSTRUMENTED}"
+new_fixture 'vitest run --exclude src/slow.test.ts --bail 1' "${UNINSTRUMENTED}"
 run_check
-assert_red 'any other flag in test:coverage fails'
+assert_red 'any other flag in test:required fails'
 assert_says 'and says what shape it expects' 'followed only by `--exclude <glob>` pairs'
 
-new_fixture "${COVERAGE}" -
+new_fixture "${REQUIRED}" -
 run_check
 assert_red 'no test:uninstrumented fails'
 assert_says 'and names the script' 'no `test:uninstrumented` script'
 
-new_fixture "${COVERAGE}" 'vitest run --coverage apps/web/src/slow.test.ts'
+new_fixture "${REQUIRED}" 'vitest run --coverage apps/web/src/slow.test.ts'
 run_check
 assert_red 'coverage on the uninstrumented run fails'
 assert_says 'and says what shape it expects' 'followed only by the paths'
 
-new_fixture "${COVERAGE}" 'vitest run'
+new_fixture "${REQUIRED}" 'vitest run'
 run_check
 assert_red 'an uninstrumented run with no filter fails'
 
@@ -188,53 +220,53 @@ assert_red 'an uninstrumented run with no filter fails'
 # #1076: a WHOLE word in single quotes is read as `sh` reads it -- one word,
 # expanded not at all -- because an exclude glob needs them. Anything else
 # about a quote is still refused.
-new_fixture "vitest run --coverage --exclude 'src/slow test.ts'" "${UNINSTRUMENTED}"
+new_fixture "vitest run --exclude 'src/slow test.ts'" "${UNINSTRUMENTED}"
 run_check
 assert_green 'a whole single-quoted exclude is read as one word, its space and all'
 
-new_fixture "vitest run --coverage --exclude src/slow test.ts" "${UNINSTRUMENTED}"
+new_fixture "vitest run --exclude src/slow test.ts" "${UNINSTRUMENTED}"
 run_check
 assert_red 'the same exclude unquoted is two words, and the second is no --exclude pair'
 
-new_fixture "vitest run --coverage --exclude '**/*.a11y.test.*'" "${UNINSTRUMENTED}"
+new_fixture "vitest run --exclude '**/*.a11y.test.*'" "${UNINSTRUMENTED}"
 run_check
 assert_green 'a single-quoted glob is read, not refused'
 
-new_fixture "vitest run --coverage --exclude src/'slow.test.ts'" "${UNINSTRUMENTED}"
+new_fixture "vitest run --exclude src/'slow.test.ts'" "${UNINSTRUMENTED}"
 run_check
 assert_red 'a quote that opens mid-word fails'
 assert_says 'and says why' 'reads quoting, globs, variables and separators'
 
-new_fixture "vitest run --coverage --exclude 'src/slow.test.ts" "${UNINSTRUMENTED}"
+new_fixture "vitest run --exclude 'src/slow.test.ts" "${UNINSTRUMENTED}"
 run_check
 assert_red 'an unclosed quote fails'
 
-new_fixture 'vitest run --coverage --exclude \"src/*.test.ts\"' "${UNINSTRUMENTED}"
+new_fixture 'vitest run --exclude \"src/*.test.ts\"' "${UNINSTRUMENTED}"
 run_check
 assert_red 'a double-quoted glob fails: sh still reads $ and backticks inside one'
 assert_says 'and names the character' '"\""'
 
-new_fixture 'vitest run --coverage --exclude src/*.test.ts' "${UNINSTRUMENTED}"
+new_fixture 'vitest run --exclude src/*.test.ts' "${UNINSTRUMENTED}"
 run_check
 assert_red 'an exclude the shell would expand as a glob fails'
 assert_says 'and names the character' '"*"'
 
-new_fixture "${COVERAGE}" 'vitest run apps/web/src/slow.test.ts; true'
+new_fixture "${REQUIRED}" 'vitest run apps/web/src/slow.test.ts; true'
 run_check
 assert_red 'a command separator in test:uninstrumented fails'
 assert_says 'and names the script' '`test:uninstrumented` is'
 
-new_fixture "${COVERAGE}" 'vitest run $SLOW'
+new_fixture "${REQUIRED}" 'vitest run $SLOW'
 run_check
 assert_red 'a variable in test:uninstrumented fails'
 assert_says 'and says it is the refusal, not an empty selection' '"$"'
 
 # --- The accessibility run (#1076) --------------------------------------------
 new_fixture
-lists instrumented apps/web/src/fast.test.ts apps/web/src/form.a11y.test.ts
+lists required apps/web/src/fast.test.ts apps/web/src/form.a11y.test.ts
 run_check
-assert_red 'an accessibility test run under coverage as well fails'
-assert_says 'and names both runs' 'apps/web/src/form.a11y.test.ts runs in `test:coverage` and `test:a11y`'
+assert_red 'an accessibility test in the required run as well fails'
+assert_says 'and names both runs' 'apps/web/src/form.a11y.test.ts runs in `test:required` and `test:a11y`'
 
 new_fixture
 lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
@@ -250,21 +282,21 @@ run_check
 assert_red 'an accessibility run that selects nothing fails'
 assert_says 'and says so' '`test:a11y` selects no files at all'
 
-new_fixture "${COVERAGE}" "${UNINSTRUMENTED}" -
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" -
 run_check
 assert_red 'no test:a11y fails'
 assert_says 'and names the script' 'no `test:a11y` script'
 
-new_fixture "${COVERAGE}" "${UNINSTRUMENTED}" 'vitest run .a11y.test.'
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" 'vitest run .a11y.test.'
 run_check
 assert_red 'a test:a11y with no --project fails'
 assert_says 'and says what shape it expects' 'expects `vitest run --project <name>`'
 
-new_fixture "${COVERAGE}" "${UNINSTRUMENTED}" 'vitest run --coverage --project web .a11y.test.'
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" 'vitest run --coverage --project web .a11y.test.'
 run_check
 assert_red 'coverage on the accessibility run fails'
 
-new_fixture "${COVERAGE}" "${UNINSTRUMENTED}" 'vitest run --project web'
+new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" 'vitest run --project web'
 run_check
 assert_red 'a test:a11y with no filter fails'
 

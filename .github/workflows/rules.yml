@@ -92,16 +92,27 @@ jobs:
     # Raised from 25 with #651, and this time it is the last resort rather than
     # the first: docs/agents/ci.md section 4c "Thirty minutes -- #651" has the
     # measurement and every candidate that was tried or is the owner's. On the
-    # slower runner (an AMD EPYC 7763) eight green runs on main and its pull
-    # requests from 2026-10-10 to 2026-10-12 took 1 459 s to 1 498 s, and four
-    # more were CANCELLED here at 1 506 s to 1 522 s with no test red (runs
-    # 38055121023 and 38077296663 on main, 38196648879 twice). Thirty leaves
-    # the slowest of those 278 s clear. The stops nested inside it move with
-    # it and nightly-split.test.ts holds each: the browser gate's step starts
-    # as late as 835 s in, runs under `timeout` for 825 s
-    # (playwright.config.ts GATE_STEP_MS) with its own `timeout-minutes: 14`
-    # (840 s) behind that, and 4 s of coverage steps follow -- 1 679 s, 121 s
-    # inside this.
+    # slower runner (an AMD EPYC 7763) six green runs on main from 2026-10-10
+    # to 2026-10-12 took 1 459 s to 1 498 s, and five more jobs were CANCELLED
+    # here at 1 506 s to 1 522 s with no test red (runs 38055121023 and
+    # 38077296663 on main, 38196648879 three times -- #1280 corrected "eight",
+    # "four" and "twice"). Thirty left the slowest of those 278 s clear. The
+    # stops nested inside it move with it: the browser gate's step started as
+    # late as 841 s in (attempt 3 of that run, not the 835 s first recorded),
+    # runs under `timeout` for 825 s (playwright.config.ts GATE_STEP_MS) with
+    # its own `timeout-minutes: 14` (840 s) behind that, and 4 s of steps
+    # followed -- 1 685 s, 115 s inside this.
+    #
+    # NOT raised by #1280, which made the job shorter instead, on the owner's
+    # ruling of 2026-10-12: Vitest runs with NO coverage here (`test:required`)
+    # and the nightly workflow takes and publishes the report. Measured on the
+    # 7763 (run 38243281606, two attempts): the job 1 337 s and 1 374 s, so
+    # 426 s clear of this at worst, and the gate's step starting at 674 s and
+    # 699 s, so its own stop ends it 257 s inside this at worst.
+    # nightly-split.test.ts holds both margins -- five minutes and three --
+    # against the measurements in docs/agents/ci.md section 4c "Coverage out
+    # of the required job -- #1280", which it reads rather than repeats. ⚠️ At
+    # about 21 s a day of growth that is about a week; shards (#1285) are next.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -283,11 +294,13 @@ jobs:
       #   what counts as an accessibility test from paths and from
       #   package.json's own script, so it has a suite.
       #
-      #   check:test-split -- #852. `test:coverage` leaves the heaviest files
+      #   check:test-split -- #852. `test:required` leaves the heaviest files
       #   out and `test:uninstrumented` runs exactly them; since #1076 it also
       #   leaves out every `.a11y.test.` file, which `test:a11y` runs. This
       #   asks Vitest what each of the three selects and fails on a file in no
-      #   run or in two. It
+      #   run or in two. Since #1280 it also fails a `test:coverage` -- the
+      #   nightly report's run -- that is not `test:required` with
+      #   `--coverage`: the report is of the files this job runs. It
       #   lists files and runs no test, so it has no case timeout to miss. Its
       #   suite, for the reason every checker here has one.
       #
@@ -391,11 +404,12 @@ jobs:
       # every route and fail the build on a violation. The checks are Vitest
       # tests, and they run HERE: a failure buried among two hundred other
       # cases is a failure somebody scrolls past; under a step called
-      # "Accessibility" it is not. ⚠️ Until #1076 `test:coverage` ran all of
-      # them a second time, about 43 s on the EPYC 7763; it excludes them since
-      # the owner's ruling of 2026-10-03, so they run once, here, and the
-      # coverage REPORT stops counting what only they execute (CLAUDE.md
-      # section 5). `check:test-split` fails a file in no run or in two.
+      # "Accessibility" it is not. ⚠️ Until #1076 the Vitest step below ran all
+      # of them a second time, about 43 s on the EPYC 7763; it excludes them
+      # since the owner's ruling of 2026-10-03, so they run once, here, and the
+      # coverage REPORT (nightly since #1280) stops counting what only they
+      # execute (CLAUDE.md section 5). `check:test-split` fails a file in no
+      # run or in two.
       #
       # In this job rather than a job of its own: `main` requires a status check
       # whose context is exactly "Repository rules", and a second job would
@@ -485,10 +499,20 @@ jobs:
       - name: Third-party notices
         run: pnpm run check:notices
 
-      # `test:coverage`, not `test`. ADR 0005 decision C sets no percentage
-      # floor and forbids inventing one -- the gate is the mutation list in the
-      # pull request body. The report is here because an untested branch is
-      # worth seeing in review, and because it costs nothing to print.
+      # `test:required`, not `test` and -- since #1280 -- not `test:coverage`.
+      # ⚠️ THIS STEP TAKES NO COVERAGE, and a reviewer who remembers a coverage
+      # table in this job's summary is reading the old file. The owner's ruling
+      # of 2026-10-12 (#1280): V8's instrumentation cost this step 106 to 133 s
+      # on the EPYC 7763 (364 s and 376 s without it against 482 s to 497 s
+      # with, run 38243281606), the job was being cancelled at its stop with
+      # every test green, and coverage is REPORTED, never gated (ADR 0005
+      # decision C sets no percentage floor and forbids inventing one -- the
+      # gate is the mutation list in the pull request body). So the report is
+      # taken by `test:coverage` in .github/workflows/nightly.yml, over the
+      # same files, and published in that run's summary with its HTML as an
+      # artefact. EVERY TEST THAT RAN HERE STILL RUNS HERE: `test:required` is
+      # `test:coverage` without the flag, and `check:test-split` fails the two
+      # if their excludes differ. What a pull request loses is the table.
       #
       # ⚠️ NOT concurrently with the browser gate, and that was measured rather
       # than assumed (#651). They are the two longest steps and it was the
@@ -502,18 +526,18 @@ jobs:
       # ⚠️ Since #852 it is NOT the whole suite. The two heaviest files -- the
       # #545 near-field rides and the FIT decode fuzz -- spent about 300 s of
       # this step's summed test time under V8's instrumentation, which slows
-      # their hot loops about three times, so `test:coverage` excludes them
-      # and the step below runs them with none. They gate exactly as before;
-      # the coverage REPORT stops counting what those two files alone execute,
-      # which section 5 says is a signal and not a gate. `check:test-split`,
+      # their hot loops about three times, so this step excludes them
+      # and `test:uninstrumented` runs them with none. They gate exactly as
+      # before; the coverage REPORT stops counting what those two files alone
+      # execute, which section 5 says is a signal and not a gate. `check:test-split`,
       # in the concurrent step above, is what stops the two lists coming apart
       # -- a file in no run is a file CI never runs. ⚠️ Since #866 those
       # two files run in the NIGHTLY workflow, not in this job (below), and
       # since #1076 so does realistic-textures.test.ts. Since #1076 this step
       # also excludes the `.a11y.test.` files, which the Accessibility step
       # above runs, so they run once rather than twice.
-      - name: Tests and coverage report
-        run: pnpm run test:coverage
+      - name: Tests
+        run: pnpm run test:required
 
       # ⚠️ The other half of #852's split, `test:uninstrumented`, is NOT here
       # since #866: it runs NIGHTLY (.github/workflows/nightly.yml), which is
@@ -551,42 +575,19 @@ jobs:
       # minutes), which signals the whole process group and
       # prints that it did, then KILLs it 10 s later; `timeout-minutes` is the
       # backstop behind that. A hang anywhere in the step -- a build, a server,
-      # a run that does not exit -- ends as this step, red and named, with the
-      # coverage steps still to run, rather than as a cancelled job. GNU
+      # a run that does not exit -- ends as this step, red and named, rather
+      # than as a cancelled job. GNU
       # coreutils `timeout`, on the runner image; locally `pnpm run
       # test:browser` is the same command without it.
       - name: Browser gate
         timeout-minutes: 14
         run: timeout --verbose --kill-after=10s 825s pnpm run test:browser
 
-      # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
-      # §5 make the mutation list the gate and forbid a percentage floor. This
-      # step exists because the numbers were being computed and then thrown
-      # away: `text` goes into this log under the install and build output, and
-      # `html` is written to a runner that is destroyed with it.
-      #
-      # `if: always()` so a failing suite still publishes what it measured --
-      # the run where coverage moved unexpectedly is the one you want the table
-      # for. It cannot fail the job: the renderer exits non-zero only when the
-      # report is missing or unparseable, and `|| true` keeps even that from
-      # turning a reporting step into a gate.
-      - name: Publish the coverage summary
-        if: always()
-        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
-
-      # The full HTML report, for the run where a number in the table above
-      # looks wrong and the question is which line.
-      #
-      # SHA from:
-      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
-      - name: Upload the coverage report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 7
-          if-no-files-found: warn
+      # ⚠️ The coverage summary and the `coverage-report` artefact are NOT here
+      # since #1280: `Publish the coverage summary` and `Upload the coverage
+      # report` moved to .github/workflows/nightly.yml with the run that takes
+      # the report. The renderer's suite (coverage-summary.test.sh) stays in
+      # `Checks, concurrently`, so a broken renderer is still a red pull request.
 
       # #1231: drop the Docker Hub credential the login step wrote to the
       # runner. The runner is destroyed with the job anyway; this is tidiness,

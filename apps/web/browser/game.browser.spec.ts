@@ -965,6 +965,15 @@ const WHEEL_TRACK_CEILING = 0.08;
  * if the overlap were ever under 4 s, the gate would stop itself at 840 s with
  * the last describe here interrupted — inside the job, naming what ran.
  *
+ * ⚠️ **What follows is history since #1128, and a reviewer who reads the
+ * required gate's margin here is reading the old file (#1280, from #1279's
+ * review).** The job's stop is 30 minutes, not 25; the required gate's step
+ * is bounded by `GATE_STEP_MS` and its own `timeout-minutes`, and
+ * `nightly-split.test.ts` DOES re-check both margins against the measurements
+ * in `docs/agents/ci.md` §4c; and no coverage step follows the gate. It is
+ * kept because `GATE_BUDGET_MS` still bounds the NIGHTLY run this way. As
+ * written for #682:
+ *
  * and the gate cannot outlive the job: on that runner the step starts as late
  * as 592 s in (run 36395959573) and builds for 9 s before Playwright starts,
  * so 840 s ends it by 1 441 s — 59 s inside `timeout-minutes: 25`'s 1 500,

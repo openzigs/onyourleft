@@ -9,7 +9,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -765,6 +765,51 @@ describe('the command, run hosted against an instance — #1235', () => {
     expect(ran.err.trimEnd().split('\n').at(-1)).toBe(KEY_NOT_CLEARED);
     expect(ran.status).toBe(3);
     expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
+  }, 60_000);
+});
+
+describe('the command’s --unload, run by this machine’s own shell — #1287', () => {
+  /** The command against a local model, without blocking this process: the instance runs here. */
+  function localCommand(
+    url: string,
+    unload: string,
+  ): Promise<{ status: number | null; out: string; err: string }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        join(dirname(fileURLToPath(import.meta.url)), 'replan-round-trip.ts'),
+        ...['--url', url, '--origin', TEST_ORIGIN, '--transport', 'plaintext'],
+        ...['--runs', '1', '--cold-runs', '2', '--run-timeout-seconds', '20'],
+        ...['--unload', unload],
+      ]);
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
+      child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString('utf8')));
+      child.on('error', reject);
+      child.on('close', (status) => resolve({ status, out, err }));
+    });
+  }
+
+  it('runs the unload command before each cold run, on Windows as on the others', async () => {
+    const url = await instance(
+      Array.from({ length: 4 }, () => TEXT),
+      false,
+    );
+    // The unload command leaves a line behind each time it really runs. Double
+    // quotes are the one quoting both `sh` and `cmd.exe` read the same way.
+    const script = join(directory ?? '', 'unload.mjs');
+    const ran = join(directory ?? '', 'unloads.txt');
+    await writeFile(
+      script,
+      "import { appendFileSync } from 'node:fs';\nappendFileSync(process.argv[2], 'unloaded\\n');\n",
+    );
+    const done = await localCommand(url, `"${process.execPath}" "${script}" "${ran}"`);
+    expect(done.err).not.toContain('the unload command failed');
+    expect(done.status).toBe(0);
+    expect(await readFile(ran, 'utf8')).toBe('unloaded\nunloaded\n');
+    const report = JSON.parse(done.out) as { statuses: unknown; cold: readonly unknown[] };
+    expect(report.statuses).toEqual({ succeeded: 3 });
+    expect(report.cold).toHaveLength(2);
   }, 60_000);
 });
 

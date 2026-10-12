@@ -36,6 +36,15 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Git Bash on Windows (#807): it rewrites every argument that looks like a
+# path before docker sees it, so the container's `/backups/pre-deploy` arrived
+# as `C:/Program Files/Git/backups/pre-deploy` and every update stopped at the
+# pre-deploy snapshot. Turned off, and this directory given in the form
+# docker.exe reads (C:/…), which that rewriting used to supply.
+if [ -n "${MSYSTEM:-}" ]; then
+  export MSYS_NO_PATHCONV=1
+  HERE="$(cd "${HERE}" && { pwd -W 2>/dev/null || pwd; })"
+fi
 ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)"
 STATE="${HERE}/.deployed"
 READY_SECONDS="${OYL_DEPLOY_READY_SECONDS:-120}"
