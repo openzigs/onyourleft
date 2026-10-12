@@ -489,6 +489,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         since ADR 0026 (#431)**, and a reviewer who remembers it
                         as the rule for every model is reading the old file: a
                         realistic asset comes from ADR 0026 D-4's source list
+                        (⚠️ **since #1275 that list is ADR 0049 D-10's**, which
+                        supersedes it and is held in code as `tools/realistic/
+                        sources.ts` §`ADMITTED_SOURCES` and §`BARRED_SOURCES`;
+                        the pipeline refuses a URL no admitted source owns,
+                        a new source is still a superseding ADR, and
+                        "AI-generated" means the output of a trained
+                        generative model — ADR 0049 D-2)
                         and is DERIVED — reproducible from a recorded input by a
                         committed headless-Blender script (#430), never
                         committed verbatim at source resolution, and none may be

@@ -545,3 +545,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   refusal of a mixed house style in the scenery stands, and no rung mixes the two worlds' scenery
   (D-3). Nothing in this ADR's decisions changes. ADR 0022 carries the matching entry.
   ([#966](https://github.com/openzigs/onyourleft/issues/966))
+
+- **2026-10-11** — **D-4's source list is superseded by
+  [ADR 0049](0049-open-asset-sources-for-the-realistic-world.md), and D-4's rule is not.** D-4 says
+  a source not in its list is *"a superseding ADR, because admitting a source is a decision"*. On
+  the owner's ruling on [#1275](https://github.com/openzigs/onyourleft/issues/1275), ADR 0049 is
+  that ADR: its D-10 is now the whole list — this one's five rows, and four more — and it is the
+  table to read. What is false of the body above since then: D-4's **In** table and **Out** sentence
+  are no longer the complete list, and *"anything marked or known to be AI-generated"* now has a
+  definition (ADR 0049 D-2: the output of a trained generative model; a deterministic tool run from
+  committed parameters is not). What still stands, unchanged: the list is the boundary, a new source
+  is a superseding ADR and never a pull-request judgement, ADR 0023 binds in full for a CC-BY
+  asset, and every other decision in this ADR. Since the same pull request the list is also held in
+  code (`apps/web/tools/realistic/sources.ts` §`ADMITTED_SOURCES`, §`BARRED_SOURCES`), with a test
+  that reads ADR 0049 and holds the two to each other. No asset was added.
+  ([#1275](https://github.com/openzigs/onyourleft/issues/1275))

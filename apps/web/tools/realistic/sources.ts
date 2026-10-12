@@ -30,9 +30,19 @@
  *
  * ⚠️ **No Mixamo, refused by host rather than by omission** — Adobe's terms bar
  * redistributing the raw character, and a public repository and an APK both
- * do. ADR 0026 D-4's other exclusions (Megascans/Fab, `-NC`, `-SA`, Sketchfab's
- * "Free Standard", anything AI-generated) are not reachable from the two hosts
- * named here, and a new host is a change to that ADR, not to this table.
+ * do.
+ *
+ * ## The list of sources is the boundary, and it is written here
+ *
+ * [ADR 0049](../../../../docs/adr/0049-open-asset-sources-for-the-realistic-world.md)
+ * D-10 is the whole list since #1275, and it supersedes ADR 0026 D-4's:
+ * {@link ADMITTED_SOURCES} and {@link BARRED_SOURCES} are that table, row for
+ * row, and `admitted-sources.test.ts` reads the ADR and holds the two to each
+ * other. {@link admission} is what the lists decide about one URL, and
+ * {@link licenceVerdict} asks it before it reads a licence page — so a source
+ * from anywhere else is refused by the pipeline, not only by a reviewer.
+ * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
+ * which ADR 0049 keeps).
  *
  * Pure: no file, no network. The two scripts beside it do the I/O.
  */
@@ -65,11 +75,229 @@ import {
   pixelDigest,
 } from './draw-bicycle-maps';
 
-/** Hosts whose terms forbid shipping the file in a bundle or a repository. */
-export const BARRED_HOSTS: readonly string[] = ['mixamo.com', 'www.mixamo.com'];
-
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
+
+/** One row of ADR 0049 D-10's **In** table. */
+export interface AdmittedSource {
+  /** The source, as the ADR's table names it. */
+  readonly name: string;
+  /**
+   * The licence its row states. `MIT` is a GENERATOR's own licence, never an
+   * asset's: what a generator writes is this repository's (ADR 0049 D-1).
+   */
+  readonly licence: KeptLicence | 'MIT';
+  /** The decision that admits it. */
+  readonly decidedBy: string;
+  /**
+   * `files`: its files are downloaded, pinned and derived from (ADR 0026 D-5).
+   * `generator`: a deterministic tool run from committed parameters — its
+   * version, seed and parameters are the recorded input (ADR 0049 D-1, D-2).
+   */
+  readonly kind: 'files' | 'generator';
+  /**
+   * Where its licence pages and files are read from: a URL is this source's
+   * when it starts with one of these. Each ends at a path boundary, so a
+   * look-alike host cannot match. Empty where this pipeline reads nothing from
+   * it yet — the pull request that adopts an asset adds the page it read, and
+   * that is a fact about an admitted source, not a new one (ADR 0049 D-11).
+   */
+  readonly prefixes: readonly string[];
+}
+
+/**
+ * Every source a realistic asset may come from — ADR 0049 D-10's **In** table,
+ * which supersedes ADR 0026 D-4's. ⚠️ **Admitted is not adopted**: #1275 added
+ * no asset, and each adoption is its own issue, measured on the tablet.
+ */
+export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
+  {
+    name: 'Poly Haven',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: ['https://polyhaven.com/', 'https://api.polyhaven.com/'],
+  },
+  {
+    name: 'ambientCG',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+  },
+  {
+    // ADR 0026's 2026-09-28 amendment: MakeHuman's own CC0 system assets pack,
+    // by the author `makehuman_system`, is under this row.
+    name: 'MakeHuman’s own files',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://raw.githubusercontent.com/makehumancommunity/makehuman/',
+      'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',
+      'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
+    ],
+  },
+  {
+    // The stylised world's models: committed verbatim, never through this pipeline.
+    name: 'Kenney',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    // Verified per asset under ADR 0023, wherever it is hosted: none is taken.
+    name: 'An individual model under CC-BY-4.0',
+    licence: 'CC-BY-4.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    name: 'EZ-Tree’s output',
+    licence: 'MIT',
+    decidedBy: 'ADR 0049 D-1',
+    kind: 'generator',
+    prefixes: ['https://github.com/dgreenheck/ez-tree/'],
+  },
+  {
+    name: 'The Base Mesh',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-3',
+    kind: 'files',
+    prefixes: ['https://www.thebasemesh.com/'],
+  },
+  {
+    name: 'Blender Studio Human Base Meshes',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://www.blender.org/download/demo-files/',
+      'https://www.blender.org/download/demo/asset-bundles/human-base-meshes/',
+    ],
+  },
+  {
+    // Per asset: the pose's OWN row on the pack's page has to read CC0.
+    name: 'MakeHuman community cyclist poses',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-6',
+    kind: 'files',
+    prefixes: [
+      'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
+      'https://files.makehumancommunity.org/asset_packs/poses02/',
+    ],
+  },
+];
+
+/** One row of ADR 0049 D-10's **Out** table. */
+export interface BarredSource {
+  /** What is out, as the ADR's table names it. */
+  readonly name: string;
+  /** The decision that bars it. */
+  readonly decidedBy: string;
+  /** Why, in the words a refusal prints. */
+  readonly why: string;
+  /**
+   * The hosts it is refused by, each with its subdomains. Empty where what is
+   * barred is a licence term or a way of making, which no host identifies:
+   * those are refused by {@link licenceVerdict}'s reading of the page, or by
+   * review of the asset's own page (ADR 0049 D-2).
+   */
+  readonly hosts: readonly string[];
+}
+
+/** Everything that stays out, whatever the convenience — ADR 0049 D-10's **Out** table. */
+export const BARRED_SOURCES: readonly BarredSource[] = [
+  {
+    name: 'Mixamo',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'its terms forbid redistributing the raw files, and a public repository is redistribution',
+    hosts: ['mixamo.com'],
+  },
+  {
+    name: 'Quixel Megascans and the Fab Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Sketchfab’s Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Anything non-commercial, no-derivatives or share-alike',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'an asset is CC0-1.0 or CC-BY-4.0 and nothing else',
+    hosts: [],
+  },
+  {
+    name: 'Non-commercial motion capture sets',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'a non-commercial grant, whatever the data',
+    hosts: [],
+  },
+  {
+    name: 'MB-Lab characters',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'its characters carry neither CC0-1.0 nor CC-BY-4.0',
+    hosts: [],
+  },
+  {
+    name: 'Anything AI-generated',
+    decidedBy: 'ADR 0049 D-2',
+    why: 'the output of a trained generative model, however it is labelled',
+    hosts: [],
+  },
+  {
+    name: 'The cyclist motion capture set’s data',
+    decidedBy: 'ADR 0049 D-5',
+    why: 'it is a reference to read, and none of its data is fetched or committed',
+    hosts: ['zenodo.org'],
+  },
+  {
+    name: 'A downloaded bicycle',
+    decidedBy: 'ADR 0049 D-8',
+    why: 'the bicycle is built from numbers (#369)',
+    hosts: [],
+  },
+];
+
+/** What the two lists decide about one URL. */
+export type Admission =
+  | { readonly admitted: true; readonly source: AdmittedSource }
+  | { readonly admitted: false; readonly reason: string };
+
+/**
+ * Whether a URL may be read by the pipeline: barred hosts first, then the
+ * admitted prefixes, and anything else refused — the list is the boundary, so
+ * "not named" is a refusal and never a judgement (ADR 0026 D-4, ADR 0049 D-11).
+ */
+export function admission(url: string): Admission {
+  const { hostname } = new URL(url);
+  const barred = BARRED_SOURCES.find((source) =>
+    source.hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`)),
+  );
+  if (barred !== undefined) {
+    return {
+      admitted: false,
+      reason: `${hostname} is barred — ${barred.name}: ${barred.why} (${barred.decidedBy})`,
+    };
+  }
+  const source = ADMITTED_SOURCES.find((candidate) =>
+    candidate.prefixes.some((prefix) => url.startsWith(prefix)),
+  );
+  if (source === undefined) {
+    return {
+      admitted: false,
+      reason: `${url} is not from a source ADR 0049 D-10 admits — a new source is a superseding ADR, not a new row`,
+    };
+  }
+  return { admitted: true, source };
+}
 
 /** Which of a Poly Haven asset's files to take. */
 export type PolyHavenSelection =
@@ -1025,19 +1253,16 @@ export type LicenceVerdict =
 /**
  * Whether a source may be kept, given the text of its licence page.
  *
- * Refuses a barred host, a page that does not carry the phrase, and — however
+ * Refuses a barred host, a URL no admitted source owns ({@link admission}), a
+ * page that does not carry the phrase, and — however
  * the phrase reads — a page that also names a non-commercial, no-derivatives or
  * share-alike term, because a page can carry the CC0 phrase for one file and a
  * stricter licence for the one being fetched. ADR 0026 D-4 excludes all three.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
-  const hosts = [source.licencePage, ...fixedUrls(source)].map((url) => new URL(url).hostname);
-  const barred = hosts.find((host) => BARRED_HOSTS.includes(host));
-  if (barred !== undefined) {
-    return {
-      kept: false,
-      reason: `${source.id}: ${barred} is barred — its terms forbid redistribution`,
-    };
+  for (const url of [source.licencePage, ...fixedUrls(source)]) {
+    const verdict = admission(url);
+    if (!verdict.admitted) return { kept: false, reason: `${source.id}: ${verdict.reason}` };
   }
   if (!pageText.includes(source.licencePhrase)) {
     return {
