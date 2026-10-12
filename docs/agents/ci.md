@@ -762,7 +762,11 @@ not a whole number of seconds fails the test.
 | 38243281606 attempt 1 | EPYC 7763 | 1374 | 220 | 60 | 376 | 699 | 671 |
 | 38243281606 attempt 2 | EPYC 7763 | 1337 | 212 | 58 | 364 | 674 | 658 |
 | 38243281606 attempt 3 | EPYC 9V45 | 945 | 159 | 36 | 235 | 463 | 478 |
+| 38254309376 (#1286, this change itself) | EPYC 7763 | 1341 | 217 | 58 | 364 | 679 | 659 |
 <!-- required-job-measurements:end -->
+
+The last row is the change as built — `pnpm run test:required`, not the spike's flag — on the first
+run of its own pull request: 459 s clear of the stop, and its gate's stop 277 s inside it.
 
 - **On the EPYC 7763, n = 2: the Vitest step took 364 s and 376 s against 482–497 s with coverage
   on the six green `main` runs above — 106 to 133 s saved.** The job took 1 337 s and 1 374 s
@@ -795,7 +799,12 @@ repository: re-read a run after it and add the row.
 
 **What the nightly job costs with the report in it.** `Nightly heavy checks` took 322 to 521 s on
 its four scheduled runs from 2026-10-09 to 2026-10-12, and the coverage run was 482–510 s as a step
-of the required job on the 7763, so about 1 030 s of its own 1 800 at worst.
+of the required job on the 7763, so about 1 030 s of its own 1 800 at worst. **Measured, n = 1**:
+run [38254309339](https://github.com/openzigs/onyourleft/actions/runs/38254309339) (#1286's, an
+EPYC 7763) took **1 018 s** — `Tests outside coverage` 57 s, `Nightly browser checks` 426 s,
+`Tests under coverage` 497 s (695 files passed), the summary 0 s and the upload 3 s — so 782 s
+inside its stop. Its `coverage-report` artefact held `coverage-summary.json`, which the renderer
+turns into the table (all files: 90.62 % of statements, 85.31 % of branches).
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
