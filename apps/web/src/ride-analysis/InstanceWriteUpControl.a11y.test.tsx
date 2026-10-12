@@ -25,7 +25,10 @@ import type {
   InstanceAskOutcome,
   InstanceJobView,
 } from './instance-analysis-port';
+import { hostedPressSends } from './hosted-consent';
+import type { InstanceJobSource } from './instance-job';
 import {
+  HOSTED_SENDS_ID,
   INSTANCE_ASK_LABEL,
   INSTANCE_CANCEL_LABEL,
   INSTANCE_RECONNECTING,
@@ -65,13 +68,20 @@ function screened(text: string): ScreenedWriteUp {
   return passed;
 }
 
-function port(connected: boolean): InstanceAnalysisPort {
+/** The service a hosted write-up would be sent to, when a case offers one (#1251). */
+const HOSTED_ENDPOINT = 'https://models.example';
+let asked: InstanceJobSource[] = [];
+
+function port(connected: boolean, hosted = false): InstanceAnalysisPort {
   return {
     connected: () => connected,
-    availableSources: () => (connected ? ['instance-local'] : []),
+    availableSources: () =>
+      !connected ? [] : hosted ? ['instance-local', 'instance-hosted'] : ['instance-local'],
+    hostedEndpoint: () => (connected && hosted ? HOSTED_ENDPOINT : undefined),
     pendingJob: () => false,
-    ask: async (_id, _source, view) =>
+    ask: async (_id, source, view) =>
       new Promise((resolve) => {
+        asked.push(source);
         push = view;
         finish = resolve;
       }),
@@ -80,7 +90,12 @@ function port(connected: boolean): InstanceAnalysisPort {
   };
 }
 
-async function open(connected: boolean, writeUp?: RideWriteUpRecord): Promise<void> {
+async function open(
+  connected: boolean,
+  writeUp?: RideWriteUpRecord,
+  hosted = false,
+): Promise<void> {
+  asked = [];
   document.documentElement.lang = 'en';
   mounted = await mount(
     <main>
@@ -93,7 +108,7 @@ async function open(connected: boolean, writeUp?: RideWriteUpRecord): Promise<vo
           ...(writeUp === undefined ? {} : { writeUp }),
         })}
         activityId={RIDE}
-        instanceWriteUp={port(connected)}
+        instanceWriteUp={port(connected, hosted)}
       />
     </main>,
   );
@@ -184,5 +199,33 @@ describe('every state of the instance’s write-up passes the audit (#1102)', ()
     expect(control.getAttribute('aria-describedby')).toBe(INSTANCE_SENDS_LEAD_ID);
     expect(document.getElementById(INSTANCE_SENDS_LEAD_ID)?.textContent).toBe(INSTANCE_SENDS_LEAD);
     expect(document.body.textContent).toContain('Never a picture.');
+  });
+
+  // #1251: the hosted press is drawn only where there is a service to name,
+  // and it is described by the sentence that names it.
+  it('offers no hosted press, and names no service, where none is on offer', async () => {
+    await open(true);
+    expect(
+      [...document.querySelectorAll('button')].map((candidate) => candidate.textContent),
+    ).not.toContain(INSTANCE_ASK_LABEL['instance-hosted']);
+    expect(document.getElementById(HOSTED_SENDS_ID)).toBeNull();
+  });
+
+  it('describes the hosted press by the sentence naming the service, kept visible, and asks that source', async () => {
+    await open(true, undefined, true);
+    const control = button(INSTANCE_ASK_LABEL['instance-hosted']);
+    expect(control.getAttribute('aria-describedby')).toBe(HOSTED_SENDS_ID);
+    const sentence = document.getElementById(HOSTED_SENDS_ID);
+    expect(sentence?.textContent).toBe(hostedPressSends(HOSTED_ENDPOINT));
+    expect(sentence?.textContent).toContain(HOSTED_ENDPOINT);
+    expect(sentence?.closest('details')).toBeNull();
+    // The instance's own press keeps its own description.
+    expect(button(INSTANCE_ASK_LABEL['instance-local']).getAttribute('aria-describedby')).toBe(
+      INSTANCE_SENDS_LEAD_ID,
+    );
+    expectClean('hosted on offer');
+    await activateWithKeyboard(control);
+    expect(asked).toStrictEqual(['instance-hosted']);
+    expectClean('hosted, starting');
   });
 });

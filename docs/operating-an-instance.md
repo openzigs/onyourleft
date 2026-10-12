@@ -288,7 +288,15 @@ nothing sent, otherwise:
 rider, erased with their account and named in their export only as `"a hosted model key is held"`,
 beside `hostedConsent` (the origin and when). An instance with no secret refuses to store one. ⚠️
 **You could technically read a key a rider stores here** — the secret is yours — and the app is to
-tell the rider so (ruling 5, in #1104's wording; no app screen stores a key yet).
+tell the rider so (ruling 5, in #1104's wording). Since #1251 the app does: a rider stores, removes
+and agrees on the Instance screen, under *A hosted model service, on your own key*, and the sentence
+is beside the key box.
+
+**The test question.** A rider who has stored a key and agreed can press *Send a test question*
+(`POST /v1/analysis/hosted/test`, sealed only). Your instance sends the service two fixed sentences
+on the rider's key — no ride, nothing the rider wrote — and tells the app only whether it answered.
+It passes the same checks as a job, so it sends nothing where a job would be refused. It is an
+outbound request from your machine to an address a rider chose, as every hosted job is.
 
 **Yours is held for you, the operator, and for nobody else.** The instance also hosts group rides
 and races, so it has other riders, and holding a key changes nothing about them: they register and

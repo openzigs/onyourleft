@@ -73,6 +73,12 @@ import {
   pendingJobForgetter,
 } from './ride-analysis/instance-analysis';
 import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
+import {
+  createHostedSettingsPort,
+  readHostedOffer,
+  sendMaskingGuard,
+} from './ride-analysis/hosted-settings';
+import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
@@ -1036,6 +1042,16 @@ function buildInstanceAnalysis(
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
     pending: storage,
     syncBase: localStore(),
+    // #1251: hosted is offered only where the instance last said it holds the
+    // rider's own key and their consent naming it, and its masking list is
+    // made current before every hosted job.
+    hosted: {
+      endpoint: () => readHostedOffer(storage, readInstanceAccount(storage)?.origin),
+      sendGuard: (session) =>
+        sendMaskingGuard(session.channel, session.token, () =>
+          readMaskingGuard(localStore(), LOCAL_ATHLETE),
+        ),
+    },
     ...(rideController === undefined
       ? {}
       : {
@@ -1044,6 +1060,33 @@ function buildInstanceAnalysis(
             subscribe: (listener) => rideController.subscribe(listener),
           },
         }),
+  });
+}
+
+/**
+ * A hosted model service on the rider's own key, held by their instance
+ * (#1251): the ONE production place its port is built, so `check:wiring`
+ * reports `createHostedSettingsPort` if this goes. Over the sealed session the
+ * Connect screen keeps (#1192) and the one instance module (ADR 0036 D-3 (a)):
+ * every route it calls is sealed-only, so a device with no sealed session
+ * sends nothing and the section says why.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildHostedSettings(): HostedSettingsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  return createHostedSettingsPort({
+    session: heldSealedSession({
+      storage,
+      loadedFrom: loadedFrom(),
+      signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    }),
+    storage,
+    guard: () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
   });
 }
 
@@ -1285,6 +1328,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const moderation = buildModerationPort();
   // #1195: built once, so a second press joins the sync already running.
   const sync = buildSyncPort();
+  // #1251: built once, for the Connect screen's reason above.
+  const hostedSettings = buildHostedSettings();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
@@ -1321,6 +1366,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
           {...(sync === undefined ? {} : { sync })}
+          {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`

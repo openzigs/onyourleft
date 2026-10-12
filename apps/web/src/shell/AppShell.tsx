@@ -72,6 +72,7 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
@@ -373,6 +374,11 @@ export interface AppShellProps {
    * is what goes red for that.
    */
   readonly instanceAnalysis?: InstanceAnalysisPort | undefined;
+  /**
+   * A hosted model service on the rider's own key, held by their instance
+   * (#1251): the Instance screen's section. Absent, the section is not drawn.
+   */
+  readonly hostedSettings?: HostedSettingsPort | undefined;
   /**
    * The analysis screen's store (#78).
    *
@@ -714,7 +720,14 @@ function viewFor(
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} sync={props.sync} />;
+      return (
+        <InstanceView
+          port={props.instance}
+          moderation={props.moderation}
+          sync={props.sync}
+          hostedSettings={props.hostedSettings}
+        />
+      );
     case 'moderation':
       return <ModerationView port={props.moderation} />;
     case 'credits':

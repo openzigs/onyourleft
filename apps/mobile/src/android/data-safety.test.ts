@@ -367,7 +367,9 @@ describe('the declaration filed on Play', () => {
       'Photos and videos',
       'Device or other IDs',
     ]);
-    // Shared: the health rows since #803, and Photos and videos since #1106,
+    // Shared: the health rows since #803, the rider's own text since #1251
+    // (#1104 B8: parts of it can be looked up and sent on to a hosted service
+    // the rider agreed to), and Photos and videos since #1106,
     // whose instance path can send a side-camera picture on to a hosted
     // service the rider agreed to by name. Every location row stays
     // `shared: false`: nothing sent to a hosted service carries a coordinate,
@@ -377,6 +379,7 @@ describe('the declaration filed on Play', () => {
     ).toStrictEqual([
       'Health and fitness — health info',
       'Health and fitness — fitness info',
+      'App activity — Other user-generated content',
       'Photos and videos',
     ]);
   });
@@ -467,9 +470,9 @@ describe('the declaration filed on Play', () => {
       expect(instance?.dataTypes, dataType).toContain(dataType);
     }
     // The rider's own copy on an instance they chose is not a third party:
-    // the rows sync alone moves stay unshared.
+    // the row sync alone moves stays unshared. (The rider's own text is shared
+    // since #1251, by the hosted service, not by the sync — the case below.)
     expect(row('Files and docs')?.shared).toBe(false);
-    expect(row('App activity — Other user-generated content')?.shared).toBe(false);
     expect(row('Files and docs')?.why).not.toContain('Nothing is uploaded');
     expect(row('Health and fitness — health info')?.why).not.toContain(
       'sends none of it to an instance',
@@ -776,6 +779,46 @@ describe('the manifest the app actually ships supports the declaration', () => {
         locationClaimFaults(permissions.map((one) => ({ ...one, maxSdkVersion: null }))).length,
       ).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('a hosted service on the rider’s own key, sent to by their instance (#1251, #1104 B8)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says the instance sends the numbers on, masked, to the address the consent names',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(
+        'the instance sends those numbers, masked, to that service at the https address the rider’s consent names',
+      );
+      expect(why).toContain('That service is a third party, hence shared.');
+      expect(why).toContain('is withdrawn when the address changes');
+      expect(why).toContain('the key is always the rider’s own, never the operator’s');
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text is SHARED: parts of it can be sent on, masked, and masking promises nothing', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain('those parts are sent to it, masked first');
+    expect(answer?.why).toContain(
+      'Masking cannot guarantee that nothing personal in free text gets through',
+    );
+    // Analytics is still not collected: the split row is what moved.
+    expect(row('App activity')).toMatchObject({ collected: false, shared: false });
+  });
+
+  it('says the privacy zones go to the instance and not to the service, and no location row is shared', () => {
+    const why = row('Location — precise location')?.why ?? '';
+    expect(why).toContain(
+      'their privacy zones — each one’s name, centre and radius — go to that instance',
+    );
+    expect(why).toContain('the zones are not sent to the service');
+    expect(row('Location — precise location')?.shared).toBe(false);
+    expect(row('Location — approximate location')?.shared).toBe(false);
   });
 });
 

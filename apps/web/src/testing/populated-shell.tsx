@@ -80,6 +80,10 @@ import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
 import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import {
+  SCRIPTED_HOSTED_KEY,
+  scriptedHostedSettings,
+} from '../ride-analysis/hosted-settings-testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -446,6 +450,7 @@ function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
   return {
     connected: () => populated,
     availableSources: () => (populated ? ['instance-local'] : []),
+    hostedEndpoint: () => undefined,
     pendingJob: () => false,
     ask: async () => new Promise<InstanceAskOutcome>(() => undefined),
     followAgain: async () => Promise.resolve({ kind: 'detached' }),
@@ -780,6 +785,9 @@ export function PopulatedShell({
       riderText={riderTextPort(populated)}
       workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
+      // #1251: a key held and not yet agreed to, so the key form, who could
+      // read the key and the whole consent beside its switch are laid out.
+      hostedSettings={scriptedHostedSettings({ key: SCRIPTED_HOSTED_KEY, consent: null }).port}
       moderation={
         scriptedModeration({
           standing: populated ? 'moderator' : 'not-moderator',

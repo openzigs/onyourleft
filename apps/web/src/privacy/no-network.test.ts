@@ -1441,6 +1441,12 @@ const UNBUILT_DELETION_PATHS: readonly string[] = [
  * Every "How to delete it" cell of the instance section's table that names no
  * route this build has: *Disconnect*, the instance's operator, Discord, or a
  * dash (#892's second review). Answers the offending cells, normalised.
+ *
+ * Since #1251 the build has two more, both on the Instance screen: the press
+ * that removes a hosted model key the rider stored, by its label
+ * (`ride-analysis/hosted-consent.ts` §`HOSTED_REMOVE_BUTTON`), and unticking
+ * the hosted consent. `HostedServicePanel.test.tsx` is what holds that they
+ * are built.
  */
 function deletionRouteFaults(section: string): readonly string[] {
   const rows = section
@@ -1458,7 +1464,9 @@ function deletionRouteFaults(section: string): readonly string[] {
       cell !== '—' &&
       !cell.includes('disconnect') &&
       !cell.includes('operator') &&
-      !cell.includes('discord'),
+      !cell.includes('discord') &&
+      !cell.includes('remove my key from my instance') &&
+      !cell.includes('when you untick it'),
   );
 }
 
