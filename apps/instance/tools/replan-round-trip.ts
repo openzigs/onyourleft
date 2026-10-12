@@ -64,7 +64,7 @@
  * and no coordinate.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { registerHooks } from 'node:module';
 
 import { resolveExtensionless } from '../src/node-imports.ts';
@@ -133,7 +133,7 @@ const report = await measure({
           // A model the last run never loaded is already unloaded, and the
           // command says so by failing: that is no reason to lose the run.
           try {
-            execFileSync('/bin/sh', ['-c', unload], { stdio: 'ignore' });
+            execSync(unload, { stdio: 'ignore' });
           } catch {
             process.stderr.write('the unload command failed; carrying on\n');
           }
