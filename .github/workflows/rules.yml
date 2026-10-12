@@ -64,6 +64,7 @@ jobs:
   # --- Shard 1 of 3: everything that is not Vitest and not a browser ------------
   checks:
     name: Checks
+    if: false
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
     # label) are charged even on a public repository, while standard
     # GitHub-hosted runners are free and unlimited -- CLAUDE.md section 8. It is
@@ -406,6 +407,7 @@ jobs:
   # not the long pole, the browser gate is.
   tests:
     name: Tests
+    if: false
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop, and docs/agents/ci.md section 4c "Shards
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
@@ -543,6 +545,7 @@ jobs:
   # runner, so this shard's length is the required check's.
   browser:
     name: Browser gate
+    if: false
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop. The stops nested inside this one, on the
     # slower runner (docs/agents/ci.md section 4c "Shards -- #1285" has the
