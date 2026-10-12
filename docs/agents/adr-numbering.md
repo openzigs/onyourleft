@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0049 is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)**, taken by
+  [#1275](https://github.com/openzigs/onyourleft/issues/1275) on 2026-10-11 for more open asset
+  sources for the realistic world and the meaning of "AI-generated", and **accepted on the owner's
+  ruling on that issue**. It supersedes ADR 0026 D-4's source list. A reviewer who remembers this
+  sentence offering 0049 is reading the old file.
   ⚠️ **0048 is [ADR 0048](../adr/0048-workouts-that-change-during-the-ride.md)**, taken by
   [#1233](https://github.com/openzigs/onyourleft/issues/1233) on 2026-10-09 for workouts that change
   during the ride (a heart-rate hold on the device, and re-plans an instance agent may only
