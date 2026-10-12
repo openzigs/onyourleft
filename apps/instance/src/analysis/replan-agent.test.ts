@@ -211,6 +211,8 @@ describe('a malformed answer is no proposal', () => {
   it.each<[string, string]>([
     ['free text', 'Shorten the next block by two minutes; the heart rate ran high.'],
     ['a move wrapped in a sentence', `Here is my answer: ${ANSWER}`],
+    ['a fenced move with a sentence before it', `Here you go:\n\`\`\`json\n${ANSWER}\n\`\`\``],
+    ['a fenced move with a sentence after it', `\`\`\`json\n${ANSWER}\n\`\`\`\nHope that helps.`],
     ['an unknown move', '{"move":{"kind":"set-power","watts":500},"reason":"on-plan"}'],
     ['an unknown reason', JSON.stringify({ move: MOVE, reason: 'the rider looks tired' })],
     [

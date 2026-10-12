@@ -193,13 +193,16 @@ export type EngineEnding =
   | { readonly kind: 'failed'; readonly why: JobFailure }
   | { readonly kind: 'cancelled' };
 
+/** How a write-up's run ended: never a proposal. */
+export type WriteUpEnding = Exclude<EngineEnding, { readonly kind: 'proposed' }>;
+
 /** What runs a job: the agent in production (`engine.ts`), a script in a test. */
 export interface AnalysisEngine {
   run(
     job: EngineJob,
     signal: AbortSignal,
     emit: (event: AgentEvent) => void,
-  ): Promise<EngineEnding>;
+  ): Promise<WriteUpEnding>;
 }
 
 /** How a re-plan's run ended: a proposal or none. Never text. */

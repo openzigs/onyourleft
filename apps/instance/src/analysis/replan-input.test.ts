@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BLOCK_SUMMARY_KEYS,
+  MAXIMUM_INPUT_SUMMARIES,
   MAXIMUM_PLAN_BLOCKS,
   readReplanInput,
   REPLAN_INPUT_BYTE_BUDGET,
@@ -152,6 +153,19 @@ describe('reading a re-plan input', () => {
       summaries: [{ block: 0, seconds: 30, rescues: 0 }],
     });
     expect(read.ok && read.value.summaries).toStrictEqual([{ block: 0, seconds: 30, rescues: 0 }]);
+  });
+
+  it('refuses more summaries than the limit, though they fit the byte budget', () => {
+    const blocks = [{ kind: 'free-ride', seconds: 60 }];
+    const summaries = Array.from({ length: MAXIMUM_INPUT_SUMMARIES + 1 }, () => ({
+      block: 0,
+      seconds: 30,
+      rescues: 0,
+    }));
+    expect(refusal({ ...REPLAN_INPUT_JSON, currentBlock: 0, blocks, summaries })).toStrictEqual({
+      field: 'input.summaries',
+      problem: `must hold at most ${String(MAXIMUM_INPUT_SUMMARIES)}`,
+    });
   });
 
   it('refuses no summaries, and an input past its byte budget', () => {
