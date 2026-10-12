@@ -367,7 +367,7 @@ interface Answer {
 }
 
 /** One device and its session, speaking one transport, counting what sealing cost it. */
-interface Device {
+export interface Device {
   call(method: string, path: string, body?: unknown): Promise<Answer>;
   /** Follow an event stream; `onEvent` returns `true` to stop. */
   stream(
@@ -377,6 +377,12 @@ interface Device {
   ): Promise<void>;
   /** Milliseconds spent sealing and opening since the last call of this. */
   takeCrypto(): { sealMs: number; openMs: number };
+  /**
+   * Body bytes sent and received by {@link Device.call} since the last call of
+   * this (#1106): the sealed envelope and the sealed reply as they crossed the
+   * wire, without HTTP's own headers.
+   */
+  takeBytes(): { sent: number; received: number };
 }
 
 function codeOf(body: unknown): string | undefined {
@@ -422,7 +428,7 @@ function field(block: string, name: string): string | undefined {
   return line?.slice(name.length + 2);
 }
 
-async function signedInDevice(
+export async function signedInDevice(
   url: string,
   origin: string,
   transport: Transport,
@@ -447,6 +453,8 @@ async function signedInDevice(
   const session: { token: string | undefined } = { token: undefined };
   let sealMs = 0;
   let openMs = 0;
+  let sentBytes = 0;
+  let receivedBytes = 0;
   let instanceKey: SealedInstanceKey | undefined;
 
   const seal = async (
@@ -485,6 +493,7 @@ async function signedInDevice(
     });
     const envelope = JSON.stringify(sealed.envelope);
     sealMs += performance.now() - before;
+    sentBytes += utf8Encode(envelope).length;
     const response = await fetch(`${url}${SEALED_PATH}`, {
       method: 'POST',
       headers: {
@@ -514,6 +523,7 @@ async function signedInDevice(
     }
     const { sealed, response } = await seal(method, path, body);
     const raw = await response.text();
+    receivedBytes += utf8Encode(raw).length;
     if (response.status !== 200) {
       return { status: response.status, body: raw === '' ? null : (JSON.parse(raw) as unknown) };
     }
@@ -586,10 +596,18 @@ async function signedInDevice(
   session.token = sessionToken;
   sealMs = 0;
   openMs = 0;
+  sentBytes = 0;
+  receivedBytes = 0;
 
   return {
     call,
     stream,
+    takeBytes: () => {
+      const taken = { sent: sentBytes, received: receivedBytes };
+      sentBytes = 0;
+      receivedBytes = 0;
+      return taken;
+    },
     takeCrypto: () => {
       const taken = { sealMs, openMs };
       sealMs = 0;

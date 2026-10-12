@@ -3958,6 +3958,112 @@
         }
       }
     },
+    "/v1/camera/side-pose": {
+      "post": {
+        "operationId": "lookAtSidePicture",
+        "summary": "Show ONE side-camera picture to a model and answer what it said (#1106). `picture` is a JPEG of at most 64 KiB, base64, carrying no location or device metadata. `source` is `instance-local` (the model this instance’s operator named for pictures, on the box) or `instance-hosted` (the hosted service YOUR OWN key is for, never anybody else’s), and with `instance-hosted` `endpoint` is the `https:` origin your own consent to send pictures there names: a key at another origin is refused `picture_source_unavailable`. The model is asked one fixed question and sent the picture and nothing else. **The picture is not stored**: not in a table, a file or a log; it is dropped with the request. `answer` is the model’s own text, unread, for your device to read as numbers or nothing. Reached only sealed, on every instance: one that holds no keys answers `sealed_required`. `rate_limited` while another picture of yours is with the model; `pictures_off` when no local model is named for pictures; `model_without_pictures` when the model said it takes none; `picture_model_failed` when it gave no usable answer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "picture": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "picture",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "answer"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/picture_source_unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "422": {
+            "$ref": "#/components/responses/model_without_pictures"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/picture_model_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `pictures_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/history/search": {
       "post": {
         "operationId": "searchHistory",
@@ -6738,6 +6844,7 @@
                   "confirmation_superseded",
                   "not_suspended",
                   "job_running",
+                  "picture_source_unavailable",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -6747,10 +6854,13 @@
                   "record_content_mismatch",
                   "record_not_your_key",
                   "record_key_revoked",
+                  "model_without_pictures",
                   "rate_limited",
                   "internal",
+                  "picture_model_failed",
                   "unavailable",
-                  "analysis_off"
+                  "analysis_off",
+                  "pictures_off"
                 ]
               },
               "message": {
@@ -7130,6 +7240,16 @@
           }
         }
       },
+      "picture_source_unavailable": {
+        "description": "`picture_source_unavailable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
         "content": {
@@ -7220,6 +7340,16 @@
           }
         }
       },
+      "model_without_pictures": {
+        "description": "`model_without_pictures` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
         "content": {
@@ -7240,6 +7370,16 @@
           }
         }
       },
+      "picture_model_failed": {
+        "description": "`picture_model_failed` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "unavailable": {
         "description": "`unavailable` (503), in the one error shape.",
         "content": {
@@ -7252,6 +7392,16 @@
       },
       "analysis_off": {
         "description": "`analysis_off` (503), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "pictures_off": {
+        "description": "`pictures_off` (503), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

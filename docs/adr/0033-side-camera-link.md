@@ -822,3 +822,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   WireGuard-class overlay, never through the Cloudflare tunnel (ADR 0029 D-6)."* D-3's never-sent
   list holds on the instance: a job's input carries the pose summary only with camera consent, and
   no instance tool returns it (ADR 0046 D-6, D-14(d)). The body above is not edited.
+- **2026-10-12** — **The path the 2026-10-07 entry said was due to move now exists on the rider's
+  instance, beside D-11's, and D-6's *"never … sent anywhere else"* has a second exception.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision; no decision of this ADR is reversed, and its D-10 says what holds of D-3, D-6 and D-11.
+  The body above is not edited. (#1106)

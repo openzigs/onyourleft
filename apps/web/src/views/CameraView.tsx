@@ -105,8 +105,11 @@ import {
 import { useHostedCheck, type HostedCheckState } from '../camera/useHostedCheck';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
+import { SIDE_INSTANCE_WHAT_IS_SENT, writeSideInstanceSwitch } from '../camera/instance-pose';
+import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { SideCameraControl } from './SideCameraControl';
+import { SideInstancePictures } from './SideInstancePictures';
 
 /**
  * What became of the picture just taken — kept, dropped, or refused a home.
@@ -151,6 +154,11 @@ export interface CameraViewProps {
    * says why it cannot be paired.
    */
   readonly sidePairing?: SidePairingPort | undefined;
+  /**
+   * The rider's instance, for the side camera's pictures — #1106. `undefined`
+   * where `main.tsx` built none; the section is then absent.
+   */
+  readonly sidePictures?: SideInstancePicturesPort | undefined;
 }
 
 /** The heading of the side camera's way in — #557. */
@@ -211,6 +219,7 @@ export const ANALYSIS_WHAT_IS_SENT =
  */
 export const CAMERA_AGREED_KEPT_VISIBLE: readonly string[] = [
   ANALYSIS_WHAT_IS_SENT,
+  SIDE_INSTANCE_WHAT_IS_SENT,
   HOSTED_CONSENT.headline,
   ...HOSTED_CONSENT.paragraphs,
   HOSTED_CONSENT.notNeeded,
@@ -224,7 +233,11 @@ export const CAMERA_KEPT_VISIBLE: readonly string[] = [
   ...CAMERA_AGREED_KEPT_VISIBLE,
 ];
 
-export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.Element {
+export function CameraView({
+  controller,
+  sidePairing,
+  sidePictures,
+}: CameraViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <section aria-labelledby={TITLE_ID}>
@@ -233,15 +246,17 @@ export function CameraView({ controller, sidePairing }: CameraViewProps): JSX.El
       </section>
     );
   }
-  return <Camera controller={controller} sidePairing={sidePairing} />;
+  return <Camera controller={controller} sidePairing={sidePairing} sidePictures={sidePictures} />;
 }
 
 function Camera({
   controller,
   sidePairing,
+  sidePictures,
 }: {
   readonly controller: CameraController;
   readonly sidePairing: SidePairingPort | undefined;
+  readonly sidePictures: SideInstancePicturesPort | undefined;
 }): JSX.Element {
   // ⚠️ Three booleans rather than the whole state object: `useSyncExternalStore`
   // compares snapshots with `Object.is`, so a getter returning a fresh object
@@ -323,6 +338,9 @@ function Camera({
   );
 
   const [acknowledged, setAcknowledged] = useState(false);
+  // #1106: the side camera's two "send them elsewhere" switches are in two
+  // sections; each re-reads its own when the other changed one.
+  const [sideRevision, setSideRevision] = useState(0);
   /**
    * How many pictures this device is holding — or `'unknown'` when the store
    * could not say (#498). `undefined` until the first read answers.
@@ -642,7 +660,34 @@ function Camera({
         </section>
       ) : null}
 
-      {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
+      {agreed ? (
+        <AnalysisSection
+          controller={controller}
+          live={live}
+          revision={sideRevision}
+          onSideSwitched={(on) => {
+            // #1106: one place at a time. The computer's switch going on takes the instance's off.
+            if (on) {
+              writeSideInstanceSwitch(undefined);
+            }
+            setSideRevision((revision) => revision + 1);
+          }}
+        />
+      ) : null}
+
+      {agreed && sidePictures !== undefined ? (
+        <SideInstancePictures
+          port={sidePictures}
+          revision={sideRevision}
+          onSwitched={(on) => {
+            // And the instance's going on takes the computer's off.
+            if (on) {
+              writeSideAnalyserOnComputer(false);
+            }
+            setSideRevision((revision) => revision + 1);
+          }}
+        />
+      ) : null}
 
       {agreed ? <HostedSection controller={controller} /> : null}
 
@@ -777,7 +822,7 @@ function SideAnalyserSwitch({
       <p>
         {on
           ? 'On. The next time you pair a side camera, its pictures go to your computer.'
-          : 'Off. The side camera’s pictures are looked at on this tablet and go nowhere else. One already sending them to your computer has stopped.'}
+          : 'Off. No picture is sent to your computer from the side camera. One already sending them to your computer has stopped.'}
       </p>
     </>
   );
@@ -798,9 +843,15 @@ function SideAnalyserSwitch({
 function AnalysisSection({
   controller,
   live,
+  revision,
+  onSideSwitched,
 }: {
   readonly controller: CameraController;
   readonly live: boolean;
+  /** Changes when the instance's section changed a switch this one shows (#1106). */
+  readonly revision: number;
+  /** Called after the side camera's computer switch changed here. */
+  readonly onSideSwitched: (on: boolean) => void;
 }): JSX.Element {
   const saved = readAnalysisEndpoint();
   const [address, setAddress] = useState(saved?.address ?? '');
@@ -810,6 +861,9 @@ function AnalysisSection({
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [configured, setConfigured] = useState(saved?.switchedOn === true);
   const [sideOnComputer, setSideOnComputer] = useState(readSideAnalyserOnComputer);
+  useEffect(() => {
+    setSideOnComputer(readSideAnalyserOnComputer());
+  }, [revision]);
   const { state, ask } = useAnalysis(controller);
   const sentence = analysisSentence(state);
 
@@ -955,6 +1009,7 @@ function AnalysisSection({
           onChange={(on) => {
             const kept = writeSideAnalyserOnComputer(on);
             setSideOnComputer(kept && on);
+            onSideSwitched(kept && on);
           }}
         />
       ) : null}

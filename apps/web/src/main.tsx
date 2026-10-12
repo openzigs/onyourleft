@@ -86,6 +86,14 @@ import { documentForeground, SecureWindow } from './camera/secure-window';
 import { NO_SECURE_WINDOW } from './camera/secure-window-port';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
+import {
+  instancePoseEstimator,
+  readSideInstanceChoice,
+  sidePictureSessionOf,
+} from './camera/instance-pose';
+import type { SideInstancePicturesPort } from './camera/side-instance-port';
+import type { SidePoseEstimator } from './camera/side-analysis-port';
+import { hostedKeyServiceReader } from './instance/hosted-service';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
@@ -126,6 +134,7 @@ import {
   type InstancePort,
 } from './instance/instance-port';
 import type { LoadedFrom } from './instance/instance-pin';
+import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
@@ -1039,6 +1048,58 @@ function buildInstanceAnalysis(
 }
 
 /**
+ * The rider's instance, for the side camera's pictures (#1106): what the
+ * Camera page asks about it, and the estimator that sends it a picture. The
+ * ONE production place either is built.
+ *
+ * ⚠️ **What holds each hand-off, and the one nothing does.** The port's two
+ * methods are watched by `check:wiring` (`side-instance-port.ts`), so a view
+ * that stops calling one is a red run. The estimator reaches a pairing through
+ * `chooseSideAnalyser`'s REQUIRED `instance` key, so leaving it out does not
+ * compile. `shell/AppShell.test.tsx` holds the shell handing the port on to
+ * the Camera page. **This file handing the port to the shell is held by
+ * nothing but a reader**: `sidePictures` is an optional prop, as
+ * `sidePairing` beside it is.
+ *
+ * ⚠️ **Sealed, or nothing.** Both go through the sealed session the Connect
+ * screen keeps (`heldSealedSession`, #1192) and the one instance module (ADR
+ * 0036 D-3 (a)): there is no plaintext call here to fall back to, so a device
+ * with no sealed session sends no picture and the screen says so.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildSidePictures():
+  | { readonly port: SideInstancePicturesPort; readonly estimator: () => SidePoseEstimator }
+  | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  // The instance signed in to NOW: what the rider agreed to is stored against
+  // its address, so it does not carry over to another instance.
+  const origin = (): string | undefined =>
+    heldInstanceSession(storage) === undefined ? undefined : readInstanceAccount(storage)?.origin;
+  return {
+    port: {
+      sideInstanceOrigin: origin,
+      askHostedPictureService: hostedKeyServiceReader(sealed),
+    },
+    estimator: () =>
+      instancePoseEstimator({
+        // Read for every picture: switching it off stops the next one.
+        choice: () => readSideInstanceChoice(origin()),
+        session: async () => sidePictureSessionOf(await sealed()),
+      }),
+  };
+}
+
+/**
  * The camera, or nothing (#382).
  *
  * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
@@ -1185,6 +1246,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #1106: built once, so every pairing asks the same sealed session.
+  const sidePictures = buildSidePictures();
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
         // #557: the tablet stays awake while it pairs and while it is paired.
@@ -1194,10 +1257,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // model, only when the rider switched the side camera over to it AND
           // their computer is saved and switched on. Chosen once per pairing,
           // and re-read for every picture so switching off stops the next one.
+          // #1106: or the rider's instance, sealed, when they switched the
+          // side camera over to it and this device is signed in to one.
           const analyser = chooseSideAnalyser({
             onComputer: () => readSideAnalyserOnComputer(),
             computer: riderAnalysis,
             tablet: () => workerPoseEstimator(),
+            onInstance: () =>
+              readSideInstanceChoice(sidePictures?.port.sideInstanceOrigin()) !== undefined,
+            instance: sidePictures?.estimator,
           });
           return new SideAnalysis({
             control,
@@ -1238,6 +1306,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
+          {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}

@@ -34,6 +34,9 @@ function memoryStorage(): EndpointStorage & { readonly rows: Map<string, string>
   };
 }
 
+/** A device with no instance to send to, and the switch off: every case before #1106. */
+const NO_INSTANCE = { onInstance: () => false, instance: undefined } as const;
+
 const TABLET: SidePoseEstimator = {
   estimateSidePose: async () => Promise.resolve({ kind: 'no-rider', cause: 'said-nobody' }),
   closeSidePoseModel: () => undefined,
@@ -101,6 +104,7 @@ describe('chooseSideAnalyser', () => {
       onComputer: () => false,
       computer: () => computerOn(async () => Promise.resolve(new Response('{}'))),
       tablet: () => TABLET,
+      ...NO_INSTANCE,
     });
     expect(choice.place).toBe('tablet');
     expect(choice.estimator()).toBe(TABLET);
@@ -111,6 +115,7 @@ describe('chooseSideAnalyser', () => {
       onComputer: () => true,
       computer: () => undefined,
       tablet: () => TABLET,
+      ...NO_INSTANCE,
     });
     expect(choice.place).toBe('tablet');
     expect(choice.estimator()).toBe(TABLET);
@@ -128,6 +133,7 @@ describe('chooseSideAnalyser', () => {
       onComputer: () => true,
       computer: () => computerOn(send),
       tablet: () => TABLET,
+      ...NO_INSTANCE,
     });
     expect(choice.place).toBe('computer');
     const estimator = choice.estimator();
@@ -153,6 +159,7 @@ describe('chooseSideAnalyser', () => {
       onComputer: () => on,
       computer: () => computerOn(send),
       tablet: () => TABLET,
+      ...NO_INSTANCE,
     });
     const estimator = choice.estimator();
     await estimator.estimateSidePose(sizedFrameBytes(640, 480));
@@ -161,5 +168,65 @@ describe('chooseSideAnalyser', () => {
       kind: 'unavailable',
     });
     expect(bodies).toBe(1);
+  });
+});
+
+describe('the rider’s instance — #1106', () => {
+  const INSTANCE: SidePoseEstimator = {
+    estimateSidePose: async () => Promise.resolve({ kind: 'unreadable' }),
+    closeSidePoseModel: () => undefined,
+  };
+  const computer = () => computerOn(async () => Promise.resolve(new Response('{}')));
+
+  it('is the instance when its switch is on and there is one to send to', () => {
+    const choice = chooseSideAnalyser({
+      onComputer: () => false,
+      computer: () => undefined,
+      tablet: () => TABLET,
+      onInstance: () => true,
+      instance: () => INSTANCE,
+    });
+    expect(choice.place).toBe('instance');
+    expect(choice.estimator()).toBe(INSTANCE);
+  });
+
+  it('is the tablet when the switch is off, or on with no instance to send to', () => {
+    for (const input of [
+      { onInstance: () => false, instance: () => INSTANCE },
+      { onInstance: () => true, instance: undefined },
+      NO_INSTANCE,
+    ]) {
+      const choice = chooseSideAnalyser({
+        onComputer: () => false,
+        computer: () => undefined,
+        tablet: () => TABLET,
+        ...input,
+      });
+      expect(choice.place).toBe('tablet');
+      expect(choice.estimator()).toBe(TABLET);
+    }
+  });
+
+  it('is still the computer when only the computer’s switch is on', () => {
+    const choice = chooseSideAnalyser({
+      onComputer: () => true,
+      computer,
+      tablet: () => TABLET,
+      onInstance: () => false,
+      instance: () => INSTANCE,
+    });
+    expect(choice.place).toBe('computer');
+  });
+
+  it('takes the instance, whose pictures are sealed, if a device somehow holds both switches on', () => {
+    const choice = chooseSideAnalyser({
+      onComputer: () => true,
+      computer,
+      tablet: () => TABLET,
+      onInstance: () => true,
+      instance: () => INSTANCE,
+    });
+    expect(choice.place).toBe('instance');
+    expect(choice.estimator()).toBe(INSTANCE);
   });
 });

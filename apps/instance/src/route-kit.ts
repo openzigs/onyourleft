@@ -16,7 +16,7 @@ import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Sync } from './sync/sync.ts';
-import { JSON_TYPE, type ErrorCode } from './errors.ts';
+import { JSON_TYPE, type ErrorCode, type FieldProblem } from './errors.ts';
 
 /** The subset of JSON Schema the specification uses, and the contract test checks. */
 export type Schema =
@@ -42,6 +42,34 @@ export type Schema =
     }
   | { readonly type: 'string'; readonly enum: readonly string[] }
   | { readonly $ref: string };
+
+/** What a look at a side-camera picture answers (#1106): the model's own words, for the device to read. */
+export interface SidePoseAnswer {
+  readonly answer: string;
+}
+
+export type SidePoseOutcome =
+  | { readonly ok: true; readonly value: SidePoseAnswer }
+  | { readonly ok: false; readonly code: ErrorCode; readonly fields?: readonly FieldProblem[] };
+
+/**
+ * What the side camera's route asks for (#1106) — `camera/side-pose.ts` is
+ * what answers it.
+ *
+ * ⚠️ **Declared here rather than imported from there, on purpose.** Every
+ * route module imports this file, the history index's among them, and
+ * `history/no-picture.test.ts` holds that the index reaches no module about a
+ * picture, however indirectly. A type imported from `camera/` would put every
+ * picture module one step from all of them.
+ */
+export interface SidePose {
+  /** Show the caller's picture to the model they named, and answer what it said. */
+  look(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): Promise<SidePoseOutcome>;
+}
 
 /** Who sent a request, as far as the adapter in front of the handler knows. */
 export interface ClientInfo {
@@ -105,6 +133,8 @@ export interface RouteContext {
   readonly analysis: AnalysisJobs | undefined;
   /** A rider's own hosted key and consent (#1199). Present for every route that declares `hostedSettings`. */
   readonly hostedSettings: HostedSettings | undefined;
+  /** The side camera's pictures (#1106). Present for every route that declares `sidePose`. */
+  readonly sidePose: SidePose | undefined;
   /**
    * The instance's own keys (#1189). Absent until the store is open, and on
    * a test's handler that was handed none.
@@ -190,6 +220,11 @@ export interface Route {
    * none answers `unavailable` without calling it.
    */
   readonly hostedSettings?: true;
+  /**
+   * The route shows a side-camera picture to a model (#1106). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly sidePose?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

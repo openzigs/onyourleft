@@ -88,6 +88,13 @@
  * now, above the switch rather than under it, so it names the switch — "Turn
  * on “This route is a loop” for a circuit…".
  *
+ * ⚠️ **Re-recorded by #1106**, for one added line and nothing else: Files →
+ * Erase's list of what an erase cannot reach gains *"a photograph your
+ * instance sent on to a hosted service you agreed to, which is a copy that
+ * service holds"* (ADR 0029 D-4's second line, true since the side camera's
+ * pictures may go on from the rider's instance). No sentence is dropped or
+ * reworded.
+ *
  * ⚠️ **Re-recorded by #1041**, when Activities became a card per ride at every
  * width and its table went. Nothing was added, and six lines of the populated
  * walk went with the table, none of them a lost word: its column headings

@@ -210,7 +210,23 @@ export const OBSERVATION_THRESHOLDS: Readonly<Record<SideObservationKind, number
  * satisfies it.
  */
 export interface SideSessionLooked extends SideReportLooked {
-  readonly place: SidePoseSource;
+  readonly place: SidePoseSource | 'instance';
+}
+
+/**
+ * The stored source for where a session's poses were estimated.
+ *
+ * ⚠️ **The rider's instance is recorded as `computer`** (#1106). The stored
+ * source has two values (`@onyourleft/analysis` §`SidePoseSource`,
+ * `@onyourleft/store` §`SIDE_SESSION_SOURCES`): the tablet's own pose model,
+ * or a general vision model asked for landmarks as JSON and held to
+ * `pose-plausibility.ts` — which is what the instance's model is, as the
+ * rider's computer's was. It is recorded and never said in a report (#761).
+ * A third value is a change to the stored record, to the account export and
+ * to what an instance accepts in a job, and is not made here.
+ */
+export function storedPoseSource(place: SideSessionLooked['place']): SidePoseSource {
+  return place === 'tablet' ? 'tablet' : 'computer';
 }
 
 /**
@@ -278,7 +294,7 @@ export function sideSessionFrom(
     }
   }
   const summary: SideSessionSummary = {
-    source: looked.place,
+    source: storedPoseSource(looked.place),
     differences,
     posed: looked.posed,
     noRider: looked.noRider,

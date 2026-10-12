@@ -158,11 +158,19 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_CANNOT_REACH).toContain(
       'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
     );
-    // D-4's second line is about a PHOTOGRAPH sent to a hosted model, and the
-    // owner ruled the hosted path is never sent one (#518) — so that line is
-    // still not here, in either wording.
+    // D-4's second line is about a PHOTOGRAPH sent to a hosted model. The
+    // app's own hosted path is never sent one (#518), so D-4's wording — *"you
+    // sent"* — is still not here. Since #1106 there is one line about a
+    // photograph and a hosted service, and it says who sent it: the rider's
+    // instance, to a service they agreed to.
     expect(text).not.toContain('photograph you sent to a hosted');
-    expect(text).not.toMatch(/hosted[^,]*photograph|photograph[^,]*hosted/);
+    expect(
+      ERASE_CANNOT_REACH.filter((entry) =>
+        /hosted[^,]*photograph|photograph[^,]*hosted/.test(entry),
+      ),
+    ).toStrictEqual([
+      'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds',
+    ]);
     // And what was already true: a picture the rider copied off the device.
     expect(text).toContain('copied off this device');
   });
@@ -217,7 +225,26 @@ describe('what the rider is told before they press it', () => {
     // whose press sends a ride's numbers to the rider's own computer; seven
     // since #777, which connects this device to an instance — and arrived
     // with it, as this comment asked.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(7);
+    // Eight since #1106, whose instance path can send a photograph on to a
+    // hosted service the rider agreed to: ADR 0029 D-4's second line, true at last.
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(8);
+  });
+
+  it('names the photograph an instance sent on to a hosted service, as the privacy policy does — #1106', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const line =
+      'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds';
+    // The policy's erase paragraph says it, and so does the screen before the press.
+    expect(straight(erase)).toContain(line);
+    expect(ERASE_CANNOT_REACH).toContain(line);
   });
 
   it('names what an instance holds, as the privacy policy does — #777, #778', () => {
@@ -423,6 +450,9 @@ describe('erasing, against the real store', () => {
     const kept = new Map<string, string>([
       [INSTANCE_SESSION_STORAGE_KEY, 'token'],
       [INSTANCE_ACCOUNT_STORAGE_KEY, '{"origin":"https://ride.example"}'],
+      // #1106: what the rider agreed to send that instance, which names its address.
+      ['oyl.side-analyser-instance.v1', 'https://ride.example'],
+      ['oyl.side-analyser-instance-hosted.v1', 'https://models.example'],
       ['oyl.units.other', 'kept'],
     ]);
     await harness.write(async (store) =>

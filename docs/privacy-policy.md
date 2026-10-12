@@ -60,8 +60,15 @@ your own key** below.
 
 ⚠️ **That computer is yours, not ours.** It is not an On Your Left service, not an account, and not
 an instance ([#7](https://github.com/openzigs/onyourleft/issues/7)) — instances are described
-separately below, and no picture is ever sent to one. We never see the picture, and we cannot see
-what your computer does with it.
+separately below. We never see the picture, and we cannot see what your computer does with it.
+
+**The third thing you can switch on: the side camera's pictures sent to your instance.** If you are
+signed in to an instance, you can switch on sending the side camera's pictures there instead of
+having the tablet look at them. They are sealed on the tablet first, so that only your instance can
+open them, and your instance does not keep them. A second switch under it, also off to begin with,
+lets your instance send them on to a hosted service that you hold your own key for, which the app
+names to you before you agree. No picture is sent to any instance, or to any service, unless you
+have switched this on. It is described under **Side-camera pictures sent to your instance** below.
 
 The other exception is a map, and it is described under **What leaves the device** below: when a
 ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
@@ -165,8 +172,12 @@ ride sent to your own computer** below).
   chose, on your own key, if you set one up and turn it on** — never a picture. See **Questions sent
   to a service you chose, on your own key** below.
 - **Start and stop, and pictures, between your tablet and a side-camera phone, if you pair them.**
-  The pictures go from the phone to your tablet and no further. See **A second phone you pair as a
-  side camera** below.
+  The pictures go from the phone to your tablet and no further, unless you switched on sending
+  them to your own computer or to your instance. See **A second phone you pair as a side camera**
+  below.
+- **The side camera's pictures, sealed, sent to your instance, if you switch that on** — and on
+  from there to a hosted service you hold your own key for, only if you also agree to that service
+  by name. See **Side-camera pictures sent to your instance** below.
 - **Map tile requests, when a map is on screen.** Map tiles are **on by default**, and you can turn
   them off in Settings → *Ride map*. To draw a ride that has
   a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
@@ -286,7 +297,9 @@ directly, over your own Wi-Fi.
   shown on its screen, or sent anywhere else** — not to us and not to any service — **unless you
   switched on sending the side camera's pictures to a computer of your own**, in which case each
   one goes to that computer instead of the tablet's model, as described under **Pictures sent to
-  your own computer** below, and is still not kept on the tablet. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
+  your own computer** below, and is still not kept on the tablet — **or to your instance**, in
+  which case about one a second goes there, sealed, as described under **Side-camera pictures sent
+  to your instance** below, and is still not kept on the tablet. What is kept is where the model found your ear, shoulder, elbow, wrist, hip, knee,
   ankle, heel and toe in each picture: numbers, not a picture, held in the tablet's memory and gone
   when the app is closed. At the end of a session the tablet keeps two things
   on the device. **The report:** a few sentences about what changed between the start and the end
@@ -318,8 +331,8 @@ directly, over your own Wi-Fi.
 
 ## Pictures sent to your own computer
 
-This is the only way this app's own code sends **a picture** anywhere, and it is off until you turn
-it on.
+This is one of the two ways this app's own code sends **a picture** anywhere, and it is off until
+you turn it on. The other is **Side-camera pictures sent to your instance**, below.
 
 - **What is sent:** one still picture from the camera, and a fixed question written into the app.
   For a side camera's pictures the question asks where your ear, shoulder, elbow, wrist, hip, knee,
@@ -359,8 +372,80 @@ and whose pictures are then not looked at for the rest of that session. Forgetti
 also switches off sending the side camera's pictures to it. [How to set up a computer of your own](analysis-on-your-own-computer.md) says what to
 install, and what the risk of a downloaded model file is to that computer.
 
-There is no option in this app to send a picture to a hosted AI service, and no such service is
-built in, suggested or named.
+The app sends a picture to a hosted AI service in one case only, described under **Side-camera
+pictures sent to your instance** below: your instance sends it, to a service you hold your own key
+for, after you agreed to that service by name. No such service is built in or suggested, and the
+only name the app shows you is the address you stored your own key with.
+
+## Side-camera pictures sent to your instance
+
+**Off until you switch it on, and it needs an instance you are signed in to.** On the Camera page,
+under *Your instance*, the app says:
+
+> Your instance can look at the side camera’s pictures instead of this tablet. Nothing is sent until you switch it on here. Each picture is then sealed on this tablet so that only your instance can open it, sent to your instance, looked at by a model there, and not kept there: not in its database, not in a file and not in its logs. If the sealed connection is not available, no picture is sent.
+
+and, beside the switch:
+
+> While the side camera is filming, pictures of you leave this room, about one a second, and go to your instance instead of being looked at on this tablet. They are sealed before they leave, so nobody between this tablet and your instance can see them, including the tunnel service a home instance is reached through. That service can still see that something is being sent, how often and roughly how large. Your instance shows each picture to the model its operator set up on that machine, and does not keep it. That is a promise about the software this project publishes: whoever runs your instance controls that machine.
+
+- **What is sent:** the side camera's pictures, one at a time and no more than about one a second,
+  with any that arrive meanwhile thrown away unsent; which model to use; and nothing else. Not your
+  rides, not your position, not your heart rate, not a name and not a filename. Each picture is
+  re-encoded from its pixels when it is taken, so it carries no location or device metadata, and
+  the tablet will not send one that does; your instance checks again and refuses one too.
+- **Where it goes, and how:** to the instance you are signed in to, sealed on the tablet for that
+  instance alone. Cloudflare, which carries the traffic to the project's own instance and to a home
+  instance reached through its tunnel, carries each picture without being able to read it. It can
+  still see that you are sending something to your instance, from which internet address, when,
+  how often and roughly how large. The app has no way to send these pictures unsealed: with no
+  card, or in a copy of the web app loaded from a website, none is sent.
+- **What your instance does with it:** it shows the picture to a model and sends back where the
+  model found your ear, shoulder, elbow, wrist, hip, knee, ankle, heel and toe, as numbers. It does
+  not store the picture: it is not written to its database, to a file or to its logs, and it is
+  gone when the answer has been sent. That is what the software this project publishes does; an
+  instance is run by its operator, who controls that machine.
+- **Which model:** the one your instance's operator set up on the instance's own machine for
+  pictures. If none is set up, your instance says so, no picture is looked at, and the Camera page
+  tells you.
+- **What the tablet keeps:** the same as when it looks at the pictures itself, described under **A
+  second phone you pair as a side camera** above: numbers, not a picture.
+- **It is for one instance.** What you switch on is for the instance you are signed in to at the
+  time, which the switch names. If this device later signs in to a different instance, it is off
+  there until you switch it on again. *Erase this device* forgets it with the sign-in.
+
+**A hosted service, on your own key — a second switch, and a company.** If you hold your own key
+for a hosted model service on your instance, you can let your instance send the side camera's
+pictures on to that service instead of using its own model. The app first asks your instance which
+service your key is for — that sends no picture — and then shows you this, with the service's
+address in place of *the service*:
+
+> This sends pictures of you to *the service*.
+>
+> If you turn this on, your instance sends each side-camera picture on to *the service*, the service your own key is for, using your key. That is a company that is not you and not us. What it does with your pictures, and how long it keeps them, is under its terms and not ours. We cannot see that, and we cannot delete them for you afterwards.
+>
+> “Not kept” is a promise about your instance only. It says nothing about *the service*.
+>
+> Your instance sends the picture and one fixed question, and nothing else: not your name, not your rides, not where you were.
+>
+> You do not need this. This tablet can look at the pictures itself, and so can the model on your instance. This is off, and it stays off until you turn it on.
+
+- **What that service is sent:** the picture, and one fixed question written into the instance's
+  software. Nothing else.
+- **Whose key:** yours, and only yours. Your instance never uses its operator's key, or another
+  rider's, for your pictures.
+- **It is agreed to by name.** What you agree to is one service. If your key is later for a
+  different service, your instance refuses the pictures until you have read and agreed to the new
+  name, or withdrawn.
+- **It is separate from a write-up.** Agreeing that a ride's numbers may go to a hosted service
+  for an analysis does not agree to this, and this does not agree to that.
+- **A model that cannot take pictures:** your instance says so, no more pictures are sent, and the
+  Camera page tells you.
+- **What we cannot do:** see what that service does with a picture, or delete it there.
+
+To stop either, switch it off on the Camera page. Nothing is sent afterwards — including from a
+side camera that is already filming, whose next picture is not sent and whose pictures are then
+not looked at for the rest of that session. Switching off the first switch also withdraws what you
+agreed to for the hosted service.
 
 ## A ride analysed on your instance
 
@@ -503,10 +588,12 @@ can do the same analysis.
   logger, and the app blocks every request it would make (see **A second phone you pair as a side
   camera** above).
 - We never sell your data. The only sharing is the analysis you choose to send to a service you
-  set up. Nothing is transmitted to us or to anybody else
+  set up. That includes the side camera's pictures, only if you have your instance send them on
+  to a service you hold your own key for and agreed to by name (see **Side-camera pictures sent to
+  your instance** above). Nothing is transmitted to us or to anybody else
   except the pictures and the rides you choose to send to your own computer, the questions and the
   rides you choose to send to a service of your own choosing, what you send to an instance you
-  choose to connect to, and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
+  choose to connect to — the side camera's pictures among it only if you switched that on — and the map tile requests described above, whose record our Cloudflare account can see for up to 7 days and which we neither use nor
   share.
 - No tracking across apps or sites.
 
@@ -519,7 +606,8 @@ makes this device forget any instance it was connected to, after you type a conf
 Some things an erase cannot reach, and the app says so before you press it: files you have already
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
 sent to your own computer, which is a copy that computer holds, a question or a ride's numbers you
-sent to a service you chose, which is a copy that service holds, your account on an instance you
+sent to a service you chose, which is a copy that service holds, a photograph your
+instance sent on to a hosted service you agreed to, which is a copy that service holds, your account on an instance you
 connected to, and anything it received, which is a copy that instance holds and which you ask its
 operator to erase (see **Deleting what an instance holds**), and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and

@@ -714,7 +714,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     expect(allFaults(main, DEVICES_SHELL_KEPT_VISIBLE, everyListed(KEPT.devices))).toEqual([]);
   });
 
-  it('Camera, agreed to: what is sent to the rider’s own computer stays out of any disclosure', async () => {
+  it('Camera, agreed to: what is sent to the rider’s own computer, and to their instance, stays out of any disclosure', async () => {
     const controller = new CameraController({
       secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
@@ -723,7 +723,14 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     mounted = await mount(
       <main>
-        <CameraView controller={controller} />
+        <CameraView
+          controller={controller}
+          // #1106: signed in to an instance, so its section and what it says is sent are there.
+          sidePictures={{
+            sideInstanceOrigin: () => 'https://rides.example',
+            askHostedPictureService: () => Promise.resolve({ kind: 'none' }),
+          }}
+        />
       </main>,
     );
     await settle();

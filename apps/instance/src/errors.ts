@@ -74,6 +74,7 @@ export const ERROR_STATUS = {
   confirmation_superseded: 409,
   not_suspended: 409,
   job_running: 409,
+  picture_source_unavailable: 409,
   payload_too_large: 413,
   file_type_unsupported: 415,
   file_undecodable: 422,
@@ -83,10 +84,13 @@ export const ERROR_STATUS = {
   record_content_mismatch: 422,
   record_not_your_key: 422,
   record_key_revoked: 422,
+  model_without_pictures: 422,
   rate_limited: 429,
   internal: 500,
+  picture_model_failed: 502,
   unavailable: 503,
   analysis_off: 503,
+  pictures_off: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
@@ -157,6 +161,14 @@ const MESSAGES: Record<ErrorCode, string> = {
   unavailable: 'This instance does not offer accounts.',
   analysis_off:
     'This instance has no model to write a ride up with. Its operator has not set one up.',
+  pictures_off:
+    'This instance has no model that takes pictures. Its operator has not named one. The picture was not kept.',
+  picture_source_unavailable:
+    'No hosted service is set up for your pictures: you hold no key of your own here, or your consent names another service than the one your key is for. The picture was not sent on, and was not kept.',
+  model_without_pictures:
+    'The model answered that it does not take pictures, so it cannot look at the side camera’s. Choose a model that does. The picture was not kept.',
+  picture_model_failed:
+    'The model gave no usable answer about this picture. The picture was not kept.',
   file_type_unsupported: 'The file is not a FIT, GPX or TCX activity file.',
   file_undecodable: 'The activity file could not be read, or holds no samples.',
   record_malformed: 'The signed record is not an activity record.',

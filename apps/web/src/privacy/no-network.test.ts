@@ -792,6 +792,66 @@ describe('the narrowed gate itself — #387', () => {
   });
 });
 
+/**
+ * **Pictures reach an instance only through the one instance module — #1106.**
+ *
+ * The side camera's pictures may now go to the rider's instance. They were
+ * given NO permit of their own: `camera/instance-pose.ts` builds the body and
+ * is handed a sealed channel, and the bytes leave through
+ * `instance/instance-transport.ts`'s one `fetch` — the entry that was already
+ * here. So the list above is unchanged by #1106, and this pins that it stays
+ * so: the two modules #1106 added name no network primitive, no entry was
+ * added for them, and a primitive in either is a red run.
+ * `camera/no-picture-reachable.test.ts` §"a picture reaches an instance by one
+ * path" is the other half: which module may put a picture in that request.
+ */
+describe('a side-camera picture goes to an instance through the one instance module — #1106', () => {
+  const PICTURE_PATH = join('camera', 'instance-pose.ts');
+  const SERVICE_READER = join('instance', 'hosted-service.ts');
+  const INSTANCE = join('instance', 'instance-transport.ts');
+  const read = (path: string): ScannedFile => ({
+    path,
+    source: readFileSync(join(SOURCE_ROOT, path), 'utf8'),
+  });
+
+  it('gave the picture path no permit: the list is the six entries it was, one module for instance traffic', () => {
+    expect(PERMITTED_NETWORK_CALLS).toHaveLength(6);
+    const modules = PERMITTED_NETWORK_CALLS.map((entry) => entry.module);
+    expect(modules).not.toContain(PICTURE_PATH);
+    expect(modules).not.toContain(SERVICE_READER);
+    // Everything for an instance is still pinned to the one module.
+    expect(modules.filter((module) => module.startsWith('instance'))).toStrictEqual([
+      INSTANCE,
+      INSTANCE,
+    ]);
+  });
+
+  it('names no network primitive in the module that builds a picture’s request, or the one that reads the service’s name', () => {
+    for (const path of [PICTURE_PATH, SERVICE_READER]) {
+      const file = read(path);
+      expect(file.source.length, path).toBeGreaterThan(500);
+      expect(networkCallsIn(file.source), path).toStrictEqual([]);
+    }
+  });
+
+  it('goes red for a fetch in the picture path, however the rest of the tree stands', () => {
+    const files = scannable().map((file) => read(relative(SOURCE_ROOT, file)));
+    const sending = files.map((file) =>
+      file.path === PICTURE_PATH
+        ? {
+            ...file,
+            source: `${file.source}\nexport const send = (url: string) => fetch(url, { method: 'POST' });\n`,
+          }
+        : file,
+    );
+    // The control: the real tree is clean, so the finding below is the planted one.
+    expect(networkFindingsOutside(files, PERMITTED_NETWORK_CALLS)).toStrictEqual([]);
+    const found = networkFindingsOutside(sending, PERMITTED_NETWORK_CALLS);
+    expect(found).toHaveLength(1);
+    expect(JSON.stringify(found)).toContain('instance-pose.ts');
+  });
+});
+
 describe('the client', () => {
   it('has source to scan', () => {
     // The population, asserted. A walk that returned nothing would make the
@@ -811,8 +871,9 @@ describe('the client', () => {
         'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
         'paired by scanning, a question — never a picture — to a hosted service on the ' +
-        'rider’s own key, a sign-in to an instance the rider chose (#777), and a room’s ' +
-        'power reports to that instance (#782); that is now ' +
+        'rider’s own key, a sign-in to an instance the rider chose (#777), a room’s ' +
+        'power reports to that instance (#782), and the side camera’s pictures, sealed, to ' +
+        'that instance when the rider switched that on (#1106); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);

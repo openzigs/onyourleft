@@ -62,6 +62,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { analysisRequestBody } from '../camera/analysis-transport';
+import { sidePoseRequest } from '../camera/instance-pose';
 import { capturedFrame } from '../camera/frame';
 import { hostedRequestBody } from '../camera/hosted-transport';
 import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messages';
@@ -182,6 +183,19 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'camera/instance-pose.ts',
+    what: 'one side-camera picture, sealed, sent to the rider’s instance while they have switched that on (#1106)',
+    // ⚠️ Departing, and the first PICTURE that leaves the room for a server.
+    // ADR 0029 D-9's table again: a frame for analysis is `departing`. The
+    // rider's instance is somebody's server (ADR 0036 D-3 (d)), and with the
+    // rider's second consent it sends the picture on to a hosted service by
+    // name. The walk below finds no coordinate in any field around the
+    // picture — the body has three keys and none can hold one — and cannot
+    // look inside it, which is why `instance-pose.ts` refuses to send a
+    // picture that still carries metadata (`instance-pose.test.ts`).
+    direction: 'departing',
+  },
+  {
     module: 'rooms/share.ts',
     what: 'the route a room is made on, relayed to the riders its maker shares its code with (#784)',
     // ⚠️ Departing: the maker's own route, leaving their device for an
@@ -229,7 +243,10 @@ function boundaryModulesOnDisk(): readonly string[] {
       // makes that module declare which way it faces.
       // ⚠️ And `instance-job.ts` since #1102: the one builder of a write-up
       // job's request to the rider's instance, named for what it builds.
+      // ⚠️ And `instance-pose.ts` since #1106: the one builder of a picture's
+      // request to the rider's instance.
       if (
+        entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
@@ -426,6 +443,27 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
     });
     const body = {
       ...analysisRequestBody('a-model', { frame, question: 'connection-check' }),
+      where: { latitude: 51.5, longitude: -0.12 },
+    };
+    expect(coordinatesIn(body)).toHaveLength(1);
+  });
+});
+
+describe('the picture sent to the rider’s instance carries no coordinate beside it — #1106', () => {
+  const picture = cleanFrameBytes(2048);
+
+  it('has none in any field, for either model', () => {
+    for (const choice of [
+      { source: 'instance-local' } as const,
+      { source: 'instance-hosted', endpoint: 'https://models.example' } as const,
+    ]) {
+      expect(coordinatesIn(sidePoseRequest(picture, choice))).toStrictEqual([]);
+    }
+  });
+
+  it('would find one if a field carried it — the walk is not blind to this payload', () => {
+    const body = {
+      ...sidePoseRequest(picture, { source: 'instance-local' }),
       where: { latitude: 51.5, longitude: -0.12 },
     };
     expect(coordinatesIn(body)).toHaveLength(1);

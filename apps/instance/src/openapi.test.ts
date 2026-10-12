@@ -18,6 +18,7 @@ import { createInstanceKeys } from './keys/instance-keys.ts';
 import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
+import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
@@ -241,6 +242,11 @@ async function finishedJob(
 }
 
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  lookAtSidePicture: async (world) =>
+    send(world, 'POST', '/v1/camera/side-pose', (await signedIn(world)).token, {
+      picture: base64Of(testPicture()),
+      source: 'instance-local',
+    }),
   startAnalysisJob: async (world) =>
     send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
   getAnalysisJob: async (world) => {
@@ -627,6 +633,8 @@ describe('every route answers with the shape its entry declares', () => {
       probes,
       moderators: { owner: moderator.publicKey },
       analysis: { engine: INSTANT_ENGINE, available: () => true },
+      // #1106: a picture model that answers at once, as the engine above does.
+      pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
     });
   });
   afterAll(async () => {

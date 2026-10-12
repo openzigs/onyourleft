@@ -26,13 +26,15 @@ import {
   createAnalysisJobs,
   type AnalysisJobs,
 } from './analysis/jobs.ts';
-import { createLocalModel } from './analysis/model.ts';
+import { createLocalModel, createLocalPictureModel } from './analysis/model.ts';
 import {
   createInstanceKeys,
   InstanceKeysUnavailable,
   type InstanceKeys,
 } from './keys/instance-keys.ts';
 import type { ModelConnection } from './analysis/model-turn.ts';
+import { hostedForPictures, SIDE_POSE_PICTURE_QUESTION } from './camera/hosted-pictures.ts';
+import { createSidePose } from './camera/side-pose.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
@@ -40,7 +42,7 @@ import { logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
-import type { InstanceProbes } from './route-kit.ts';
+import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
@@ -211,6 +213,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let analysisModel: ModelConnection | undefined;
   let analysisJobs: AnalysisJobs | undefined;
   let hostedSettings: HostedSettings | undefined;
+  let sidePose: SidePose | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
@@ -371,6 +374,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       'analysis-model',
       analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
     );
+    // The picture model (#1106): off unless the operator named one. No model name is logged.
+    logEvent(
+      log,
+      'picture-model',
+      options.config.pictures.kind === 'on'
+        ? { state: 'on' }
+        : { state: 'off', code: options.config.pictures.code },
+    );
     // The hosted model key (#1097): whether one is held, and whether this
     // secret opens it. A key that will not open — a restore onto a box with
     // another secret — is SAID, never a crash: the hosted source is then
@@ -527,6 +538,22 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // #1229: the agent's history tool searches the index this instance keeps.
       const indexed = history;
       hostedSettings = createHostedSettings({ store, secret: () => secretKey, now });
+      // #1106: a side-camera picture, shown to the local model the operator
+      // named for pictures or to the hosted service the rider's OWN key is
+      // for. Handed no store and no log: a picture is kept nowhere.
+      const pictures = options.config.pictures;
+      sidePose = createSidePose({
+        local:
+          pictures.kind === 'on'
+            ? createLocalPictureModel({
+                settings: pictures,
+                resolve: options.resolve ?? systemResolver,
+                question: SIDE_POSE_PICTURE_QUESTION,
+              })
+            : undefined,
+        hostedKey,
+        hosted: (key) => hostedForPictures(key, options.hostedFetch),
+      });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
@@ -592,6 +619,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ...(sync === undefined ? {} : { sync }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
+            ...(sidePose === undefined ? {} : { sidePose }),
           }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).

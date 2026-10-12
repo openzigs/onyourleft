@@ -1073,3 +1073,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   readable. Until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes the device
   path, the hosted consent the app ships stays the one the last 2026-09-29 entry above quotes; this
   entry quotes no consent of its own. The body above is not edited.
+- **2026-10-12** — **D-6's rejection of the Cloudflare Tunnel, and D-7's *"only for a frame the
+  rider is looking at, on a press"*, are superseded for ONE payload: a sealed side-camera picture on
+  its way to the rider's instance.** [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md),
+  accepted on the owner's decisions of 2026-10-12 on
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the decision, and its D-10 says
+  what stays of each: D-6's rule and every other row, D-7's *"the frame, and a fixed prompt … Nothing
+  else"*, and D-4, D-8 and D-9, which it applies. The body above is not edited. (#1106)

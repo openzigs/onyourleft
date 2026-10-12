@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **Which device looks at the side camera's pictures: this tablet, or the
- * rider's own computer** — [#553](https://github.com/openzigs/onyourleft/issues/553),
- * [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-11.
+ * **Which device looks at the side camera's pictures: this tablet, the
+ * rider's own computer, or their instance** — [#553](https://github.com/openzigs/onyourleft/issues/553),
+ * [ADR 0033](../../../../docs/adr/0033-side-camera-link.md) D-11, and
+ * [#1106](https://github.com/openzigs/onyourleft/issues/1106) for the instance.
+ *
+ * ## The instance — #1106
+ *
+ * The owner's ruling (#1092 ruling 1) moves this path to the rider's
+ * instance: `instance-pose.ts` holds its two switches, both off by default,
+ * and its estimator. ⚠️ **The computer path below is still here**: #1103
+ * removes it, and waits for this to land. Until then the two cannot both be
+ * on — the Camera page switches one off when the other goes on — and if a
+ * device somehow holds both, {@link chooseSideAnalyser} takes the instance:
+ * it is the one whose pictures are sealed on the way.
  *
  * ## Its own switch, off by default
  *
@@ -86,7 +97,7 @@ export function writeSideAnalyserOnComputer(
 }
 
 /** Where the pictures are looked at, which the side-camera screen says in words. */
-export type SideAnalyserPlace = 'tablet' | 'computer';
+export type SideAnalyserPlace = 'tablet' | 'computer' | 'instance';
 
 /** The choice: where, and how to make the estimator when the first picture arrives. */
 export interface SideAnalyserChoice {
@@ -105,14 +116,31 @@ export interface SideAnalyserChoice {
  * not quietly move to the tablet mid-session, which would make the screen's
  * account of where pictures go false.
  *
+ * The instance (#1106) is chosen the same way: when the rider switched it on
+ * ({@link input.onInstance} answers `true`) and there is an instance to send
+ * to ({@link input.instance} is given). Its estimator reads the switch again
+ * for every picture too (`instance-pose.ts` §`instancePoseEstimator`).
+ *
  * @param computer `riderAnalysisPort(readAnalysisEndpoint(), …)` — `undefined`
  * when no computer is saved, or it is saved and switched off.
+ * @param instance how the instance's estimator is made — `undefined` on a
+ * device with no instance to send to.
  */
 export function chooseSideAnalyser(input: {
   readonly onComputer: () => boolean;
   readonly computer: () => AnalysisPort | undefined;
   readonly tablet: () => SidePoseEstimator;
+  /**
+   * ⚠️ **Required keys, though `instance` may be `undefined`**, so that a
+   * caller which stops passing them does not compile: `check:wiring` cannot
+   * see an optional option left out (`main.tsx` says so of two others).
+   */
+  readonly onInstance: () => boolean;
+  readonly instance: (() => SidePoseEstimator) | undefined;
 }): SideAnalyserChoice {
+  if (input.instance !== undefined && input.onInstance()) {
+    return { place: 'instance', estimator: input.instance };
+  }
   const current = (): AnalysisPort | undefined =>
     input.onComputer() ? input.computer() : undefined;
   if (current() !== undefined) {
