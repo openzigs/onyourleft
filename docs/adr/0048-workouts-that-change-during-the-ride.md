@@ -628,3 +628,19 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   trainer's reported minimum to that minimum, so the "nothing clamps" reading of 5 above no longer
   holds. A raised target equals the floor, so the forget-hold rule treats it as an ease and does not
   hold it back.
+
+- **2026-10-12** — **Two readings of #1300's ruling a and b, ruled on
+  [#1304](https://github.com/openzigs/onyourleft/issues/1304) the same day, are kept as built and
+  written down.** Nothing above is edited and no code changes for either.
+  - **A place eased well below its loaded share may climb back in more steps: accepted.** The +10 %
+    is over the share the place was *loaded* with and each move is +5 % at most, so a place loaded
+    at 1.0 and swapped down to 0.5 accepts 0.525, then 0.5512, then 0.5787: 15.7 % over the block
+    that joined, where the old additive sum stopped at +10 %, and about 0.60 is reachable. Each
+    move is still 5 % at most and ten minutes apart, and the place stays far under what the workout
+    was loaded with.
+  - **A hold swapped for a hold: kept as built.** The +5 % compares ceiling with ceiling, but the
+    +10 % total divides the ceiling's rise by the place's loaded **start** share. A hold loaded from
+    0.3 to a 0.7 ceiling therefore refuses a ceiling of 0.735, which is exactly +5 %, and any hold
+    whose ceiling is more than twice its start share refuses even a +5 % ceiling move. It refuses
+    more, never less. `carried` is an upper bound on what a place has risen, not the distance
+    travelled: it counts the larger of the start's and the ceiling's rise in points of one share. (#1304)
