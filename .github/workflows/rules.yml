@@ -546,13 +546,16 @@ jobs:
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop. The stops nested inside this one, on the
     # slower runner (docs/agents/ci.md section 4c "Shards -- #1285" has the
-    # runs): the browser install has its own five minutes; the gate's step
+    # runs): the browser install has its own ten minutes; the gate's step
     # runs under `timeout` for 825 s (playwright.config.ts GATE_STEP_MS) with
     # its own `timeout-minutes: 14` (840 s) behind that; and after it come
-    # only the post steps. nightly-split.test.ts holds the step's stop at
-    # least three minutes inside this from the latest start measured, so a
-    # hung gate ends as a red, named step and never as a cancelled job.
-    timeout-minutes: 20
+    # only the post steps. So with the install at its stop and the gate at
+    # its own, the last step ends by about 20 + 600 + 840 + 4 = 1 464 s, inside
+    # this job's 1 500: a hang in either ends as a red, named STEP and never
+    # as a cancelled job. nightly-split.test.ts holds that sum, and holds the
+    # gate's stop at least three minutes inside this from the latest start
+    # measured.
+    timeout-minutes: 25
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, as in the `checks` shard, which has the
@@ -626,12 +629,16 @@ jobs:
       # libraries a headless Chromium needs on a bare runner, with the
       # passwordless sudo ubuntu-latest grants. It is mostly a ~170 MB
       # download, the one step here whose duration depends on somebody else's
-      # CDN. ⚠️ A step of its own since #1285 (it was one of `Checks,
-      # concurrently`'s commands, where it had three CPUs' worth of company),
-      # with a stop of its own: five minutes, so the latest the gate can start
-      # is a number this file states rather than one that has to be measured.
+      # CDN -- and on Ubuntu's mirror. ⚠️ A step of its own since #1285 (it was
+      # one of `Checks, concurrently`'s commands, where it had three CPUs'
+      # worth of company), with a stop of its own, so the latest the gate can
+      # start is a number this file states. Ten minutes and not five: on
+      # #1285's first measuring run (38261783717) the runner's Ubuntu mirror
+      # served 22 MB of fonts at about 40 kB/s, and a five-minute stop turned
+      # a slow mirror into a red pull request, which the one job never did.
+      # Alone it takes about 25 s.
       - name: Install the pinned Chromium
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
       # Builds the harness and drives it; docs/agents/commands.md section 4a documents both
