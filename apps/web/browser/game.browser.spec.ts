@@ -816,14 +816,12 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * `realistic-budget.test.ts`), which halves the phase: **12.8 s of a 116 s
  * load** on an AMD EPYC 9V74 (38262357819), 73 % of this budget.
  *
- * ⚠️ **Not yet seen on the EPYC 7763, which is the slowest and where `main`
- * already takes 111 s** (38238932099, 38130451210, 37764575451). On the one
- * model both have run on, the 9V45, this load went from 59 s to 61 s on
- * `main` to 80 s with the two-view phase (15.5 s of it the phase), so on the
- * 7763 the one-view phase should be about 17 s and the load about 133 s,
- * 83 % of this budget. That is arithmetic. The `?realistic` load beside it
- * is nearer its own: 146 s to 148 s of 165 s on `main` on that runner, and
- * six broadleaf shapes for two took it from 77 s to 80 s to 82 s on the 9V45.
+ * And on the EPYC 7763, the slowest, where `main` takes 111 s (38238932099,
+ * 38130451210, 37764575451): **126 s, the phase 14.3 s of it** (38266140979),
+ * 79 % of this budget and 1.27 times — under the 1.5 every figure above
+ * keeps, and not raised here. The `?realistic` load beside it was 149 s of its
+ * 165 s on that run, where `main` is 146 s to 148 s: six broadleaf shapes for
+ * two cost it a second or two, and it was at 90 % of its budget before them.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 
