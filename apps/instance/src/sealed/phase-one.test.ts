@@ -217,6 +217,11 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     'POST /v1/history/search': { query: 'hills', limit: 6, characters: 4000 },
     'POST /v1/moderation/invites': reason,
     'POST /v1/analysis/jobs': { input: {}, templateVersion: '1', source: 'instance-local' },
+    'POST /v1/analysis/replans': {
+      input: {},
+      templateVersion: 're-plan-1',
+      source: 'instance-local',
+    },
   };
   const body =
     bodies[key(route)] ?? (route.path.startsWith('/v1/moderation/') ? reason : undefined);

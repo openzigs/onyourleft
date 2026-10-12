@@ -19,7 +19,8 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
-import { agentEngine } from './analysis/engine.ts';
+import { agentEngine, replanEngine } from './analysis/engine.ts';
+import type { SourceOptions } from './analysis/source.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
@@ -554,23 +555,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         hostedKey,
         hosted: (key) => hostedForPictures(key, options.hostedFetch),
       });
+      const sources: SourceOptions = {
+        local,
+        hostedKey,
+        // Q10 (#1199): the athlete's own recorded consent, naming an origin.
+        recordedConsent: async (athleteId) => (await reading.getHostedConsent(athleteId))?.origin,
+        // #1223: every hosted request masked by the athlete's own guard (#1101).
+        guard: (athleteId) => readMaskingGuard(reading, athleteId),
+        behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+      };
       const jobs = createAnalysisJobs({
         store,
-        engine: agentEngine({
-          reads: store,
-          history: indexed,
-          sources: {
-            local,
-            hostedKey,
-            // Q10 (#1199): the athlete's own recorded consent, naming an origin.
-            recordedConsent: async (athleteId) =>
-              (await reading.getHostedConsent(athleteId))?.origin,
-            // #1223: every hosted request masked by the athlete's own guard (#1101).
-            guard: (athleteId) => readMaskingGuard(reading, athleteId),
-            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
-          },
-          clock: { now },
-        }),
+        engine: agentEngine({ reads: store, history: indexed, sources, clock: { now } }),
+        // #1243: a re-plan during the ride, on the same sources and the same reads.
+        replan: replanEngine({ reads: store, sources, clock: { now } }),
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
         available: async () => local !== undefined || (await secretKey) !== undefined,

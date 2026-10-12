@@ -23,6 +23,7 @@ import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { jobBody } from './analysis/jobs-testing.ts';
+import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
 import { openApiDocument, openApiText } from './openapi.ts';
@@ -249,6 +250,8 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     }),
   startAnalysisJob: async (world) =>
     send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
+  startReplanJob: async (world) =>
+    send(world, 'POST', '/v1/analysis/replans', (await signedIn(world)).token, replanBody()),
   getAnalysisJob: async (world) => {
     const { token, jobId } = await finishedJob(world);
     return send(world, 'GET', `/v1/analysis/jobs/${jobId}`, token);
@@ -632,7 +635,12 @@ describe('every route answers with the shape its entry declares', () => {
       emailRecovery: true,
       probes,
       moderators: { owner: moderator.publicKey },
-      analysis: { engine: INSTANT_ENGINE, available: () => true },
+      analysis: {
+        engine: INSTANT_ENGINE,
+        // #1243: a re-plan that keeps the workout at once.
+        replan: { run: () => Promise.resolve({ kind: 'proposed', proposal: null }) },
+        available: () => true,
+      },
       // #1106: a picture model that answers at once, as the engine above does.
       pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
     });

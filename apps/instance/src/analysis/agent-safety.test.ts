@@ -20,6 +20,14 @@
  * 3. **No picture** (#799's walk, on the server path): no module here reaches
  *    anything about a camera, a frame, an image or a photo.
  *
+ * Since #1243 the same three hold of the re-plan job (ADR 0048): its agent
+ * (`replan-agent.ts`), input, template and tools are under `src/analysis/`,
+ * so the walks below cover them, and one case names them so that they cannot
+ * leave the walk unnoticed. ⚠️ `@onyourleft/domain`, which the re-plan
+ * modules import for the proposal's decoder, is a bare specifier and is not
+ * followed (below); it is platform-free by its own lint boundary, and the
+ * trainer protocol is `@onyourleft/sensors`, which nothing here names.
+ *
  * A type-only import (`import type`) is erased before the code runs, so it
  * reaches nothing and is not followed.
  *
@@ -130,6 +138,7 @@ describe('the tools are read-only and reach no network (ADR 0046 D-7)', () => {
     expect(TOOL_MODULES.map((path) => relative(HERE, path)).sort()).toStrictEqual([
       'tools/history-search.ts',
       'tools/reads.ts',
+      'tools/replan-tools.ts',
       'tools/tools.ts',
     ]);
     expect(toolFindings(TOOL_MODULES, onDisk, SOURCE)).toStrictEqual([]);
@@ -174,6 +183,33 @@ describe('nothing the agent is made of reaches a trainer, or a network but the o
       ),
     ).toStrictEqual([]);
     expect(toolFindings([entry], onDisk, SOURCE)).toStrictEqual([]);
+  });
+
+  it('no trainer reachable from the instance: the re-plan job, its template and its tools (#1243)', () => {
+    // The job's own modules are among those walked, by name — a renamed or
+    // moved one would otherwise drop out of the walk in silence.
+    const walked = ANALYSIS_MODULES.map((path) => relative(HERE, path));
+    const replan = [
+      'replan-agent.ts',
+      'replan-input.ts',
+      'replan-template.ts',
+      'tools/replan-tools.ts',
+    ];
+    expect(walked).toEqual(expect.arrayContaining(replan));
+    // From the agent, from the engine that runs it, and from the job table that queues it.
+    const entries = [...replan, 'engine.ts', 'jobs.ts', 'routes.ts'].map((name) =>
+      join(HERE, name),
+    );
+    const { modules, bare } = reach(entries, onDisk);
+    expect(modules.map((path) => relative(HERE, path))).toEqual(expect.arrayContaining(replan));
+    expect(
+      [...modules.map((path) => relative(SOURCE, path)), ...bare].filter((path) =>
+        TRAINER.test(path),
+      ),
+    ).toStrictEqual([]);
+    // The agent and its tools reach no store, no socket and no network either:
+    // a proposal is returned, and nothing here could send or write one.
+    expect(toolFindings([join(HERE, 'replan-agent.ts')], onDisk, SOURCE)).toStrictEqual([]);
   });
 
   it('no module under analysis/ reaches a trainer', () => {

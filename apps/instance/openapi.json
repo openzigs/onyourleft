@@ -1604,7 +1604,7 @@
     "/v1/analysis/jobs/{jobId}": {
       "get": {
         "operationId": "getAnalysisJob",
-        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
+        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
         "parameters": [
           {
             "name": "jobId",
@@ -1854,7 +1854,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results."
+                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons?, proposal? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
                 }
               }
             }
@@ -1882,6 +1882,108 @@
           },
           "503": {
             "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/replans": {
+      "post": {
+        "operationId": "startReplanJob",
+        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "A re-plan input (#1243)."
+                  },
+                  "templateVersion": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  }
+                },
+                "required": [
+                  "input",
+                  "templateVersion",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "jobId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/job_running"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "description": "One of `unavailable`, `analysis_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

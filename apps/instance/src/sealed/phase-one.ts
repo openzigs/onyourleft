@@ -124,6 +124,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/history/search', 'History search'),
   // Analysis jobs (#1095, ADR 0046 D-11): born sealed.
   only('POST', '/v1/analysis/jobs', JOB_ROW),
+  // #1243: a re-plan's input and its proposal travel as a job's do (ADR 0048 D-10).
+  only('POST', '/v1/analysis/replans', JOB_ROW),
   only('GET', '/v1/analysis/jobs/{jobId}', JOB_ROW),
   only('GET', '/v1/analysis/jobs/{jobId}/events', JOB_ROW),
   only('POST', '/v1/analysis/jobs/{jobId}/cancel', JOB_ROW),
