@@ -1001,6 +1001,45 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused and to
     expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(150)));
   });
 
+  it('stops saying so once a free ride follows, though the trainer was already eased before the refused block', async () => {
+    // free ride (eases), 75 W on a 150 W minimum (refused), free ride again:
+    // the second ease is skipped by the `released` guard, so it must not be
+    // the only thing that clears the sentence.
+    const { session } = await loop(
+      () =>
+        expandWorkout(
+          workout([
+            { kind: 'free-ride', seconds: seconds(3) },
+            steady(3, 0.3),
+            { kind: 'free-ride', seconds: seconds(4) },
+          ]),
+        ),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 4);
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(150)));
+
+    await ride(session, 6, 9);
+
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
+  it('stops saying so while paused, after a pause that follows a refused block', async () => {
+    const { session } = await loop(
+      () => expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(3) }, steady(10, 0.3)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 5);
+    expect(session.state().lastFault).toBe(raiseRefusedText(watts(150), watts(150)));
+
+    session.pause(seconds(6));
+    await session.settled();
+
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
   it('stops saying so when the link is lost, and when the workout ends on such a block', async () => {
     const dropped = await loop(HARD_THEN_EASY, machine(150));
     dropped.session.start(seconds(0));

@@ -308,13 +308,16 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * be overwritten by it on the machine.
    */
   const ease = (): void => {
+    // ⚠️ Before the guard: an ease that is skipped because the trainer was
+    // already eased still ends the block a refusal was about, and the
+    // sentence (and "raised from") must not outlive it (#1305).
+    raiseRefused = false;
+    raisedFrom = undefined;
     if (released) {
       return;
     }
     released = true;
     lastOffered = undefined;
-    raiseRefused = false;
-    raisedFrom = undefined;
     void writer.offer(powerFloor).then((outcome) => {
       if (outcome.kind === 'written') {
         return;
@@ -389,6 +392,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * after the ramp had climbed past it.
    */
   let lastOffered: { readonly target: Watts; landed: Watts | undefined } | undefined;
+  // Invariant: `released === true` implies `lastOffered === undefined`, which is
+  // why `resume()` need not forget it (`ease()` clears it when it releases).
 
   const offer = (target: Watts): void => {
     released = false;
