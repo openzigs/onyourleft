@@ -680,6 +680,85 @@ describe('the ERG spiral is broken against a real control point', () => {
   });
 });
 
+describe('a workout target under the trainer’s minimum is written as that minimum — #1297', () => {
+  /**
+   * A machine whose Supported Power Range starts at 100 W. 30 % of the 250 W
+   * threshold is 75 W, which this machine refuses as out of range: it does not
+   * clamp, and it keeps the target it had.
+   */
+  const MINIMUM = 100;
+  const HIGH_MINIMUM = () =>
+    ftmsTrainer({ id: 'kickr', retainsTargetsThroughStop: true, minTargetPower: watts(MINIMUM) });
+
+  const targetWrites = (trainer: {
+    readonly wire: readonly { readonly direction: string; readonly bytes: readonly number[] }[];
+  }) =>
+    trainer.wire
+      .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+      .map((entry) => [...entry.bytes]);
+
+  it('replaces a harder block’s target with the minimum, rather than leaving the harder one applied', async () => {
+    // ⚠️ The defect in its dangerous form: the easy block after a hard one. The
+    // 75 W write was refused and the trainer went on holding 250 W.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(6, 1.0), steady(6, 0.3)])),
+      HIGH_MINIMUM(),
+    );
+    expect(trainer.powerRange.minimum).toBe(MINIMUM);
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+
+    await ride(session, 4, 8);
+
+    // Read from the machine's own state and from the wire, not from the session.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(MINIMUM);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(250), targetWrite(MINIMUM)]);
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
+  it('reports the minimum as what the trainer holds, and the target as answered', async () => {
+    // `holding` is what the ride screen's "Holding … W." line reads.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(30, 0.3)])),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(MINIMUM);
+    expect(session.state().holding).toBe(MINIMUM);
+    expect(session.state().player.pending).toBeUndefined();
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
+  it('writes the raised target once for the block, not on every tick', async () => {
+    // The player asked for 75 W and was told 100 W. It must not read that as a
+    // target still to be written (#542).
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(30, 0.3)])),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 20);
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(MINIMUM)]);
+  });
+
+  it('writes a target above the minimum as the workout’s own number', async () => {
+    // 50 % of 250 W is 125 W, inside this machine’s range: not raised, not lowered.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(30, 0.5)])),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(125);
+    expect(session.state().holding).toBe(125);
+  });
+});
+
 describe('a refused write is reported and retried, not thrown', () => {
   it('tells the rider control was lost, and asks again on the next tick', async () => {
     // Control permission is revoked by the machine. The next setpoint — the
