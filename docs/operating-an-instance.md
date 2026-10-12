@@ -176,8 +176,7 @@ What the agent sends the model and what it may read is in
 
 A rider signed in to your instance can switch on, in their app, sending their side camera's
 pictures here instead of having their tablet look at them (#1106;
-[ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md), Amendments,
-2026-10-12). Your instance then shows each picture to a model and answers where the model found
+[ADR 0050](adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md)). Your instance then shows each picture to a model and answers where the model found
 the rider's joints. **It takes no picture unless you name a model for them**:
 
 ```
@@ -186,8 +185,13 @@ OYL_INSTANCE_PICTURE_MODEL=<a model you pulled that reads images>
 
 on the same server as the analysis model (`OYL_INSTANCE_ANALYSIS_MODEL_URL`, by the same address
 rule). No model is recommended and none is named in this repository (ADR 0031 D-4), and the
-analysis model is never used in its place: name one whose server lists it as reading images, and
-whose licence ADR 0031 D-2 admits.
+analysis model is never used in its place: name one that reads images, and whose licence ADR 0031
+D-2 admits. ⚠️ **Your model server's list is not a reliable "no"**: on 2026-10-12 an Ollama listed
+one model with no `vision` capability, and that model read a picture (spike 0025 §8). To find out,
+ask it. From a checkout of this repository, in `apps/instance`, `node
+tools/side-picture-round-trip.ts --loopback --picture drawn --model-url http://localhost:11434/v1
+--picture-model <name> --pictures 1` starts a throwaway instance on your machine, shows the model a drawing of three shapes, and prints what it said. A model that takes no
+picture is reported as `model_without_pictures`.
 
 **What your instance does with a picture, and what you must not make it do.** A picture arrives
 sealed to your instance's key and signed by the rider's device; it is checked (a JPEG of at most

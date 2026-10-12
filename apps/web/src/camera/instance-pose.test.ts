@@ -270,7 +270,7 @@ describe('the two switches are off by default, and the second sits under the fir
   });
 });
 
-describe('the words a rider agrees to (#1106) — DRAFT until the owner approves them', () => {
+describe('the words a rider agrees to (#1106) — approved by the owner on 2026-10-12', () => {
   it('says the pictures leave the room, are sealed, and are not kept, and what the tunnel can still see', () => {
     expect(SIDE_INSTANCE_WHAT_IS_SENT).toContain(
       'If the sealed connection is not available, no picture is sent.',

@@ -2,7 +2,7 @@
 
 /**
  * **One side-camera picture, shown to a model the rider chose, and
- * forgotten** — #1106, ADR 0046's amendment of 2026-10-12.
+ * forgotten** — #1106, ADR 0050.
  *
  * The owner's ruling (#1092 ruling 1, 2026-10-04) moves the side camera's
  * *"pose on your computer"* path to the rider's instance; the ruling of

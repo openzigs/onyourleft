@@ -10,9 +10,9 @@
  * instance, the hosted service named and under its own terms, its own
  * consent, and that *"never stored"* is a promise about the instance only.
  *
- * ⚠️ **The words themselves are a DRAFT until the owner approves them**
- * (#1106: *"wording approved by the owner before merge"*). This holds the two
- * documents together; it does not make either final.
+ * ⚠️ **The owner approved the words as written on 2026-10-12** (#1106, ADR
+ * 0050 D-7). This holds the two documents together, so a change to one is
+ * seen in the other; a change to either is the owner's.
  */
 
 import { readFileSync } from 'node:fs';

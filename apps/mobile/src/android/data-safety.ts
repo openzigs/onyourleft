@@ -458,8 +458,8 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //   user-initiated exemption for a third party. Still `optional: true`:
     //   two switches, both off by default, the second naming the service.
     //
-    // ⚠️ **DRAFT until the owner approves it** (#1106: *"Privacy policy and
-    // Data Safety wording, approved by the owner before merge"*). Flipping
+    // ⚠️ **Accepted by the owner on 2026-10-12** (#1106, ADR 0050 D-7: *"Play
+    // Data Safety: the Photos and videos row becomes shared."*). Flipping
     // this row is what changes the listing's face (ADR 0029 §"What
     // `docs/privacy-policy.md` and Play Data Safety would have to say").
     dataType: 'Photos and videos',

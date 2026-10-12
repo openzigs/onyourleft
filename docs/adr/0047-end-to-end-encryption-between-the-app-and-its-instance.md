@@ -1532,24 +1532,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the out-of-order replay and makes that bound not depend on how the instance chose `notAfter`. It
   still cannot make a device trust a key the identity key never signed, nor take it below the
   highest serial it has seen.
-- **2026-10-12** — **DRAFT, for the owner's approval before merge: D-12 and D-14 Q4 no longer
-  hold for the side camera's pictures, and D-7's table gains a row.** D-14 Q4 was *"camera
-  pictures stay off the tunnel, even sealed. ADR 0029 D-6 stands."* The owner ruled otherwise on
-  [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12: *"Side-camera
-  pictures travel only through the sealed transport (ADR 0047). If it is not available they are
-  refused, never sent unsealed. Cloudflare terminates TLS on the tunnel, so the seal is what
-  keeps it from reading them."* [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s
-  entries of that date are the record. **The row D-7 gains**, in phase 1 and born sealed: *A
-  side-camera picture and the model's answer about it* — `POST /v1/camera/side-pose` — both
-  directions; it is on `sealed/phase-one.ts`'s list under that name. ⚠️ **It is stricter than
-  D-7's rule for an instance with no keys.** D-7 says such an instance *"has no sealed routes"*
-  and answers them in plaintext; this one route answers `sealed_required` there too, so a
-  keyless instance takes no picture (`camera/routes.ts`). **D-12's second reason is not
-  answered, and is said instead**: *"a picture's size and timing are themselves revealing in a
-  way D-11's padding does not answer"*. That is still so. The edge sees each envelope's size to
-  within its 64 KiB bucket, and from about one a second for as long as it lasts, that a side
-  camera is filming and for how long. The consent sentence and the privacy policy tell the rider
-  that. **The instance's limit on sealed requests, 120 a minute to a session
-  (`auth/identity.ts` §`DEFAULT_LIMITS`), is what sets the rate**: a picture every 200 ms was
-  refused past it (spike 0025), so the app sends at most one a second. A picture's envelope is at
-  most 175 KB, inside `/v1/sealed`'s own limit for the 1 MiB body an instance starts with. (#1106)
+- **2026-10-12** — **D-14 Q4 (*"camera pictures stay off the tunnel, even sealed"*) and D-12, which
+  records it, are superseded for the side camera's pictures, and D-7's table gains a row.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision: its D-2 is the row (`POST /v1/camera/side-pose`, sealed on every instance, a keyless one
+  included), and its D-3 says what D-12's second reason still leaves visible. Every other camera
+  picture stays off the tunnel. The body above is not edited. (#1106)

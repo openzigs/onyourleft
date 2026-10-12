@@ -26,8 +26,8 @@
  * routes (#1199 — #1097 built the operator command and no app route, so there
  * was no plaintext key route to remove and no home-network check to lift)
  * were born sealed and are listed below. So was the side camera's picture
- * route (#1106): its row is not in D-7's table as written but in ADR 0047's
- * amendment of 2026-10-12, which is where a reviewer reads it.
+ * route (#1106): its row is not in D-7's table as written but in ADR 0050
+ * D-2, which is where a reviewer reads it.
  *
  * ## The families
  *
@@ -58,7 +58,7 @@ const JOB_ROW = 'Each analysis job’s input, every SSE event’s text, the resu
 const KEY_ROW = 'A pasted API key, a rider’s own or the shared one set from the app';
 const CONSENT_ROW = 'The rider’s recorded hosted consent and the endpoint it names';
 
-/** The row ADR 0047's amendment of 2026-10-12 adds to D-7 (#1106). */
+/** The row ADR 0050 D-2 adds to ADR 0047 D-7's table (#1106). */
 const PICTURE_ROW = 'A side-camera picture and the model’s answer about it';
 
 const only = (method: PhaseOneRoute['method'], path: string, row: string): PhaseOneRoute => ({
@@ -134,7 +134,7 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('DELETE', '/v1/analysis/hosted/key', KEY_ROW),
   only('POST', '/v1/analysis/hosted/consent', CONSENT_ROW),
   only('DELETE', '/v1/analysis/hosted/consent', CONSENT_ROW),
-  // A side-camera picture (#1106, ADR 0047's amendment of 2026-10-12): born sealed, and
+  // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
   // refused unsealed on an instance with no keys too (`camera/routes.ts`).
   only('POST', '/v1/camera/side-pose', PICTURE_ROW),
 ];

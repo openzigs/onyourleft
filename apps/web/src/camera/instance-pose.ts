@@ -3,8 +3,8 @@
 /**
  * **The side camera's pictures, looked at by a model on the rider's
  * instance** — [#1106](https://github.com/openzigs/onyourleft/issues/1106),
- * [ADR 0046](../../../../docs/adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s
- * amendment of 2026-10-12, and the owner's rulings there.
+ * [ADR 0050](../../../../docs/adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md),
+ * and the owner's rulings it quotes.
  *
  * {@link instancePoseEstimator} is a third `SidePoseEstimator`, beside the
  * tablet's own model (`pose-estimator.ts`) and the rider's computer
@@ -129,8 +129,8 @@ export const SIDE_INSTANCE_HOSTED_STORAGE_KEY = INSTANCE_AGREEMENT_STORAGE_KEYS[
  * What the section says before any switch — what is sent, where, sealed, and
  * not kept. Never tucked (`views/CameraView.tsx` §`CAMERA_AGREED_KEPT_VISIBLE`).
  *
- * ⚠️ **DRAFT, for the owner's approval before merge** (#1106's ruling: *"wording
- * approved by the owner before merge"*). So are the two consents below.
+ * ⚠️ **Approved by the owner as written, 2026-10-12** (#1106, ADR 0050 D-7),
+ * and so are the two consents below. A change to a word is the owner's.
  */
 export const SIDE_INSTANCE_WHAT_IS_SENT =
   'Your instance can look at the side camera’s pictures instead of this tablet. Nothing is sent ' +
@@ -139,7 +139,7 @@ export const SIDE_INSTANCE_WHAT_IS_SENT =
   'not in its database, not in a file and not in its logs. If the sealed connection is not ' +
   'available, no picture is sent.';
 
-/** The consent beside the first switch, verbatim. DRAFT: see {@link SIDE_INSTANCE_WHAT_IS_SENT}. */
+/** The consent beside the first switch, verbatim. Approved: see {@link SIDE_INSTANCE_WHAT_IS_SENT}. */
 export const SIDE_INSTANCE_CONSENT =
   'While the side camera is filming, pictures of you leave this room, about one a second, and go ' +
   'to your instance instead of being looked at on this tablet. They are sealed before they ' +
@@ -166,7 +166,7 @@ export function hostedServiceHost(origin: string): string | undefined {
 
 /**
  * The consent beside the second switch, naming the service by `host`.
- * DRAFT: see {@link SIDE_INSTANCE_WHAT_IS_SENT}.
+ * Approved: see {@link SIDE_INSTANCE_WHAT_IS_SENT}.
  *
  * The owner's ruling 3: it *"names the vendor and says that pictures of the
  * rider go to that company and that what it keeps is under its terms"*, and

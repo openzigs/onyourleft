@@ -8,9 +8,9 @@
   run it on loopback against an instance started for the test … the through-the-tunnel run needs
   the owner's go-ahead and is reported as owed if not made"*
 - **Rests on it**: `apps/web/src/camera/instance-pose.ts`
-  §`INSTANCE_POSE_INTERVAL_MILLISECONDS`, and the measurement entries of 2026-10-12 in
-  [ADR 0046](../adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) and
-  [ADR 0047](../adr/0047-end-to-end-encryption-between-the-app-and-its-instance.md)
+  §`INSTANCE_POSE_INTERVAL_MILLISECONDS`, and
+  [ADR 0050](../adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md) D-9 and its
+  §"What was verified, and what was not"
 - **Number**: **0025.** `docs/spikes/` holds 0001 to 0020 and 0022 to 0024 on `main`; 0021 is
   claimed by [#1057](https://github.com/openzigs/onyourleft/issues/1057). No open pull request
   carried a 0025 on 2026-10-12
@@ -166,3 +166,162 @@ Each of those is the owner's to allow.
   was not timed, nor the tablet's radio.
 - **A hosted model.** The tool refuses `--source instance-hosted`: it holds no key and no consent.
 - **The report's quality on fewer pictures** (§5).
+
+## 8. Real models, asked on 2026-10-12
+
+Appended after §1 to §7, which are as they were: where the opening paragraph, §2 and §7 say no real
+model looked at a picture and no hosted model was measured, read this section. Four real models were
+asked, the same day, after the owner's decisions on #1106 allowed it
+([comment](https://github.com/openzigs/onyourleft/issues/1106#issuecomment-6127194892), decision 5
+for the hosted one).
+
+> **In one paragraph.** A drawn picture of nobody went through an instance started for the run on
+> loopback, sealed, to each model. **Three of the four took it and answered `{"rider":false}`**:
+> two local models on the owner's Ollama (`gemma4:12b`, 6.6 s at the median; `gemma3:4b`, 4.7 s) and
+> DeepSeek's `deepseek-flash` on the owner's key (2.0 s, once). **The fourth, a text-only local
+> model, was refused by its server and the instance said `model_without_pictures`, correctly.**
+> ⚠️ **Two of the models that take pictures were wrongly read as taking none** when sent bytes they
+> could not decode, because their refusals name an image; that is fixed in the same pull request.
+> ⚠️ **No model was shown a rider**, so no model's landmarks were read, and the local timings were
+> taken on a machine busy with other work.
+
+### 8.1 What was run
+
+    node tools/side-picture-round-trip.ts --loopback --picture drawn \
+      --model-url http://localhost:11434/v1 --picture-model <name> --pictures <n> --interval-ms 1000
+
+- **The tool** as of this pull request: `--picture drawn`, `--model-url` and `--picture-model` are
+  new, and so is `answers` in the report.
+- **The instance**: started for each run by `side-picture-loopback.ts`, the composition
+  `startInstance` builds, a temporary database, its own keys, on `127.0.0.1`. Not the home
+  instance, whose `.env` and tunnels were not touched.
+- **The picture**: `tools/drawn-picture.ts`. A red disc, a blue rectangle and a green triangle on a
+  pale ground, 320 by 240, **6 021 bytes**, drawn and encoded as a baseline JPEG in code, with no
+  segment but the ones a picture needs (no Exif, no XMP, no comment). The disc moves a little
+  between pictures so no two are the same bytes. **No image file is committed and no photograph was
+  read.** macOS's own decoder opened it as a 320 by 240 JPEG.
+- **The question** is the instance's one fixed question (`camera/hosted-pictures.ts`
+  §`SIDE_POSE_QUESTION`), with a bound of 512 tokens.
+- **The local models**: the owner's Ollama, version 0.30.5, at `http://localhost:11434`. Models were
+  loaded by being asked. None was pulled, deleted or stopped, and Ollama was not restarted.
+- **The machine** is §3's. ⚠️ **It was busier than in §4**: the one-minute load average read 11.1
+  before the first run, 12.9 after it and 22.7 after the third. The local round trips are therefore
+  slower than these models alone, by an amount not measured.
+
+### 8.2 The local models
+
+One picture offered a second, one at a time; a picture that fell due while the last was out was
+skipped unsent, as the tablet does.
+
+| | `gemma4:12b` | `gemma3:4b` | `qwen2.5:3b` |
+|---|---|---|---|
+| Ollama lists it with | `completion`, `tools`, `thinking`, `vision` | `completion` only | `completion`, `tools` |
+| Report's `startedAt` | `2026-10-12T15:24:47.197Z` | `2026-10-12T15:28:30.597Z` | `2026-10-12T15:30:04.813Z` |
+| Pictures offered | 200 | 90 | 3 |
+| Sent | 27 | 16 | 1 |
+| Answered | **27** | **15** | **0** |
+| Refused | none | 1 `picture_model_failed` | 1 `model_without_pictures` |
+| Round trip, p50 | **6 596 ms** | **4 726 ms** | |
+| Round trip, p95 | 11 728 ms | 6 532 ms | |
+| Round trip, least to most | 4 478 to 12 792 ms | 493 to 6 532 ms | |
+| Ten answers (the framing check's count) | 66.6 s | 79.8 s | never |
+| On the wire, each | 21 961 bytes up, 411 down | the same | |
+
+**What the answers looked like, for a picture with no rider.** Every answered picture got
+`{"rider":false}`, which is what the question asks for:
+
+- `gemma4:12b`: 8 times bare, 18 times inside a Markdown code fence (` ```json `), and once fenced
+  with a space after the colon. The app's reader (`computer-pose.ts` §`sidePoseFromAnswer`) takes
+  the fence off, so all 27 read as *no rider*. Asked directly, this model also returned a
+  `reasoning` field naming the three shapes (154 completion tokens in all); the instance passes on
+  the answer alone.
+- `gemma3:4b`: 15 times bare. ⚠️ **Ollama's list gives this model no `vision` capability, and it
+  read the picture**: asked directly with a looser question it answered *"The image depicts three
+  colored geometric shapes arranged on a light gray background."* A server's list is not a reliable
+  "no".
+- Its one `picture_model_failed` was not explained. It was most likely the first picture, sent while
+  Ollama was swapping the model in, running past the instance's 25 s bound; that was not
+  established.
+
+**One a second is what was offered, and it is not what a local model here took.** About one picture
+in seven was sent. The rate the app sends at is the model's, as §5 said it would be.
+
+### 8.3 A text-only model, and what the code made of it
+
+`qwen2.5:3b` has no image input. Ollama answered the instance's request **HTTP 400**:
+
+    {"error":{"message":"{\"error\":{\"code\":400,\"message\":\"Multimodal data provided, but model does not support multimodal requests.\",\"type\":\"invalid_request_error\"}}","type":"invalid_request_error","param":null,"code":null}}
+
+The instance answered the device **422 `model_without_pictures`**, which is right, and the app's
+sentence for it is *"The model answered that it does not take pictures…"*. It did not answer about
+a picture it had dropped.
+
+### 8.4 A hosted model: DeepSeek, two requests in all
+
+The owner allowed one real test with their key. **Two requests were made and no more**: one with the
+drawn picture, and one with the tool's filler bytes to see a real refusal.
+
+- **Where**: `https://api.deepseek.com/v1`, model `deepseek-flash`, the model spike 0023 §11 used.
+- **How**: an instance on loopback as in §8.1, a throwaway account, the key stored through
+  `POST /v1/analysis/hosted/key`, and the picture sent sealed with `source: instance-hosted` and the
+  consent's origin, so it went through `camera/side-pose.ts`, `camera/hosted-pictures.ts` and
+  `analysis/model.ts` as a rider's would. The request the service was sent held `model`,
+  `max_tokens` (512) and one user message of two parts, `text` and `image_url`, 9 027 bytes in all,
+  and nothing else.
+- ⚠️ **By a script that is not committed**, because the measuring tool refuses
+  `--source instance-hosted` on purpose (it holds no key and no consent) and this pull request does
+  not change that. It differs from §8.1 only in storing the key and in handing `startInstance` a
+  `hostedFetch` that recorded the service's status, time and reply.
+
+| | The drawn picture | Filler bytes (not a decodable picture) |
+|---|---|---|
+| The service answered | **HTTP 200** in **1 972 ms** | **HTTP 400** in 423 ms |
+| Round trip through the sealed route | **2 005 ms** | 450 ms |
+| The instance answered the device | 200, `{"rider":false}` | 422 `model_without_pictures` — **wrong**, see §8.5 |
+| The service's words | `"content":"{\"rider\":false}"`, with 34 reasoning tokens of 41, the reasoning saying *"shapes only"* | *".messages[0].image[0]: You have uploaded an unsupported image. Please make sure your image is valid and has one of the following formats: webp, png, jpeg, and gif."* |
+
+So `deepseek-flash` **accepts a picture in this request on a rider's own key, and saw it**. One
+round trip is not a distribution: nothing here says how it varies, and nothing was sent a second
+apart.
+
+**The key.** It was read from a file into the environment of the one process that made each
+request, sent sealed to the loopback instance, and stored there encrypted under that instance's own
+secret. After each request the key was cleared through `DELETE /v1/analysis/hosted/key`, read back
+as cleared, and the instance's data directory deleted. The script refuses to print its report if the
+key is anywhere in it, and both saved reports and the instance's log lines were searched for the key
+and did not hold it. It is in no file this pull request adds.
+
+### 8.5 The refusal pattern was wrong, and how
+
+`analysis/model.ts` read any 400, 415 or 422 whose body contained *image*, *vision* or *multimodal*
+as *"this model takes no pictures"*. Two real refusals from models that DO take pictures matched it:
+
+| Model | Sent | It answered, HTTP 400 | Read as | Should be |
+|---|---|---|---|---|
+| `gemma3:4b` (Ollama) | the tool's filler bytes | *"Failed to load image or audio file"* | `model_without_pictures` | one failed picture |
+| `deepseek-flash` | the same | *"You have uploaded an unsupported image…"* | `model_without_pictures` | one failed picture |
+
+The app stops for the session on `model_without_pictures` and tells the rider to choose another
+model, so one picture a service could not decode would have ended the session with the wrong
+reason. The pattern now matches statements about the MODEL only (`model.ts` §`WITHOUT_PICTURES`),
+and both of these are `picture_model_failed`. `model.test.ts` holds the three real sentences of
+§8.3 and this table. ⚠️ Of the five patterns, **one was observed** (§8.3's). The other four are the
+author's reading of what other servers say, and a server that words it differently is three failed
+pictures and a stop that says *"gave no usable answer"*.
+
+This is also why **a run against a real model needs `--picture drawn`**: §6's command, as written,
+sends filler, which a real model refuses.
+
+### 8.6 What is still not measured
+
+- **The tunnel.** The owner's decision 4 allows the run on the Mac home instance (one model that
+  takes pictures pulled into its Ollama, one `.env` line naming it, one throwaway account). It was
+  not made here. The command is §6's with `--picture drawn` added.
+- **Anthropic**, and every hosted service but DeepSeek: documentation only.
+- **A picture with a rider in it, on any model.** No picture of a person was used, so nothing here
+  says whether a real model returns nine landmarks the reader takes, whether the plausibility check
+  passes them, or whether a model that reasons finishes that longer answer inside 512 tokens.
+- **What a hosted service that takes no picture answers.**
+- **A quiet machine, a cold model's first answer measured on purpose, and a model's time on a
+  picture the size a real camera sends** (the drawn one is 6 KB; the side link carries up to 64 KiB).
+- **The app**: still a Node process and not the tablet.
