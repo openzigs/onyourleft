@@ -116,7 +116,8 @@ export interface WorkoutSessionOptions {
   readonly control: WorkoutTrainer;
   /**
    * The lowest ERG target this trainer accepts — the minimum of the Supported
-   * Power Range **the machine itself reported** (#441). What an ease writes.
+   * Power Range **the machine itself reported** (#441). What an ease writes,
+   * and what a workout target under it is raised to (#1297).
    *
    * ⚠️ Required, with no default: a default would be the hard-coded floor
    * #43's criteria forbid, and a floor below the machine's minimum would be
@@ -272,6 +273,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       return;
     }
     released = true;
+    lastOffered = undefined;
     void writer.offer(powerFloor).then((outcome) => {
       if (outcome.kind === 'written') {
         return;
@@ -329,8 +331,23 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    */
   let asks = 0;
 
+  /**
+   * The last target this session offered the writer, after the raise to the
+   * floor — #1297 review. The player's unchanged-target check (#542) compares
+   * what it ASKED for, before the clamp, so a ramp under the machine's minimum
+   * asks for a new wattage every tick and every one of them clamps to the same
+   * number: without this, the same `0x05` once a second. Forgotten whenever the
+   * wire is forgotten (an ease, a refused or superseded write, a resume, a lost
+   * link), so a target that did not land is written again.
+   */
+  let lastOffered: Watts | undefined;
+
   const offer = (target: Watts): void => {
     released = false;
+    if (lastOffered === target) {
+      return;
+    }
+    lastOffered = target;
     asks += 1;
     const ask = asks;
     void writer.offer(target).then((outcome) => {
@@ -350,6 +367,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
         case 'failed':
           lastFault = faultText(outcome.error);
           if (current) {
+            lastOffered = undefined;
             player.writeFailed();
           }
           break;
@@ -359,6 +377,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // A superseded target was replaced by a newer one, whose own outcome
           // clears the pending state; a closed one means the session is over.
           if (current) {
+            lastOffered = undefined;
             player.writeFailed();
           }
           break;
@@ -372,6 +391,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     start(now: Seconds): void {
       player.start(now);
+      lastOffered = undefined;
       changed();
     },
 
@@ -402,15 +422,15 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
       switch (state.intent.kind) {
         case 'write-target':
-          // An eased target is raised to the floor if the relief would take
-          // it under — the machine refuses an out-of-range target outright,
-          // and a refused ease rescues nobody. An un-eased one is the
-          // workout's own number and is written as it is.
-          offer(
-            state.intent.eased
-              ? watts(Math.max(state.intent.watts, powerFloor))
-              : state.intent.watts,
-          );
+          // ⚠️ #1297: EVERY target is raised to the floor, the workout's own
+          // as well as an eased one. The machine refuses a target under its
+          // reported minimum outright (it does not clamp), and a refusal
+          // leaves the target it had: a 0.3 block after a hard one kept the
+          // hard one on the trainer, and a refused ease rescues nobody. The
+          // floor is the least this machine can be asked to hold, so it is
+          // the nearest thing to the number asked for. The player is told
+          // what was written (`acknowledge`), and the screen reads `holding`.
+          offer(watts(Math.max(state.intent.watts, powerFloor)));
           break;
         case 'release':
           ease();
@@ -440,11 +460,13 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     resume(now: Seconds): void {
       player.resume(now);
+      lastOffered = undefined;
       changed();
     },
 
     linkLost(now: Seconds): void {
       player.linkLost(now);
+      lastOffered = undefined;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is
