@@ -2,7 +2,10 @@
 
 /**
  * The analysis job routes (#1095, ADR 0046 D-11): start a job, read it,
- * follow its event stream, cancel it, and acknowledge its write-up.
+ * follow its event stream, cancel it, and acknowledge its write-up. Since
+ * #1243 a second route starts a job of the other type, a re-plan during the
+ * ride (ADR 0048), which the same four routes read, follow, cancel and
+ * acknowledge.
  *
  * Every one is `auth: 'session'` (the device-key session, #772) and
  * `reaches: 'own'`: the athlete is the session's, and no body or path names
@@ -17,7 +20,13 @@
 
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
-import { DEFAULT_ANALYSIS_STARTS, DEFAULT_HEARTBEAT_MS, JOB_FAILURES } from './jobs.ts';
+import {
+  DEFAULT_ANALYSIS_STARTS,
+  DEFAULT_HEARTBEAT_MS,
+  DEFAULT_REPLAN_STARTS,
+  JOB_FAILURES,
+} from './jobs.ts';
+import { REPLAN_TEMPLATE } from './replan-template.ts';
 
 const STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled', 'withheld'];
 const status: Schema = { type: 'string', enum: STATUSES };
@@ -80,6 +89,55 @@ export const ANALYSIS_ROUTES: readonly Route[] = [
     },
   },
   {
+    method: 'POST',
+    path: '/v1/analysis/replans',
+    sealed: 'only',
+    operationId: 'startReplanJob',
+    reaches: 'own',
+    summary: `Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (\`source\`: \`instance-local\`, or \`instance-hosted\` on your own key only). \`input\` is \`{ revision, summarySeq, currentBlock, goals, blocks, summaries }\`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. \`templateVersion\` is \`${REPLAN_TEMPLATE.version}\`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its \`result\` event is \`{ status: "succeeded", proposal }\`, where \`proposal\` is one \`{ revision, summarySeq, move, reason }\` from the closed lists of moves and reasons, or \`null\` when the workout should stay as it is; or \`{ status: "failed", failure }\` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. \`job_running\` while you have a job of either kind queued or running, \`rate_limited\` past ${String(DEFAULT_REPLAN_STARTS.limit)} re-plans an hour on an instance with the default limits, and \`analysis_off\` when this instance has no model at all.`,
+    identity: true,
+    auth: 'session',
+    analysis: true,
+    accepted: true,
+    request: {
+      type: 'object',
+      properties: {
+        input: { type: 'object', description: 'A re-plan input (#1243).' },
+        templateVersion: { type: 'string' },
+        source: { type: 'string', enum: ['instance-local', 'instance-hosted'] },
+      },
+      required: ['input', 'templateVersion', 'source'],
+      additionalProperties: false,
+    },
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'job_running',
+      'rate_limited',
+      'analysis_off',
+      'unavailable',
+    ],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { jobId: { type: 'string' } },
+        required: ['jobId'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      const outcome = await got.analysis.startReplan(got.caller, context.json);
+      if (outcome.ok) return json(outcome.value, 202);
+      return errorResponse(
+        outcome.code,
+        outcome.fields === undefined ? {} : { fields: outcome.fields },
+      );
+    },
+  },
+  {
     method: 'GET',
     path: '/v1/analysis/jobs/{jobId}',
     sealed: 'only',
@@ -125,7 +183,7 @@ export const ANALYSIS_ROUTES: readonly Route[] = [
     response: {
       contentType: 'text/event-stream',
       description:
-        'Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results.',
+        'Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons?, proposal? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text.',
     },
     handle: async (context) => {
       const got = ready(context);

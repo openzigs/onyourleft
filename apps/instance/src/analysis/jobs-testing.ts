@@ -8,7 +8,7 @@
 
 import type { AgentEvent } from './agent.ts';
 import { RIDE_INPUT } from './agent-testing.ts';
-import type { AnalysisEngine, EngineEnding, EngineJob, JobTimers } from './jobs.ts';
+import type { AnalysisEngine, WriteUpEnding, EngineJob, JobTimers } from './jobs.ts';
 
 /** One run the scripted engine was handed: the job, its signal, and what it may do. */
 export interface ScriptedRun {
@@ -16,7 +16,7 @@ export interface ScriptedRun {
   readonly signal: AbortSignal;
   emit(event: AgentEvent): void;
   /** End the run with `ending`. */
-  finish(ending: EngineEnding): void;
+  finish(ending: WriteUpEnding): void;
   /** End the run by REJECTING with `error`, as a tool's store read that throws does (#1187). */
   fail(error: unknown): void;
 }
@@ -38,7 +38,7 @@ export function scriptedEngine(): ScriptedEngine {
     runs,
     engine: {
       run: (job, signal, emit) =>
-        new Promise<EngineEnding>((resolve, reject) => {
+        new Promise<WriteUpEnding>((resolve, reject) => {
           const run: ScriptedRun = { job, signal, emit, finish: resolve, fail: reject };
           runs.push(run);
           waiting.shift()?.(run);

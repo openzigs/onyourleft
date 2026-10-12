@@ -13,7 +13,8 @@
  */
 
 import { runAnalysisAgent, type AgentClock } from './agent.ts';
-import type { AnalysisEngine } from './jobs.ts';
+import type { AnalysisEngine, ReplanEngine } from './jobs.ts';
+import { runReplanAgent } from './replan-agent.ts';
 import { modelForSource, type SourceOptions } from './source.ts';
 import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
 
@@ -48,6 +49,35 @@ export function agentEngine(options: AgentEngineOptions): AnalysisEngine {
         signal,
         emit,
       });
+    },
+  };
+}
+
+/**
+ * The engine a re-plan job is handed to (#1243, ADR 0048 D-11): the same two
+ * sources, chosen the same way, so a hosted re-plan runs only on the rider's
+ * OWN key, under their recorded consent naming the endpoint, with everything
+ * it is sent masked (`source.ts`) — the owner's ruling on #1233 Q5. A rider
+ * with neither a local model nor a key of their own gets no proposal, and
+ * the operator's key is never used for them.
+ */
+export function replanEngine(
+  options: Pick<AgentEngineOptions, 'reads' | 'sources' | 'clock'>,
+): ReplanEngine {
+  return {
+    async run(job, signal, emit) {
+      const chosen = await modelForSource(job.source, job.athleteId, options.sources);
+      if (!chosen.ok) return { kind: 'failed', why: chosen.failure };
+      const outcome = await runReplanAgent({
+        job: { athleteId: job.athleteId, input: job.input },
+        model: chosen.model,
+        reads: options.reads,
+        clock: options.clock,
+        signal,
+        emit,
+        waitedMilliseconds: job.waitedMilliseconds,
+      });
+      return outcome.kind === 'kept' ? { kind: 'proposed', proposal: null } : outcome;
     },
   };
 }
