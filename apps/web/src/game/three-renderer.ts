@@ -224,6 +224,20 @@ import {
 // not engaged and the lockfile does not move. And the specifier still matches
 // `three-seam.test.ts`'s `['"]three(?:\/[^'"]*)?['"]`, so a loader imported
 // anywhere but here is a red test with no change to that rule.
+import {
+  nodes as spikeNodes,
+  portFoliageSway,
+  portGround,
+  portGroundBlob,
+  portImpostor,
+  portInstanceChannels,
+  portMaterialLayers,
+  portRiderKit,
+  portRoad,
+  portSilhouette,
+  syncInstanceMatrices,
+  syncWind,
+} from './spike-0024-nodes';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // ⚠️ **The realistic world's two addons ship in `three@0.185.1` too** (ADR 0026
 // D-2: *"three 0.185.1 already ships PMREMGenerator, the HDR loader, GLTFLoader
@@ -3244,7 +3258,13 @@ export class RiderSilhouetteBelt {
     this.#texture.wrapT = ClampToEdgeWrapping;
     this.#texture.needsUpdate = true;
     const { zMin, zMax, height, reach } = silhouette.bounds;
-    this.#material = constructed(
+    this.#material = spikeNodes()
+      ? (portSilhouette(this.#texture, new Vector4(zMin, zMax, height, reach), this.#darkness, {
+          margin: SILHOUETTE_MARGIN_METRES,
+          taps: SILHOUETTE_TAPS,
+          edge: SILHOUETTE_EDGE_METRES,
+        }) as unknown as ShaderMaterial)
+      : constructed(
       new ShaderMaterial({
         uniforms: {
           oylSilhouette: { value: this.#texture },
@@ -3653,6 +3673,10 @@ function glslFloat(value: number): string {
  * as the ground under it, and the tone mapping of black is black.
  */
 function withGroundBlobShading(material: MeshBasicMaterial): MeshBasicMaterial {
+  if (spikeNodes()) {
+    portGroundBlob(material, GROUND_BLOB_DARKNESS, GROUND_BLOB_CORE);
+    return material;
+  }
   const varyings = `
 varying vec2 vBlobLocal;
 varying vec2 vBlobOffset;
@@ -4527,6 +4551,7 @@ function withSurfaceDetail<
   fieldSpan: { value: number },
   fieldCount: { value: number },
 ): M {
+  if (spikeNodes()) return material; // spike 0024: left out; the stylised world's only
   material.defines = { ...material.defines };
   // ⚠️ Chained after whatever the material already did before it compiles —
   // since ADR 0026 the photographic ground has its own injection, and this one
@@ -5118,6 +5143,28 @@ export class WaterBelt {
  */
 function reflectingWaterMaterial(environment: Texture): ShaderMaterial {
   const height = (environment.image as { height?: number } | null)?.height ?? 256;
+  if (spikeNodes()) {
+    // Spike 0024: NOT ported. A plain physically based surface stands in, lit by
+    // the scene's environment; the belt's writes land in `uniforms` and go nowhere.
+    const standIn = new MeshStandardMaterial({
+      color: WATER_DEEP_COLOUR,
+      roughness: 0.08,
+      metalness: 0,
+      side: DoubleSide,
+    }) as unknown as ShaderMaterial;
+    standIn.uniforms = {
+      skyColour: { value: new Color(UNSET_COLOUR) },
+      horizonColour: { value: new Color(UNSET_COLOUR) },
+      time: { value: 0 },
+      rippleFilter: { value: 1 },
+      envMap: { value: null },
+      envMapRotation: { value: new Matrix3() },
+      environmentScale: { value: 0 },
+      sunDirection: { value: new Vector3(0, 1, 0) },
+      fresnelHeld: { value: -1 },
+    };
+    return standIn;
+  }
   const material = constructed(
     new ShaderMaterial({
       vertexShader: WATER_VERTEX,
@@ -6765,7 +6812,10 @@ function layeredGeometry(
   if (colours !== undefined && colour !== undefined) {
     merged.setAttribute('color', new BufferAttribute(colours, colour.itemSize, colour.normalized));
   }
-  merged.setAttribute('oylLayer', new BufferAttribute(layer, 1));
+  merged.setAttribute(
+    'oylLayer',
+    new BufferAttribute(spikeNodes() ? Float32Array.from(layer) : layer, 1),
+  );
   merged.setIndex(new BufferAttribute(index, 1));
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
@@ -6804,6 +6854,10 @@ interface MaterialLayers {
 function withMaterialLayers(material: MeshStandardMaterial, layers: MaterialLayers): void {
   const count = layers.colours.length;
   const extra = LAYER_TEXTURES.get(material) ?? [];
+  if (spikeNodes()) {
+    portMaterialLayers(material, layers, extra);
+    return;
+  }
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const spliced = "#639's layers";
@@ -7036,6 +7090,7 @@ const REALISTIC_TEXTURE_LOD_BIAS = { value: 0 };
 function withTextureLodBias<M extends Material>(material: M): M {
   if (TEXTURE_BIASED.has(material)) return material;
   TEXTURE_BIASED.add(material);
+  if (spikeNodes()) return material; // spike 0024: left out; 0 at the rung measured
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   material.onBeforeCompile = (shader, renderer) => {
@@ -7213,6 +7268,7 @@ const ATMOSPHERE_FRAGMENT = /* glsl */ `
 function withAtmosphere<M extends Material>(material: M): M {
   if (ATMOSPHERIC.has(material)) return material;
   ATMOSPHERIC.add(material);
+  if (spikeNodes()) return material; // spike 0024: left out; three's own fog stands in
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const spliced = "#622's air";
@@ -7388,6 +7444,16 @@ function withInstanceChannels<M extends Material>(material: M, dither: boolean):
     return material;
   }
   INSTANCE_TAUGHT.set(material, dither);
+  if (spikeNodes()) {
+    portInstanceChannels(material, dither, {
+      zero: TINT_CODEC_ZERO,
+      steps: TINT_CODEC_STEPS,
+      hue: (TINT_CODEC_RANGE.hueDegrees * Math.PI) / 180,
+      saturation: TINT_CODEC_RANGE.saturation,
+      brightness: TINT_CODEC_RANGE.brightness,
+    });
+    return material;
+  }
   if (!ShaderChunk.color_vertex.includes(INSTANCE_TINT)) {
     throw new Error('three’s color_vertex no longer tints by instanceColor as the tint expects');
   }
@@ -7527,6 +7593,11 @@ function withFoliageSwayOf(shape: RealisticShape): void {
     SWAYING.add(material);
     const layers = FOLIAGE_LAYERS.get(material) ?? [material.alphaTest > 0];
     const weights = layers.map((leaves) => (leaves ? 1 : WOOD_SWAY_SHARE));
+    if (spikeNodes()) {
+      portFoliageSway(material, height, weights, FOLIAGE_SWAY_METRES, FOLIAGE_WAVES);
+      material.needsUpdate = true;
+      continue;
+    }
     const weight =
       layers.length > 1
         ? `oylSwayLayer[int(oylLayer + 0.5)]`
@@ -8215,6 +8286,22 @@ function impostorMaterial(
       ? image.width / frames / image.height
       : 0.5;
   const scriptSun = scriptSunToward();
+  if (spikeNodes()) {
+    return portImpostor(strip, normals, {
+      frames,
+      quadW: ortho * frameAspect,
+      quadH: ortho,
+      quadBottom: height / 2 - ortho / 2,
+      treeHeight: height,
+      treeWidth: Number(extras['oyl_scan_width']) > 0 ? Number(extras['oyl_scan_width']) : height,
+      swayMetres: FOLIAGE_SWAY_METRES,
+      alphaCutoff: REALISTIC_ALPHA_CUTOFF,
+      crownShare: IMPOSTOR_CROWN_SHARE,
+      scriptSun,
+      scriptSkyShare: SCRIPT_SKY_SHARE,
+      relightRange: IMPOSTOR_RELIGHT_RANGE,
+    }) as unknown as ShaderMaterial;
+  }
   const material = new ShaderMaterial({
     uniforms: UniformsUtils.merge([
       UniformsLib.fog,
@@ -9093,6 +9180,25 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
     colour: 1,
   };
   ROAD_WEAR.set(material, wear);
+  if (spikeNodes()) {
+    portRoad(material, {
+      tileMetres: REALISTIC_SURFACES.road.tileMetres,
+      grain: PHOTOGRAPHIC_ROAD_GRAIN,
+      wear,
+      maximumPatches: MAXIMUM_ROAD_PATCHES,
+      trackOffsets: WHEEL_TRACK_OFFSETS_METRES,
+      trackHalfWidth: WHEEL_TRACK_HALF_WIDTH_METRES,
+      trackEdge: WHEEL_TRACK_EDGE_METRES,
+      trackLighten: WHEEL_TRACK_LIGHTEN,
+      trackRoughness: WHEEL_TRACK_ROUGHNESS,
+      dustLighten: DUST_LIGHTEN,
+      dustBand: DUST_BAND_METRES,
+      carriagewayHalf: CARRIAGEWAY_HALF_METRES,
+      maximumWear: MAXIMUM_WEAR_SHARE,
+      paintWear: PAINT_WEAR,
+    });
+    return material;
+  }
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
     // #628: the patches lying in this frame's corridor, and the switch the
@@ -9435,6 +9541,25 @@ export function photographicGroundMaterial(
   const shares = new Vector3(1, 1, 1);
   GROUND_BLEND_SHARES.set(material, shares);
   const blended = blend.verge !== undefined && blend.rock !== undefined;
+  if (spikeNodes()) {
+    portGround(material, {
+      tileMetres: REALISTIC_SURFACES.ground.tileMetres,
+      vergeTile: REALISTIC_SURFACES.verge.tileMetres,
+      rockTile: REALISTIC_SURFACES.rock.tileMetres,
+      verge: blend.verge,
+      rock: blend.rock,
+      treeLine: blend.treeLine,
+      shares,
+      roadEdge: ROAD_EDGE_METRES,
+      vergeBlend: VERGE_BLEND_METRES,
+      rockCos: [
+        Math.cos((ROCK_SLOPE_DEGREES[0] * Math.PI) / 180),
+        Math.cos((ROCK_SLOPE_DEGREES[1] * Math.PI) / 180),
+      ],
+      screeBand: SCREE_BAND_METRES,
+    });
+    return material;
+  }
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
     shader.vertexShader = shader.vertexShader
@@ -10171,6 +10296,10 @@ function riderBodyMaterial(
   );
   const mean = REALISTIC_RIDER_KIT_MEAN;
   const spliced = "#623's kit colour";
+  if (spikeNodes()) {
+    portRiderKit(material, kit, plain, mean);
+    return material;
+  }
   material.onBeforeCompile = (shader) => {
     shader.uniforms['oylKitColour'] = kit;
     shader.uniforms['oylKitPlain'] = plain;
@@ -12276,6 +12405,10 @@ class ThreeGameView implements GameView {
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
       ATMOSPHERE.oylValleyMiddle.value = this.#valleyMiddle;
       ATMOSPHERE.oylValleyHaze.value = this.#valleyHaze ? REALISTIC_VALLEY_HAZE : 1;
+    }
+    if (spikeNodes()) {
+      syncWind(FOLIAGE, FOLIAGE_WAVES);
+      syncInstanceMatrices();
     }
     this.#renderer.render(this.#scene, this.#camera);
   }

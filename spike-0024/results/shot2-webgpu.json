@@ -1,0 +1,72 @@
+{
+ "label": "shot2-webgpu",
+ "query": "backend=webgpu&at=2550",
+ "page": "/webgpu.html",
+ "flags": [
+  "--shot"
+ ],
+ "when": "2026-10-12T00:40:39.936Z",
+ "firstFrameWallMs": 906,
+ "wallSeconds": 0.033,
+ "cpuSeconds": {
+  "renderer": 0,
+  "gpu": 0,
+  "browser": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgpu&at=2550",
+  "windows": [],
+  "config": {
+   "backend": "webgpu",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgpu",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": true,
+   "adapter": {
+    "vendor": "apple",
+    "architecture": "metal-3",
+    "device": "",
+    "description": "",
+    "features": [
+     "bgra8unorm-storage",
+     "clip-distances",
+     "core-features-and-limits",
+     "depth-clip-control",
+     "depth32float-stencil8",
+     "dual-source-blending",
+     "float32-blendable",
+     "float32-filterable",
+     "indirect-first-instance",
+     "primitive-index",
+     "rg11b10ufloat-renderable",
+     "shader-f16",
+     "subgroup-size-control",
+     "subgroups",
+     "texture-component-swizzle",
+     "texture-compression-astc",
+     "texture-compression-astc-sliced-3d",
+     "texture-compression-bc",
+     "texture-compression-bc-sliced-3d",
+     "texture-compression-etc2",
+     "texture-formats-tier1",
+     "texture-formats-tier2",
+     "timestamp-query"
+    ]
+   },
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 863.0999999046326
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 863"
+ ],
+ "shot": "/private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c1-9450-eeec99ecadc1/scratchpad/wt-1273-code/spike-0024/screenshots/shot2-webgpu.png"
+}

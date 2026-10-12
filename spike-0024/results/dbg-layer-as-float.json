@@ -1,0 +1,124 @@
+{
+ "label": "dbg-layer-as-float",
+ "query": "backend=webgl2&at=2550&debug=layer-as-float",
+ "page": "/webgpu.html",
+ "flags": [
+  "--shot",
+  "--dump"
+ ],
+ "when": "2026-10-12T00:46:06.941Z",
+ "firstFrameWallMs": 2964,
+ "wallSeconds": 0.026,
+ "cpuSeconds": {
+  "renderer": 0.009999999999999787,
+  "gpu": 0,
+  "browser": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&at=2550&debug=layer-as-float",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 2960.3999996185303
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 2960"
+ ],
+ "shot": "/private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c1-9450-eeec99ecadc1/scratchpad/wt-1273-code/spike-0024/screenshots/dbg-layer-as-float.png",
+ "gpuInfo": {
+  "rows": [
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=true | inst=1 | ic=- | position:Float323 color:Float323 | idx=576",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=1 | ic=- | position:Float323 normal:Float323 color:Float323 fields:Float322 | idx=19296",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 shore:Float321 | idx=216",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=42 | ic=- | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=36",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=1 | ic=- | position:Float323 color:Float323 normal:Float323 oylAcross:Float321 | idx=2694",
+   "Mesh |  | MeshLambertNodeMaterial |  | vc=true | inst=0 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 oylKit:Float321 oylKitJersey:Float323 oylKitLimb:Float323 | idx=2412",
+   "Mesh |  | MeshLambertNodeMaterial |  | vc=true | inst=0 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 oylKit:Float321 oylKitJersey:Float323 oylKitLimb:Float323 | idx=420",
+   "Mesh |  | MeshLambertNodeMaterial |  | vc=true | inst=0 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 oylKit:Float321 oylKitJersey:Float323 oylKitLimb:Float323 | idx=504",
+   "Mesh |  | MeshLambertNodeMaterial |  | vc=true | inst=0 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 oylKit:Float321 oylKitJersey:Float323 oylKitLimb:Float323 | idx=72",
+   "Mesh |  | MeshStandardNodeMaterial | tree_small_02 | vc=true | inst=1 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Uint164n oylLayer:Uint81 | idx=17964",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=10 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=10 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=6",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_a | vc=true | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 oylLayer:Uint81 | idx=71988",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_a | vc=true | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Uint164n oylLayer:Uint81 | idx=17994",
+   "Mesh |  | MeshStandardNodeMaterial | fir_sapling_medium_b | vc=true | inst=3 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Uint164n oylLayer:Uint81 | idx=17994",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=67 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=65 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=6",
+   "Mesh |  | MeshStandardNodeMaterial | shrub_02 | vc=true | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=17940",
+   "Mesh |  | MeshStandardNodeMaterial | shrub_02 | vc=true | inst=6 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=17964",
+   "Mesh |  | MeshStandardNodeMaterial | boulder_01 | vc=true | inst=12 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Uint164n | idx=7200",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=16 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=20 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=14 | ic=- | position:Float323 normal:Float323 uv:Float322 color:Float323 | idx=60",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=false | inst=2 | ic=Float32Array | position:Float323 normal:Float323 uv:Float322 | idx=-",
+   "Mesh |  | MeshStandardNodeMaterial |  | vc=true | inst=2 | ic=Float32Array | position:Float323 normal:Float323 color:Uint164n | idx=1086",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 normal:Float323 uv:Float322 tangent:Float324 skinIndex:Uint84 skinWeight:Float324 | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 normal:Float323 uv:Float322 tangent:Float324 skinIndex:Uint84 skinWeight:Float324 | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 normal:Float323 uv:Float322 tangent:Float324 skinIndex:Uint84 skinWeight:Float324 | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 normal:Float323 uv:Float322 tangent:Float324 skinIndex:Uint84 skinWeight:Float324 | idx=25908",
+   "SkinnedMesh | rider | MeshStandardNodeMaterial |  | vc=false | inst=1 | ic=- | position:Float323 normal:Float323 uv:Float322 tangent:Float324 skinIndex:Uint84 skinWeight:Float324 | idx=25908",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=2 | ic=- | position:Float323 oylThrow:Float322 | idx=6",
+   "Mesh |  | MeshBasicNodeMaterial |  | vc=false | inst=62 | ic=- | position:Float323 blobClipFirst:Float323 blobClipSecond:Float323 blobStrength:Float321 | idx=6"
+  ],
+  "ported": [
+   [
+    "impostor strip",
+    4
+   ],
+   [
+    "material layers",
+    4
+   ],
+   [
+    "foliage sway",
+    6
+   ],
+   [
+    "instance channels: tint and dither",
+    4
+   ],
+   [
+    "instance channels: tint",
+    21
+   ],
+   [
+    "rider kit colour",
+    5
+   ],
+   [
+    "rider silhouette shadow",
+    1
+   ],
+   [
+    "ground blob",
+    1
+   ],
+   [
+    "photographic road",
+    1
+   ],
+   [
+    "photographic ground",
+    1
+   ]
+  ]
+ }
+}

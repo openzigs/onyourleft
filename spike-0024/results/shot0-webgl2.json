@@ -1,0 +1,44 @@
+{
+ "label": "shot0-webgl2",
+ "query": "backend=webgl2&at=2550",
+ "page": "/webgpu.html",
+ "flags": [
+  "--shot"
+ ],
+ "when": "2026-10-12T00:29:22.467Z",
+ "firstFrameWallMs": 4315,
+ "wallSeconds": 0.022,
+ "cpuSeconds": {
+  "renderer": 0,
+  "gpu": 0,
+  "browser": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&at=2550",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 4288.199999809265
+ },
+ "lines": [
+  "OYL-SPIKE-CONSOLE warn THREE.AttributeNode: Vertex attribute \"uv\" not found on geometry.",
+  "OYL-SPIKE-CONSOLE error THREE.NodeBuilder: Material \"ShaderMaterial\" is not compatible.",
+  "OYL-SPIKE-FIRST-FRAME 4288"
+ ],
+ "shot": "/private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c1-9450-eeec99ecadc1/scratchpad/wt-1273-code/spike-0024/screenshots/shot0-webgl2.png"
+}

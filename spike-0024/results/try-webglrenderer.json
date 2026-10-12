@@ -1,0 +1,117 @@
+{
+ "label": "try-webglrenderer",
+ "query": "backend=webglrenderer&seconds=30",
+ "page": "/webgpu.html",
+ "flags": [],
+ "when": "2026-10-12T00:28:09.207Z",
+ "firstFrameWallMs": 3573,
+ "wallSeconds": 26.93,
+ "cpuSeconds": {
+  "renderer": 8.82,
+  "gpu": 3.49,
+  "browser": 0.21999999999999997
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&seconds=30",
+  "windows": [
+   {
+    "window": 1,
+    "frames": 3570,
+    "fps": 119,
+    "frameMs": {
+     "p50": 8.300000000000182,
+     "p90": 8.80000000000291,
+     "p99": 9.399999999999636,
+     "count": 3570
+    },
+    "renderMs": {
+     "p50": 1.5,
+     "p90": 2,
+     "p99": 2.5,
+     "count": 3570
+    },
+    "trianglesPerFrame": 199527,
+    "drawCallsPerFrame": 31
+   }
+  ],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 30,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 3569.5,
+  "result": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "world": "realistic",
+   "rung": "realistic",
+   "seconds": 30,
+   "frames": 3570,
+   "fps": 119,
+   "frameMs": {
+    "p50": 8.300000000000182,
+    "p90": 8.80000000000291,
+    "p99": 9.399999999999636,
+    "count": 3570
+   },
+   "renderMs": {
+    "p50": 1.5,
+    "p90": 2,
+    "p99": 2.5,
+    "count": 3570
+   },
+   "gapsOver100Ms": 2,
+   "lastFrame": {
+    "frame": 3600,
+    "calls": 30,
+    "triangles": 197506,
+    "points": 0,
+    "lines": 0
+   },
+   "memory": {
+    "geometries": 31,
+    "textures": 63
+   },
+   "textures": {
+    "bytes": 30869160,
+    "formats": {
+     "ETC2 RGB": 25,
+     "ASTC 4x4": 34,
+     "ETC2 RGBA": 5
+    },
+    "sky": "half-float"
+   },
+   "drawingBuffer": [
+    2560,
+    1600
+   ],
+   "devicePixelRatio": 2,
+   "gl": true,
+   "layers": {
+    "traa": false,
+    "ao": false,
+    "wind": false
+   },
+   "firstFrameMs": 3569.5
+  }
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 3570",
+  "OYL-SPIKE {\"window\":1,\"frames\":3570,\"fps\":119,\"frameMs\":{\"p50\":8.300000000000182,\"p90\":8.80000000000291,\"p99\":9.399999999999636,\"count\":3570},\"renderMs\":{\"p50\":1.5,\"p90\":2,\"p99\":2.5,\"count\":3570},\"trianglesPerFrame\":199527,\"drawCallsPerFrame\":31}",
+  "OYL-SPIKE-RESULT {\"asked\":\"webglrenderer\",\"renderer\":\"WebGLRenderer\",\"webgpuBackend\":false,\"adapter\":null,\"userAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\",\"world\":\"realistic\",\"rung\":\"realistic\",\"seconds\":30,\"frames\":3570,\"fps\":119,\"frameMs\":{\"p50\":8.300000000000182,\"p90\":8.80000000000291,\"p99\":9.399999999999636,\"count\":3570},\"renderMs\":{\"p50\":1.5,\"p90\":2,\"p99\":2.5,\"count\":3570},\"gapsOver100Ms\":2,\"lastFrame\":{\"frame\":3600,\"calls\":30,\"triangles\":197506,\"points\":0,\"lines\":0},\"memory\":{\"geometries\":31,\"textures\":63},\"textures\":{\"bytes\":30869160,\"formats\":{\"ETC2 RGB\":25,\"ASTC 4x4\":34,\"ETC2 RGBA\":5},\"sky\":\"half-float\"},\"drawingBuffer\":[2560,1600],\"devicePixelRatio\":2,\"gl\":true,\"layers\":{\"traa\":false,\"ao\":false,\"wind\":false},\"firstFrameMs\":3569.5}"
+ ]
+}

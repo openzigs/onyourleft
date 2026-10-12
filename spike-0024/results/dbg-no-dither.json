@@ -1,0 +1,42 @@
+{
+ "label": "dbg-no-dither",
+ "query": "backend=webgl2&at=2550&debug=no-dither",
+ "page": "/webgpu.html",
+ "flags": [
+  "--shot"
+ ],
+ "when": "2026-10-12T00:45:36.903Z",
+ "firstFrameWallMs": 2025,
+ "wallSeconds": 0.028,
+ "cpuSeconds": {
+  "renderer": 0.04999999999999982,
+  "gpu": 0.010000000000000009,
+  "browser": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webgl2&at=2550&debug=no-dither",
+  "windows": [],
+  "config": {
+   "backend": "webgl2",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webgl2",
+   "renderer": "WebGPURenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 2020.0999999046326
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 2020"
+ ],
+ "shot": "/private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c1-9450-eeec99ecadc1/scratchpad/wt-1273-code/spike-0024/screenshots/dbg-no-dither.png"
+}

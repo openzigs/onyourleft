@@ -1,0 +1,42 @@
+{
+ "label": "shot3-webglrenderer",
+ "query": "backend=webglrenderer&at=2550",
+ "page": "/webgpu.html",
+ "flags": [
+  "--shot"
+ ],
+ "when": "2026-10-12T00:44:37.801Z",
+ "firstFrameWallMs": 1120,
+ "wallSeconds": 0.031,
+ "cpuSeconds": {
+  "renderer": 0.009999999999999787,
+  "gpu": 0.010000000000000009,
+  "browser": 0
+ },
+ "published": {
+  "ready": true,
+  "errors": [],
+  "query": "?backend=webglrenderer&at=2550",
+  "windows": [],
+  "config": {
+   "backend": "webglrenderer",
+   "seconds": 60,
+   "at": 2550,
+   "traa": false,
+   "ao": false,
+   "wind": false
+  },
+  "drawing": {
+   "asked": "webglrenderer",
+   "renderer": "WebGLRenderer",
+   "webgpuBackend": false,
+   "adapter": null,
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+  },
+  "firstFrameMs": 1108.1999998092651
+ },
+ "lines": [
+  "OYL-SPIKE-FIRST-FRAME 1108"
+ ],
+ "shot": "/private/tmp/claude-501/-Users-matthewcronin-Development-onyourleft/558d353f-3273-42c1-9450-eeec99ecadc1/scratchpad/wt-1273-code/spike-0024/screenshots/shot3-webglrenderer.png"
+}
