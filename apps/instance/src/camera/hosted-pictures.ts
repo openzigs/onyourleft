@@ -31,8 +31,9 @@ import type { PictureConnection, PictureQuestion } from './picture-model.ts';
  * (`apps/web/src/camera/analysis-port.ts` §`ANALYSIS_PROMPTS` `side-pose`),
  * copied because the instance may not import the client, and because the
  * answer is read by the app's one reader of that shape
- * (`side-pose-answer` in `apps/web/src/camera/computer-pose.ts`
- * §`sidePoseFromAnswer`). A change to either is a change to both.
+ * (`apps/web/src/camera/computer-pose.ts` §`sidePoseFromAnswer`). A change
+ * to either is a change to both, and `apps/web/src/camera/instance-pose.test.ts`
+ * holds the two sentences equal.
  */
 export const SIDE_POSE_QUESTION =
   'First decide whether this picture shows a person riding a bicycle, filmed from the side. ' +
