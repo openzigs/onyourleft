@@ -10,7 +10,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { beatsPerMinute, seconds, watts, type Seconds } from '../quantities';
+import {
+  beatsPerMinute,
+  seconds,
+  watts,
+  type BeatsPerMinute,
+  type Seconds,
+  type Watts,
+} from '../quantities';
 
 import type { WorkoutGoals } from './goals';
 import type { TrainerPowerRange } from './heart-rate-hold';
@@ -635,6 +642,17 @@ describe('the safety criteria, by name — #1242', () => {
     expect(ruleOf(swap('w-1', 0), { state: stateOf({ position: seconds(4000) }) })).toBe('P3');
   });
 
+  it('a swap on a plan already over its goal is accepted when it does not lengthen it', () => {
+    // The goal is 60 minutes and the loaded workout 80: the plan is over before any move.
+    const goals = { durationMinutes: 60 };
+    const swap = (blockIndex: number) =>
+      proposalOf({ kind: 'swap-next-block', workoutId: 'w-1', blockIndex });
+    // 5 minutes for 10 shortens it.
+    expect(ruleOf(swap(0), { goals })).toBe('accepted');
+    // 30 minutes for 10 lengthens it.
+    expect(ruleOf(swap(3), { goals })).toBe('P3');
+  });
+
   it('a swap that makes a plan too long to ride is refused', () => {
     // 49 blocks of 100 repeats is 9 800 segments; one more such block is over the 10 000.
     const many: WorkoutBlock = {
@@ -783,6 +801,15 @@ describe('validateProposal — the rules a refusal names', () => {
     expect(ruleOf(proposalOf(shorten), { athlete: { ...ATHLETE, thresholdPower: watts(0) } })).toBe(
       'P6',
     );
+    // An unset threshold heart rate or machine maximum is NaN-shaped: the bound comparisons
+    // fail open on it, so the guard refuses before they run.
+    const nan = Number.NaN;
+    const holdUp = proposalOf({ kind: 'move-hold-range', block: 3, bpm: 5 });
+    expect(
+      ruleOf(holdUp, { athlete: { ...ATHLETE, thresholdHeartRate: nan as BeatsPerMinute } }),
+    ).toBe('P6');
+    const swapIn = proposalOf({ kind: 'swap-next-block', workoutId: 'w-1', blockIndex: 0 });
+    expect(ruleOf(swapIn, { machine: { minimum: watts(0), maximum: nan as Watts } })).toBe('P6');
     // Goals that do not read are no bounds to check against.
     const unread = { powerCeiling: 250 } as unknown as WorkoutGoals;
     expect(ruleOf(proposalOf(shorten), { goals: unread })).toBe('P6');
