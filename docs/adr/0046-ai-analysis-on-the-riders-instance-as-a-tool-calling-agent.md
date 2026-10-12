@@ -1117,3 +1117,156 @@ Until 2026-10-07 this section was §"Owner questions left open".
   inline in the answer shows neither sign, and its rider or operator sets the field. **3 072 is the
   author's draft, not a measurement** — the three calls were capped at 1 024 — and it and the
   `model-no-answer` sentence are the owner's to rule on. (#1268)
+- **2026-10-12** — **DRAFT, for the owner's approval before merge: side-camera pictures may go to
+  the rider's instance, sealed, to be looked at by a model there.** D-1's *"pictures do not leave
+  the room"* and D-14(d)'s closing paragraph (*"Pictures travel only over the home network or a
+  WireGuard-class overlay, never through the Cloudflare tunnel"*, the Q3 ruling of 2026-10-07) no
+  longer hold for ONE path: the side camera's pictures, when the rider has switched this on. The
+  owner ruled it twice. On [#1092](https://github.com/openzigs/onyourleft/issues/1092) on
+  2026-10-04, ruling 1: *"Pose on your computer (ADR 0033 D-11): move it to the instance.
+  Side-camera pictures will go to the instance, which asks the vision model. A photograph of the
+  rider then leaves the room, through the tunnel when away from home."* And on
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12, five points: sealing,
+  storage, which model, consent and stripping, each recorded in an entry below. **For every other
+  picture D-1 and D-14(d) stand as written**: the tablet's own pose model is still the default and
+  is what runs unless the rider turns this on; a kept frame, a snapshot and the single-picture
+  camera send nothing to an instance; and no analysis job, no tool and no synced item carries a
+  picture (`apps/web/src/camera/no-picture-reachable.test.ts` §"a picture reaches an instance by
+  one path" holds that the one module that may put a picture in an instance's request is
+  `camera/instance-pose.ts`, and that every other module naming an instance route reaches no
+  picture module). It is **not an analysis job**: there is no job row, no event, no stream and no
+  tool, and D-7's budgets do not apply; it is one request and one answer
+  (`POST /v1/camera/side-pose`). ⚠️ **Recorded as amendments because the owner's ruling on #1106
+  says so** (*"the ADR amendment (ADR 0046's `## Amendments`, and amendments to ADR 0029 and ADR
+  0033 where they say otherwise; no ADR body is edited)"*). [ADR 0013](0013-adr-amendments.md)
+  D-3 would have a reversed decision superseded by a new ADR, and
+  [ADR 0029](0029-camera-imagery-as-a-data-class.md) D-6 says of itself that it is *"reversible
+  only by a superseding ADR"*; ADR number 0049 is free if the owner would rather have one. (#1106)
+- **2026-10-12** — **DRAFT (#1106, ruling 1): a picture travels sealed, or it is not sent.** A
+  side-camera picture leaves the tablet only inside a sealed request
+  ([ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-8, D-9): sealed
+  on the device to the instance's encryption key, signed by the device's key, through the one
+  module the client reaches an instance through (`instance/instance-transport.ts`, no new network
+  primitive and no new permit in `privacy/no-network.test.ts`). The app has no unsealed way to
+  call the route, so with no card, with keys that do not verify, or in a copy of the web app loaded
+  from a website (ADR 0047 D-11), no picture is sent and the screen says so. The instance refuses
+  the route unsealed on EVERY instance: it is on `sealed/phase-one.ts`'s list, and its handler
+  answers `sealed_required` itself to anything that did not arrive inside `POST /v1/sealed`, so an
+  instance with no keys, which answers its other sealed routes in plaintext (ADR 0047 D-7), takes
+  no picture at all. **What crosses the tunnel**: going up, the sealed envelope, whose plaintext
+  is the picture (a JPEG of at most 64 KiB, base64), which model to use, and for a hosted model
+  the origin the rider agreed to; coming down, the sealed model's answer, a few hundred bytes of
+  text. **What Cloudflare can see**, which terminates TLS on the tunnel: not the picture and not
+  the answer; that this rider's device is sending this instance something, from which address,
+  when and how often; each envelope's size to within its padding bucket (the next 64 KiB above
+  64 KiB, so a picture's size to within that, which says roughly how much detail was in it); the
+  bearer session token in the header, as for every request (ADR 0047 D-11); and from the rhythm,
+  about one a second for as long as it lasts, that a side camera is filming and for how long. Not
+  what is in a picture, and not what the model said. (#1106)
+- **2026-10-12** — **DRAFT (#1106, ruling 2): a picture is never stored on the instance. It is in
+  transit, analysed, and discarded.** `apps/instance/src/camera/` is handed no store, no blob
+  store and no log, and imports none (`camera/hosted-pictures-seam.test.ts` walks its imports). A
+  picture is the argument of one call: decoded from the request, checked, shown to one model, and
+  dropped when the call returns. There is no job table row, no queue, no file and no cache; the
+  request log carries the sealed route alone, as for every sealed request; an error is a closed
+  code and a fixed sentence, and a model server's own error text, which can quote what it was
+  sent, never leaves `analysis/model.ts`. `camera/side-pose.test.ts` reads every byte of the
+  database and every log line after a picture has been through, one of them through a model that
+  failed. **At most one picture an athlete is held at a time**: a second while one is with the
+  model is refused `rate_limited`, unread, because a queue of photographs in memory is refused
+  ([ADR 0033](0033-side-camera-link.md) D-6). **Per-athlete scoping**: the route is the session's
+  own (`reaches: 'own'`); no body or path names an athlete; the one thing read about an athlete is
+  their OWN hosted key, and a key held for anybody else is refused there as well as by the lookup.
+  ⚠️ **"Never stored" is a promise about the software this repository publishes, on the
+  instance.** Whoever runs an instance controls that machine, and what a hosted service keeps is
+  under its own terms (the next entry). The rider-facing words say both. (#1106)
+- **2026-10-12** — **DRAFT (#1106, ruling 3, the owner's own): which model may see a picture.**
+  *"The instance's local model, or a hosted vendor's model when the rider has entered their own
+  key for it (DeepSeek, Anthropic and the like). Never the operator's key."* **Local**: a model
+  the operator NAMES for pictures (`OYL_INSTANCE_PICTURE_MODEL`), on the server at
+  `OYL_INSTANCE_ANALYSIS_MODEL_URL` and held to its local-address rule (D-9, ADR 0040 D-6). Not
+  set, no local model takes pictures (`pictures_off`); the analysis model is never used in its
+  place, because a model that writes may not read a picture. **Hosted**: the rider's own key
+  (`analysis/hosted-key.ts` §`ownHostedKeyState`, D-9 as the 2026-10-09 entry left it) and nobody
+  else's, through one builder (`camera/hosted-pictures.ts`, the only module besides `model.ts`
+  that may name the hosted picture connection). What the service is sent is the picture and one
+  fixed question this repository's source contains, and nothing else: no athlete id, no session,
+  no ride, nothing the rider typed. D-10's masking does not apply because there are no words of
+  the rider's to mask, which is why it is a second seam and not `analysis/hosted.ts`'s. **The
+  hosted consent is its own**, separate from the write-up's (Q10, `athlete_hosted_consent`,
+  which this path never reads): it names the service, it is given on the device, and it travels
+  with every picture as the origin it named, sealed and device-signed. The instance sends a
+  picture on only when that origin is the origin the rider's key goes to, so a key later moved to
+  another service is refused (`picture_source_unavailable`) until the rider has agreed to a
+  sentence naming the new one. ⚠️ It is NOT a row on the instance, unlike Q10's; that is the
+  author's choice, for the owner to rule on: one fewer thing about a rider kept on a server,
+  against no server-side record that consent was given. **A model that takes no picture is
+  refused, saying so**: a 400, 415 or 422 whose text names an image or vision is
+  `model_without_pictures`, the text matched and dropped, and the app says *"The model answered
+  that it does not take pictures"*. ⚠️ **Which models were checked for image input, and how: none
+  by a request.** Read on 2026-10-12: Ollama's OpenAI-compatibility page lists vision with a
+  base64 picture as supported and says nothing of a model without it; Anthropic's OpenAI SDK
+  compatibility page lists `image_url` in a user message as fully supported, and calls that layer
+  not production-ready for most uses; DeepSeek's vision guide says its `deepseek-flash` model
+  takes pictures in user messages. The instance was run only against a scripted model server. No
+  key of the owner's was used and no model on the owner's Ollama was loaded; that Ollama's own
+  model list was read (it marks which of its models have `vision`). ⚠️ **A server that silently
+  drops a picture it cannot read is not detected.** Its answer is then about nothing, and what
+  stands between it and the report is the device's check that the points could be a person on a
+  bicycle (#761). A sight check, a known picture asked about before the first real one, is owed
+  if a real model is found to do this. (#1106)
+- **2026-10-12** — **DRAFT (#1106, rulings 4 and 5): two consents, off by default, and stripping
+  first.** Both switches are on the Camera page, each beside the sentence it is consent to, and
+  both are `false` on every device until the rider ticks them; the second sits under the first
+  and is withdrawn with it. They are stored on the device, not on the instance, and the first is
+  stored as the address of the instance it was given for: a device that later signs in to another
+  instance holds no agreement for that one, and *Erase this device* forgets both with the sign-in. Turning the
+  instance's switch on turns off ADR 0033 D-11's computer switch, and the reverse: one place at a
+  time. **The words, for the owner's approval** — they are `apps/web/src/camera/instance-pose.ts`
+  §`SIDE_INSTANCE_WHAT_IS_SENT`, §`SIDE_INSTANCE_CONSENT` and §`sideInstanceHostedConsent`, and
+  `docs/privacy-policy.md` §"Side-camera pictures sent to your instance" quotes them word for
+  word (`camera/instance-pose-policy.test.ts`). What is sent: *"Your instance can look at the
+  side camera’s pictures instead of this tablet. Nothing is sent until you switch it on here.
+  Each picture is then sealed on this tablet so that only your instance can open it, sent to your
+  instance, looked at by a model there, and not kept there: not in its database, not in a file
+  and not in its logs. If the sealed connection is not available, no picture is sent."* The
+  first consent: *"While the side camera is filming, pictures of you leave this room, about one a
+  second, and go to your instance instead of being looked at on this tablet. They are sealed
+  before they leave, so nobody between this tablet and your instance can see them, including the
+  tunnel service a home instance is reached through. That service can still see that something
+  is being sent, how often and roughly how large. Your instance shows each picture to the model
+  its operator set up on that machine, and does not keep it. That is a promise about the software
+  this project publishes: whoever runs your instance controls that machine."* The hosted consent,
+  with the service's host where *the service* stands: *"This sends pictures of you to the
+  service. If you turn this on, your instance sends each side-camera picture on to the service,
+  the service your own key is for, using your key. That is a company that is not you and not us.
+  What it does with your pictures, and how long it keeps them, is under its terms and not ours.
+  We cannot see that, and we cannot delete them for you afterwards. “Not kept” is a promise about
+  your instance only. It says nothing about the service. Your instance sends the picture and one
+  fixed question, and nothing else: not your name, not your rides, not where you were. You do not
+  need this. This tablet can look at the pictures itself, and so can the model on your instance.
+  This is off, and it stays off until you turn it on."* The service is named by the host of the
+  URL the rider stored their key with, read back from their instance on a press, because the app
+  ships no vendor list and no vendor's name ([ADR 0031](0031-model-licences-and-the-hosted-model-hole.md)
+  D-4). **Stripping** ([ADR 0029](0029-camera-imagery-as-a-data-class.md) D-9): a side-camera
+  picture is re-encoded from pixels on the phone when it is taken; the tablet refuses to send one
+  that carries a metadata marker (`instance-pose.ts`, through `frame.ts` §`capturedFrame`); and
+  the instance checks again and refuses one (`camera/picture.ts`), because its next hop may be a
+  company. (#1106)
+- **2026-10-12** — **DRAFT (#1106): the measurement, on loopback, and the rate it set.**
+  [Spike 0025](../spikes/0025-side-camera-pictures-through-the-instance.md), run on 2026-10-12
+  against an instance started for the run with a scripted model: a sealed picture costs 22 KB up
+  for an 8 KiB picture, 87 KB for 24 KiB and 175 KB for the largest (64 KiB), and about 0.4 KB
+  down; sealing, the round trip and opening took 8 to 31 ms at the median with a model that
+  answered at once. **Five a second is not reachable, and not for bandwidth**: an instance allows
+  one session 120 sealed requests a minute, and offered a picture every 200 ms it refused 180 of
+  450 in ninety seconds. So the app sends at most one a second, one at a time, and a model slower
+  than that sets the rate. At one a second, 130 of 130 of the largest pictures were answered over
+  129 s with none refused, at 176 KB a second up (1.4 Mbit/s; 91 KB a second for 24 KiB pictures);
+  the framing check's ten pictures took 9.4 s with a model taking 0.4 s, and 29 s with one taking
+  2 s on the tool's one-second grid (the app sends the next as soon as the last is answered, which
+  would be nearer 20 s and was not measured). What the side analysis NEEDS is ten pictures with a
+  rider in them for the framing check, and a session's worth for the report; it needs no
+  particular rate, and a rider waits about ten seconds for the check where the tablet's own model
+  takes two. ⚠️ **Not measured: the tunnel, any real model, and a real camera's picture sizes.**
+  The run through the Cloudflare tunnel needs the owner's go-ahead and is owed. (#1106)

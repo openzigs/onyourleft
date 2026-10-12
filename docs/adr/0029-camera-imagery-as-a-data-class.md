@@ -1073,3 +1073,33 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   readable. Until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes the device
   path, the hosted consent the app ships stays the one the last 2026-09-29 entry above quotes; this
   entry quotes no consent of its own. The body above is not edited.
+- **2026-10-12** — **DRAFT, for the owner's approval before merge: D-6's rejection of the
+  Cloudflare Tunnel no longer holds for a SEALED side-camera picture on its way to the rider's
+  instance, and D-7's *"only for a frame the rider is looking at, on a press"* no longer holds
+  for the instance's hosted path.** The owner ruled both on
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12, and
+  [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s entries of that
+  date are the record. **D-6**: its rule was *"It may not travel over a transport whose operator
+  can read it"*, and it said a reversal would have to argue *"that the operator cannot read the
+  payload"*. That is the argument made: the picture is sealed on the device to the instance's own
+  key ([ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md)), so Cloudflare
+  carries ciphertext, and a picture that cannot be sealed is not sent. D-6's rule stands; what
+  changed is that this payload now meets it on that transport. Its table's other rows stand, and
+  an UNSEALED picture through a TLS-terminating proxy is as rejected as it was: #387's path to
+  the rider's own computer still refuses any address off their own network. **D-7**: a hosted
+  model may now be sent the side camera's pictures continuously while it films, about one a
+  second, when the rider has turned on two switches, the second naming the service. D-7's other
+  rows hold in substance: the bytes that leave are *"the frame, and a fixed prompt this
+  repository's source contains. Nothing else"*; the key is the rider's own, though it now lives
+  on their instance (the 2026-10-07 entry); it is never default and never silent; and what comes
+  back is untrusted input (D-8). D-7's consent sentences are not the ones shown: the ones shown
+  are in ADR 0046's entry, and say the service's name. **D-4's second `ERASE_CANNOT_REACH`
+  line** — *"a photograph you sent to a hosted model"* — ships now, worded for who sent it: *"a
+  photograph your instance sent on to a hosted service you agreed to, which is a copy that
+  service holds"*. **D-9's boundary table** gains a row, `departing`: a side-camera picture to
+  the rider's instance (`privacy/boundaries.test.ts`); and its rule is applied three times on
+  this path, at capture, before the tablet sends, and on arrival at the instance. **§"What
+  `docs/privacy-policy.md` and Play Data Safety would have to say"**: done in the same pull
+  request as the first byte, as it asked. The Photos row is now `shared: true`. ⚠️ Recorded as an
+  amendment on the owner's instruction, though D-6 says of itself that it is reversible only by a
+  superseding ADR: see ADR 0046's first entry of this date. (#1106)

@@ -822,3 +822,25 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   WireGuard-class overlay, never through the Cloudflare tunnel (ADR 0029 D-6)."* D-3's never-sent
   list holds on the instance: a job's input carries the pose summary only with camera consent, and
   no instance tool returns it (ADR 0046 D-6, D-14(d)). The body above is not edited.
+- **2026-10-12** — **DRAFT, for the owner's approval before merge: the path the 2026-10-07 entry
+  said was due to move now exists on the rider's instance, beside D-11's, and D-6's *"never …
+  sent anywhere else"* has a second exception.** The owner's ruling on
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106) of 2026-10-12, recorded in
+  [ADR 0046](0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md)'s entries of
+  that date, lifts the Q3 bound the 2026-10-07 entry quotes (*"never through the Cloudflare
+  tunnel"*) for a picture that is SEALED. So the tablet may send the side camera's pictures on to
+  the rider's instance (`camera/instance-pose.ts`), which shows each to a model and keeps none.
+  It is chosen as D-11 is: its own switch, off by default, with its own consent sentence, read
+  again for every picture so that switching it off stops the next one, and chosen once per
+  pairing. What differs from D-11: the pictures are sealed and go through
+  `instance/instance-transport.ts`, never `camera/analysis-transport.ts`; no more than one a
+  second is sent (an instance's limit on sealed requests, spike 0025), not each as it arrives;
+  and a stop says why. **D-11's own path, to the rider's computer, is still here**:
+  [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes it. Until then the two
+  switches cannot both be on, and `side-analyser.ts` takes the instance if a device somehow holds
+  both. **D-6 stands for everything else**: at most one picture waits; no picture is written to
+  the tablet's storage; the per-ride keep is not offered on this path; and pose numbers alone are
+  kept. A session looked at by the instance records its source as `computer`, the stored value
+  for a general vision model off the tablet; a third stored value is not added here. **D-3's
+  never-across list holds on this path too**: the request carries the picture, which model, and
+  for a hosted model the origin agreed to, and nothing else. The body above is not edited. (#1106)
