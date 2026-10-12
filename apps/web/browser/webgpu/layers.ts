@@ -52,13 +52,18 @@ export async function installLayers(
         const scenePass = pass(scene, camera);
         const targets = { output };
         if (switches.traa) targets.velocity = velocity;
-        if (switches.ao) targets.normal = normalView;
+        const depthNormals = new URLSearchParams(location.search).get('aon') === 'depth';
+        if (switches.ao && !depthNormals) targets.normal = normalView;
         scenePass.setMRT(mrt(targets));
         let colour = scenePass.getTextureNode('output');
         const depth = scenePass.getTextureNode('depth');
         if (switches.ao) {
-          const occlusion = ao(depth, scenePass.getTextureNode('normal'), camera);
-          occlusion.resolutionScale = 0.5;
+          const occlusion = ao(
+            depth,
+            depthNormals ? null : scenePass.getTextureNode('normal'),
+            camera,
+          );
+          occlusion.resolutionScale = Number(new URLSearchParams(location.search).get('aos') ?? '0.5');
           colour = colour.mul(vec4(vec3(occlusion.getTextureNode().r), 1));
         }
         if (switches.traa) {

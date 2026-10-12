@@ -4,7 +4,10 @@
  * Spike 0024 (#1273). NEVER MERGED. Builds `browser/webgpu.html` alone, with
  * `three` aliased to `browser/webgpu/three-shim.ts`.
  *
- * `OYL_SPIKE_ONLY=webgpu` leaves the classic build out (W7's JavaScript size).
+ * W7's JavaScript size is the difference between two builds of this one page:
+ * `OYL_SPIKE_ONLY=webgpu` leaves the classic build out (a page that has moved),
+ * and `OYL_SPIKE_ONLY=classic` leaves `three/webgpu`, TSL and the ports out (the
+ * same page on `WebGLRenderer`, as the product is today).
  */
 
 import { fileURLToPath } from 'node:url';
@@ -22,7 +25,11 @@ export default defineConfig({
   publicDir: '../public',
   appType: 'mpa',
   resolve: {
-    alias: [
+    alias: only === 'classic' ? [
+      { find: /^\.\/three-shim$/, replacement: here('./browser/webgpu/classic-only/three-shim.ts') },
+      { find: /^\.\/layers$/, replacement: here('./browser/webgpu/classic-only/layers.ts') },
+      { find: /^\.\/spike-0024-nodes$/, replacement: here('./browser/webgpu/classic-only/nodes.ts') },
+    ] : [
       { find: /^three$/, replacement: here('./browser/webgpu/three-shim.ts') },
       {
         find: /^oyl-three-classic$/,

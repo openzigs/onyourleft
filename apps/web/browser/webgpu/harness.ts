@@ -22,7 +22,6 @@ import {
   realisticTextureReport,
   threeGameRenderer,
 } from '../../src/game/three-renderer';
-import { percentiles } from '../realistic/config';
 import { rideFrame, RIDE_METRES_PER_SECOND } from '../realistic/frame';
 import { describe } from '../realistic/loop';
 import { realisticRoute } from '../realistic/route';
@@ -37,6 +36,22 @@ const LOOP_METRES = 3_500;
 const WINDOW_SECONDS = 30;
 
 type Backend = 'webglrenderer' | 'webgpu' | 'webgl2';
+
+/** Nearest-rank percentiles, as `realistic/config.ts` §`percentiles`, with the 95th the plan asks for. */
+function percentiles(samples: readonly number[]): Record<string, number> {
+  if (samples.length === 0) return { p50: NaN, p90: NaN, p95: NaN, p99: NaN, max: NaN, count: 0 };
+  const sorted = [...samples].sort((a, b) => a - b);
+  const rank = (p: number): number =>
+    sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)] as number;
+  return {
+    p50: rank(50),
+    p90: rank(90),
+    p95: rank(95),
+    p99: rank(99),
+    max: sorted[sorted.length - 1] as number,
+    count: sorted.length,
+  };
+}
 
 interface Published {
   ready: boolean;
@@ -136,7 +151,25 @@ async function run(): Promise<void> {
             description: adapter.info.description,
             isFallbackAdapter: (adapter as { isFallbackAdapter?: boolean }).isFallbackAdapter,
             features: [...adapter.features].sort(),
+            limits: {
+              maxTextureDimension2D: adapter.limits.maxTextureDimension2D,
+              maxTextureArrayLayers: adapter.limits.maxTextureArrayLayers,
+              maxBindGroups: adapter.limits.maxBindGroups,
+              maxSampledTexturesPerShaderStage: adapter.limits.maxSampledTexturesPerShaderStage,
+              maxSamplersPerShaderStage: adapter.limits.maxSamplersPerShaderStage,
+              maxUniformBufferBindingSize: adapter.limits.maxUniformBufferBindingSize,
+              maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+              maxVertexAttributes: adapter.limits.maxVertexAttributes,
+              maxColorAttachments: adapter.limits.maxColorAttachments,
+              maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize,
+              maxComputeInvocationsPerWorkgroup: adapter.limits.maxComputeInvocationsPerWorkgroup,
+            },
           },
+    deviceFeatures: isWebGPUBackend
+      ? [...((renderer.backend.device?.features ?? []) as Iterable<string>)].sort()
+      : undefined,
+    compatibilityMode: renderer.backend?.compatibilityMode,
+    canvasFormat: isWebGPUBackend ? navigator.gpu.getPreferredCanvasFormat() : undefined,
     userAgent: navigator.userAgent,
   };
 
@@ -219,6 +252,9 @@ async function run(): Promise<void> {
             renderMs: percentiles(windowRender),
             trianglesPerFrame: Math.round(windowTriangles / windowRender.length),
             drawCallsPerFrame: Math.round(windowCalls / windowRender.length),
+            gapsOver100Ms: gaps,
+            texturesSize: renderer.info.memory.texturesSize as number | undefined,
+            textures: renderer.info.memory.textures as number,
           };
           published.windows.push(each);
           console.log(`OYL-SPIKE ${JSON.stringify(each)}`);

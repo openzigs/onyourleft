@@ -23,3 +23,15 @@ __pycache__/
 
 # The home deploy's record of what it deployed (#52): a file on the box.
 apps/instance/deploy/home/.deployed
+
+# Spike 0024 (#1273), owner ruling 2026-10-12: no image is committed or pushed
+# on any branch, and neither is a build's output.
+spike-0024/screenshots/
+apps/web/browser/dist-webgpu/
+apps/web/browser/dist-webgpu-*/
+spike-0024/apk/
+spike-0024/runs/**/logcat-stream.txt
+*.png
+*.jpg
+*.jpeg
+*.mp4
