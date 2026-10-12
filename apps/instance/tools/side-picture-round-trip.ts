@@ -10,8 +10,10 @@
  *     node tools/side-picture-round-trip.ts --loopback [--model-ms 400]
  *     node tools/side-picture-round-trip.ts --url https://rides.example.org \
  *       [--origin https://…]
- *     …and with either: [--pictures 50] [--interval-ms 200]
- *       [--picture-bytes 24576] [--source instance-local]
+ *     node tools/side-picture-round-trip.ts --loopback --picture drawn \
+ *       --model-url http://localhost:11434/v1 --picture-model <name>
+ *     …and with any: [--pictures 50] [--interval-ms 200]
+ *       [--picture-bytes 24576] [--picture filler|drawn] [--source instance-local]
  *
  * - **`--loopback`** starts an instance on this machine for the run —
  *   `side-picture-loopback.ts`: a temporary database, its own keys, and a
@@ -24,8 +26,14 @@
  *   (`OYL_INSTANCE_PICTURE_MODEL`) and admit a new device. ⚠️ Through a tunnel
  *   this is the run the owner has to allow: it registers a throwaway account
  *   on that instance and asks its model about each picture.
+ * - **`--model-url` and `--picture-model`**, together and with `--loopback`,
+ *   ask a REAL model on a server on this machine instead of the scripted one.
+ *   An address that is not this machine's is refused. The model's time is
+ *   then its own, and `answers` in the report is what it said.
  * - **The pictures are of nobody**: a JPEG's opening and filler of
- *   `--picture-bytes` (at most 65536).
+ *   `--picture-bytes` (at most 65536), or with `--picture drawn` a small
+ *   drawing of three coloured shapes (`drawn-picture.ts`). ⚠️ **A real model
+ *   needs `--picture drawn`**: it cannot decode filler, and refuses it.
  * - **`--source instance-hosted`** is refused here: a hosted model is
  *   measured only with a key and a consent, and this command holds neither.
  *
@@ -39,7 +47,7 @@ import { resolveExtensionless } from '../src/node-imports.ts';
 registerHooks({ resolve: resolveExtensionless });
 
 const { refusedArguments } = await import('./replan-round-trip-run.ts');
-const { measurePictures } = await import('./side-picture-round-trip-run.ts');
+const { measurePictures, PICTURE_KINDS } = await import('./side-picture-round-trip-run.ts');
 
 const VALUED = [
   '--url',
@@ -48,6 +56,9 @@ const VALUED = [
   '--pictures',
   '--interval-ms',
   '--picture-bytes',
+  '--picture',
+  '--model-url',
+  '--picture-model',
   '--source',
 ];
 
@@ -78,10 +89,39 @@ function whole(name: string, fallback: number, least: number, most: number): num
 
 const url = arg('--url');
 const source = arg('--source') ?? 'instance-local';
-if (refused !== undefined || loopback === (url !== undefined) || source !== 'instance-local') {
+const picture = PICTURE_KINDS.find((kind) => kind === (arg('--picture') ?? 'filler'));
+const modelUrl = arg('--model-url');
+const pictureModel = arg('--picture-model');
+const realModel =
+  modelUrl === undefined || pictureModel === undefined
+    ? undefined
+    : { url: modelUrl, model: pictureModel };
+
+/** Why the arguments are refused, or `undefined`. */
+function problem(): string | undefined {
+  if (refused !== undefined) return refused;
+  if (source !== 'instance-local') {
+    return '--source instance-hosted is not measured by this command: it holds no key and no consent';
+  }
+  if (loopback === (url !== undefined)) return 'give --loopback or --url, and not both';
+  if (picture === undefined) return '--picture must be filler or drawn';
+  if ((modelUrl === undefined) !== (pictureModel === undefined)) {
+    return '--model-url and --picture-model go together: give both, or neither';
+  }
+  if (realModel !== undefined && !loopback) {
+    return '--model-url and --picture-model are for --loopback: an instance at --url has its own picture model';
+  }
+  if (realModel !== undefined && arg('--model-ms') !== undefined) {
+    return '--model-ms is the scripted model’s: a real model takes the time it takes';
+  }
+  return undefined;
+}
+
+const wrong = problem();
+if (wrong !== undefined || picture === undefined) {
   process.stderr.write(
-    `${refused ?? (source !== 'instance-local' ? '--source instance-hosted is not measured by this command: it holds no key and no consent' : 'give --loopback or --url, and not both')}\n` +
-      'usage: node tools/side-picture-round-trip.ts (--loopback [--model-ms 400] | --url https://… [--origin https://…]) [--pictures 50] [--interval-ms 200] [--picture-bytes 24576]\n',
+    `${wrong ?? ''}\n` +
+      'usage: node tools/side-picture-round-trip.ts (--loopback [--model-ms 400 | --model-url http://localhost:… --picture-model <name>] | --url https://… [--origin https://…]) [--pictures 50] [--interval-ms 200] [--picture-bytes 24576] [--picture filler|drawn]\n',
   );
   process.exit(2);
 }
@@ -95,7 +135,11 @@ const origin = arg('--origin');
 let started;
 if (loopback) {
   const { startLoopbackInstance } = await import('./side-picture-loopback.ts');
-  started = await startLoopbackInstance({ modelMs, pictures });
+  started = await startLoopbackInstance({
+    modelMs,
+    pictures,
+    ...(realModel === undefined ? {} : { realModel }),
+  });
 }
 try {
   const report = await measurePictures({
@@ -108,11 +152,12 @@ try {
     pictures,
     intervalMs,
     pictureBytes,
+    picture,
     source: 'instance-local',
     log: (line) => process.stderr.write(`${line}\n`),
   });
   process.stdout.write(
-    `${JSON.stringify({ ...report, ...(loopback ? { loopback: { modelMs } } : {}) }, null, 2)}\n`,
+    `${JSON.stringify({ ...report, ...(loopback ? { loopback: realModel === undefined ? { modelMs } : { realModel } } : {}) }, null, 2)}\n`,
   );
 } finally {
   await started?.close();

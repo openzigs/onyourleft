@@ -8,6 +8,11 @@
  * `modelMs`. Loopback only, a port the operating system chooses, and nothing
  * of any other instance is read or changed.
  *
+ * With {@link LoopbackOptions.realModel} the picture model is instead a REAL
+ * one on a model server on this machine (an Ollama, say), which is how a
+ * model is found to take pictures or not (spike 0025 §8). The address is
+ * loopback or it is refused: this instance sends a picture nowhere else.
+ *
  * Used by `side-picture-round-trip.ts --loopback` and by the tool's own test.
  */
 
@@ -40,14 +45,41 @@ export interface LoopbackInstance {
   close(): Promise<void>;
 }
 
-export async function startLoopbackInstance(options: {
-  /** How long the model takes over each picture. */
+export interface LoopbackOptions {
+  /** How long the scripted model takes over each picture. */
   readonly modelMs: number;
-  /** How many pictures the model will answer. */
+  /** How many pictures the scripted model will answer. */
   readonly pictures: number;
   /** `false` for an instance with no picture model named. */
   readonly pictureModel?: boolean;
-}): Promise<LoopbackInstance> {
+  /**
+   * A real model on a server on THIS machine, asked instead of the scripted
+   * one: the server's OpenAI-compatible base URL and the model's name there.
+   */
+  readonly realModel?: { readonly url: string; readonly model: string };
+}
+
+/** `localhost` or 127.0.0.0/8: the only places a real model is asked from here. */
+function onThisMachine(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === 'http:' &&
+    (parsed.hostname === 'localhost' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(parsed.hostname))
+  );
+}
+
+export async function startLoopbackInstance(options: LoopbackOptions): Promise<LoopbackInstance> {
+  const real = options.realModel;
+  if (real !== undefined && !onThisMachine(real.url)) {
+    throw new Error(
+      'a real picture model is asked on this machine only: give an http: address on localhost or 127.0.0.1',
+    );
+  }
   const reply: ScriptedReply =
     options.modelMs > 0 ? { kind: 'slow', milliseconds: options.modelMs, then: NOBODY } : NOBODY;
   const model = await startFakeModelServer(Array.from({ length: options.pictures }, () => reply));
@@ -63,8 +95,8 @@ export async function startLoopbackInstance(options: {
       // The limit an instance really starts with, which a 64 KiB picture must fit inside.
       bodyLimitBytes: DEFAULT_BODY_LIMIT_BYTES,
       pictures: readPictureModelSettings({
-        analysisModelUrl: `http://ollama:${model.baseUrl.port}/v1`,
-        ...(options.pictureModel === false ? {} : { pictureModel: 'scripted' }),
+        analysisModelUrl: real?.url ?? `http://ollama:${model.baseUrl.port}/v1`,
+        ...(options.pictureModel === false ? {} : { pictureModel: real?.model ?? 'scripted' }),
       }),
     }),
     resolve: () => Promise.resolve(['127.0.0.1']),

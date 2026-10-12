@@ -21,10 +21,16 @@
  * picture's size and not on what is in it; a model's time over a real picture
  * is NOT measured by this and is whatever the instance's model takes.
  *
+ * ⚠️ **A real model needs a picture it can decode**, and filler is not one:
+ * {@link PictureMeasureOptions.picture} `drawn` sends `drawn-picture.ts`'s
+ * coloured shapes instead, which are of nobody either. What the model said of
+ * each is counted in {@link PictureMeasureReport.answers}.
+ *
  * ⚠️ **"Sealed" here is less than the app's**, for `replan-round-trip-run.ts`'s
  * reason: this pins nothing and seals to whatever key the URL serves.
  */
 
+import { drawnPicture } from './drawn-picture.ts';
 import { signedInDevice, summarise, type Device, type Summary } from './replan-round-trip-run.ts';
 
 /** The route measured (`src/camera/routes.ts` §`SIDE_POSE_PATH`). */
@@ -58,6 +64,13 @@ export function syntheticPicture(bytes: number, variant: number): Uint8Array {
   return picture;
 }
 
+/** The two pictures this can send. Neither is of anybody. */
+export const PICTURE_KINDS = ['filler', 'drawn'] as const;
+export type PictureKind = (typeof PICTURE_KINDS)[number];
+
+/** The most of a model's answer that is written down, in characters. */
+export const ANSWER_SHOWN = 200;
+
 export interface PictureMeasureOptions {
   /** Where the instance is reached. */
   readonly url: string;
@@ -67,8 +80,13 @@ export interface PictureMeasureOptions {
   readonly pictures: number;
   /** How often one is offered: 200 ms is five a second. */
   readonly intervalMs: number;
-  /** Each picture's size in bytes, at most 64 KiB. */
+  /** Each picture's size in bytes, at most 64 KiB. Ignored for a `drawn` picture, which has its own. */
   readonly pictureBytes: number;
+  /**
+   * What is sent: `filler` ({@link syntheticPicture}, the default) or `drawn`
+   * (`drawn-picture.ts`), which a real model can decode.
+   */
+  readonly picture?: PictureKind;
   /** Which model the instance is asked to use. `instance-hosted` needs `endpoint`. */
   readonly source: 'instance-local' | 'instance-hosted';
   /** The origin a hosted picture consent names, for `instance-hosted`. */
@@ -83,6 +101,9 @@ export interface PictureMeasureReport {
   readonly startedAt: string;
   readonly url: string;
   readonly source: string;
+  /** Which picture was sent. */
+  readonly picture: PictureKind;
+  /** The size of the pictures sent: the size asked for, or the drawn picture's own. */
   readonly pictureBytes: number;
   readonly intervalMs: number;
   /** Pictures that fell due. */
@@ -95,6 +116,13 @@ export interface PictureMeasureReport {
   readonly skipped: number;
   /** Every other answer, by its error code (or its status). */
   readonly refused: Readonly<Record<string, number>>;
+  /**
+   * What the model said of the answered pictures, as the instance passed it
+   * on: each distinct answer's first {@link ANSWER_SHOWN} characters, and how
+   * many pictures got it. The pictures are this tool's own, so nothing of a
+   * rider's can be in an answer.
+   */
+  readonly answers: Readonly<Record<string, number>>;
   /** From the first picture offered to the last answer. */
   readonly elapsedMs: number;
   /** Answered pictures a second, over {@link elapsedMs}. */
@@ -142,6 +170,11 @@ export async function measurePicturesWith(
   const ups: number[] = [];
   const downs: number[] = [];
   const refused: Record<string, number> = {};
+  const answers: Record<string, number> = {};
+  const kind: PictureKind = options.picture ?? 'filler';
+  const pictureOf = (index: number): Uint8Array =>
+    kind === 'drawn' ? drawnPicture(index) : syntheticPicture(options.pictureBytes, index);
+  const pictureBytes = pictureOf(0).length;
   const answeredAt: number[] = [];
   let sent = 0;
   let skipped = 0;
@@ -156,7 +189,7 @@ export async function measurePicturesWith(
   const startedAt = new Date().toISOString();
 
   const send = async (index: number): Promise<void> => {
-    const picture = Buffer.from(syntheticPicture(options.pictureBytes, index)).toString('base64');
+    const picture = Buffer.from(pictureOf(index)).toString('base64');
     const before = now();
     const answer = await device.call('POST', SIDE_POSE_PATH, {
       picture,
@@ -176,6 +209,9 @@ export async function measurePicturesWith(
       ups.push(bytes.sent);
       downs.push(bytes.received);
       answeredAt.push(after - started);
+      const said = (answer.body as { answer?: unknown } | null)?.answer;
+      const shown = typeof said === 'string' ? said.slice(0, ANSWER_SHOWN) : '(no answer)';
+      answers[shown] = (answers[shown] ?? 0) + 1;
     } else {
       const code = codeOf(answer.body, answer.status);
       refused[code] = (refused[code] ?? 0) + 1;
@@ -203,13 +239,15 @@ export async function measurePicturesWith(
     startedAt,
     url: options.url,
     source: options.source,
-    pictureBytes: options.pictureBytes,
+    picture: kind,
+    pictureBytes,
     intervalMs: options.intervalMs,
     offered: options.pictures,
     sent,
     answered: roundTrips.length,
     skipped,
     refused,
+    answers,
     elapsedMs: round(elapsedMs),
     answeredPerSecond: Math.round((roundTrips.length / elapsedMs) * 1000 * 100) / 100,
     framingCheckMs:

@@ -28,6 +28,7 @@ import {
   GATEWAY_REFUSED,
   GatewayRefusedError,
   pinnedTo,
+  saysWithoutPictures,
 } from './model.ts';
 import type { ModelTurnRequest, ToolSpec } from './model-turn.ts';
 
@@ -537,6 +538,65 @@ describe('the two picture model builders hold what the text ones hold (#1106)', 
       ok: false,
       failure: 'timed-out',
     });
+  });
+
+  /** A model server's own 400, as Ollama and DeepSeek wrap theirs. */
+  const refusal = (message: string): ScriptedReply => ({
+    kind: 'status',
+    status: 400,
+    body: JSON.stringify({ error: { message, type: 'invalid_request_error' } }),
+  });
+
+  // The words each server really answered on 2026-10-12 (spike 0025 §8).
+  const OLLAMA_WITHOUT_PICTURES =
+    'Multimodal data provided, but model does not support multimodal requests.';
+  const OLLAMA_BAD_PICTURE = 'Failed to load image or audio file';
+  const DEEPSEEK_BAD_PICTURE =
+    '.messages[0].image[0]: You have uploaded an unsupported image. Please make sure your image is valid and has one of the following formats: webp, png, jpeg, and gif.';
+
+  it('reads a model that takes no picture as that, and a picture a model could not open as one refusal', async () => {
+    const model = await fake(
+      refusal(OLLAMA_WITHOUT_PICTURES),
+      refusal(OLLAMA_BAD_PICTURE),
+      refusal(DEEPSEEK_BAD_PICTURE),
+    );
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look())).toStrictEqual({
+      ok: false,
+      failure: 'model-without-pictures',
+    });
+    // These two came from models that DO take pictures, about bytes they could not decode.
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+    expect(await connection.look(look())).toStrictEqual({ ok: false, failure: 'refused' });
+  });
+
+  it.each([
+    'This model does not support image input.',
+    'The model does not support images.',
+    'Model does not support vision.',
+    'image input is not supported - hint: provide a projector',
+    'Invalid content type. image_url is only supported by certain models.',
+    'unknown variant `image_url`, expected `text`',
+    'this model is missing data required for image input',
+  ])('takes %j to say the model takes no picture', (words) => {
+    expect(saysWithoutPictures(words)).toBe(true);
+  });
+
+  it.each([
+    OLLAMA_BAD_PICTURE,
+    DEEPSEEK_BAD_PICTURE,
+    'image too large',
+    'could not process image',
+    'invalid image',
+    'The vision service is busy.',
+    'max_tokens is too large',
+    '',
+  ])('does not take %j to say so', (words) => {
+    expect(saysWithoutPictures(words)).toBe(false);
   });
 
   it('adds the rider’s reasoning allowance to the answer bound, on the wire', async () => {

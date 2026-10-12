@@ -202,15 +202,45 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
 }
 
 /**
- * A 4xx body that says the model, or the service, takes no picture. Read on
- * 2026-10-12: a hosted service that takes no picture refuses the `image_url`
- * part by name, and a server whose model has no vision says "image" or
- * "vision" in its refusal. Matched and dropped, as {@link WITHOUT_TOOLS} is.
+ * A 4xx body that says the model, or the service, takes no picture: a
+ * statement about what the MODEL can do, never one about the picture.
+ * Matched and dropped, as {@link WITHOUT_TOOLS} is.
+ *
+ * ⚠️ **Until 2026-10-12 this was `/image|vision|multi-?modal/`, and two real
+ * models that DO take pictures showed it wrong** (spike 0025 §8, #1106's
+ * review). Sent bytes they could not decode, Ollama's `gemma3:4b` answered
+ * 400 *"Failed to load image or audio file"* and DeepSeek's `deepseek-flash`
+ * answered 400 *"You have uploaded an unsupported image. Please make sure
+ * your image is valid and has one of the following formats …"*. Both name an
+ * image, so both were read as *"this model takes no pictures"*, and the app
+ * would have stopped for the session and told the rider to choose another
+ * model. Each is one failed picture, and is `refused` now.
+ *
+ * ## Provenance
+ *
+ * - **Observed, 2026-10-12**: the first pattern, from Ollama 400ing
+ *   `qwen2.5:3b`, which takes no picture: *"Multimodal data provided, but
+ *   model does not support multimodal requests."*
+ * - ⚠️ **Not observed, the author's reading of what other servers say**: the
+ *   other four. A server whose words for it are none of these is one failed
+ *   picture at a time, and three in a row stop the session with *"gave no
+ *   usable answer"*: the wrong sentence, and no picture sent on regardless.
  */
-const WITHOUT_PICTURES = /image|vision|multi-?modal/i;
+const WITHOUT_PICTURES: readonly RegExp[] = [
+  /does not support (?:multi-?modal|images?\b|image input|vision)/i,
+  /image input is not supported/i,
+  /image_url is only supported/i,
+  /unknown variant .?image_url/i,
+  /missing data required for image input/i,
+];
 
 /** The statuses a server refuses a request's SHAPE with: the three a picture it cannot take gets. */
 const SHAPE_REFUSALS: ReadonlySet<number> = new Set([400, 415, 422]);
+
+/** Whether a refusal's words say the model takes no picture. Exported for `model.test.ts`. */
+export function saysWithoutPictures(responseBody: string): boolean {
+  return WITHOUT_PICTURES.some((pattern) => pattern.test(responseBody));
+}
 
 /** Which closed failure an error from a look is. Never reads its message into the result. */
 export function pictureFailureOf(
@@ -224,7 +254,7 @@ export function pictureFailureOf(
     APICallError.isInstance(error) &&
     error.statusCode !== undefined &&
     SHAPE_REFUSALS.has(error.statusCode) &&
-    WITHOUT_PICTURES.test(error.responseBody ?? '')
+    saysWithoutPictures(error.responseBody ?? '')
   ) {
     return 'model-without-pictures';
   }

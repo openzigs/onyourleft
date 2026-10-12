@@ -15,20 +15,30 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  startFakeModelServer,
+  type FakeModelServer,
+} from '../src/analysis/fake-model-server-testing.ts';
+import { pictureFrom } from '../src/camera/picture.ts';
+import { DRAWN_PICTURE_HEIGHT, DRAWN_PICTURE_WIDTH, drawnPicture } from './drawn-picture.ts';
 import type { Device } from './replan-round-trip-run.ts';
 import { startLoopbackInstance, type LoopbackInstance } from './side-picture-loopback.ts';
 import {
   FRAMING_CHECK_PICTURES,
   measurePictures,
+  ANSWER_SHOWN,
   measurePicturesWith,
   syntheticPicture,
   type PictureMeasureOptions,
 } from './side-picture-round-trip-run.ts';
 
 let instance: LoopbackInstance | undefined;
+let realModel: FakeModelServer | undefined;
 afterEach(async () => {
   await instance?.close();
   instance = undefined;
+  await realModel?.close();
+  realModel = undefined;
 });
 
 const options = (
@@ -44,7 +54,12 @@ const options = (
 });
 
 /** A device whose every call takes `callMs` of a clock moved by hand. */
-function scriptedDevice(clock: { ms: number }, callMs: number, statuses: readonly number[] = []) {
+function scriptedDevice(
+  clock: { ms: number },
+  callMs: number,
+  statuses: readonly number[] = [],
+  answers: readonly string[] = [],
+) {
   const bodies: unknown[] = [];
   let calls = 0;
   const device: Device = {
@@ -55,7 +70,7 @@ function scriptedDevice(clock: { ms: number }, callMs: number, statuses: readonl
       // The answer arrives `callMs` later, by the same clock the measurement reads.
       await waitUntil(clock, clock.ms + callMs);
       return status === 200
-        ? { status, body: { answer: '{"rider":false}' } }
+        ? { status, body: { answer: answers[calls - 1] ?? '{"rider":false}' } }
         : { status, body: { error: { code: 'picture_model_failed' } } };
     },
     stream: () => Promise.resolve(),
@@ -168,6 +183,142 @@ describe('the picture measurement’s arithmetic — #1106', () => {
   });
 });
 
+describe('the drawn picture, which a real model can open — #1106', () => {
+  /** Every segment's marker, in order, up to the scan. */
+  function markers(picture: Uint8Array): number[] {
+    const found: number[] = [];
+    let at = 2;
+    while (at + 3 < picture.length && picture[at] === 0xff) {
+      const marker = picture[at + 1] ?? 0;
+      found.push(marker);
+      if (marker === 0xda) break;
+      at += 2 + (((picture[at + 2] ?? 0) << 8) | (picture[at + 3] ?? 0));
+    }
+    return found;
+  }
+
+  it('is a JPEG of its stated size whose only segments are the ones a picture needs: no metadata', () => {
+    const picture = drawnPicture(0);
+    expect([...picture.slice(0, 2)]).toStrictEqual([0xff, 0xd8]);
+    expect([...picture.slice(-2)]).toStrictEqual([0xff, 0xd9]);
+    // APP0/JFIF, the quantisation table, the frame, two Huffman tables and the scan. No APP1
+    // (Exif, XMP), no APP13 (IPTC) and no comment.
+    expect(markers(picture)).toStrictEqual([0xe0, 0xdb, 0xc0, 0xc4, 0xc4, 0xda]);
+    expect(Buffer.from(picture.slice(6, 11)).toString('latin1')).toBe('JFIF\0');
+    // The frame header says the size: after APP0 (18 bytes) and DQT (69), at SOF0's fifth byte.
+    const frame = picture.indexOf(0xc0, 20) - 1;
+    expect([...picture.slice(frame, frame + 2)]).toStrictEqual([0xff, 0xc0]);
+    const height = ((picture[frame + 5] ?? 0) << 8) | (picture[frame + 6] ?? 0);
+    const width = ((picture[frame + 7] ?? 0) << 8) | (picture[frame + 8] ?? 0);
+    expect([width, height]).toStrictEqual([DRAWN_PICTURE_WIDTH, DRAWN_PICTURE_HEIGHT]);
+  });
+
+  it('is taken by the instance’s own check, is the same for the same variant and differs between two', () => {
+    const picture = drawnPicture(3);
+    const taken = pictureFrom(Buffer.from(picture).toString('base64'));
+    expect(taken).toMatchObject({ ok: true });
+    expect(picture.length).toBeLessThan(16 * 1024);
+    expect(drawnPicture(3)).toStrictEqual(picture);
+    expect(drawnPicture(4)).not.toStrictEqual(picture);
+  });
+
+  it('stuffs a zero after every 0xff in the scan, so no byte of it reads as a marker', () => {
+    const picture = drawnPicture(0);
+    const scan = picture.lastIndexOf(0xda);
+    for (let at = scan + 12; at < picture.length - 2; at += 1) {
+      if (picture[at] === 0xff) expect(picture[at + 1]).toBe(0x00);
+    }
+  });
+
+  it('is what is sent when asked for, and its own size is the one reported', async () => {
+    const clock = { ms: 0 };
+    const { device, bodies } = scriptedDevice(clock, 100);
+    const measuring = measurePicturesWith(device, {
+      ...options('http://127.0.0.1:1', { pictures: 2, intervalMs: 200, picture: 'drawn' }),
+      now: () => clock.ms,
+      wait: (milliseconds) => waitUntil(clock, clock.ms + milliseconds),
+    });
+    await runClock(clock, measuring);
+    const report = await measuring;
+    const sent = bodies.map((body) => (body as { picture: string }).picture);
+    expect(sent).toHaveLength(2);
+    expect(sent[0] === Buffer.from(drawnPicture(0)).toString('base64')).toBe(true);
+    expect(sent[1] === Buffer.from(drawnPicture(1)).toString('base64')).toBe(true);
+    expect(report.picture).toBe('drawn');
+    expect(report.pictureBytes).toBe(drawnPicture(0).length);
+  });
+
+  it('sends filler unless asked, and reports the size asked for', async () => {
+    const clock = { ms: 0 };
+    const { device, bodies } = scriptedDevice(clock, 0);
+    const report = await measurePicturesWith(device, {
+      ...options('http://127.0.0.1:1', { pictures: 1 }),
+      now: () => clock.ms,
+      wait: () => Promise.resolve(),
+    });
+    expect((bodies[0] as { picture: string }).picture).toBe(
+      Buffer.from(syntheticPicture(2_048, 0)).toString('base64'),
+    );
+    expect(report).toMatchObject({ picture: 'filler', pictureBytes: 2_048 });
+  });
+
+  it('counts what the model said, each distinct answer once, cut to what is shown', async () => {
+    const clock = { ms: 0 };
+    const long = 'x'.repeat(ANSWER_SHOWN + 50);
+    const { device } = scriptedDevice(
+      clock,
+      100,
+      [200, 200, 502, 200],
+      ['{"rider":false}', '{"rider":false}', 'never read', long],
+    );
+    const measuring = measurePicturesWith(device, {
+      ...options('http://127.0.0.1:1', { pictures: 4, intervalMs: 200 }),
+      now: () => clock.ms,
+      wait: (milliseconds) => waitUntil(clock, clock.ms + milliseconds),
+    });
+    await runClock(clock, measuring);
+    const report = await measuring;
+    expect(report.answers).toStrictEqual({
+      '{"rider":false}': 2,
+      ['x'.repeat(ANSWER_SHOWN)]: 1,
+    });
+    expect(report.refused).toStrictEqual({ picture_model_failed: 1 });
+  });
+});
+
+describe('a real model on this machine in place of the scripted one — #1106', () => {
+  it('asks the server and the model it was given, with the drawn picture', async () => {
+    realModel = await startFakeModelServer([{ kind: 'text', text: '{"rider":false}' }]);
+    instance = await startLoopbackInstance({
+      modelMs: 0,
+      pictures: 0,
+      realModel: { url: `http://localhost:${realModel.baseUrl.port}/v1`, model: 'named:4b' },
+    });
+    const report = await measurePictures(
+      options(instance.url, { origin: instance.origin, pictures: 1, picture: 'drawn' }),
+    );
+    expect(report.answers).toStrictEqual({ '{"rider":false}': 1 });
+    expect(realModel.requests).toHaveLength(1);
+    expect(realModel.requests[0]?.model).toBe('named:4b');
+    expect(JSON.stringify(realModel.requests[0])).toContain(
+      `data:image/jpeg;base64,${Buffer.from(drawnPicture(0)).toString('base64')}`,
+    );
+    // The scripted server was started and never asked.
+    expect(instance.model.requests).toHaveLength(0);
+  });
+
+  it.each([
+    'https://localhost:11434/v1',
+    'http://models.example/v1',
+    'http://10.0.0.5:11434/v1',
+    'x',
+  ])('refuses %s: a picture is sent to a model on this machine or to none', async (url) => {
+    await expect(
+      startLoopbackInstance({ modelMs: 0, pictures: 0, realModel: { url, model: 'm' } }),
+    ).rejects.toThrow(/on this machine only/);
+  });
+});
+
 describe('a picture through the instance as it really starts — #1106', () => {
   it('is sealed in, answered by the model the operator named, and written to no log line', async () => {
     instance = await startLoopbackInstance({ modelMs: 0, pictures: 3 });
@@ -239,12 +390,48 @@ describe('the command — #1106', () => {
     expect(report.answered as number).toBeGreaterThan(0);
   });
 
+  it('sends the drawn picture when asked, and prints what the model said of it', () => {
+    const ran = run('--loopback', '--model-ms', '0', '--pictures', '1', '--picture', 'drawn');
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(JSON.parse(ran.stdout)).toMatchObject({
+      picture: 'drawn',
+      pictureBytes: drawnPicture(0).length,
+      answers: { '{"rider":false}': 1 },
+    });
+  });
+
   it.each([
     [['--url', 'http://127.0.0.1:1', '--loopback'], 'give --loopback or --url, and not both'],
     [[], 'give --loopback or --url, and not both'],
     [['--loopback', '--source', 'instance-hosted'], 'instance-hosted is not measured'],
     [['--loopback', '--hosted-key', 'sk-secret'], '--hosted-key is not an option'],
     [['--loopback', '--picture-bytes', '70000'], '--picture-bytes must be a whole number'],
+    [['--loopback', '--picture', 'photo'], '--picture must be filler or drawn'],
+    [['--loopback', '--model-url', 'http://localhost:1/v1'], 'go together'],
+    [['--loopback', '--picture-model', 'm'], 'go together'],
+    [
+      [
+        '--url',
+        'http://127.0.0.1:1',
+        '--model-url',
+        'http://localhost:1/v1',
+        '--picture-model',
+        'm',
+      ],
+      'are for --loopback',
+    ],
+    [
+      [
+        '--loopback',
+        '--model-ms',
+        '5',
+        '--model-url',
+        'http://localhost:1/v1',
+        '--picture-model',
+        'm',
+      ],
+      'a real model takes the time it takes',
+    ],
   ])('refuses %j', (args, said) => {
     const ran = run(...args);
     expect(ran.status).toBe(2);
