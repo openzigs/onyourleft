@@ -107,8 +107,9 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
       'since #870, #630’s far-band light and foliage breeze, which are appearance. Since #1283 ' +
-      'the trees it measures are the GENERATED broadleaves a ride draws, and the same wooded ' +
-      'frame is counted again with the scanned ones as the control.',
+      'the trees it measures are the GENERATED ones a ride draws — since #1294 the firs with ' +
+      'the broadleaves — and the same wooded frame is counted again with every tree a scan ' +
+      'as the control.',
   },
   {
     spec: 'realistic.browser.spec.ts',
@@ -120,11 +121,12 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   },
   {
     spec: 'realistic.browser.spec.ts',
-    describe: 'the realistic page’s tree lever — #1283',
-    seconds: 'about 36 s: two more loads of the owner’s page',
+    describe: 'the realistic page’s tree levers — #1283, #1294',
+    seconds: 'about 54 s: three more loads of the owner’s page',
     why:
-      'the owner’s page’s lever for the generated trees (#1283): that `-generated-trees` ' +
-      'fetches the scanned broadleaves instead and never both, with both frames’ triangles ' +
+      'the owner’s page’s levers for the generated trees (#1283, #1294): that ' +
+      '`-generated-trees` fetches every tree’s scan instead, `-generated-conifers` the ' +
+      'scanned firs alone, and never both makings of a tree, with each frame’s triangles ' +
       'and draw calls. An instrument of a page that ships in no build; which files the ' +
       'PRODUCT asks for is held in the required suite by `realistic-renderer.test.ts` ' +
       '§"asks for the generated broadleaves".',

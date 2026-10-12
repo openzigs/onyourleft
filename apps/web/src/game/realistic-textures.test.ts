@@ -57,6 +57,7 @@ import {
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
   REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
   REALISTIC_SURFACES,
   REALISTIC_TREE_SETS,
   REALISTIC_TREES_DEFAULT,
@@ -1077,6 +1078,8 @@ describe('the generated trees, loaded and drawn through the product’s own path
       readonly vertexColors: boolean;
       readonly defines?: Readonly<Record<string, unknown>>;
       readonly uniforms?: Readonly<Record<string, { readonly value: unknown }>>;
+      /** A strip's own shader, where the material is one this file wrote whole. */
+      readonly fragmentShader?: string;
       onBeforeCompile(shader: unknown, renderer: unknown): void;
     };
   }
@@ -1128,10 +1131,20 @@ describe('the generated trees, loaded and drawn through the product’s own path
   const DISTANCES = [95, 85, 75, 65, 55, 45, 35, 25, 18, 10];
   const X = 12;
 
-  /** Ten broadleaves down a verge, each variant in turn, nearest last. */
-  const trees = (variants: number) =>
+  /**
+   * The generated trees of each kind — #1294: what #1283 holds of a generated
+   * broadleaf is held of a generated fir, read back the same way.
+   */
+  const GENERATED = [
+    ['tree-broadleaf', REALISTIC_BROADLEAVES.generated],
+    ['tree-conifer', REALISTIC_CONIFERS.generated],
+  ] as const;
+  type TreeKind = (typeof GENERATED)[number][0];
+
+  /** Ten trees of a kind down a verge, each variant in turn, nearest last. */
+  const trees = (variants: number, kind: TreeKind) =>
     DISTANCES.map((z, at) => ({
-      kind: 'tree-broadleaf' as const,
+      kind,
       x: X,
       y: 0,
       z,
@@ -1162,18 +1175,21 @@ describe('the generated trees, loaded and drawn through the product’s own path
           expected[kind].length,
         );
       }
-      // And the triangles drawn are the committed files', variant by variant.
-      const full = belt.levelsOf('tree-broadleaf')
-        .full as unknown as readonly (readonly DrawnMesh[])[];
-      expected['tree-broadleaf'].forEach((model, variant) => {
-        const drawn = (full[variant] ?? []).reduce(
-          (sum, mesh) => sum + (mesh.geometry.index?.count ?? 0) / 3,
-          0,
-        );
-        expect(drawn, `${String(set)} ${model.name}`).toBe(
-          modelFacts(join(PUBLIC, 'realistic', model.file)).triangles,
-        );
-      });
+      // And the triangles drawn are the committed files', variant by variant
+      // — the broadleaves', and since #1294 the conifers', which differ
+      // between the sets too.
+      for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+        const full = belt.levelsOf(kind).full as unknown as readonly (readonly DrawnMesh[])[];
+        expected[kind].forEach((model, variant) => {
+          const drawn = (full[variant] ?? []).reduce(
+            (sum, mesh) => sum + (mesh.geometry.index?.count ?? 0) / 3,
+            0,
+          );
+          expect(drawn, `${String(set)} ${model.name}`).toBe(
+            modelFacts(join(PUBLIC, 'realistic', model.file)).triangles,
+          );
+        });
+      }
       // Only the one set's textures are held: the other's are never fetched.
       const models = renderer.realisticTextureReport().filter((each) => each.role === 'impostor');
       expect(models).toHaveLength(
@@ -1182,149 +1198,172 @@ describe('the generated trees, loaded and drawn through the product’s own path
     }
   }, 120_000);
 
-  it('draws each generated tree at three levels, one draw call a level, and hands one over to the next', async () => {
-    const renderer = await loadedOn(TABLET, 'generated');
-    const belt = renderer.realisticVegetationOfLoadedWorld();
-    if (belt === undefined) throw new Error('no world is loaded');
-    const levels = belt.levelsOf('tree-broadleaf') as unknown as {
-      readonly full: readonly (readonly DrawnMesh[])[];
-      readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
-      readonly impostor: readonly (DrawnMesh | undefined)[];
-    };
-    const variants = REALISTIC_BROADLEAVES.generated.length;
-    expect(levels.full).toHaveLength(variants);
-    REALISTIC_BROADLEAVES.generated.forEach((model, variant) => {
-      const full = levels.full[variant] ?? [];
-      const middle = levels.middle[variant] ?? [];
-      // #639: bark and leaves are one material's two layers, so one call a level.
-      expect(full, model.name).toHaveLength(1);
-      expect(middle, model.name).toHaveLength(1);
-      expect(levels.impostor[variant], model.name).toBeDefined();
-      const [near] = full;
-      const [mid] = middle;
-      if (near === undefined || mid === undefined) throw new Error(`${model.name}: no mesh`);
-      // #617: the middle level wears the full level's own material, maps and all.
-      expect(mid.material).toBe(near.material);
-      expect(renderer.materialLayers(near.material as never), model.name).toBe(2);
-      // A leaf card is cut, and the baked occlusion is drawn.
-      expect(near.material.alphaTest, model.name).toBeGreaterThan(0);
-      expect(near.material.vertexColors, model.name).toBe(true);
-      expect(near.geometry.hasAttribute('color'), model.name).toBe(true);
-      expect(mid.geometry.hasAttribute('color'), model.name).toBe(true);
-      // The middle level is a real level: under half the full one's triangles.
-      expect((mid.geometry.index?.count ?? 0) * 2, model.name).toBeLessThan(
-        near.geometry.index?.count ?? 0,
-      );
-    });
-
-    belt.update(trees(variants), POSE);
-    const slots = treeSlots(REALISTIC_TREE_LEVELS);
-    const full = levels.full.flatMap((meshes) => meshes.flatMap(drawnAt));
-    const middle = levels.middle.flatMap((meshes) => (meshes ?? []).flatMap(drawnAt));
-    const impostor = levels.impostor.flatMap(drawnAt);
-    // The nearest is the full mesh; the band tree behind it is drawn at both.
-    expect(full.sort((a, b) => a - b)).toEqual([10, 18]);
-    expect(full).toHaveLength(slots.full);
-    expect(middle.sort((a, b) => a - b)).toEqual([18, 25, 35, 45, 55, 65]);
-    expect(middle).toHaveLength(slots.middle);
-    // And every tree from the far band's edge outward is its impostor.
-    expect(impostor.sort((a, b) => a - b)).toEqual([65, 75, 85, 95]);
-    // Each in the mesh of ITS variant: the tree at 10 m is the tenth, variant 3.
-    const nearest = DISTANCES.indexOf(10) % variants;
-    expect(drawnAt(levels.full[nearest]?.[0])).toContain(10);
-  }, 120_000);
-
-  it('teaches a generated tree the breeze, its seeded tint and the world’s sun, and grounds it under its trunk', async () => {
-    const renderer = await loadedOn(TABLET, 'generated');
-    const belt = renderer.realisticVegetationOfLoadedWorld();
-    if (belt === undefined) throw new Error('no world is loaded');
-    const levels = belt.levelsOf('tree-broadleaf') as unknown as {
-      readonly full: readonly (readonly DrawnMesh[])[];
-      readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
-      readonly impostor: readonly (DrawnMesh | undefined)[];
-    };
-    const variants = REALISTIC_BROADLEAVES.generated.length;
-    belt.update(trees(variants), POSE);
-
-    REALISTIC_BROADLEAVES.generated.forEach((model, variant) => {
-      const near = levels.full[variant]?.[0];
-      const strip = levels.impostor[variant];
-      if (near === undefined || strip === undefined) throw new Error(`${model.name}: no mesh`);
-
-      // #630, the breeze: the meshes sway, the leaves by all of it and the
-      // wood by its small share — bark is layer 0, as the file orders them.
-      const mesh = compiled(near.material);
-      expect(mesh.vertex, model.name).toContain('oylSwayWave(oylSwayPhase(');
-      expect(mesh.uniforms['oylSwayLayer']?.value, model.name).toEqual([WOOD_SWAY_SHARE, 1]);
-      expect(mesh.uniforms['oylWindTime'], model.name).toBeDefined();
-      // #621, the seeded tint: read by the meshes' material and by the strip's.
-      expect(renderer.readsInstanceTint(near.material as never), model.name).toBe(true);
-      expect(mesh.fragment, model.name).toContain('oylTinted');
-      // #617: and it keeps its half of the hand-over's dither, from the same
-      // instance colour — a tree taught the tint alone would swap levels whole.
-      expect(mesh.vertex, model.name).toContain('vOylKeep = instanceColor.xy;');
-      // #630, the far band's light: the strip has its normals, and is relit by them.
-      expect(strip.material.defines, model.name).toHaveProperty('OYL_LIT_IMPOSTOR');
-      expect(strip.material.uniforms?.['stripNormals']?.value, model.name).toBeTruthy();
-      expect(strip.material.uniforms?.['strip']?.value, model.name).toBeTruthy();
-      expect(Number(strip.material.defines?.['FRAMES']), model.name).toBe(8);
-      // The quad is as tall as the strip's frame, in the tree's own units.
-      const facts = modelFacts(join(PUBLIC, 'realistic', model.file));
-      expect(Number(strip.material.defines?.['QUAD_H']), model.name).toBeCloseTo(
-        Number(facts.extras['oyl_impostor_scale']),
-        4,
-      );
-      expect(Number(strip.material.defines?.['TREE_HEIGHT']), model.name).toBeCloseTo(
-        Number(facts.extras['oyl_scan_height']),
-        4,
-      );
-
-      // #620: the trunk stands on the model's own origin, which is where the
-      // belt lays the blob — the lowest ring of the wood is centred on it.
-      const positions = near.geometry.getAttribute('position');
-      const layer = near.geometry.getAttribute('oylLayer');
-      const height = Number(facts.extras['oyl_scan_height']);
-      let [sumX, sumZ, foot] = [0, 0, 0];
-      for (let vertex = 0; vertex < positions.count; vertex += 1) {
-        if ((layer.array[vertex] ?? 1) !== 0) continue;
-        if ((positions.array[vertex * 3 + 1] ?? Infinity) > height * 0.002) continue;
-        sumX += positions.array[vertex * 3] ?? Number.NaN;
-        sumZ += positions.array[vertex * 3 + 2] ?? Number.NaN;
-        foot += 1;
-      }
-      expect(foot, model.name).toBeGreaterThanOrEqual(6);
-      expect(Math.abs(sumX / foot), model.name).toBeLessThan(height * 0.01);
-      expect(Math.abs(sumZ / foot), model.name).toBeLessThan(height * 0.01);
-    });
-
-    // #621: every instance, at every level, carries the tint of where it stands.
-    const everyMesh = [
-      ...levels.full.flat(),
-      ...levels.middle.flatMap((meshes) => meshes ?? []),
-      ...levels.impostor.filter((mesh): mesh is DrawnMesh => mesh !== undefined),
-    ];
-    let written = 0;
-    for (const mesh of everyMesh) {
-      for (let slot = 0; slot < mesh.count; slot += 1) {
-        const z = mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN;
-        expect(mesh.instanceColor?.array[slot * 3 + 2], String(z)).toBe(
-          Math.fround(packedInstanceTint(X, Math.round(z), FOLIAGE_TINT)),
+  it.each(GENERATED)(
+    'draws each generated %s at three levels, one draw call a level, and hands one over to the next',
+    async (kind, generated) => {
+      const renderer = await loadedOn(TABLET, 'generated');
+      const belt = renderer.realisticVegetationOfLoadedWorld();
+      if (belt === undefined) throw new Error('no world is loaded');
+      const levels = belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly DrawnMesh[])[];
+        readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
+        readonly impostor: readonly (DrawnMesh | undefined)[];
+      };
+      const variants = generated.length;
+      expect(levels.full).toHaveLength(variants);
+      generated.forEach((model, variant) => {
+        const full = levels.full[variant] ?? [];
+        const middle = levels.middle[variant] ?? [];
+        // #639: bark and leaves are one material's two layers, so one call a level.
+        expect(full, model.name).toHaveLength(1);
+        expect(middle, model.name).toHaveLength(1);
+        expect(levels.impostor[variant], model.name).toBeDefined();
+        const [near] = full;
+        const [mid] = middle;
+        if (near === undefined || mid === undefined) throw new Error(`${model.name}: no mesh`);
+        // #617: the middle level wears the full level's own material, maps and all.
+        expect(mid.material).toBe(near.material);
+        expect(renderer.materialLayers(near.material as never), model.name).toBe(2);
+        // A leaf card is cut, and the baked occlusion is drawn.
+        expect(near.material.alphaTest, model.name).toBeGreaterThan(0);
+        expect(near.material.vertexColors, model.name).toBe(true);
+        expect(near.geometry.hasAttribute('color'), model.name).toBe(true);
+        expect(mid.geometry.hasAttribute('color'), model.name).toBe(true);
+        // The middle level is a real level: under half the full one's triangles.
+        expect((mid.geometry.index?.count ?? 0) * 2, model.name).toBeLessThan(
+          near.geometry.index?.count ?? 0,
         );
-        written += 1;
-      }
-    }
-    expect(written).toBeGreaterThan(DISTANCES.length);
+      });
 
-    // #620: a ground blob under each tree drawn as a mesh, where it stands.
-    const blobs = belt.grounded.casters.slice(0, belt.grounded.count);
-    expect(blobs.map((blob) => blob.z).sort((a, b) => a - b)).toEqual([10, 18, 25, 35, 45, 55]);
-    for (const blob of blobs) {
-      expect(blob.x).toBe(X);
-      expect(blob.round).toBe(true);
-      expect(blob.halfAcross).toBeGreaterThan(0.5);
-      // No wider than the tree itself is drawn: 4.4 m at most, across.
-      expect(blob.halfAcross).toBeLessThan(2.5);
-      expect(blob.height).toBeGreaterThan(2);
-    }
-  }, 120_000);
+      belt.update(trees(variants, kind), POSE);
+      const slots = treeSlots(REALISTIC_TREE_LEVELS);
+      const full = levels.full.flatMap((meshes) => meshes.flatMap(drawnAt));
+      const middle = levels.middle.flatMap((meshes) => (meshes ?? []).flatMap(drawnAt));
+      const impostor = levels.impostor.flatMap(drawnAt);
+      // The nearest is the full mesh; the band tree behind it is drawn at both.
+      expect(full.sort((a, b) => a - b)).toEqual([10, 18]);
+      expect(full).toHaveLength(slots.full);
+      expect(middle.sort((a, b) => a - b)).toEqual([18, 25, 35, 45, 55, 65]);
+      expect(middle).toHaveLength(slots.middle);
+      // And every tree from the far band's edge outward is its impostor.
+      expect(impostor.sort((a, b) => a - b)).toEqual([65, 75, 85, 95]);
+      // Each in the mesh of ITS variant: the tree at 10 m is the tenth, variant 3.
+      const nearest = DISTANCES.indexOf(10) % variants;
+      expect(drawnAt(levels.full[nearest]?.[0])).toContain(10);
+    },
+    120_000,
+  );
+
+  it.each(GENERATED)(
+    'teaches a generated %s the breeze, its seeded tint and the world’s sun, and grounds it under its trunk',
+    async (kind, generated) => {
+      const renderer = await loadedOn(TABLET, 'generated');
+      const belt = renderer.realisticVegetationOfLoadedWorld();
+      if (belt === undefined) throw new Error('no world is loaded');
+      const levels = belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly DrawnMesh[])[];
+        readonly middle: readonly (readonly DrawnMesh[] | undefined)[];
+        readonly impostor: readonly (DrawnMesh | undefined)[];
+      };
+      const variants = generated.length;
+      // Non-vacuity for #1294: the conifers read here are the generated firs.
+      expect(generated.every((model) => model.name.startsWith('generated_'))).toBe(true);
+      belt.update(trees(variants, kind), POSE);
+
+      generated.forEach((model, variant) => {
+        const near = levels.full[variant]?.[0];
+        const strip = levels.impostor[variant];
+        if (near === undefined || strip === undefined) throw new Error(`${model.name}: no mesh`);
+
+        // #630, the breeze: the meshes sway, the leaves by all of it and the
+        // wood by its small share — bark is layer 0, as the file orders them.
+        const mesh = compiled(near.material);
+        expect(mesh.vertex, model.name).toContain('oylSwayWave(oylSwayPhase(');
+        expect(mesh.uniforms['oylSwayLayer']?.value, model.name).toEqual([WOOD_SWAY_SHARE, 1]);
+        expect(mesh.uniforms['oylWindTime'], model.name).toBeDefined();
+        // #621, the seeded tint: read by the meshes' material and by the strip's.
+        expect(renderer.readsInstanceTint(near.material as never), model.name).toBe(true);
+        expect(mesh.fragment, model.name).toContain('oylTinted');
+        // #1294: read AND applied — the function's own definition contains its
+        // name, so the line above stayed green with the tint never multiplied
+        // in (found by deleting that multiplication). The colour is tinted, from
+        // the varying the vertex stage fills from the instance's own colour.
+        expect(mesh.fragment, model.name).toContain(
+          'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+        );
+        expect(mesh.vertex, model.name).toContain('vOylTint = oylTintOf(instanceColor.z);');
+        // And the far band's strip tints its own texel the same way.
+        expect(strip.material.fragmentShader, model.name).toContain(
+          'oylTinted(texel.rgb, vOylTint)',
+        );
+        // #617: and it keeps its half of the hand-over's dither, from the same
+        // instance colour — a tree taught the tint alone would swap levels whole.
+        expect(mesh.vertex, model.name).toContain('vOylKeep = instanceColor.xy;');
+        // #630, the far band's light: the strip has its normals, and is relit by them.
+        expect(strip.material.defines, model.name).toHaveProperty('OYL_LIT_IMPOSTOR');
+        expect(strip.material.uniforms?.['stripNormals']?.value, model.name).toBeTruthy();
+        expect(strip.material.uniforms?.['strip']?.value, model.name).toBeTruthy();
+        expect(Number(strip.material.defines?.['FRAMES']), model.name).toBe(8);
+        // The quad is as tall as the strip's frame, in the tree's own units.
+        const facts = modelFacts(join(PUBLIC, 'realistic', model.file));
+        expect(Number(strip.material.defines?.['QUAD_H']), model.name).toBeCloseTo(
+          Number(facts.extras['oyl_impostor_scale']),
+          4,
+        );
+        expect(Number(strip.material.defines?.['TREE_HEIGHT']), model.name).toBeCloseTo(
+          Number(facts.extras['oyl_scan_height']),
+          4,
+        );
+
+        // #620: the trunk stands on the model's own origin, which is where the
+        // belt lays the blob — the lowest ring of the wood is centred on it.
+        const positions = near.geometry.getAttribute('position');
+        const layer = near.geometry.getAttribute('oylLayer');
+        const height = Number(facts.extras['oyl_scan_height']);
+        let [sumX, sumZ, foot] = [0, 0, 0];
+        for (let vertex = 0; vertex < positions.count; vertex += 1) {
+          if ((layer.array[vertex] ?? 1) !== 0) continue;
+          if ((positions.array[vertex * 3 + 1] ?? Infinity) > height * 0.002) continue;
+          sumX += positions.array[vertex * 3] ?? Number.NaN;
+          sumZ += positions.array[vertex * 3 + 2] ?? Number.NaN;
+          foot += 1;
+        }
+        expect(foot, model.name).toBeGreaterThanOrEqual(6);
+        expect(Math.abs(sumX / foot), model.name).toBeLessThan(height * 0.01);
+        expect(Math.abs(sumZ / foot), model.name).toBeLessThan(height * 0.01);
+      });
+
+      // #621: every instance, at every level, carries the tint of where it stands.
+      const everyMesh = [
+        ...levels.full.flat(),
+        ...levels.middle.flatMap((meshes) => meshes ?? []),
+        ...levels.impostor.filter((mesh): mesh is DrawnMesh => mesh !== undefined),
+      ];
+      let written = 0;
+      for (const mesh of everyMesh) {
+        for (let slot = 0; slot < mesh.count; slot += 1) {
+          const z = mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN;
+          expect(mesh.instanceColor?.array[slot * 3 + 2], String(z)).toBe(
+            Math.fround(packedInstanceTint(X, Math.round(z), FOLIAGE_TINT)),
+          );
+          written += 1;
+        }
+      }
+      expect(written).toBeGreaterThan(DISTANCES.length);
+
+      // #620: a ground blob under each tree drawn as a mesh, where it stands.
+      const blobs = belt.grounded.casters.slice(0, belt.grounded.count);
+      expect(blobs.map((blob) => blob.z).sort((a, b) => a - b)).toEqual([10, 18, 25, 35, 45, 55]);
+      for (const blob of blobs) {
+        expect(blob.x).toBe(X);
+        expect(blob.round).toBe(true);
+        expect(blob.halfAcross).toBeGreaterThan(0.5);
+        // No wider than the tree itself is drawn: a broadleaf 4.4 m at most,
+        // across, and a fir 7 m tall and about 4.1 m across.
+        expect(blob.halfAcross).toBeLessThan(2.5);
+        expect(blob.height).toBeGreaterThan(2);
+      }
+    },
+    120_000,
+  );
 });

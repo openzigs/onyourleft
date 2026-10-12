@@ -103,6 +103,19 @@ export interface RealisticSample {
   readonly frameCap: 'display' | number;
   /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
+  /**
+   * Draw calls per drawn frame over the window, a MEAN, rounded.
+   *
+   * ⚠️ **Not one frame's count, and it reads higher the fewer frames the
+   * window holds** — #1294. The first frame of a window makes about twice the
+   * calls of every other: read frame by frame on 2026-10-12 in the pinned
+   * Chromium, held at `at=2550`, the first made 60 and every later one 31. So
+   * this is `(60 + 31·n) / (n + 1)` for `n` later frames — 33 for 11 to 18 of
+   * them, 34 for 8 to 10, 32 for 19 or more — and it moved between runs of
+   * one held frame with how busy the machine was, while the frame did not
+   * change at all. What made the first frame's other 29 was not looked for.
+   * {@link lastFrame}'s `calls` is the steady frame's own.
+   */
   readonly drawCalls: number;
   /**
    * Triangles submitted per drawn frame over the window, counted at the WebGL
@@ -118,6 +131,8 @@ export interface RealisticSample {
   readonly lastFrame: {
     readonly triangles: number;
     readonly rendererTriangles: number | undefined;
+    /** Its draw calls, counted at the WebGL draw calls — #1294. @see drawCalls */
+    readonly calls: number;
   };
   /** The layers switched off for this run — #616. Empty for an ordinary ride. */
   readonly layersOff: readonly Layer[];
@@ -325,6 +340,7 @@ async function run(): Promise<void> {
   let trianglesInWindow = 0;
   let framesInWindow = 0;
   let lastFrameTriangles = 0;
+  let lastFrameCalls = 0;
   let lastFrameRendererTriangles: number | undefined;
   let shownAt = 0;
   const soak: (RealisticSample & { minute: number })[] = [];
@@ -336,7 +352,11 @@ async function run(): Promise<void> {
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
     trianglesPerFrame: framesInWindow === 0 ? 0 : Math.round(trianglesInWindow / framesInWindow),
-    lastFrame: { triangles: lastFrameTriangles, rendererTriangles: lastFrameRendererTriangles },
+    lastFrame: {
+      triangles: lastFrameTriangles,
+      rendererTriangles: lastFrameRendererTriangles,
+      calls: lastFrameCalls,
+    },
     layersOff: config.layersOff,
     leversOff: config.leversOff,
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
@@ -388,7 +408,8 @@ async function run(): Promise<void> {
         rung: worldRung(state),
       }),
     );
-    callsInWindow += counter.takeCalls();
+    lastFrameCalls = counter.takeCalls();
+    callsInWindow += lastFrameCalls;
     lastFrameTriangles = counter.takeTriangles();
     trianglesInWindow += lastFrameTriangles;
     // three resets its own count at the start of every `render`, so after the

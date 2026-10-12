@@ -358,3 +358,23 @@ EZ-Tree's licence, README and `package.json`.
 - **Whether EZ-Tree's output is byte-stable** across machines and Node versions. D-1 makes that a
   condition of committing a tree, to be measured by the adopting issue.
 - **The scope of the Zenodo participants' consent** — the reason for D-5.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-12** — **A generated tree's bark and leaves may come from Poly Haven as well as
+  ambientCG.** D-1 says *"Bark and leaves come from ambientCG"*. That sentence was written to keep
+  EZ-Tree's own bundled images out, and it is no longer the whole of where a generated tree's
+  surfaces come from. Asked on 2026-10-12 whether a generated tree's needles and bark may come from
+  Poly Haven as well as ambientCG, the owner ruled: *"needles and bark come from Poly Haven"*. Poly
+  Haven is already on D-10's **In** list, for *"photoscanned vegetation"* among other things, so this
+  admits no new source and D-10's two tables stand as written. What still stands, unchanged: none of
+  the images inside EZ-Tree's own repository is taken; each asset is verified per asset at download
+  time, with its own page, the date and the grant recorded, and pinned by digest (D-11); ambientCG's
+  "Approximation" atlases stay refused, because no ruling was sought on them; and a source on
+  neither table is still a superseding ADR. The first asset taken under this ruling is Poly Haven's
+  `fir_tree_01`, for the generated fir's sprigs and bark. In code the two admitted sources a
+  generated tree may wear are `apps/web/tools/realistic/sources.ts` §`GENERATED_TREE_WEARS`, and
+  `admitted-sources.test.ts` holds that list to this entry and every worn asset's page to that
+  list. ([#1294](https://github.com/openzigs/onyourleft/issues/1294))

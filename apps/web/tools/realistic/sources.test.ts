@@ -21,6 +21,8 @@ import {
   GENERATED_TREE_TEXTURES,
   generatedInputDigest,
   generatedTreeMaps,
+  POLY_HAVEN_TREE_MAPS,
+  POLY_HAVEN_TREE_RESOLUTION,
   WORDMARK_FROM,
   EXPECTED_REPORTS,
   inputDigest,
@@ -120,12 +122,26 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     const fromAmbientCg = SOURCES.filter(
       (source) => new URL(source.licencePage).hostname === 'ambientcg.com',
     );
-    // The ground's rock (#1274), and since #1283 the generated trees' bark and leaves.
+    // The ground's rock (#1274), and since #1283 the generated trees' bark
+    // and leaves — those of them that are ambientCG's: since #1294 the fir's
+    // are Poly Haven's.
+    const wornFrom = (from: 'ambientcg' | 'polyhaven'): string[] =>
+      GENERATED_TREE_TEXTURES.filter((texture) => texture.from === from).map(
+        (texture) => texture.id,
+      );
     expect(fromAmbientCg.map((source) => source.id)).toEqual([
       ...AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
-      ...GENERATED_TREE_TEXTURES.map((texture) => texture.id),
+      ...wornFrom('ambientcg'),
     ]);
-    expect(GENERATED_TREE_TEXTURES.length).toBeGreaterThan(0);
+    expect(wornFrom('ambientcg').length).toBeGreaterThan(0);
+    // A Poly Haven asset a tree wears is read from Poly Haven's own page,
+    // through Poly Haven's origin, as named maps and no geometry.
+    expect(wornFrom('polyhaven')).toEqual(Object.keys(POLY_HAVEN_TREE_MAPS));
+    for (const id of wornFrom('polyhaven')) {
+      const source = SOURCES.find((each) => each.id === id);
+      expect(source?.licencePage, id).toBe(`https://polyhaven.com/a/${id}`);
+      expect(source?.origin, id).toMatchObject({ from: 'polyhaven', select: { type: 'maps' } });
+    }
     for (const source of fromAmbientCg) expect(source.origin.from, source.id).toBe('ambientcg');
     expect(
       SOURCES.filter((source) => source.origin.from === 'ambientcg').map((source) => source.id),
@@ -164,6 +180,34 @@ describe('Poly Haven’s answers', () => {
     expect(
       polyHavenFiles('tree', { type: 'model', resolution: '1k' }, answer).map((each) => each.path),
     ).toEqual(['tree_1k.gltf', 'textures/a.jpg', 'tree.bin']);
+  });
+
+  it('takes a model’s named maps and none of its geometry — #1294', () => {
+    const answer = {
+      twig_diff: { '1k': { jpg: file('fir_twig_diff_1k.jpg'), png: file('fir_twig_diff_1k.png') } },
+      twig_alpha: { '1k': { jpg: file('fir_twig_alpha_1k.jpg') } },
+      gltf: { '1k': { gltf: { ...file('fir_1k.gltf'), include: { 'fir.bin': file('fir.bin') } } } },
+    };
+    const select = { type: 'maps', resolution: '1k', maps: ['twig_diff', 'twig_alpha'] } as const;
+    expect(polyHavenFiles('fir', select, answer)).toEqual([
+      {
+        path: 'fir_twig_diff_1k.jpg',
+        url: 'https://dl.polyhaven.org/fir_twig_diff_1k.jpg',
+        md5: 'm',
+        size: 1,
+      },
+      {
+        path: 'fir_twig_alpha_1k.jpg',
+        url: 'https://dl.polyhaven.org/fir_twig_alpha_1k.jpg',
+        md5: 'm',
+        size: 1,
+      },
+    ]);
+    // A map the asset does not offer is a refusal: a model's glTF does not
+    // include its alpha, and a sprig with no cut-out would be a green square.
+    expect(() =>
+      polyHavenFiles('fir', { ...select, maps: ['twig_diff', 'twig_mask'] }, answer),
+    ).toThrow(/fir: Poly Haven offers no twig_mask\/1k\/jpg/);
   });
 
   it('refuses rather than quietly downloading less than was asked for', () => {
@@ -811,24 +855,72 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
   if (tree === undefined) throw new Error('no generated tree');
   const species = speciesOf(tree);
 
-  it('fetches each species’ bark and leaves from ambientCG once, with the maps the script reads', () => {
+  it('fetches each species’ bark and leaves once, with the maps the script reads', () => {
     const ids = GENERATED_TREE_TEXTURES.map((texture) => texture.id);
     expect(new Set(ids).size).toBe(ids.length);
+    /** Every file a source is fetched for, as a run would name it. */
+    const fetched = (id: string): readonly string[] => {
+      const source = SOURCES.find((candidate) => candidate.id === id);
+      if (source === undefined) throw new Error(`${id} is not a source`);
+      if (source.origin.from === 'ambientcg') {
+        return ambientCgArchive(source).members.map((member) => `${id}/${member.path}`);
+      }
+      // #1294: a Poly Haven asset's maps, named as its API names each file.
+      if (source.origin.from !== 'polyhaven' || source.origin.select.type !== 'maps') {
+        throw new Error(`${id}: neither ambientCG’s nor a Poly Haven asset’s maps`);
+      }
+      const { maps, resolution } = source.origin.select;
+      const answer = Object.fromEntries(
+        maps.map((map) => [
+          map,
+          {
+            [resolution]: {
+              jpg: {
+                url: `https://dl.polyhaven.org/x/${id}_${map}_${resolution}.jpg`,
+                md5: 'm',
+                size: 1,
+              },
+            },
+          },
+        ]),
+      );
+      return polyHavenFiles(id, source.origin.select, answer).map((file) => `${id}/${file.path}`);
+    };
+    let fromPolyHaven = 0;
     for (const each of GENERATED_SPECIES) {
       expect(ids, each.id).toContain(each.bark.source);
       expect(ids, each.id).toContain(each.sprig.source);
       const maps = generatedTreeMaps(each);
-      // Every path a run reads is a member the archive of its source is taken for.
-      for (const [id, paths] of [
-        [each.bark.source, [maps.barkColour, maps.barkNormal]],
-        [each.sprig.source, [maps.leafColour, maps.leafOpacity, maps.leafNormal]],
-      ] as const) {
-        const source = SOURCES.find((candidate) => candidate.id === id);
-        if (source === undefined) throw new Error(`${id} is not a source`);
-        const members = ambientCgArchive(source).members.map((member) => `${id}/${member.path}`);
-        expect([...paths].sort(), id).toEqual([...members].sort());
+      const bark = [maps.barkColour, maps.barkNormal];
+      const leaf = [maps.leafColour, maps.leafOpacity, maps.leafNormal];
+      // Five different files: a species never reads one map as two.
+      expect(new Set([...bark, ...leaf]).size, each.id).toBe(5);
+      if (each.bark.source === each.sprig.source) {
+        // One asset is both: every file fetched of it is one the run reads.
+        expect([...bark, ...leaf].sort(), each.id).toEqual([...fetched(each.bark.source)].sort());
+        fromPolyHaven += 1;
+        continue;
       }
+      // Every path a run reads is a member the archive of its source is taken for.
+      expect([...bark].sort(), each.id).toEqual([...fetched(each.bark.source)].sort());
+      expect([...leaf].sort(), each.id).toEqual([...fetched(each.sprig.source)].sort());
     }
+    // The fir's five maps, by the names Poly Haven gives them.
+    expect(fromPolyHaven).toBe(1);
+    const fir = GENERATED_SPECIES.find((each) => each.id === 'fir');
+    if (fir === undefined) throw new Error('there is a fir');
+    expect(POLY_HAVEN_TREE_RESOLUTION).toBe('1k');
+    expect(generatedTreeMaps(fir)).toEqual({
+      barkColour: 'fir_tree_01/fir_tree_01_bark_diff_1k.jpg',
+      barkNormal: 'fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg',
+      leafColour: 'fir_tree_01/fir_tree_01_twig_diff_1k.jpg',
+      leafOpacity: 'fir_tree_01/fir_tree_01_twig_alpha_1k.jpg',
+      leafNormal: 'fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg',
+    });
+    // And an oak's are still ambientCG's own names.
+    expect(generatedTreeMaps(species).leafOpacity).toBe(
+      `${species.sprig.source}/${species.sprig.source}_1K-JPG_Opacity.jpg`,
+    );
     // A bark gives two maps and a leaf atlas three: the opacity is the cut-out.
     expect(Object.values(GENERATED_BARK_MAPS)).toEqual(['Color', 'NormalGL']);
     expect(Object.values(GENERATED_LEAF_MAPS)).toEqual(['Color', 'Opacity', 'NormalGL']);
@@ -916,6 +1008,7 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
     const lock = lockOf((id) => (id === species.bark.source ? 'a' : 'b').repeat(64));
     const digest = generatedInputDigest(tree, lock);
     const { sprig } = species;
+    if ('rects' in sprig) throw new Error('the first tree’s atlas is a grid');
     const firstLeaf = sprig.leaves[0];
     if (firstLeaf === undefined) throw new Error('a sprig has leaves');
     const turned = [{ ...firstLeaf, turn: firstLeaf.turn + 1 }, ...sprig.leaves.slice(1)];
@@ -958,5 +1051,55 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
     expect(generatedInputDigest(tree, lock, species)).toBe(digest);
     // A full level and a middle level are told different things, and both are recorded.
     expect(runNumbersDigest(tree, 'full')).not.toBe(runNumbersDigest(tree, 'middle'));
+  });
+
+  it('digests a fir’s one asset once, and moves with every number of a rectangle — #1294', () => {
+    const fir = GENERATED_TREES.find((each) => each.species === 'fir');
+    if (fir === undefined) throw new Error('there is a generated fir');
+    const firSpecies = speciesOf(fir);
+    // Its bark and its sprigs are one Poly Haven asset.
+    expect(firSpecies.bark.source).toBe(firSpecies.sprig.source);
+    const lock = lockOf(() => 'a'.repeat(64));
+    const digest = generatedInputDigest(fir, lock);
+    expect(digest).toBe(
+      inputDigest([
+        ...(['full', 'middle'] as const).flatMap((level) => [
+          { path: `generated-trees.ts#${fir.name}.${level}`, sha256: fir.geometry[level] },
+          {
+            path: `generated-trees.ts#${fir.name}.${level}.run`,
+            sha256: runNumbersDigest(fir, level),
+          },
+        ]),
+        // Once: named twice it would be two lines of one file.
+        {
+          path: `${firSpecies.bark.source}/${firSpecies.bark.source}.zip`,
+          sha256: 'a'.repeat(64),
+        },
+      ]),
+    );
+    const { sprig } = firSpecies;
+    if (!('rects' in sprig)) throw new Error('the fir’s atlas is rectangles');
+    const [first, ...rest] = sprig.rects;
+    if (first === undefined) throw new Error('the fir’s atlas has rectangles');
+    const seen = new Set([digest]);
+    for (const key of ['x', 'y', 'width', 'height', 'turn'] as const) {
+      const moved = generatedInputDigest(fir, lock, {
+        ...firSpecies,
+        sprig: { ...sprig, rects: [{ ...first, [key]: first[key] + 1 }, ...rest] },
+      });
+      expect(moved, key).not.toBe(digest);
+      seen.add(moved);
+    }
+    expect(seen.size).toBe(6);
+    // A rectangle fewer, and the same rectangles in another order.
+    expect(
+      generatedInputDigest(fir, lock, { ...firSpecies, sprig: { ...sprig, rects: rest } }),
+    ).not.toBe(digest);
+    expect(
+      generatedInputDigest(fir, lock, {
+        ...firSpecies,
+        sprig: { ...sprig, rects: [...rest, first] },
+      }),
+    ).not.toBe(digest);
   });
 });

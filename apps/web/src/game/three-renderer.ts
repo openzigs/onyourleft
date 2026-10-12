@@ -5954,7 +5954,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      // #1283: the broadleaves are the generated trees, or — for the owner's
+      // #1283, #1294: the trees are the generated ones, or — for the owner's
       // page — the scans they replaced. @see setRealisticTrees
       models: realisticVegetation(realisticTrees)[kind].map(
         ({ name, file, impostor, impostorNormals, middle }) => ({
@@ -6190,19 +6190,22 @@ export function setRealisticMaterialsMerged(on: boolean): void {
   realisticMaterialsMerged = on;
 }
 
-/** Which broadleaf trees the next realistic load draws. @see setRealisticTrees */
+/** Which trees the next realistic load draws. @see setRealisticTrees */
 let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
 
 /**
- * Makes the NEXT realistic load draw its broadleaf trees from the scans, as
- * every load did before #1283 — or, with `'generated'`, from the generated
- * trees, as the product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`).
- * Only the one set asked for is fetched, decoded and held.
+ * Makes the NEXT realistic load draw its trees from the scans, as every load
+ * did before #1283 — or, with `'generated'`, from the generated trees, as the
+ * product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`), or with
+ * `'scanned-conifers'` the generated broadleaves beside the scanned firs, as
+ * every load did between #1283 and #1294. Only the one set asked for is
+ * fetched, decoded and held.
  *
  * ADR 0049 D-1 keeps a generated tree only where the tablet measurement says
  * it should, so until that row is in, the scans are one switch away: the
- * owner's page loads them with `?levers=-generated-trees`, and the browser
- * gate measures the two sets at the same route positions with the same camera.
+ * owner's page loads them with `?levers=-generated-trees` or, for the firs
+ * alone, `?levers=-generated-conifers`, and the browser gate measures the
+ * generated set and the scans at the same route positions with the same camera.
  *
  * @test-facing `apps/web/browser/realistic-harness.ts` and
  * `apps/web/browser/game-harness.ts` §`treeLevelRun` load the scans with it; the

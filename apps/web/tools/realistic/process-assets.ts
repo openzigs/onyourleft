@@ -52,7 +52,8 @@
  * above, and refused at any other version — and makes each tree's levels from
  * the seed and parameters in `generated-trees.ts`, refusing a tree whose
  * numbers are not the ones recorded there; `blender/process_generated_tree.py`
- * then dresses each in ambientCG's bark and leaves.
+ * then dresses each in its species' bark and leaves — ambientCG's, or since
+ * #1294 Poly Haven's.
  *
  * `--geometry` prints what those numbers make today, to record after one is
  * changed on purpose.

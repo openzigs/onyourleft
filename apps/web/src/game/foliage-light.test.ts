@@ -48,7 +48,7 @@ describe('the far band’s light and the breeze — #630', () => {
   });
 
   it('bakes a normal strip for every tree that has an impostor, and ships it', () => {
-    // #1283: of both sets — a generated tree's strip is lit as a scan's is.
+    // #1283, #1294: of every set — a generated tree's strip is lit as a scan's is.
     let strips = 0;
     for (const trees of REALISTIC_TREE_SETS) {
       for (const models of Object.values(realisticVegetation(trees))) {
@@ -61,8 +61,9 @@ describe('the far band’s light and the breeze — #630', () => {
         }
       }
     }
-    // Non-vacuity: four generated broadleaves, two scanned, and two conifers in each set.
-    expect(strips).toBe(10);
+    // Non-vacuity: three sets — six generated trees, four generated
+    // broadleaves beside two scanned firs, and four scans.
+    expect(strips).toBe(6 + 6 + 4);
   });
 
   it('sways with the ride’s clock, is still when the clock is, and no two phases move alike', () => {

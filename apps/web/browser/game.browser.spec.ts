@@ -4472,7 +4472,10 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     // reading the scans' figure.** 60 000 is what the middle level took off
     // six scanned trees of 24 000 to 28 000 triangles; a generated broadleaf
     // is 6 692 at full detail, so on the trees a ride draws there is far less
-    // to save and what is saved is mostly the conifers', which are scans yet.
+    // to save. ⚠️ Since #1294 the conifers are generated too — a fir is 4 792
+    // triangles and 878 at its middle level — and the saving on this frame is
+    // 14 234 (129 952 against 115 718, 2026-10-12), where it was 18 078 with
+    // the scanned firs. Still over the floor below, which did not move.
     // #617's own figure is still held on the scans, off the committed files,
     // by `realistic-budget.test.ts` §"falls by at least 60 000" — and was
     // measured here on 2026-10-12, on this very frame with the scanned
@@ -4488,9 +4491,9 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
   }) => {
     const measured = await trees(harnessRun);
     console.log(
-      `#1283: the wooded view, same route position and camera: ` +
+      `#1283, #1294: the wooded view, same route position and camera: ` +
         `${String(measured.trianglesSubmitted)} triangles in ${String(measured.drawCallsSubmitted)} draw calls ` +
-        `with the generated broadleaves, ${String(measured.scanned.triangles)} in ` +
+        `with the generated trees, ${String(measured.scanned.triangles)} in ` +
         `${String(measured.scanned.calls)} with the scans — ` +
         `${String(measured.scanned.triangles - measured.trianglesSubmitted)} fewer triangles, ` +
         `${String(measured.drawCallsSubmitted - measured.scanned.calls)} more calls`,
@@ -4506,7 +4509,9 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     // More shapes are more calls — a call a level a variant — and both sets
     // stay inside the one ceiling, which did not move: 29 with the four
     // generated shapes and 27 with the two scans, 2026-10-12 (32 with the six
-    // shapes #1283 first made).
+    // shapes #1283 first made). #1294's two generated firs stand where the two
+    // scanned firs stood, so they add none: still 29, and 115 718 triangles
+    // where the frame was 169 482 with the scanned firs.
     expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(measured.scanned.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
@@ -4528,10 +4533,19 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     expect(measured.drawCallsSubmitted).toBeGreaterThan(0);
     expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     // THE CONTROL: the same frame from a world loaded one part a material, as
-    // every load was before #639, must be OVER the ceiling — so the count
-    // above is a count of merged trees, not of a frame that happened to hold
-    // few. The same triangles, so the saving is calls and not geometry…
-    expect(measured.drawCallsUnmerged).toBeGreaterThan(REALISTIC_WOODED_DRAW_CALLS);
+    // every load was before #639, must make MORE calls — so the count above
+    // is a count of merged trees, not of a frame that happened to hold few.
+    // The same triangles, so the saving is calls and not geometry…
+    //
+    // ⚠️ **This said "over the ceiling" until #1294, and a reviewer who
+    // remembers that is reading the scanned firs' figure.** A scanned fir is
+    // three materials and a generated one is two, its bark and its sprigs, so
+    // the unmerged frame fell from over 35 to 34 (measured 2026-10-12, against
+    // 29 merged) and no longer crosses a ceiling that did not move. What the
+    // control is for is unchanged: {@link MERGED_CALLS_SAVED_AT_LEAST}.
+    expect(measured.drawCallsUnmerged - measured.drawCallsSubmitted).toBeGreaterThanOrEqual(
+      MERGED_CALLS_SAVED_AT_LEAST,
+    );
     expect(measured.trianglesUnmerged).toBe(measured.trianglesSubmitted);
     // …and the same picture: the layers are read as the materials were.
     expect(measured.pixelsCompared).toBe(640 * 360);
@@ -4639,10 +4653,22 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
 const MERGED_PIXELS_CHANGED = 0;
 
 /**
+ * The least calls merging a tree's materials must take off the wooded view,
+ * against the same frame from a world loaded one part a material — #639's
+ * control, restated by #1294: **4**. Measured on 2026-10-12 with every tree
+ * generated: 34 unmerged against 29, five fewer — a call for each tree mesh in
+ * the frame whose bark and leaves became one material's two layers. A merge
+ * that stopped merging saves none.
+ */
+const MERGED_CALLS_SAVED_AT_LEAST = 4;
+
+/**
  * The least the middle level must take off the wooded view's frame, against
  * the same view drawn with the hard swap: **9 000** triangles, half the 18 078
  * measured on 2026-10-12 with the generated broadleaves a ride draws (169 482
- * against 187 560).
+ * against 187 560). Since #1294, with the firs generated too, the frame is
+ * 115 718 against 129 952 and the saving 14 234: over this floor by 5 234,
+ * and the floor was not moved to make room.
  *
  * ⚠️ **It was 60 000 until #1283** — #617's own figure, measured on the
  * scans, which `realistic-budget.test.ts` still holds the scans' worst case

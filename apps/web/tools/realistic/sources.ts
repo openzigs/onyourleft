@@ -352,7 +352,14 @@ export type PolyHavenSelection =
       readonly resolution: string;
       readonly maps: readonly string[];
     }
-  | { readonly type: 'model'; readonly resolution: string };
+  | { readonly type: 'model'; readonly resolution: string }
+  /**
+   * Named maps of an asset of any kind and none of its geometry — #1294: a
+   * model's twig atlas and bark, for a generated tree to wear. `maps` are the
+   * keys of Poly Haven's `/files/{id}` answer (`twig_alpha`), which for a
+   * model are not among the files its glTF includes.
+   */
+  | { readonly type: 'maps'; readonly resolution: string; readonly maps: readonly string[] };
 
 /** A file named by URL rather than by an API. */
 export interface FixedFile {
@@ -776,7 +783,8 @@ const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
  * The bark and leaves the generated trees wear — #1283, ADR 0049 D-1: each an
  * ambientCG CC0 asset at 1K, taken through #1274's origin (its own page's
  * licence, its technique against {@link AMBIENTCG_TECHNIQUES_KEPT}, its
- * archive pinned by digest). Which species wears which is
+ * archive pinned by digest) — or, since #1294, a Poly Haven one
+ * ({@link POLY_HAVEN_TREE_MAPS}). Which species wears which is
  * `generated-trees.ts` §`GENERATED_SPECIES`; this is the list of what to fetch,
  * derived from it so the two cannot disagree.
  *
@@ -784,11 +792,11 @@ const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
  * - a **leaf atlas** gives its colour map, its opacity map — the cut-out each
  *   leaf is taken by — and its normal map.
  *
- * ⚠️ **No conifer is here, and that is a finding**: read on 2026-10-12,
- * ambientCG's two needle atlases (`LeafSet019`, `PineNeedles001`) are both
- * made by "Approximation", which {@link AMBIENTCG_TECHNIQUES_KEPT} refuses,
- * so there are no needles a generated conifer could wear and the conifers stay
- * the Poly Haven scans.
+ * ⚠️ **ambientCG has no needles the pipeline may take**: read on 2026-10-12,
+ * its two needle atlases (`LeafSet019`, `PineNeedles001`) are both made by
+ * "Approximation", which {@link AMBIENTCG_TECHNIQUES_KEPT} refuses. A reviewer
+ * who remembers this note ending "so the conifers stay the Poly Haven scans"
+ * is reading #1283's file: the fir's needles are Poly Haven's since #1294.
  */
 export const GENERATED_TREE_ATTRIBUTE = '1K-JPG';
 export const GENERATED_BARK_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
@@ -798,35 +806,158 @@ export const GENERATED_LEAF_MAPS = {
   normal: 'NormalGL',
 } as const;
 
-/** Every ambientCG asset a generated tree wears, once each, barks first. */
+/**
+ * The admitted sources a generated tree's bark and leaves may come from, as
+ * ADR 0049 D-10 names them. D-1's body says "Bark and leaves come from
+ * ambientCG", written to keep EZ-Tree's own bundled images out; its amendment
+ * of 2026-10-12 records the owner's ruling that "needles and bark come from
+ * Poly Haven" as well (#1294). Poly Haven was already on D-10's list for
+ * photoscanned vegetation, so this is no new source. `admitted-sources.test.ts`
+ * holds this list to the ADR and every worn asset's page to this list.
+ */
+export const GENERATED_TREE_WEARS: readonly string[] = ['ambientCG', 'Poly Haven'];
+
+/** The size a Poly Haven map is taken at, as its API names it. */
+export const POLY_HAVEN_TREE_RESOLUTION = '1k';
+
+/**
+ * The Poly Haven assets a generated tree wears, and which of each one's maps
+ * are its bark and its leaf atlas, as `api.polyhaven.com/files/{id}` names
+ * them — #1294. An asset named here is fetched from Poly Haven, through
+ * {@link polyHavenFiles}; every other is ambientCG's.
+ *
+ * ## `fir_tree_01`, and why not `fir_sapling_medium`
+ *
+ * Both are Poly Haven CC0 models by Rob Tuytel (photography) and Rico Cilliers
+ * (modeling), of the same collection, and both carry a twig atlas of the same
+ * **seven photographed fir sprigs**. Read on 2026-10-12, byte for byte:
+ *
+ * | Map, 1K JPEG | `fir_sapling_medium` (`twigs_…`) | `fir_tree_01` (`twig_…`) |
+ * |---|---|---|
+ * | alpha | `1f0607dd…` | the same file |
+ * | normal (`nor_gl`) | `d470dc39…` | the same file |
+ * | colour (`diff`) | `db1113d3…`: black wherever the alpha is | `8c0833a1…`: the same sprigs, with green carried out from each needle's edge |
+ *
+ * `fir_tree_01` is taken for its colour map. A card is drawn several times
+ * smaller than the atlas, so a card texel at a needle's edge averages needle
+ * with background; over black that edge is a dark outline round every needle,
+ * and over the needles' own green it is not. And taking it adds a source where
+ * `fir_sapling_medium`'s alpha map would have changed an existing one: the
+ * model's glTF does not include its alpha, so the scans' locked file list —
+ * and with it the recorded input of eight committed files that do not read
+ * it — would have moved.
+ *
+ * Its **bark** is the same asset's `bark_diff` and `bark_nor_gl`, which are
+ * byte for byte `fir_sapling_medium`'s `branches_…` maps: the photographed
+ * bark the scanned firs already wear.
+ *
+ * ## Four of the seven sprigs
+ *
+ * `generated-trees.ts` names each sprig by the rectangle it lies in. Measured
+ * off the alpha map at half coverage on 2026-10-12: five sprigs stand upright,
+ * two lean (at about 400, 300 and 510, 265 from the top left), and the
+ * rectangle of the large upright one at the lower right (650 to 980 across,
+ * 463 to 850 down) also holds 1 854 texels of the bare twig that crosses the
+ * atlas's corner, so it is left out. The four named are the other upright
+ * ones. What each one's rectangle holds beside its sprig: flecks of 1 to 22
+ * texels that touch nothing, 105 texels in all, and in the third 23 texels of
+ * the leaning sprig beside it — which a rectangle cannot leave out without
+ * cutting the sprig it is for. The first is drawn 11 texels short on its right
+ * so that its neighbour's tip is not in it, and loses 41 of its 25 109 texels.
+ */
+export const POLY_HAVEN_TREE_MAPS: Readonly<
+  Record<
+    string,
+    {
+      readonly bark: { readonly colour: string; readonly normal: string };
+      readonly leaf: {
+        readonly colour: string;
+        readonly opacity: string;
+        readonly normal: string;
+      };
+    }
+  >
+> = {
+  fir_tree_01: {
+    bark: { colour: 'bark_diff', normal: 'bark_nor_gl' },
+    leaf: { colour: 'twig_diff', opacity: 'twig_alpha', normal: 'twig_nor_gl' },
+  },
+};
+
+const wornAs = (part: 'bark' | 'sprig'): readonly string[] => [
+  ...new Set(GENERATED_SPECIES.map((species) => species[part].source)),
+];
+
+/**
+ * Every asset a generated tree wears, once each: ambientCG's barks, then its
+ * leaf atlases, then Poly Haven's — one entry an asset, with its bark's maps
+ * and its atlas's where one asset is both (#1294).
+ */
 export const GENERATED_TREE_TEXTURES: readonly {
   readonly id: string;
+  readonly from: 'ambientcg' | 'polyhaven';
   readonly maps: readonly string[];
 }[] = [
-  ...[...new Set(GENERATED_SPECIES.map((species) => species.bark.source))].map((id) => ({
-    id,
-    maps: Object.values(GENERATED_BARK_MAPS),
-  })),
-  ...[...new Set(GENERATED_SPECIES.map((species) => species.sprig.source))].map((id) => ({
-    id,
-    maps: Object.values(GENERATED_LEAF_MAPS),
-  })),
+  ...wornAs('bark')
+    .filter((id) => !(id in POLY_HAVEN_TREE_MAPS))
+    .map((id) => ({
+      id,
+      from: 'ambientcg' as const,
+      maps: Object.values(GENERATED_BARK_MAPS),
+    })),
+  ...wornAs('sprig')
+    .filter((id) => !(id in POLY_HAVEN_TREE_MAPS))
+    .map((id) => ({
+      id,
+      from: 'ambientcg' as const,
+      maps: Object.values(GENERATED_LEAF_MAPS),
+    })),
+  ...Object.entries(POLY_HAVEN_TREE_MAPS)
+    .map(([id, maps]) => ({
+      id,
+      from: 'polyhaven' as const,
+      maps: [
+        ...(wornAs('bark').includes(id) ? Object.values(maps.bark) : []),
+        ...(wornAs('sprig').includes(id) ? Object.values(maps.leaf) : []),
+      ],
+    }))
+    .filter((texture) => texture.maps.length > 0),
 ];
 
 /**
  * Where the maps one species wears are, relative to the downloads' directory:
  * `<id>/<id>_1K-JPG_<map>.jpg`, the names ambientCG's archive gives them
- * ({@link ambientCgArchive}).
+ * ({@link ambientCgArchive}), or for a Poly Haven asset `<id>/<id>_<map>_1k.jpg`,
+ * the name its API gives each file ({@link polyHavenFiles}).
  */
 export function generatedTreeMaps(species: GeneratedSpecies): RunPaths {
-  const file = (id: string, map: string): string =>
+  const ambient = (id: string, map: string): string =>
     `${id}/${id}_${GENERATED_TREE_ATTRIBUTE}_${map}.jpg`;
+  const haven = (id: string, map: string): string =>
+    `${id}/${id}_${map}_${POLY_HAVEN_TREE_RESOLUTION}.jpg`;
+  const bark = POLY_HAVEN_TREE_MAPS[species.bark.source]?.bark;
+  const leaf = POLY_HAVEN_TREE_MAPS[species.sprig.source]?.leaf;
   return {
-    barkColour: file(species.bark.source, GENERATED_BARK_MAPS.colour),
-    barkNormal: file(species.bark.source, GENERATED_BARK_MAPS.normal),
-    leafColour: file(species.sprig.source, GENERATED_LEAF_MAPS.colour),
-    leafOpacity: file(species.sprig.source, GENERATED_LEAF_MAPS.opacity),
-    leafNormal: file(species.sprig.source, GENERATED_LEAF_MAPS.normal),
+    barkColour:
+      bark === undefined
+        ? ambient(species.bark.source, GENERATED_BARK_MAPS.colour)
+        : haven(species.bark.source, bark.colour),
+    barkNormal:
+      bark === undefined
+        ? ambient(species.bark.source, GENERATED_BARK_MAPS.normal)
+        : haven(species.bark.source, bark.normal),
+    leafColour:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.colour)
+        : haven(species.sprig.source, leaf.colour),
+    leafOpacity:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.opacity)
+        : haven(species.sprig.source, leaf.opacity),
+    leafNormal:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.normal)
+        : haven(species.sprig.source, leaf.normal),
   };
 }
 
@@ -913,9 +1044,16 @@ export const SOURCES: readonly AssetSource[] = [
       AMBIENTCG_GROUND_MAPS.normal,
     ]),
   ),
-  // #1283: the generated trees' bark and leaves, from ambientCG.
+  // #1283: the generated trees' bark and leaves, from ambientCG — and since
+  // #1294 the fir's, from Poly Haven.
   ...GENERATED_TREE_TEXTURES.map((texture) =>
-    ambientCg(texture.id, GENERATED_TREE_ATTRIBUTE, texture.maps),
+    texture.from === 'polyhaven'
+      ? polyHaven(texture.id, {
+          type: 'maps',
+          resolution: POLY_HAVEN_TREE_RESOLUTION,
+          maps: texture.maps,
+        })
+      : ambientCg(texture.id, GENERATED_TREE_ATTRIBUTE, texture.maps),
   ),
   {
     id: 'makehuman',
@@ -1247,7 +1385,7 @@ export type OutputRecipe =
    * One level of a GENERATED tree — #1283, ADR 0049 D-1: `generated-trees.ts`
    * makes its geometry with the pinned {@link PINNED_EZ_TREE} from the tree's
    * committed seed and parameters, and {@link GENERATED_TREE_SCRIPT} dresses
-   * it in ambientCG's bark and leaves, bakes its occlusion and, for a full
+   * it in its species' bark and leaves, bakes its occlusion and, for a full
    * level, renders its impostor. Its input is {@link generatedInputDigest}.
    */
   | {
@@ -1301,7 +1439,7 @@ export const GENERATED_TREES_PATH = `${PIPELINE_DIRECTORY}generated-trees.ts`;
 /**
  * What a generated output's {@link OutputSpec.from} names: no single
  * {@link SOURCES} entry, because the tree is this repository's own work and
- * the two ambientCG assets it wears are named by its species.
+ * the assets it wears are named by its species.
  */
 export const GENERATED_FROM = 'this repository, generated';
 
@@ -1652,7 +1790,7 @@ function generatedFull(tree: GeneratedTree): OutputSpec {
         },
       ],
     },
-    modified: `${species.words}, generated at the size wanted and neither decimated nor thinned: its wood and leaf cards are what ${PINNED_EZ_TREE} made from the seed ${String(tree.seed)} and the ${species.id} parameters in ${GENERATED_TREES_PATH}, scaled to metres; each leaf card a sprig drawn from ${species.sprig.source}'s scanned leaves, cut out by that atlas's own opacity map and toned by ${species.sprig.tone.join(', ')}, at ${String(species.sprig.pixels)} px with its normals at ${String(species.sprig.normalPixels)} px; ${species.bark.source}'s colour and normal maps downsized to ${String(species.bark.pixels)} px and its other maps dropped; ambient occlusion baked into a vertex colour; then ${GLB_IMAGES_WORDS}`,
+    modified: `${species.words}, generated at the size wanted and neither decimated nor thinned: its wood and leaf cards are what ${PINNED_EZ_TREE} made from the seed ${String(tree.seed)} and the ${species.id} parameters in ${GENERATED_TREES_PATH}, scaled to metres; each leaf card ${'rects' in species.sprig ? `drawn from ${String(new Set(species.sprig.leaves.map((leaf) => leaf.cell)).size)} of ${species.sprig.source}'s photographed sprigs, each taken from its own rectangle of the twig atlas` : `a sprig drawn from ${species.sprig.source}'s scanned leaves`}, cut out by that atlas's own opacity map and toned by ${species.sprig.tone.join(', ')}, at ${String(species.sprig.pixels)} px with its normals at ${String(species.sprig.normalPixels)} px; ${species.bark.source}'s colour and normal maps downsized to ${String(species.bark.pixels)} px and its other maps dropped; ambient occlusion baked into a vertex colour; then ${GLB_IMAGES_WORDS}`,
   };
 }
 
@@ -1673,8 +1811,7 @@ function generatedMiddle(tree: GeneratedTree): OutputSpec {
  * each level (`generated-trees.ts` §`geometryDigest`, named
  * `generated-trees.ts#<tree>.<level>`), the numbers of each level's run that
  * only Blender reads (§`runNumbersDigest`, named `…#<tree>.<level>.run`), and
- * every locked file of the two ambientCG assets it wears, each under its
- * source's id. So a row moves when a parameter, the seed, the generator, or
+ * every locked file of the assets it wears, each under its source's id. So a row moves when a parameter, the seed, the generator, or
  * either download does.
  *
  * ⚠️ **The `.run` lines are what make "a parameter" true.** The geometry
@@ -1702,7 +1839,8 @@ export function generatedInputDigest(
         sha256: runNumbersDigest(tree, level, species),
       },
     ]),
-    ...[species.bark.source, species.sprig.source].flatMap((id) =>
+    // Once each: the fir's bark and sprigs are one Poly Haven asset (#1294).
+    ...[...new Set([species.bark.source, species.sprig.source])].flatMap((id) =>
       locked(id).files.map((file) => ({ path: `${id}/${file.path}`, sha256: file.sha256 })),
     ),
   ]);
@@ -1850,6 +1988,7 @@ export function polyHavenFiles(
     case 'hdri':
       return [one(pick(['hdri', select.resolution, 'hdr']))];
     case 'texture':
+    case 'maps':
       return select.maps.map((map) => one(pick([map, select.resolution, 'jpg'])));
     case 'model': {
       const gltf = pick(['gltf', select.resolution, 'gltf']);
@@ -2119,7 +2258,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
  * The `ASSETS.toml` entry for one file of a generated tree — #1283, ADR 0049
  * D-1: **this repository's own work, dedicated `CC0-1.0`, naming the generator
  * and its version**, as the bicycle's drawn maps are recorded, and naming the
- * two ambientCG assets it wears with what each one's own page said.
+ * ambientCG or Poly Haven assets it wears with what each one's own page said.
  */
 function generatedRecord(
   file: string,
@@ -2132,7 +2271,7 @@ function generatedRecord(
   const tree = GENERATED_TREES.find((each) => each.name === recipe.tree);
   if (tree === undefined) throw new Error(`${file}: no generated tree ${recipe.tree}`);
   const species = speciesOf(tree);
-  const worn = [species.bark.source, species.sprig.source].map((id) => {
+  const worn = [...new Set([species.bark.source, species.sprig.source])].map((id) => {
     const source = lock.sources.find((each) => each.id === id);
     if (source === undefined) throw new Error(`${file}: ${id} is not in the lock`);
     return source;
@@ -2143,17 +2282,20 @@ function generatedRecord(
     strip === undefined
       ? (output.modified ?? '')
       : `${strip.modified ?? ''}; then ${encodingWords(strip.ktx2)}`;
+  // An ambientCG page says how the asset was made; a Poly Haven asset's API
+  // names who photographed and modelled it (#1294).
   const wears = worn
-    .map(
-      (each) =>
-        `ambientCG's ${each.id} (${each.licence}; its own page, read on ${each.read}: made by ${each.technique ?? 'nothing it names'})`,
+    .map((each) =>
+      each.id in POLY_HAVEN_TREE_MAPS
+        ? `Poly Haven's ${each.id} (${each.licence}; its own page, read on ${each.read}: by ${each.authors})`
+        : `ambientCG's ${each.id} (${each.licence}; its own page, read on ${each.read}: made by ${each.technique ?? 'nothing it names'})`,
     )
     .join(' and ');
   return [
     ['path', `${OUTPUT_DIRECTORY}/${file}`],
     [
       'source',
-      `This repository, #1283 — a tree generated by ${PINNED_EZ_TREE} (MIT, https://github.com/dgreenheck/ez-tree), a deterministic generator run from the seed and parameters committed in ${GENERATED_TREES_PATH}, wearing ${wears}. None of the generator's own images is taken, and nothing is the output of a trained model (ADR 0049 D-1, D-2)`,
+      `This repository, ${species.adoptedBy} — a tree generated by ${PINNED_EZ_TREE} (MIT, https://github.com/dgreenheck/ez-tree), a deterministic generator run from the seed and parameters committed in ${GENERATED_TREES_PATH}, wearing ${wears}. None of the generator's own images is taken, and nothing is the output of a trained model (ADR 0049 D-1, D-2)`,
     ],
     ['licence', 'CC0-1.0'],
     [

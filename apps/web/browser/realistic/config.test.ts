@@ -88,6 +88,36 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?levers=-generated-trees'))).toBe('?levers=-generated-trees');
   });
 
+  it('loads the scanned firs beside the generated broadleaves with the fir’s own lever off — #1294', () => {
+    expect(LEVERS).toContain('generated-conifers');
+    const firs = treesWithLevers(parseConfig('?levers=-generated-conifers').leversOff);
+    expect(firs).toBe('scanned-conifers');
+    expect(firs).not.toBe(REALISTIC_TREES_DEFAULT);
+    expect(REALISTIC_TREE_SETS).toContain(firs);
+    // Every tree's scan with the trees' lever off, whether or not the fir's is
+    // off too: scanned broadleaves beside generated firs is no set at all.
+    for (const query of [
+      '?levers=-generated-trees',
+      '?levers=-generated-trees,-generated-conifers',
+      '?levers=-generated-conifers,-generated-trees',
+    ]) {
+      expect(treesWithLevers(parseConfig(query).leversOff), query).toBe('scanned');
+    }
+    // Another lever beside it changes nothing about the trees.
+    expect(treesWithLevers(parseConfig('?levers=-air,-generated-conifers').leversOff)).toBe(
+      'scanned-conifers',
+    );
+    expect(configQuery(parseConfig('?levers=-generated-conifers'))).toBe(
+      '?levers=-generated-conifers',
+    );
+    // Every set the renderer can load has a URL that loads it.
+    expect(
+      ['', '?levers=-generated-conifers', '?levers=-generated-trees'].map((query) =>
+        treesWithLevers(parseConfig(query).leversOff),
+      ),
+    ).toEqual([...REALISTIC_TREE_SETS]);
+  });
+
   it('takes the rung’s texture bias out when that lever is off, and leaves the rung alone otherwise — #619', () => {
     const rung = { label: 'realistic, reduced', textureLodBias: 1 };
     expect(rungWithLevers(rung, [])).toBe(rung);

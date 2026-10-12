@@ -706,6 +706,46 @@
       ]
     },
     {
+      "id": "fir_tree_01",
+      "licence": "CC0-1.0",
+      "licencePage": "https://polyhaven.com/a/fir_tree_01",
+      "evidence": "CC0 1.0 Universal - public domain dedication, no attribution required",
+      "read": "2026-10-12",
+      "authors": "Rob Tuytel (photography); Rico Cilliers (modeling)",
+      "files": [
+        {
+          "path": "fir_tree_01_bark_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+          "bytes": 776567,
+          "sha256": "a5d25150ba1bee10008c039f98aa3c73b4477a404d6715c511ca9b5b0f4a9077"
+        },
+        {
+          "path": "fir_tree_01_bark_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+          "bytes": 1137533,
+          "sha256": "6a570ab53ab2249ecdfa93e7d3b9a8a2cb1a8ad391400e5a64c708914779b2c3"
+        },
+        {
+          "path": "fir_tree_01_twig_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
+          "bytes": 371741,
+          "sha256": "8c0833a10e4fd44498d848cf9e659fe250a3813984cbd679f42430eb98c61fb8"
+        },
+        {
+          "path": "fir_tree_01_twig_alpha_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_twig_alpha_1k.jpg",
+          "bytes": 274407,
+          "sha256": "1f0607dd457c32406717daffe5049b1d2248c497589c83795c623c5e8b03e542"
+        },
+        {
+          "path": "fir_tree_01_twig_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
+          "bytes": 472604,
+          "sha256": "d470dc39b1d02bbeba06feb0ad818680ef3c24623b4db597270301a5fb8c9369"
+        }
+      ]
+    },
+    {
       "id": "makehuman",
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",

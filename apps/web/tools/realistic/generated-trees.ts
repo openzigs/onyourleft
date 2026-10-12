@@ -16,7 +16,8 @@
  * - {@link GENERATED_SPECIES} is every parameter of each species, written out
  *   in full — none is left to the generator's defaults, so a later release
  *   that changed a default could not move a tree — with the bark and leaves it
- *   wears, which are ambientCG's (`sources.ts` §`SOURCES`);
+ *   wears, which are ambientCG's or, since #1294, Poly Haven's (`sources.ts`
+ *   §`SOURCES`; ADR 0049's amendment of 2026-10-12);
  * - {@link GENERATED_TREES} is each tree: its species, its seed, and the
  *   SHA-256 of the geometry those make at each level of detail.
  *
@@ -46,6 +47,11 @@
  *   hand-over between them (`tree-levels.ts`) dithers one shape into itself.
  *   `generated-trees.test.ts` holds that.
  * - **impostor** — Blender's eight views of the full level, as a scan's are.
+ *
+ * The fir (#1294) is made the same way with one difference a reader should
+ * not have to find: its middle level keeps the stem's wood and NONE of its
+ * boughs', whose sprig cards then stand where the boughs were. A bough is
+ * a few centimetres thick and behind its own needles from 20 m.
  *
  * ⚠️ **Nothing of EZ-Tree's own images is read** (ADR 0049 D-1: its README
  * does not say where they came from). The generator's module asks for them
@@ -118,9 +124,46 @@ export interface LevelPlan {
   readonly leafGrowth: number;
 }
 
+/**
+ * One rectangle of an atlas, holding one whole cutting — #1294. Poly Haven's
+ * fir twig atlas is not a grid: its seven sprigs are of seven sizes, laid
+ * where they fitted, so each is named by the rectangle it lies in.
+ */
+export interface AtlasRect {
+  /** Its left and top edges, texels from the atlas's top left, at the size the lock pins. */
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** Which way the cutting's tip points in the atlas, degrees anticlockwise from up. */
+  readonly turn: number;
+}
+
+/**
+ * Where an atlas keeps its leaves: a regular grid of single leaves all
+ * pointing one way (#1283's ambientCG atlases), or a list of rectangles, each
+ * a whole sprig with its own turn (#1294's fir twigs).
+ */
+export type AtlasCells =
+  | {
+      /** The atlas's grid of leaves: columns and rows. */
+      readonly grid: readonly [number, number];
+      /** Which way a leaf's tip points in the atlas, degrees anticlockwise from up. */
+      readonly atlasTurn: number;
+    }
+  | { readonly rects: readonly AtlasRect[] };
+
+/** How many leaves an atlas holds: the most a {@link SprigLeaf.cell} may name, and one more. */
+export function cellCount(cells: AtlasCells): number {
+  return 'rects' in cells ? cells.rects.length : cells.grid[0] * cells.grid[1];
+}
+
 /** One placement of a scanned leaf on a species' leaf card. @see GeneratedSpecies.sprig */
 export interface SprigLeaf {
-  /** Which leaf of the atlas, counted along its rows from the top left. */
+  /**
+   * Which leaf of the atlas: counted along a grid's rows from the top left, or
+   * an index into its rectangles.
+   */
   readonly cell: number;
   /** Where the leaf's stalk end goes on the card, as shares of its side, from the bottom left. */
   readonly at: readonly [number, number];
@@ -186,12 +229,14 @@ export function sprigLeaves(shoots: readonly Shoot[], cells: number): readonly S
 /** One species: its shape's parameters, what it wears, and how each level is made. */
 export interface GeneratedSpecies {
   readonly id: string;
+  /** The issue that adopted it (ADR 0049 D-11), as its files' records name it. */
+  readonly adoptedBy: string;
   /** What the shape is meant to read as, for the record's words. */
   readonly words: string;
   readonly parameters: TreeParameters;
   /** Metres to one generator unit: what the generated numbers are multiplied by. */
   readonly metresPerUnit: number;
-  /** The ambientCG bark it wears (`sources.ts` §`SOURCES`), and how often it repeats. */
+  /** The bark it wears (`sources.ts` §`SOURCES`), and how often it repeats. */
   readonly bark: {
     readonly source: string;
     /** Repeats round a branch and along one section of it. Whole numbers: a part closes on itself. */
@@ -201,15 +246,12 @@ export interface GeneratedSpecies {
   };
   /**
    * The leaf card: a sprig drawn by `blender/process_generated_tree.py` from
-   * the ambientCG leaf atlas named — each of its leaves cut from the atlas by
-   * its own opacity map, turned and laid along a stem.
+   * the leaf atlas named — each of its leaves cut from the atlas by its own
+   * opacity map, turned and laid where {@link SprigLeaf} says. The atlas is
+   * ambientCG's or Poly Haven's; `sources.ts` §`generatedTreeMaps` knows which.
    */
-  readonly sprig: {
+  readonly sprig: AtlasCells & {
     readonly source: string;
-    /** The atlas's grid of leaves: columns and rows. */
-    readonly grid: readonly [number, number];
-    /** Which way a leaf's tip points in the atlas, degrees anticlockwise from up. */
-    readonly atlasTurn: number;
     /**
      * What each of the atlas's colour channels is multiplied by. The leaves
      * were scanned flat under a lamp and are brighter and yellower than a
@@ -315,6 +357,7 @@ export interface EzTree {
 
 const OAK: GeneratedSpecies = {
   id: 'oak',
+  adoptedBy: '#1283',
   words: 'a broad, spreading crown on a short trunk',
   parameters: {
     type: 'deciduous',
@@ -356,6 +399,7 @@ const OAK: GeneratedSpecies = {
 
 const HORNBEAM: GeneratedSpecies = {
   id: 'hornbeam',
+  adoptedBy: '#1283',
   words: 'a tall, narrow crown of ascending limbs',
   parameters: {
     type: 'deciduous',
@@ -395,8 +439,66 @@ const HORNBEAM: GeneratedSpecies = {
   impostor: { frame: [160, 256], normalFrame: [80, 128] },
 };
 
+/**
+ * The fir — #1294: the generator's `evergreen`, which tapers every branch to a
+ * point, grows no terminal branch from one, and shortens a limb by how far up
+ * the trunk it starts (`src/lib/tree.js`, 1.1.0) — a cone of boughs on one
+ * straight stem. ONE branch level: a bough carries its sprig cards itself,
+ * because a card here is already a whole photographed sprig with its side
+ * twigs, where a broadleaf's card is a handful of single leaves.
+ *
+ * It wears Poly Haven's `fir_tree_01`: its bark, and four of the seven
+ * sprigs of its twig atlas, each named by the rectangle it lies in.
+ * `sources.ts` §`POLY_HAVEN_TREE_MAPS` says why that asset and not
+ * `fir_sapling_medium`, and why four.
+ */
+const FIR: GeneratedSpecies = {
+  id: 'fir',
+  adoptedBy: '#1294',
+  words: 'a narrow cone of drooping boughs on one straight stem',
+  parameters: {
+    type: 'evergreen',
+    levels: 1,
+    angle: [0, 100, 0, 0],
+    children: [100, 0, 0, 0],
+    force: { x: 0, y: 1, z: 0, strength: 0 },
+    gnarliness: [0.01, 0.02, 0, 0],
+    length: [92, 30, 0, 0],
+    radius: [1.6, 0.3, 0, 0],
+    sections: [12, 4, 1, 1],
+    segments: [8, 3, 3, 3],
+    start: [0, 0.18, 0, 0],
+    taper: [1, 1, 1, 1],
+    twist: [0, 0, 0, 0],
+    leaves: { billboard: 'single', angle: 50, count: 11, start: 0.18, size: 6, sizeVariance: 0.2 },
+  },
+  metresPerUnit: 0.07,
+  bark: { source: 'fir_tree_01', repeat: [1, 1], pixels: 256 },
+  sprig: {
+    source: 'fir_tree_01',
+    rects: [
+      { x: 311, y: 410, width: 338, height: 386, turn: 0 },
+      { x: 666, y: 39, width: 296, height: 341, turn: 0 },
+      { x: 192, y: 46, width: 249, height: 275, turn: 0 },
+      { x: 550, y: 99, width: 55, height: 137, turn: 0 },
+    ],
+    tone: [1, 1, 1],
+    leaves: [
+      { cell: 2, at: [0.5, 0.06], turn: 62, length: 0.46 },
+      { cell: 1, at: [0.5, 0.06], turn: -62, length: 0.46 },
+      { cell: 3, at: [0.2, 0.62], turn: 24, length: 0.3 },
+      { cell: 3, at: [0.8, 0.6], turn: -28, length: 0.3 },
+      { cell: 0, at: [0.5, 0.02], turn: 0, length: 0.96 },
+    ],
+    pixels: 256,
+    normalPixels: 128,
+  },
+  middle: { segments: [6, 3, 3, 3], deepestWood: 0, leafEvery: 3, leafGrowth: 1.4 },
+  impostor: { frame: [128, 256], normalFrame: [64, 128] },
+};
+
 /** Every species, in a fixed order. */
-export const GENERATED_SPECIES: readonly GeneratedSpecies[] = [OAK, HORNBEAM];
+export const GENERATED_SPECIES: readonly GeneratedSpecies[] = [OAK, HORNBEAM, FIR];
 
 /** The species a generated tree is of. */
 export function speciesOf(tree: GeneratedTree): GeneratedSpecies {
@@ -428,6 +530,19 @@ export function speciesOf(tree: GeneratedTree): GeneratedSpecies {
  * the eight turns one may stand at to the other it is the same pair (0.696
  * and 0.699). They keep their names and their seeds, so the files kept are
  * byte for byte the ones first committed; seeds 2566 and 621 make no tree.
+ *
+ * ## The fir's two seeds — #1294
+ *
+ * Two, for the same draw-call reason, and the scanned firs they stand in for
+ * are two shapes as well. ⚠️ **Chosen, and by a measure**: the generator
+ * starts each of a fir's hundred boughs at a random height, and its random
+ * stream leaves gaps — with the issue's own number as the seed, 1294, one
+ * half-metre of the trunk between 4.5 m and 5 m carried a single bough, and
+ * the tree was drawn with a bare waist. The forty seeds 1294 to 1333 were
+ * generated and the boughs starting in each half metre of the trunk from 1 m
+ * to 6.5 m counted; eight seeds had at least six in every one, the most any
+ * had, and 1313 and 1324 are two of those. Nothing else was looked at to
+ * choose them.
  */
 export const GENERATED_TREES: readonly GeneratedTree[] = [
   {
@@ -464,6 +579,24 @@ export const GENERATED_TREES: readonly GeneratedTree[] = [
     geometry: {
       full: '4d8a7275c0ca642beb0d1ad0afd60432fd99210bec10661ffe7f2f25bfdc50a3',
       middle: 'bf2c4837ec166573a967b4659d590e6215f0d33b390014af108a012164af0f08',
+    },
+  },
+  {
+    name: 'generated_fir_a',
+    species: 'fir',
+    seed: 1313,
+    geometry: {
+      full: '59c9e8f5bf2995b51c1c8b88b4bbf33750c0b8053339981340be4057aa6d068e',
+      middle: '09270a644896f387d4c8f3b25aeaf96b46a4cfa4f47f2e691940a5bdf4470ef4',
+    },
+  },
+  {
+    name: 'generated_fir_b',
+    species: 'fir',
+    seed: 1324,
+    geometry: {
+      full: '63a7a4cd3cbf401561af898f6230466cba22ed0c215f8996a140145486310667',
+      middle: '5f2c7dd6cdd3b42295c67c2a4712a22644820cb07b1ce7a5b864e401eca88d0b',
     },
   },
 ];
@@ -788,7 +921,7 @@ export interface RunPaths {
 /**
  * Every number of a run that is this file's and NOT the geometry's: what
  * `blender/process_generated_tree.py` reads beside the level it imports — the
- * sprig's leaves, its atlas's grid and turn, its tone, the sizes of every map
+ * sprig's leaves, its atlas's grid and turn or its rectangles, its tone, the sizes of every map
  * and of the impostor's frames, and whether the level has maps at all.
  *
  * ⚠️ **{@link geometryDigest} sees none of these.** The generator does not
@@ -807,10 +940,8 @@ export interface RunNumbers {
   readonly maps: boolean;
   readonly impostor: GeneratedSpecies['impostor'] | null;
   readonly bark: { readonly pixels: number };
-  readonly sprig: Pick<
-    GeneratedSpecies['sprig'],
-    'grid' | 'atlasTurn' | 'tone' | 'leaves' | 'pixels' | 'normalPixels'
-  >;
+  readonly sprig: AtlasCells &
+    Pick<GeneratedSpecies['sprig'], 'tone' | 'leaves' | 'pixels' | 'normalPixels'>;
 }
 
 /** @see RunNumbers. `species` is the tree's own unless a test hands it another. */
@@ -826,8 +957,12 @@ export function runNumbers(
     impostor: level === 'full' ? species.impostor : null,
     bark: { pixels: species.bark.pixels },
     sprig: {
-      grid: species.sprig.grid,
-      atlasTurn: species.sprig.atlasTurn,
+      // The cells first, and a grid's two numbers in the order #1283 wrote
+      // them: this object's JSON is digested, and the broadleaves' digests
+      // are in sixteen committed rows.
+      ...('rects' in species.sprig
+        ? { rects: species.sprig.rects }
+        : { grid: species.sprig.grid, atlasTurn: species.sprig.atlasTurn }),
       tone: species.sprig.tone,
       leaves: species.sprig.leaves,
       pixels: species.sprig.pixels,
