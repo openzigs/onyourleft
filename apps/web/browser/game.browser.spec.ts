@@ -806,14 +806,15 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * run after (36396660625). 160 s is 1.52 times 105.
  *
  * ⚠️ **#1283 added a phase** (`trees: scanned — #1283`: the world loaded again
- * with the scanned broadleaves, and the wooded frame counted on two views).
- * On a Mac on 2026-10-12 it is 11.6 s to 11.9 s of a 45 s to 46 s load, a
- * quarter. On #1283's own pull request the nightly ran it once (38256459141,
- * an AMD EPYC 9V45): **15.5 s of an 80 s load**, half this budget, with the
- * unmerged control beside it at 8.9 s. ⚠️ That is the FASTER of the runners
- * this lands on: the 105 s above was an EPYC 7763, where the control took up
- * to 16.1 s, so on it this phase should be about 28 s and the load about
- * 133 s, 83 % of this budget. That figure is arithmetic, not a measurement.
+ * with the scanned broadleaves, and the wooded frame counted on it). As first
+ * written it counted TWO views, the hard swap as well, and its own pull
+ * request's nightly ran that twice: 15.5 s of an **80 s** load on an AMD EPYC
+ * 9V45 (38256459141), and 25.5 s of a **128 s** load on an Intel Xeon
+ * Platinum 8573C (38259197999) — 80 % of this budget, 1.25 times, where every
+ * figure above keeps 1.5. So the hard-swap view was dropped (the 60 000 it
+ * held is #617's and is held off the committed files by
+ * `realistic-budget.test.ts`), which halves the phase: about 13 s and a load
+ * of about 115 s on that runner, 72 % of this budget.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 
@@ -4431,34 +4432,33 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     expect(foliage.heldChanged).toBe(0);
   });
 
-  test('submits at least 60 000 fewer triangles with the trees’ middle level — #617', async ({
+  test('submits fewer triangles with the trees’ middle level than with the hard swap — #617', async ({
     harnessRun,
   }) => {
     const measured = await trees(harnessRun);
     console.log(
       `#617: ${String(measured.trianglesSubmitted)} triangles a frame, ` +
         `${String(measured.trianglesHardSwap)} with the hard swap; ` +
-        `${String(measured.woodedScenery)} scenery items drawn in ${String(measured.drawCallsSubmitted)} draw calls. ` +
-        `With the scanned broadleaves: ${String(measured.scanned.triangles)} a frame, ` +
-        `${String(measured.scanned.trianglesHardSwap)} with the hard swap`,
+        `${String(measured.woodedScenery)} scenery items drawn in ${String(measured.drawCallsSubmitted)} draw calls`,
     );
     // Non-vacuity: a real frame with scenery in it, counted at the draw calls.
     expect(measured.woodedScenery).toBeGreaterThan(10);
     expect(measured.trianglesSubmitted).toBeGreaterThan(50_000);
-    // ⚠️ **#617's 60 000 is the SCANS' figure, and is held on the scans**
-    // (#1283): it is what the middle level took off six trees of 24 000 to
-    // 28 000 triangles, and a generated broadleaf is 6 692. The control is the
-    // same view with the six nearest trees full and no middle level — what a
-    // frame drew before #617 — on the world loaded with the scanned
-    // broadleaves, which is the world #617 measured.
-    expect(measured.scanned.triangles).toBeGreaterThan(50_000);
-    expect(measured.scanned.trianglesHardSwap - measured.scanned.triangles).toBeGreaterThanOrEqual(
-      TRIANGLES_FALL_AT_LEAST,
-    );
-    // With the generated trees a ride draws, the middle level still saves —
-    // the conifers are scans yet — and the hard swap is still the heavier.
+    // The control is the same view with the six nearest trees full and no
+    // middle level — what a frame drew before #617.
+    //
+    // ⚠️ **This named 60 000 until #1283, and a reviewer who remembers that is
+    // reading the scans' figure.** 60 000 is what the middle level took off
+    // six scanned trees of 24 000 to 28 000 triangles; a generated broadleaf
+    // is 6 692 at full detail, so on the trees a ride draws there is far less
+    // to save and what is saved is mostly the conifers', which are scans yet.
+    // #617's own figure is still held on the scans, off the committed files,
+    // by `realistic-budget.test.ts` §"falls by at least 60 000" — and was
+    // measured here on 2026-10-12, on this very frame with the scanned
+    // broadleaves loaded, as 72 017 (253 249 against 181 232), before that
+    // half of the control was dropped for what it cost the load.
     expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
-      GENERATED_TRIANGLES_FALL_AT_LEAST,
+      TRIANGLES_FALL_AT_LEAST,
     );
   });
 
@@ -4616,21 +4616,17 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
 const MERGED_PIXELS_CHANGED = 0;
 
 /**
- * The least #617's middle level must take off the wooded view's frame, against
- * the same view drawn as before it: **60 000** triangles — the issue's own
- * figure, which `realistic-budget.test.ts` also holds the worst case to.
+ * The least the middle level must take off the wooded view's frame, against
+ * the same view drawn with the hard swap: **9 000** triangles, half the 18 078
+ * measured on 2026-10-12 with the generated broadleaves a ride draws (169 482
+ * against 187 560).
+ *
+ * ⚠️ **It was 60 000 until #1283** — #617's own figure, measured on the
+ * scans, which `realistic-budget.test.ts` still holds the scans' worst case
+ * to. A generated broadleaf is 6 692 triangles at full detail where a scan is
+ * 28 000, so the hard swap costs far less than it did.
  */
-const TRIANGLES_FALL_AT_LEAST = 60_000;
-
-/**
- * The least the middle level must take off the wooded view with the GENERATED
- * broadleaves a ride draws — #1283: **9 000**, half the 18 078 measured on
- * 2026-10-12 (169 482 triangles against 187 560 with the hard swap). Far less
- * than the scans' 60 000, because a generated broadleaf is 6 692 triangles at
- * full detail where a scan is 28 000: there is less to save, and what is saved
- * is mostly the conifers', which are scans still.
- */
-const GENERATED_TRIANGLES_FALL_AT_LEAST = 9_000;
+const TRIANGLES_FALL_AT_LEAST = 9_000;
 
 /**
  * The least the generated broadleaves must take off the wooded view against

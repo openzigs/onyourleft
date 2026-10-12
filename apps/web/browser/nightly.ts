@@ -102,7 +102,8 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'game.browser.spec.ts',
     describe: 'the trees’ levels of detail in the realistic world — #617',
-    seconds: '82 s: the `?realistic&trees` load, and since #1283 about 20 s more for the scans',
+    seconds:
+      '82 s to 105 s: the `?realistic&trees` load, and since #1283 about 8 s to 13 s more for the scans’ frame',
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
       'since #870, #630’s far-band light and foliage breeze, which are appearance. Since #1283 ' +

@@ -4765,14 +4765,17 @@ export interface TreeLevelMeasurement {
    * broadleaves (`three-renderer.ts` §`setRealisticTrees`) — the trees every
    * measurement above was first taken on — at the same route position, with
    * the same camera: its triangles and draw calls as the product's levels draw
-   * it, and its triangles with the hard swap, which is the pair #617's
-   * 60 000 was measured on. Everything above is the GENERATED trees', which
-   * is what a ride draws.
+   * it. Everything above is the GENERATED trees', which is what a ride draws.
+   *
+   * ⚠️ **One frame, on one view, and not the hard swap as well.** The first
+   * version counted the scans' hard swap too, to keep #617's 60 000 in the
+   * browser; the two views took 25.5 s of a 128 s load on the slower runner
+   * (run 38259197999), 80 % of the load's budget. #617's figure is still held
+   * off the committed files by `realistic-budget.test.ts`, on the scans.
    */
   readonly scanned: {
     readonly triangles: number;
     readonly calls: number;
-    readonly trianglesHardSwap: number;
   };
 }
 
@@ -6444,7 +6447,7 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
-  scanned: { triangles: 0, calls: 0, trianglesHardSwap: 0 },
+  scanned: { triangles: 0, calls: 0 },
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -8514,25 +8517,8 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
   phaseEnds('trees: unmerged control');
   // #1283: the scans the generated broadleaves replaced, on the same frame.
   // LAST, because it replaces the loaded world and nothing after it reads one;
-  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644).
-  const scannedFrame = (levels: TreeLevels): WoodedFrame => {
-    setTreeLevels(levels);
-    const canvas = document.createElement('canvas');
-    let view: GameView;
-    try {
-      view = threeGameRenderer.create(canvas, top);
-    } finally {
-      setTreeLevels(REALISTIC_TREE_LEVELS);
-    }
-    try {
-      const gl = canvas.getContext('webgl2');
-      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
-      view.resize(160, 90);
-      return woodedFrameOf(view, gl, wooded);
-    } finally {
-      view.destroy();
-    }
-  };
+  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644),
+  // and on ONE view: a view is the dearest thing on this load.
   setRealisticTrees('scanned');
   let scanned: TreeLevelMeasurement['scanned'];
   try {
@@ -8540,12 +8526,17 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     if (!outcome.loaded) {
       throw new Error(`#1283: the scanned trees' world did not load: ${outcome.detail}`);
     }
-    const levelled = scannedFrame(REALISTIC_TREE_LEVELS);
-    scanned = {
-      triangles: levelled.triangles,
-      calls: levelled.calls,
-      trianglesHardSwap: scannedFrame(HARD_SWAP_TREE_LEVELS).triangles,
-    };
+    const canvas = document.createElement('canvas');
+    const view = threeGameRenderer.create(canvas, top);
+    try {
+      const gl = canvas.getContext('webgl2');
+      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
+      view.resize(160, 90);
+      const levelled = woodedFrameOf(view, gl, wooded);
+      scanned = { triangles: levelled.triangles, calls: levelled.calls };
+    } finally {
+      view.destroy();
+    }
   } finally {
     setRealisticTrees(REALISTIC_TREES_DEFAULT);
   }
