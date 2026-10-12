@@ -36,6 +36,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  admission,
   licenceVerdict,
   polyHavenAuthors,
   polyHavenFiles,
@@ -55,13 +56,21 @@ export const RAW = join(HERE, 'build', 'raw');
 /** The committed record of what the inputs are. */
 export const LOCK = join(HERE, 'inputs.lock.json');
 
-async function text(url: string): Promise<string> {
+/** Every request this script makes is for an address the list admits (ADR 0049 D-11). */
+function admitted(url: string, as: 'licence' | 'file'): void {
+  const verdict = admission(url, as);
+  if (!verdict.admitted) throw new Error(verdict.reason);
+}
+
+async function text(url: string, as: 'licence' | 'file' = 'file'): Promise<string> {
+  admitted(url, as);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url}: HTTP ${String(response.status)}`);
   return response.text();
 }
 
 async function bytes(url: string): Promise<Buffer> {
+  admitted(url, 'file');
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url}: HTTP ${String(response.status)}`);
   return Buffer.from(await response.arrayBuffer());
@@ -116,7 +125,7 @@ async function main(): Promise<void> {
   const read = new Date().toISOString().slice(0, 10);
   const sources: LockedSource[] = [];
   for (const source of SOURCES) {
-    const page = await text(source.licencePage);
+    const page = await text(source.licencePage, 'licence');
     const verdict = licenceVerdict(source, page);
     if (!verdict.kept) throw new Error(verdict.reason);
     const expected = locked?.sources.find((each) => each.id === source.id);

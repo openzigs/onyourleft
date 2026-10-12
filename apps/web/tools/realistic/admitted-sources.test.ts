@@ -121,6 +121,67 @@ describe('the lists are ADR 0049 D-10’s tables, row for row — #1275', () => 
 });
 
 describe('what the lists decide about a URL — ADR 0049 D-11', () => {
+  it('admits every file URL the lock records: Poly Haven resolves them at run time', () => {
+    const lock = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'inputs.lock.json'), 'utf8'),
+    ) as { sources: { id: string; files: { url: string }[] }[] };
+    const urls = lock.sources.flatMap((source) => source.files.map((file) => file.url));
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.some((url) => url.startsWith('https://dl.polyhaven.org/'))).toBe(true);
+    for (const url of urls) {
+      expect(admission(url.split('#')[0] ?? url), url).toMatchObject({ admitted: true });
+    }
+  });
+
+  it('pins every admitted prefix, so a host added to a row is a visible edit', () => {
+    expect(
+      Object.fromEntries(ADMITTED_SOURCES.map((source) => [source.name, [...source.prefixes]])),
+    ).toEqual({
+      'Poly Haven': [
+        'https://polyhaven.com/',
+        'https://api.polyhaven.com/',
+        'https://dl.polyhaven.org/',
+      ],
+      ambientCG: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+      'MakeHuman’s own files': [
+        'https://raw.githubusercontent.com/makehumancommunity/makehuman/',
+        'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',
+        'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
+      ],
+      Kenney: [],
+      'An individual model under CC-BY-4.0': [],
+      'EZ-Tree’s output': ['https://github.com/dgreenheck/ez-tree/'],
+      'The Base Mesh': ['https://www.thebasemesh.com/'],
+      'Blender Studio Human Base Meshes': [
+        'https://www.blender.org/download/demo-files/',
+        'https://www.blender.org/download/demo/asset-bundles/human-base-meshes/',
+      ],
+      'MakeHuman community cyclist poses': [
+        'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
+        'https://files.makehumancommunity.org/asset_packs/poses02/',
+      ],
+    });
+  });
+
+  it('refuses an address that is not the one fetch would request, and a page matched by prefix', () => {
+    for (const url of [
+      'https://www.blender.org/download/demo/asset-bundles/human-base-meshes/../ellie-pose-library/ellie.zip',
+      'https://raw.githubusercontent.com/makehumancommunity/makehuman/../../someone/else/main/base.obj',
+      'https://files.makehumancommunity.org/asset_packs/poses02/%2e%2e/hats02/hats02_ccby.zip',
+      'https://static.makehumancommunity.org/assets/assetpacks/poses02.html/../skins01.html',
+      'https://static.makehumancommunity.org/assets/assetpacks/poses02.htmlx',
+    ]) {
+      expect(admission(url), url).toMatchObject({ admitted: false });
+    }
+  });
+
+  it('takes no file from a generator: only its licence page is read (ADR 0049 D-1)', () => {
+    const bark =
+      'https://github.com/dgreenheck/ez-tree/blob/v1.1.0/src/textures/bark/oak_color_1k.jpg';
+    expect(admission(bark)).toMatchObject({ admitted: false });
+    expect(admission(bark, 'licence')).toMatchObject({ admitted: true });
+  });
+
   it('admits every URL the pipeline reads today, each to the source that owns it', () => {
     const owners = new Map<string, Set<string>>();
     for (const source of SOURCES) {
@@ -157,7 +218,7 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
     ['https://github.com/dgreenheck/ez-tree/blob/v1.1.0/LICENSE', 'EZ-Tree’s output'],
     ['https://ambientcg.com/view?id=Bark012', 'ambientCG'],
   ])('admits %s as %s', (url, name) => {
-    const verdict = admission(url);
+    const verdict = admission(url, 'licence');
     expect(verdict).toMatchObject({ admitted: true, source: { name } });
   });
 
@@ -297,6 +358,7 @@ describe('ADR 0026 points at the list that replaced its own — ADR 0013', () =>
     expect(entry).toContain('0049-open-asset-sources-for-the-realistic-world.md');
     expect(entry).toContain('D-4');
     // D-4's own table is still there, word for word: the body is never edited.
+    expect(old).toContain('**Out**, whatever the convenience: **Mixamo** (Adobe forbids');
     expect(old).toContain(
       '| **MakeHuman**, exports only | `CC0-1.0` for exports (#430, read 2026-09-20) |',
     );

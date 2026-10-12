@@ -85,7 +85,7 @@ tree is reproducible in ADR 0026 D-5's sense: the recorded input is those number
 Poly Haven tree it is a downloaded file's digest.
 
 - **The generator is a pinned tool, like Blender** (D-5). The pull request that adopts it pins one
-  release and records it as `PINNED_BLENDER` is recorded; `realistic:process --check` must reproduce
+  release and records it the way `PINNED_BLENDER` is recorded; `realistic:process --check` must reproduce
   each tree byte for byte, or by D-5's stated fallback, before the tree is committed. 1.1.0 is the
   release that was read (see "What was read"); the pin is the adopting issue's.
 - **What it writes is this repository's own work.** *The author's choice*: a generated tree is
@@ -264,9 +264,13 @@ every source nobody has proposed — is **not admitted**, which the pipeline tre
   `admitted-sources.test.ts` reads this file and fails if a row is in one and not the other, or if
   a licence or a deciding ADR differs. Until now the *In* list existed in code only as a pattern in
   a test and a sentence in a comment.
-- **The pipeline refuses what the list does not name.** `licenceVerdict` — which
-  `realistic:fetch` asks before it writes a byte — refuses a source whose licence page or files
-  are not at an admitted source's address, and refuses a barred host with that host's own reason.
+- **The pipeline refuses what the list does not name.** `realistic:fetch` asks
+  `admission` of every address it requests — each licence page and each file, including the files
+  Poly Haven's API names at run time (on `dl.polyhaven.org`, a host of that row) — before the
+  request is made, and `licenceVerdict` asks it of the addresses a source declares. A barred host
+  is refused with that host's own reason, and an address that is not in the form `fetch` would
+  request (`..`, `%2e%2e`) is refused. A generator's row admits its licence page and no file. Only
+  the address requested is checked: a redirect is followed.
   A term no host identifies (D-2, the Standard licences) is still a reviewer's reading of the
   asset's own page.
 - **An admitted source's addresses are facts.** *The author's choice*: `sources.ts` records where

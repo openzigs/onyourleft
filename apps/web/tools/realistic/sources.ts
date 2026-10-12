@@ -39,8 +39,11 @@
  * {@link ADMITTED_SOURCES} and {@link BARRED_SOURCES} are that table, row for
  * row, and `admitted-sources.test.ts` reads the ADR and holds the two to each
  * other. {@link admission} is what the lists decide about one URL, and
- * {@link licenceVerdict} asks it before it reads a licence page — so a source
- * from anywhere else is refused by the pipeline, not only by a reviewer.
+ * `realistic:fetch` asks it of every URL it requests — a licence page and each
+ * file, including the ones Poly Haven's API resolves — before the request is
+ * made, so a source from anywhere else is refused by the pipeline, not only by
+ * a reviewer. {@link licenceVerdict} asks it of the addresses a source declares.
+ * (A redirect is followed by `fetch`; only the address requested is checked.)
  * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
  * which ADR 0049 keeps).
  *
@@ -116,7 +119,12 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     licence: 'CC0-1.0',
     decidedBy: 'ADR 0026 D-4',
     kind: 'files',
-    prefixes: ['https://polyhaven.com/', 'https://api.polyhaven.com/'],
+    prefixes: [
+      'https://polyhaven.com/',
+      'https://api.polyhaven.com/',
+      // Where api.polyhaven.com's /files answer points: the files themselves.
+      'https://dl.polyhaven.org/',
+    ],
   },
   {
     name: 'ambientCG',
@@ -275,9 +283,16 @@ export type Admission =
  * Whether a URL may be read by the pipeline: barred hosts first, then the
  * admitted prefixes, and anything else refused — the list is the boundary, so
  * "not named" is a refusal and never a judgement (ADR 0026 D-4, ADR 0049 D-11).
+ *
+ * `as` says what the URL is for. A **generator** row (EZ-Tree) admits its
+ * licence page and nothing it hosts: its bundled images are not taken (ADR
+ * 0049 D-1), so no file is read from it. A URL that is not in the form `fetch`
+ * would request (`..`, `%2e%2e`, a default port) is refused, because the prefix
+ * test reads the string and the server reads the normalised address; a prefix
+ * that names a page (`.html`) matches that page alone.
  */
-export function admission(url: string): Admission {
-  const { hostname } = new URL(url);
+export function admission(url: string, as: 'licence' | 'file' = 'file'): Admission {
+  const { hostname, href } = new URL(url);
   const barred = BARRED_SOURCES.find((source) =>
     source.hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`)),
   );
@@ -287,9 +302,16 @@ export function admission(url: string): Admission {
       reason: `${hostname} is barred — ${barred.name}: ${barred.why} (${barred.decidedBy})`,
     };
   }
-  const source = ADMITTED_SOURCES.find((candidate) =>
-    candidate.prefixes.some((prefix) => url.startsWith(prefix)),
-  );
+  const source =
+    href !== url || /%2e/i.test(url)
+      ? undefined
+      : ADMITTED_SOURCES.find(
+          (candidate) =>
+            (as === 'licence' || candidate.kind === 'files') &&
+            candidate.prefixes.some((prefix) =>
+              prefix.endsWith('.html') ? url === prefix : url.startsWith(prefix),
+            ),
+        );
   if (source === undefined) {
     return {
       admitted: false,
@@ -1260,8 +1282,12 @@ export type LicenceVerdict =
  * stricter licence for the one being fetched. ADR 0026 D-4 excludes all three.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
-  for (const url of [source.licencePage, ...fixedUrls(source)]) {
-    const verdict = admission(url);
+  const asked: [string, 'licence' | 'file'][] = [
+    [source.licencePage, 'licence'],
+    ...fixedUrls(source).map((url): [string, 'file'] => [url, 'file']),
+  ];
+  for (const [url, as] of asked) {
+    const verdict = admission(url, as);
     if (!verdict.admitted) return { kept: false, reason: `${source.id}: ${verdict.reason}` };
   }
   if (!pageText.includes(source.licencePhrase)) {
