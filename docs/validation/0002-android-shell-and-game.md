@@ -3570,7 +3570,7 @@ Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, the scan
 | | Scanned | Generated |
 |---|--:|--:|
 | This page held at `at=2550`: triangles a frame | 199 676 | **195 692** |
-| The same: draw calls | 30 to 31, run to run | **35** |
+| The same: draw calls | 30 to 31, run to run | **35** (34 on the CI runner) |
 | The same: bytes of texture the load holds (`textures.bytes`) | 31 393 488 | **27 932 576** |
 | The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 181 232 / 27 | **169 482 / 32** |
 | Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 70.56 MiB | **67.26 MiB** |
@@ -3593,7 +3593,7 @@ here, and the product on a lowland route is where the difference is largest.
 |---|---|
 | AH-1283-1 | **Before**: build #1283's merge with the owner's page staged, and run AH1–AH7 with `&levers=-generated-trees` added to AH4's URL. `RUN=1283-before` |
 | AH-1283-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1283-after` |
-| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall and **draw calls** rise by about four; the measured columns against #616's spread |
+| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall and **draw calls** rise by about four, to 34 or 35; the measured columns against #616's spread |
 | AH-1283-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1950`, then add `&levers=-generated-trees`, and compare the broadleaves behind the wall on the right and the one at the far left. Then the same pair at `at=1100` (one left of the road, one against the hedge), `at=150` and `at=3150`. Most of this route's trees are conifers: these four are where its broadleaves stand nearest |
 | AH-1283-5 | **By eye, in the product**, with *Game world* on: ride a saved lowland route with broadleaf trees beside the road. Do neighbouring trees differ in shape? Does a tree change visibly as it is passed (the hand-over between its three levels)? |
 

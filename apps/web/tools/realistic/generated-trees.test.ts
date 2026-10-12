@@ -17,7 +17,7 @@
  * | macOS, Darwin 25.6.0, arm64 (where the committed files were made) | 24.20.0 | the committed digests, all twelve |
  * | the same | 22.22.3 | the same twelve |
  * | the same | 20.14.0 | the same twelve |
- * | CI, `ubuntu-latest`, x64 | 24 (`.nvmrc`) | this file, on every pull request: a different digest is a red build |
+ * | CI, `ubuntu-latest`, x64 (run 38256459138, #1283's own) | 24.21.0 | the same twelve — and this file, on every pull request since: a different digest is a red build |
  *
  * ⚠️ **Stable as float32, and not shown to be as float64**: on the
  * generator's own default tree, the doubles it computes hashed differently

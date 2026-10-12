@@ -808,11 +808,12 @@ const REALISTIC_LOAD_BUDGET_MS = 165_000;
  * ⚠️ **#1283 added a phase** (`trees: scanned — #1283`: the world loaded again
  * with the scanned broadleaves, and the wooded frame counted on two views).
  * On a Mac on 2026-10-12 it is 11.6 s to 11.9 s of a 45 s to 46 s load, a
- * quarter; the unmerged control beside it is 7.9 s there and was 11.7 s to
- * 16.1 s on the runner, so this one should be 17 s to 24 s on it — a load of
- * about 130 s at the slowest, 81 % of this budget. Not measured on the runner:
- * this describe is nightly, and the first nightly after the merge is the
- * measurement.
+ * quarter. On #1283's own pull request the nightly ran it once (38256459141,
+ * an AMD EPYC 9V45): **15.5 s of an 80 s load**, half this budget, with the
+ * unmerged control beside it at 8.9 s. ⚠️ That is the FASTER of the runners
+ * this lands on: the 105 s above was an EPYC 7763, where the control took up
+ * to 16.1 s, so on it this phase should be about 28 s and the load about
+ * 133 s, 83 % of this budget. That figure is arithmetic, not a measurement.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 

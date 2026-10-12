@@ -141,7 +141,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * | The gate's wooded view (`game-harness.ts` §`treeLevelRun`, 900 m of the valley route), triangles a frame | 181 232 | **169 482** |
  * | The same view, draw calls | 27 | **32** |
  * | The owner's page held at `at=2550`, triangles a frame | 199 676 | **195 692** |
- * | The same page, draw calls | 30 to 31 | **35** |
+ * | The same page, draw calls | 30 to 31 | **34 to 35** |
  * | The same page, bytes of texture the load holds | 31 393 488 | **27 932 576** |
  * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | **67.26 MiB** |
  * | The worst vegetation the caps allow, triangles | 168 692 | **160 684** |
@@ -151,7 +151,8 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * is a call a level a shape, and there are six generated shapes where there
  * were two scans, so the far band alone can make four more calls. Both views
  * are inside {@link REALISTIC_WOODED_DRAW_CALLS} — which was not raised — and
- * the page's has no room left in it: the next call that view gains is a red
+ * the page's has no room left in it: it made 35 in every run on a Mac and 34
+ * on the CI runner (38256459141), so the next call that view gains is a red
  * nightly. What the calls cost the tablet is validation 0002's #1283 row,
  * which is the owner's; two seeds a species instead of three would give two
  * back.
@@ -334,9 +335,9 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * ⚠️ **Since #1283 that room is spent**, and a reviewer who remembers 27 and
  * 31 is reading the scans' figures: with the six generated broadleaves the
  * gate's wooded view makes **32** calls and the owner's page at `at=2550`
- * **35** — this ceiling exactly — because a tree is a call a level a SHAPE and
- * there are six shapes where there were two. {@link REALISTIC_TRIANGLES} has
- * the table. The scans, loaded on the same views, still make 27 and 30 to 31
+ * **34 to 35** — this ceiling exactly, on a Mac — because a tree is a call a
+ * level a SHAPE and there are six shapes where there were two.
+ * {@link REALISTIC_TRIANGLES} has the table. The scans, loaded on the same views, still make 27 and 30 to 31
  * (the page's count moved by one between runs of the same held frame).
  *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
