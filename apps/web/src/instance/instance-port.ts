@@ -31,7 +31,8 @@
  * `sign-in.ts` §`INSTANCE_ACCOUNT_STORAGE_KEY` (the address and the instance's
  * athlete id) and {@link INSTANCE_SESSION_STORAGE_KEY} (the token, beside the
  * origin that issued it), and
- * **disconnecting removes both** — and nothing else: no ride, route or other
+ * **disconnecting removes both** — and the picture agreements
+ * ({@link INSTANCE_AGREEMENT_STORAGE_KEYS}, #1106) — and nothing else: no ride, route or other
  * local row is touched, which `instance-port.test.ts` counts.
  *
  * ## What is shown comes from the instance
@@ -1010,6 +1011,8 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       // instance does — and whether or not it answers at all.
       storage.removeItem(INSTANCE_SESSION_STORAGE_KEY);
       storage.removeItem(INSTANCE_ACCOUNT_STORAGE_KEY);
+      // #1106: what was agreed to is the signed-in rider's, not the next account's.
+      for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage.removeItem(key);
       if (connection === undefined) return;
       try {
         await connection.http.call('DELETE', '/v1/auth/session', { token: connection.token });

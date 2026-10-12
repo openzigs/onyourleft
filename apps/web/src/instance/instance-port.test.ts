@@ -23,6 +23,7 @@ import { ADDRESS_REFUSAL_TEXT } from './address';
 import {
   CONNECT_REFUSAL_TEXT,
   createInstancePort,
+  INSTANCE_AGREEMENT_STORAGE_KEYS,
   INSTANCE_SESSION_STORAGE_KEY,
   type InstancePortDependencies,
   type InstanceStorage,
@@ -372,6 +373,15 @@ describe('disconnecting — #777', () => {
     expect((await world.call('GET', '/v1/auth/session', { token })).status).toBe(401);
     // Read back on a fresh connection: every ride is still on the device.
     expect(await count()).toBe(before);
+  });
+
+  it('forgets what the rider agreed to send this instance, so the next account starts with none (#1106)', async () => {
+    const world = await instance();
+    const { port, storage } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage.map.set(key, testing.TEST_ORIGIN);
+    await port.disconnect();
+    for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) expect(storage.map.has(key)).toBe(false);
   });
 
   it('forgets the instance even when it does not answer', async () => {

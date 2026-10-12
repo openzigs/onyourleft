@@ -22,7 +22,9 @@ import {
 } from './fake-model-server-testing.ts';
 import {
   createHostedModel,
+  createHostedPictureModel,
   createLocalModel,
+  createLocalPictureModel,
   GATEWAY_REFUSED,
   GatewayRefusedError,
   pinnedTo,
@@ -421,5 +423,139 @@ describe('the hosted model on the instance’s key (#1097)', () => {
     const { fetch } = hostedFetch(model);
     const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
     expect(await connection.turn(request())).toStrictEqual({ ok: false, failure: 'refused' });
+  });
+});
+
+describe('the two picture model builders hold what the text ones hold (#1106)', () => {
+  const HOSTED = new URL('https://models.example/v1');
+  const QUESTION = { question: 'Where is the rider?', maxOutputTokens: 40 };
+  const PICTURE = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+  function look(overrides: Partial<{ timeoutMilliseconds: number; signal: AbortSignal }> = {}) {
+    return {
+      picture: PICTURE,
+      timeoutMilliseconds: 10_000,
+      signal: new AbortController().signal,
+      ...overrides,
+    };
+  }
+
+  /** A fetch that records the init of every request, and answers a plain reply. */
+  function recording() {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      calls.push({ url, init });
+      return Promise.resolve(
+        Response.json({
+          id: 'x',
+          object: 'chat.completion',
+          created: 1,
+          model: 'm',
+          choices: [
+            { index: 0, message: { role: 'assistant', content: 'seen' }, finish_reason: 'stop' },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    }) as typeof globalThis.fetch;
+    return { calls, fetch };
+  }
+
+  it('sends a hosted look through the one-host fetch: refusing a redirect', async () => {
+    const { calls, fetch } = recording();
+    const connection = createHostedPictureModel({
+      baseUrl: HOSTED,
+      model: 'm',
+      apiKey: 'k',
+      question: QUESTION,
+      fetch,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: true, text: 'seen' });
+    expect(calls.map((call) => call.url)).toStrictEqual([
+      'https://models.example/v1/chat/completions',
+    ]);
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' });
+  });
+
+  it('sends a local look through the one-host fetch: refusing a redirect, to the checked address', async () => {
+    const { calls, fetch } = recording();
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: new URL('http://ollama:11434/v1'), model: 'm' },
+      resolve: () => Promise.resolve(['172.30.0.9']),
+      question: QUESTION,
+      fetch,
+    });
+    expect(await connection.look(look())).toStrictEqual({ ok: true, text: 'seen' });
+    expect(calls.map((call) => call.url)).toStrictEqual([
+      'http://172.30.0.9:11434/v1/chat/completions',
+    ]);
+    expect(calls[0]?.init).toMatchObject({ redirect: 'error' });
+  });
+
+  it.each([
+    ['a public address', ['93.184.216.34'], 'not-local'],
+    ['nothing', [], 'unresolved'],
+  ])(
+    'answers a local name resolving to %s as a failure, sending nothing',
+    async (_w, found, why) => {
+      const { calls, fetch } = recording();
+      const connection = createLocalPictureModel({
+        settings: { baseUrl: new URL('http://ollama:11434/v1'), model: 'm' },
+        resolve: () => Promise.resolve(found),
+        question: QUESTION,
+        fetch,
+      });
+      expect(await connection.look(look())).toStrictEqual({ ok: false, failure: why });
+      expect(calls).toStrictEqual([]);
+    },
+  );
+
+  it('refuses an http: hosted URL outright', () => {
+    expect(() =>
+      createHostedPictureModel({
+        baseUrl: new URL('http://models.example/v1'),
+        model: 'm',
+        apiKey: 'k',
+        question: QUESTION,
+      }),
+    ).toThrow(/https/);
+  });
+
+  it('gives a look up when it takes longer than it was given', async () => {
+    const model = await fake({
+      kind: 'slow',
+      milliseconds: 5_000,
+      then: { kind: 'text', text: 'too late' },
+    });
+    const connection = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    expect(await connection.look(look({ timeoutMilliseconds: 50 }))).toStrictEqual({
+      ok: false,
+      failure: 'timed-out',
+    });
+  });
+
+  it('adds the rider’s reasoning allowance to the answer bound, on the wire', async () => {
+    const model = await fake({ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' });
+    const local = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm', reasoningTokens: 2_000 },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    const without = createLocalPictureModel({
+      settings: { baseUrl: model.baseUrl, model: 'm' },
+      resolve: LOOPBACK,
+      question: QUESTION,
+    });
+    await local.look(look());
+    await without.look(look());
+    const bounds = model.requests.map(
+      (body) => (body as { max_tokens?: number; max_completion_tokens?: number }).max_tokens,
+    );
+    expect(bounds).toStrictEqual([2_040, 40]);
   });
 });
