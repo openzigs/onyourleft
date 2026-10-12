@@ -20,6 +20,7 @@ import {
 } from './analysis/hosted-key.ts';
 import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
 import { agentEngine } from './analysis/engine.ts';
+import type { SourceOptions } from './analysis/source.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
@@ -154,6 +155,13 @@ export interface StartedInstance {
   analysisJobs(): AnalysisJobs | undefined;
   /** Resolves once the jobs a stopped instance left unended have been failed `interrupted`. */
   readonly jobsRecovered: Promise<void>;
+  /**
+   * A rider's own hosted key and consent (#1199), and the test question
+   * (#1251) — built over the SAME sources the job engine is handed, which is
+   * what `instance.test.ts` reads this for. `undefined` until the store is
+   * open on an instance with accounts.
+   */
+  hostedSettings(): HostedSettings | undefined;
   /**
    * The hosted model key (#1097), opened with `OYL_INSTANCE_SECRET_KEY` if it
    * can be — what `analysis/source.ts` §`modelForSource` is handed by the
@@ -537,7 +545,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const local = analysisModel;
       // #1229: the agent's history tool searches the index this instance keeps.
       const indexed = history;
-      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now });
+      // What a hosted job's model is chosen from, and (#1251) what the test
+      // question's is: one object, so the two pass the same gate.
+      const sources: SourceOptions = {
+        local,
+        hostedKey,
+        // Q10 (#1199): the athlete's own recorded consent, naming an origin.
+        recordedConsent: async (athleteId) => (await reading.getHostedConsent(athleteId))?.origin,
+        // #1223: every hosted request masked by the athlete's own guard (#1101).
+        guard: (athleteId) => readMaskingGuard(reading, athleteId),
+        behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+      };
+      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
       // #1106: a side-camera picture, shown to the local model the operator
       // named for pictures or to the hosted service the rider's OWN key is
       // for. Handed no store and no log: a picture is kept nowhere.
@@ -559,16 +578,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         engine: agentEngine({
           reads: store,
           history: indexed,
-          sources: {
-            local,
-            hostedKey,
-            // Q10 (#1199): the athlete's own recorded consent, naming an origin.
-            recordedConsent: async (athleteId) =>
-              (await reading.getHostedConsent(athleteId))?.origin,
-            // #1223: every hosted request masked by the athlete's own guard (#1101).
-            guard: (athleteId) => readMaskingGuard(reading, athleteId),
-            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
-          },
+          sources,
           clock: { now },
         }),
         // A hosted model needs only a secret to hold a rider's own key under
@@ -687,6 +697,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
     analysisModel: () => analysisModel,
     analysisJobs: () => analysisJobs,
+    hostedSettings: () => hostedSettings,
     jobsRecovered: opened.then(() => jobsRecovered),
     hostedModelKey: async () =>
       store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),

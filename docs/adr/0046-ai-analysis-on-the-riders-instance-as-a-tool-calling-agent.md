@@ -1124,3 +1124,38 @@ Until 2026-10-07 this section was §"Owner questions left open".
   decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
   decision, and its D-10 says what stays: D-1's rule for analysis, the tablet's own pose model as
   the default, and D-8, D-9 and D-14(d) otherwise. The body above is not edited. (#1106)
+- **2026-10-12** — **D-9's hosted source is reachable from the app, on the rider's own key only, and
+  three things about it are decided here that D-9 left open.**
+  [#1251](https://github.com/openzigs/onyourleft/issues/1251) built the app half of #1199: the
+  Instance screen's section where a rider stores their own key (sealed, padded to D-9's 1 KiB),
+  records and withdraws the consent that names the endpoint (Q10), and has the instance send a test
+  question. The owner withdrew D-9's Share mode on 2026-10-09, so **there is no shared key and no
+  operator's switch**: a hosted job runs on the athlete's own key or not at all. The wording a
+  rider reads is #1104's B1 and B2, quoted in that pull request for the owner's approval and held
+  word for word by `apps/web/src/ride-analysis/hosted-consent.test.ts`; it is not quoted here, so
+  that this record does not fix a wording the owner has yet to approve. What is decided:
+  1. **The masking list reaches the instance with the consent, not with a sync.** D-10 has the
+     instance mask with its own copy, one sync item of kind `masking`, and until #1251 nothing in
+     the app sent one, so every hosted job would have ended `hosted_unavailable`. The device now
+     writes that item, sealed, before a consent is recorded and again before every hosted job, so
+     the instance never masks with a list older than the press. A list that cannot be sent means no
+     job is started. ⚠️ This is the author's choice, not a ruling: #1104's B6 row, as the owner
+     approved it on 2026-10-09, says the list is copied *"when it syncs"*.
+  2. **A test question (Q2 of #1104's B1, ruled 2026-10-09: *"sent by the instance with none of the
+     rider's data"*)** is `POST /v1/analysis/hosted/test`, sealed-only: two fixed sentences, on the
+     rider's own key, through `source.ts` §`modelForSource` exactly as a job goes. So it is refused,
+     with nothing sent, wherever a job would be — no key, no consent naming the key's origin, no
+     masking list — and it returns a closed word for how it went and never a word of the
+     service's. Its bounds (64 answer tokens, 30 seconds) are the author's, not measurements.
+  3. **The app offers the hosted press from a note on the device, not from a request.** Opening a
+     ride's page sends nothing (ADR 0035 D-8), so whether `instance-hosted` is offered is read from
+     what the instance last answered on the Instance screen — a key AND a consent naming that key's
+     origin — and the instance still checks all of it for every job.
+
+  Two sentences of B1 as drafted on #1104 are not in what ships, because they are not true of this
+  build: *"Your instance keeps a record of what was actually sent, and you can read it on the
+  ride's page afterwards"* (nothing keeps or shows one), and the unqualified *"It is never sent a
+  picture"* (since ADR 0050 the same service can be sent the side camera's pictures, under that
+  feature's own consent; the consent says *"A ride analysis never sends it a picture"*). The
+  device-held hosted path of ADR 0035 D-9 C still ships beside this one until #1103 removes it, so
+  ADR 0029's entry quoting that consent still governs it. The body above is not edited. (#1251)

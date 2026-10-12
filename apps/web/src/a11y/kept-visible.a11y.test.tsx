@@ -108,6 +108,8 @@ import { RideView } from '../views/RideView';
 import { ROUTES_KEPT_VISIBLE } from '../views/RoutesView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
+import { hostedKeptVisible } from '../ride-analysis/hosted-consent';
+import { SCRIPTED_HOSTED_KEY } from '../ride-analysis/hosted-settings-testing';
 import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
 import { browserSecureWindow } from '../camera/secure-window-testing';
@@ -283,7 +285,15 @@ const KEPT: Record<RouteId, Kept> = {
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
-  instance: { sentences: INSTANCE_KEPT_VISIBLE, populated: INSTANCE_CONNECTED_KEPT_VISIBLE },
+  // #1251: and, signed in with a key held, the hosted service's section —
+  // who could read the key, and the whole consent beside its switch.
+  instance: {
+    sentences: INSTANCE_KEPT_VISIBLE,
+    populated: [
+      ...INSTANCE_CONNECTED_KEPT_VISIBLE,
+      ...hostedKeptVisible(SCRIPTED_HOSTED_KEY.origin),
+    ],
+  },
   // #955: that every action is logged, and the log outlives an erased account
   // — on the page a moderator acts from (the populated walk; the empty one is
   // an account that moderates nothing, which acts on nothing).

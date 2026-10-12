@@ -13,6 +13,8 @@ import type {
 } from '../instance/instance-port';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
 import { keyFingerprint, type SyncPort } from '../instance/sync-port';
+import { HostedServicePanel } from '../ride-analysis/HostedServicePanel';
+import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
 import { SyncPanel } from './SyncPanel';
@@ -165,12 +167,15 @@ export function InstanceView({
   port,
   moderation,
   sync,
+  hostedSettings,
 }: {
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
   /** Sync with the instance (#1195): drawn only once connected, and only offered with a card. */
   readonly sync?: SyncPort | undefined;
+  /** A hosted model service on the rider's own key (#1251): drawn only once connected. */
+  readonly hostedSettings?: HostedSettingsPort | undefined;
 }): JSX.Element {
   const [state, setState] = useState<InstanceState | undefined>(undefined);
   const [standing, setStanding] = useState<ModerationStanding | undefined>(undefined);
@@ -450,6 +455,11 @@ export function InstanceView({
       {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}
+
+      {/* #1251: only for a device signed in, so it never asks an instance that will not answer. */}
+      {state.kind === 'connected' && hostedSettings !== undefined ? (
+        <HostedServicePanel port={hostedSettings} />
+      ) : null}
 
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-devices">
