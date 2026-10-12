@@ -412,7 +412,7 @@ jobs:
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
-    # 455 to 461 s on the slower runner.
+    # 448 to 461 s on the slower runner.
     timeout-minutes: 15
     steps:
       - name: Check out the repository

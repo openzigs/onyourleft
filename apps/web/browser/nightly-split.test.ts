@@ -462,6 +462,13 @@ describe('the required check is one job over every shard — #1285', () => {
     expect(shards.size).toBeGreaterThanOrEqual(3);
   });
 
+  it('triggers on every pull request: no path filter, and the event is present', () => {
+    // A filter, or a missing event, makes the required check never report.
+    const on = /^on:\n((?: {2}.+\n|\n)+)/m.exec(workflow)?.[1] ?? '';
+    expect(on).toMatch(/^ {2}pull_request:\s*$/m);
+    expect(on).not.toMatch(/paths(-ignore)?:|branches-ignore:/);
+  });
+
   it('waits for every shard: a job it does not need cannot block a merge', () => {
     const needs = (jobField(aggregate, 'needs') ?? '')
       .replace(/^\[|\]$/g, '')
@@ -486,6 +493,25 @@ describe('the required check is one job over every shard — #1285', () => {
     // On a job, this reports a failure to `needs` as success; on a step, it
     // turns a red step green. Neither belongs in a gate.
     expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toContain('continue-on-error');
+    // The verdict step must run on every event and its exit must reach the
+    // job. A step-level `if:` or a `shell:` override (`... || true`) switches
+    // it off with every shard red, and the check would pass.
+    const uncommented = (text: string): string => text.replace(/^\s*#.*\n/gm, '');
+    const steps = uncommented(aggregate)
+      .split(/^ {6}- /m)
+      .slice(1);
+    const verdict = steps.find((step) => step.includes('check-shard-results.sh')) ?? '';
+    expect(verdict).not.toMatch(/^ +(if|shell|continue-on-error):/m);
+    expect(uncommented(aggregate).match(/^ +(if|shell):/gm)).toHaveLength(1);
+    // Across the file: the job-level `if:` above and the Docker logout's
+    // `always()` are the only conditions. Any other step-level `if:` can skip
+    // a gate command in a shard and the shard still succeeds.
+    expect(
+      uncommented(workflow)
+        .match(/^ +if: .+$/gm)
+        ?.map((line) => line.trim()),
+    ).toEqual(['if: always()', 'if: always()']);
+    expect(uncommented(workflow)).not.toMatch(/^ +shell:/m);
     // A stop of its own, so it cannot be what hangs the required check.
     expect(Number(jobField(aggregate, 'timeout-minutes'))).toBeLessThanOrEqual(5);
   });

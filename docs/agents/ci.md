@@ -848,6 +848,11 @@ one job over every shard":
   in the `checks` shard. No `continue-on-error` anywhere in the file: on a job it reports a failure
   to `needs` as `success`.
 - **The name.** Exactly one job is named `Repository rules`, and the workflow is.
+- **No other condition can switch a gate off.** The verdict step has no `if:`, `shell:` or
+  `continue-on-error`, the only `if:` lines in `rules.yml` are the two `always()` ones, and
+  `pull_request:` has no path filter; the test fails on each. A superseded pull-request run
+  (`cancel-in-progress`) is expected to report `Repository rules` as failure on the old commit
+  rather than cancelled, since the job runs `always()`; reasoned, not observed.
 
 **Shown red on the runner, not only in the suite** (throwaway pull request #1291, closed unmerged;
 branch `spike/issue-1285-shards-red`):
