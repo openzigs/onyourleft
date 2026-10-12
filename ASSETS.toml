@@ -900,6 +900,30 @@ script = "apps/web/tools/realistic/blender/process_texture.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
 [[asset]]
+path = "apps/web/public/realistic/Rock026_diff_512.ktx2"
+source = "ambientCG, Rock026 by ambientCG (its own page: made by Surface Photogrammetry); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-10-12"
+sha256 = "2d2739df89667dfff28af3cc4d7602fbbe811a8cc3388cd0e430b29554666cd8"
+modified = "one map of the texture (Rock026_1K-JPG_Color.jpg), downsized from 1024 to 512 px and re-encoded as JPEG; then encoded as KTX2 (Basis Universal ETC1S, sRGB, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "https://ambientcg.com/view?id=Rock026"
+inputsha256 = "5968c3259bf3209b4f249618e07f1439ecd6528e20c724281dca401775a4b211"
+script = "apps/web/tools/realistic/blender/process_texture.py"
+tool = "Blender 4.4.3, then KTX-Software v4.4.2"
+
+[[asset]]
+path = "apps/web/public/realistic/Rock026_nor_gl_512.ktx2"
+source = "ambientCG, Rock026 by ambientCG (its own page: made by Surface Photogrammetry); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-10-12"
+sha256 = "2c8fb9065ad4a4085d448f621beea689eb8862cf2c52be55e826abb1b0d02636"
+modified = "one map of the texture (Rock026_1K-JPG_NormalGL.jpg), downsized from 1024 to 512 px and re-encoded as JPEG; then encoded as KTX2 (Basis Universal UASTC with Zstandard, linear, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "https://ambientcg.com/view?id=Rock026"
+inputsha256 = "5968c3259bf3209b4f249618e07f1439ecd6528e20c724281dca401775a4b211"
+script = "apps/web/tools/realistic/blender/process_texture.py"
+tool = "Blender 4.4.3, then KTX-Software v4.4.2"
+
+[[asset]]
 path = "apps/web/public/realistic/rider.glb"
 source = "MakeHuman, makehuman by The MakeHuman team, and makehuman-system-assets by The MakeHuman team (makehuman_system), its licence read on 2026-09-28 at https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"

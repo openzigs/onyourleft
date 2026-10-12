@@ -53,6 +53,7 @@ import {
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
 } from './realistic-assets';
@@ -277,14 +278,14 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const renderer = await loadedOn(TABLET);
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
-    // Non-vacuity: the whole set — eight surface maps (#627's verge and rock
-    // among them), fourteen structure maps,
+    // Non-vacuity: the whole set — two maps a surface (#627's verge and rock
+    // and #1274's crag among them: ten), fourteen structure maps,
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three
     // uploads once.
     const images =
-      8 +
+      2 * Object.keys(REALISTIC_SURFACES).length +
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
@@ -315,6 +316,17 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
+    // #1274: the road's two maps are the road's, and every other surface's —
+    // the grass, the verge, the rock and the crag — are the ground's, a colour
+    // map (ETC2) and a normal map (ASTC) each.
+    expect(worn.filter((each) => each.role === 'road')).toHaveLength(2);
+    const ground = worn.filter((each) => each.role === 'ground').map((each) => each.format);
+    const blended = Object.keys(REALISTIC_SURFACES).length - 1;
+    expect(blended).toBe(4);
+    expect(ground.sort()).toEqual([
+      ...Array.from({ length: blended }, () => 'ASTC 4x4'),
+      ...Array.from({ length: blended }, () => 'ETC2 RGB'),
+    ]);
     // #966: the wordmark is a cut-out over its board, ETC2 with its alpha.
     expect(worn.filter((each) => each.role === 'wordmark').map((each) => each.format)).toEqual([
       'ETC2 RGBA',

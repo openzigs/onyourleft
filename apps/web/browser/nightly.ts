@@ -96,7 +96,8 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'moved pending the owner’s explicit acknowledgement (#878’s review). The stylised ' +
       'road’s gradient contrast stays required (#242). Since #870 (R2) (3) also holds #628’s ' +
       'floor, 3.5 : 1 with the road’s wear on; the rest of R2 here (#627’s ground, #629’s ' +
-      'water, #679’s gantries) is appearance and cost.',
+      'water, #679’s gantries) is appearance and cost, and so is #1274’s crag on a steep ' +
+      'bank, read on #627’s own frame.',
   },
   {
     spec: 'game.browser.spec.ts',

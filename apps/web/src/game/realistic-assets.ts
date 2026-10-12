@@ -88,12 +88,21 @@ export interface SurfaceMaps {
  * (`ground-blend.ts`). Their repeats are this repository's own: gravel at
  * 2.5 m and stones at 3 m, near the scans' own sizes (Poly Haven's
  * `dimensions`, 2.48 m and 3 m) so a pebble is about a pebble's size.
+ *
+ * ⚠️ **Since #1274 a steep bank wears `crag`, and `rock` is the scree alone.**
+ * `rock` is loose stones on earth, which is what lies above a tree line and is
+ * exactly what does not stay on a bank past the angle of repose; `crag` is a
+ * fractured rock face — ambientCG's `Rock026`, the first asset taken from that
+ * source — at 3 m a repeat, this repository's own figure (its page states no
+ * size), which makes a block of it about a metre. A reviewer who remembers
+ * one photograph for both is reading the old file.
  */
 export const REALISTIC_SURFACES: {
   readonly road: SurfaceMaps;
   readonly ground: SurfaceMaps;
   readonly verge: SurfaceMaps;
   readonly rock: SurfaceMaps;
+  readonly crag: SurfaceMaps;
 } = {
   road: {
     colour: 'asphalt_02_diff_1k.ktx2',
@@ -113,6 +122,11 @@ export const REALISTIC_SURFACES: {
   rock: {
     colour: 'rocks_ground_05_diff_512.ktx2',
     normal: 'rocks_ground_05_nor_gl_512.ktx2',
+    tileMetres: 3,
+  },
+  crag: {
+    colour: 'Rock026_diff_512.ktx2',
+    normal: 'Rock026_nor_gl_512.ktx2',
     tileMetres: 3,
   },
 };
@@ -472,6 +486,8 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.verge.normal,
     REALISTIC_SURFACES.rock.colour,
     REALISTIC_SURFACES.rock.normal,
+    REALISTIC_SURFACES.crag.colour,
+    REALISTIC_SURFACES.crag.normal,
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
       REALISTIC_VEGETATION[kind].flatMap((model) =>
         [model.file, model.impostor, model.impostorNormals, model.middle].filter(

@@ -77,6 +77,7 @@ import {
   REALISTIC_BOUNDARY_PARTS,
   REALISTIC_BUILDING_SURFACES,
   REALISTIC_STRUCTURE_SURFACES,
+  REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
@@ -1639,6 +1640,85 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     expect(outcome.loaded ? '' : outcome.detail).toMatch(/bicycle_rubber_nor_gl/);
   });
 
+  /**
+   * Loaders that keep each texture they make by its URL, and count how often
+   * each was let go of — #1274.
+   */
+  function keepingLoaders(): {
+    readonly loaders: RealisticLoaders;
+    readonly made: Map<string, Record<string, unknown>>;
+    readonly released: Map<string, number>;
+  } {
+    const reading = loaders();
+    const made = new Map<string, Record<string, unknown>>();
+    const released = new Map<string, number>();
+    return {
+      made,
+      released,
+      loaders: {
+        ...reading,
+        texture: (url) =>
+          reading.texture(url).then((loaded) => {
+            const kept = Object.assign(loaded, {
+              dispose: () => {
+                released.set(url, (released.get(url) ?? 0) + 1);
+              },
+            });
+            made.set(url, kept as unknown as Record<string, unknown>);
+            return kept;
+          }),
+      },
+    };
+  }
+
+  it('loads the crag’s two maps as it loads the rock’s — tiled, mipmapped, the colour as colour — and none of the world without them (#1274)', async () => {
+    const { loaders: keeping, made } = keepingLoaders();
+    await expect(loadRealisticWorld(keeping)).resolves.toEqual({ loaded: true });
+    const map = (file: string): Record<string, unknown> => {
+      const texture = made.get(realisticUrl(file));
+      if (texture === undefined) throw new Error(`${file} was never asked for`);
+      return texture;
+    };
+    const rock = REALISTIC_SURFACES.rock;
+    const crag = REALISTIC_SURFACES.crag;
+    // Non-vacuity: the rock's own settings are set, and its colour map is
+    // told from its normal map by the colour space.
+    expect(map(rock.colour)['wrapS']).toBeDefined();
+    expect(map(rock.colour)['minFilter']).toBeDefined();
+    expect(map(rock.colour)['colorSpace']).toBeDefined();
+    expect(map(rock.normal)['colorSpace']).toBeUndefined();
+    // A map left clamped is one photograph smeared over a hillside; one whose
+    // colour is read as data is a bank lit as if it were its own height map.
+    for (const key of ['wrapS', 'wrapT', 'minFilter', 'colorSpace']) {
+      expect(map(crag.colour)[key], `colour ${key}`).toBe(map(rock.colour)[key]);
+      expect(map(crag.normal)[key], `normal ${key}`).toBe(map(rock.normal)[key]);
+    }
+    for (const file of [crag.colour, crag.normal]) {
+      const outcome = await loadRealisticWorld(loaders(file));
+      expect(outcome, file).toMatchObject({ loaded: false });
+      expect(outcome.loaded ? '' : outcome.detail).toContain(file);
+    }
+  });
+
+  it('lets go of the crag’s maps with the world: once when it is replaced, and when it is evicted (#1274)', async () => {
+    const first = keepingLoaders();
+    await expect(loadRealisticWorld(first.loaders)).resolves.toEqual({ loaded: true });
+    const crag = [REALISTIC_SURFACES.crag.colour, REALISTIC_SURFACES.crag.normal].map((file) =>
+      realisticUrl(file),
+    );
+    for (const url of crag) expect(first.released.get(url), url).toBeUndefined();
+    // Replaced: the first world's are released, the second's are not.
+    const second = keepingLoaders();
+    await expect(loadRealisticWorld(second.loaders)).resolves.toEqual({ loaded: true });
+    for (const url of crag) {
+      expect(first.released.get(url), url).toBe(1);
+      expect(second.released.get(url), url).toBeUndefined();
+    }
+    // Evicted from the GPU: the world a view would draw lets its textures go.
+    evictRealisticWorldFromGpu();
+    for (const url of crag) expect(second.released.get(url), url).toBe(1);
+  });
+
   it('says it was offline when the browser says so, which is the fallback D-7 names', async () => {
     vi.stubGlobal('navigator', { onLine: false });
     const outcome = await loadRealisticWorld(loaders('farm_field'));
@@ -1769,10 +1849,26 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(outcome.loaded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const surfaces = held.filter((one) => one.url.includes('_512.ktx2'));
-    // The structures' maps, and since #627 the ground's verge and rock, which
-    // are made at the same size by the same script.
-    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length + 4);
+    // The structures' maps, and since #627 the ground's verge and rock — and
+    // since #1274 its crag — which are made at the same size by the same script.
+    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length + 6);
+    expect(surfaces.map((one) => one.url).join(' ')).toContain(REALISTIC_SURFACES.crag.normal);
     expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('waits for the crag’s two maps when they alone answer last — #1274', async () => {
+    // ⚠️ The case above cannot see the crag left out of the settled list: its
+    // maps answer with every other 512 px map, which the list does wait for,
+    // so they arrive in time by luck. Here ONLY the crag's are late.
+    for (const map of [REALISTIC_SURFACES.crag.colour, REALISTIC_SURFACES.crag.normal]) {
+      const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: map });
+      const outcome = await loadRealisticWorld(loaders);
+      expect(outcome.loaded).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const late = held.filter((one) => one.url.includes(map));
+      expect(late, map).toHaveLength(1);
+      expect(late[0]?.released, map).toBe(true);
+    }
   });
 
   it('releases the materials it had built for the trees before a later model failed', async () => {

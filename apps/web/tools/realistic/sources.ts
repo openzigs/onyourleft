@@ -30,9 +30,28 @@
  *
  * ⚠️ **No Mixamo, refused by host rather than by omission** — Adobe's terms bar
  * redistributing the raw character, and a public repository and an APK both
- * do. ADR 0026 D-4's other exclusions (Megascans/Fab, `-NC`, `-SA`, Sketchfab's
- * "Free Standard", anything AI-generated) are not reachable from the two hosts
- * named here, and a new host is a change to that ADR, not to this table.
+ * do.
+ *
+ * ## The list of sources is the boundary, and it is written here
+ *
+ * [ADR 0049](../../../../docs/adr/0049-open-asset-sources-for-the-realistic-world.md)
+ * D-10 is the whole list since #1275, and it supersedes ADR 0026 D-4's:
+ * {@link ADMITTED_SOURCES} and {@link BARRED_SOURCES} are that table, row for
+ * row, and `admitted-sources.test.ts` reads the ADR and holds the two to each
+ * other. {@link admission} is what the lists decide about one URL, and
+ * `realistic:fetch` asks it of every URL it requests — a licence page and each
+ * file, including the ones Poly Haven's API resolves — before the request is
+ * made, so a source from anywhere else is refused by the pipeline, not only by
+ * a reviewer. {@link licenceVerdict} asks it of the addresses a source declares.
+ * (A redirect is followed by `fetch`; only the address requested is checked.)
+ * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
+ * which ADR 0049 keeps).
+ *
+ * ⚠️ **ambientCG is one of them since #1274, and it is no new host**: D-10's
+ * table admits it, as ADR 0026 D-4's did, for PBR materials, and until #1274
+ * nothing here read it. Its origin is {@link ambientCg}; what its asset's own page has to say,
+ * and which of its assets are refused however their page reads, is
+ * {@link ambientCgVerdict}.
  *
  * Pure: no file, no network. The two scripts beside it do the I/O.
  */
@@ -65,11 +84,248 @@ import {
   pixelDigest,
 } from './draw-bicycle-maps';
 
-/** Hosts whose terms forbid shipping the file in a bundle or a repository. */
-export const BARRED_HOSTS: readonly string[] = ['mixamo.com', 'www.mixamo.com'];
-
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
+
+/** One row of ADR 0049 D-10's **In** table. */
+export interface AdmittedSource {
+  /** The source, as the ADR's table names it. */
+  readonly name: string;
+  /**
+   * The licence its row states. `MIT` is a GENERATOR's own licence, never an
+   * asset's: what a generator writes is this repository's (ADR 0049 D-1).
+   */
+  readonly licence: KeptLicence | 'MIT';
+  /** The decision that admits it. */
+  readonly decidedBy: string;
+  /**
+   * `files`: its files are downloaded, pinned and derived from (ADR 0026 D-5).
+   * `generator`: a deterministic tool run from committed parameters — its
+   * version, seed and parameters are the recorded input (ADR 0049 D-1, D-2).
+   */
+  readonly kind: 'files' | 'generator';
+  /**
+   * Where its licence pages and files are read from: a URL is this source's
+   * when it starts with one of these. Each ends at a path boundary, so a
+   * look-alike host cannot match. Empty where this pipeline reads nothing from
+   * it yet — the pull request that adopts an asset adds the page it read, and
+   * that is a fact about an admitted source, not a new one (ADR 0049 D-11).
+   */
+  readonly prefixes: readonly string[];
+}
+
+/**
+ * Every source a realistic asset may come from — ADR 0049 D-10's **In** table,
+ * which supersedes ADR 0026 D-4's. ⚠️ **Admitted is not adopted**: #1275 added
+ * no asset, and each adoption is its own issue, measured on the tablet.
+ */
+export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
+  {
+    name: 'Poly Haven',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://polyhaven.com/',
+      'https://api.polyhaven.com/',
+      // Where api.polyhaven.com's /files answer points: the files themselves.
+      'https://dl.polyhaven.org/',
+    ],
+  },
+  {
+    name: 'ambientCG',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+  },
+  {
+    // ADR 0026's 2026-09-28 amendment: MakeHuman's own CC0 system assets pack,
+    // by the author `makehuman_system`, is under this row.
+    name: 'MakeHuman’s own files',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://raw.githubusercontent.com/makehumancommunity/makehuman/',
+      'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',
+      'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
+    ],
+  },
+  {
+    // The stylised world's models: committed verbatim, never through this pipeline.
+    name: 'Kenney',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    // Verified per asset under ADR 0023, wherever it is hosted: none is taken.
+    name: 'An individual model under CC-BY-4.0',
+    licence: 'CC-BY-4.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    name: 'EZ-Tree’s output',
+    licence: 'MIT',
+    decidedBy: 'ADR 0049 D-1',
+    kind: 'generator',
+    prefixes: ['https://github.com/dgreenheck/ez-tree/'],
+  },
+  {
+    name: 'The Base Mesh',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-3',
+    kind: 'files',
+    prefixes: ['https://www.thebasemesh.com/'],
+  },
+  {
+    name: 'Blender Studio Human Base Meshes',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://www.blender.org/download/demo-files/',
+      'https://www.blender.org/download/demo/asset-bundles/human-base-meshes/',
+    ],
+  },
+  {
+    // Per asset: the pose's OWN row on the pack's page has to read CC0.
+    name: 'MakeHuman community cyclist poses',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-6',
+    kind: 'files',
+    prefixes: [
+      'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
+      'https://files.makehumancommunity.org/asset_packs/poses02/',
+    ],
+  },
+];
+
+/** One row of ADR 0049 D-10's **Out** table. */
+export interface BarredSource {
+  /** What is out, as the ADR's table names it. */
+  readonly name: string;
+  /** The decision that bars it. */
+  readonly decidedBy: string;
+  /** Why, in the words a refusal prints. */
+  readonly why: string;
+  /**
+   * The hosts it is refused by, each with its subdomains. Empty where what is
+   * barred is a licence term or a way of making, which no host identifies:
+   * those are refused by {@link licenceVerdict}'s reading of the page, or by
+   * review of the asset's own page (ADR 0049 D-2).
+   */
+  readonly hosts: readonly string[];
+}
+
+/** Everything that stays out, whatever the convenience — ADR 0049 D-10's **Out** table. */
+export const BARRED_SOURCES: readonly BarredSource[] = [
+  {
+    name: 'Mixamo',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'its terms forbid redistributing the raw files, and a public repository is redistribution',
+    hosts: ['mixamo.com'],
+  },
+  {
+    name: 'Quixel Megascans and the Fab Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Sketchfab’s Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Anything non-commercial, no-derivatives or share-alike',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'an asset is CC0-1.0 or CC-BY-4.0 and nothing else',
+    hosts: [],
+  },
+  {
+    name: 'Non-commercial motion capture sets',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'a non-commercial grant, whatever the data',
+    hosts: [],
+  },
+  {
+    name: 'MB-Lab characters',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'its characters carry neither CC0-1.0 nor CC-BY-4.0',
+    hosts: [],
+  },
+  {
+    name: 'Anything AI-generated',
+    decidedBy: 'ADR 0049 D-2',
+    why: 'the output of a trained generative model, however it is labelled',
+    hosts: [],
+  },
+  {
+    name: 'The cyclist motion capture set’s data',
+    decidedBy: 'ADR 0049 D-5',
+    why: 'it is a reference to read, and none of its data is fetched or committed',
+    hosts: ['zenodo.org'],
+  },
+  {
+    name: 'A downloaded bicycle',
+    decidedBy: 'ADR 0049 D-8',
+    why: 'the bicycle is built from numbers (#369)',
+    hosts: [],
+  },
+];
+
+/** What the two lists decide about one URL. */
+export type Admission =
+  | { readonly admitted: true; readonly source: AdmittedSource }
+  | { readonly admitted: false; readonly reason: string };
+
+/**
+ * Whether a URL may be read by the pipeline: barred hosts first, then the
+ * admitted prefixes, and anything else refused — the list is the boundary, so
+ * "not named" is a refusal and never a judgement (ADR 0026 D-4, ADR 0049 D-11).
+ *
+ * `as` says what the URL is for. A **generator** row (EZ-Tree) admits its
+ * licence page and nothing it hosts: its bundled images are not taken (ADR
+ * 0049 D-1), so no file is read from it. A URL that is not in the form `fetch`
+ * would request (`..`, `%2e%2e`, a default port) is refused, because the prefix
+ * test reads the string and the server reads the normalised address; a prefix
+ * that names a page (`.html`) matches that page alone.
+ */
+export function admission(url: string, as: 'licence' | 'file' = 'file'): Admission {
+  const { hostname, href } = new URL(url);
+  const barred = BARRED_SOURCES.find((source) =>
+    source.hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`)),
+  );
+  if (barred !== undefined) {
+    return {
+      admitted: false,
+      reason: `${hostname} is barred — ${barred.name}: ${barred.why} (${barred.decidedBy})`,
+    };
+  }
+  const source =
+    href !== url || /%2e/i.test(url)
+      ? undefined
+      : ADMITTED_SOURCES.find(
+          (candidate) =>
+            (as === 'licence' || candidate.kind === 'files') &&
+            candidate.prefixes.some((prefix) =>
+              prefix.endsWith('.html') ? url === prefix : url.startsWith(prefix),
+            ),
+        );
+  if (source === undefined) {
+    return {
+      admitted: false,
+      reason: `${url} is not from a source ADR 0049 D-10 admits — a new source is a superseding ADR, not a new row`,
+    };
+  }
+  return { admitted: true, source };
+}
 
 /** Which of a Poly Haven asset's files to take. */
 export type PolyHavenSelection =
@@ -128,6 +384,18 @@ export interface AssetSource {
         readonly from: 'archive';
         readonly url: string;
         readonly members: readonly ArchiveMember[];
+      }
+    | {
+        /**
+         * An ambientCG asset — #1274: the one archive ambientCG publishes for
+         * it at `attribute`, downloaded whole and pinned by its digest, and
+         * only `maps` taken out. {@link ambientCgArchive} says which files.
+         */
+        readonly from: 'ambientcg';
+        /** The size and format ambientCG names the archive by: `1K-JPG`. */
+        readonly attribute: string;
+        /** The maps taken, as ambientCG names them: `Color`, `NormalGL`. */
+        readonly maps: readonly string[];
       };
 }
 
@@ -241,6 +509,165 @@ function polyHaven(id: string, select: PolyHavenSelection): AssetSource {
 }
 
 /**
+ * What every ambientCG asset's own page says of its licence, verbatim — read
+ * on 2026-10-12 at `ambientcg.com/view?id=Rock026`.
+ */
+export const AMBIENTCG_PHRASE = 'All assets are released under the Creative Commons CC0 license';
+
+/**
+ * How an ambientCG asset may have been made, as its own page's "Technique"
+ * names it, for the pipeline to take it — #1274.
+ *
+ * ADR 0026 D-4 bars anything **marked or known to be AI-generated**, and
+ * ambientCG says of each asset how its maps were made. Read on 2026-10-12, its
+ * pages name five techniques:
+ *
+ * | The page's "Technique" | What the page says of it | |
+ * |---|---|---|
+ * | `Surface Photogrammetry` | "Photogrammetry is used to create a highly accurate height map for the surface." | **kept** |
+ * | `Photometric Stereo` | "Light from multiple angles is used to create a more accurate approximation of the height map for the surface." | **kept** |
+ * | `Approximation` | "The height profile of the surface is approximated from the color." | refused |
+ * | `Prodedural` (the site's spelling) | "Procedural/algorithmic techniques are used to create a surface." | refused |
+ * | `Other/Unknown` | "(no description)" | refused |
+ *
+ * The two kept are MEASURED from a real surface. `Approximation` is refused
+ * because the page does not say what approximates the height from the colour,
+ * and until that is known it cannot be shown not to be a trained model — #1274
+ * item 4. `Other/Unknown` is refused for the same reason, in the page's own
+ * words. Both follow ADR 0049 D-2: a page that says "approximated" is read
+ * until it is known which kind it is, and an asset whose making cannot be
+ * established is treated as barred. `Prodedural` stays refused, and no longer
+ * as a class: ADR 0049 D-2 rules that a deterministic tool run from committed
+ * parameters is NOT AI-generated, and also that the test is how the asset was
+ * made, not what its page calls it — the pull request that takes one shows
+ * the making. The page's one sentence does not show it, and #1274 takes no
+ * such asset, so adding the technique here is the work of the issue that does.
+ *
+ * ⚠️ **A list of what is kept, not of what is refused**, so a technique
+ * ambientCG adds later is refused until somebody reads what it means.
+ */
+export const AMBIENTCG_TECHNIQUES_KEPT: readonly string[] = [
+  'Surface Photogrammetry',
+  'Photometric Stereo',
+];
+
+/**
+ * One ambientCG asset — #1274: its id, the archive it is published in at
+ * `attribute`, and the maps taken out of that archive.
+ *
+ * - **Its page** is `ambientcg.com/view?id=<id>`, the asset's own, which
+ *   states the licence ({@link AMBIENTCG_PHRASE}), how the asset was made and
+ *   which archives it is published in. {@link ambientCgVerdict} reads all three.
+ * - **Its author** is recorded as ambientCG: the site publishes its own work,
+ *   and an asset's page names no other author.
+ */
+function ambientCg(id: string, attribute: string, maps: readonly string[]): AssetSource {
+  return {
+    id,
+    licencePage: `https://ambientcg.com/view?id=${id}`,
+    licencePhrase: AMBIENTCG_PHRASE,
+    licence: 'CC0-1.0',
+    author: 'ambientCG',
+    origin: { from: 'ambientcg', attribute, maps },
+  };
+}
+
+/** An archive downloaded whole, and the files taken out of it. */
+export interface ArchiveToRead {
+  /** The archive's own file name: under `build/raw/<id>/`, and its path in the lock. */
+  readonly name: string;
+  readonly url: string;
+  readonly members: readonly Pick<ArchiveMember, 'path' | 'mustContain'>[];
+}
+
+/**
+ * The archive an ambientCG asset is published in, and the files taken out of
+ * it — #1274. ambientCG names both by the asset's id and the attribute:
+ * `Rock026_1K-JPG.zip` holds `Rock026_1K-JPG_Color.jpg`.
+ *
+ * ⚠️ **The archive is what the lock pins**, as it is for MakeHuman's pack
+ * (#623): ambientCG publishes no digest of its own and serves the file through
+ * a redirect, so the SHA-256 of the bytes that arrived is the only statement
+ * of what they were. Measured on 2026-10-12: two downloads of
+ * `Rock026_1K-JPG.zip`, minutes apart, were the same bytes.
+ */
+export function ambientCgArchive(source: AssetSource): ArchiveToRead {
+  if (source.origin.from !== 'ambientcg') {
+    throw new Error(`${source.id}: not an ambientCG asset`);
+  }
+  const { attribute, maps } = source.origin;
+  const stem = `${source.id}_${attribute}`;
+  const extension = (attribute.split('-')[1] ?? '').toLowerCase();
+  return {
+    name: `${stem}.zip`,
+    url: `https://ambientcg.com/get?file=${stem}.zip`,
+    members: maps.map((map) => ({ path: `${stem}_${map}.${extension}` })),
+  };
+}
+
+/** The archive a source is read out of, where it is one: MakeHuman's pack, or an ambientCG asset. */
+export function archiveOf(source: AssetSource): ArchiveToRead | undefined {
+  if (source.origin.from === 'ambientcg') return ambientCgArchive(source);
+  if (source.origin.from !== 'archive') return undefined;
+  const { url, members } = source.origin;
+  const path = new URL(url).pathname;
+  return { name: path.slice(path.lastIndexOf('/') + 1), url, members };
+}
+
+/**
+ * The techniques an ambientCG asset's page names: the text of each entry of
+ * its "Technique" block (`<div id="techniques">`), in the page's order.
+ */
+export function ambientCgTechniques(pageHtml: string): readonly string[] {
+  const block = /\bid="techniques"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bid="|$)/i.exec(pageHtml);
+  if (block === null) return [];
+  return [...(block[1] ?? '').matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)]
+    .map((match) => (match[1] ?? '').replace(/\s+/g, ' ').trim())
+    .filter((technique) => technique !== '');
+}
+
+/**
+ * Whether an ambientCG asset may be kept, given the text of its OWN page —
+ * #1274. Three things, none of which a marketplace label gives:
+ *
+ * 1. **The page is this asset's**: it offers the very archive the pipeline is
+ *    about to download. A page that does not — the site's front page, another
+ *    asset's, this asset at a size it is not published in — is refused, so
+ *    another page's CC0 sentence cannot vouch for this file.
+ * 2. **The page states the licence** — {@link licenceVerdict}'s own checks:
+ *    the phrase, no NC, ND or SA term, no barred host.
+ * 3. **The page says how the asset was made, and every technique it names is
+ *    one {@link AMBIENTCG_TECHNIQUES_KEPT} lists.** A page that names none is
+ *    refused too: not known is not the same as measured.
+ */
+export function ambientCgVerdict(source: AssetSource, pageHtml: string): LicenceVerdict {
+  const archive = ambientCgArchive(source);
+  if (!pageHtml.includes(`href="${archive.url}"`)) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not offer ${archive.name} — it is not this asset's own page, or the asset is not published at that size`,
+    };
+  }
+  const stated = statedLicence(source, pageHtml);
+  if (!stated.kept) return stated;
+  const techniques = ambientCgTechniques(pageHtml);
+  if (techniques.length === 0) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not say how the asset was made`,
+    };
+  }
+  const refused = techniques.find((technique) => !AMBIENTCG_TECHNIQUES_KEPT.includes(technique));
+  if (refused !== undefined) {
+    return {
+      kept: false,
+      reason: `${source.id}: its page says it was made by "${refused}", which is not one of ${AMBIENTCG_TECHNIQUES_KEPT.join(', ')} — ADR 0026 D-4 bars AI-generated material, and only an asset measured from a real surface is taken (#1274)`,
+    };
+  }
+  return { ...stated, technique: techniques.join(', ') };
+}
+
+/**
  * The photographic surfaces the realistic structures wear — #475, ADR 0026
  * D-12 layer 3 — each a Poly Haven CC0 texture: its id, and the file name Poly
  * Haven gives its 1K colour map (one of them spells it `diffuse`). How many
@@ -292,6 +719,41 @@ export const GROUND_BLEND_TEXTURES: readonly {
   { id: 'gravelly_sand', colourFile: 'gravelly_sand_diff_1k.jpg' },
   { id: 'rocks_ground_05', colourFile: 'rocks_ground_05_diff_1k.jpg' },
 ];
+
+/**
+ * The ground surfaces taken from ambientCG — #1274, each one of its CC0
+ * materials at 1K: its id, which is also the name its files carry.
+ *
+ * - `Rock026` — bare ROCK where the landform is steep: a fractured rock face,
+ *   made by surface photogrammetry and published on 2019-10-24 (its own page,
+ *   read 2026-10-12). Until #1274 a steep bank wore `rocks_ground_05`, which is
+ *   loose stones on earth — scree, which a bank past the angle of repose is
+ *   exactly not. That photograph keeps the scree above the tree line; this
+ *   one takes the banks.
+ *
+ * ## ⚠️ Measured before it stayed, and the first one tried did not
+ *
+ * #1274 asks that each asset be measured before it stays. `Rock045`, a
+ * weathered face with lichen on it, was fetched, locked, made and drawn first,
+ * and read back **flatter than the grass beside it** in the browser gate's own
+ * frame (`game-harness.ts` §`groundBlendProbe`, #627's measure): a contrast of
+ * 0.0021 on the bank against 0.0017 to 0.0058 for level grass, where the
+ * photograph it replaced read 0.0944 — so #627's own gate went red, rightly.
+ * The ground's shader keeps a photograph's STRUCTURE and gives it the world's
+ * colour, and a rider sees a bank from tens of metres away, where one pixel
+ * covers 5 to 20 cm: a scan whose detail is all finer than that is a flat
+ * slope. `Rock026`'s is fractured rock a metre across, and reads 0.0408 in the
+ * same frame. A candidate for this table is screened the same way: its detail
+ * has to survive a 20 cm footprint.
+ *
+ * Downsized to {@link STRUCTURE_TEXTURE_PIXELS} and encoded as KTX2 by the
+ * same script and recipe as {@link GROUND_BLEND_TEXTURES}.
+ */
+export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ id: 'Rock026' }];
+
+/** The archive every {@link AMBIENTCG_GROUND_TEXTURES} entry is taken from, and the two maps taken. */
+const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
+const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
 
 /** The side, in pixels, the pipeline downsizes a structure's maps to. */
 export const STRUCTURE_TEXTURE_PIXELS = 512;
@@ -368,6 +830,13 @@ export const SOURCES: readonly AssetSource[] = [
   // #627: the ground's verge, rock and scree.
   ...GROUND_BLEND_TEXTURES.map((texture) =>
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
+  ),
+  // #1274: the ground's bare rock, from ambientCG.
+  ...AMBIENTCG_GROUND_TEXTURES.map((texture) =>
+    ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
+      AMBIENTCG_GROUND_MAPS.colour,
+      AMBIENTCG_GROUND_MAPS.normal,
+    ]),
   ),
   {
     id: 'makehuman',
@@ -843,6 +1312,16 @@ export const OUTPUTS: readonly OutputSpec[] = [
       structureMap(made.normal, texture.id, `${texture.id}_nor_gl_1k.jpg`, 'data'),
     ];
   }),
+  // #1274: ambientCG's, by the same recipe — its files carry its own names.
+  ...AMBIENTCG_GROUND_TEXTURES.flatMap((texture) => {
+    const made = structureMapFiles(texture.id);
+    const upstream = (map: string): string =>
+      `${texture.id}_${AMBIENTCG_GROUND_ATTRIBUTE}_${map}.jpg`;
+    return [
+      structureMap(made.colour, texture.id, upstream(AMBIENTCG_GROUND_MAPS.colour), 'colour'),
+      structureMap(made.normal, texture.id, upstream(AMBIENTCG_GROUND_MAPS.normal), 'data'),
+    ];
+  }),
   {
     file: REALISTIC_RIDER,
     from: 'makehuman',
@@ -1019,25 +1498,44 @@ export function shippedFiles(): readonly string[] {
 
 /** Why a source was refused, or the evidence that it was not. */
 export type LicenceVerdict =
-  | { readonly kept: true; readonly licence: KeptLicence; readonly evidence: string }
+  | {
+      readonly kept: true;
+      readonly licence: KeptLicence;
+      readonly evidence: string;
+      /** How the page says the asset was made, where the source says — #1274, ambientCG's. */
+      readonly technique?: string;
+    }
   | { readonly kept: false; readonly reason: string };
 
 /**
  * Whether a source may be kept, given the text of its licence page.
  *
- * Refuses a barred host, a page that does not carry the phrase, and — however
+ * Refuses a barred host, a URL no admitted source owns ({@link admission}), a
+ * page that does not carry the phrase, and — however
  * the phrase reads — a page that also names a non-commercial, no-derivatives or
  * share-alike term, because a page can carry the CC0 phrase for one file and a
  * stricter licence for the one being fetched. ADR 0026 D-4 excludes all three.
+ *
+ * ⚠️ **The one door, whatever the origin** — #1274: an ambientCG asset is held
+ * to {@link ambientCgVerdict}, which asks all of this and more, from HERE, so
+ * `fetch-assets.ts` cannot keep one on the general checks alone by calling the
+ * wrong function.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
-  const hosts = [source.licencePage, ...fixedUrls(source)].map((url) => new URL(url).hostname);
-  const barred = hosts.find((host) => BARRED_HOSTS.includes(host));
-  if (barred !== undefined) {
-    return {
-      kept: false,
-      reason: `${source.id}: ${barred} is barred — its terms forbid redistribution`,
-    };
+  return source.origin.from === 'ambientcg'
+    ? ambientCgVerdict(source, pageText)
+    : statedLicence(source, pageText);
+}
+
+/** {@link licenceVerdict}'s checks of the page's own words, which every origin shares. */
+function statedLicence(source: AssetSource, pageText: string): LicenceVerdict {
+  const asked: [string, 'licence' | 'file'][] = [
+    [source.licencePage, 'licence'],
+    ...fixedUrls(source).map((url): [string, 'file'] => [url, 'file']),
+  ];
+  for (const [url, as] of asked) {
+    const verdict = admission(url, as);
+    if (!verdict.admitted) return { kept: false, reason: `${source.id}: ${verdict.reason}` };
   }
   if (!pageText.includes(source.licencePhrase)) {
     return {
@@ -1057,6 +1555,7 @@ export function licenceVerdict(source: AssetSource, pageText: string): LicenceVe
 function fixedUrls(source: AssetSource): readonly string[] {
   if (source.origin.from === 'urls') return source.origin.files.map((file) => file.url);
   if (source.origin.from === 'archive') return [source.origin.url];
+  if (source.origin.from === 'ambientcg') return [ambientCgArchive(source).url];
   return [];
 }
 
@@ -1157,7 +1656,31 @@ export interface LockedSource {
   readonly read: string;
   /** Who made it, as the source names them — recorded even where CC0 asks for nothing. */
   readonly authors: string;
+  /**
+   * How the source's own page said the asset was made, read with its licence —
+   * #1274, for an ambientCG asset: {@link AMBIENTCG_TECHNIQUES_KEPT}.
+   */
+  readonly technique?: string;
   readonly files: readonly LockedFile[];
+}
+
+/**
+ * Why a file that was just downloaded is not the one the lock records, or
+ * nothing — the digest lock, ADR 0026 D-5, as one sentence `fetch-assets.ts`
+ * throws: a file the lock does not name at all, or one whose SHA-256 is not
+ * the one recorded. `--lock` is the only way past it, and that is a decision
+ * to re-base the realistic world on new inputs.
+ */
+export function lockFault(
+  id: string,
+  path: string,
+  sha256: string,
+  locked: Pick<LockedSource, 'files'> | undefined,
+): string | undefined {
+  const was = locked?.files.find((each) => each.path === path);
+  return was !== undefined && was.sha256 === sha256
+    ? undefined
+    : `${id}/${path}: not the input the lock records (${was?.sha256 ?? 'absent'}, got ${sha256}); run with --lock only if re-basing on new inputs is intended`;
 }
 
 /** `inputs.lock.json`. */
@@ -1272,7 +1795,17 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   const source = lock.sources.find((each) => each.id === output.from);
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
-  const origin = source.id === 'makehuman' ? 'MakeHuman' : 'Poly Haven';
+  // #1274: an ambientCG asset says so, and says how its page said it was made.
+  const origin =
+    source.id === 'makehuman'
+      ? 'MakeHuman'
+      : SOURCES.find((each) => each.id === source.id)?.origin.from === 'ambientcg'
+        ? 'ambientCG'
+        : 'Poly Haven';
+  const by =
+    source.technique === undefined
+      ? source.authors
+      : `${source.authors} (its own page: made by ${source.technique})`;
   // #623: a run that reads a second source names it, and digests it too.
   const also =
     output.recipe.how === 'blender'
@@ -1288,10 +1821,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     if (upstream === undefined) throw new Error(`${file}: the lock records no ${recipe.file}`);
     return [
       ['path', path],
-      [
-        'source',
-        `${origin}, ${source.id} by ${source.authors}; upstream bytes, unmodified — ${upstream.url}`,
-      ],
+      ['source', `${origin}, ${source.id} by ${by}; upstream bytes, unmodified — ${upstream.url}`],
       ['licence', source.licence],
       ['read', source.read],
       ['sha256', sha256],
@@ -1336,7 +1866,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ['path', path],
     [
       'source',
-      `${origin}, ${source.id} by ${source.authors}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
+      `${origin}, ${source.id} by ${by}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
     ],
     ['licence', source.licence],
     ['read', source.read],

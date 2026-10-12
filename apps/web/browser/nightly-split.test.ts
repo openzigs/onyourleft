@@ -208,9 +208,30 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // The step's own stop is behind the wrapper and its kill, never in front.
     expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
     // ...and the step's stop ends inside the job's, from the latest start the
-    // 7763 has shown (707 s) with the coverage steps (4 s) after it.
+    // 7763 has shown (835 s, run 38196648879 attempt 1; 707 s until #651) with
+    // the coverage steps (4 s) after it.
     const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
-    expect(707 + minutes * 60 + 4).toBeLessThan(job * 60);
+    expect(835 + minutes * 60 + 4).toBeLessThan(job * 60);
+  });
+
+  it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
+    // Until #651 they summed to 815 s against a 765 s wrapper, and a `chromium`
+    // run that used its 720 s left the game run 35 s of its 85. The two `vite
+    // build`s before the first run take about 10 s on the runner.
+    const BUILDS_MS = 10_000;
+    expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
+  });
+
+  it('keeps the job’s stop at least three minutes clear of the slowest job measured with nothing red — #651', () => {
+    // 1 522 s: run 38196648879 attempt 1, an AMD EPYC 7763, cancelled at the
+    // 25-minute stop with every test it had run green. A stop has to be clear
+    // of what it stops (docs/agents/ci.md §4c §"Thirty minutes — #651"); when
+    // the job grows past this, the answer is the candidates listed there, and
+    // this number moves only with a new measurement beside it.
+    const SLOWEST_JOB_WITH_NOTHING_RED_S = 1522;
+    const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
+    const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(rules)?.[1]);
+    expect(job * 60 - SLOWEST_JOB_WITH_NOTHING_RED_S).toBeGreaterThanOrEqual(180);
   });
 });
 
@@ -231,7 +252,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(commands).toEqual(
       expect.arrayContaining([
         'pnpm run test:coverage',
-        'timeout --verbose --kill-after=10s 765s pnpm run test:browser',
+        'timeout --verbose --kill-after=10s 825s pnpm run test:browser',
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');

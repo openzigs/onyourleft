@@ -61,6 +61,7 @@ import {
   drawnWorldOf,
   atmosphereOf,
   foliageOrderedOf,
+  groundBlendOf,
   loadRealisticWorld,
   loadSceneryModels,
   realisticTextureReport,
@@ -297,6 +298,11 @@ async function run(): Promise<void> {
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');
   foliageOrderedOf(view, foliageOrdered);
+  // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
+  // off — in the scree's photograph, as it was. The ground's material is built
+  // with the realistic belts, so this too is applied again after a rung change.
+  const crag = config.leversOff.includes('crag') ? 0 : 1;
+  groundBlendOf(view, 1, 1, 1, crag);
   // #622's by-eye pair: the air as the product breathes it, or as it was
   // before #622. A setting of the view's, so it survives a rung change.
   const airOn = !config.leversOff.includes('air');
@@ -353,6 +359,7 @@ async function run(): Promise<void> {
       if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
+        groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;
     }

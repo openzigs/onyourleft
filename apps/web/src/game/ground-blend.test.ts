@@ -7,10 +7,12 @@ import {
   ROAD_EDGE_METRES,
   ROCK_SLOPE_DEGREES,
   SCREE_BAND_METRES,
+  stoneBlend,
   treeLineHeight,
   VERGE_BLEND_METRES,
 } from './ground-blend';
 import { terrainCorridor, VERGE_METRES } from './landform';
+import { REALISTIC_SURFACES } from './realistic-assets';
 import { hillRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
@@ -66,18 +68,62 @@ describe('the realistic ground’s blend — #627', () => {
   });
 
   it('blends in the ground’s one shader, from attributes the ground already has', () => {
-    const noTexture = {} as Parameters<typeof photographicGroundMaterial>[0];
-    const material = photographicGroundMaterial(
-      noTexture,
-      noTexture,
-      { value: 90 },
-      { value: 1 },
-      {
-        verge: { colour: noTexture, normal: noTexture },
-        rock: { colour: noTexture, normal: noTexture },
-        treeLine: { value: 123 },
-      },
-    );
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    // No new vertex attribute: the only one declared is the surface detail's
+    // `fields`, which the ground has carried since #425.
+    const attributes = shader.vertexShader.match(/^attribute .*$/gm) ?? [];
+    expect(attributes).toEqual(['attribute vec2 fields;']);
+    // The tree line is the one the belt writes, by reference.
+    expect(shader.uniforms['treeLine']?.value).toBe(123);
+    // Branched: each new surface is sampled only where it is.
+    expect(shader.fragmentShader).toContain('if (oylVergeShare > 0.0)');
+    expect(shader.fragmentShader).toContain('if (oylRockShare - oylCragShare > 0.0)');
+    // The world's colour leads: each photograph over its own mean, times it.
+    expect(shader.fragmentShader).toContain('/ max(textureLod(rockMap, vec2(0.5), 16.0).rgb');
+    expect(shader.fragmentShader).toContain('oylGroundWorld * vColor.rgb');
+    // Mixed in after the patchwork, which the surface detail splices in after
+    // `color_fragment`: #460's fields show where the grass does.
+    const patchwork = shader.fragmentShader.indexOf('fieldTone');
+    const mixedIn = shader.fragmentShader.indexOf('float oylOther = oylVergeShare + oylRockShare;');
+    expect(patchwork).toBeGreaterThan(0);
+    expect(mixedIn).toBeGreaterThan(patchwork);
+    // The normal map is blended where the colour is.
+    expect(shader.fragmentShader).toContain('vec3 mapN = oylGroundNormal( vNormalMapUv )');
+    material.dispose();
+  });
+});
+
+type GroundTexture = Parameters<typeof photographicGroundMaterial>[0];
+type GroundBlend = NonNullable<Parameters<typeof photographicGroundMaterial>[4]>;
+
+/** A texture nothing reads, told from every other by identity. */
+const texture = (): GroundTexture => ({}) as GroundTexture;
+
+/** Every surface the blend takes, each map its own object. */
+const ALL_SURFACES = {
+  verge: { colour: texture(), normal: texture() },
+  rock: { colour: texture(), normal: texture() },
+  crag: { colour: texture(), normal: texture() },
+  treeLine: { value: 123 },
+} satisfies GroundBlend;
+
+/** The ground's material, and its shader as `onBeforeCompile` leaves the chunks it edits. */
+function compiledGround(blend: GroundBlend): {
+  readonly shader: {
+    vertexShader: string;
+    fragmentShader: string;
+    uniforms: Record<string, { value: unknown }>;
+  };
+  readonly material: ReturnType<typeof photographicGroundMaterial>;
+} {
+  const material = photographicGroundMaterial(
+    texture(),
+    texture(),
+    { value: 90 },
+    { value: 1 },
+    blend,
+  );
+  {
     const shader = {
       vertexShader: [
         '#include <common>',
@@ -104,26 +150,67 @@ describe('the realistic ground’s blend — #627', () => {
       defines: {},
     };
     (material.onBeforeCompile as (s: typeof shader) => void)(shader);
-    // No new vertex attribute: the only one declared is the surface detail's
-    // `fields`, which the ground has carried since #425.
-    const attributes = shader.vertexShader.match(/^attribute .*$/gm) ?? [];
-    expect(attributes).toEqual(['attribute vec2 fields;']);
-    // The tree line is the one the belt writes, by reference.
-    expect(shader.uniforms['treeLine']?.value).toBe(123);
-    // Branched: each new surface is sampled only where it is.
-    expect(shader.fragmentShader).toContain('if (oylVergeShare > 0.0)');
-    expect(shader.fragmentShader).toContain('if (oylRockShare > 0.0)');
-    // The world's colour leads: each photograph over its own mean, times it.
-    expect(shader.fragmentShader).toContain('/ max(textureLod(rockMap, vec2(0.5), 16.0).rgb');
-    expect(shader.fragmentShader).toContain('oylGroundWorld * vColor.rgb');
-    // Mixed in after the patchwork, which the surface detail splices in after
-    // `color_fragment`: #460's fields show where the grass does.
-    const patchwork = shader.fragmentShader.indexOf('fieldTone');
-    const mixedIn = shader.fragmentShader.indexOf('float oylOther = oylVergeShare + oylRockShare;');
-    expect(patchwork).toBeGreaterThan(0);
-    expect(mixedIn).toBeGreaterThan(patchwork);
-    // The normal map is blended where the colour is.
-    expect(shader.fragmentShader).toContain('vec3 mapN = oylGroundNormal( vNormalMapUv )');
+    return { shader, material };
+  }
+}
+
+describe('the bare rock a steep bank wears — #1274', () => {
+  it('gives the slope’s share to the crag and what is left of the stone to the loose scree', () => {
+    // A steep bank below the tree line: all crag, no loose stone.
+    expect(stoneBlend(1, 0)).toEqual({ crag: 1, loose: 0 });
+    // Level ground above the tree line: all loose stone, no crag.
+    expect(stoneBlend(0, 1)).toEqual({ crag: 0, loose: 1 });
+    // Steep AND above the tree line: rock that steep holds no loose stone.
+    expect(stoneBlend(1, 1)).toEqual({ crag: 1, loose: 0 });
+    // Grass: neither.
+    expect(stoneBlend(0, 0)).toEqual({ crag: 0, loose: 0 });
+    // And across both ranges the two are never more than the stone there is.
+    for (const rock of [0, 0.25, 0.5, 0.75, 1]) {
+      for (const scree of [0, 0.25, 0.5, 0.75, 1]) {
+        const { crag, loose } = stoneBlend(rock, scree);
+        expect(crag + loose).toBe(Math.max(rock, scree));
+        expect(loose).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('runs that arithmetic in the ground’s shader, on the crag’s own two maps at its own size', () => {
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    // Each sampler is handed the map it is named for: a colour map bound where
+    // the normal map belongs lights a bank by a photograph's colours.
+    expect(shader.uniforms['cragMap']?.value).toBe(ALL_SURFACES.crag.colour);
+    expect(shader.uniforms['cragNormalMap']?.value).toBe(ALL_SURFACES.crag.normal);
+    expect(shader.uniforms['rockMap']?.value).toBe(ALL_SURFACES.rock.colour);
+    expect(shader.uniforms['rockNormalMap']?.value).toBe(ALL_SURFACES.rock.normal);
+    const fragment = shader.fragmentShader;
+    // The slope's share, times the browser gate's switch.
+    expect(fragment).toContain('oylCragShare = oylRock * groundShares.w;');
+    // Sampled only where it is, colour and normal alike, over its own mean.
+    expect(fragment.match(/if \(oylCragShare > 0\.0\)/g)).toHaveLength(2);
+    expect(fragment).toContain('textureGrad(cragMap, cragUv, cragDx, cragDy).rgb');
+    expect(fragment).toContain('/ max(textureLod(cragMap, vec2(0.5), 16.0).rgb');
+    expect(fragment).toContain('textureGrad(cragNormalMap, cragUv, cragDx, cragDy).xyz');
+    // The loose stone keeps only what the crag leaves, in both places.
+    expect(fragment).toContain('+ oylRockTexel * (oylRockShare - oylCragShare)');
+    expect(fragment).toContain('+ oylCragTexel * oylCragShare);');
+    expect(fragment).toContain('float oylScreeShare = oylRockShare - oylCragShare;');
+    // At 3 m a repeat: this repository's figure, the scan's page stating none.
+    expect(REALISTIC_SURFACES.crag.tileMetres).toBe(3);
+    expect(fragment).toContain('vec2 oylCragUv() { return vOylGround.xz / 3.0; }');
+    material.dispose();
+  });
+
+  it('draws the grass everywhere, as before #627, in a world built without the crag', () => {
+    // A sampler declared and never bound reads texture unit 0, which is the
+    // grass: a bank would silently wear grass texels as rock.
+    const { shader, material } = compiledGround({
+      verge: ALL_SURFACES.verge,
+      rock: ALL_SURFACES.rock,
+      treeLine: ALL_SURFACES.treeLine,
+    });
+    expect(shader.fragmentShader).not.toContain('cragMap');
+    expect(shader.fragmentShader).not.toContain('rockMap');
+    expect(shader.uniforms['cragMap']).toBeUndefined();
     material.dispose();
   });
 });

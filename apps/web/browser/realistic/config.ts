@@ -71,8 +71,13 @@ export type Layer = (typeof LAYERS)[number];
  *   haze off, which is the picture before #622 — for the owner's BY-EYE
  *   comparison only. ⚠️ **Not a cost pair**: the shader runs either way, so
  *   #622's cost is two builds (validation 0002 Part AH §"The #622 rows").
+ * - `crag` — #1274: the rock face a steep bank wears, ambientCG's. Off draws
+ *   the bank in the scree's photograph, which is the picture before #1274 —
+ *   for the owner's BY-EYE comparison. ⚠️ **Not a cost pair either**: the
+ *   ground's shader is the same program with it off, and samples one
+ *   photograph on a bank where it sampled the other.
  */
-export const LEVERS = ['air', 'foliage-order', 'texture-bias'] as const;
+export const LEVERS = ['air', 'crag', 'foliage-order', 'texture-bias'] as const;
 
 /** One of {@link LEVERS}. */
 export type Lever = (typeof LEVERS)[number];

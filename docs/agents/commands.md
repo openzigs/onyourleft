@@ -251,7 +251,7 @@ pnpm run build
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
 # then `game` alone, each with its own stop (§4c §"23m50s of 25 — #1128").
 # A failed build ends it before either run. CI runs it under
-# `timeout --verbose --kill-after=10s 765s` (§4c, `GATE_STEP_MS`).
+# `timeout --verbose --kill-after=10s 825s` (§4c, `GATE_STEP_MS`).
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
