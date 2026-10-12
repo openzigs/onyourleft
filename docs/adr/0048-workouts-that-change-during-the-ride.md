@@ -577,3 +577,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   workout with no re-plan, and is
   [#1297](https://github.com/openzigs/onyourleft/issues/1297), to land before or with #1244. Read
   from the code, not ridden on a trainer. (#1296)
+
+- **2026-10-12** — #1297 landed the clamp. The session now raises every workout target under the
+  trainer's reported minimum to that minimum, so the "nothing clamps" reading of 5 above no longer
+  holds. A raised target equals the floor, so the forget-hold rule treats it as an ease and does not
+  hold it back.

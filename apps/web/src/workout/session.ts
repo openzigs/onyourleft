@@ -273,6 +273,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       return;
     }
     released = true;
+    lastOffered = undefined;
     void writer.offer(powerFloor).then((outcome) => {
       if (outcome.kind === 'written') {
         return;
@@ -330,8 +331,23 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    */
   let asks = 0;
 
+  /**
+   * The last target this session offered the writer, after the raise to the
+   * floor — #1297 review. The player's unchanged-target check (#542) compares
+   * what it ASKED for, before the clamp, so a ramp under the machine's minimum
+   * asks for a new wattage every tick and every one of them clamps to the same
+   * number: without this, the same `0x05` once a second. Forgotten whenever the
+   * wire is forgotten (an ease, a refused or superseded write, a resume, a lost
+   * link), so a target that did not land is written again.
+   */
+  let lastOffered: Watts | undefined;
+
   const offer = (target: Watts): void => {
     released = false;
+    if (lastOffered === target) {
+      return;
+    }
+    lastOffered = target;
     asks += 1;
     const ask = asks;
     void writer.offer(target).then((outcome) => {
@@ -351,6 +367,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
         case 'failed':
           lastFault = faultText(outcome.error);
           if (current) {
+            lastOffered = undefined;
             player.writeFailed();
           }
           break;
@@ -360,6 +377,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // A superseded target was replaced by a newer one, whose own outcome
           // clears the pending state; a closed one means the session is over.
           if (current) {
+            lastOffered = undefined;
             player.writeFailed();
           }
           break;
@@ -373,6 +391,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     start(now: Seconds): void {
       player.start(now);
+      lastOffered = undefined;
       changed();
     },
 
@@ -441,11 +460,13 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     resume(now: Seconds): void {
       player.resume(now);
+      lastOffered = undefined;
       changed();
     },
 
     linkLost(now: Seconds): void {
       player.linkLost(now);
+      lastOffered = undefined;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is

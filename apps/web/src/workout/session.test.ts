@@ -745,6 +745,49 @@ describe('a workout target under the trainer’s minimum is written as that mini
     expect(targetWrites(trainer)).toStrictEqual([targetWrite(MINIMUM)]);
   });
 
+  it('writes a ramp that stays under the minimum once, not once per new asked wattage', async () => {
+    // Review of #1301: the player asks for a new wattage every tick of a ramp
+    // (75 W rising to 100 W here), and every one clamps to the same minimum.
+    const { trainer, session } = await loop(
+      () =>
+        expandWorkout(
+          workout([
+            {
+              kind: 'ramp',
+              seconds: seconds(30),
+              from: thresholdShare(0.2),
+              to: thresholdShare(0.4),
+            },
+          ]),
+        ),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 20);
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(MINIMUM)]);
+  });
+
+  it('writes the minimum again after a refused write, and after a resume', async () => {
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(30, 0.3)])),
+      HIGH_MINIMUM(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    session.pause(seconds(4));
+    await session.settled();
+    session.resume(seconds(5));
+    await ride(session, 5, 8);
+
+    // minimum, the pause's ease (same number), then the resumed target.
+    expect(targetWrites(trainer)).toStrictEqual([
+      targetWrite(MINIMUM),
+      targetWrite(MINIMUM),
+      targetWrite(MINIMUM),
+    ]);
+  });
+
   it('writes a target above the minimum as the workout’s own number', async () => {
     // 50 % of 250 W is 125 W, inside this machine’s range: not raised, not lowered.
     const { trainer, session } = await loop(
