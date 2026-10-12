@@ -139,6 +139,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         (`rideId`, migration 0021, checked to be the
                         caller's), and the engine hands the agent the
                         history index — it was handed none before.
+                        Since #1251 `src/analysis/hosted-test.ts` is the
+                        test question: `POST /v1/analysis/hosted/test`,
+                        sealed-only, two fixed sentences on the rider's own
+                        key through `source.ts` §`modelForSource` — the
+                        gate a job passes — answering a closed word and
+                        never the service's own.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

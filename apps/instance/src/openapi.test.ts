@@ -580,6 +580,12 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await hostedBoth(world, token);
     return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
   },
+  // #1251: nothing is held, so the answer is `not-ready` and nothing is sent
+  // anywhere — still the route's own 200 and its declared shape.
+  sendHostedTestQuestion: async (world) => {
+    const { token } = await signedIn(world);
+    return send(world, 'POST', '/v1/analysis/hosted/test', token);
+  },
   searchHistory: async (world) => {
     const { token } = await signedIn(world);
     await send(world, 'POST', '/v1/sync/items/note/note-1', token, {
