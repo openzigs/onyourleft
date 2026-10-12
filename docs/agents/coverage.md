@@ -22,6 +22,13 @@ its output; including it in the report would only mix a generator's coverage int
 denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
 the second pattern and is no longer true: all six packages appear (`packages/physics` since #88).
 
+⚠️ **Since [#1280](https://github.com/openzigs/onyourleft/issues/1280) the report is taken
+NIGHTLY, not on each pull request.** The required job runs `test:required` — the same files with no
+coverage — and `.github/workflows/nightly.yml` runs `test:coverage`, publishes the table in that
+run's summary and uploads the HTML as `coverage-report` (the owner's ruling of 2026-10-12; §4c
+§"Coverage out of the required job — #1280" has the measurement). For a branch's own figure, run
+`pnpm run test:coverage` locally or `gh workflow run nightly.yml --ref <branch>`.
+
 ⚠️ **Since [#852](https://github.com/openzigs/onyourleft/issues/852) the report is taken WITHOUT
 two test files**, and a module only they exercise reads as untested in it. `test:coverage` excludes
 the #545 near-field rides and the FIT decode fuzz, which `test:uninstrumented` runs with no
