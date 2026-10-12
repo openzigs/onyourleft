@@ -116,4 +116,13 @@ describe('deploy/home/compose.yaml — the analysis model (#1096, ADR 0046 D-9)'
     );
     expect(env).toMatch(/^OYL_INSTANCE_ANALYSIS_MODEL=$/m);
   });
+
+  it('passes the picture model through, and names none (#1106)', () => {
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_PICTURE_MODEL: \$\{OYL_INSTANCE_PICTURE_MODEL:-\}$/m);
+    const env = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    expect(env).toMatch(/^OYL_INSTANCE_PICTURE_MODEL=$/m);
+  });
 });

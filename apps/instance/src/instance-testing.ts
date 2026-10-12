@@ -4,7 +4,7 @@ import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
-import type { InstanceProbes } from './route-kit.ts';
+import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { createHandler, type Handler } from './handler.ts';
 import type { Route } from './routes.ts';
 import type { History } from './history/history.ts';
@@ -63,6 +63,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     trustedProxies: [],
     history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
     analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
+    pictures: { kind: 'off', code: 'not-set', reason: 'A test instance has no picture model.' },
     name: null,
     ...overrides,
   };
@@ -90,6 +91,7 @@ export async function startTestInstance(
     analysis?: AnalysisJobs;
     /** A rider's own hosted key and consent (#1199). */
     hostedSettings?: HostedSettings;
+    sidePose?: SidePose;
     /** What `/metrics` would count of each response (#1095's never-logged test). */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -111,6 +113,7 @@ export async function startTestInstance(
     ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
     ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
     ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
+    ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
     ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
   const listening = await listen(handler, {

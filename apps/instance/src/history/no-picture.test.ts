@@ -5,9 +5,12 @@
  *
  * The device's gate (`apps/web/src/camera/no-picture-reachable.test.ts`) walks
  * the client's imports and holds that no module sending a model request can
- * reach a picture type. The instance has no picture type at all — it never
- * holds a frame — so what can reach one here is DATA: a synced item that is,
- * or carries, a picture or the pose summary. So this holds three things:
+ * reach a picture type. The history index has no picture type at all, so what
+ * can reach one here is DATA: a synced item that is, or carries, a picture or
+ * the pose summary. ⚠️ Since #1106 the instance DOES hold a picture, for the
+ * length of one request and in one directory (`camera/`, which keeps none:
+ * `camera/hosted-pictures-seam.test.ts`); hold 1 below is what keeps the
+ * index from reaching it. So this holds three things:
  *
  * 1. no module that writes or reads the index imports, however indirectly,
  *    anything about a camera, a pose, a frame or an image — and the walk is

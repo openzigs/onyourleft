@@ -39,11 +39,28 @@
  * - **Tools are described, never executed by the SDK**: no tool has an
  *   `execute`, so one turn returns the calls the model made and the agent
  *   (`agent.ts`) validates and runs them, counting each against its budgets.
+ *
+ * ## A picture — #1106
+ *
+ * {@link createLocalPictureModel} and {@link createHostedPictureModel} show a
+ * model ONE side-camera picture and a question fixed when the connection is
+ * built (`camera/picture-model.ts`), through the same provider, the same
+ * one-host fetch, no retries and no tools. The picture is in the one user
+ * message and nowhere else, and nothing here keeps it: it is the argument of
+ * one call. A server that says it takes no picture is `model-without-pictures`
+ * ({@link pictureFailureOf}); its text is matched and dropped.
  */
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { APICallError, generateText, jsonSchema, tool, type ModelMessage, type ToolSet } from 'ai';
 
+import type {
+  PictureConnection,
+  PictureFailure,
+  PictureLook,
+  PictureLookRequest,
+  PictureQuestion,
+} from '../camera/picture-model.ts';
 import { localAddressesOnly, type Resolver } from '../history/address.ts';
 import type {
   AgentMessage,
@@ -182,6 +199,38 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
   const name = (error as { name?: unknown } | null)?.name;
   if (typeof name === 'string' && UNREADABLE.has(name)) return 'malformed';
   return 'unreachable';
+}
+
+/**
+ * A 4xx body that says the model, or the service, takes no picture. Read on
+ * 2026-10-12: a hosted service that takes no picture refuses the `image_url`
+ * part by name, and a server whose model has no vision says "image" or
+ * "vision" in its refusal. Matched and dropped, as {@link WITHOUT_TOOLS} is.
+ */
+const WITHOUT_PICTURES = /image|vision|multi-?modal/i;
+
+/** The statuses a server refuses a request's SHAPE with: the three a picture it cannot take gets. */
+const SHAPE_REFUSALS: ReadonlySet<number> = new Set([400, 415, 422]);
+
+/** Which closed failure an error from a look is. Never reads its message into the result. */
+export function pictureFailureOf(
+  error: unknown,
+  timedOut: boolean,
+  aborted: boolean,
+): PictureFailure {
+  if (
+    !aborted &&
+    !timedOut &&
+    APICallError.isInstance(error) &&
+    error.statusCode !== undefined &&
+    SHAPE_REFUSALS.has(error.statusCode) &&
+    WITHOUT_PICTURES.test(error.responseBody ?? '')
+  ) {
+    return 'model-without-pictures';
+  }
+  const failure = failureOf(error, timedOut, aborted);
+  // No tool is ever sent with a picture, so this cannot be the answer; it is a refusal.
+  return failure === 'model-without-tools' ? 'refused' : failure;
 }
 
 /**
@@ -332,6 +381,104 @@ async function oneTurn(
     return {
       ok: false,
       failure: failureOf(error, timeout.aborted, request.signal.aborted),
+    };
+  }
+}
+
+/** What a picture connection is built with beyond its model: the fixed question. */
+export interface PictureModelExtras {
+  readonly question: PictureQuestion;
+}
+
+/**
+ * The model on the rider's own box that takes pictures (#1106): the local
+ * server of {@link createLocalModel}, held to the same address rule on every
+ * look, and the model the operator named for pictures.
+ */
+export function createLocalPictureModel(
+  options: LocalModelOptions & PictureModelExtras,
+): PictureConnection {
+  const { settings, resolve, question } = options;
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  return {
+    async look(request: PictureLookRequest): Promise<PictureLook> {
+      if (request.signal.aborted) return { ok: false, failure: 'aborted' };
+      const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
+      if (!checked.ok) return { ok: false, failure: checked.why };
+      const base = atAddress(settings.baseUrl, checked.address);
+      const provider = createOpenAICompatible({
+        name: 'local',
+        baseURL: base,
+        fetch: pinnedTo(base, send),
+      });
+      return oneLook(provider, settings.model, question, settings.reasoningTokens, request);
+    },
+  };
+}
+
+/**
+ * A hosted model on the rider's OWN key, shown a picture (#1106, the owner's
+ * ruling of 2026-10-12): `https:` only, one host, the same closed failures.
+ *
+ * ⚠️ **Built in one place** — `camera/hosted-pictures.ts`, which
+ * `camera/hosted-pictures-seam.test.ts` holds every other shipped module out
+ * of — and only for a rider whose own picture consent names the origin
+ * (`camera/side-pose.ts`). What leaves is the picture and
+ * {@link PictureModelExtras.question}: no athlete id, no session, no ride.
+ */
+export function createHostedPictureModel(
+  options: HostedModelOptions & PictureModelExtras,
+): PictureConnection {
+  if (options.baseUrl.protocol !== 'https:') {
+    throw new TypeError('A hosted model is reached over https: only.');
+  }
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const base = options.baseUrl.href.replace(/\/+$/, '');
+  const provider = createOpenAICompatible({
+    name: 'hosted',
+    baseURL: base,
+    apiKey: options.apiKey,
+    fetch: pinnedTo(base, send),
+  });
+  return {
+    async look(request: PictureLookRequest): Promise<PictureLook> {
+      if (request.signal.aborted) return { ok: false, failure: 'aborted' };
+      return oneLook(provider, options.model, options.question, options.reasoningTokens, request);
+    },
+  };
+}
+
+/** One picture through `provider`: the fixed question and the picture, in one user message. */
+async function oneLook(
+  provider: ReturnType<typeof createOpenAICompatible>,
+  model: string,
+  question: PictureQuestion,
+  reasoningTokens: number | undefined,
+  request: PictureLookRequest,
+): Promise<PictureLook> {
+  const timeout = AbortSignal.timeout(Math.max(1, request.timeoutMilliseconds));
+  try {
+    const result = await generateText({
+      model: provider.chatModel(model),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: question.question },
+            { type: 'image', image: request.picture, mediaType: 'image/jpeg' },
+          ],
+        },
+      ],
+      // A model that reasons spends its allowance before it answers (#1268).
+      maxOutputTokens: question.maxOutputTokens + (reasoningTokens ?? 0),
+      maxRetries: 0,
+      abortSignal: AbortSignal.any([request.signal, timeout]),
+    });
+    return { ok: true, text: result.text };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: pictureFailureOf(error, timeout.aborted, request.signal.aborted),
     };
   }
 }
