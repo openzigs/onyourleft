@@ -556,9 +556,9 @@ jobs:
     # this job's 1 500: a hang in either ends as a red, named STEP and never
     # as a cancelled job. nightly-split.test.ts holds that sum, and holds the
     # gate's stop at least three minutes inside this from the latest start
-    # measured (39 s). The shard itself took 705 s and 757 s on the slower
+    # measured (48 s). The shard itself took 705 to 757 s on the slower
     # runner, so this is not what bounds a green run: the required check
-    # reported 723 s and 772 s after the run began.
+    # reported 723 to 772 s after the run began.
     timeout-minutes: 25
     steps:
       - name: Check out the repository

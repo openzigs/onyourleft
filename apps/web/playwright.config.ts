@@ -287,14 +287,15 @@ export const GAME_PART_MS = 85_000;
  *
  * ⚠️ **Since #1285 the gate is a job of its own — the `browser` shard of
  * `Repository rules` — and every "into the job" above is the one job's
- * history.** The step starts 35–39 s into its job, not 700: before it are
+ * history.** The step starts 35–48 s into its job, not 700: before it are
  * the checkout, the install and the browser install, which has a ten-minute
- * stop of its own. The job's stop is 25 minutes, so 39 + 840 + 4 s is 883 s,
- * 617 s inside 1 500, and with the install at its stop 20 + 600 + 840 + 4 is
+ * stop of its own. The job's stop is 25 minutes, so 48 + 840 + 4 s is 892 s,
+ * 608 s inside 1 500, and with the install at its stop 20 + 600 + 840 + 4 is
  * 1 464 s, still inside. **No stop here moved**: on the EPYC 7763 in a shard
- * the step took 663 s and 714 s (825 is 1.16 times the slower), the
- * `chromium` run 583 s and 632 s ({@link CHROMIUM_PART_MS} is 1.14 times)
- * and the `game` run 66 s and 68 s (run 38262894650, attempts 5 and 2).
+ * the step took 663, 685 and 714 s (825 is 1.16 times the slowest), the
+ * `chromium` run 583, 604 and 632 s ({@link CHROMIUM_PART_MS} is 1.14 times)
+ * and the `game` run 66 to 68 s (run 38262894650 attempts 5 and 2, and
+ * 38270763442).
  * `nightly-split.test.ts` holds the two sums above, and each shard's stop at
  * least five minutes clear of its slowest run, from the table in
  * `docs/agents/ci.md` §"Shards — #1285".

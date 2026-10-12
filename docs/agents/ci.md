@@ -906,16 +906,18 @@ the test, and a shard with no column fails it too.
 | attempt 3 | 669 | EPYC 9V74 | 240 | EPYC 7763 | 461 | Xeon 8573C | 652 | 39 | 610 |
 | attempt 4 | 721 | EPYC 7763 | 250 | EPYC 7763 | 455 | EPYC 9V74 | 703 | 35 | 666 |
 | attempt 5 | 723 | EPYC 7763 | 256 | EPYC 7763 | 458 | **EPYC 7763** | 705 | 38 | 663 |
+| [38270763442](https://github.com/openzigs/onyourleft/actions/runs/38270763442) (#1292, this change itself) | 751 | EPYC 9V74 | 252 | EPYC 7763 | 448 | **EPYC 7763** | 736 | 48 | 685 |
 <!-- shard-measurements:end -->
 
-- **From the run starting to `Repository rules` reporting: 567 to 772 s on the five attempts, against
+- **From the run starting to `Repository rules` reporting: 567 to 772 s on the six runs, against
   the one job's 1 341–1 391 s on the 7763.** The check takes as long as its slowest shard plus about
   12 s for the fourth job, and the slowest shard is always `browser`.
-- **With the `browser` shard on the EPYC 7763: 772 s and 723 s** (attempts 2 and 5; 12m52s and
-  12m03s), n = 2 when this was first written — the third is owed by this change's own pull request and is added to the table when it lands.
-- **Each shard on the EPYC 7763**: `checks` 250, 256 and 279 s; `tests` 455, 458 and 461 s (the
-  accessibility gate 60–61 s and the suite 374–381 s, as in the one job); `browser` 705 and 757 s
-  (the gate's step 663 and 714 s, starting 38–39 s in).
+- **With the `browser` shard on the EPYC 7763: 772 s, 723 s and 751 s** (attempts 2 and 5 and
+  this change's own first run; 12m52s, 12m03s and 12m31s). n = 3, each inside the 900 s #1285
+  asked for, by 128 s at worst.
+- **Each shard on the EPYC 7763**: `checks` 250, 256 and 279 s; `tests` 448, 455, 458 and 461 s
+  (the accessibility gate 59–61 s and the suite 372–381 s, as in the one job); `browser` 705, 736
+  and 757 s (the gate's step 663, 685 and 714 s, starting 38–48 s in).
 - ⚠️ **Three shards are three draws of a runner**, so "a run on the 7763" no longer means one
   thing: attempt 5 is the only one with all three there. What matters for the wall is where
   `browser` landed, and that column is marked.
@@ -939,7 +941,7 @@ the workflow and `playwright.config.ts`.
 - **The gate's stop ends inside its job with nothing measured at all.** Before it the shard spends
   about 14 s (the checkout, Node, pnpm, the install) and then the browser install, which has a stop
   of its own: 20 + 600 + 840 + 4 s is **1 464 s, inside 1 500**. That is why the shard's stop is 25
-  minutes and not 20. From the latest start measured (39 s) it is 39 + 840 + 4 = 883 s, **617 s
+  minutes and not 20. From the latest start measured (48 s) it is 48 + 840 + 4 = 892 s, **608 s
   inside** (the test fails under 180). A hang in the install or the gate therefore ends as a red,
   named step, never as a cancelled job — which `rules` would report red but could not name.
 - **None of `GATE_STEP_MS`, `CHROMIUM_PART_MS`, `GAME_PART_MS`, `GATE_BUDGET_MS` or `GATE_STEP_MS`'s
@@ -948,7 +950,7 @@ the workflow and `playwright.config.ts`.
 - ⚠️ **The `chromium` stop is 88 s above the slowest green run in a shard (632 s, 38262894650
   attempt 2), 1.14 times and not the 1.15 it was set at** (625 s then). Nothing in this change made
   the run slower that can be shown: the same step took 655–690 s in the one job on the same CPU and
-  663 s and 714 s here, n = 2. It is the stop that will be reached first; raising it also means
+  663, 685 and 714 s here, n = 3. It is the stop that will be reached first; raising it also means
   raising the wrapper, the step's 14 minutes and `GATE_BUDGET_MS`, which is the nightly run's stop
   too, so it is left for its own change and stated here.
 - ⚠️ **`Install the pinned Chromium` is ten minutes because five went red on its first run.** Run
@@ -966,7 +968,7 @@ the workflow and `playwright.config.ts`.
   free (§8) but not unlimited at once. ⚠️ **Queueing is inside `Wall`, and it is the part this
   repository does not control**: on run 38261783717 the three shards waited 61 s, 82 s and 92 s for
   a runner while two of this change's own runs and CodeQL were in flight; on the five attempts in
-  the table each waited 2–4 s.
+  the table each waited 2–4 s, and on this change's own first run `checks` waited 50 s.
 - ⚠️ **The required check now takes as long as the `browser` shard**, about 12 to 13 minutes on
   the 7763, and that shard is one step. It grew about 12 s in the week to 2026-10-12 (§"Thirty
   minutes — #651"). **When a new row brings `Wall` near 900 s, the answer is to divide the gate**:
