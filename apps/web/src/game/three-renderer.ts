@@ -342,11 +342,13 @@ import {
   isPhotographic,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
-  REALISTIC_VEGETATION,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION_KINDS,
+  realisticVegetation,
   realisticUrl,
   type RealisticBicycleMap,
   type RealisticRiderMap,
+  type RealisticTrees,
   type RealisticVegetationKind,
   type RealisticWorldOutcome,
   type StructureSurface,
@@ -5952,7 +5954,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      models: REALISTIC_VEGETATION[kind].map(
+      // #1283: the broadleaves are the generated trees, or — for the owner's
+      // page — the scans they replaced. @see setRealisticTrees
+      models: realisticVegetation(realisticTrees)[kind].map(
         ({ name, file, impostor, impostorNormals, middle }) => ({
           name,
           scene: model(() => loaders.model(realisticUrl(file))),
@@ -6184,6 +6188,28 @@ let realisticMaterialsMerged = true;
  */
 export function setRealisticMaterialsMerged(on: boolean): void {
   realisticMaterialsMerged = on;
+}
+
+/** Which broadleaf trees the next realistic load draws. @see setRealisticTrees */
+let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
+
+/**
+ * Makes the NEXT realistic load draw its broadleaf trees from the scans, as
+ * every load did before #1283 — or, with `'generated'`, from the generated
+ * trees, as the product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`).
+ * Only the one set asked for is fetched, decoded and held.
+ *
+ * ADR 0049 D-1 keeps a generated tree only where the tablet measurement says
+ * it should, so until that row is in, the scans are one switch away: the
+ * owner's page loads them with `?levers=-generated-trees`, and the browser
+ * gate measures the two sets at the same route positions with the same camera.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` and
+ * `apps/web/browser/game-harness.ts` §`treeLevelRun` load the scans with it; the
+ * product never calls it
+ */
+export function setRealisticTrees(trees: RealisticTrees): void {
+  realisticTrees = trees;
 }
 
 /** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
@@ -10242,6 +10268,20 @@ diffuseColor.rgb = mix(
   };
   material.customProgramCacheKey = () => 'oyl-rider-kit';
   return withAtmosphere(material);
+}
+
+/**
+ * The realistic vegetation belt, built from the loaded world as a view builds
+ * it — #1283. `undefined` when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` builds it from a real load of the
+ * committed files — the generated trees, and the scans — and reads its
+ * levels, materials, tints and ground blobs; a view builds its own in
+ * `RealisticDrawing`
+ */
+export function realisticVegetationOfLoadedWorld(): RealisticVegetationBelt | undefined {
+  const world = realisticWorld;
+  return world === undefined ? undefined : new RealisticVegetationBelt(world.vegetation);
 }
 
 /**

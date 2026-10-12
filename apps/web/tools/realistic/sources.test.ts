@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  alsoWritten,
   AMBIENTCG_GROUND_TEXTURES,
   AMBIENTCG_PHRASE,
   AMBIENTCG_TECHNIQUES_KEPT,
@@ -14,6 +15,12 @@ import {
   ambientCgTechniques,
   archiveOf,
   DRAWN_FROM,
+  GENERATED_BARK_MAPS,
+  GENERATED_FROM,
+  GENERATED_LEAF_MAPS,
+  GENERATED_TREE_TEXTURES,
+  generatedInputDigest,
+  generatedTreeMaps,
   WORDMARK_FROM,
   EXPECTED_REPORTS,
   inputDigest,
@@ -37,9 +44,17 @@ import {
   structureMapFiles,
   TEXTURE_SCRIPT,
   type AssetSource,
+  type InputLock,
   type Ktx2Step,
 } from './sources';
 import { sameFiles } from './fetch-assets';
+import {
+  GENERATED_SPECIES,
+  GENERATED_TREES,
+  runNumbersDigest,
+  speciesOf,
+  type GeneratedSpecies,
+} from './generated-trees';
 import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
@@ -105,9 +120,12 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     const fromAmbientCg = SOURCES.filter(
       (source) => new URL(source.licencePage).hostname === 'ambientcg.com',
     );
-    expect(fromAmbientCg.map((source) => source.id)).toEqual(
-      AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
-    );
+    // The ground's rock (#1274), and since #1283 the generated trees' bark and leaves.
+    expect(fromAmbientCg.map((source) => source.id)).toEqual([
+      ...AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
+      ...GENERATED_TREE_TEXTURES.map((texture) => texture.id),
+    ]);
+    expect(GENERATED_TREE_TEXTURES.length).toBeGreaterThan(0);
     for (const source of fromAmbientCg) expect(source.origin.from, source.id).toBe('ambientcg');
     expect(
       SOURCES.filter((source) => source.origin.from === 'ambientcg').map((source) => source.id),
@@ -227,8 +245,23 @@ describe('the pipeline’s own table', () => {
         expect(output.from, output.file).toBe(WORDMARK_FROM);
         continue;
       }
+      // #1283: a generated tree is this repository's own work, wearing two
+      // ambientCG assets its SPECIES names — each of them a source in the table.
+      if (output.recipe.how === 'generated') {
+        expect(output.from, output.file).toBe(GENERATED_FROM);
+        const recipe = output.recipe;
+        const tree = GENERATED_TREES.find((each) => each.name === recipe.tree);
+        if (tree === undefined) throw new Error(`${output.file}: no generated tree`);
+        expect(ids, output.file).toContain(speciesOf(tree).bark.source);
+        expect(ids, output.file).toContain(speciesOf(tree).sprig.source);
+        continue;
+      }
       expect(ids, output.file).toContain(output.from);
     }
+    // Non-vacuity: every generated tree has a full and a middle level.
+    expect(OUTPUTS.filter((output) => output.recipe.how === 'generated')).toHaveLength(
+      GENERATED_TREES.length * 2,
+    );
     // Non-vacuity: the four bicycle maps, and only they, are drawn.
     expect(OUTPUTS.filter((output) => output.recipe.how === 'drawn')).toHaveLength(4);
     expect(OUTPUTS.filter((output) => output.recipe.how === 'wordmark')).toHaveLength(1);
@@ -241,6 +274,11 @@ describe('the pipeline’s own table', () => {
         ...(output.recipe.how === 'blender' ? (output.recipe.alsoReads ?? []) : []),
       ]),
     );
+    // #1283: what a generated tree wears, by its species.
+    for (const tree of GENERATED_TREES) {
+      used.add(speciesOf(tree).bark.source);
+      used.add(speciesOf(tree).sprig.source);
+    }
     for (const source of SOURCES) expect(used, source.id).toContain(source.id);
   });
 
@@ -379,7 +417,9 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
     // A colour map is colour, a normal map is normal, never the other way.
     for (const output of OUTPUTS) {
       const recipe = output.recipe;
-      const step = recipe.how === 'verbatim' ? undefined : recipe.ktx2;
+      // A generated tree's own file is a GLB; its strips are held below.
+      const step =
+        recipe.how === 'verbatim' || recipe.how === 'generated' ? undefined : recipe.ktx2;
       if (step === undefined) continue;
       // #624: a roughness map is data — linear, never sRGB colour.
       // #966: the wordmark is a cut-out over its board, so it keeps its alpha.
@@ -748,5 +788,175 @@ describe('the digest lock — ADR 0026 D-5, #1274', () => {
       /\(bb, got aa\)/,
     );
     expect(lockFault('Rock026', 'Rock026_1K-JPG.zip', 'bb', locked)).toMatch(/\(aa, got bb\)/);
+  });
+});
+
+describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1', () => {
+  const locked = (id: string, sha256: string): InputLock['sources'][number] => ({
+    id,
+    licence: 'CC0-1.0',
+    licencePage: `https://ambientcg.com/view?id=${id}`,
+    evidence: AMBIENTCG_PHRASE,
+    read: '2026-10-12',
+    authors: 'ambientCG',
+    technique: 'Surface Photogrammetry',
+    files: [
+      { path: `${id}.zip`, url: `https://ambientcg.com/get?file=${id}.zip`, bytes: 1, sha256 },
+    ],
+  });
+  const lockOf = (digest: (id: string) => string): InputLock => ({
+    sources: GENERATED_TREE_TEXTURES.map((texture) => locked(texture.id, digest(texture.id))),
+  });
+  const [tree] = GENERATED_TREES;
+  if (tree === undefined) throw new Error('no generated tree');
+  const species = speciesOf(tree);
+
+  it('fetches each species’ bark and leaves from ambientCG once, with the maps the script reads', () => {
+    const ids = GENERATED_TREE_TEXTURES.map((texture) => texture.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const each of GENERATED_SPECIES) {
+      expect(ids, each.id).toContain(each.bark.source);
+      expect(ids, each.id).toContain(each.sprig.source);
+      const maps = generatedTreeMaps(each);
+      // Every path a run reads is a member the archive of its source is taken for.
+      for (const [id, paths] of [
+        [each.bark.source, [maps.barkColour, maps.barkNormal]],
+        [each.sprig.source, [maps.leafColour, maps.leafOpacity, maps.leafNormal]],
+      ] as const) {
+        const source = SOURCES.find((candidate) => candidate.id === id);
+        if (source === undefined) throw new Error(`${id} is not a source`);
+        const members = ambientCgArchive(source).members.map((member) => `${id}/${member.path}`);
+        expect([...paths].sort(), id).toEqual([...members].sort());
+      }
+    }
+    // A bark gives two maps and a leaf atlas three: the opacity is the cut-out.
+    expect(Object.values(GENERATED_BARK_MAPS)).toEqual(['Color', 'NormalGL']);
+    expect(Object.values(GENERATED_LEAF_MAPS)).toEqual(['Color', 'Opacity', 'NormalGL']);
+  });
+
+  it('writes a full level’s two strips beside it, and nothing beside a middle level', () => {
+    for (const each of GENERATED_TREES) {
+      const full = OUTPUTS.find((output) => output.file === `${each.name}.glb`);
+      const middle = OUTPUTS.find((output) => output.file === `${each.name}-middle.glb`);
+      expect(full?.recipe).toMatchObject({ how: 'generated', tree: each.name, level: 'full' });
+      expect(middle?.recipe).toMatchObject({ how: 'generated', tree: each.name, level: 'middle' });
+      if (full === undefined || middle === undefined) throw new Error(`${each.name}: no output`);
+      expect(alsoWritten(full.recipe).map((also) => also.file)).toEqual([
+        `${each.name}-impostor.ktx2`,
+        `${each.name}-impostor-normals.ktx2`,
+      ]);
+      // A strip is a cut-out read as `TextureLoader` read it; its normals are data.
+      expect(alsoWritten(full.recipe).map((also) => also.ktx2)).toEqual([
+        { encoding: 'colour-alpha', origin: 'bottom-left' },
+        { encoding: 'normal', origin: 'bottom-left' },
+      ]);
+      expect(alsoWritten(middle.recipe)).toEqual([]);
+      // A full level's maps are encoded; a middle level has none to encode.
+      expect(full.recipe).toMatchObject({ images: 'ktx2' });
+      expect(middle.recipe).not.toHaveProperty('images');
+      for (const file of [full.file, middle.file, ...alsoWritten(full.recipe).map((a) => a.file)]) {
+        expect(shippedFiles(), file).toContain(file);
+      }
+    }
+    // And a recipe that writes nothing else says so.
+    expect(alsoWritten({ how: 'verbatim', file: 'x' })).toEqual([]);
+  });
+
+  it('digests a tree’s input over its geometry at both levels and both assets it wears', () => {
+    const lock = lockOf((id) => (id === species.bark.source ? 'a' : 'b').repeat(64));
+    const digest = generatedInputDigest(tree, lock);
+    expect(digest).toBe(
+      inputDigest([
+        { path: `generated-trees.ts#${tree.name}.full`, sha256: tree.geometry.full },
+        { path: `generated-trees.ts#${tree.name}.middle`, sha256: tree.geometry.middle },
+        // #1289's review: and what only Blender reads of each level's run.
+        {
+          path: `generated-trees.ts#${tree.name}.full.run`,
+          sha256: runNumbersDigest(tree, 'full'),
+        },
+        {
+          path: `generated-trees.ts#${tree.name}.middle.run`,
+          sha256: runNumbersDigest(tree, 'middle'),
+        },
+        { path: `${species.bark.source}/${species.bark.source}.zip`, sha256: 'a'.repeat(64) },
+        { path: `${species.sprig.source}/${species.sprig.source}.zip`, sha256: 'b'.repeat(64) },
+      ]),
+    );
+    // It moves with the seed's geometry at either level…
+    for (const level of ['full', 'middle'] as const) {
+      expect(
+        generatedInputDigest(
+          { ...tree, geometry: { ...tree.geometry, [level]: 'c'.repeat(64) } },
+          lock,
+        ),
+        level,
+      ).not.toBe(digest);
+    }
+    // …and with either download.
+    expect(
+      generatedInputDigest(
+        tree,
+        lockOf((id) => (id === species.bark.source ? 'd' : 'b').repeat(64)),
+      ),
+    ).not.toBe(digest);
+    expect(
+      generatedInputDigest(
+        tree,
+        lockOf((id) => (id === species.bark.source ? 'a' : 'd').repeat(64)),
+      ),
+    ).not.toBe(digest);
+    // A lock that does not hold what the tree wears is refused, not digested short.
+    expect(() => generatedInputDigest(tree, { sources: [] })).toThrow(/is not in the lock/);
+  });
+
+  it('moves a tree’s input with every number only Blender reads — #1289’s review', () => {
+    // The reviewer turned one shoot of the oak's sprig from 48° to 30° and
+    // every test stayed green, although the shipped leaf card is drawn from
+    // it: the generator reads none of these, so no geometry digest moves.
+    const lock = lockOf((id) => (id === species.bark.source ? 'a' : 'b').repeat(64));
+    const digest = generatedInputDigest(tree, lock);
+    const { sprig } = species;
+    const firstLeaf = sprig.leaves[0];
+    if (firstLeaf === undefined) throw new Error('a sprig has leaves');
+    const turned = [{ ...firstLeaf, turn: firstLeaf.turn + 1 }, ...sprig.leaves.slice(1)];
+    const edits: Readonly<Record<string, GeneratedSpecies>> = {
+      'a leaf’s turn, which a shoot’s heading sets': {
+        ...species,
+        sprig: { ...sprig, leaves: turned },
+      },
+      'a leaf fewer': { ...species, sprig: { ...sprig, leaves: sprig.leaves.slice(1) } },
+      'the atlas’s grid': { ...species, sprig: { ...sprig, grid: [sprig.grid[1], sprig.grid[0]] } },
+      'the atlas’s turn': { ...species, sprig: { ...sprig, atlasTurn: sprig.atlasTurn + 90 } },
+      'the tone': { ...species, sprig: { ...sprig, tone: [sprig.tone[0], sprig.tone[1], 0.51] } },
+      'the card’s pixels': { ...species, sprig: { ...sprig, pixels: sprig.pixels * 2 } },
+      'the card’s normal pixels': {
+        ...species,
+        sprig: { ...sprig, normalPixels: sprig.normalPixels * 2 },
+      },
+      'the bark’s pixels': {
+        ...species,
+        bark: { ...species.bark, pixels: species.bark.pixels * 2 },
+      },
+      'the impostor’s frame': {
+        ...species,
+        impostor: { ...species.impostor, frame: [species.impostor.frame[0] + 16, 256] },
+      },
+      'the impostor’s normal frame': {
+        ...species,
+        impostor: { ...species.impostor, normalFrame: [species.impostor.normalFrame[0] + 16, 96] },
+      },
+    };
+    const seen = new Set([digest]);
+    for (const [what, edited] of Object.entries(edits)) {
+      const moved = generatedInputDigest(tree, lock, edited);
+      expect(moved, what).not.toBe(digest);
+      seen.add(moved);
+    }
+    // Each its own digest: none of the ten is read as another.
+    expect(seen.size).toBe(Object.keys(edits).length + 1);
+    // And the species handed in unchanged is the tree's own.
+    expect(generatedInputDigest(tree, lock, species)).toBe(digest);
+    // A full level and a middle level are told different things, and both are recorded.
+    expect(runNumbersDigest(tree, 'full')).not.toBe(runNumbersDigest(tree, 'middle'));
   });
 });

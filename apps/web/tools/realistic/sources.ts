@@ -53,6 +53,12 @@
  * and which of its assets are refused however their page reads, is
  * {@link ambientCgVerdict}.
  *
+ * ⚠️ **And since #1283 some trees are GENERATED** (ADR 0049 D-1): made by the
+ * pinned {@link PINNED_EZ_TREE} from the seed and parameters in
+ * `generated-trees.ts`, wearing ambientCG's bark and leaves. Their recipe is
+ * `generated`; their recorded input is those numbers' digest with the
+ * ambientCG files' ({@link generatedInputDigest}).
+ *
  * Pure: no file, no network. The two scripts beside it do the I/O.
  */
 
@@ -76,6 +82,17 @@ import {
   WORDMARK_SOURCE_WORDS,
   WORDMARK_URL,
 } from '../brand/game-wordmark';
+
+import {
+  GENERATED_SPECIES,
+  GENERATED_TREES,
+  runNumbersDigest,
+  speciesOf,
+  type GeneratedLevel,
+  type GeneratedSpecies,
+  type GeneratedTree,
+  type RunPaths,
+} from './generated-trees';
 
 import {
   BICYCLE_MAP_KINDS,
@@ -755,6 +772,64 @@ export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ 
 const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
 const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
 
+/**
+ * The bark and leaves the generated trees wear — #1283, ADR 0049 D-1: each an
+ * ambientCG CC0 asset at 1K, taken through #1274's origin (its own page's
+ * licence, its technique against {@link AMBIENTCG_TECHNIQUES_KEPT}, its
+ * archive pinned by digest). Which species wears which is
+ * `generated-trees.ts` §`GENERATED_SPECIES`; this is the list of what to fetch,
+ * derived from it so the two cannot disagree.
+ *
+ * - a **bark** gives its colour and normal maps;
+ * - a **leaf atlas** gives its colour map, its opacity map — the cut-out each
+ *   leaf is taken by — and its normal map.
+ *
+ * ⚠️ **No conifer is here, and that is a finding**: read on 2026-10-12,
+ * ambientCG's two needle atlases (`LeafSet019`, `PineNeedles001`) are both
+ * made by "Approximation", which {@link AMBIENTCG_TECHNIQUES_KEPT} refuses,
+ * so there are no needles a generated conifer could wear and the conifers stay
+ * the Poly Haven scans.
+ */
+export const GENERATED_TREE_ATTRIBUTE = '1K-JPG';
+export const GENERATED_BARK_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
+export const GENERATED_LEAF_MAPS = {
+  colour: 'Color',
+  opacity: 'Opacity',
+  normal: 'NormalGL',
+} as const;
+
+/** Every ambientCG asset a generated tree wears, once each, barks first. */
+export const GENERATED_TREE_TEXTURES: readonly {
+  readonly id: string;
+  readonly maps: readonly string[];
+}[] = [
+  ...[...new Set(GENERATED_SPECIES.map((species) => species.bark.source))].map((id) => ({
+    id,
+    maps: Object.values(GENERATED_BARK_MAPS),
+  })),
+  ...[...new Set(GENERATED_SPECIES.map((species) => species.sprig.source))].map((id) => ({
+    id,
+    maps: Object.values(GENERATED_LEAF_MAPS),
+  })),
+];
+
+/**
+ * Where the maps one species wears are, relative to the downloads' directory:
+ * `<id>/<id>_1K-JPG_<map>.jpg`, the names ambientCG's archive gives them
+ * ({@link ambientCgArchive}).
+ */
+export function generatedTreeMaps(species: GeneratedSpecies): RunPaths {
+  const file = (id: string, map: string): string =>
+    `${id}/${id}_${GENERATED_TREE_ATTRIBUTE}_${map}.jpg`;
+  return {
+    barkColour: file(species.bark.source, GENERATED_BARK_MAPS.colour),
+    barkNormal: file(species.bark.source, GENERATED_BARK_MAPS.normal),
+    leafColour: file(species.sprig.source, GENERATED_LEAF_MAPS.colour),
+    leafOpacity: file(species.sprig.source, GENERATED_LEAF_MAPS.opacity),
+    leafNormal: file(species.sprig.source, GENERATED_LEAF_MAPS.normal),
+  };
+}
+
 /** The side, in pixels, the pipeline downsizes a structure's maps to. */
 export const STRUCTURE_TEXTURE_PIXELS = 512;
 
@@ -838,6 +913,10 @@ export const SOURCES: readonly AssetSource[] = [
       AMBIENTCG_GROUND_MAPS.normal,
     ]),
   ),
+  // #1283: the generated trees' bark and leaves, from ambientCG.
+  ...GENERATED_TREE_TEXTURES.map((texture) =>
+    ambientCg(texture.id, GENERATED_TREE_ATTRIBUTE, texture.maps),
+  ),
   {
     id: 'makehuman',
     licencePage: `${MAKEHUMAN_RAW}/LICENSE.md`,
@@ -912,6 +991,36 @@ export const SOURCES: readonly AssetSource[] = [
 
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
 export const PINNED_BLENDER = 'Blender 4.4.3';
+
+/**
+ * The tree generator every generated tree was made with, and the one a re-run
+ * must use — #1283, ADR 0049 D-1: **EZ-Tree 1.1.0**, MIT, by Daniel Greenheck,
+ * the release ADR 0049 read (published 2026-01-15).
+ *
+ * ⚠️ **A tool, never a dependency of the product**, as Blender and
+ * KTX-Software are (ADR 0026 D-5): it is a `devDependency` of this app at
+ * exactly this version, `ez-tree.ts` is the one module that loads it and
+ * refuses any other, and nothing under `src/` imports it. What it writes is
+ * this repository's own work, dedicated `CC0-1.0` (ADR 0049 D-1); the MIT
+ * licence is the tool's.
+ *
+ * ⚠️ **three.js is part of the pin.** EZ-Tree places every limb with three's
+ * own vectors, Euler angles and quaternions (its `peerDependency`), so the
+ * numbers it makes are those of the `three` this app pins too —
+ * {@link EZ_TREE_THREE}. A bump of either moves `generated-trees.ts`
+ * §`GENERATED_TREES`' digests or does not, and `generated-trees.test.ts` says
+ * which before anything is committed.
+ */
+export const EZ_TREE_VERSION = '1.1.0';
+
+/** The generator as a record names it: its name and {@link EZ_TREE_VERSION}. */
+export const PINNED_EZ_TREE = `EZ-Tree ${EZ_TREE_VERSION}`;
+
+/** The npm package {@link PINNED_EZ_TREE} is installed as. */
+export const EZ_TREE_PACKAGE = '@dgreenheck/ez-tree';
+
+/** The `three` release {@link PINNED_EZ_TREE} computed the committed trees with. */
+export const EZ_TREE_THREE = '0.185.1';
 
 /**
  * The KTX-Software release every KTX2 file was encoded with, and the one a
@@ -1133,7 +1242,29 @@ export type OutputRecipe =
        * §`drawMark` at this many pixels and handed to the run as a PNG, last.
        */
       readonly mark?: number;
+    }
+  /**
+   * One level of a GENERATED tree — #1283, ADR 0049 D-1: `generated-trees.ts`
+   * makes its geometry with the pinned {@link PINNED_EZ_TREE} from the tree's
+   * committed seed and parameters, and {@link GENERATED_TREE_SCRIPT} dresses
+   * it in ambientCG's bark and leaves, bakes its occlusion and, for a full
+   * level, renders its impostor. Its input is {@link generatedInputDigest}.
+   */
+  | {
+      readonly how: 'generated';
+      /** Which of `generated-trees.ts` §`GENERATED_TREES`. */
+      readonly tree: string;
+      readonly level: GeneratedLevel;
+      /** Whether the GLB's embedded maps are encoded as KTX2 before it ships. */
+      readonly images?: 'ktx2';
+      /** The impostor strips a full level's run writes. */
+      readonly alsoWrites?: readonly AlsoWritten[];
     };
+
+/** The other files a recipe's run writes beside its own: a tree's strips, the rider's maps. */
+export function alsoWritten(recipe: OutputRecipe): readonly AlsoWritten[] {
+  return recipe.how === 'blender' || recipe.how === 'generated' ? (recipe.alsoWrites ?? []) : [];
+}
 
 /**
  * A second file a Blender run writes — a tree's impostor strip — and, since
@@ -1160,6 +1291,25 @@ export interface OutputSpec {
 }
 
 const TREE_SCRIPT = 'blender/process_tree.py';
+
+/** The script that dresses and exports a generated tree — #1283. */
+export const GENERATED_TREE_SCRIPT = 'blender/process_generated_tree.py';
+
+/** Where the generated trees' numbers are, repository-relative. */
+export const GENERATED_TREES_PATH = `${PIPELINE_DIRECTORY}generated-trees.ts`;
+
+/**
+ * What a generated output's {@link OutputSpec.from} names: no single
+ * {@link SOURCES} entry, because the tree is this repository's own work and
+ * the two ambientCG assets it wears are named by its species.
+ */
+export const GENERATED_FROM = 'this repository, generated';
+
+/**
+ * The tools a generated tree is made with, in order: the generator on the
+ * `three` it computes with, under the repository's own Node, then Blender.
+ */
+export const GENERATED_TOOL = `${PINNED_EZ_TREE} on three ${EZ_TREE_THREE} under Node.js 24 (.nvmrc), then ${PINNED_BLENDER}`;
 
 /**
  * How an impostor strip is encoded — #618: ETC1S with its alpha, because the
@@ -1291,6 +1441,8 @@ export const OUTPUTS: readonly OutputSpec[] = [
   middle('tree_small_02', 'tree_small_02', 'tree_small_02', '6000'),
   middle('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '6000'),
   middle('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '6000'),
+  // #1283: the generated trees, each a full level with its strips and a middle level.
+  ...GENERATED_TREES.flatMap((tree) => [generatedFull(tree), generatedMiddle(tree)]),
   plant('shrub_02_a', 'shrub_02', 'shrub_02_a', '6000'),
   plant('shrub_02_c', 'shrub_02', 'shrub_02_c', '6000'),
   {
@@ -1472,6 +1624,90 @@ function middle(name: string, from: string, object: string, triangles: string): 
   };
 }
 
+/** A generated tree's full level, with the impostor strips its run renders — #1283. */
+function generatedFull(tree: GeneratedTree): OutputSpec {
+  const species = speciesOf(tree);
+  const [frameW, frameH] = species.impostor.frame;
+  const [normalW, normalH] = species.impostor.normalFrame;
+  return {
+    file: `${tree.name}.glb`,
+    from: GENERATED_FROM,
+    recipe: {
+      how: 'generated',
+      tree: tree.name,
+      level: 'full',
+      images: 'ktx2',
+      alsoWrites: [
+        {
+          file: `${tree.name}-impostor.ktx2`,
+          made: `${tree.name}-impostor.png`,
+          ktx2: IMPOSTOR_KTX2,
+          modified: `an eight-view impostor strip of the generated tree's full level, each view ${String(frameW)} by ${String(frameH)} px, rendered by Cycles on one thread before its maps are downsized`,
+        },
+        {
+          file: `${tree.name}-impostor-normals.ktx2`,
+          made: `${tree.name}-impostor-normals.png`,
+          ktx2: IMPOSTOR_NORMALS_KTX2,
+          modified: `the eight views of the generated tree's full level the impostor strip is rendered from, as NORMALS, each view ${String(normalW)} by ${String(normalH)} px: Cycles' normal pass on one thread, in the tree's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector`,
+        },
+      ],
+    },
+    modified: `${species.words}, generated at the size wanted and neither decimated nor thinned: its wood and leaf cards are what ${PINNED_EZ_TREE} made from the seed ${String(tree.seed)} and the ${species.id} parameters in ${GENERATED_TREES_PATH}, scaled to metres; each leaf card a sprig drawn from ${species.sprig.source}'s scanned leaves, cut out by that atlas's own opacity map and toned by ${species.sprig.tone.join(', ')}, at ${String(species.sprig.pixels)} px with its normals at ${String(species.sprig.normalPixels)} px; ${species.bark.source}'s colour and normal maps downsized to ${String(species.bark.pixels)} px and its other maps dropped; ambient occlusion baked into a vertex colour; then ${GLB_IMAGES_WORDS}`,
+  };
+}
+
+/** A generated tree's middle level: the same tree made again at a lower budget — #1283, #617. */
+function generatedMiddle(tree: GeneratedTree): OutputSpec {
+  const species = speciesOf(tree);
+  return {
+    file: `${tree.name}-middle.glb`,
+    from: GENERATED_FROM,
+    recipe: { how: 'generated', tree: tree.name, level: 'middle' },
+    modified: `the same tree generated again as its middle level of detail, by ${PINNED_EZ_TREE} from the same seed ${String(tree.seed)} and ${species.id} parameters in ${GENERATED_TREES_PATH}: fewer sides round each branch, the wood deeper than level ${String(species.middle.deepestWood)} left out, and one leaf card in ${String(species.middle.leafEvery)} kept and enlarged ${String(species.middle.leafGrowth)} times about the point it grows from; ambient occlusion baked into a vertex colour, and no image — it wears the full level's maps`,
+  };
+}
+
+/**
+ * One digest for everything a generated tree was made from — #1283, ADR 0049
+ * D-1: {@link inputDigest} over the geometry its seed and parameters make at
+ * each level (`generated-trees.ts` §`geometryDigest`, named
+ * `generated-trees.ts#<tree>.<level>`), the numbers of each level's run that
+ * only Blender reads (§`runNumbersDigest`, named `…#<tree>.<level>.run`), and
+ * every locked file of the two ambientCG assets it wears, each under its
+ * source's id. So a row moves when a parameter, the seed, the generator, or
+ * either download does.
+ *
+ * ⚠️ **The `.run` lines are what make "a parameter" true.** The geometry
+ * moves only for a number the GENERATOR reads. The sprig's shoots, its
+ * atlas's grid and turn, its tone and every map's size are read by Blender
+ * alone, and until #1289's review one of them could be edited with every
+ * test green and stale files committed — CI has no Blender to run `--check`.
+ * `species` is the tree's own unless a test hands it another.
+ */
+export function generatedInputDigest(
+  tree: GeneratedTree,
+  lock: InputLock,
+  species: GeneratedSpecies = speciesOf(tree),
+): string {
+  const locked = (id: string): LockedSource => {
+    const source = lock.sources.find((each) => each.id === id);
+    if (source === undefined) throw new Error(`${tree.name}: ${id} is not in the lock`);
+    return source;
+  };
+  return inputDigest([
+    ...(['full', 'middle'] as const).flatMap((level) => [
+      { path: `generated-trees.ts#${tree.name}.${level}`, sha256: tree.geometry[level] },
+      {
+        path: `generated-trees.ts#${tree.name}.${level}.run`,
+        sha256: runNumbersDigest(tree, level, species),
+      },
+    ]),
+    ...[species.bark.source, species.sprig.source].flatMap((id) =>
+      locked(id).files.map((file) => ({ path: `${id}/${file.path}`, sha256: file.sha256 })),
+    ),
+  ]);
+}
+
 /** A plant with no impostor: a shrub stands in the near field or not at all. */
 function plant(name: string, from: string, object: string, triangles: string): OutputSpec {
   return {
@@ -1489,11 +1725,10 @@ function plant(name: string, from: string, object: string, triangles: string): O
 
 /** Every file the pipeline writes into {@link OUTPUT_DIRECTORY}, impostors included. */
 export function shippedFiles(): readonly string[] {
-  return OUTPUTS.flatMap((output) =>
-    output.recipe.how === 'blender'
-      ? [output.file, ...(output.recipe.alsoWrites ?? []).map((also) => also.file)]
-      : [output.file],
-  );
+  return OUTPUTS.flatMap((output) => [
+    output.file,
+    ...alsoWritten(output.recipe).map((also) => also.file),
+  ]);
 }
 
 /** Why a source was refused, or the evidence that it was not. */
@@ -1753,12 +1988,10 @@ export type AssetRecord = readonly (readonly [string, string])[];
  */
 export function assetRecord(file: string, lock: InputLock, sha256: string): AssetRecord {
   const output = OUTPUTS.find(
-    (each) =>
-      each.file === file ||
-      (each.recipe.how === 'blender' &&
-        (each.recipe.alsoWrites ?? []).some((also) => also.file === file)),
+    (each) => each.file === file || alsoWritten(each.recipe).some((also) => also.file === file),
   );
   if (output === undefined) throw new Error(`${file}: no pipeline output makes it`);
+  if (output.recipe.how === 'generated') return generatedRecord(file, output, lock, sha256);
   if (output.recipe.how === 'drawn') {
     return [
       ['path', `${OUTPUT_DIRECTORY}/${file}`],
@@ -1879,6 +2112,68 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ],
     ['script', `${PIPELINE_DIRECTORY}${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
     ['tool', tool],
+  ];
+}
+
+/**
+ * The `ASSETS.toml` entry for one file of a generated tree — #1283, ADR 0049
+ * D-1: **this repository's own work, dedicated `CC0-1.0`, naming the generator
+ * and its version**, as the bicycle's drawn maps are recorded, and naming the
+ * two ambientCG assets it wears with what each one's own page said.
+ */
+function generatedRecord(
+  file: string,
+  output: OutputSpec,
+  lock: InputLock,
+  sha256: string,
+): AssetRecord {
+  if (output.recipe.how !== 'generated') throw new Error(`${file}: not a generated tree`);
+  const recipe = output.recipe;
+  const tree = GENERATED_TREES.find((each) => each.name === recipe.tree);
+  if (tree === undefined) throw new Error(`${file}: no generated tree ${recipe.tree}`);
+  const species = speciesOf(tree);
+  const worn = [species.bark.source, species.sprig.source].map((id) => {
+    const source = lock.sources.find((each) => each.id === id);
+    if (source === undefined) throw new Error(`${file}: ${id} is not in the lock`);
+    return source;
+  });
+  const strip = alsoWritten(recipe).find((also) => also.file === file);
+  const encoded = strip !== undefined || recipe.images === 'ktx2';
+  const described =
+    strip === undefined
+      ? (output.modified ?? '')
+      : `${strip.modified ?? ''}; then ${encodingWords(strip.ktx2)}`;
+  const wears = worn
+    .map(
+      (each) =>
+        `ambientCG's ${each.id} (${each.licence}; its own page, read on ${each.read}: made by ${each.technique ?? 'nothing it names'})`,
+    )
+    .join(' and ');
+  return [
+    ['path', `${OUTPUT_DIRECTORY}/${file}`],
+    [
+      'source',
+      `This repository, #1283 — a tree generated by ${PINNED_EZ_TREE} (MIT, https://github.com/dgreenheck/ez-tree), a deterministic generator run from the seed and parameters committed in ${GENERATED_TREES_PATH}, wearing ${wears}. None of the generator's own images is taken, and nothing is the output of a trained model (ADR 0049 D-1, D-2)`,
+    ],
+    ['licence', 'CC0-1.0'],
+    [
+      'read',
+      worn
+        .map((each) => each.read)
+        .sort()
+        .at(-1) ?? '',
+    ],
+    ['sha256', sha256],
+    ['modified', `${described}${encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : ''}`],
+    [
+      'input',
+      [`${GENERATED_TREES_PATH}#${tree.name}`, ...worn.map((each) => each.licencePage)].join(
+        ' and ',
+      ),
+    ],
+    ['inputsha256', generatedInputDigest(tree, lock)],
+    ['script', `${PIPELINE_DIRECTORY}${GENERATED_TREE_SCRIPT}`],
+    ['tool', encoded ? `${GENERATED_TOOL}, then ${PINNED_KTX}` : GENERATED_TOOL],
   ];
 }
 

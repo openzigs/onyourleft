@@ -63,7 +63,7 @@ import {
   modelTriangles,
   referenceShapeMeets,
 } from './near-field-testing';
-import { REALISTIC_VEGETATION } from './realistic-assets';
+import { REALISTIC_BROADLEAVES, REALISTIC_VEGETATION } from './realistic-assets';
 import {
   circuitRoute,
   hairpinRoute,
@@ -159,12 +159,26 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
         }
       }
     }
+    // #1283: and the scanned broadleaves, which a ride no longer draws and the
+    // owner's page still can — the same reach holds them.
+    for (const model of REALISTIC_BROADLEAVES.scanned) {
+      const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
+      expectInside(
+        `scanned ${model.name}`,
+        sceneryReach('tree-broadleaf', 'realistic'),
+        boundsOf(fittedRealistic(triangles, extras, sceneryFitMetres('tree-broadleaf'))),
+        true,
+      );
+      checked += 1;
+    }
     // Every committed natural model, so a table that forgot one is a red count
-    // rather than a shape nobody checked.
+    // rather than a shape nobody checked: the stylised kit's, and the realistic
+    // world's four generated broadleaves, two conifers, two shrubs and a rock,
+    // with the two scanned broadleaves.
     const stylisedFiles = readdirSync(STYLISED_MODELS).filter(
       (file) => file.endsWith('.glb') && !file.startsWith('building-'),
     ).length;
-    expect(checked).toBe(stylisedFiles + 7);
+    expect(checked).toBe(stylisedFiles + 11);
   });
 
   it('holds the stylised house, fitted and centred, as a box turned with the item', () => {

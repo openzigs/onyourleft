@@ -65,6 +65,7 @@ import {
   loadRealisticWorld,
   loadSceneryModels,
   realisticTextureReport,
+  setRealisticTrees,
   threeGameRenderer,
 } from '../src/game/three-renderer';
 import {
@@ -72,6 +73,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  treesWithLevers,
   type Layer,
   type Lever,
   type Percentiles,
@@ -271,6 +273,9 @@ async function run(): Promise<void> {
   await loadSceneryModels();
   let outcome: RealisticWorldOutcome | undefined;
   if (config.world === 'realistic') {
+    // #1283: the generated broadleaves, or the scans with that lever off —
+    // chosen before the load, because it decides which files are fetched.
+    setRealisticTrees(treesWithLevers(config.leversOff));
     outcome = await loadRealisticWorld();
   }
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);

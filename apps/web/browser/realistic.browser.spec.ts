@@ -20,6 +20,12 @@
  * the two frames are the same frame bar the one layer: the rung, the camera
  * and the scenery's placement do not move between them.
  *
+ * And since #1283, a fourth: **the tree lever** (`?levers=-generated-trees`)
+ * loads the scanned broadleaves INSTEAD of the generated ones — read off the
+ * files the page fetches, so a lever that changed a label and loaded the same
+ * trees is seen — with both frames' triangles and draw calls printed, which
+ * are the figures validation 0002's #1283 rows start from.
+ *
  * ⚠️ **What it does not prove**: anything about the tablet's GPU clock, which
  * is what the switch is FOR — that is validation 0002's Part for #616, run by
  * the owner. And it holds only the vegetation to a number; the other six
@@ -28,6 +34,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { REALISTIC_BROADLEAVES } from '../src/game/realistic-assets';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
@@ -122,6 +129,67 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
     expect(without.result.rung).toBe(all.result.rung);
     expect(triangles - without.result.lastFrame.triangles).toBeGreaterThanOrEqual(
       VEGETATION_AT_LEAST,
+    );
+  });
+});
+
+test.describe('the realistic page’s tree lever — #1283', { tag: NIGHTLY }, () => {
+  test('loads the generated broadleaves, or with the lever off the scans, and never both', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+
+    const fetched: string[] = [];
+    page.on('request', (request) => {
+      const file = /\/realistic\/([^/?]+)$/.exec(new URL(request.url()).pathname)?.[1];
+      if (file !== undefined) fetched.push(file);
+    });
+    const treesOf = (set: 'generated' | 'scanned'): readonly string[] =>
+      REALISTIC_BROADLEAVES[set].flatMap((model) =>
+        [model.file, model.middle, model.impostor, model.impostorNormals].filter(
+          (file): file is string => file !== undefined,
+        ),
+      );
+
+    const generated = await ride(page, HELD);
+    const withGenerated = [...fetched];
+    // The product's trees: every generated file, and not one of the scans'.
+    for (const file of treesOf('generated')) expect(withGenerated, file).toContain(file);
+    for (const file of treesOf('scanned')) expect(withGenerated, file).not.toContain(file);
+    expect(generated.result.leversOff).toEqual([]);
+
+    fetched.length = 0;
+    const scanned = await ride(page, `${HELD}&levers=-generated-trees`);
+    const withScanned = [...fetched];
+    for (const file of treesOf('scanned')) expect(withScanned, file).toContain(file);
+    for (const file of treesOf('generated')) expect(withScanned, file).not.toContain(file);
+    expect(scanned.result.leversOff).toEqual(['generated-trees']);
+    // The lever chooses trees and nothing else: the rung does not move.
+    expect(scanned.result.rung).toBe(generated.result.rung);
+
+    console.log(
+      `#1283 at=2550, held: ${String(generated.result.lastFrame.triangles)} triangles in ` +
+        `${String(generated.result.drawCalls)} draw calls with the generated broadleaves; ` +
+        `${String(scanned.result.lastFrame.triangles)} in ${String(scanned.result.drawCalls)} with the scans. ` +
+        `Textures held: ${String(generated.page.textures?.bytes)} bytes against ` +
+        `${String(scanned.page.textures?.bytes)}`,
+    );
+    // Different trees are different frames — and the generated ones are no
+    // heavier, here where most of the trees in view are conifers.
+    expect(generated.result.lastFrame.triangles).not.toBe(scanned.result.lastFrame.triangles);
+    expect(generated.result.lastFrame.triangles).toBeLessThanOrEqual(
+      scanned.result.lastFrame.triangles,
+    );
+    // Both inside #639's ceiling, which did not move; and less texture memory
+    // held, with four trees for two. Measured on 2026-10-12: 33 calls with
+    // the generated trees in seven runs of seven, 31 with the scans and 32
+    // once. ⚠️ With THREE seeds a species, as #1283 was first written, this
+    // was 35 of 35 on a Mac and 34 on the CI runner, on a frame whose count
+    // moves by one between runs — which is why there are two (#1289's review).
+    expect(generated.result.drawCalls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(scanned.result.drawCalls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(generated.page.textures?.bytes ?? Infinity).toBeLessThan(
+      scanned.page.textures?.bytes ?? 0,
     );
   });
 });

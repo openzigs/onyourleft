@@ -10,7 +10,9 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  treesWithLevers,
 } from './config';
+import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('rides the realistic world with the ladder running when given no query', () => {
@@ -60,9 +62,30 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     // #1274's, the steep bank's rock face against the scree it wore before.
     expect(LEVERS).toContain('crag');
     expect(parseConfig('?levers=-crag,-air').leversOff).toEqual(['air', 'crag']);
+    // #1283's, the generated trees against the scans they replaced.
+    expect(LEVERS).toContain('generated-trees');
+    expect(parseConfig('?levers=-texture-bias,-generated-trees').leversOff).toEqual([
+      'generated-trees',
+      'texture-bias',
+    ]);
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {
+    // No lever is the product: the page must not draw a set a ride does not.
+    expect(treesWithLevers([])).toBe(REALISTIC_TREES_DEFAULT);
+    expect(treesWithLevers(parseConfig('?levers=-air,-crag').leversOff)).toBe(
+      REALISTIC_TREES_DEFAULT,
+    );
+    // Off is the OTHER set, whichever the product's is, and not the same one.
+    const off = treesWithLevers(parseConfig('?levers=-generated-trees').leversOff);
+    expect(off).toBe('scanned');
+    expect(off).not.toBe(REALISTIC_TREES_DEFAULT);
+    expect(REALISTIC_TREE_SETS).toContain(off);
+    // And the URL round-trips, so a soak's row names the set it measured.
+    expect(configQuery(parseConfig('?levers=-generated-trees'))).toBe('?levers=-generated-trees');
   });
 
   it('takes the rung’s texture bias out when that lever is off, and leaves the rung alone otherwise — #619', () => {

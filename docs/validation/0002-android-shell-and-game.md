@@ -3220,6 +3220,8 @@ published figures (its run predates `oyl.txt`).
 | #639 | after (a call a tree level) | #639's merge | — | | | | | | | | |
 | #1274 | before (one photograph for rock and scree) | the first parent of #1274's merge | — | | | | | | | | |
 | #1274 | after (ambientCG's rock face on a steep bank) | #1274's merge | — | | | | | | | | |
+| #1283 | before (the scanned broadleaves) | #1283's merge | — ; `levers=-generated-trees` | | | | | | | | |
+| #1283 | after (the generated broadleaves) | #1283's merge | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3547,6 +3549,67 @@ judged in the product, on a route with a bank beside the road.
 | On the page (AH-1274-4): can the two be told apart at all, and if so which looks more like a hillside? | |
 | In the product (AH-1274-5): does a steep bank read as rock, and is its 3 m repeat visible? | |
 | Is it worth its 0.4 MiB of build, or should the bank go back to one photograph? | |
+
+### #1283's rows — the broadleaf trees, generated to their budget
+
+[#1283](https://github.com/openzigs/onyourleft/issues/1283) is the first adoption under
+[ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1: a ride's broadleaf trees
+are no longer two photoscans cut down to a triangle budget but **four trees generated at their
+size** — two oaks and two hornbeams, each a seed of its species — by the pinned EZ-Tree 1.1.0
+from numbers committed in `apps/web/tools/realistic/generated-trees.ts`, wearing ambientCG bark and
+leaves cut from ambientCG's scanned leaf atlases. Full level, middle level and impostor are each
+made to a size rather than decimated. **The conifers are still scans**: ambientCG publishes no
+needle atlas the pipeline may take (both are made by "Approximation").
+
+ADR 0049 D-1 keeps a generated tree *"only where the tablet measurement says it should"*, so **the
+scans are still in the build and one lever away** — and unlike every pair above, **both rows are one
+build**: `levers=-generated-trees` loads the scans instead, and only the set asked for is fetched.
+
+Deterministic figures, from the pinned Chromium on a Mac on 2026-10-12, the scans first:
+
+| | Scanned | Generated |
+|---|--:|--:|
+| This page held at `at=2550`: triangles a frame | 199 676 | **195 692** |
+| The same: draw calls | 31, and 32 in one run of seven | **33** in seven runs of seven |
+| The same: bytes of texture the load holds (`textures.bytes`) | 31 393 488 | **26 173 344** |
+| The gate's wooded view (`game.browser.spec.ts` §"#1283"): triangles / draw calls | 181 232 / 27 | **169 482 / 29** |
+| Texture memory estimated on the tablet's formats (`realistic-budget.test.ts`) | 70.56 MiB | **65.58 MiB** |
+| One broadleaf at full detail / at the middle level, triangles | 28 000 / 5 998 | **6 692 / 2 208** |
+
+The build is **39 836 999 bytes** of the 40 MiB ceiling (41 943 040) with the transcoder, where it
+was 37 025 627: it carries both sets until this row is in, and the four generated trees are
+2 811 372 of them. The scanned broadleaves are 10 616 301 of
+those bytes, and deleting them or going back to them after this row is
+[#1293](https://github.com/openzigs/onyourleft/issues/1293).
+
+**Two seeds a species, where #1283 was first written with three.** With six shapes this page made
+35 draw calls on a Mac and 34 on the CI runner — #639's ceiling itself, on a held frame whose count
+moves by one between runs — so its review took a seed of each species out again. The triangles did
+not move, because every tree of a species is the same count; the calls, the texture bytes and the
+build above are the four trees'.
+
+**Cost ceiling** (#615's rule 1): **no measurable increase** against this Part's spread — GPU DVFS
+mean, CPU *both*, skin at minute 20 and present p95. ⚠️ **What could cost, and only this row can
+say whether it does**: the frame makes **two more draw calls**, a call a tree shape a level, and
+this page is at 33 of #639's 35. The triangles and the texture memory both fall. ⚠️ **On this
+page's route most trees are conifers**, which did not change, so the page's triangles fall by 2 %
+where a broadleaf wood's would fall by two thirds: the by-eye half matters more than the cost half
+here, and the product on a lowland route is where the difference is largest.
+
+| Step | What to do |
+|---|---|
+| AH-1283-1 | **Before**: build #1283's merge with the owner's page staged, and run AH1–AH7 with `&levers=-generated-trees` added to AH4's URL. `RUN=1283-before` |
+| AH-1283-2 | **Cool again (AH3, 25–26 °C)**, same build, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=1283-after` |
+| AH-1283-3 | Write both rows into the table above. **Triangles / frame** should fall and **draw calls** rise by about two, to 33; the measured columns against #616's spread |
+| AH-1283-4 | **By eye, on the page**: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=1950`, then add `&levers=-generated-trees`, and compare the broadleaves behind the wall on the right and the one at the far left. Then the same pair at `at=1100` (one left of the road, one against the hedge), `at=150` and `at=3150`. Most of this route's trees are conifers: these four are where its broadleaves stand nearest |
+| AH-1283-5 | **By eye, in the product**, with *Game world* on: ride a saved lowland route with broadleaf trees beside the road. Do neighbouring trees differ in shape? Does a tree change visibly as it is passed (the hand-over between its three levels)? |
+
+| #1283 by eye | Answer |
+|---|---|
+| On the page (AH-1283-4): which set reads more like trees in leaf, and do the generated ones sit in the same light as the conifers beside them, or lighter, darker, yellower? | |
+| In the product (AH-1283-5): do the trees along a road read as different trees, and is any level's change visible? | |
+| Up close: do the leaf cards read as foliage, or as flat cards? | |
+| Keep the generated broadleaves and delete the scans (10.6 MB of build back), or go back to the scans? | |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

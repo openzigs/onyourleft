@@ -29,7 +29,9 @@
  * - {@link REALISTIC_SURFACES} are the road's and the ground's tiled maps.
  * - {@link REALISTIC_VEGETATION} is ADR 0026 D-12's second layer: the four
  *   kinds `scatter.ts` places that a photoscan can stand in for. Trees carry an
- *   impostor strip for the far band.
+ *   impostor strip for the far band. ⚠️ Since #1283 a broadleaf tree is
+ *   GENERATED rather than scanned ({@link REALISTIC_BROADLEAVES}), and the
+ *   scans it replaced are still shipped beside it.
  * - {@link REALISTIC_STRUCTURE_SURFACES} are ADR 0026 D-12's third layer
  *   (#475): the photographic surfaces the structures wear. The structures'
  *   SHAPES are built from numbers — a building's in `buildings.ts` since #500,
@@ -315,53 +317,128 @@ export interface RealisticModel {
   readonly middle?: string;
 }
 
+/** Which broadleaf trees a realistic world is drawn with — #1283. */
+export type RealisticTrees = 'generated' | 'scanned';
+
 /**
- * The shapes, by kind, in variant order. An item's `variant` picks among them
- * modulo their count, exactly as `three-renderer.ts` §`ScatterBelt` does for the
- * stylised world — so the same item wears the same variant slot in both worlds
- * and only the shape changes (ADR 0026 D-2).
+ * Both, in a fixed order.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, `realistic-assets.test.ts`
+ * and `realistic-textures.test.ts`, which hold EACH set to the budget and load
+ * each for real, and read by {@link realisticFiles}; a ride draws one set and
+ * never asks which others there are
  */
-export const REALISTIC_VEGETATION: Readonly<
-  Record<RealisticVegetationKind, readonly RealisticModel[]>
-> = {
-  'tree-broadleaf': [
-    {
-      name: 'island_tree_02',
-      file: 'island_tree_02.glb',
-      impostor: 'island_tree_02-impostor.ktx2',
-      impostorNormals: 'island_tree_02-impostor-normals.ktx2',
-      middle: 'island_tree_02-middle.glb',
-    },
-    {
-      name: 'tree_small_02',
-      file: 'tree_small_02.glb',
-      impostor: 'tree_small_02-impostor.ktx2',
-      impostorNormals: 'tree_small_02-impostor-normals.ktx2',
-      middle: 'tree_small_02-middle.glb',
-    },
+export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = ['generated', 'scanned'];
+
+/**
+ * The broadleaf trees a ride draws: the **generated** ones — #1283, ADR 0049
+ * D-1.
+ *
+ * ## Why generated is the default, and what that rests on
+ *
+ * Measured in the browser gate on 2026-10-12, same route position, same
+ * camera (`realistic-budget.ts` §`REALISTIC_TRIANGLES`, "The generated trees,
+ * measured", has the table): the generated trees submit fewer triangles a
+ * frame, ask for less texture memory, and are four shapes of two species where
+ * the scans are two trees — and they make two MORE draw calls, a call a shape,
+ * inside a ceiling that did not move and that the owner's page is two under.
+ * On the page's own pictures they read as trees in leaf where the scans read
+ * as bare limbs; that is this change's author looking at two screenshots, not
+ * the owner looking at a tablet. What none of it can say is how they look
+ * there or what they cost its GPU: those are validation 0002's rows for
+ * #1283, which are the owner's, and ADR 0049 D-1 keeps a generated tree "only
+ * where the tablet measurement says it should".
+ *
+ * ⚠️ **So the scans are still committed and still loadable**, behind the
+ * owner's page (`browser/realistic/config.ts` §`LEVERS`, `-generated-trees`)
+ * and `three-renderer.ts` §`setRealisticTrees`. Removing them, or making them
+ * the default again, is the change after the rows.
+ *
+ * ⚠️ **Broadleaves only.** A conifer is still its scan in both sets:
+ * ambientCG publishes no needles the pipeline may take
+ * (`tools/realistic/sources.ts` §`GENERATED_TREE_TEXTURES`).
+ */
+export const REALISTIC_TREES_DEFAULT: RealisticTrees = 'generated';
+
+const tree = (name: string): RealisticModel => ({
+  name,
+  file: `${name}.glb`,
+  impostor: `${name}-impostor.ktx2`,
+  impostorNormals: `${name}-impostor-normals.ktx2`,
+  middle: `${name}-middle.glb`,
+});
+
+/**
+ * The broadleaf trees of each set, in variant order.
+ *
+ * - `generated` — #1283: two oaks and two hornbeams, each a seed of its
+ *   species (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`, which
+ *   says why two and why there is no `_b`), interleaved so that two
+ *   neighbouring variant slots are different species as well as different
+ *   seeds.
+ * - `scanned` — the two Poly Haven photoscans every realistic world drew until
+ *   #1283, decimated to their budget.
+ */
+export const REALISTIC_BROADLEAVES: Readonly<Record<RealisticTrees, readonly RealisticModel[]>> = {
+  generated: [
+    tree('generated_oak_a'),
+    tree('generated_hornbeam_a'),
+    tree('generated_oak_c'),
+    tree('generated_hornbeam_c'),
   ],
-  'tree-conifer': [
-    {
-      name: 'fir_sapling_medium_a',
-      file: 'fir_sapling_medium_a.glb',
-      impostor: 'fir_sapling_medium_a-impostor.ktx2',
-      impostorNormals: 'fir_sapling_medium_a-impostor-normals.ktx2',
-      middle: 'fir_sapling_medium_a-middle.glb',
-    },
-    {
-      name: 'fir_sapling_medium_b',
-      file: 'fir_sapling_medium_b.glb',
-      impostor: 'fir_sapling_medium_b-impostor.ktx2',
-      impostorNormals: 'fir_sapling_medium_b-impostor-normals.ktx2',
-      middle: 'fir_sapling_medium_b-middle.glb',
-    },
-  ],
-  shrub: [
-    { name: 'shrub_02_a', file: 'shrub_02_a.glb' },
-    { name: 'shrub_02_c', file: 'shrub_02_c.glb' },
-  ],
-  rock: [{ name: 'boulder_01', file: 'boulder_01.glb' }],
+  scanned: [tree('island_tree_02'), tree('tree_small_02')],
 };
+
+/**
+ * The shapes one set draws, by kind, in variant order. An item's `variant`
+ * picks among them modulo their count, exactly as `three-renderer.ts`
+ * §`ScatterBelt` does for the stylised world — so the same item wears the same
+ * variant slot in both worlds and only the shape changes (ADR 0026 D-2).
+ *
+ * ⚠️ **The two sets differ only in their broadleaves** (#1283): the conifers,
+ * the shrubs and the rock are the same files in both.
+ */
+export function realisticVegetation(
+  trees: RealisticTrees,
+): Readonly<Record<RealisticVegetationKind, readonly RealisticModel[]>> {
+  return {
+    'tree-broadleaf': REALISTIC_BROADLEAVES[trees],
+    'tree-conifer': [
+      {
+        name: 'fir_sapling_medium_a',
+        file: 'fir_sapling_medium_a.glb',
+        impostor: 'fir_sapling_medium_a-impostor.ktx2',
+        impostorNormals: 'fir_sapling_medium_a-impostor-normals.ktx2',
+        middle: 'fir_sapling_medium_a-middle.glb',
+      },
+      {
+        name: 'fir_sapling_medium_b',
+        file: 'fir_sapling_medium_b.glb',
+        impostor: 'fir_sapling_medium_b-impostor.ktx2',
+        impostorNormals: 'fir_sapling_medium_b-impostor-normals.ktx2',
+        middle: 'fir_sapling_medium_b-middle.glb',
+      },
+    ],
+    shrub: [
+      { name: 'shrub_02_a', file: 'shrub_02_a.glb' },
+      { name: 'shrub_02_c', file: 'shrub_02_c.glb' },
+    ],
+    rock: [{ name: 'boulder_01', file: 'boulder_01.glb' }],
+  };
+}
+
+/**
+ * The shapes a RIDE draws: {@link realisticVegetation} of
+ * {@link REALISTIC_TREES_DEFAULT}.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, `near-field.test.ts`,
+ * `realistic-textures.test.ts` and `game.browser.spec.ts`, which read the
+ * committed files of what a ride draws off this table; since #1283 the
+ * renderer asks {@link realisticVegetation} for the set it was told to load,
+ * and `realistic-assets.test.ts` holds this to that function's answer for the
+ * default
+ */
+export const REALISTIC_VEGETATION = realisticVegetation(REALISTIC_TREES_DEFAULT);
 
 /** The four kinds, in a fixed order. */
 export const REALISTIC_VEGETATION_KINDS: readonly RealisticVegetationKind[] = [
@@ -488,10 +565,16 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.rock.normal,
     REALISTIC_SURFACES.crag.colour,
     REALISTIC_SURFACES.crag.normal,
-    ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
-      REALISTIC_VEGETATION[kind].flatMap((model) =>
-        [model.file, model.impostor, model.impostorNormals, model.middle].filter(
-          (file): file is string => file !== undefined,
+    // #1283: BOTH sets' trees, each file once — the set a ride does not draw
+    // still ships, and is still held to its budget.
+    ...new Set(
+      REALISTIC_TREE_SETS.flatMap((trees) =>
+        REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
+          realisticVegetation(trees)[kind].flatMap((model) =>
+            [model.file, model.impostor, model.impostorNormals, model.middle].filter(
+              (file): file is string => file !== undefined,
+            ),
+          ),
         ),
       ),
     ),

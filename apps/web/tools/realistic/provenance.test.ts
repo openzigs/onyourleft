@@ -36,18 +36,24 @@ import {
 } from '../brand/game-wordmark';
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
+import { GENERATED_TREES, speciesOf } from './generated-trees';
 import {
   AMBIENTCG_TECHNIQUES_KEPT,
   ambientCgArchive,
   assetRecord,
   DRAW_SCRIPT,
   DRAWN_TOOL,
+  GENERATED_TOOL,
+  GENERATED_TREE_SCRIPT,
+  GENERATED_TREES_PATH,
+  generatedInputDigest,
   inputDigest,
   KTX2_SCRIPT,
   KTX2_SCRIPT_PATH,
   OUTPUT_DIRECTORY,
   OUTPUTS,
   PINNED_BLENDER,
+  PINNED_EZ_TREE,
   PINNED_KTX,
   PIPELINE_DIRECTORY,
   RIDER_KIT,
@@ -113,7 +119,9 @@ describe('the realistic files and the pipeline that makes them', () => {
       if (
         output.recipe.how === 'verbatim' ||
         output.recipe.how === 'drawn' ||
-        output.recipe.how === 'wordmark'
+        output.recipe.how === 'wordmark' ||
+        // #1283: a generated tree's input is its numbers, held below.
+        output.recipe.how === 'generated'
       ) {
         continue;
       }
@@ -212,7 +220,9 @@ describe('the realistic files and the pipeline that makes them', () => {
             ? KTX2_SCRIPT
             : recipe.how === 'drawn'
               ? DRAW_SCRIPT
-              : recipe.script;
+              : recipe.how === 'generated'
+                ? GENERATED_TREE_SCRIPT
+                : recipe.script;
       const script = readFileSync(join(REPOSITORY, 'apps/web/tools/realistic', name), 'utf8');
       expect(script.split('\n').slice(0, 5).join('\n'), name).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
@@ -270,14 +280,15 @@ describe('the realistic files and the pipeline that makes them', () => {
         expect(callsTheImporter(source), file).toBe(false);
       }
     }
-    expect([...imported].sort()).toEqual(['gltf_import.py', 'rider_kit.py']);
+    // #1283: and `impostor.py`, the one strip both kinds of tree are rendered by.
+    expect([...imported].sort()).toEqual(['gltf_import.py', 'impostor.py', 'rider_kit.py']);
     for (const file of imported) {
       const source = readFileSync(join(directory, file), 'utf8');
       expect(source.split('\n').slice(0, 5).join('\n'), file).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
       );
     }
-    for (const script of ['process_tree.py', 'process_rock.py']) {
+    for (const script of ['process_tree.py', 'process_rock.py', 'process_generated_tree.py']) {
       expect(readFileSync(join(directory, script), 'utf8'), script).toMatch(
         /^from gltf_import import import_scan/m,
       );
@@ -337,6 +348,126 @@ describe('the bicycle’s drawn maps — #624', () => {
         lock.sources.map((source) => source.id),
         map,
       ).not.toContain(output?.from);
+    }
+  });
+});
+
+describe('the generated trees — #1283, ADR 0049 D-1', () => {
+  const rowOf = (file: string): Readonly<Record<string, string | undefined>> =>
+    (manifest.entries.find((each) => each.path === `${OUTPUT_DIRECTORY}/${file}`) ??
+      {}) as Readonly<Record<string, string | undefined>>;
+  const filesOf = (name: string): readonly string[] => [
+    `${name}.glb`,
+    `${name}-middle.glb`,
+    `${name}-impostor.ktx2`,
+    `${name}-impostor-normals.ktx2`,
+  ];
+
+  it('records each as this repository’s own work, CC0-1.0, naming the generator and its version', () => {
+    expect(GENERATED_TREES.length).toBeGreaterThan(0);
+    for (const tree of GENERATED_TREES) {
+      for (const file of filesOf(tree.name)) {
+        const row = rowOf(file);
+        expect(row['licence'], file).toBe('CC0-1.0');
+        expect(row['source'], file).toContain('This repository, #1283');
+        expect(row['source'], file).toContain(PINNED_EZ_TREE);
+        expect(row['source'], file).toContain('MIT, https://github.com/dgreenheck/ez-tree');
+        expect(row['source'], file).toContain(GENERATED_TREES_PATH);
+        // ADR 0049 D-1 and D-2, in the row's own words.
+        expect(row['source'], file).toContain("None of the generator's own images is taken");
+        expect(row['source'], file).toContain('nothing is the output of a trained model');
+        expect(row['tool'], file).toContain(PINNED_EZ_TREE);
+        expect(row['tool'], file).toContain(PINNED_BLENDER);
+        expect(row['script'], file).toBe(`${PIPELINE_DIRECTORY}${GENERATED_TREE_SCRIPT}`);
+      }
+    }
+  });
+
+  it('names the two ambientCG assets each wears, with what each one’s own page said', () => {
+    for (const tree of GENERATED_TREES) {
+      const species = speciesOf(tree);
+      for (const file of filesOf(tree.name)) {
+        const row = rowOf(file);
+        for (const id of [species.bark.source, species.sprig.source]) {
+          const source = lock.sources.find((each) => each.id === id);
+          expect(source, id).toBeDefined();
+          expect(row['source'], file).toContain(
+            `ambientCG's ${id} (CC0-1.0; its own page, read on ${source?.read ?? ''}: made by ${source?.technique ?? ''})`,
+          );
+          expect(row['input'], file).toContain(`https://ambientcg.com/view?id=${id}`);
+          expect(AMBIENTCG_TECHNIQUES_KEPT, id).toContain(source?.technique);
+        }
+        expect(row['input'], file).toContain(`${GENERATED_TREES_PATH}#${tree.name}`);
+        // No file of another species' is named in this tree's row.
+        for (const other of GENERATED_TREES.map(speciesOf)) {
+          if (other.id === species.id) continue;
+          expect(row['source'], file).not.toContain(`ambientCG's ${other.bark.source} `);
+          expect(row['source'], file).not.toContain(`ambientCG's ${other.sprig.source} `);
+        }
+      }
+    }
+  });
+
+  it('records, as each row’s input, the digest of its committed numbers and its locked downloads', () => {
+    for (const tree of GENERATED_TREES) {
+      for (const file of filesOf(tree.name)) {
+        expect(rowOf(file)['inputsha256'], file).toBe(generatedInputDigest(tree, lock));
+      }
+    }
+  });
+
+  it('names the encoder in exactly the rows that passed through it', () => {
+    for (const tree of GENERATED_TREES) {
+      const [full, middle, strip, normals] = filesOf(tree.name).map(rowOf);
+      for (const row of [full, strip, normals]) {
+        expect(row?.['tool']).toBe(`${GENERATED_TOOL}, then ${PINNED_KTX}`);
+        expect(row?.['modified']).toContain(KTX2_SCRIPT_PATH);
+      }
+      // A middle level carries no image, so no encoder touched it.
+      expect(middle?.['tool']).toBe(GENERATED_TOOL);
+      expect(middle?.['modified']).not.toContain(KTX2_SCRIPT_PATH);
+      expect(middle?.['modified']).toContain('no image');
+      // And the words say it was generated at its size, not cut down to it.
+      expect(full?.['modified']).toContain('neither decimated nor thinned');
+      expect(full?.['modified']).toContain(`the seed ${String(tree.seed)}`);
+      expect(middle?.['modified']).toContain(`the same seed ${String(tree.seed)}`);
+    }
+  });
+
+  it('commits each strip at the frames its species asks for, the normals smaller, each with its mipmaps', () => {
+    for (const tree of GENERATED_TREES) {
+      const { frame, normalFrame } = speciesOf(tree).impostor;
+      const colour = fileKtx2Facts(
+        join(REPOSITORY, OUTPUT_DIRECTORY, `${tree.name}-impostor.ktx2`),
+      );
+      const normals = fileKtx2Facts(
+        join(REPOSITORY, OUTPUT_DIRECTORY, `${tree.name}-impostor-normals.ktx2`),
+      );
+      expect(colour, tree.name).toMatchObject({
+        width: frame[0] * 8,
+        height: frame[1],
+        scheme: 'etc1s',
+        alpha: true,
+        transfer: 'srgb',
+      });
+      expect(normals, tree.name).toMatchObject({
+        width: normalFrame[0] * 8,
+        height: normalFrame[1],
+        scheme: 'uastc',
+        transfer: 'linear',
+      });
+      // One coordinate reads both, so the two frames are one shape.
+      expect(frame[0] / frame[1]).toBeCloseTo(normalFrame[0] / normalFrame[1], 6);
+      expect(normalFrame[0]).toBeLessThan(frame[0]);
+    }
+  });
+
+  it('is in the lock only through what it wears: nothing is downloaded from the generator', () => {
+    for (const source of lock.sources) {
+      for (const file of source.files) {
+        expect(file.url, source.id).not.toMatch(/dgreenheck|ez-tree/i);
+      }
+      expect(source.licencePage, source.id).not.toMatch(/dgreenheck|ez-tree/i);
     }
   });
 });
