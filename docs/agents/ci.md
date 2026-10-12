@@ -806,6 +806,18 @@ EPYC 7763) took **1 018 s** — `Tests outside coverage` 57 s, `Nightly browser 
 inside its stop. Its `coverage-report` artefact held `coverage-summary.json`, which the renderer
 turns into the table (all files: 90.62 % of statements, 85.31 % of branches).
 
+#### Shards — #1285
+
+SPIKE SEED, NOT A MEASUREMENT: estimates so that the first measuring run can be green.
+
+<!-- shard-measurements:start -->
+| Run | Wall | checks | tests | browser | Gate starts |
+|---|--:|--:|--:|--:|--:|
+| estimate | 800 | 270 | 440 | 760 | 80 |
+| estimate | 800 | 270 | 440 | 760 | 80 |
+| estimate | 800 | 270 | 440 | 760 | 80 |
+<!-- shard-measurements:end -->
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
