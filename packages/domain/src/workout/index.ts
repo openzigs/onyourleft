@@ -131,3 +131,37 @@ export type {
   WorkoutRescue,
 } from './player';
 export { createWorkoutPlayer } from './player';
+
+export type {
+  Accepted,
+  OwnThresholds,
+  PlanBlock,
+  PlanMove,
+  PlanRevision,
+  PlanState,
+  Proposal,
+  ReasonCode,
+  Refused,
+  ReplanRecord,
+  ReplanRule,
+  SavedWorkout,
+} from './replan';
+export {
+  decodeProposal,
+  loadPlan,
+  MAXIMUM_WORKOUT_ID_CHARACTERS,
+  PLAN_MOVE_KINDS,
+  planWorkout,
+  PROPOSAL_KEYS,
+  REASON_CODES,
+  REPLAN_BLOCK_MINUTES,
+  REPLAN_BOUNDARY_LEAD_SECONDS,
+  REPLAN_FRESHNESS_SECONDS,
+  REPLAN_HARDER_INTERVAL_SECONDS,
+  REPLAN_HOLD_RANGE_BPM,
+  REPLAN_MAXIMUM_CUMULATIVE_PERCENT,
+  REPLAN_MOVE_INTERVAL_SECONDS,
+  REPLAN_RULES,
+  REPLAN_SCALE_PERCENTS,
+  validateProposal,
+} from './replan';
