@@ -1272,7 +1272,9 @@ export function createRideController(options: RideControllerOptions): RideContro
    * rescue writes relief below the target (#567), and refusing either would
    * leave a higher target on the machine under a rider who has stopped, which
    * is the ERG spiral this program exists to prevent. What waits is anything
-   * that RAISES: a new target, a workout's next interval, a rescue's restore.
+   * that RAISES: a new target, a workout's next interval above the trainer's
+   * minimum (one under it is raised to the floor, #1297, so it passes as an
+   * ease), a rescue's restore.
    * A gradient has no floor and always waits.
    *
    * ⚠️ **"Below the confirmed target" trusts `targetPower()`, and that is

@@ -69,12 +69,13 @@
  * 5. **The machine's minimum is not read here.** An easier move is bounded
  *    by {@link MINIMUM_SHARE} alone, so a scaled share may be fewer watts than
  *    the trainer's reported minimum. Raising it to that minimum is for
- *    whatever writes the target. ⚠️ **Nothing does today**:
- *    `apps/web/src/workout/session.ts` raises only an eased (stall-relief)
- *    target to its `powerFloor`, writes a workout's own number as it is, and
- *    `packages/sensors/protocol/src/fitness-machine-control.ts` refuses a
- *    target under the reported range. That is true of a loaded workout with
- *    no re-plan too, and is #1297, which lands before or with #1244.
+ *    whatever writes the target, and since #1297 that is
+ *    `apps/web/src/workout/session.ts`: every target it writes, a workout's
+ *    own and an eased one alike, is raised to its `powerFloor`, the minimum
+ *    of the range the machine reported. A share that works out under it is
+ *    therefore written as that minimum, and is not refused by
+ *    `packages/sensors/protocol/src/fitness-machine-control.ts` with the
+ *    target of the block before left on the trainer.
  * 6. **Warm-up and cool-down are the first and the last block.** The workout
  *    model marks neither, so the rule is structural: the main set is every
  *    block between them. The last block is never changed or removed by any

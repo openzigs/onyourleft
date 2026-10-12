@@ -4902,6 +4902,52 @@ describe('a paused ride eases the workout to the trainer’s OWN floor — #441'
   });
 });
 
+describe('a workout target under the trainer’s minimum — #1297', () => {
+  it('is written as the minimum the trainer reported, and the screen is given that number', async () => {
+    // ⚠️ Through the controller's own composition: the minimum is read off the
+    // machine's Supported Power Range at pairing, and the snapshot is what the
+    // ride screen's "Holding … W." line renders. 30 % of 250 W is 75 W, which
+    // this machine refuses; before #1297 the 250 W of the block before stayed.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(100) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      {
+        id: workoutId('w1'),
+        createdBy: ATHLETE_A,
+        name: 'Hard then easy',
+        workout: {
+          name: 'Hard then easy',
+          blocks: [
+            { kind: 'steady', seconds: seconds(3), target: thresholdShare(1.0) },
+            { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.3) },
+          ],
+        },
+        createdAt: unixSeconds(1),
+        updatedAt: unixSeconds(1),
+      },
+      watts(250),
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    const before = rig.written.length;
+
+    await ride(rig, 4);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[0x05, 100, 0]]);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.holdingWatts).toBe(100);
+    expect(snapshot?.fault).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
 // --- The snapshot itself -----------------------------------------------------
 
 describe('the snapshot', () => {

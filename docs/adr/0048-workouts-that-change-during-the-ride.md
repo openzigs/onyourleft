@@ -623,3 +623,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   The rounding note above is superseded with a: a rise is no longer stored as exactly 5. A total
   within 10⁻⁹ of a percentage point over +10 % is taken as +10 %, for a swap and for a scale, as a
   move's +5 % already was. (#1300)
+
+- **2026-10-12** — #1297 landed the clamp. The session now raises every workout target under the
+  trainer's reported minimum to that minimum, so the "nothing clamps" reading of 5 above no longer
+  holds. A raised target equals the floor, so the forget-hold rule treats it as an ease and does not
+  hold it back.
