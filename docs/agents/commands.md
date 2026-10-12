@@ -506,6 +506,23 @@ pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … 
 # model that admits a new device. Run over loopback on 2026-10-11; ⚠️ never
 # yet through the tunnel.
 pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --cold-runs 5 --unload 'ollama stop <model>'
+# The same, on a HOSTED model and a key of your own (spike 0023 §11):
+# `--hosted-url` and `--hosted-model` together. ⚠️ The key is read from
+# OYL_MEASURE_HOSTED_KEY and from nowhere else: it is not an argument, an
+# option the command does not have (`--hosted-key` too) is refused by name and
+# never with its value, and the key is printed nowhere. Set it from a file for
+# the one command, as below. Each throwaway account stores it, consents to the
+# URL's origin and pushes an empty masking item; when the run ends or throws,
+# the key and consent are cleared and read back (`hosted.cleared` in the
+# report; exit 3, and a last stderr line saying to revoke the key, when one was
+# not). Sealed only; refused with `--unload` (a hosted model has no cold runs).
+# ⚠️ "Sealed" is less than the app's: the tool pins no instance and checks no
+# key statement (ADR 0047 D-5, D-6), it seals to whatever key `--url` serves.
+# So hosted needs an `https:` or loopback `--url`, and over `https:` the key is
+# sealed to whoever terminates TLS for that name. Use a key you can revoke. A
+# run that is KILLED clears nothing: revoke the key. Run once against a real
+# hosted service, through the tunnel, on 2026-10-11 (spike 0023 §11).
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --hosted-url https://… --hosted-model <name>
 
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's

@@ -413,6 +413,8 @@ export interface AthleteHostedKeyTable {
   readonly iv: Uint8Array;
   readonly ciphertext: Uint8Array;
   readonly set_at: number;
+  /** What the rider says a turn may spend reasoning (migration 0023, #1268), or null. */
+  readonly reasoning_tokens: number | null;
 }
 
 /**

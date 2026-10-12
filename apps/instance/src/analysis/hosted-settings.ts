@@ -37,6 +37,7 @@
 import type { Caller } from '../auth/identity.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './model-turn.ts';
 import {
   hostedKeyFrom,
   hostedModelFrom,
@@ -60,6 +61,8 @@ export interface HostedStatus {
     readonly model: string;
     /** Unix seconds. */
     readonly setAt: number;
+    /** What you said a turn may spend reasoning (#1268), or null: the agent finds out. */
+    readonly reasoningTokens: number | null;
     /**
      * `app` for a key the rider stored themselves; `operator-command` for the
      * operator's one key (`operator model-key set`), which serves only the
@@ -86,7 +89,7 @@ export type HostedOutcome =
 
 export interface HostedSettings {
   status(caller: Caller): Promise<HostedStatus>;
-  /** Store the caller's own key: `{ url, model, key }`. */
+  /** Store the caller's own key: `{ url, model, key }`, and optionally `reasoningTokens` (#1268). */
   setKey(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<HostedOutcome>;
   /** Clear the key the caller stored, scrubbed. Never the operator's one key. */
   clearKey(caller: Caller): Promise<HostedStatus>;
@@ -114,16 +117,19 @@ export interface HostedSettingsOptions {
 }
 
 const KEY_FIELDS = ['url', 'model', 'key'] as const;
+/** The key request's one optional field: a whole number of tokens, or null for none (#1268). */
+const REASONING_FIELD = 'reasoningTokens';
 const CONSENT_FIELDS = ['endpoint'] as const;
 
 /** A problem for every field not in `allowed`, or not a string among `allowed`. */
 function shapeProblems(
   body: Readonly<Record<string, unknown>>,
   allowed: readonly string[],
+  optional: readonly string[] = [],
 ): FieldProblem[] {
   const problems: FieldProblem[] = [];
   for (const field of Object.keys(body)) {
-    if (!allowed.includes(field))
+    if (!allowed.includes(field) && !optional.includes(field))
       problems.push({ field, problem: 'is not a field of this request' });
   }
   for (const field of allowed) {
@@ -141,12 +147,19 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     const consent = await store.getHostedConsent(athleteId);
     const key =
       own !== undefined
-        ? { url: own.url, model: own.model, setAt: own.setAt, setBy: 'app' as const }
+        ? {
+            url: own.url,
+            model: own.model,
+            setAt: own.setAt,
+            reasoningTokens: own.reasoningTokens ?? null,
+            setBy: 'app' as const,
+          }
         : operators?.athleteId === athleteId
           ? {
               url: operators.url,
               model: operators.model,
               setAt: operators.setAt,
+              reasoningTokens: null,
               setBy: 'operator-command' as const,
             }
           : null;
@@ -166,8 +179,16 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (secret === undefined) {
         return { ok: false, code: 'unavailable', message: HOSTED_KEY_NEEDS_SECRET };
       }
-      const problems = shapeProblems(body, KEY_FIELDS);
+      const problems = shapeProblems(body, KEY_FIELDS, [REASONING_FIELD]);
       if (problems.length > 0) return { ok: false, code: 'validation_failed', fields: problems };
+      const said = body[REASONING_FIELD];
+      const reasoningTokens = said === undefined || said === null ? undefined : said;
+      if (reasoningTokens !== undefined && !isReasoningTokens(reasoningTokens)) {
+        problems.push({
+          field: REASONING_FIELD,
+          problem: `must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or null`,
+        });
+      }
       const url = hostedUrlFrom(body.url as string);
       const model = hostedModelFrom(body.model as string);
       const key = hostedKeyFrom(body.key as string);
@@ -179,7 +200,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (key === undefined) {
         problems.push({ field: 'key', problem: 'must be one line of printable characters' });
       }
-      if (!url.ok || model === undefined || key === undefined) {
+      if (!url.ok || model === undefined || key === undefined || problems.length > 0) {
         return { ok: false, code: 'validation_failed', fields: problems };
       }
       const sealed = await sealHostedKey(secret, {
@@ -192,6 +213,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
         url: url.url.href,
         model,
         ...sealed,
+        ...(reasoningTokens === undefined ? {} : { reasoningTokens: reasoningTokens as number }),
         setAt: Math.floor(options.now() / 1000),
       });
       if (put.outcome === 'no-athlete') return { ok: false, code: 'not_found' };

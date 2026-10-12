@@ -17,6 +17,12 @@
  *   figures, which the owner ruled stand until measurements replace them
  *   (Q4). Each limit ends the run `failed`, with its own closed reason, and
  *   keeps nothing.
+ * - **A model that reasons before it answers** (#1268) spends its reasoning
+ *   out of the turn's allowance. Once a turn of the run shows that — the
+ *   server reports reasoning, or the turn ends on its limit with no answer and
+ *   no call — every later turn is allowed {@link AGENT_TURN_REASONING_TOKENS}
+ *   more, and the turn that showed it at its limit is asked again, once. The
+ *   answer's own bound and the run's token budget are unchanged.
  * - **The screen** (`@onyourleft/analysis` §`screenWriteUp`, ADR 0035 D-4's one
  *   set of matchers) runs before a word is streamed or kept, with ONE rewrite.
  *   A second failure ends the run `withheld`, keeping nothing.
@@ -55,6 +61,7 @@ import type {
   AgentMessage,
   ModelConnection,
   ModelFailure,
+  ModelTurn,
   ToolCallRequest,
   ToolResultText,
 } from './model-turn.ts';
@@ -87,6 +94,26 @@ export const AGENT_TOKEN_BUDGET = 40_000;
 /** What one turn may answer: the chain's summary bound. */
 export const AGENT_TURN_OUTPUT_TOKENS = 1_024;
 
+/**
+ * What one turn may spend reasoning, ON TOP of {@link AGENT_TURN_OUTPUT_TOKENS},
+ * once the run's model has shown that it reasons (#1268). A server counts
+ * reasoning and the answer against one `max_tokens`, so a reasoning model
+ * given 1 024 spent 847 to all 1 024 of them before a word of its answer (the
+ * issue's three measured calls). ⚠️ **A draft, not a measurement**: the three
+ * calls were capped at 1 024, so how long that model reasons uncapped is not
+ * known; three times the answer's bound is the author's figure.
+ *
+ * It moves no other wall. A run that never shows reasoning asks for 1 024 a
+ * turn, exactly as before. The run's {@link AGENT_TOKEN_BUDGET} is checked
+ * against whichever allowance the turn is given, so a reasoning model reaches
+ * `out-of-tokens` sooner and never spends past it. And the answer keeps its
+ * own bound: a turn given the larger allowance whose server reports more
+ * answer tokens (output less reasoning) than {@link AGENT_TURN_OUTPUT_TOKENS}
+ * fails `model-cut-off` and keeps nothing. Where the server reports no such
+ * split, the screen's `MAXIMUM_WRITE_UP_CHARACTERS` is the answer's bound.
+ */
+export const AGENT_TURN_REASONING_TOKENS = 3_072;
+
 /** The longest one turn may take, inside what is left of the run. */
 export const AGENT_TURN_MILLISECONDS = 120_000;
 
@@ -105,6 +132,7 @@ export type AgentFailure =
   | 'model-refused'
   | 'model-error'
   | 'model-cut-off'
+  | 'model-no-answer'
   | 'model-malformed';
 
 /**
@@ -131,6 +159,8 @@ export const AGENT_FAILURE_TEXT: Readonly<Record<AgentFailure, string>> = {
   'model-error': 'The model server had an error, so nothing was kept. Try again later.',
   'model-cut-off':
     'The model’s answer was cut off before it finished, so nothing was kept. A model with a larger context may do better.',
+  'model-no-answer':
+    'The model used up what it is allowed for one answer before it wrote any of it, so nothing was kept. A model that reasons before it answers can do this; one that reasons less may do better.',
   'model-malformed': 'The model server sent an answer this app cannot read, so nothing was kept.',
 };
 
@@ -257,6 +287,19 @@ function turnFailure(failure: ModelFailure): AgentFailure | 'cancelled' {
   }
 }
 
+/**
+ * The tokens of a turn's answer alone: what the server counted, less what it
+ * counted as reasoning. `undefined` where it cannot be told — the server
+ * counted nothing, or the turn reasoned and its reasoning was not counted
+ * apart (Ollama).
+ */
+function answerTokens(turn: Extract<ModelTurn, { ok: true }>): number | undefined {
+  const { outputTokens } = turn.usage;
+  if (outputTokens === undefined) return undefined;
+  if (turn.reasoning === undefined) return outputTokens;
+  return turn.reasoning.tokens === undefined ? undefined : outputTokens - turn.reasoning.tokens;
+}
+
 /** A reply's sections: its paragraphs, in order. */
 function sectionsOf(text: string): readonly string[] {
   return text
@@ -327,6 +370,10 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
   let toolCalls = 0;
   let tokens = 0;
   let rewritesLeft = AGENT_REWRITES;
+  // Whether a turn of this run has shown that the model reasons (#1268).
+  // ...or because the rider or the operator said so (`model.reasoningTokens`, #1268).
+  let reasoningModel = model.reasoningTokens !== undefined;
+  const reasoningAllowance = model.reasoningTokens ?? AGENT_TURN_REASONING_TOKENS;
 
   const failed = (why: AgentFailure): AgentOutcome => ({ kind: 'failed', why });
 
@@ -338,7 +385,8 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
     const sent = estimatedTokens(
       fixedCharacters + messages.reduce((sum, message) => sum + messageCharacters(message), 0),
     );
-    if (tokens + sent + AGENT_TURN_OUTPUT_TOKENS > budgets.tokens) return failed('out-of-tokens');
+    const allowance = AGENT_TURN_OUTPUT_TOKENS + (reasoningModel ? reasoningAllowance : 0);
+    if (tokens + sent + allowance > budgets.tokens) return failed('out-of-tokens');
 
     modelCalls += 1;
     emit({ type: 'progress', step: modelCalls });
@@ -346,7 +394,7 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
       system: template.system,
       messages: [...messages],
       tools: specs,
-      maxOutputTokens: AGENT_TURN_OUTPUT_TOKENS,
+      maxOutputTokens: allowance,
       timeoutMilliseconds: Math.min(AGENT_TURN_MILLISECONDS, left),
       signal,
     });
@@ -357,8 +405,9 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
     if (signal.aborted) return { kind: 'cancelled' };
     // What the turn cost, as the server reports it; where it reports nothing,
     // the estimate of what was sent and every token the turn could answer.
-    tokens +=
-      (turn.usage.inputTokens ?? sent) + (turn.usage.outputTokens ?? AGENT_TURN_OUTPUT_TOKENS);
+    tokens += (turn.usage.inputTokens ?? sent) + (turn.usage.outputTokens ?? allowance);
+    const allowedToReason = reasoningModel;
+    if (turn.reasoning !== undefined) reasoningModel = true;
 
     // A turn that called tools: run each, in order, inside the budgets. Any
     // text beside the calls is neither screened nor shown, so it is not kept.
@@ -382,7 +431,23 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
       continue;
     }
 
-    if (turn.finish === 'length') return failed('model-cut-off');
+    if (turn.finish === 'length') {
+      const noAnswer = turn.text.trim() === '';
+      // The first sign that the model reasons, at the limit: ask again, once,
+      // with room to reason. The spent turn stays counted and nothing of it is
+      // kept. A limit reached with no answer and no call is such a sign even
+      // where the server reports no reasoning: nothing else spends a turn's
+      // whole allowance and writes nothing.
+      if (!allowedToReason && (reasoningModel || noAnswer)) {
+        reasoningModel = true;
+        continue;
+      }
+      return failed(noAnswer ? 'model-no-answer' : 'model-cut-off');
+    }
+    // The answer's own bound, where the larger allowance could have let it past.
+    if (allowedToReason && (answerTokens(turn) ?? 0) > AGENT_TURN_OUTPUT_TOKENS) {
+      return failed('model-cut-off');
+    }
 
     // The write-up: each section screened alone and streamed once it passes,
     // then the whole; any failure withdraws what was streamed.

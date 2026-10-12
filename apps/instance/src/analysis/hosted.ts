@@ -209,6 +209,7 @@ function maskedMessage(message: AgentMessage, guard: MaskingGuard): AgentMessage
  */
 export function maskedConnection(inner: ModelConnection, guard: MaskingGuard): ModelConnection {
   return {
+    ...(inner.reasoningTokens === undefined ? {} : { reasoningTokens: inner.reasoningTokens }),
     turn: (request) =>
       inner.turn({
         ...request,
@@ -233,6 +234,7 @@ export function hostedBehindMasking(
       baseUrl: new URL(key.url),
       model: key.model,
       apiKey: key.key,
+      ...(key.reasoningTokens === undefined ? {} : { reasoningTokens: key.reasoningTokens }),
       ...(fetch === undefined ? {} : { fetch }),
     }),
     guard,

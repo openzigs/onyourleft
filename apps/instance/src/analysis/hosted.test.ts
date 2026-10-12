@@ -452,6 +452,15 @@ describe('the masking item', () => {
   });
 });
 
+describe('the rider’s and the operator’s reasoning allowance reaches the connection (#1268)', () => {
+  it('stays on the hosted connection behind the masking, and is absent when none was said', () => {
+    expect(
+      hostedBehindMasking({ ...HELD, reasoningTokens: 2_048 }, PLANTED_GUARD).reasoningTokens,
+    ).toBe(2_048);
+    expect(hostedBehindMasking(HELD, PLANTED_GUARD)).not.toHaveProperty('reasoningTokens');
+  });
+});
+
 describe('maskedConnection masks every message of every request', () => {
   it('the system prompt, the user text, the model’s text and arguments, and every tool result', async () => {
     const seen: ModelTurnRequest[] = [];

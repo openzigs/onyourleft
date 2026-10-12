@@ -38,6 +38,7 @@ import * as recoveryAddresses from './0019-recovery-addresses.ts';
 import * as analysisJobs from './0020-analysis-jobs.ts';
 import * as riderHostedKeys from './0021-rider-hosted-keys.ts';
 import * as analysisJobRide from './0022-analysis-job-ride.ts';
+import * as hostedKeyReasoning from './0023-hosted-key-reasoning.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -68,4 +69,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0020-analysis-jobs': analysisJobs,
   '0021-rider-hosted-keys': riderHostedKeys,
   '0022-analysis-job-ride': analysisJobRide,
+  '0023-hosted-key-reasoning': hostedKeyReasoning,
 };

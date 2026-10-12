@@ -30,6 +30,16 @@ export type ScriptedReply =
       readonly text: string;
       readonly finish?: 'stop' | 'length';
       readonly usage?: { readonly prompt: number; readonly completion: number };
+      /**
+       * Reasoning sent beside the answer (#1268), in the field a server uses:
+       * `reasoning_content` is DeepSeek's, `reasoning` Ollama's. `tokens`, when
+       * given, is reported as `completion_tokens_details.reasoning_tokens`.
+       */
+      readonly reasoning?: {
+        readonly field: 'reasoning_content' | 'reasoning';
+        readonly text: string;
+        readonly tokens?: number;
+      };
     }
   | { readonly kind: 'tool-calls'; readonly calls: readonly ScriptedCall[] }
   /** An HTTP error with this body, as a server would send it. */
@@ -66,7 +76,13 @@ export interface FakeModelServer {
 function completion(reply: Extract<ScriptedReply, { kind: 'text' | 'tool-calls' }>, n: number) {
   const message =
     reply.kind === 'text'
-      ? { role: 'assistant', content: reply.text }
+      ? {
+          role: 'assistant',
+          content: reply.text,
+          ...(reply.reasoning === undefined
+            ? {}
+            : { [reply.reasoning.field]: reply.reasoning.text }),
+        }
       : {
           role: 'assistant',
           content: null,
@@ -101,6 +117,9 @@ function completion(reply: Extract<ScriptedReply, { kind: 'text' | 'tool-calls' 
       prompt_tokens: usage.prompt,
       completion_tokens: usage.completion,
       total_tokens: usage.prompt + usage.completion,
+      ...(reply.kind === 'text' && reply.reasoning?.tokens !== undefined
+        ? { completion_tokens_details: { reasoning_tokens: reply.reasoning.tokens } }
+        : {}),
     },
   };
 }

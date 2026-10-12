@@ -346,6 +346,8 @@ describe('failures are sentences', () => {
     'out-of-time',
     'out-of-tokens',
     'model-without-tools',
+    'model-cut-off',
+    'model-no-answer',
     'hosted_unavailable',
     'interrupted',
   ] as const)('says %s in its own sentence, and saves nothing', async (failure) => {

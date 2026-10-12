@@ -65,7 +65,10 @@ export const PASSING_WRITE_UP = [
 export type ScriptedTurn =
   ModelTurn | ((request: ModelTurnRequest) => ModelTurn | Promise<ModelTurn>);
 
-export const text = (reply: string, finish: 'stop' | 'length' = 'stop'): ModelTurn => ({
+export const text = (
+  reply: string,
+  finish: 'stop' | 'length' = 'stop',
+): Extract<ModelTurn, { ok: true }> => ({
   ok: true,
   text: reply,
   calls: [],

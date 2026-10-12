@@ -47,6 +47,7 @@
  * accept. Failing at start-up is the only place that is cheap.
  */
 
+import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './analysis/model-turn.ts';
 import { isAddress, normalisedAddress } from './client-address.ts';
 import { configuredHostProblem, isAddressLiteral } from './history/address.ts';
 import {
@@ -106,6 +107,7 @@ export interface RawConfig {
   readonly embeddingQueryPrefix?: string | undefined;
   readonly analysisModelUrl?: string | undefined;
   readonly analysisModel?: string | undefined;
+  readonly analysisModelReasoningTokens?: string | undefined;
   readonly name?: string | undefined;
 }
 
@@ -141,6 +143,12 @@ export type AnalysisModelSettings =
       readonly baseUrl: URL;
       /** The model the operator pulled. There is no default (ADR 0031 D-4). */
       readonly model: string;
+      /**
+       * What a turn may spend reasoning, when the operator says this model
+       * reasons (`OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS`, #1268).
+       * Absent: the agent finds out from the model's replies.
+       */
+      readonly reasoningTokens?: number;
     }
   | {
       readonly kind: 'off';
@@ -150,7 +158,14 @@ export type AnalysisModelSettings =
 
 /** Why the analysis model is off. */
 export type AnalysisModelOffCode =
-  'not-set' | 'not-a-url' | 'not-base-url' | 'not-local' | 'tls-by-name' | 'no-model' | 'bad-model';
+  | 'not-set'
+  | 'not-a-url'
+  | 'not-base-url'
+  | 'not-local'
+  | 'tls-by-name'
+  | 'no-model'
+  | 'bad-model'
+  | 'bad-reasoning';
 
 /** A configuration the instance can start with. */
 export interface Config {
@@ -532,7 +547,15 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
     );
   }
   const baseUrl = new URL(url.href.replace(/\/+$/, ''));
-  return { kind: 'on', baseUrl, model };
+  if (!present(raw.analysisModelReasoningTokens)) return { kind: 'on', baseUrl, model };
+  const reasoningTokens = Number(raw.analysisModelReasoningTokens.trim());
+  if (!isReasoningTokens(reasoningTokens)) {
+    return off(
+      'bad-reasoning',
+      `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or not set.`,
+    );
+  }
+  return { kind: 'on', baseUrl, model, reasoningTokens };
 }
 
 /**
