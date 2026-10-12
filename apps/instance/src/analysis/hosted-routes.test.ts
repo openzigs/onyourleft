@@ -45,7 +45,13 @@ describe('a rider’s own hosted key (#1199)', () => {
     const set = await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     const expected: HostedStatus = {
-      key: { url: KEY_BODY.url, model: 'a-model', setAt: 1_790_000_123, setBy: 'app' },
+      key: {
+        url: KEY_BODY.url,
+        model: 'a-model',
+        setAt: 1_790_000_123,
+        reasoningTokens: null,
+        setBy: 'app',
+      },
       consent: null,
     };
     expect(set.body).toEqual(expected);
@@ -58,6 +64,52 @@ describe('a rider’s own hosted key (#1199)', () => {
     expect(row?.ciphertext.byteLength).toBeGreaterThan(0);
     expect(await world.databaseBytes()).not.toContain(MARKER);
   });
+
+  it('keeps what the rider says their model needs to reason, replaces it with the next key, and reads it back from a fresh store (#1268)', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const { token, athleteId } = synced.riders[0]!;
+    const set = await world.call('POST', '/v1/analysis/hosted/key', {
+      token,
+      body: { ...KEY_BODY, reasoningTokens: 2_048 },
+    });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    expect((set.body as HostedStatus).key?.reasoningTokens).toBe(2_048);
+    expect(
+      ((await world.call('GET', '/v1/analysis/hosted', { token })).body as HostedStatus).key
+        ?.reasoningTokens,
+    ).toBe(2_048);
+    const row = await world.freshRead((store) => store.getAthleteHostedKey(athleteId));
+    expect(row?.reasoningTokens).toBe(2_048);
+    // The next key says nothing: the figure is not carried over.
+    await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });
+    const again = await world.freshRead((store) => store.getAthleteHostedKey(athleteId));
+    expect(again?.reasoningTokens).toBeUndefined();
+    const nulled = await world.call('POST', '/v1/analysis/hosted/key', {
+      token,
+      body: { ...KEY_BODY, reasoningTokens: null },
+    });
+    expect((nulled.body as HostedStatus).key?.reasoningTokens).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, 16_385, '2048', true])(
+    'refuses reasoningTokens %j, naming the field, and stores nothing (#1268)',
+    async (bad) => {
+      const synced = await syncWorld(1);
+      world = synced.world;
+      const { token, athleteId } = synced.riders[0]!;
+      const refused = await world.call('POST', '/v1/analysis/hosted/key', {
+        token,
+        body: { ...KEY_BODY, reasoningTokens: bad },
+      });
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(refused.body)).toContain('reasoningTokens');
+      expect(JSON.stringify(refused.body)).not.toContain(MARKER);
+      expect(
+        await world.freshRead((store) => store.getAthleteHostedKey(athleteId)),
+      ).toBeUndefined();
+    },
+  );
 
   it('is the caller’s alone: another rider reads nothing, and clearing theirs leaves it', async () => {
     const synced = await syncWorld(2);
@@ -96,6 +148,7 @@ describe('a rider’s own hosted key (#1199)', () => {
       url: 'https://operator.example/v1',
       model: 'operators',
       setAt: 5,
+      reasoningTokens: null,
       setBy: 'operator-command',
     });
     await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });

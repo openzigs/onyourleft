@@ -31,9 +31,10 @@ const status: Schema = {
         url: { type: 'string' },
         model: { type: 'string' },
         setAt: { type: 'integer' },
+        reasoningTokens: { type: ['integer', 'null'] },
         setBy: { type: 'string', enum: ['app', 'operator-command'] },
       },
-      required: ['url', 'model', 'setAt', 'setBy'],
+      required: ['url', 'model', 'setAt', 'reasoningTokens', 'setBy'],
       additionalProperties: false,
     },
     consent: {
@@ -95,10 +96,15 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/key',
     operationId: 'setHostedModelKey',
     summary:
-      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
+      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. `reasoningTokens` (DRAFT wording) is optional: say your model reasons before it answers, and the tokens one turn may spend on that, 1 to 16384, beside the answer’s own 1 024; absent or null, the instance finds out from the model’s replies. It replaces the figure of any earlier key. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
     request: {
       type: 'object',
-      properties: { url: { type: 'string' }, model: { type: 'string' }, key: { type: 'string' } },
+      properties: {
+        url: { type: 'string' },
+        model: { type: 'string' },
+        key: { type: 'string' },
+        reasoningTokens: { type: ['integer', 'null'] },
+      },
       required: ['url', 'model', 'key'],
       additionalProperties: false,
     },

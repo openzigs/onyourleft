@@ -270,6 +270,20 @@ describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
     }
   });
 
+  it('takes an operator’s reasoning allowance, and turns analysis off for one it cannot read (#1268)', () => {
+    const base = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'm' };
+    const said = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' 3072 ' });
+    expect(said.kind === 'on' && said.reasoningTokens).toBe(3_072);
+    const none = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' ' });
+    expect(none.kind === 'on' && none.reasoningTokens).toBeUndefined();
+    for (const bad of ['0', '-4', '1.5', 'many', '16385', '1e3x']) {
+      expect(
+        readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: bad }),
+        bad,
+      ).toMatchObject({ kind: 'off', code: 'bad-reasoning' });
+    }
+  });
+
   it('refuses a public name and a .local name at reading, and says why', () => {
     for (const url of [
       'https://models.example.com/v1',

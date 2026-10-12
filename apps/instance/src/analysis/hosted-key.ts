@@ -194,6 +194,8 @@ export type HostedKeyState =
       readonly model: string;
       readonly athleteId: string;
       readonly key: string;
+      /** What the rider says a turn may spend reasoning (#1268), when they did. */
+      readonly reasoningTokens?: number;
     };
 
 /** The held key, opened with `secret` if it can be. Never throws for a key it cannot read. */
@@ -213,7 +215,14 @@ async function opened(
   if (secret === undefined) return { kind: 'no-secret', url: held.url, model: held.model };
   const key = await openHostedKey(secret, held);
   if (key === undefined) return { kind: 'unreadable', url: held.url, model: held.model };
-  return { kind: 'held', url: held.url, model: held.model, athleteId: held.athleteId, key };
+  return {
+    kind: 'held',
+    url: held.url,
+    model: held.model,
+    athleteId: held.athleteId,
+    key,
+    ...(held.reasoningTokens === undefined ? {} : { reasoningTokens: held.reasoningTokens }),
+  };
 }
 
 /** The longest model name accepted: the operator command's own bound. */

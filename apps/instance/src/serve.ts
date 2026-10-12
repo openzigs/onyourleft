@@ -38,6 +38,7 @@ const http = readConfig({
   embeddingQueryPrefix: process.env.OYL_INSTANCE_EMBEDDING_QUERY_PREFIX,
   analysisModelUrl: process.env.OYL_INSTANCE_ANALYSIS_MODEL_URL,
   analysisModel: process.env.OYL_INSTANCE_ANALYSIS_MODEL,
+  analysisModelReasoningTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS,
   name: process.env.OYL_INSTANCE_NAME,
 });
 const server = readServerConfig(
