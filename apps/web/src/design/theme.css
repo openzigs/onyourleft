@@ -5163,6 +5163,113 @@ select.oyl-input {
 }
 
 /*
+ * THE RUNNING WORKOUT'S GRAPH (#1307).
+ *
+ * Three lanes, one above another (`workout/workout-graph.ts`): the plan, heart
+ * rate while a hold runs, and the last five minutes. The well is `surface`,
+ * which the graph paints for itself on the Ride screen and on the HUD alike,
+ * so every mark is a pair `tokens.ts` §CONTRAST_REQUIREMENTS already holds
+ * against `surface` or, over a shaded step, against `surfaceRaised`. The
+ * bands, a free ride and the threshold rule are the block chart's own rules
+ * above. `workout/WorkoutGraph.tsx` §WORKOUT_GRAPH_PAINTS is the same table,
+ * held to these rules by its test.
+ *
+ * Nothing is told by colour alone (SC 1.4.1): ridden is an outline and to come
+ * is filled; the target is a shaded step and power a line; the range is a
+ * band with dashed edges and heart rate a line.
+ *
+ * No height here: on the HUD the size is `.oyl-hud__plan-svg`'s, and the border
+ * is inside it (`box-sizing` is `border-box` on everything, at the top of this
+ * file), so the panel is the height the route plan left it (#1169) —
+ * `browser/ride.browser.spec.ts` §"#1307" measures the two against each other.
+ */
+.oyl-workout-graph__svg {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  width: 100%;
+}
+
+.oyl-workout-graph__svg--panel {
+  height: 11rem;
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-workout-graph__key {
+  font-size: var(--oyl-font-size-sm);
+  margin: var(--oyl-space-xs) 0 0;
+}
+
+.oyl-workout-graph__done {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__replaced {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__now {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__now-cap {
+  fill: var(--oyl-color-ink);
+}
+
+.oyl-workout-graph__range {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__range-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__heart-rate {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__target {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__target-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__power {
+  fill: none;
+  stroke: var(--oyl-color-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
  * The ride HUD (#94).
  *
  * Sized for a phone clamped to a handlebar and read at about 60 cm, by a rider

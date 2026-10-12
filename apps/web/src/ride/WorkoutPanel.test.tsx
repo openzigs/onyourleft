@@ -25,6 +25,7 @@ import {
 import { athleteId as toAthleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { workoutGraphText } from '../workout/workout-graph';
 import { workoutStub } from '../workouts/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
@@ -375,5 +376,52 @@ describe('what a stalled rider sees first — #605', () => {
       (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
     expect(follows(end, notice)).toBe(true);
     expect(follows(notice, holding)).toBe(true);
+  });
+});
+
+describe('the running workout as a picture — #1307', () => {
+  it('draws the graph from the snapshot the sentences are written from', async () => {
+    const workout = running({
+      elapsedSeconds: 150,
+      thresholdWatts: 250,
+      trace: [{ at: 150, target: 150, power: 152, heartRate: undefined, range: undefined }],
+    });
+    const view = await render({ workout });
+    const svg = view.container.querySelector('[data-oyl-workout-graph="panel"] svg');
+    expect(svg?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(svg?.getAttribute('aria-label')).toContain('Target the trainer last confirmed: 150 W.');
+    expect(svg?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
+      '0.2500',
+    );
+    expect(svg?.querySelector('.oyl-workout-graph__power')).not.toBeNull();
+  });
+
+  it('keeps every sentence the panel had, and puts the graph after all of them', async () => {
+    const view = await render({ workout: running() });
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Now: 10 min at 60%');
+    expect(text).toContain('Holding 150 W.');
+    const graph = view.container.querySelector('[data-oyl-workout-graph]');
+    const end = buttonSaying(view.container, 'End workout');
+    const holding = queryAll(view.container, 'p').find((p) => p.textContent === 'Holding 150 W.');
+    if (graph === null || end === undefined || holding === undefined) {
+      throw new Error('the panel is missing a part');
+    }
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(end.compareDocumentPosition(graph) & FOLLOWING).toBe(FOLLOWING);
+    expect(holding.compareDocumentPosition(graph) & FOLLOWING).toBe(FOLLOWING);
+  });
+
+  it('draws what the trainer holds when that is not what the plan asks — #1297', async () => {
+    // 60 % of 250 W is 150 W; the trainer confirmed 180 W.
+    const view = await render({ workout: running({ holdingWatts: 180, thresholdWatts: 250 }) });
+    expect(view.container.querySelector('svg[role="img"]')?.getAttribute('aria-label')).toContain(
+      'Target the trainer last confirmed: 180 W, where the plan asks for 150 W.',
+    );
+  });
+
+  it('draws no graph where no workout is running', async () => {
+    const view = await render();
+    expect(view.container.querySelector('[data-oyl-workout-graph]')).toBeNull();
   });
 });

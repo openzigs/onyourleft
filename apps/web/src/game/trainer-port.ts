@@ -85,6 +85,7 @@ import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
 import type { WorkoutHold } from '../workout/hold-text';
+import type { WorkoutGraphInput } from '../workout/workout-graph';
 
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.
@@ -268,6 +269,15 @@ export interface GameTrainerPort {
    */
   workoutHold?(): WorkoutHold | undefined;
   /**
+   * The workout in progress as its graph reads it, or `undefined` when there
+   * is none or it has finished — #1307. The Ride screen's own snapshot object
+   * (`RideWorkoutSnapshot`), so the HUD's strip and the panel's graph are one
+   * picture of one record. Read on every render, like {@link workoutHold},
+   * and for its reason: it decides no write. Optional for that method's
+   * reason too.
+   */
+  runningWorkout?(): WorkoutGraphInput | undefined;
+  /**
    * Whether the ride being RECORDED may stop if the screen goes off — #647,
    * `RideSnapshot.keepAliveFailed`: the platform refused the recording
    * service. `false` with no ride controller, and with no recording.
@@ -359,11 +369,13 @@ interface GameTrainerSource {
   getSnapshot(): {
     readonly trainer: TrainerFacts;
     readonly workout:
-      | {
+      | ({
           readonly status: string;
           readonly rescue: WorkoutRescue | undefined;
           readonly hold?: WorkoutHold | undefined;
-        }
+          // #1307: the rest of what the graph reads. Partial only so a source
+          // with no graph in it need not say; the ride controller says all of it.
+        } & Partial<WorkoutGraphInput>)
       | undefined;
     /** #647. Optional here only so a source with no recording need not say. */
     readonly keepAliveFailed?: boolean;
@@ -381,6 +393,11 @@ interface GameTrainerSource {
   subscribe(listener: () => void): () => void;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+}
+
+/** Whether a source's workout says enough to draw — the ride controller's always does. */
+function isDrawable(workout: Partial<WorkoutGraphInput>): workout is WorkoutGraphInput {
+  return workout.timeline !== undefined && workout.elapsedSeconds !== undefined;
 }
 
 /** What {@link GameTrainerPort.watchRide} returns with no ride controller: nothing to stop. */
@@ -423,6 +440,15 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
     workoutHold: () => controller?.getSnapshot().workout?.hold,
+    runningWorkout: () => {
+      const workout = controller?.getSnapshot().workout;
+      if (workout === undefined || workout.status === 'finished') {
+        return undefined;
+      }
+      // ⚠️ The snapshot's own object, never a copy: the graph memoises its
+      // geometry on it, and the HUD renders on every frame.
+      return isDrawable(workout) ? workout : undefined;
+    },
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);

@@ -1615,3 +1615,92 @@ test(`#1042 — the control — the card after the readings puts Done under the 
   expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
+
+/**
+ * #1307 — the running workout's graph on the Ride screen.
+ *
+ * It is LAST in the workout's section, after every control and sentence
+ * (#605's order), so the fold margins §"a workout eased — #605" holds are
+ * measured with it on the page and are its regression test. What is held here
+ * is the graph itself: laid out at the size `theme.css` gives it, inside its
+ * column, below *End workout*, with every lane drawn — and that it does not
+ * make the page scroll sideways.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test(`the running workout’s graph is drawn in its column, under the controls — #1307 — ${viewport.name}`, async ({
+    page,
+  }) => {
+    await open(page, viewport, '?workout=running');
+    const seen = await page.evaluate(() => {
+      const boxOf = (element: Element | null | undefined) => {
+        if (element === null || element === undefined) return undefined;
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const svg = document.querySelector('[data-oyl-workout-graph="panel"] svg');
+      const section = svg?.closest('section');
+      const end = [...document.querySelectorAll('button')].find(
+        (button) => button.textContent === 'End workout',
+      );
+      const key = document.querySelector('.oyl-workout-graph__key');
+      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return {
+        role: svg?.getAttribute('role') ?? null,
+        name: svg?.getAttribute('aria-label') ?? '',
+        svg: boxOf(svg),
+        section: boxOf(section),
+        end: boxOf(end),
+        key: boxOf(key),
+        keyText: key?.textContent ?? '',
+        keyFontSize: key ? Number.parseFloat(getComputedStyle(key).fontSize) : 0,
+        marks: [...(svg?.querySelectorAll('path') ?? [])].map((path) => ({
+          name: path.getAttribute('class') ?? '',
+          box: boxOf(path),
+        })),
+        rem,
+        sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    if (seen.svg === undefined || seen.section === undefined || seen.end === undefined) {
+      throw new Error('the Ride screen drew no workout graph');
+    }
+    expect(seen.role).toBe('img');
+    expect(seen.name).toContain('Target the trainer last confirmed: 225 W.');
+    // 11 rem tall, as wide as its column, and no wider.
+    expect(Math.abs(seen.svg.height - 11 * seen.rem)).toBeLessThanOrEqual(1);
+    expect(seen.svg.width).toBeGreaterThan(200);
+    expect(seen.svg.left).toBeGreaterThanOrEqual(seen.section.left - 1);
+    expect(seen.svg.right).toBeLessThanOrEqual(seen.section.right + 1);
+    expect(seen.svg.right).toBeLessThanOrEqual(viewport.width);
+    expect(seen.sideways).toBeLessThanOrEqual(0);
+    // Under the control that ends the workout, and the key under the graph.
+    expect(seen.svg.top).toBeGreaterThanOrEqual(seen.end.bottom);
+    expect(seen.key?.top ?? 0).toBeGreaterThanOrEqual(seen.svg.bottom);
+    expect(seen.keyText).toContain('Top: the whole workout.');
+    expect(seen.keyFontSize).toBeGreaterThanOrEqual(12);
+    // Drawn: the plan ridden and to come, now, the target and the power.
+    for (const name of [
+      'oyl-workout-graph__done',
+      'oyl-workout-graph__now',
+      'oyl-workout-graph__target',
+      'oyl-workout-graph__target-edge',
+      'oyl-workout-graph__power',
+    ]) {
+      const box = seen.marks.find((each) => each.name === name)?.box;
+      expect(box, name).toBeDefined();
+      expect(box?.height ?? 0, name).toBeGreaterThan(name.endsWith('target-edge') ? -1 : 2);
+      expect(box?.left ?? -1, name).toBeGreaterThanOrEqual(seen.svg.left - 1);
+      expect(box?.right ?? Infinity, name).toBeLessThanOrEqual(seen.svg.right + 1);
+    }
+    console.log(
+      `#1307 the workout graph — ${viewport.name}: ${seen.svg.width.toFixed(1)} × ${seen.svg.height.toFixed(1)} px, ${(seen.svg.top - seen.end.bottom).toFixed(1)} px under End workout`,
+    );
+  });
+}

@@ -111,6 +111,7 @@ import {
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
+import { heldInstead, TRACE_MAX_SAMPLES } from '../workout/workout-graph';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
@@ -7397,6 +7398,47 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     return state.kind === 'live' ? state.value : undefined;
   };
 
+  it('gives the graph the hold’s range, the heart rate and the target it set — #1307', async () => {
+    const rig = await holding();
+    await ride(rig, 6 * 60);
+    await flushMicrotasks(20);
+
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    const last = trace.at(-1);
+    expect(last?.range).toEqual({ low: 130, high: 140 });
+    expect(last?.heartRate).toBe(heartRateNow(rig));
+    expect(last?.heartRate).toBeGreaterThan(80);
+    // The hold has been moving the target, and the trace has more than one of them.
+    expect(new Set(trace.map((each) => each.target)).size).toBeGreaterThan(1);
+    rig.controller.dispose();
+  });
+
+  it('gives the graph no heart rate once the strap has gone quiet, never its last one — #1307', async () => {
+    const rig = await holding();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().workout?.trace?.at(-1)?.heartRate).toBe(heartRateNow(rig));
+    expect(heartRateNow(rig)).toBeGreaterThan(0);
+
+    await rig.controller.unpair(STRAP);
+    await ride(rig, METRIC_STALE_AFTER_SECONDS + 2);
+    const last = rig.controller.getSnapshot().workout?.trace?.at(-1);
+    expect(last?.heartRate).toBeUndefined();
+    // Power is still live beside it: one channel going quiet is one gap.
+    expect(last?.power).toBeGreaterThan(0);
+    rig.controller.dispose();
+  });
+
+  it('gives the graph no range while the hold is off for want of a strap — #1307', async () => {
+    const rig = await holding({ strap: false });
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((each) => each.range === undefined)).toBe(true);
+    expect(trace.every((each) => each.heartRate === undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
   it('trainer receives the hold’s targets: every one inside the envelope, and the heart rate ends inside the range', async () => {
     const rig = await holding();
     await ride(rig, 12 * 60);
@@ -7527,6 +7569,162 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     await flushMicrotasks(20);
     expect(targetsSent(rig, before)).not.toContain(200);
     expect(rig.controller.getSnapshot().trainer.refusal).toBeDefined();
+    rig.controller.dispose();
+  });
+});
+
+// --- The running workout's graph (#1307) -------------------------------------
+
+describe('#1307 — what the workout’s graph is drawn from, through the real controller', () => {
+  const savedWorkout = (blocks: readonly WorkoutBlock[]): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name: 'Test',
+    workout: { name: 'Test', blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+  const steadyWorkout = (): WorkoutRecord =>
+    savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }]);
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith(options);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('carries the threshold the workout was started with', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.thresholdWatts).toBe(250);
+    rig.controller.dispose();
+  });
+
+  it('samples once a second of the workout’s own clock: the acknowledged target and live power', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual([]);
+
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+
+    const workout = rig.controller.getSnapshot().workout;
+    const trace = workout?.trace ?? [];
+    // One per tick, each later than the last, and the newest is this second.
+    // (Not 1…6: this bench's simulator advances its clock a second on a write.)
+    const times = trace.map((each) => each.at);
+    expect(times).toHaveLength(6);
+    expect(times).toEqual([...new Set(times)].sort((a, b) => a - b));
+    expect(times.at(-1)).toBe(workout?.elapsedSeconds);
+    const last = trace.at(-1);
+    // What the TRAINER holds, read back off the machine, and the screen's own figure.
+    expect(last?.target).toBe(rig.targetOnTheTrainer());
+    expect(last?.target).toBe(workout?.holdingWatts);
+    const power = metric(rig, 'power');
+    expect(power.kind).toBe('live');
+    expect(last?.power).toBe(power.kind === 'live' ? power.value : undefined);
+    // No strap and no hold: neither is invented.
+    expect(last?.heartRate).toBeUndefined();
+    expect(last?.range).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('records a target raised to the trainer’s minimum as the minimum — #1297', async () => {
+    // 30 % of 250 W is 75 W; this machine's minimum is 100 W.
+    const rig = await riding({ machine: { minTargetPower: watts(100) } });
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.3) }]),
+      watts(250),
+    );
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    const workout = rig.controller.getSnapshot().workout;
+    expect(workout?.trace?.at(-1)?.target).toBe(100);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    // And the graph, drawn from that snapshot, says both numbers.
+    if (workout === undefined) throw new Error('no workout');
+    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75 });
+    rig.controller.dispose();
+  });
+
+  it('adds nothing while the workout is paused, and carries on after', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 3);
+    await rig.controller.pause();
+    await ride(rig, 1);
+    const paused = rig.controller.getSnapshot().workout?.trace ?? [];
+    await ride(rig, 20);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('paused');
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual(paused);
+
+    await rig.controller.resume();
+    await ride(rig, 3);
+    const after = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(after.length).toBeGreaterThan(paused.length);
+    // The workout's clock, so the pause leaves no gap and no step back.
+    const times = after.map((each) => each.at);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(new Set(times).size).toBe(times.length);
+    rig.controller.dispose();
+  });
+
+  it('adds nothing once the workout has finished', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(3), target: thresholdShare(0.6) }]),
+      watts(250),
+    );
+    await ride(rig, 6);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('finished');
+    const finished = rig.controller.getSnapshot().workout?.trace;
+    expect(finished?.length).toBeGreaterThan(0);
+
+    // The ride goes on, and so does the tick. `toBe`: not one sample replaced.
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().workout?.trace).toBe(finished);
+    rig.controller.dispose();
+  });
+
+  it('is bounded however long the workout runs', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(3600), target: thresholdShare(0.6) }]),
+      watts(250),
+    );
+    await ride(rig, TRACE_MAX_SAMPLES + 40);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBe(TRACE_MAX_SAMPLES);
+    expect(trace.at(-1)?.at).toBe(rig.controller.getSnapshot().workout?.elapsedSeconds);
+    rig.controller.dispose();
+  });
+
+  it('starts a new workout with an empty trace', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 4);
+    expect(rig.controller.getSnapshot().workout?.trace?.length).toBe(4);
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('writes nothing to the trainer for it', async () => {
+    // The same ride with and without anyone reading the trace: the wire is the
+    // wire. What is asserted is that sampling is not a write — a steady block
+    // is one Set Target Power however many samples are taken.
+    const rig = await riding();
+    const before = rig.written.length;
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 30);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().workout?.trace?.length).toBe(30);
+    expect(rig.written.slice(before).filter((write) => write[0] === 0x05)).toHaveLength(1);
     rig.controller.dispose();
   });
 });

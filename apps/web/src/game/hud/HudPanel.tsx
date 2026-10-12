@@ -73,6 +73,9 @@ import {
   type ReadingTier,
   type TrainerLine,
 } from './fields';
+import { WorkoutGraph } from '../../workout/WorkoutGraph';
+import type { WorkoutGraphInput } from '../../workout/workout-graph';
+
 import { PlanTrace } from './PlanTrace';
 
 /**
@@ -116,6 +119,11 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * rather than a tenth grid field.
    */
   readonly trainer?: TrainerLine | undefined;
+  /**
+   * The workout in progress, for its graph — #1307. `undefined` on an
+   * ordinary game ride, which draws the route plan as it always has.
+   */
+  readonly workout?: WorkoutGraphInput | undefined;
   /**
    * Anything the ride has to *say* — a fault, a road that is not reaching the
    * trainer — laid out by the HUD so that it cannot land on a panel (#423).
@@ -235,7 +243,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           through `plan.ts` §`planProgress`; before it, the strip clamped and
           this comment recorded why the plan view could not read its number.
         */}
-        <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+        {props.workout === undefined ? (
+          <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+        ) : (
+          // #1307: while a workout runs, its graph takes the route plan's
+          // place and its size — `oyl-hud__plan-svg` sizes both — so this
+          // panel is the height it was and covers no more of the rider
+          // (#1169). The workout owns the trainer then, so the road's shape
+          // is not what sets the resistance; the elevation strip above stays.
+          <div className="oyl-hud__plan">
+            <WorkoutGraph workout={props.workout} variant="hud" />
+          </div>
+        )}
       </div>
 
       <div className="oyl-hud__panel oyl-hud__actions">

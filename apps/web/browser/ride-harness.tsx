@@ -77,9 +77,12 @@ import {
   buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   kilograms,
   routeProfile,
+  seconds,
+  thresholdShare,
   watts,
   type RoutePoint,
   type RouteProfile,
@@ -97,6 +100,7 @@ import {
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
@@ -526,8 +530,44 @@ const RACE_PORTS =
         },
       };
 
+/**
+ * `?graph=hold`: the running workout as the HUD's graph reads it (#1307), in a
+ * heart-rate hold — the TALLEST drawing, three lanes — with a trace that fills
+ * its window. Fixed numbers, so two loads measure the same picture. Paired
+ * with `?trainer=workout`, whose route panel it is drawn in.
+ */
+const GRAPH: WorkoutGraphInput | undefined =
+  new URLSearchParams(window.location.search).get('graph') === 'hold'
+    ? {
+        elapsedSeconds: 900,
+        timeline: expandWorkout({
+          name: 'Hold',
+          blocks: [
+            { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+            { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
+            {
+              kind: 'ramp',
+              seconds: seconds(600),
+              from: thresholdShare(0.7),
+              to: thresholdShare(0.4),
+            },
+          ],
+        }),
+        holdingWatts: 165,
+        thresholdWatts: 250,
+        trace: Array.from({ length: 300 }, (_, index) => ({
+          at: 601 + index,
+          target: 175 - Math.floor(index / 60) * 2,
+          power: 170 + Math.round(8 * Math.sin(index / 9)),
+          heartRate: 128 + Math.round(index / 25),
+          range: { low: 130, high: 140 },
+        })),
+      }
+    : undefined;
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  runningWorkout: () => GRAPH,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,

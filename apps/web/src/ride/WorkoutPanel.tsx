@@ -91,6 +91,7 @@ import {
   workoutRescueHeadline,
 } from '../workout/rescue-text';
 import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
+import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -353,6 +354,14 @@ export function WorkoutPanel({
               ? `Holding ${String(workout.holdingWatts)} W.`
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
+        {/*
+          #1307: the same workout as a picture — the plan, where the rider is
+          in it, and the last few minutes of target and power. LAST, after
+          every control and every sentence (#605's order: press, wrong, read),
+          and it replaces none of them. `workout/workout-graph.ts` says what
+          each part is.
+        */}
+        <WorkoutGraph workout={workout} />
       </section>
     );
   }

@@ -2007,6 +2007,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // #422). `hud/fields.ts` §`TrainerLine` argues the placement and says
         // what did fix it; `browser/ride.browser.spec.ts` measures it.
         trainer={trainerReading(gradient) ?? holdLineOf(props.trainer?.workoutHold?.())}
+        // #1307: the running workout as a picture, where the route plan is
+        // on an ordinary ride. The Ride screen's own snapshot, read through
+        // the port like the hold above; it draws and decides nothing.
+        workout={props.trainer?.runningWorkout?.()}
         // #551: the side camera's one line and its Stop. A lost link on an
         // OPEN pairing is not here but in `notices` below — it is the
         // exception, and a steady "filming" in the notice slot would take a

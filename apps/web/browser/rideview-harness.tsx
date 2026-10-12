@@ -95,6 +95,7 @@ import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
 import type { WorkoutHold } from '../src/workout/hold-text';
+import type { WorkoutTraceSample } from '../src/workout/workout-graph';
 import { workoutStub } from '../src/workouts/testing';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -179,6 +180,21 @@ const HOLD_WORKOUT = {
     ],
   },
 };
+
+/**
+ * #1307: the last five minutes the running workout's graph draws, full to its
+ * window and ending at the stub's `elapsedSeconds` (312). Fixed numbers, so
+ * two loads measure one picture.
+ */
+function graphTrace(target: number): readonly WorkoutTraceSample[] {
+  return Array.from({ length: 300 }, (_, index) => ({
+    at: 13 + index,
+    target,
+    power: Math.max(0, target + Math.round(8 * Math.sin(index / 9))),
+    heartRate: undefined,
+    range: undefined,
+  }));
+}
 
 const FLOOR: WorkoutRescue = {
   kind: 'floor',
@@ -354,6 +370,8 @@ function snapshot(): RideSnapshot {
         rescue: undefined,
         hold: HOLD,
         timeline: expandWorkout(HOLD_WORKOUT.workout),
+        thresholdWatts: 250,
+        trace: graphTrace(HOLD.target),
       },
     };
   }
@@ -372,6 +390,8 @@ function snapshot(): RideSnapshot {
       fault: undefined,
       rescue: WORKOUT_STATE === 'eased' ? FLOOR : undefined,
       timeline: expandWorkout(WORKOUT.workout),
+      thresholdWatts: 250,
+      trace: graphTrace(WORKOUT_STATE === 'eased' ? 0 : 225),
     },
   };
 }
