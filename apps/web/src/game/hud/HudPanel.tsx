@@ -73,10 +73,9 @@ import {
   type ReadingTier,
   type TrainerLine,
 } from './fields';
+import { PlanTrace } from './PlanTrace';
 import { WorkoutGraph } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
-
-import { PlanTrace } from './PlanTrace';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.

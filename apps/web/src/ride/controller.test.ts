@@ -7651,7 +7651,7 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     rig.controller.dispose();
   });
 
-  it('adds nothing while the workout is paused, and carries on after', async () => {
+  it('adds nothing while the ride is paused (the tick is not called), and carries on after', async () => {
     const rig = await riding();
     rig.controller.startWorkout(steadyWorkout(), watts(250));
     await ride(rig, 3);
@@ -7670,6 +7670,27 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     const times = after.map((each) => each.at);
     expect(times).toEqual([...times].sort((a, b) => a - b));
     expect(new Set(times).size).toBe(times.length);
+    rig.controller.dispose();
+  });
+
+  it('samples no target once trainer control is lost: the last write is not a confirmed target — #1307', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    expect(rig.controller.getSnapshot().workout?.trace?.at(-1)?.target).toBeDefined();
+
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    const before = rig.controller.getSnapshot().workout?.trace?.length ?? 0;
+    await ride(rig, 4);
+
+    const after = (rig.controller.getSnapshot().workout?.trace ?? []).slice(before);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((each) => each.target === undefined)).toBe(true);
     rig.controller.dispose();
   });
 

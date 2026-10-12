@@ -498,7 +498,8 @@ function heartRateLane(
     ((at - (end - TRACE_WINDOW_SECONDS)) / TRACE_WINDOW_SECONDS) * CHART_WIDTH;
   const y = (bpm: number): number =>
     HEART_RATE_LANE_HEIGHT - ((bpm - low) / (high - low)) * HEART_RATE_LANE_HEIGHT;
-  const valid = (sample: WorkoutTraceSample): boolean => ranged.includes(sample);
+  const rangedSet = new Set(ranged);
+  const valid = (sample: WorkoutTraceSample): boolean => rangedSet.has(sample);
   const band = steps(
     samples,
     (sample) => (valid(sample) ? y(sample.range?.high ?? 0) : undefined),

@@ -2510,7 +2510,9 @@ export function createRideController(options: RideControllerOptions): RideContro
     const hold = state.player.hold;
     current.trace = withTraceSample(current.trace, {
       at: state.player.elapsed,
-      target: state.holding,
+      // No control, no confirmed target: `holding` outlives a lost link (the
+      // panel says "last set to"), and the graph's lane is the confirmed one.
+      target: control()?.hasControl() === true ? state.holding : undefined,
       power: liveReading('power', at),
       heartRate: liveReading('heart-rate', at),
       range:
