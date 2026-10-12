@@ -430,7 +430,15 @@ describe('the safety criteria, by name — #1242', () => {
             // P4: never more than 10 % above the share it joined the plan with.
             expect(value).toBeLessThanOrEqual((sharesOf(entry.base)[at] ?? 0) * 1.1 + EPSILON);
           }
-          expect(entry.percent).toBeLessThanOrEqual(10);
+          if (swappedIn && old !== undefined && sharesOf(entry.block).length > 0) {
+            // P4, #1296: a swap raises the highest share by 5 % at most.
+            expect(Math.max(...sharesOf(entry.block))).toBeLessThanOrEqual(
+              Math.max(...sharesOf(old.block)) * 1.05 + EPSILON,
+            );
+          }
+          for (const percent of entry.percents) {
+            expect(entry.carried + percent).toBeLessThanOrEqual(10 + EPSILON);
+          }
         }
 
         const totalAfter = totalOf(next.map((entry) => entry.block));
@@ -501,7 +509,7 @@ describe('the safety criteria, by name — #1242', () => {
     }
     // +5 % twice is the whole +10 %; every later scale was refused.
     expect(scales).toBe(2);
-    expect(plan.blocks[1]?.percent).toBe(10);
+    expect(plan.blocks[1]?.percents).toStrictEqual([10]);
     expect(sharesOf(plan.blocks[1]?.block as WorkoutBlock)[0]).toBeCloseTo(0.77, 12);
     expect(
       ruleOf(later({ kind: 'scale-remaining-intervals', percent: 5 }, plan), after(plan, 9000)),
@@ -655,11 +663,12 @@ describe('the safety criteria, by name — #1242', () => {
 
   it('a swap that makes a plan too long to ride is refused', () => {
     // 49 blocks of 100 repeats is 9 800 segments; one more such block is over the 10 000.
+    // Its peak is the 0.7 of the block it replaces: the plan's length is what refuses it.
     const many: WorkoutBlock = {
       kind: 'intervals',
       repeats: 100,
       hardSeconds: seconds(1),
-      hardTarget: share(0.9),
+      hardTarget: share(0.7),
       easySeconds: seconds(1),
       easyTarget: share(0.5),
     };
@@ -776,7 +785,8 @@ describe('decodeProposal — P1', () => {
 });
 
 describe('validateProposal — the rules a refusal names', () => {
-  const shorten = { kind: 'shorten-block', block: 1, minutes: 1 };
+  // Block 4 is followed by a free ride, so shortening it is not a harder move (#1296).
+  const shorten = { kind: 'shorten-block', block: 4, minutes: 1 };
 
   it('P7: off unless switched on for the ride', () => {
     expect(ruleOf(proposalOf(shorten))).toBe('accepted');
@@ -1025,7 +1035,7 @@ describe('validateProposal — the rules a refusal names', () => {
     expect(steps[1]).toBe(0.7);
     expect(steps[2]).toBeCloseTo(0.735, 12);
     expect(steps[3]).toBeCloseTo(0.77, 12);
-    expect(plan.blocks[1]?.percent).toBe(10);
+    expect(plan.blocks[1]?.percents).toStrictEqual([10]);
     // The plan keeps the share each block joined with.
     expect(plan.blocks[1]?.base).toBe(LOADED.blocks[1]);
   });
@@ -1118,7 +1128,7 @@ describe('validateProposal — the rules a refusal names', () => {
   });
 
   it('an accepted move is the next revision, and its workout is the plan the player reads', () => {
-    const result = accepted(proposalOf({ kind: 'shorten-block', block: 1, minutes: 2 }));
+    const result = accepted(proposalOf({ kind: 'shorten-block', block: 4, minutes: 2 }));
     expect(result.plan.revision).toBe(1);
     expect(result.plan.loaded).toBe(LOADED);
     expect(result.plan.lastAcceptedAt).toBe(NOW);
@@ -1128,5 +1138,297 @@ describe('validateProposal — the rules a refusal names', () => {
     expect(result.workout.name).toBe('Over-unders');
     expect(planWorkout(loadPlan(LOADED))).toStrictEqual(LOADED);
     expect(() => loadPlan({ name: 'Empty', blocks: [] })).toThrow(/at least one block/);
+  });
+});
+
+describe("the owner's rulings of 2026-10-12 — #1296", () => {
+  const scale = (percent: number) => ({ kind: 'scale-remaining-intervals', percent });
+  const swapOf = (workoutId: string, blockIndex: number) => ({
+    kind: 'swap-next-block',
+    workoutId,
+    blockIndex,
+  });
+  const steady = (target: number, length = 600): WorkoutBlock => ({
+    kind: 'steady',
+    seconds: seconds(length),
+    target: share(target),
+  });
+  const WARM_UP = steady(0.5);
+  const COOL_DOWN = steady(0.45);
+
+  /** Moves made 1 000 s apart, each on the plan the one before it made. */
+  function sequence(
+    workout: Workout,
+    moves: readonly unknown[],
+    overrides: Partial<PlanState> = {},
+  ): PlanRevision {
+    let plan = loadPlan(workout);
+    for (const [index, move] of moves.entries()) {
+      const at = 2000 + index * 1000;
+      plan = accepted(later(move, plan), after(plan, at, overrides)).plan;
+    }
+    return plan;
+  }
+
+  const targetsOf = (plan: PlanRevision): number[][] =>
+    plan.blocks.map((entry) => sharesOf(entry.block));
+
+  describe('an easier move takes full effect after a harder one that changed nothing', () => {
+    // The issue's own measurement: steady 0.7, 0.8 (the loaded peak) and 0.4.
+    const PEAKED: Workout = {
+      name: 'Peaked',
+      blocks: [WARM_UP, steady(0.7), steady(0.8), steady(0.4), COOL_DOWN],
+    };
+
+    it('eases the peak block by the whole of a −5 that follows a +5', () => {
+      const alone = targetsOf(sequence(PEAKED, [scale(-5)]));
+      expect(alone[1]?.[0]).toBeCloseTo(0.665, 12);
+      expect(alone[2]?.[0]).toBeCloseTo(0.76, 12);
+      expect(alone[3]?.[0]).toBeCloseTo(0.38, 12);
+
+      const raised = sequence(PEAKED, [scale(5)]);
+      // The peak block was asked for more and given none: its count has not moved.
+      expect(targetsOf(raised)[2]).toStrictEqual([0.8]);
+      expect(raised.blocks[2]?.percents).toStrictEqual([0]);
+      expect(raised.blocks[1]?.percents).toStrictEqual([5]);
+
+      const eased = targetsOf(sequence(PEAKED, [scale(5), scale(-5)]));
+      expect(eased[1]?.[0]).toBe(0.7);
+      expect(eased[2]?.[0]).toBeCloseTo(0.76, 12);
+      expect(eased[3]?.[0]).toBe(0.4);
+
+      const easedTwice = targetsOf(sequence(PEAKED, [scale(5), scale(-10)]));
+      expect(easedTwice[2]?.[0]).toBeCloseTo(0.72, 12);
+    });
+
+    it('counts each share of a block on its own', () => {
+      // Intervals 0.9 / 0.5 are the loaded peak: +5 raises only the easy share.
+      const raised = sequence(LOADED, [scale(5)]);
+      expect(raised.blocks[2]?.percents).toStrictEqual([0, 5]);
+      const eased = targetsOf(sequence(LOADED, [scale(5), scale(-5)]));
+      expect(eased[2]?.[0]).toBeCloseTo(0.855, 12);
+      expect(eased[2]?.[1]).toBe(0.5);
+    });
+
+    it('keeps the change a share reached when a bound stopped it part of the way', () => {
+      // 0.78 can rise to the loaded peak of 0.8 and no further: 2.56 points, not 5.
+      const near: Workout = {
+        name: 'Near',
+        blocks: [WARM_UP, steady(0.78), steady(0.8), COOL_DOWN],
+      };
+      const raised = sequence(near, [scale(5)]);
+      expect(targetsOf(raised)[1]).toStrictEqual([0.8]);
+      expect(raised.blocks[1]?.percents[0]).toBeCloseTo((0.8 / 0.78 - 1) * 100, 9);
+      // −5 is then 5 points of 0.78 below what is ridden.
+      const eased = targetsOf(sequence(near, [scale(5), scale(-5)]));
+      expect(eased[1]?.[0]).toBeCloseTo(0.8 - 0.05 * 0.78, 12);
+    });
+
+    it('does not spend the +10 % on a rise that did not happen', () => {
+      // Two +5 moves: 0.7 reaches the loaded peak of 0.75 on the second, and the
+      // peak block itself is never raised.
+      const one: Workout = {
+        name: 'One',
+        blocks: [WARM_UP, steady(0.7), steady(0.4), steady(0.75), COOL_DOWN],
+      };
+      const plan = sequence(one, [scale(5), scale(5)]);
+      expect(targetsOf(plan)[1]).toStrictEqual([0.75]);
+      expect(plan.blocks[1]?.percents[0]).toBeCloseTo((0.75 / 0.7 - 1) * 100, 9);
+      expect(plan.blocks[2]?.percents).toStrictEqual([10]);
+      expect(plan.blocks[3]?.percents).toStrictEqual([0]);
+      // The 0.4 block is at +10: a third rise is over the allowance.
+      expect(ruleOf(later(scale(5), plan), after(plan, 9000))).toBe('P4');
+    });
+
+    it('takes a harder move in full after a cut the floor stopped', () => {
+      const low: Workout = { name: 'Low', blocks: [WARM_UP, steady(0.21), COOL_DOWN] };
+      const cut = sequence(low, [scale(-10)]);
+      expect(targetsOf(cut)[1]).toStrictEqual([0.2]);
+      expect(cut.blocks[1]?.percents[0]).toBeCloseTo((0.2 / 0.21 - 1) * 100, 9);
+      const back = targetsOf(sequence(low, [scale(-10), scale(5)]));
+      expect(back[1]?.[0]).toBeCloseTo(0.2 + 0.05 * 0.21, 12);
+    });
+  });
+
+  describe('ruling 2: a swap is bound by +5 % a move and +10 % in total', () => {
+    const saved = (...targets: number[]): readonly SavedWorkout[] => [
+      { id: 's', workout: { name: 'S', blocks: targets.map((target) => steady(target)) } },
+    ];
+    // The loaded steady peak is 1.0, so P3 refuses none of these.
+    const ROOMY: Workout = {
+      name: 'Roomy',
+      blocks: [
+        WARM_UP,
+        steady(0.7),
+        steady(1),
+        { kind: 'free-ride', seconds: seconds(600) },
+        COOL_DOWN,
+      ],
+    };
+    const at = (position: number, library: readonly SavedWorkout[], plan = loadPlan(ROOMY)) =>
+      stateOf({ plan, position: seconds(position), library });
+
+    it('refuses a rise of more than 5 % over the block it replaces', () => {
+      const library = saved(0.8, 0.735, 0.736, 0.6);
+      const rule = (blockIndex: number) =>
+        ruleOf(proposalOf(swapOf('s', blockIndex)), { state: at(100, library) });
+      // 0.7 for the loaded 0.8 was accepted before #1296: 14 % in one move.
+      expect(rule(0)).toBe('P4');
+      // Exactly +5 %, which 0.735 / 0.7 is only to within rounding.
+      expect(rule(1)).toBe('accepted');
+      expect(rule(2)).toBe('P4');
+      expect(rule(3)).toBe('accepted');
+    });
+
+    it('counts the rise, and what the replaced block was raised by, toward the +10 %', () => {
+      const library = saved(0.77, 0.772, 0.7);
+      const state = (plan: PlanRevision) => ({ library, plan });
+      // +5 % by a scale: 0.735. A swap to 0.77 is 4.76 more, 9.76 in all.
+      const raised = sequence(ROOMY, [scale(5)], { library });
+      expect(raised.blocks[1]?.percents).toStrictEqual([5]);
+      const swapped = accepted(later(swapOf('s', 0), raised), after(raised, 9000, state(raised)));
+      const entry = swapped.plan.blocks[1];
+      expect(entry?.block).toStrictEqual(steady(0.77));
+      expect(entry?.percents).toStrictEqual([0]);
+      expect(entry?.carried).toBeCloseTo(5 + (0.77 / 0.735 - 1) * 100, 9);
+      // 0.772 is 5.03 % over 0.735: over a move's +5 %.
+      expect(ruleOf(later(swapOf('s', 1), raised), after(raised, 9000, state(raised)))).toBe('P4');
+
+      // The count did not go back to 0: another +5 % would be 14.76.
+      const plan = swapped.plan;
+      expect(ruleOf(later(scale(5), plan), after(plan, 12000, state(plan)))).toBe('P4');
+      // An easier move is still taken, in full, from the share swapped in.
+      const eased = accepted(later(scale(-5), plan), after(plan, 12000, state(plan)));
+      expect(sharesOf(eased.plan.blocks[1]?.block as WorkoutBlock)[0]).toBeCloseTo(0.7315, 12);
+
+      // At +10 by scales, a swap may not rise at all, and a fall earns nothing back.
+      const full = sequence(ROOMY, [scale(5), scale(5)], { library });
+      expect(ruleOf(later(swapOf('s', 1), full), after(full, 9000, state(full)))).toBe('P4');
+      const fallen = accepted(later(swapOf('s', 2), full), after(full, 9000, state(full)));
+      expect(fallen.plan.blocks[1]?.carried).toBe(10);
+      expect(
+        ruleOf(later(scale(5), fallen.plan), after(fallen.plan, 12000, state(fallen.plan))),
+      ).toBe('P4');
+    });
+
+    it('carries the count from one swap to the next in the same place', () => {
+      const library = saved(0.735, 0.77, 0.8);
+      const state = (plan: PlanRevision) => ({ library, plan });
+      // +5 %, then +4.76 %: 9.76 in all.
+      const twice = sequence(ROOMY, [swapOf('s', 0), swapOf('s', 1)], { library });
+      expect(twice.blocks[1]?.block).toStrictEqual(steady(0.77));
+      expect(twice.blocks[1]?.carried).toBeCloseTo(5 + (0.77 / 0.735 - 1) * 100, 9);
+      // 0.8 is 3.9 % over 0.77, a move's worth, and 13.66 % over the loaded 0.7.
+      expect(ruleOf(later(swapOf('s', 2), twice), after(twice, 9000, state(twice)))).toBe('P4');
+    });
+
+    it('refuses a block with a target in place of a free ride, and is a harder move', () => {
+      const library = saved(0.3);
+      // 1 300 s: riding the 1.0 block, and the next block is the free ride.
+      expect(ruleOf(proposalOf(swapOf('s', 0)), { state: at(1300, library) })).toBe('P4');
+      // An easier block is still a harder move: it starts P4's ten minutes.
+      const easier = accepted(proposalOf(swapOf('s', 0)), { state: at(100, library) });
+      expect(easier.plan.lastHarderAt).toBe(NOW);
+    });
+
+    it('lets a hold swapped in for a hold raise the range by 5 bpm at most', () => {
+      const hold = (low: number, high: number): WorkoutBlock => ({
+        kind: 'heart-rate-hold',
+        seconds: seconds(600),
+        range: { low: beatsPerMinute(low), high: beatsPerMinute(high) },
+        startShare: share(0.6),
+        ceilingShare: share(0.7),
+      });
+      const holds: Workout = {
+        name: 'Holds',
+        blocks: [WARM_UP, hold(120, 130), hold(130, 140), COOL_DOWN],
+      };
+      const library: readonly SavedWorkout[] = [
+        { id: 'h', workout: { name: 'H', blocks: [hold(125, 135), hold(126, 136)] } },
+      ];
+      const state = stateOf({ plan: loadPlan(holds), library });
+      expect(ruleOf(proposalOf(swapOf('h', 0)), { state })).toBe('accepted');
+      // 136 is inside the highest range loaded (140), and 6 above the hold it replaces.
+      expect(ruleOf(proposalOf(swapOf('h', 1)), { state })).toBe('P4');
+    });
+  });
+
+  it('ruling 3: shortening a recovery is a harder move', () => {
+    const shortenOf = (block: number) => ({ kind: 'shorten-block', block, minutes: 1 });
+    const harderAt = (block: number, position = 100) =>
+      accepted(proposalOf(shortenOf(block)), { state: stateOf({ position: seconds(position) }) })
+        .plan.lastHarderAt;
+    // 0.7 before intervals that reach 0.9.
+    expect(harderAt(1)).toBe(NOW);
+    // The hold starts at 0.6, before 0.8.
+    expect(harderAt(3)).toBe(NOW);
+    // 0.8 before a free ride, which asks for nothing.
+    expect(harderAt(4)).toBeUndefined();
+    // A free ride before the cool-down's 0.45.
+    expect(harderAt(5)).toBe(NOW);
+    // A block as hard as the one after it is not a recovery.
+    const level = loadPlan({
+      name: 'Level',
+      blocks: [WARM_UP, steady(0.7), steady(0.7), COOL_DOWN],
+    });
+    expect(
+      accepted(proposalOf(shortenOf(1)), { state: stateOf({ plan: level }) }).plan.lastHarderAt,
+    ).toBeUndefined();
+
+    // A ramp from 0.4 to 0.8 before 0.7: its lowest share is what is compared.
+    const ramped = loadPlan({
+      name: 'Ramped',
+      blocks: [
+        WARM_UP,
+        { kind: 'ramp', seconds: seconds(600), from: share(0.4), to: share(0.8) },
+        steady(0.7),
+        COOL_DOWN,
+      ],
+    });
+    expect(
+      accepted(proposalOf(shortenOf(1)), { state: stateOf({ plan: ramped }) }).plan.lastHarderAt,
+    ).toBe(NOW);
+
+    // Bound as a harder move is: one in ten minutes.
+    const first = accepted(proposalOf({ kind: 'scale-remaining-intervals', percent: 5 }));
+    const recovery = later(shortenOf(1), first.plan);
+    expect(ruleOf(recovery, after(first.plan, NOW + 599))).toBe('P4');
+    expect(ruleOf(recovery, after(first.plan, NOW + 600))).toBe('accepted');
+    expect(ruleOf(later(shortenOf(4), first.plan), after(first.plan, NOW + 599))).toBe('accepted');
+    // And it starts the ten minutes for the next one.
+    const shortened = accepted(proposalOf(shortenOf(1)));
+    expect(ruleOf(later(scale(5), shortened.plan), after(shortened.plan, NOW + 599))).toBe('P4');
+  });
+
+  it('ruling 4: a free ride is swapped in with none loaded, and no other kind is', () => {
+    const plain: Workout = { name: 'Plain', blocks: [WARM_UP, steady(0.7), COOL_DOWN] };
+    const library: readonly SavedWorkout[] = [
+      {
+        id: 'f',
+        workout: {
+          name: 'F',
+          blocks: [
+            { kind: 'free-ride', seconds: seconds(300) },
+            { kind: 'ramp', seconds: seconds(300), from: share(0.4), to: share(0.6) },
+          ],
+        },
+      },
+    ];
+    const state = stateOf({ plan: loadPlan(plain), library });
+    const free = accepted(proposalOf(swapOf('f', 0)), { state });
+    expect(free.workout.blocks[1]).toStrictEqual({ kind: 'free-ride', seconds: 300 });
+    expect(ruleOf(proposalOf(swapOf('f', 1)), { state })).toBe('P3');
+  });
+
+  it("ruling 5: the machine's minimum is not read", () => {
+    // Threshold 200 W and a trainer that goes no lower than 100 W: −10 % of 0.4 is 72 W.
+    const light: Workout = { name: 'Light', blocks: [WARM_UP, steady(0.4), COOL_DOWN] };
+    const result = accepted(proposalOf(scale(-10)), {
+      state: stateOf({ plan: loadPlan(light) }),
+      athlete: { ...ATHLETE, thresholdPower: watts(200) },
+      machine: { minimum: watts(100), maximum: watts(1000) },
+    });
+    const target = sharesOf(result.workout.blocks[1] as WorkoutBlock)[0] ?? 0;
+    expect(target * 200).toBeCloseTo(72, 9);
   });
 });

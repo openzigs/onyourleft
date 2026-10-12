@@ -507,3 +507,65 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   spike's ten rules (R1 to R10) are owned by the issues its §6 names, the heart-rate hold's among
   them: #1236 (R6), #1239 (R2, R10), #1242 to #1244 and #1245 (R2). Option H is #1243's to decide.
   Its §8 Questions A and B are put to the owner. (#1234)
+- **2026-10-12** — **D-4's P1 and D-6's P3 and P4 leave eleven things open, which the owner ruled on
+  that day on [#1296](https://github.com/openzigs/onyourleft/issues/1296); and D-6's *"Easier moves
+  are bounded by H3's floor and the machine's minimum"* is not what the validator does.** The body
+  above is not edited. #1242's author had decided the eleven alone, in
+  `packages/domain/src/workout/replan.ts`; the rulings keep nine as built and change two (2 and 3).
+  The validator's header and `docs/architecture.md` carry the same list under the same numbers.
+  1. *"Scale the remaining intervals"* (P1) reaches steady and ramp blocks as well as intervals
+     blocks. A hold and a free ride are not scaled.
+  2. **Changed.** A swap is bound by P4's **+5 %** a move and **+10 %** cumulative: the block's
+     count does not go back to 0.
+  3. **Changed.** Shortening a **recovery** block, one easier than the block that follows it, is a
+     harder move and is bound as harder moves are.
+  4. A free ride may be swapped in with none loaded, because it sets no target. Every other kind
+     needs a block of its own kind in the loaded workout (P3's peak is per kind).
+  5. The validator does **not** read the machine's minimum. An easier move is bounded by the lowest
+     share a target may carry (0.2, H3's floor share) and by nothing else; raising a target to the
+     trainer's reported minimum belongs to whatever writes it.
+  6. Warm-up and cool-down are the first and the last block.
+  7. A scale is counted in percentage points of the share a block joined the plan with, so +5 %
+     twice is +10 % exactly.
+  8. With no duration goal, the plan may not grow past the loaded workout's own length.
+  9. A hold range moves up only to the highest range loaded, and never above threshold heart rate
+     or the goal's.
+  10. An intervals block is neither extended nor shortened.
+  11. A proposal must name the latest summary sent, and its age is counted from when it left.
+
+  **The arithmetic for 2 and 3 is the implementer's proposal, as the ruling asked, and is the
+  owner's to change.** Wherever the ruling's words left a choice, the reading that refuses more was
+  taken; each such choice is marked ⚠️.
+  - **2, a move's +5 %.** The comparison is of the **highest share** each block asks for: the block
+    swapped in against the block it replaces *as ridden now* (after any scale), whatever their
+    kinds. A rise over 5 % is refused under P4. ⚠️ A block with a target may not replace a free
+    ride, which has no target to measure a rise from. ⚠️ A hold swapped in for a hold may have a
+    range at most **5 bpm** higher, P1's largest step, since a hold's target is its range. The rise
+    is a ratio of two shares and is not exact in binary (0.735 / 0.7), so a rise within 10⁻⁹ of a
+    percentage point over a limit is taken as the limit.
+  - **2, the +10 %.** The new block carries a count: what the replaced block carried, plus the
+    highest net scale any of the replaced block's shares had reached, plus this swap's rise. Over
+    10, the swap is refused under P4. A later scale of the new block is counted from its own
+    shares, and that carried count is added before the +10 % is checked. ⚠️ A swap to an easier
+    block, and a net scale below zero on the replaced block, earn nothing back. ⚠️ Every swap is
+    still a harder move for the one-in-10-minutes rule, an easier one included.
+  - **3.** A block is a recovery when the **lowest** share it asks for is under the **highest**
+    share of the block after it. ⚠️ So a ramp from 0.4 to 0.8 before a 0.7 block is one, and a hold
+    is read at its start share. ⚠️ A free ride is a recovery before any block with a target, and
+    nothing is a recovery before a free ride. *"Bound as harder moves are"* is P4's one harder move
+    in 10 minutes; P4's two percentages are about shares, which a shortening does not change. The
+    3-minute rule and *"never shortened to nothing"* apply as before.
+
+  **A defect fixed in the same change, under 7.** The count had been advanced by a move even where
+  a ceiling or the floor stopped the share from moving, so a +5 % that changed nothing at the peak
+  block was "undone" by the next −5 %, which then changed nothing either. The count is now kept
+  **for each share** (an intervals block's hard and easy shares, a ramp's two ends) and is **the
+  change reached**: a share that did not move keeps its count, and one stopped part of the way
+  records how far it got. +5 % twice is still +10 % exactly where nothing stops it.
+
+  **On 5.** As of this date nothing clamps a workout's own target to the trainer's minimum:
+  `apps/web/src/workout/session.ts` raises only a stall-relief target to it, and the trainer client
+  refuses a target under the reported range, so the previous target stays. That is so for a loaded
+  workout with no re-plan, and is
+  [#1297](https://github.com/openzigs/onyourleft/issues/1297), to land before or with #1244. Read
+  from the code, not ridden on a trainer. (#1296)
