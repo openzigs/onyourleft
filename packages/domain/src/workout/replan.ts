@@ -216,7 +216,7 @@ export interface PlanBlock {
    * replaced. 0 for a loaded block. It counts toward the +10 %.
    */
   readonly carried: number;
-  /** What is ridden: {@link base} at {@link percent}, inside the bounds of the day. */
+  /** What is ridden: {@link base} at {@link percents}, inside the bounds of the day. */
   readonly block: WorkoutBlock;
 }
 
@@ -585,6 +585,13 @@ function replaced(
 }
 
 /**
+ * A ratio of two shares is not exact: 0.735 / 0.7 is a hair over 1.05. A rise
+ * this far over a move's limit is the limit, and is stored as it, so the
+ * count carried never holds a hair over +5.
+ */
+const ROUNDING_PERCENT = 1e-9;
+
+/**
  * Whether a block is a recovery before the block after it: its lowest share is
  * under that block's highest. A free ride asks for nothing, so it is a
  * recovery before any block with a target, and nothing is a recovery before
@@ -720,12 +727,6 @@ function applyHoldRange(
   };
 }
 
-/**
- * A ratio of two shares is not exact: 0.735 / 0.7 is a hair over 1.05. A rise
- * this far over a limit is the limit.
- */
-const ROUNDING_PERCENT = 1e-9;
-
 function applySwap(
   incoming: WorkoutBlock,
   blocks: readonly PlanBlock[],
@@ -756,6 +757,12 @@ function applySwap(
       return { rule: 'P4' };
     }
     rise = Math.max(0, (peak / replacedPeak - 1) * 100);
+    if (
+      rise > REPLAN_MAXIMUM_MOVE_PERCENT &&
+      rise <= REPLAN_MAXIMUM_MOVE_PERCENT + ROUNDING_PERCENT
+    ) {
+      rise = REPLAN_MAXIMUM_MOVE_PERCENT;
+    }
   }
   const carried = entry.carried + Math.max(0, ...entry.percents) + rise;
   if (
@@ -854,7 +861,8 @@ function isPositive(value: number): boolean {
  *
  * The first rule that refuses is the one named, in this order: P1 (the
  * vocabulary, and a swap's library), P7, P6, P5, P2, P4's three minutes, then
- * the move's own bounds (P3 before P4's rises), then P4's ten minutes. An
+ * the move's own bounds (a swap's P3 ceilings, then P4's rises, then P3's
+ * length), then P4's ten minutes. An
  * accepted move yields the next {@link PlanRevision}, a pure
  * function of the old one and the move, in which nothing at or before the
  * block being ridden differs.

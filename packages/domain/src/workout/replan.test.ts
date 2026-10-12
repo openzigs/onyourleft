@@ -1322,6 +1322,20 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
       expect(ruleOf(later(swapOf('s', 2), twice), after(twice, 9000, state(twice)))).toBe('P4');
     });
 
+    it('takes a swap of exactly +5 % as 5, so a later +5 % is not refused for rounding', () => {
+      const library = saved(0.735);
+      const state = (plan: PlanRevision) => ({ library, plan });
+      const swapped = sequence(ROOMY, [swapOf('s', 0)], { library });
+      // 0.735 / 0.7 is 1.05 only to within rounding; the count is the limit, not a hair over.
+      expect(swapped.blocks[1]?.carried).toBe(5);
+      const scaled = accepted(later(scale(5), swapped), after(swapped, 9000, state(swapped)));
+      expect(scaled.plan.blocks[1]?.carried).toBe(5);
+      expect(scaled.plan.blocks[1]?.percents).toStrictEqual([5]);
+      // Eased by 5 and brought back by 5: not refused either.
+      const undone = sequence(ROOMY, [swapOf('s', 0), scale(-5), scale(5)], { library });
+      expect(undone.blocks[1]?.percents).toStrictEqual([0]);
+    });
+
     it('refuses a block with a target in place of a free ride, and is a harder move', () => {
       const library = saved(0.3);
       // 1 300 s: riding the 1.0 block, and the next block is the free ride.

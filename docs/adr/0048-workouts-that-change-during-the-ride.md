@@ -542,17 +542,25 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     ride, which has no target to measure a rise from. ⚠️ A hold swapped in for a hold may have a
     range at most **5 bpm** higher, P1's largest step, since a hold's target is its range. The rise
     is a ratio of two shares and is not exact in binary (0.735 / 0.7), so a rise within 10⁻⁹ of a
-    percentage point over a limit is taken as the limit.
+    percentage point over a move's +5 % is taken as 5, and is stored as 5, so the count
+    carried never holds a hair over it.
   - **2, the +10 %.** The new block carries a count: what the replaced block carried, plus the
     highest net scale any of the replaced block's shares had reached, plus this swap's rise. Over
     10, the swap is refused under P4. A later scale of the new block is counted from its own
-    shares, and that carried count is added before the +10 % is checked. ⚠️ A swap to an easier
+    shares, and that carried count is added before the +10 % is checked. ⚠️ The count is **additive**: it sums each
+    move's percentage, though the rises compound, so +10 % in total can reach about 10.25 % over
+    the loaded share (P3's loaded peak still caps it). Measuring against the loaded share instead
+    is the owner's to rule. ⚠️ A hold is measured at its ceiling share, a cap and not a target;
+    the start share was available and was not taken. One swapped-in block that has spent its
+    allowance makes a scale refuse every remaining block until it is ridden (the existing
+    all-or-nothing rule). ⚠️ A swap to an easier
     block, and a net scale below zero on the replaced block, earn nothing back. ⚠️ Every swap is
     still a harder move for the one-in-10-minutes rule, an easier one included.
   - **3.** A block is a recovery when the **lowest** share it asks for is under the **highest**
     share of the block after it. ⚠️ So a ramp from 0.4 to 0.8 before a 0.7 block is one, and a hold
     is read at its start share. ⚠️ A free ride is a recovery before any block with a target, and
-    nothing is a recovery before a free ride. *"Bound as harder moves are"* is P4's one harder move
+    nothing is a recovery before a free ride. ⚠️ Only the block immediately
+    after is read, so shortening a 0.5 before another 0.5 and then a 0.9 is not a harder move. *"Bound as harder moves are"* is P4's one harder move
     in 10 minutes; P4's two percentages are about shares, which a shortening does not change. The
     3-minute rule and *"never shortened to nothing"* apply as before.
 
