@@ -281,7 +281,7 @@ describe('the safety criteria, by name — #1242', () => {
               seconds: aLength(),
               range: { low: beatsPerMinute(low), high: beatsPerMinute(low + whole(6, 15)) },
               startShare: share(start),
-              ceilingShare: share(Math.min(0.85, start + whole(0, 15) / 100)),
+              ceilingShare: share(Math.min(0.78, start + whole(0, 30) / 100)),
             };
           }
           default:
@@ -293,7 +293,26 @@ describe('the safety criteria, by name — #1242', () => {
         blocks: Array.from({ length: whole(3, 8) }, aBlock),
       });
 
-      const loaded = aWorkout('loaded');
+      const drawn = aWorkout('loaded');
+      // A hold with the highest ceiling a hold may have, so that P3 leaves room
+      // for the holds below to rise toward it (#1304).
+      const peakHold: WorkoutBlock[] = drawn.blocks.some(
+        (block) => block.kind === 'heart-rate-hold',
+      )
+        ? [
+            {
+              kind: 'heart-rate-hold',
+              seconds: aLength(),
+              range: { low: beatsPerMinute(140), high: beatsPerMinute(150) },
+              startShare: share(0.7),
+              ceilingShare: share(0.85),
+            },
+          ]
+        : [];
+      const loaded: Workout = {
+        name: 'loaded',
+        blocks: [...drawn.blocks.slice(0, 1), ...peakHold, ...drawn.blocks.slice(1)],
+      };
       // Two blocks for each block loaded, one 5 % above it (to a thousandth)
       // and one 5 % above that, so that a rise can follow a rise in the same
       // place: two random workouts almost never offer one (#1300).
@@ -302,7 +321,16 @@ describe('the safety criteria, by name — #1242', () => {
       const above = (from: number): number => Math.floor(from * 1.05 * 1000) / 1000;
       for (const block of loaded.blocks) {
         const [, from] = comparedWith(block, block)[0] ?? [];
-        if (from !== undefined) {
+        if (block.kind === 'heart-rate-hold' && block.ceilingShare < 0.78) {
+          // A hold for a hold, its ceiling up 3 % and then 5 % more: the +10 %
+          // divides each ceiling rise by the START share, so it is the only
+          // way to see which share the module divides by (#1304, ruling 2).
+          const first = Math.floor(block.ceilingShare * 1.03 * 1000) / 1000;
+          nearOf.set(block, near.length);
+          for (const ceilingShare of [first, above(first)]) {
+            near.push({ ...block, ceilingShare: share(ceilingShare) });
+          }
+        } else if (from !== undefined) {
           const first = above(from);
           nearOf.set(block, near.length);
           near.push(steadyAt(aLength(), first), steadyAt(aLength(), above(first)));
@@ -510,8 +538,12 @@ describe('the safety criteria, by name — #1242', () => {
           const place = places[index];
           expect(place).toBeDefined();
           if (place !== undefined) {
+            // A hold swapped for a hold: the +10 % divides each rise by the
+            // place's loaded START share, so a ceiling's rise is measured in
+            // that share and not in the ceiling's own (#1304, ruling 2).
+            const loadedStart = place.kind === 'heart-rate-hold' ? place.startShare : undefined;
             for (const [value, from] of comparedWith(entry.block, place)) {
-              expect(value).toBeLessThanOrEqual(from * 1.1 + EPSILON);
+              expect(value).toBeLessThanOrEqual(from + (loadedStart ?? from) * 0.1 + EPSILON);
             }
           }
         }

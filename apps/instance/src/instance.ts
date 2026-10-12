@@ -19,7 +19,7 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
-import { agentEngine } from './analysis/engine.ts';
+import { agentEngine, replanEngine } from './analysis/engine.ts';
 import type { SourceOptions } from './analysis/source.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
@@ -581,6 +581,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           sources,
           clock: { now },
         }),
+        // #1243: a re-plan during the ride, on the same sources and the same reads.
+        replan: replanEngine({ reads: store, sources, clock: { now } }),
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
         available: async () => local !== undefined || (await secretKey) !== undefined,

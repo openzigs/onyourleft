@@ -628,3 +628,60 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   trainer's reported minimum to that minimum, so the "nothing clamps" reading of 5 above no longer
   holds. A raised target equals the floor, so the forget-hold rule treats it as an ease and does not
   hold it back.
+
+- **2026-10-12** — **Two readings of #1300's ruling a and b, ruled on
+  [#1304](https://github.com/openzigs/onyourleft/issues/1304) the same day, are kept as built and
+  written down.** Nothing above is edited and no code changes for either.
+  - **A place eased well below its loaded share may climb back in more steps: accepted.** The +10 %
+    is over the share the place was *loaded* with and each move is +5 % at most, so a place loaded
+    at 1.0 and swapped down to 0.5 accepts 0.525, then 0.5512, then 0.5787: 15.7 % over the block
+    that joined, where the old additive sum stopped at +10 %, and about 0.60 is reachable. Each
+    move is still 5 % at most and ten minutes apart, and the place stays far under what the workout
+    was loaded with.
+  - **A hold swapped for a hold: kept as built.** The +5 % compares ceiling with ceiling, but the
+    +10 % total divides the ceiling's rise by the place's loaded **start** share. A hold loaded from
+    0.3 to a 0.7 ceiling therefore refuses a ceiling of 0.735, which is exactly +5 %, and any hold
+    whose ceiling is more than twice its start share refuses even a +5 % ceiling move. It refuses
+    more, never less. `carried` is an upper bound on what a place has risen, not the distance
+    travelled: it counts the larger of the start's and the ceiling's rise in points of one share. (#1304)
+
+- **2026-10-12** — **D-11 leaves a re-plan's budget to #1243, the 2026-10-10 amendment leaves it
+  spike 0022's option H, and D-14's gate on #1234 was lifted for #1243 by the owner that day**
+  (*"go now. Do not wait for counsel"*,
+  [recorded on #1243](https://github.com/openzigs/onyourleft/issues/1243#issuecomment-6132451387)).
+  The body above is not edited. #1243 built the instance job; what it decided is below, and each
+  point but the first is **the implementer's choice and the owner's to change**.
+  - **Hosted models: as D-11 says, not as #1243's body says.** The issue's *"Ollama on the
+    instance only, unless #1233 Q5 rules otherwise"* predates the Q5 confirmation. A re-plan runs
+    on the instance's local model, or on a hosted one only on the rider's own key, under their
+    recorded consent naming the endpoint, masked. A rider with no key of their own is refused
+    `hosted_unavailable`, whatever key the operator holds.
+  - **Budgets**: at most 4 model turns, 3 tool calls, 6 000 tokens and **45 s**, the issue's
+    proposed figures. ⚠️ The 45 s is counted **from when the device's request was queued**, not
+    from when a worker took the job, because P5 drops an answer older than 60 s. ⚠️ They are not a
+    measurement of a re-plan: spike 0023 measured a write-up's one model call, and no run there
+    called a tool. A spent budget is no proposal.
+  - **Option H: taken.** The re-plan job has `ride_so_far`, `goals` and `saved_workouts`, and
+    neither `recent_rides` nor `history_search`. It costs the re-plan the rider's earlier rides.
+    Spike 0022 §3.5 says what it adds: a second element of US11270598's claims 1 and 19 the
+    design does not have, beside the score. That is the spike's chart, not an opinion (ADR 0007
+    D1). It also keeps a run inside its token budget.
+  - **A model writes neither `revision` nor `summarySeq`.** It answers exactly `{ move, reason }`;
+    the instance copies the other two keys from the device's input and reads the whole with
+    #1242's decoder. So the instance's check is the device's decoder over the model's move and
+    reason, and an answer carrying a revision of its own is no proposal.
+  - **A model may answer that the workout should stay as it is** (`{ "keep": true }`), which is a
+    job that succeeded with no proposal. D-4's closed list has no move for *no change*, and without
+    this a model is asked for a change at every boundary. It is not a move and reaches nothing.
+  - **No rewrite.** An answer that does not decode ends the job with no proposal and the cause
+    `not-a-proposal`. A write-up is sent back once (ADR 0035 D-4); a re-plan has no time for it.
+  - **A swap names a saved workout by its sync key**, which `saved_workouts` returns with each
+    block's index and shape, and no name. No write-up tool returns a key.
+  - **The typed goals travel in the job's input**, device-built, and are not read from the synced
+    `workout-goal` item: the device's copy is canonical (D-10) and may be newer than the synced one.
+  - **Spike 0022's R1 and R4**: the input's and the summary's keys are held by a test, and the
+    re-plan's modules are scanned for the name of a performance figure or an environment figure.
+    ⚠️ What that does not reach: the model is shown one block's *seconds in range* and the goal's
+    *time-in-range* target together, and `goal-time-in-range` is one of D-4's reasons, so a model
+    can compare the two. No code on the instance does. Whether the goal's target should be
+    withheld from the job is **put to the owner**, with spike 0022 §3.4. (#1243)
