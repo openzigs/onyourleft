@@ -229,7 +229,7 @@ export const GAME_PART_MS = 85_000;
 /**
  * What bounds the required gate's STEP — #1128's review. `rules.yml` runs
  * `test:browser` under `timeout --verbose --kill-after=10s` this many seconds,
- * with the step's own `timeout-minutes: 13` behind it, and
+ * with the step's own `timeout-minutes: 14` (13 until #651) behind it, and
  * `nightly-split.test.ts` holds the workflow to both.
  *
  * ⚠️ **Why it exists.** Run 37254251351 attempt 3 (an EPYC 9V45) started the
@@ -258,8 +258,24 @@ export const GAME_PART_MS = 85_000;
  * 815 s, 50 s MORE than this: so a `chromium` run that uses all of its 720 s
  * leaves the game run 35 s, and this stop, not the game's, is the one that
  * names it.
+ *
+ * ⚠️ **It is 825 s since #651, the job's stop is 30 minutes, and a reviewer
+ * who remembers 765 s inside 25 is reading the old file.** By 2026-10-12 a
+ * green job on the 7763 took 1 459–1 498 s and four were cancelled at the
+ * 25-minute stop with no test red (`docs/agents/ci.md` §"Thirty minutes —
+ * #651"). The step now starts as late as 835 s in (run 38196648879 attempt
+ * 1), and the slowest step that finished took 679 s (run 38183688472) — one
+ * the job's stop cut short had run 694 s (run 38055121023). 825 s is 1.19
+ * times that 694 s, and it now HOLDS both Playwright stops and the builds
+ * (720 + 85 + 10 = 815 s), so a `chromium` run that uses all of its 720 s
+ * still leaves the game run its 85 s, and each stop names its own run.
+ * 835 + 825 + 10 (the kill) is 1 670 s; the step's `timeout-minutes: 14`
+ * (840 s) ends it by 1 675 s, and with the 4 s of coverage steps that is
+ * 1 679 s, 121 s inside the job's 1 800. `nightly-split.test.ts` holds all
+ * three: the two stops inside this, the step's stop behind it, and the job's
+ * stop behind that.
  */
-export const GATE_STEP_MS = 765_000;
+export const GATE_STEP_MS = 825_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
 export const CHROMIUM_WORKERS = 3;
 
