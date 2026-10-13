@@ -3244,13 +3244,36 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
         for (const [index, [how, seen]] of after.entries()) {
           await test.step(`${fixture.graph} — ${how}`, () => {
             const was = before[index]?.[1];
+            // ⚠️ Two boxes are compared WITHOUT the one number the ride itself
+            // moves. The harness rides for real, and the secondary fields
+            // panel is a line taller (182.5 px against 195.9) at some moments
+            // of the ride than at others — its pacer and best-effort readings
+            // are "—" at first and gain a second line ("3 s / ahead of you")
+            // once they have something to report; the notices sit under that
+            // panel and move down with it. The two
+            // loads compared here are seconds apart, so which side of that
+            // moment each was measured on is a race: 18 of 120 runs of this
+            // case failed on exactly those two numbers and on nothing else
+            // (`--repeat-each 30`). Neither holds the strip: the route panel,
+            // the actions and the primary fields are compared in full.
+            const RIDE_MOVES: readonly { readonly panel: string; readonly skip: number }[] = [
+              { panel: 'oyl-hud__fields--secondary', skip: 3 }, // its height
+              { panel: 'oyl-hud__notices', skip: 1 }, // its top
+            ];
             const boxes = (measurement: StageMeasurement | undefined) =>
               (measurement?.panels ?? [])
                 .filter((each) => each.box.height > 0)
-                .map(
-                  (each) =>
-                    `${each.name}: ${[each.box.left, each.box.top, each.box.width, each.box.height].map((n) => n.toFixed(1)).join(' ')}`,
-                );
+                .map((each) => {
+                  const skip = RIDE_MOVES.find((moved) => each.name.includes(moved.panel))?.skip;
+                  return `${each.name}: ${[
+                    each.box.left,
+                    each.box.top,
+                    each.box.width,
+                    each.box.height,
+                  ]
+                    .map((n, index) => (index === skip ? '(the ride’s)' : n.toFixed(1)))
+                    .join(' ')}`;
+                });
             expect(boxes(seen).length).toBeGreaterThanOrEqual(4);
             expect(boxes(seen)).toEqual(boxes(was));
             if (viewport.riderClear) {
