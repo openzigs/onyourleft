@@ -266,19 +266,34 @@ function pointOfFitRecord(record: FitRecord): TrackPoint {
   };
 }
 
+/**
+ * A sum of the totals a file's laps state, to the thousandth.
+ *
+ * ⚠️ **A decimal a file wrote is exact as text and not as a float** (#1312):
+ * laps stating `5.3`, `10.2` and `12.1` are 27.6 seconds between them, and
+ * adding the three floats gives `27.599999999999998`. Stored as it comes, a
+ * ride exported with its laps would come back a hair shorter than the same
+ * ride exported with none. A thousandth is finer than either XML format is
+ * written to and far coarser than the error.
+ *
+ * ⚠️ **This applies to EVERY file with lap totals, not only this client's
+ * own.** A lap from somewhere else that states `12345.678912` metres is
+ * stored as `12345.679`: under half a millimetre, and under half a
+ * millisecond for a time. A file written to tenths, as this client's are,
+ * reads back exactly as it did.
+ */
+function summed(parts: readonly (number | undefined)[]): number {
+  const total = parts.reduce<number>((sum, part) => (part === undefined ? sum : sum + part), 0);
+  return Math.round(total * 1000) / 1000;
+}
+
 function statedElapsedTimeOf(activity: TrackActivity): Seconds | undefined {
-  const total = activity.laps.reduce(
-    (sum, lap) => (lap.totalElapsedTime === undefined ? sum : sum + lap.totalElapsedTime),
-    0,
-  );
+  const total = summed(activity.laps.map((lap) => lap.totalElapsedTime));
   return total === 0 ? undefined : seconds(total);
 }
 
 function statedDistanceOf(activity: TrackActivity): Metres | undefined {
-  const total = activity.laps.reduce(
-    (sum, lap) => (lap.totalDistance === undefined ? sum : sum + lap.totalDistance),
-    0,
-  );
+  const total = summed(activity.laps.map((lap) => lap.totalDistance));
   return total === 0 ? undefined : metres(total);
 }
 

@@ -28,6 +28,7 @@ import {
   degreesBearing,
   gradePercent,
   metres,
+  revolutionsPerMinute,
   seconds,
   unixSeconds,
   watts,
@@ -174,6 +175,14 @@ export interface PersistedLap {
   movingTime: number;
   distance: number;
   averagePower?: number;
+  // #1312. Optional and unindexed, so no schema version: a row written before
+  // them is already a valid row.
+  maxPower?: number;
+  averageHeartRate?: number;
+  maxHeartRate?: number;
+  averageCadence?: number;
+  ascent?: number;
+  partial?: true;
 }
 
 /**
@@ -784,7 +793,44 @@ export function toPersistedLap(record: LapRecord): PersistedLap {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  if (record.maxPower !== undefined) {
+    row.maxPower = record.maxPower;
+  }
+  if (record.averageHeartRate !== undefined) {
+    row.averageHeartRate = record.averageHeartRate;
+  }
+  if (record.maxHeartRate !== undefined) {
+    row.maxHeartRate = record.maxHeartRate;
+  }
+  if (record.averageCadence !== undefined) {
+    row.averageCadence = record.averageCadence;
+  }
+  if (record.ascent !== undefined) {
+    row.ascent = record.ascent;
+  }
+  if (record.partial === true) {
+    row.partial = true;
+  }
   return row;
+}
+
+/**
+ * One of a lap's optional figures, decoded through its unit — #1312. Absent
+ * stays absent; a present value that its unit refuses is a decode error that
+ * names the field.
+ */
+function optionalLapFigure<Key extends string, Value>(
+  key: Key,
+  value: unknown,
+  construct: (value: number) => Value,
+): Partial<Record<Key, Value>> {
+  if (value === undefined) {
+    return {};
+  }
+  const field = `lap.${key}`;
+  return { [key]: decoded(field, decodedNumber(field, value), construct) } as Partial<
+    Record<Key, Value>
+  >;
 }
 
 /** @throws {StoreDecodeError} */
@@ -806,6 +852,13 @@ export function fromPersistedLap(row: PersistedLap): LapRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('lap.averagePower', averagePower, watts) }),
+    ...optionalLapFigure('maxPower', row.maxPower, watts),
+    ...optionalLapFigure('averageHeartRate', row.averageHeartRate, beatsPerMinute),
+    ...optionalLapFigure('maxHeartRate', row.maxHeartRate, beatsPerMinute),
+    ...optionalLapFigure('averageCadence', row.averageCadence, revolutionsPerMinute),
+    ...optionalLapFigure('ascent', row.ascent, metres),
+    // Only `true` is a part lap; anything else stored there is a whole one.
+    ...(row.partial === true ? { partial: true as const } : {}),
   };
 }
 
