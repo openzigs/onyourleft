@@ -79,8 +79,9 @@
  *    is one exception: a workout's own target more than 50 W under the
  *    minimum is not written at all, and the rider is told, when this app
  *    knows of no target on the trainer at or above that minimum (in the
- *    client, a trainer it has set no target on). Wherever the trainer may
- *    hold one, the minimum only eases and is written whatever the gap.
+ *    client: no target this app has had acknowledged by that trainer since
+ *    the page loaded). Wherever the trainer may hold one, the minimum only
+ *    eases and is written whatever the gap.
  * 6. **Warm-up and cool-down are the first and the last block.** The workout
  *    model marks neither, so the rule is structural: the main set is every
  *    block between them. The last block is never changed or removed by any

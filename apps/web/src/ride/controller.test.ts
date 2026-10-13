@@ -5109,6 +5109,104 @@ describe('a workout target under the trainer’s minimum — #1297', () => {
     expect(snapshot?.fault).toBeUndefined();
     rig.controller.dispose();
   });
+  // --- #1305's review: a target this app wrote, which the client forgot. ---
+
+  /** The machine takes control away (`0xFF`), and the rider takes it back. */
+  const loseAndRetakeControl = async (rig: Bench): Promise<void> => {
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    await rig.controller.requestTrainerControl();
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
+  };
+  const HIGH_MINIMUM_150 = {
+    machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+  } as const;
+  const targetWritesSince = (rig: Bench, from: number): number[][] =>
+    rig.written.slice(from).filter((bytes) => bytes[0] === 0x05);
+  /** A 75 W block as the first of a workout: what is written, and what the machine holds. */
+  const expectTheMinimumWritten = async (rig: Bench, from: number): Promise<void> => {
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    expect(targetWritesSince(rig, from)).toStrictEqual([[0x05, 150, 0]]);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.fault).toBeUndefined();
+    expect(snapshot?.holdingWatts).toBe(150);
+    expect(snapshot?.raisedFromWatts).toBe(75);
+  };
+
+  it('a hand-set 200 W, control taken away and back, then a workout: the minimum is written over the 200 W — #1305', async () => {
+    // The client says `none` after the `0xFF`, and the machine still holds the
+    // 200 W this app wrote. Refusing here left it on through a 75 W block.
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await loseAndRetakeControl(rig);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('workout A at 250 W, control taken away and back, then workout B replaces it: the minimum is written over the 250 W — #1305', async () => {
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await startOn(rig, [[600, 1.0]]);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    await loseAndRetakeControl(rig);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('the same with workout A ended before B starts: the minimum is written over the 250 W — #1305', async () => {
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await startOn(rig, [[600, 1.0]]);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    await loseAndRetakeControl(rig);
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('a hand-set 200 W, the trainer forgotten and paired again, then a workout: the minimum is written over the 200 W — #1305', async () => {
+    // A new pairing builds a new control client, which knows of no target.
+    // What this app last had acknowledged is kept by device, not by client.
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
 });
 
 // --- The snapshot itself -----------------------------------------------------

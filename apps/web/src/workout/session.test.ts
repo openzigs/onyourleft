@@ -843,6 +843,79 @@ describe('a workout target under the trainer’s minimum is written as that mini
     ]);
   });
 
+  it('stops saying the target is raised once the block it was raised for is over — #1305', async () => {
+    // `raisedFrom` is what the screen's "This block asks for … W" reads. A
+    // free ride, a lost link and the end of the workout each leave the
+    // trainer on the minimum that was written for the raised block, so the
+    // number still matches and only the session can say the block is over.
+    const raisedThen = (after: readonly WorkoutBlock[]) =>
+      loop(() => expandWorkout(workout([steady(3, 0.3), ...after])), HIGH_MINIMUM());
+
+    const eased = await raisedThen([{ kind: 'free-ride', seconds: seconds(5) }]);
+    eased.session.start(seconds(0));
+    await ride(eased.session, 0, 2);
+    expect(eased.session.state().raisedFrom).toBe(75);
+    await ride(eased.session, 3, 5);
+    expect(eased.session.state().holding).toBe(MINIMUM);
+    expect(eased.session.state().raisedFrom).toBeUndefined();
+
+    const dropped = await raisedThen([steady(5, 0.3)]);
+    dropped.session.start(seconds(0));
+    await ride(dropped.session, 0, 2);
+    expect(dropped.session.state().raisedFrom).toBe(75);
+    dropped.session.linkLost(seconds(3));
+    expect(dropped.session.state().holding).toBe(MINIMUM);
+    expect(dropped.session.state().raisedFrom).toBeUndefined();
+
+    const ended = await raisedThen([]);
+    ended.session.start(seconds(0));
+    await ride(ended.session, 0, 2);
+    expect(ended.session.state().raisedFrom).toBe(75);
+    await ride(ended.session, 3, 5);
+    await flush();
+    expect(ended.session.state().player.status).toBe('finished');
+    expect(ended.session.state().holding).toBe(MINIMUM);
+    expect(ended.session.state().raisedFrom).toBeUndefined();
+  });
+
+  it('does not say the target is raised until the raise has landed: a machine that keeps refusing it — #1305', async () => {
+    // 250 W acknowledged, then the 75 W block's raise to 100 W is refused by
+    // the machine with control kept. The trainer holds 250 W, and the screen
+    // must not read "Holding 250 W. This block asks for 75 W, …".
+    const trainer = await connectSimulatedTrainer({ spec: HIGH_MINIMUM() });
+    await trainer.control.requestControl();
+    let refuse = false;
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([steady(3, 1.0), steady(30, 0.3)])),
+      thresholdPower: THRESHOLD,
+      powerFloor: trainer.powerRange.minimum,
+      control: {
+        setTargetPower: (target) =>
+          refuse
+            ? Promise.reject(new SensorError('control-rejected', 'the machine refused op code 0x5'))
+            : trainer.control.setTargetPower(target),
+        stop: () => trainer.control.stop(),
+        targetPower: () => trainer.control.targetPower(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    refuse = true;
+    await ride(session, 3, 6);
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
+    expect(session.state().holding).toBe(250);
+    expect(session.state().raisedFrom).toBeUndefined();
+
+    refuse = false;
+    await ride(session, 7, 8);
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(MINIMUM);
+    expect(session.state().holding).toBe(MINIMUM);
+    expect(session.state().raisedFrom).toBe(75);
+  });
+
   it('writes a target above the minimum as the workout’s own number', async () => {
     // 50 % of 250 W is 125 W, inside this machine’s range: not raised, not lowered.
     const { trainer, session } = await loop(
@@ -1215,22 +1288,6 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
       },
     });
   const neverAnswers = (): Promise<never> => new Promise<never>(() => undefined);
-
-  it('does not go on calling the target raised once a later block is refused', async () => {
-    // 110 W is offered as 150 W and the machine refuses it; the 75 W block
-    // after it is not offered at all.
-    const session = sessionOver(expandWorkout(workout([steady(4, 0.44), steady(6, 0.3)])), () =>
-      Promise.reject(new SensorError('control-rejected', 'the machine refused op code 0x5')),
-    );
-    session.start(seconds(0));
-    await ride(session, 0, 2);
-    expect(session.state().raisedFrom).toBe(110);
-
-    await ride(session, 4, 6);
-
-    expect(session.state().raisedFrom).toBeUndefined();
-    expect(session.state().lastFault).toBe(REFUSED_AT_150);
-  });
 
   it('stops saying so once a free ride follows, though the trainer was already being eased before the refused block', () => {
     // free ride (the ease is sent and not yet answered), 75 W on a 150 W

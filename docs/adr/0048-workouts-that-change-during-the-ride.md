@@ -686,18 +686,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     can compare the two. No code on the instance does. Whether the goal's target should be
     withheld from the job is **put to the owner**, with spike 0022 §3.4. (#1243)
 
-- **2026-10-12** — #1305 narrowed #1297's clamp, on the owner's ruling of that day. The #1297
-  entry above says the session raises "every workout target" under the trainer's reported minimum
-  to that minimum. There is now one exception. A workout's own target more than 50 W under the
-  minimum is not written, and the rider is told, **when the session knows of no target on the
-  trainer at or above that minimum**. Where the trainer may hold one, the minimum only eases and is
-  written whatever the gap, so a recovery after a hard block is never left on the hard block's
-  target. What the session counts as a target the trainer may hold: one the control client has
-  confirmed (a hand-set target from before the workout included), one it had confirmed or attempted
-  and can no longer vouch for (a lost link, a Stop, a gradient, a write with no answer), and, when
-  the client knows of none, the last write the trainer acknowledged to that session. Only the first
-  is known to be on the machine. The control client sends nothing under the machine's minimum, so
-  in the client a refusal happens only on a trainer no target is known on. An eased target (the
-  stall relief, a pause, a free ride) is raised or written as before. H3 is unchanged: a hold
-  block's envelope starts at the machine's minimum inside the player, so the refusal never applies
-  to a hold block. (#1305)
+- **2026-10-12** — #1305 narrowed #1297's clamp, on two owner rulings of that day recorded on
+  [#1305](https://github.com/openzigs/onyourleft/issues/1305): *refuse a large raise and tell the
+  rider*, and then *"yes"* to the narrower rule below. The #1297 entry above says the session
+  raises "every workout target" under the trainer's reported minimum to that minimum. There is now
+  one exception. A workout's own target more than 50 W under the minimum is not written, and the
+  rider is told, **when this app knows of no target on the trainer at or above that minimum**.
+  Where the trainer may hold one, the minimum only eases and is written whatever the gap. What
+  counts as a target the trainer may hold: one the control client has confirmed (a hand-set target
+  from before the workout included); one it had confirmed or attempted and can no longer vouch for
+  (a lost link, a Stop, a gradient, a write with no answer); and, where the client knows of none,
+  the last target that trainer acknowledged to this app since the page loaded, which the ride
+  controller keeps by device because the client forgets it when the machine takes control away and
+  a new pairing starts a new client. Only the first is known to be on the machine. The control
+  client sends nothing under the machine's minimum, so in the client a refusal happens only on a
+  trainer this app has had no target acknowledged by since the page loaded. ⚠️ That is not a
+  trainer holding nothing: a target from before a page reload, from another app or from the
+  machine's own buttons is not known to this app, and a refusal leaves it on. An eased target (the
+  stall relief, a pause, a free ride) is raised or written as before, so on such a trainer the
+  refusal lasts only until the first of those. H3 is unchanged: a hold block's envelope starts at
+  the machine's minimum inside the player, so the refusal never applies to a hold block. (#1305)

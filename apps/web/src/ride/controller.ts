@@ -1331,8 +1331,56 @@ export function createRideController(options: RideControllerOptions): RideContro
     setTargetPower: (target) =>
       mustWaitForForget(client, { target, floor })
         ? Promise.reject(new TargetHeldBack('forget-running', TARGET_WAITS_FOR_FORGET))
-        : client.setTargetPower(target),
+        : client.setTargetPower(target).then((acknowledged) => {
+            const id = [...sensors.values()].find((entry) => entry.trainer?.control === client)
+              ?.device.identity.id;
+            if (id !== undefined) {
+              lastAcknowledgedTarget.set(id, acknowledged);
+            }
+            return acknowledged;
+          }),
   });
+  /**
+   * The last ERG target each trainer acknowledged to this app, by device —
+   * #1305's review. Every ERG target in the client is written through
+   * {@link gatedTargets}, a hand-set one and a workout's alike, so this is
+   * all of them.
+   *
+   * ⚠️ **Why it exists: the control client forgets.** A `0xFF` leaves
+   * `targetPower()` saying `none`, and a new pairing builds a new client that
+   * says `none` too, while the machine may be holding the 250 W this app wrote
+   * a minute ago. A workout started then judged its first block as if the
+   * trainer held nothing, refused a 150 W minimum for a 75 W block, and left
+   * the 250 W on (@see workoutsViewOfTheTarget).
+   *
+   * ⚠️ **By device, not by client, and never forgotten while the page
+   * lives.** Web Bluetooth has no silent reconnect, so after a dropped link
+   * the rider pairs the same trainer again and gets a NEW client: keyed by
+   * client, the one case the owner was told about ("after a lost link the
+   * trainer is assumed to have kept its target") would be the one this
+   * missed. It is only ever read to turn a refusal into a write of the
+   * machine's minimum, which is what `main` wrote before #1305, so a stale
+   * entry cannot raise a target above that. A different trainer has a
+   * different id and starts with nothing. A page reload starts with nothing
+   * too: what the machine kept across it is not something this app can know.
+   */
+  const lastAcknowledgedTarget = new Map<DeviceId, Watts>();
+  /**
+   * What a workout is told the trainer's ERG target is — #1305. The client's
+   * own answer, except where the client says `none` and this app has had a
+   * target acknowledged by that trainer: then `unknown`, which is what it is.
+   * The machine may hold it still, or may not.
+   *
+   * ⚠️ The workout's view only. The ride screen reads the client's answer
+   * unchanged, so it goes on saying no target is set after a `0xFF`.
+   */
+  const workoutsViewOfTheTarget = (client: TrainerControl, id: DeviceId): TargetPower => {
+    const target = client.targetPower();
+    const last = lastAcknowledgedTarget.get(id);
+    return target.kind === 'none' && last !== undefined
+      ? { kind: 'unknown', attempted: last }
+      : target;
+  };
   /**
    * Note a forget's rejection — #718's review. Holds control back (@see
    * lateTrainerForgets) when the forget ran out of time on something that is,
@@ -2934,15 +2982,22 @@ export function createRideController(options: RideControllerOptions): RideContro
       thresholdPower: Watts,
       heartRateHold?: HeartRateHoldContext,
     ): boolean {
-      const connection = trainerEntry()?.trainer;
+      const paired = trainerEntry();
+      const connection = paired?.trainer;
       const client = connection?.control;
       // ⚠️ Both halves. A trainer that is paired but has not granted control
       // answers every setpoint `0x05 Control Not Permitted`, so starting here
       // would produce a workout that runs its clock and controls nothing —
       // which is the silent failure #14's revision block names.
-      if (connection === undefined || client === undefined || !client.hasControl()) {
+      if (
+        paired === undefined ||
+        connection === undefined ||
+        client === undefined ||
+        !client.hasControl()
+      ) {
         return false;
       }
+      const trainerId = paired.device.identity.id;
       // #718's second review: control this client took back by itself while
       // a trainer's forget is in progress or late is not control the rider
       // asked for. Checked here for the sentence; every write the workout
@@ -2969,8 +3024,9 @@ export function createRideController(options: RideControllerOptions): RideContro
           stop: () => client.stop(),
           letGo: () => releaseTrainer(client),
           // #1305: a read. What the client believes the trainer holds, a
-          // hand-set target from before this workout included.
-          targetPower: () => client.targetPower(),
+          // hand-set target from before this workout included, and what
+          // this app last had acknowledged where the client has forgotten.
+          targetPower: () => workoutsViewOfTheTarget(client, trainerId),
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,

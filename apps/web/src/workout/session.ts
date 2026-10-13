@@ -179,12 +179,15 @@ export interface WorkoutSessionState {
   /** True between an offered target and its answer. */
   readonly writing: boolean;
   /**
-   * What the workout asked for, when the target the session last offered was
-   * that ask raised to the trainer's minimum (#1297). `undefined` whenever the
-   * workout's own number was offered, and after an ease.
+   * What the workout asked for, when the target the trainer holds is that ask
+   * raised to the trainer's minimum (#1297). `undefined` whenever the
+   * workout's own number was offered, after an ease, a lost link and the end
+   * of the workout, and **until the raised target has landed**: while
+   * {@link holding} is still some other number this says nothing, so a
+   * screen cannot put "this block asks for 75 W" beside "Holding 250 W".
    *
    * So a screen can say why the trainer holds more than the block asks
-   * (#1305). ⚠️ About what was OFFERED: {@link holding} is what landed.
+   * (#1305).
    */
   readonly raisedFrom: Watts | undefined;
   /**
@@ -295,7 +298,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     player: player.state(),
     holding: writer.lastWritten(),
     writing: writer.busy(),
-    raisedFrom,
+    // #1305's review: only once the raise is what the trainer acknowledged.
+    raisedFrom: writer.lastWritten() === powerFloor ? raisedFrom : undefined,
     cadenceRetained: cadence.length,
     lastFault: raiseRefused ? raiseRefusedText(powerFloor) : lastFault,
   });
@@ -311,8 +315,11 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    *   for (a lost link, a Stop, a gradient), or one it attempted and got no
    *   answer to.
    * - `none`: the client has set no ERG target, or the machine took control
-   *   away. Then the last write the trainer acknowledged to THIS session
-   *   stands in, if there was one.
+   *   away and the client forgot. Then the last write the trainer
+   *   acknowledged to THIS session stands in, if there was one. ⚠️ A target
+   *   from before this session is not this function's to know: the ride
+   *   controller remembers it and hands it over as `unknown`
+   *   (`ride/controller.ts` §`workoutsViewOfTheTarget`).
    *
    * ⚠️ **Only `confirmed` is known to be on the machine. The rest are
    * counted on purpose.** The trainer may still hold them, and this file
@@ -391,6 +398,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     finished = true;
     released = true;
     raiseRefused = false;
+    // The workout is over: no block is asking for anything (#1305's review).
+    raisedFrom = undefined;
     void control.letGo().then(
       (outcome) => {
         if (outcome.kind === 'incomplete') {
@@ -542,7 +551,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // `holding`.
           const asked = state.intent.watts;
           const raised = asked < powerFloor;
-          // ⚠️ #1305, owner ruling, as narrowed on the second pass: the
+          // ⚠️ #1305, the owner's rulings of 2026-10-12 (refuse a large
+          // raise; then "yes" to this narrower rule, both on the issue): the
           // workout's OWN target is not raised by more than
           // `LARGEST_RAISE_WATTS` when the raise could raise what the trainer
           // holds. Nothing is written for it, so the trainer keeps whatever
@@ -561,7 +571,6 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           const onlyEases = held !== undefined && powerFloor <= held;
           if (!state.intent.eased && !onlyEases && powerFloor - asked > LARGEST_RAISE_WATTS) {
             raiseRefused = true;
-            raisedFrom = undefined;
             player.writeFailed();
             break;
           }
@@ -605,6 +614,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       player.linkLost(now);
       lastOffered = undefined;
       raiseRefused = false;
+      // What the machine holds is no longer known to be this block's raise.
+      raisedFrom = undefined;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is
@@ -649,10 +660,14 @@ export const RELEASE_INCOMPLETE =
  * is more than {@link LARGEST_RAISE_WATTS} under the trainer's minimum and
  * the minimum is not known to be at or below what the trainer holds (#1305).
  *
- * ⚠️ Says nothing about what the trainer holds, because on the ride screen
- * this app knows of nothing there when it is shown: the control client never
- * sends a target under the machine's minimum, so any target it knows of is at
- * or above the floor, and then the floor is written and not refused.
+ * ⚠️ Says nothing about what the trainer holds. On the ride screen it is
+ * shown only when neither the control client nor the ride controller knows
+ * of a target this app had acknowledged by this trainer since the page
+ * loaded: any such target is at or above the floor (the client sends nothing
+ * under the machine's minimum), and then the floor is written, not refused.
+ * ⚠️ That is not "the trainer holds nothing". A target from before a page
+ * reload, from another app or from the machine's own buttons is not known
+ * here, and the trainer keeps it.
  */
 export function raiseRefusedText(minimum: Watts): string {
   return `This trainer's lowest target is ${String(minimum)} W, more than ${String(LARGEST_RAISE_WATTS)} W above what this block asks for, so no target was sent for it.`;
