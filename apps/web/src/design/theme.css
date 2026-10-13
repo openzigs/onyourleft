@@ -3178,25 +3178,15 @@ a.oyl-button {
 }
 
 @media (min-width: 48rem) and (min-height: 60rem) and (max-width: 59.99rem) {
-  /* Upright: row 1 is as tall as the trainer group, and the Live group spans
-     both rows beside it and the graph. */
-  .oyl-ride:has(> .oyl-ride__group--graph) {
-    grid-template-rows: auto 1fr;
-  }
-
+  /* Upright: the Live group spans both rows, beside the trainer group and
+     the graph under it.
+     ⚠️ That is the ONLY rule this layout needs. With the Live group placed,
+     auto-placement puts the trainer group at column 2 row 1 and the graph at
+     column 2 row 2, and the rows size to them. Rules saying each of those
+     were written, and deleting them changed nothing the gate could measure. */
   .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--live {
     grid-column: 1;
     grid-row: 1 / span 2;
-  }
-
-  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--trainer {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--graph {
-    grid-column: 2;
-    grid-row: 2;
   }
 }
 

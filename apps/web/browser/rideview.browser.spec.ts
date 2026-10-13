@@ -1879,6 +1879,9 @@ function expectGraphLaidOut(seen: GraphSeen, viewport: Viewport): void {
     expect(seen.frame.right).toBeLessThanOrEqual(seen.trainer.right + 1);
     expect(seen.frame.top).toBeGreaterThanOrEqual(seen.trainerContentBottom - 1);
     expect(seen.frame.top).toBeGreaterThanOrEqual(seen.end.bottom);
+    // DIRECTLY under it — its last margin and the grid’s gap, 40 px — and not pushed
+    // down the column by the taller Live group beside them.
+    expect(seen.frame.top - seen.trainerContentBottom).toBeLessThanOrEqual(3 * seen.rem);
   }
 }
 
