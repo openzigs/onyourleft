@@ -350,10 +350,7 @@ describe('the running workout’s graph on the HUD — #1307', () => {
 
   it('draws the workout in the route plan’s place, at its size, inside the route panel', async () => {
     mounted = await mount(<HudPanel {...base} workout={workout} />);
-    const graphs = queryAll(
-      mounted.container,
-      '.oyl-hud__route .oyl-hud__plan [data-oyl-workout-graph="hud"]',
-    );
+    const graphs = queryAll(mounted.container, '.oyl-hud__route > [data-oyl-workout-graph="hud"]');
     expect(graphs).toHaveLength(1);
     const strip = graphs[0];
     // The route plan's own sizing rule, so the panel is the height it was.

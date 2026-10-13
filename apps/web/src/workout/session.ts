@@ -191,6 +191,13 @@ export interface WorkoutSessionState {
    */
   readonly raisedFrom: Watts | undefined;
   /**
+   * Whether the block's own target is NOT being sent, because sending it
+   * would be a large raise (#1305) — the fact behind the sentence
+   * {@link lastFault} carries then, for a screen that draws rather than says
+   * (#1307's graph: no target the trainer was not sent is drawn as confirmed).
+   */
+  readonly raiseRefused: boolean;
+  /**
    * How many cadence readings are being kept for the ERG rule.
    *
    * A diagnostic, and the one number that says whether the spiral rule has
@@ -300,6 +307,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     writing: writer.busy(),
     // #1305's review: only once the raise is what the trainer acknowledged.
     raisedFrom: writer.lastWritten() === powerFloor ? raisedFrom : undefined,
+    raiseRefused,
     cadenceRetained: cadence.length,
     lastFault: raiseRefused ? raiseRefusedText(powerFloor) : lastFault,
   });

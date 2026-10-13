@@ -250,9 +250,9 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           // panel is the height it was and covers no more of the rider
           // (#1169). The workout owns the trainer then, so the road's shape
           // is not what sets the resistance; the elevation strip above stays.
-          <div className="oyl-hud__plan">
-            <WorkoutStrip workout={props.workout} />
-          </div>
+          // ⚠️ No `oyl-hud__plan` wrapper: no rule in `theme.css` names that
+          // class, and one was here with nothing to measure what it did.
+          <WorkoutStrip workout={props.workout} />
         )}
       </div>
 

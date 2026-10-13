@@ -539,13 +539,18 @@ const RACE_PORTS =
  *   against its range. `hold-silent` is the same hold with a strap gone
  *   quiet, so the strip writes "— bpm" and draws no heart-rate line.
  * - `plain`: the same plan with no hold and a target that STEPS inside the
- *   window, so the lane is power against the confirmed target.
+ *   window, so the lane is power against the confirmed target. `paused` is
+ *   that workout paused: the trainer holds its 50 W minimum, and the newest
+ *   sample (175 W) is from before the ease.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
 const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
+/** `paused`: the plain workout paused — the trainer eased to its 50 W minimum. */
+const GRAPH_PAUSED = GRAPH_KIND === 'paused';
 const GRAPH: WorkoutGraphInput | undefined =
-  GRAPH_HOLD || GRAPH_KIND === 'plain'
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED
     ? {
+        ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
         elapsedSeconds: 900,
         timeline: expandWorkout({
           name: 'Hold',
@@ -561,7 +566,7 @@ const GRAPH: WorkoutGraphInput | undefined =
           ],
         }),
         // In a hold the trainer holds what the hold last asked: 167 W.
-        holdingWatts: GRAPH_HOLD ? 167 : 175,
+        holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
         hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
         thresholdWatts: 250,
         trace: Array.from({ length: 300 }, (_, index) =>

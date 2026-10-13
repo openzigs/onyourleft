@@ -3238,6 +3238,46 @@ a.oyl-button {
   .oyl-ride__group--graph {
     grid-area: graph;
   }
+
+  /*
+   * ⚠️ The owner's tablet is 1280×800 with the system bars over the page:
+   * the fold is at 768, not 800 (`rideview.browser.spec.ts`'s header, #439).
+   * Under the readings there are 142 px to it. With 80 px drawings and the
+   * sentence UNDER the frame, the eased state ended 8 px under that fold and
+   * the raised one 28 px, and what went under the system bar was the
+   * sentence. So here, and only here where there is width for it:
+   *
+   * - the drawings are 4rem, not 5;
+   * - the sentence stands BESIDE the frame, in a column of its own, so that
+   *   it adds nothing to the group's height however many lines it takes.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph {
+    align-items: flex-start;
+    display: flex;
+    gap: var(--oyl-space-md);
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__frame {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__key {
+    flex: 0 0 13rem;
+    margin: 0;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__svg {
+    height: 4rem;
+  }
+
+  /* Beside the sentence a lane has less width: its floor comes down with it,
+     and only then. */
+  .oyl-ride__group--graph
+    .oyl-workout-graph:has(> .oyl-workout-graph__key)
+    .oyl-workout-graph__lane {
+    min-width: 9rem;
+  }
 }
 
 /*

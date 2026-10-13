@@ -3140,6 +3140,17 @@ const STRIP_FIXTURES = [
     doing: 'oyl-workout-strip__power',
     absent: /range|heart-rate/,
   },
+  {
+    // Paused: the trainer was eased to its 50 W minimum. ⚠️ The line says
+    // THAT, not the newest sample's 175 W, which is what is still drawn.
+    graph: 'paused',
+    lane: 'power',
+    text: 'Paused · Target 50 W',
+    named: 'Workout graph. Paused.',
+    asked: 'oyl-workout-strip__target',
+    doing: 'oyl-workout-strip__power',
+    absent: /range|heart-rate/,
+  },
 ] as const;
 
 /** What the strip must be for a rider to read it, whichever lane it drew. */

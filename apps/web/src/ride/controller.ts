@@ -357,6 +357,30 @@ export interface RideWorkoutSnapshot {
    * it today.
    */
   readonly replaced?: readonly WorkoutSegment[] | undefined;
+  /**
+   * Whether this app has control of the trainer NOW — #1307. With
+   * {@link holdingWatts} it is the one source of "what the trainer holds":
+   * the two facts the panel's own "Holding … W." line is written from, read
+   * live, so the graph cannot state a target from a sample taken before a
+   * pause or a lost link. `false`: {@link holdingWatts} is only the last
+   * write, and the graph states no target.
+   */
+  readonly hasControl?: boolean | undefined;
+  /**
+   * The rider's power and heart rate NOW, each `undefined` when its reading
+   * is not live — #1307. The numbers the graph writes beside its lanes; the
+   * trace is what it draws, and is not sampled while the ride is paused.
+   */
+  readonly live?:
+    | { readonly power: number | undefined; readonly heartRate: number | undefined }
+    | undefined;
+  /**
+   * Whether no target is being sent for the block being ridden, because it
+   * would be a large raise (#1305) — the session's `raiseRefused`, the fact
+   * behind the sentence in {@link fault}. So the graph draws no confirmed
+   * target for a block the trainer was never sent (#1307).
+   */
+  readonly refused?: boolean | undefined;
 }
 
 /** Everything the view renders, and nothing it has to derive. */
@@ -2511,6 +2535,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       timeline: workout.timeline,
       holdingWatts: state.holding,
       raisedFromWatts: state.raisedFrom,
+      // #1307: the graph's one source for what the trainer holds, and the
+      // readings it writes, all live — see each field.
+      hasControl: control()?.hasControl() === true,
+      live: { power: liveReading('power', clock), heartRate: liveReading('heart-rate', clock) },
+      refused: state.raiseRefused,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.

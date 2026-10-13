@@ -96,6 +96,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
 import type { WorkoutBlock } from '@onyourleft/domain';
 import type { WorkoutHold } from '../src/workout/hold-text';
+import { raiseRefusedText } from '../src/workout/session';
 import type { WorkoutTraceSample } from '../src/workout/workout-graph';
 import { workoutStub } from '../src/workouts/testing';
 
@@ -215,12 +216,22 @@ interface GraphFixture {
   readonly name: string;
   readonly blocks: readonly WorkoutBlock[];
   readonly elapsedSeconds: number;
-  readonly holdingWatts: number;
+  readonly holdingWatts: number | undefined;
   readonly nowRiding: string;
   readonly hold?: WorkoutHold;
-  /** The confirmed target at a second of the workout. */
-  readonly target: (at: number) => number;
+  /** The confirmed target at a second of the workout; `undefined` where none is known. */
+  readonly target: (at: number) => number | undefined;
   readonly heartRate?: (at: number) => number;
+  /** As the real controller sets each — `ride/controller.ts` §`RideWorkoutSnapshot`. */
+  readonly status?: 'running' | 'paused';
+  readonly hasControl?: boolean;
+  readonly refused?: boolean;
+  readonly fault?: string;
+  readonly raisedFromWatts?: number;
+  /** A hold that ran in the window but is not the snapshot's `hold` now (a pause). */
+  readonly range?: WorkoutHold['range'];
+  /** The readings now, where they are not the newest sample's (a pause). */
+  readonly live?: { readonly power: number | undefined; readonly heartRate: number | undefined };
 }
 
 const RUNNING_HOLD: WorkoutHold = {
@@ -261,8 +272,83 @@ const GRAPH_FIXTURES: Readonly<Record<string, GraphFixture>> = {
     ],
     elapsedSeconds: 780,
     holdingWatts: 100,
+    // The session's own word for it, as the controller hands it on (#1305).
+    raisedFromWatts: 75,
     nowRiding: '15 min at 30%',
     target: (at) => (at <= 600 ? 150 : 100),
+  },
+  /*
+   * #1307's third review — four states in which the graph must not state a
+   * target the trainer does not hold. Each is the snapshot the real
+   * controller was seen to produce (`ride/controller.test.ts` §"#1307").
+   *
+   * - `?workout=paused`: paused in a 90 % block. The pause eased the trainer
+   *   to its 50 W minimum; the newest sample is from before the ease.
+   * - `?workout=paused-hold`: the same inside a heart-rate hold, where the
+   *   snapshot carries no `hold` while paused.
+   * - `?workout=refused`: a first block of 30 % (75 W) on a trainer whose
+   *   minimum is 150 W: no target was sent for it (#1305).
+   * - `?workout=lost`: control lost in a 60 % block, and the workout has run
+   *   on into a 100 % one. 150 W is only the last write.
+   */
+  paused: {
+    name: 'Sweet spot, three by twelve',
+    blocks: [{ kind: 'steady', seconds: seconds(720), target: thresholdShare(0.9) }],
+    elapsedSeconds: 312,
+    status: 'paused',
+    holdingWatts: 50,
+    live: { power: 0, heartRate: undefined },
+    nowRiding: '12 min at 90%',
+    target: () => 225,
+  },
+  'paused-hold': {
+    name: 'Endurance hold',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+      {
+        kind: 'heart-rate-hold',
+        seconds: seconds(1800),
+        range: RUNNING_HOLD.range,
+        startShare: thresholdShare(0.5),
+        ceilingShare: thresholdShare(0.8),
+      },
+      { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.4) },
+    ],
+    elapsedSeconds: 1200,
+    status: 'paused',
+    holdingWatts: 50,
+    range: RUNNING_HOLD.range,
+    live: { power: 0, heartRate: 124 },
+    nowRiding: '30 min holding 130–140 bpm',
+    target: (at) =>
+      at < 1020 ? 125 + Math.floor((at - 900) / 30) * 3 : 137 - Math.floor((at - 1020) / 30) * 3,
+    heartRate: (at) => Math.round(127 + 16 * Math.sin(((at - 900) / 300) * 2.2) + Math.sin(at / 7)),
+  },
+  refused: {
+    name: 'Easy spin',
+    blocks: [
+      { kind: 'steady', seconds: seconds(900), target: thresholdShare(0.3) },
+      { kind: 'steady', seconds: seconds(900), target: thresholdShare(0.8) },
+    ],
+    elapsedSeconds: 312,
+    holdingWatts: undefined,
+    refused: true,
+    fault: raiseRefusedText(watts(150)),
+    nowRiding: '15 min at 30%',
+    target: () => undefined,
+  },
+  lost: {
+    name: 'Two blocks',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
+      { kind: 'steady', seconds: seconds(900), target: thresholdShare(1) },
+    ],
+    elapsedSeconds: 780,
+    holdingWatts: 150,
+    hasControl: false,
+    nowRiding: '15 min at 100%',
+    // Control went at 560 s: no confirmed target since.
+    target: (at) => (at < 560 ? 150 : undefined),
   },
   stepped: {
     name: 'Two-minute efforts',
@@ -288,36 +374,45 @@ const GRAPH_FIXTURES: Readonly<Record<string, GraphFixture>> = {
 
 function fixtureWorkout(fixture: GraphFixture): NonNullable<RideSnapshot['workout']> {
   const timeline = expandWorkout({ name: fixture.name, blocks: fixture.blocks });
-  const from = fixture.elapsedSeconds - 299;
-  let power = fixture.target(from);
+  const from = Math.max(1, fixture.elapsedSeconds - 299);
+  // With no target to ride to, the rider holds a steady 150 W.
+  const ridden = (at: number): number => fixture.target(at) ?? 150;
+  let power = ridden(from);
   const trace: WorkoutTraceSample[] = [];
+  const range = fixture.hold?.range ?? fixture.range;
   for (let at = from; at <= fixture.elapsedSeconds; at += 1) {
     const target = fixture.target(at);
     // The rider closes a sixth of the gap to the target each second.
-    power += (target - power) / 6;
+    power += (ridden(at) - power) / 6;
     trace.push({
       at,
       target,
       power: Math.round(power + 7 * Math.sin(at / 5)),
       heartRate: fixture.heartRate?.(at),
-      range: fixture.hold === undefined ? undefined : fixture.hold.range,
+      range,
       // A hold that is running asked for exactly what the trainer confirmed.
-      asked: fixture.hold === undefined ? undefined : target,
+      asked: range === undefined ? undefined : target,
     });
   }
+  const last = trace.at(-1);
   return {
     name: fixture.name,
-    status: 'running',
+    status: fixture.status ?? 'running',
     elapsedSeconds: fixture.elapsedSeconds,
     totalSeconds: timeline.totalSeconds,
     holdingWatts: fixture.holdingWatts,
+    raisedFromWatts: fixture.raisedFromWatts,
     nowRiding: fixture.nowRiding,
-    fault: undefined,
+    fault: fixture.fault,
     rescue: undefined,
     hold: fixture.hold,
     timeline,
     thresholdWatts: 250,
     trace,
+    // Live, as the controller's snapshot is — and the tiles are set from these.
+    hasControl: fixture.hasControl ?? true,
+    live: fixture.live ?? { power: last?.power, heartRate: last?.heartRate },
+    refused: fixture.refused ?? false,
   };
 }
 
@@ -506,16 +601,20 @@ function snapshot(): RideSnapshot {
     const workout = fixtureWorkout(GRAPH_FIXTURE);
     // The tiles say what the graph's newest sample says, so a screenshot of
     // this state does not show two powers or a strap that is and is not there.
-    const last = workout.trace?.at(-1);
     const at = unixSeconds(1_800_000_000);
     return {
       ...riding,
+      // The panel's "Holding … W." line reads the trainer's own control.
+      trainer:
+        workout.hasControl === false
+          ? { ...riding.trainer, hasControl: false, target: { kind: 'none' } }
+          : riding.trainer,
       metrics: riding.metrics.map((metric) => {
         const value =
           metric.id === 'power'
-            ? last?.power
+            ? workout.live?.power
             : metric.id === 'heartRate'
-              ? last?.heartRate
+              ? workout.live?.heartRate
               : undefined;
         return value === undefined ? metric : { id: metric.id, state: { kind: 'live', value, at } };
       }),
