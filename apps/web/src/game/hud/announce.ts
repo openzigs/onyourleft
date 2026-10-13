@@ -33,6 +33,8 @@
  * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
+ * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
+ * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | **yes** — #1312 |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -59,6 +61,7 @@
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
+ * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -147,7 +150,23 @@
  * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
  * announcements off the form speaks it, and this region says nothing new.
  *
- * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ⚠️ **Rank 5e is #1312's**: a lap of the course has ended, and this is its
+ * time and averages and how it compares. The LOWEST event — nothing about a
+ * lap is the machine under the rider or a thing to act on, so it never costs
+ * a fault, a block or a climb its place — and above every reading, because it
+ * is true of one moment: a lap said after a routine power sentence has had
+ * its window is a lap the rider is a hundred metres into the next of. A lower
+ * event behind a higher one is dropped, so `GameView` offers it on every call
+ * for as long as its notice is on the HUD, until it comes back as `kind`
+ * (#647's "owed" rule): said ONCE, and never after the notice has gone.
+ * ⚠️ **In {@link ALWAYS_SPOKEN}**, for the side camera's reason: the lap is
+ * shown as a notice for a few seconds and then gone, which makes it a status
+ * message (SC 4.1.3), and this region is the only thing on the stage that
+ * speaks. Behind a switch that is off by default it would be silent for
+ * exactly the rider who cannot see the notice. The owner may reverse this:
+ * it is the membership of one array.
+ *
+ * ## ⚠️ Seven kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -210,7 +229,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
-  | { readonly kind: 'hold-changed'; readonly text: string };
+  | { readonly kind: 'hold-changed'; readonly text: string }
+  | { readonly kind: 'lap-ended'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -236,6 +256,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
   // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
   'hold-changed',
+  // #1312: a lap of the course, as it ends. The lowest event. Rank 5e.
+  'lap-ended',
   'power-off-target',
   'distance-tick',
   'power',
@@ -254,10 +276,12 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
+  // #1312: a lap shown for a few seconds is a status message. Rank 5e.
+  'lap-ended',
 ];
 
 /**
- * What the announcer does with announcements off: the six status kinds and
+ * What the announcer does with announcements off: the seven status kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {

@@ -12,7 +12,9 @@
  */
 
 import {
+  beatsPerMinute,
   metres,
+  revolutionsPerMinute,
   seconds,
   unixSeconds,
   watts,
@@ -237,6 +239,46 @@ describe('athlete, lap and privacy zone encode and decode', () => {
     const powered = { ...LAP, averagePower: watts(180) };
     expect(fromPersistedLap(toPersistedLap(powered))).toEqual(powered);
   });
+
+  // #1312: every figure a course lap states, through the row and back.
+  const FULL_LAP: LapRecord = {
+    ...LAP,
+    averagePower: watts(180),
+    maxPower: watts(412),
+    averageHeartRate: beatsPerMinute(148),
+    maxHeartRate: beatsPerMinute(171),
+    averageCadence: revolutionsPerMinute(88),
+    ascent: metres(64),
+    partial: true,
+  };
+
+  it('a lap round trips with every figure of #1312, and a part lap stays a part lap', () => {
+    expect(fromPersistedLap(toPersistedLap(FULL_LAP))).toEqual(FULL_LAP);
+  });
+
+  it('a lap with none of them reads back with none, and is not a part lap', () => {
+    const read = fromPersistedLap(toPersistedLap(LAP));
+    for (const key of [
+      'maxPower',
+      'averageHeartRate',
+      'maxHeartRate',
+      'averageCadence',
+      'ascent',
+      'partial',
+    ]) {
+      expect(read).not.toHaveProperty(key);
+    }
+  });
+
+  it.each(['maxPower', 'averageHeartRate', 'maxHeartRate', 'averageCadence', 'ascent'] as const)(
+    'a stored lap whose %s is not a quantity is a decode error naming it',
+    (key) => {
+      const row = { ...toPersistedLap(FULL_LAP), [key]: -1 };
+      expect(() => fromPersistedLap(row)).toThrow(new RegExp(`lap\\.${key}`));
+      const text = { ...toPersistedLap(FULL_LAP), [key]: '180' as unknown as number };
+      expect(() => fromPersistedLap(text)).toThrow(StoreDecodeError);
+    },
+  );
 
   it('a lap with a negative moving time is rejected', () => {
     const row = { ...toPersistedLap(LAP), movingTime: -1 };

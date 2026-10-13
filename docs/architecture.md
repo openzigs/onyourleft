@@ -358,6 +358,12 @@ erDiagram
         number  movingTime       "Seconds"
         number  distance         "Metres"
         number  averagePower     "Watts, optional"
+        number  maxPower         "Watts, optional (#1312)"
+        number  averageHeartRate "BeatsPerMinute, optional (#1312)"
+        number  maxHeartRate     "BeatsPerMinute, optional (#1312)"
+        number  averageCadence   "RevolutionsPerMinute, optional (#1312)"
+        number  ascent           "Metres climbed, optional (#1312)"
+        boolean partial          "true only: the rider stopped part-way round (#1312)"
     }
     PRIVACY_ZONE {
         string  id         PK

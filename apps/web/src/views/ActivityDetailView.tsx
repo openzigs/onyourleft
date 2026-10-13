@@ -86,6 +86,7 @@ import {
   type Trace,
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
+import { LapsTable } from '../detail/LapsTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
 import { RaceConsentSection } from '../detail/RaceConsentSection';
@@ -111,7 +112,6 @@ import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-pref
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
 import { hrefFor, routeById } from '../shell/routes';
-import { ScrollTable } from '../design/ScrollTable';
 
 /**
  * The chart, loaded on demand.
@@ -568,32 +568,8 @@ export function ActivityDetailView({
       )}
 
       <h3>Laps</h3>
-      {laps.length === 0 ? (
-        <p className="oyl-muted">This ride has no laps recorded.</p>
-      ) : (
-        <ScrollTable className="oyl-table" caption="Laps, in the order they were ridden">
-          <thead>
-            <tr>
-              <th scope="col">Lap</th>
-              <th scope="col">Elapsed</th>
-              <th scope="col">Moving</th>
-              <th scope="col">Distance ({distanceUnit(units)})</th>
-              <th scope="col">Avg power ({POWER_UNIT})</th>
-            </tr>
-          </thead>
-          <tbody>
-            {laps.map((lap) => (
-              <tr key={lap.id}>
-                <th scope="row">{String(lap.ordinal + 1)}</th>
-                <td>{formatDuration(lap.elapsedTime)}</td>
-                <td>{formatDuration(lap.movingTime)}</td>
-                <td>{formatDistance(lap.distance, units).value}</td>
-                <td>{lap.averagePower === undefined ? '—' : formatPowerValue(lap.averagePower)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </ScrollTable>
-      )}
+      {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
+      <LapsTable laps={laps} units={units} />
 
       {/*
         #388. Only for a ride the side camera filmed — the owner's ruling puts

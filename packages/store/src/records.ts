@@ -33,6 +33,7 @@ import type {
   GradePercent,
   Kilograms,
   Metres,
+  RevolutionsPerMinute,
   Seconds,
   SegmentSport,
   SegmentVisibility,
@@ -556,6 +557,29 @@ export interface LapRecord {
   readonly movingTime: Seconds;
   readonly distance: Metres;
   readonly averagePower?: Watts;
+  /**
+   * #1312: the rest of what a lap states, each absent where nothing measured
+   * it — a ride with no strap has no heart rate, and nought would say the
+   * rider's heart stopped. All optional, so a lap written before #1312 (and a
+   * lap a later lap button writes with fewer figures) is already valid.
+   *
+   * Average speed is not here: it is {@link distance} over {@link movingTime},
+   * and a stored copy could disagree with the two it is made of.
+   */
+  /** The highest power reading of the lap. */
+  readonly maxPower?: Watts;
+  readonly averageHeartRate?: BeatsPerMinute;
+  /** The highest heart-rate reading of the lap. */
+  readonly maxHeartRate?: BeatsPerMinute;
+  readonly averageCadence?: RevolutionsPerMinute;
+  /** Metres climbed in the lap. */
+  readonly ascent?: Metres;
+  /**
+   * The rider stopped part-way through this lap — #1312. Present only as
+   * `true`: a part lap is shown as one and is never compared with a whole lap,
+   * which would read as a slow lap. Absent on every whole lap.
+   */
+  readonly partial?: true;
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  metres,
   metresPerSecond,
   routeProfile,
   revolutionsPerMinute,
@@ -80,6 +81,7 @@ import {
 } from '@onyourleft/sensors/simulator';
 import {
   activityId,
+  lapId,
   recordingSessionId,
   workoutId,
   type RecordingSessionId,
@@ -5348,6 +5350,7 @@ function savePort(overrides: Partial<RideSavePort['store']> = {}): {
     saved,
     port: {
       newActivityId: () => activityId('saved-ride'),
+      newLapId: () => lapId('saved-lap'),
       timeZone: 'Europe/London',
       store: {
         putActivity: (record) => {
@@ -5355,6 +5358,7 @@ function savePort(overrides: Partial<RideSavePort['store']> = {}): {
           return Promise.resolve(record.id);
         },
         putStreamSet: (set) => Promise.resolve(set.activityId),
+        putLap: (lap) => Promise.resolve(lap.id),
         deleteActivity: () => Promise.resolve(true),
         ...overrides,
       },
@@ -6660,10 +6664,15 @@ function storeSavePort(): RideSavePort {
       minted += 1;
       return activityId(`ride-${String(minted)}`);
     },
+    newLapId: () => {
+      minted += 1;
+      return lapId(`lap-${String(minted)}`);
+    },
     timeZone: 'Europe/London',
     store: {
       putActivity: async (record) => harness.write(async (store) => store.putActivity(record)),
       putStreamSet: async (set) => harness.write(async (store) => store.putStreamSet(set)),
+      putLap: async (lap) => harness.write(async (store) => store.putLap(lap)),
       deleteActivity: async (owner, id) =>
         harness.write(async (store) => store.deleteActivity(owner, id)),
     },
@@ -6782,6 +6791,206 @@ describe('#1111 — the game HUD’s moving time is the recorder’s, and the sa
     expect(saved?.movingTime).toBe(last);
     // And it is not the elapsed time — the pauses are what the test is about.
     expect(saved?.elapsedTime).toBeGreaterThan(last);
+    rig.controller.dispose();
+  });
+});
+
+describe('#1312 — the laps of a course are the recording’s, and are saved with the ride', () => {
+  const WHOLE = {
+    kind: 'lap',
+    distance: metres(1_000),
+    ascent: metres(14),
+    partial: false,
+  } as const;
+  const lapsOf = async (id: string) =>
+    harness.read(async (store) => store.listLaps(ATHLETE_A, activityId(id)));
+
+  it('states each lap from the recorder’s clock and samples, and the library reads the same rows back', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    // The port `main.tsx` builds over this controller — the game's only way in.
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 4);
+    // No lap is open until the rider leaves the line.
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+
+    expect(hud.courseLine?.({ kind: 'started' })).toBeUndefined();
+    expect(hud.rideLapSeconds?.()).toBe(0);
+    await ride(rig, 10);
+    expect(hud.rideLapSeconds?.()).toBe(10);
+
+    const afterOne = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(afterOne).toHaveLength(1);
+    expect(afterOne?.[0]).toMatchObject({
+      movingTime: 10,
+      elapsedTime: 10,
+      distance: 1_000,
+      ascent: 14,
+    });
+    // The line starts the next lap's clock.
+    expect(hud.rideLapSeconds?.()).toBe(0);
+
+    await ride(rig, 7);
+    const afterTwo = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(afterTwo?.map((lap) => lap.movingTime)).toEqual([10, 7]);
+
+    await ride(rig, 3);
+    // *End ride*, part-way round the third.
+    const afterThree = hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(280),
+      ascent: metres(2),
+      partial: true,
+      again: false,
+    });
+    expect(afterThree?.[2]).toMatchObject({ movingTime: 3, distance: 280, partial: true });
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back through the store, as the ride's page reads them (§5): the
+    // rows are the laps the HUD was handed as each one ended.
+    const saved = await lapsOf('ride-1');
+    expect(saved.map((lap) => [lap.ordinal, lap.movingTime, lap.distance, lap.partial])).toEqual([
+      [0, 10, 1_000, undefined],
+      [1, 7, 1_000, undefined],
+      [2, 3, 280, true],
+    ]);
+    expect(saved).toHaveLength(afterThree?.length ?? 0);
+    saved.forEach((row, index) => {
+      // Everything the HUD was handed is on the row; the row adds its ids.
+      expect(row).toMatchObject({ ...afterThree?.[index] });
+    });
+
+    // And each lap's power is the mean of the samples the save wrote between
+    // its two crossings — what anything reading the ride's samples works out.
+    const streams = await harness.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+    );
+    const power = streams?.channels.power ?? [];
+    const first = saved[0];
+    const from = (first?.startedAt ?? 0) - (streams?.startedAt ?? 0);
+    const inLap = power.slice(from, from + 10).filter((sample) => sample !== undefined);
+    expect(inLap.length).toBeGreaterThan(0);
+    expect(first?.averagePower).toBe(
+      Math.round(inLap.reduce((sum, sample) => sum + sample, 0) / inLap.length),
+    );
+    expect(first?.maxPower).toBe(Math.max(...inLap));
+    rig.controller.dispose();
+  });
+
+  it('leaves a pause inside a lap out of its moving time, and the HUD’s lap time holds through it', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 5);
+    await rig.controller.pause();
+    await ride(rig, 9);
+    expect(hud.rideLapSeconds?.()).toBe(5);
+    await rig.controller.resume();
+    await ride(rig, 4);
+
+    const laps = hud.courseLine?.({ ...WHOLE, again: true });
+
+    expect(laps?.[0]?.movingTime).toBe(9);
+    expect(laps?.[0]?.elapsedTime).toBe(18);
+
+    // The next lap is open — and a stopped ride is no longer a ride in
+    // progress, so it has no lap time to show.
+    await ride(rig, 2);
+    expect(hud.rideLapSeconds?.()).toBe(2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+    // …and a line crossed after the recording stopped ends no lap of it.
+    expect(hud.courseLine?.({ ...WHOLE, again: true })).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('takes both ends of a lap from the recorder’s own clock, so a lap never moves for longer than it lasts', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 5);
+    // The recorder's clock runs three seconds ahead of the wall clock — a
+    // reading stamped ahead does this — and the rider crosses the line then.
+    await rig.controller.tick(unixSeconds(rig.bench.now + 3));
+    const moving = rig.controller.getSnapshot().movingSeconds;
+
+    const laps = hud.courseLine?.({ ...WHOLE, again: true });
+
+    expect(laps?.[0]?.movingTime).toBe(moving);
+    expect(laps?.[0]?.elapsedTime).toBe(moving);
+    rig.controller.dispose();
+  });
+
+  it('states no lap with nothing recording, and none for a lap the recording did not see begin', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    // A game ride with no recording under it.
+    hud.courseLine?.({ kind: 'started' });
+    expect(hud.courseLine?.({ ...WHOLE, again: true })).toBeUndefined();
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+
+    // The recording starts part-way round a lap: that lap is not one.
+    await rig.controller.start();
+    await ride(rig, 3);
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+    expect(hud.courseLine?.({ ...WHOLE, again: true })).toBeUndefined();
+    // The next one is, from the line.
+    await ride(rig, 6);
+    const laps = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(laps?.map((lap) => lap.movingTime)).toEqual([6]);
+    rig.controller.dispose();
+  });
+
+  it('saves no laps for a ride that never completed the course, and none of one ride’s with the next', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    // Ride 1: abandoned part-way round its first lap.
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 5);
+    hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(400),
+      ascent: undefined,
+      partial: true,
+      again: false,
+    });
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(await lapsOf('ride-1')).toEqual([]);
+
+    // Ride 2: one whole lap. ⚠️ `storeSavePort` mints ride and lap ids from
+    // one counter, so this is `ride-2` and its lap `lap-3`.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 6);
+    expect(hud.courseLine?.({ ...WHOLE, again: false })).toHaveLength(1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect((await lapsOf('ride-2')).map((lap) => lap.movingTime)).toEqual([6]);
+
+    // Ride 3: no course at all — and nothing of ride 2's laps comes with it.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(await lapsOf('ride-4')).toEqual([]);
     rig.controller.dispose();
   });
 });

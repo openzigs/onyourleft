@@ -74,15 +74,18 @@ import { flushSync } from 'react-dom';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
   expandWorkout,
   geographicPosition,
   kilograms,
+  metres,
   routeProfile,
   seconds,
   thresholdShare,
+  unixSeconds,
   watts,
   type RoutePoint,
   type RouteProfile,
@@ -94,6 +97,7 @@ import { roomPortOver } from '../src/net/room-port';
 import { ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { LapFigures } from '../src/recording/laps';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
@@ -386,7 +390,14 @@ const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
     Promise.resolve([
-      { id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 },
+      {
+        id: 'harness',
+        name: 'Harness hills',
+        // #1312: `?lap=riding` and `?lap=ended` ride a loop. @see LAP
+        profile:
+          new URLSearchParams(window.location.search).get('lap') === null ? route() : lapCircuit(),
+        attempts: 1,
+      },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
   loadGhost: () =>
@@ -594,8 +605,73 @@ const GRAPH: WorkoutGraphInput | undefined =
       }
     : undefined;
 
+/**
+ * `ride.html?lap=riding` and `?lap=ended` — #1312: the ride is on a LOOP.
+ *
+ * - `riding`: the recording has a lap open, so the elevation strip's sentence
+ *   carries the lap's time beside the lap's number (`fields.ts`
+ *   §`profileReading`) — `59:59`, the widest a lap short of an hour reads.
+ *   No lap ends: the port answers no laps, as it does with nothing recorded.
+ * - `ended`: the same, and the rider has just completed a lap, so the notice
+ *   cell carries the finished lap. The loop is FOUR metres round, so the
+ *   harness's rider is over its line within two seconds of the start and
+ *   again every second after: the notice is up for ten seconds of ride after
+ *   each crossing, so once the first lap is done it is always on the stage.
+ *   ⚠️ That short on purpose. A forty-metre loop took eight seconds to its
+ *   first line at every viewport, which is over a minute of a gate whose
+ *   `chromium` run has 88 s to spare (docs/agents/ci.md §4c).
+ *
+ * The laps are the port's — the recording's, in the product — and the third
+ * is the WIDEST notice a ride short of an hour-long lap produces: every
+ * figure, a three-digit difference from the lap before, and the longer of the
+ * two ways the comparison with the best lap ends.
+ */
+const LAP = new URLSearchParams(window.location.search).get('lap');
+const LAP_ENDED = LAP === 'ended';
+
+/** A level loop, two metres out and back, so its two ends meet. */
+function lapCircuit(): RouteProfile {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 8; index += 1) {
+    const out = index <= 4 ? index : 8 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 0.5) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(60),
+    });
+  }
+  return routeProfile(points, { loop: true });
+}
+
+/** One whole 35.99 km lap, in `moving` seconds. @see LAP_ENDED */
+function harnessLap(moving: number): LapFigures {
+  return {
+    startedAt: unixSeconds(1_800_000_000),
+    elapsedTime: seconds(moving),
+    movingTime: seconds(moving),
+    distance: metres(35_990),
+    averagePower: watts(342),
+    averageHeartRate: beatsPerMinute(168),
+  };
+}
+
+/**
+ * Lap 3 is the one just ended: 59:59, 124 s faster than lap 2 and the best of
+ * the three — the longer of the notice's two endings.
+ */
+const HARNESS_LAPS: readonly LapFigures[] = [
+  harnessLap(3_800),
+  harnessLap(3_723),
+  harnessLap(3_599),
+];
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  // #1312. @see LAP_ENDED
+  courseLine: (event) => (LAP_ENDED && event.kind === 'lap' ? HARNESS_LAPS : undefined),
+  rideLapSeconds: () => (LAP === 'ended' || LAP === 'riding' ? 59 * 60 + 59 : undefined),
   runningWorkout: () => GRAPH,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),

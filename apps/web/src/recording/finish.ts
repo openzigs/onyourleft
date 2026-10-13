@@ -28,7 +28,12 @@
  * 2. Write the streams. If this throws, the activity is deleted again, because
  *    a row with no samples behind it is a ride that shows in the library and
  *    opens to nothing.
- * 3. **Only then** discard the checkpoint — and that step belongs to the
+ * 3. Write the laps (#1312), when the ride has any. A lap needs its activity
+ *    behind it (`putLap` refuses one without), and a failure here takes the
+ *    activity back too — `deleteActivity` takes its streams and laps with it —
+ *    so a ride is never saved with some of its laps and a sentence saying all
+ *    is well.
+ * 4. **Only then** discard the checkpoint — and that step belongs to the
  *    caller, not here. Until the activity is durable the checkpoint is the only
  *    copy, and a discard that ran first would turn a failed save into a lost
  *    ride rather than a retryable one.
@@ -69,7 +74,9 @@ import {
 import type {
   ActivityId,
   AthleteId,
+  LapId,
   NewActivity,
+  NewLap,
   NewStreamSet,
   StreamChannelValue,
 } from '@onyourleft/store';
@@ -77,10 +84,14 @@ import type {
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
-/** The activity and the samples behind it, ready to write. */
+import { lapsToSave, type LapFigures } from './laps';
+
+/** The activity, the samples behind it and its laps, ready to write. */
 export interface FinishedRide {
   readonly activity: NewActivity;
   readonly streams: NewStreamSet;
+  /** The laps of a course ridden during it, in order — #1312. Usually none. */
+  readonly laps: readonly NewLap[];
 }
 
 export interface RideToSaveInput {
@@ -104,6 +115,13 @@ export interface RideToSaveInput {
   readonly workoutFinished?: boolean | undefined;
   /** This ride raced the rider's own ghost and the race settled — #947's ghost badge. */
   readonly ghostRaced?: boolean | undefined;
+  /**
+   * The laps of a course the rider completed during this recording, and how
+   * to name each — #1312, `laps.ts`. Absent for a ride with no course under
+   * it, and for a recovered ride, whose laps went with the tab that held them.
+   */
+  readonly laps?:
+    { readonly ridden: readonly LapFigures[]; readonly newLapId: () => LapId } | undefined;
 }
 
 /**
@@ -176,6 +194,8 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
 
   return {
     activity,
+    laps:
+      input.laps === undefined ? [] : lapsToSave(input.laps.ridden, input.id, input.laps.newLapId),
     streams: {
       activityId: input.id,
       athleteId: input.athleteId,
@@ -241,6 +261,7 @@ function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watt
 export interface RideSaveStore {
   putActivity(record: NewActivity): Promise<ActivityId>;
   putStreamSet(set: NewStreamSet): Promise<ActivityId>;
+  putLap(record: NewLap): Promise<LapId>;
   deleteActivity(athleteId: AthleteId, id: ActivityId): Promise<boolean>;
 }
 
@@ -277,6 +298,21 @@ export async function saveFinishedRide(
     // behind it shows in the library and opens to nothing. The cleanup's own
     // failure is swallowed so the rider is told the original cause — a full
     // disk — rather than whatever the tidy-up hit on the way out.
+    await store
+      .deleteActivity(finished.activity.athleteId, finished.activity.id)
+      .catch(() => false);
+    return { status: 'failed', error: asError(error) };
+  }
+  try {
+    // #1312. In order, so a reader that stops at the first failure has the
+    // laps it has in the order they were ridden.
+    for (const lap of finished.laps) {
+      await store.putLap(lap);
+    }
+  } catch (error: unknown) {
+    // The whole ride goes back, laps and streams with it (`deleteActivity`
+    // cascades both): the checkpoint is still there, and a ride saved with
+    // two of its five laps would say something no rider rode.
     await store
       .deleteActivity(finished.activity.athleteId, finished.activity.id)
       .catch(() => false);

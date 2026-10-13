@@ -56,6 +56,23 @@ vi.mock('./gradient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gradient')>();
   return { ...actual, createGradientSession: vi.fn(actual.createGradientSession) };
 });
+/**
+ * What `GameView` OFFERED the announcer, call by call — #1312, the seam
+ * `hud/hud-announcer.a11y.test.tsx` uses and for its reason: the region's text
+ * cannot tell an event offered once from one offered on every frame. The real
+ * `announce` still runs.
+ */
+const offered = vi.hoisted((): string[] => []);
+vi.mock('./hud/announce', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./hud/announce')>();
+  return {
+    ...actual,
+    announce: (...args: Parameters<typeof actual.announce>) => {
+      for (const event of args[1].events ?? []) offered.push(event.kind);
+      return actual.announce(...args);
+    },
+  };
+});
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
   altitudeMetres,
@@ -72,7 +89,7 @@ import {
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
-import { activityId, recordingSessionId } from '@onyourleft/store';
+import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { createRideController } from '../ride/controller';
@@ -744,6 +761,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const harness = createStoreHarness();
     await seedAthletes(harness);
     const savedIds: string[] = [];
+    let mintedLaps = 0;
     const { transport, bench } = createSimulator({
       devices: [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' })],
     });
@@ -770,6 +788,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       // the real store, so what a group ride leaves in it can be read back.
       rideSave: {
         newActivityId: () => activityId('the-ride'),
+        newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
           putActivity: (record) =>
@@ -779,6 +798,7 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
               return id;
             }),
           putStreamSet: (set) => harness.write(async (store) => store.putStreamSet(set)),
+          putLap: (lap) => harness.write(async (store) => store.putLap(lap)),
           deleteActivity: (owner, id) =>
             harness.write(async (store) => store.deleteActivity(owner, id)),
         },
@@ -939,6 +959,142 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     for (const trace of ['777.7', '1234.5', '13.37', '11.11', 'room-1', '"riderId"']) {
       expect(everything, trace).not.toContain(trace);
     }
+    await rig.done();
+  });
+
+  it('records a lap each time the rider completes a loop, says it on the HUD, and saves a part lap as one (#1312)', async () => {
+    /** 300 flat metres out and back, so its ends meet and it is honestly a loop. */
+    const circuit = (): RidableRoute => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 30; index += 1) {
+        const out = index <= 15 ? index : 30 - index;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (out * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      return {
+        id: 'route-circuit',
+        name: 'Test circuit',
+        profile: routeProfile(points, { loop: true }),
+        attempts: 0,
+      };
+    };
+    const route = circuit();
+    const rig = await onTheBench(false);
+    await rig.controller.start();
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(route)}
+        trainer={gameTrainerPortOver(rig.controller)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+
+    const hud = (): string => mounted?.container.textContent ?? '';
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    /** The strip's own sentence: which lap, and its time — `12% of lap 2 · 0:03`. */
+    const strip = (): string =>
+      mounted?.container.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
+    const lapLabel = (): string | undefined => /of (lap \d+)/.exec(strip())?.[1];
+    /** One second of ride: two frames of the game, one tick of the recording. */
+    const rideOneSecond = async (): Promise<void> => {
+      await pump(1);
+      // In `act`: the tick tells the HUD's lap time, which re-renders.
+      await act(async () => {
+        rig.bench.advance(seconds(1));
+        await rig.controller.tick(rig.bench.now);
+      });
+      await pump(1);
+    };
+    const rideUntil = async (reached: () => boolean): Promise<void> => {
+      for (let second = 0; second < 400 && !reached(); second += 1) {
+        await rideOneSecond();
+      }
+      expect(reached()).toBe(true);
+    };
+
+    // On the first lap: the HUD says which lap, and nothing has ended.
+    await rideOneSecond();
+    await rideOneSecond();
+    expect(lapLabel()).toBe('lap 1');
+    // The lap's time is the RECORDING's moving time since the line — and the
+    // recording began on the line here, so it is the ride's moving time.
+    const early = rig.controller.getSnapshot();
+    expect(early.courseLapSeconds).toBeGreaterThan(0);
+    expect(early.courseLapSeconds).toBe(early.movingSeconds);
+    expect(strip()).toMatch(new RegExp(`of lap 1 · 0:0${String(early.courseLapSeconds)}$`));
+    expect(region()).not.toContain('Lap 1:');
+
+    // The line, the first time: lap 1 is shown and said, with nothing to compare it with.
+    await rideUntil(() => lapLabel() === 'lap 2');
+    // And the lap's clock began again at the line.
+    expect(strip()).toMatch(/of lap 2 · 0:0[0-2]$/);
+    await rideUntil(() => region().startsWith('Lap 1:'));
+    // The notice a rider reads: the lap, its time and its averages.
+    expect(hud()).toMatch(/Lap 1: \d+:\d\d · \d+ W · /);
+    expect(region()).not.toContain('than lap');
+    // Said ONCE: offered until the region said it, and not again while its
+    // notice is still up — or it would hold every reading off for ten seconds.
+    expect(offered).toContain('lap-ended');
+    offered.length = 0;
+    await rideOneSecond();
+    expect(offered).not.toContain('lap-ended');
+    expect(hud()).toMatch(/Lap 1: \d+:\d\d · /);
+    // The notice is for a few seconds of ride, and then the cell is given back.
+    for (let second = 0; second < 12; second += 1) {
+      await rideOneSecond();
+    }
+    expect(lapLabel()).toBe('lap 2');
+    expect(hud()).not.toMatch(/Lap 1: \d+:\d\d · /);
+
+    // The second time: compared with the first, in words.
+    await rideUntil(() => lapLabel() === 'lap 3');
+    await rideUntil(() => region().startsWith('Lap 2:'));
+    expect(region()).toMatch(/(faster|slower) than lap 1\.|The same time as lap 1\./);
+    expect(hud()).toMatch(/than lap 1\.|Same time as lap 1\./);
+
+    // *End ride*, part-way round the third.
+    for (let second = 0; second < 5; second += 1) {
+      await rideOneSecond();
+    }
+    await clickThrough(buttonStarting('End ride'));
+    await act(async () => {
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+    });
+    await flush();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back on a fresh connection, as the ride's page reads them.
+    const laps = await rig.harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('the-ride')),
+    );
+    const length: number = route.profile.totalDistance;
+    expect(laps.map((lap) => [lap.ordinal, lap.partial])).toEqual([
+      [0, undefined],
+      [1, undefined],
+      [2, true],
+    ]);
+    expect(laps[0]?.distance).toBe(length);
+    expect(laps[1]?.distance).toBe(length);
+    expect(laps[2]?.distance).toBeGreaterThan(0);
+    expect(laps[2]?.distance).toBeLessThan(length);
+    for (const lap of laps) {
+      expect(lap.movingTime).toBeGreaterThan(0);
+      // One clock for both: a lap never moved for longer than it lasted.
+      expect(lap.movingTime).toBeLessThanOrEqual(lap.elapsedTime);
+    }
+    // The second lap began where the first ended.
+    expect(laps[1]?.startedAt).toBe((laps[0]?.startedAt ?? 0) + (laps[0]?.elapsedTime ?? 0));
     await rig.done();
   });
 

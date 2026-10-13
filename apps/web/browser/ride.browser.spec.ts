@@ -3329,3 +3329,165 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
     }
   });
 });
+
+/**
+ * #1312 — a ride on a LOOP. `?lap=riding` has a lap open, so the elevation
+ * strip's sentence carries the lap's time beside its number (`fields.ts`
+ * §`profileReading`): `NN% of lap N · 59:59`. `?lap=ended` adds the finished
+ * lap in the notice cell (`GameView` §`lapNotice`), with the widest notice a
+ * ride short of an hour-long lap produces.
+ *
+ * ⚠️ **Why the lap's time is in the strip's sentence and not a field.** As an
+ * eighth secondary field it was measured here first, and at 736×360 it put the
+ * secondary panel over the rider (the panel grew a row, to 182 px); upright
+ * at 360×752 it cost the notice cell its clearance. The sentence costs no
+ * cell, and "riding" below holds the stage to exactly what it was: every
+ * reading and control on it, every panel whole, none over another or over the
+ * rider — and the sentence still on ONE line with the time in it.
+ *
+ * "Ended" measures the notice at every overlay viewport, both ways: whole,
+ * over no panel and not over the rider, and upright clear of the rider's box
+ * by the clearance #605 set for a notice there.
+ *
+ * ⚠️ **The lap's notice is alone in the cell by rule, and that rule is the
+ * third thing measured** (`HudPanel.tsx` §`HudPanelProps.lapNotice`): beside
+ * *Keep the screen on*, which is never put away, the lap is not on the HUD at
+ * all — a pair of notices is what #585 and #647 each measured running over
+ * the rider. There is no control that takes the rule away: it is a branch in
+ * a component, not a stylesheet rule a page can restore, and the unit test
+ * that holds it is `HudPanel.test.tsx` §"#1312". What stands in for one is
+ * #647's own control above, where the same measurement is red for a pair.
+ */
+const LAP_NOTICE_SEEN =
+  'Lap 3: 59:59 · 342 W · 36.0 km/h · 168 bpm. 124 s faster than lap 2. Your best lap of this ride.';
+
+async function lapOnTheHud(page: Page): Promise<{
+  readonly notice: string | undefined;
+  /** The strip's sentence as the document holds it, laid out or not. */
+  readonly sentence: string;
+  /** The strip's sentence, and how many lines it is set on — or `undefined` where it is not laid out. */
+  readonly strip: { readonly text: string; readonly lines: number } | undefined;
+}> {
+  return page.evaluate(() => {
+    const label = [...document.querySelectorAll('.oyl-hud__notices .oyl-status__label')].find(
+      (each) => each.textContent?.startsWith('Lap '),
+    );
+    const sentence = document.querySelector('.oyl-hud__profile-text');
+    const words = sentence?.firstChild ?? null;
+    let strip: { text: string; lines: number } | undefined;
+    if (sentence !== null && words !== null && sentence.getClientRects().length > 0) {
+      const range = document.createRange();
+      range.selectNodeContents(words);
+      // One rectangle per line box the words are set on.
+      const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+      strip = { text: sentence.textContent ?? '', lines: tops.size };
+    }
+    return {
+      notice: label?.closest('.oyl-status')?.textContent?.replace(/\s+/g, ' '),
+      sentence: sentence?.textContent ?? '',
+      strip,
+    };
+  });
+}
+
+test.describe('a ride on a loop — #1312', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`the lap’s time is in the strip’s sentence, on one line, and the stage is as it was — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?lap=riding');
+      const found = await lapOnTheHud(page);
+      expect(found.strip?.text).toMatch(/^\d+% of lap \d+ · 59:59$/);
+      expect(found.strip?.lines).toBe(1);
+      expect(found.notice).toBeUndefined();
+
+      const box = riderBox(viewport);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          expect(seen.scrollY).toBe(0);
+          expect(seen.pageOverflow).toBeLessThanOrEqual(0);
+          const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
+          expect(lost.map(describeItem)).toEqual([]);
+          expect(
+            seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+          ).toEqual([]);
+          const collisions: string[] = [];
+          seen.panels.forEach((a, index) => {
+            for (const b of seen.panels.slice(index + 1)) {
+              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          expect(collisions).toEqual([]);
+          expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem)).toEqual(
+            [],
+          );
+        });
+      }
+    });
+
+    test(`as a lap ends: the finished lap’s notice, whole and over nothing — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?lap=ended');
+      // The harness rides its four-metre loop for real, so the first crossing
+      // of its line is a second or two of ride away.
+      await expect
+        .poll(async () => (await lapOnTheHud(page)).notice, { timeout: 30_000 })
+        .toContain(LAP_NOTICE_SEEN);
+
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          expect(seen.scrollY).toBe(0);
+          expect(seen.pageOverflow).toBeLessThanOrEqual(0);
+          // ⚠️ On a phone a notice takes the route panel's cell (#437), so for
+          // these seconds the strip and the plan view are not laid out — and
+          // on a tablet, where the notice has a cell of its own, they are.
+          const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
+          const routePanel = ['the elevation strip', 'the plan view'];
+          const lost = seen.items
+            .filter((each) => !inside(each.box, viewport) || !each.onTop)
+            .map((each) => each.name);
+          expect(lost).toEqual(onAPhone ? routePanel : []);
+          // The notice: whole, over no panel, not over the rider.
+          expect(easedCollisions(seen, viewport)).toEqual([]);
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice?.box.height ?? 0).toBeGreaterThan(1);
+          const clearance = riderBox(viewport).top - (notice?.box.bottom ?? Infinity);
+          console.log(
+            `a lap ended, ${how} — ${viewport.name} — notice cell ${(notice?.box.height ?? 0).toFixed(0)} px tall` +
+              (viewport.height > viewport.width
+                ? `; ${clearance.toFixed(0)} px above the rider's box`
+                : ''),
+          );
+          if (viewport.height > viewport.width) {
+            expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+          }
+        });
+      }
+    });
+  }
+
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width === 360)) {
+    test(`a finished lap gives way to Keep the screen on: it is not in the notice cell — ${viewport.name}`, async ({
+      page,
+    }) => {
+      // The apparatus is the case above at this viewport: without the refusal,
+      // the lap IS in the cell. Here a lap HAS ended behind the refusal — the
+      // strip's sentence is in the document though its panel is not laid out,
+      // and it says the rider is past the first lap.
+      await openRide(page, viewport, '?lap=ended&keepalive=failed');
+      await expect
+        .poll(async () => (await lapOnTheHud(page)).sentence, { timeout: 30_000 })
+        .toMatch(/of lap ([3-9]|\d\d+) /);
+      expect((await keepScreenOnNotice(page)).text).toBe(KEEP_SCREEN_ON_SEEN);
+      expect((await lapOnTheHud(page)).notice).toBeUndefined();
+      const { collisions, clearance } = keepScreenOnLaidOut(
+        await measure(page),
+        viewport,
+        'a lap ended behind it',
+      );
+      expect(collisions).toEqual([]);
+      expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+    });
+  }
+});

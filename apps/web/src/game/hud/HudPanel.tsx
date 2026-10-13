@@ -197,6 +197,23 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
         readonly onToggle: () => void;
       }
     | undefined;
+  /**
+   * The lap of the course that has just ended — #1312: `GameView` hands it in
+   * for a few seconds of ride after each lap, and `undefined` otherwise.
+   *
+   * ⚠️ **Shown only when the notice cell is otherwise EMPTY** — no fault, no
+   * safety notice ({@link notices}), and no standing notice open. On a phone
+   * the cell is the route panel's (#437) and it holds one notice well and two
+   * badly: #585 and #647 each measured a pair of notices running over the
+   * rider or pushing *End ride* off the stage. A lap is the one notice that
+   * is nothing to act on, so it is the one that gives way; its sentence is
+   * still said by the HUD's one region, and its figures are on the ride's
+   * page afterwards. Decided here rather than in `GameView` so that the rule
+   * reads the notices that ARE rendered, not a second list of their
+   * conditions. `browser/ride.browser.spec.ts` §"#1312" measures it alone at
+   * every overlay viewport.
+   */
+  readonly lapNotice?: ReactNode;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -205,7 +222,13 @@ export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
   const readings = hudReadings({ ...props, units });
-  const elevation = profileReading(props.state, props.profile);
+  // #1312: the lap's time joins the lap's number in the strip's sentence.
+  const elevation = profileReading(props.state, props.profile, props.lapSeconds);
+  // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
+  const lap =
+    hasContent(props.notices) || props.standingNotice?.expanded === true
+      ? undefined
+      : props.lapNotice;
 
   return (
     <section className="oyl-hud" aria-label="Ride metrics">
@@ -405,10 +428,10 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         {props.announcement}
       </p>
 
-      {hasContent(props.notices) || props.standingNotice !== undefined ? (
+      {hasContent(props.notices) || props.standingNotice !== undefined || hasContent(lap) ? (
         <div
           className={
-            hasContent(props.notices) || props.standingNotice?.expanded === true
+            hasContent(props.notices) || props.standingNotice?.expanded === true || hasContent(lap)
               ? 'oyl-hud__notices'
               : 'oyl-hud__notices oyl-hud__notices--collapsed'
           }
@@ -422,6 +445,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </div>
           )}
           {props.notices}
+          {lap}
         </div>
       ) : null}
     </section>

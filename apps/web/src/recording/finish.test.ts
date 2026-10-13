@@ -12,6 +12,7 @@
  */
 
 import {
+  metres,
   metresPerSecond,
   seconds,
   unixSeconds,
@@ -20,6 +21,8 @@ import {
 } from '@onyourleft/domain';
 import {
   activityId as toActivityId,
+  lapId as toLapId,
+  type LapId,
   type NewActivity,
   type StreamChannelValue,
 } from '@onyourleft/store';
@@ -35,6 +38,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hasNoLoadToWorkOut, needsLoadSummary } from '../analysis/summary';
 
 import { rideName, rideToSave, saveFinishedRide, type RideSaveStore } from './finish';
+import type { LapFigures } from './laps';
 
 const ACTIVITY = toActivityId('ride-1');
 const ZONE = 'Europe/London';
@@ -263,6 +267,7 @@ describe('a save that fails leaves nothing half-written', () => {
     const store: RideSaveStore = {
       putActivity: () => Promise.resolve(ACTIVITY),
       putStreamSet: () => Promise.reject(new Error('the device is full')),
+      putLap: (lap) => Promise.resolve(lap.id),
       deleteActivity: (_athlete, id) => {
         deleted.push(id);
         return Promise.resolve(true);
@@ -280,6 +285,7 @@ describe('a save that fails leaves nothing half-written', () => {
     const store: RideSaveStore = {
       putActivity: () => Promise.resolve(ACTIVITY),
       putStreamSet: () => Promise.reject(new Error('the device is full')),
+      putLap: (lap) => Promise.resolve(lap.id),
       deleteActivity: () => Promise.reject(new Error('and the delete failed too')),
     };
     const outcome = await saveFinishedRide(store, rideToSave(input()));
@@ -295,6 +301,7 @@ describe('a save that fails leaves nothing half-written', () => {
         attempted.push('streams');
         return Promise.resolve(ACTIVITY);
       },
+      putLap: (lap) => Promise.resolve(lap.id),
       deleteActivity: () => Promise.resolve(true),
     };
     expect((await saveFinishedRide(store, rideToSave(input()))).status).toBe('failed');
@@ -304,10 +311,104 @@ describe('a save that fails leaves nothing half-written', () => {
   });
 });
 
+// #1312: the laps of a course ridden during the recording.
+function riddenLaps(): {
+  readonly ridden: readonly LapFigures[];
+  readonly newLapId: () => LapId;
+} {
+  const whole = (offset: number, moving: number): LapFigures => ({
+    startedAt: unixSeconds(STARTED + offset),
+    elapsedTime: seconds(moving + 1),
+    movingTime: seconds(moving),
+    distance: metres(1_000),
+    averagePower: watts(200),
+    maxPower: watts(340),
+    ascent: metres(9),
+  });
+  let next = 0;
+  return {
+    ridden: [whole(0, 4), whole(5, 3), { ...whole(9, 1), distance: metres(120), partial: true }],
+    newLapId: () => toLapId(`lap-${String((next += 1))}`),
+  };
+}
+
+describe("#1312 — a ride's laps are saved with it", () => {
+  it('and come back through a fresh handle, in order, with a part lap still a part lap', async () => {
+    await seedAthletes(harness);
+    const finished = rideToSave(input({ laps: riddenLaps() }));
+    const outcome = await harness.write(async (store) => saveFinishedRide(store, finished));
+    expect(outcome.status).toBe('saved');
+
+    const laps = await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY));
+    expect(laps.map((lap) => [lap.ordinal, lap.movingTime, lap.distance, lap.partial])).toEqual([
+      [0, 4, 1_000, undefined],
+      [1, 3, 1_000, undefined],
+      [2, 1, 120, true],
+    ]);
+    expect(laps[0]).toMatchObject({ averagePower: 200, maxPower: 340, ascent: 9 });
+    // Scoped: another athlete asking for this ride's laps is given none.
+    expect(await harness.read(async (store) => store.listLaps(ATHLETE_B, ACTIVITY))).toEqual([]);
+  });
+
+  it('a ride with no course under it is saved with no laps', async () => {
+    await seedAthletes(harness);
+    await harness.write(async (store) => saveFinishedRide(store, rideToSave(input())));
+
+    expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
+  });
+
+  it('takes the whole ride back out when a lap will not go down', async () => {
+    const deleted: string[] = [];
+    let written = 0;
+    const store: RideSaveStore = {
+      ...storeOf(),
+      putLap: (lap) => {
+        written += 1;
+        return written === 2
+          ? Promise.reject(new Error('the device is full'))
+          : Promise.resolve(lap.id);
+      },
+      deleteActivity: (_athlete, id) => {
+        deleted.push(id);
+        return Promise.resolve(true);
+      },
+    };
+
+    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
+    expect(deleted).toStrictEqual([ACTIVITY]);
+    // It stopped at the lap that failed.
+    expect(written).toBe(2);
+  });
+
+  it('and through the real store that leaves no ride and no lap behind', async () => {
+    await seedAthletes(harness);
+    const finished = rideToSave(input({ laps: riddenLaps() }));
+    await harness.write(async (store) => {
+      const refusing: RideSaveStore = {
+        putActivity: (record) => store.putActivity(record),
+        putStreamSet: (set) => store.putStreamSet(set),
+        deleteActivity: (athlete, id) => store.deleteActivity(athlete, id),
+        putLap: (lap) =>
+          lap.ordinal === 1 ? Promise.reject(new Error('refused')) : store.putLap(lap),
+      };
+      expect((await saveFinishedRide(refusing, finished)).status).toBe('failed');
+    });
+
+    expect(await harness.read(async (store) => store.getActivity(ATHLETE_A, ACTIVITY))).toBe(
+      undefined,
+    );
+    expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
+  });
+});
+
 function storeOf(): RideSaveStore {
   return {
     putActivity: () => Promise.resolve(ACTIVITY),
     putStreamSet: () => Promise.resolve(ACTIVITY),
+    putLap: (lap) => Promise.resolve(lap.id),
     deleteActivity: () => Promise.resolve(true),
   };
 }
