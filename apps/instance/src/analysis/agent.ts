@@ -66,7 +66,7 @@ import type {
   ToolResultText,
 } from './model-turn.ts';
 import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
-import { AGENT_TOOLS, type AnyAgentTool, type ToolContext } from './tools/tools.ts';
+import { AGENT_TOOLS, type AgentTool, type ToolContext } from './tools/tools.ts';
 
 /** The most model turns one run may take (ADR 0046 D-7). */
 export const AGENT_MODEL_CALLS = 24;
@@ -244,7 +244,7 @@ export function estimatedTokens(characters: number): number {
   return Math.ceil(characters / 3);
 }
 
-function messageCharacters(message: AgentMessage): number {
+export function messageCharacters(message: AgentMessage): number {
   switch (message.role) {
     case 'user':
       return message.text.length;
@@ -265,7 +265,7 @@ function messageCharacters(message: AgentMessage): number {
 }
 
 /** Which failure a turn that gave no reply is. */
-function turnFailure(failure: ModelFailure): AgentFailure | 'cancelled' {
+export function turnFailure(failure: ModelFailure): AgentFailure | 'cancelled' {
   switch (failure) {
     case 'aborted':
       return 'cancelled';
@@ -309,12 +309,15 @@ function sectionsOf(text: string): readonly string[] {
 }
 
 /** The result a tool call gets: its fenced data, or an error the model is shown. */
-async function runCall(
+export async function runCall<C = ToolContext>(
   call: ToolCallRequest,
-  tools: ReadonlyMap<string, AnyAgentTool>,
-  context: ToolContext,
+  tools: ReadonlyMap<string, AgentTool<Readonly<Record<string, unknown>>, C>>,
+  context: C,
   called: Map<string, number>,
-): Promise<{ readonly text: string; readonly known: AnyAgentTool | undefined }> {
+): Promise<{
+  readonly text: string;
+  readonly known: AgentTool<Readonly<Record<string, unknown>>, C> | undefined;
+}> {
   const known = tools.get(call.toolName);
   const names = [...tools.keys()].join(', ');
   if (known === undefined) {

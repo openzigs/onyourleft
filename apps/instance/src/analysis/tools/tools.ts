@@ -74,7 +74,13 @@ export interface ToolContext {
 type Checked<T> =
   { readonly ok: true; readonly args: T } | { readonly ok: false; readonly error: string };
 
-export interface AgentTool<T = unknown> {
+/**
+ * What a tool that reads only the athlete's synced items runs against: the
+ * part of a {@link ToolContext} a job of another type has too (#1243).
+ */
+export type ReadContext = Pick<ToolContext, 'athleteId' | 'reads'>;
+
+export interface AgentTool<T = unknown, C = ToolContext> {
   readonly spec: ToolSpec;
   /**
    * The most times one run may call this tool, when it has its own cap inside
@@ -88,7 +94,7 @@ export interface AgentTool<T = unknown> {
    * it propagates out of the agent and fails the job `engine-error`, with the
    * error's text kept nowhere (`agent.ts` §`runAnalysisAgent`, #1187).
    */
-  run(context: ToolContext, args: T): Promise<string>;
+  run(context: C, args: T): Promise<string>;
 }
 
 /** The most rides `recent_rides` returns (ADR 0046 D-7 allows ten; #1098 asks for eight). */
@@ -111,7 +117,7 @@ function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** Arguments with only the keys named, each an integer in its range when present. */
-function integers(
+export function integers(
   input: unknown,
   ranges: Readonly<Record<string, readonly [number, number]>>,
 ): Checked<Readonly<Record<string, number | undefined>>> {
@@ -143,7 +149,7 @@ function integerSchema(minimum: number, maximum: number, description: string) {
 }
 
 /** An item's text, decoded strictly: `undefined` for bytes that are not UTF-8. */
-function textOf(item: ReadItem): string | undefined {
+export function textOf(item: ReadItem): string | undefined {
   if (item.body === null) return undefined;
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(item.body);
@@ -161,7 +167,7 @@ function parsed(text: string): unknown {
 }
 
 /** At most `limit` characters, cut at a space when there is one near the end. */
-function bounded(text: string, limit: number): string {
+export function bounded(text: string, limit: number): string {
   if (text.length <= limit) return text;
   // One character is the ellipsis, so the whole is at most `limit`.
   const cut = text.slice(0, limit - 1);
@@ -270,7 +276,7 @@ function goalText(item: ReadItem): string | undefined {
 }
 
 /** `goals`: what the athlete wrote about their goals, newest first, at most 4 000 characters. */
-export const GOALS: AgentTool<Readonly<Record<string, number | undefined>>> = {
+export const GOALS: AgentTool<Readonly<Record<string, number | undefined>>, ReadContext> = {
   spec: {
     name: 'goals',
     description: 'What the cyclist has written about their goals, newest first.',

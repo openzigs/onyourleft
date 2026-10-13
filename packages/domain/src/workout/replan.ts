@@ -87,9 +87,9 @@
  *    with**, kept for each share ({@link PlanBlock.percents}). Two +5 moves
  *    are +10 % exactly, and no sequence of moves takes a target more than
  *    10 % above that share, nor a block swapped in more than 10 % above the
- *    share its place was loaded with. **What is kept is the change reached**: a share
- *    held at its ceiling or at the floor by a move keeps the count it had,
- *    so the next move the other way takes full effect (#1296).
+ *    share its place was loaded with. **What is kept is the change reached**: a
+ *    share held at its ceiling or at the floor by a move keeps the count it
+ *    had, so the next move the other way takes full effect (#1296).
  * 8. **With no duration goal, total time may not grow past the loaded
  *    workout's own.** An absent goal is no licence.
  * 9. **A hold range moves up only to the highest range loaded**, and never
@@ -623,7 +623,10 @@ const ROUNDING_PERCENT = 1e-9;
 /**
  * A change of share as percentage points of the share the place was loaded
  * with, which is what the +10 % is counted in (#1300). A place loaded with no
- * target has no share to measure from, so anything there is over.
+ * target has no share to measure from, so anything there is over. The
+ * infinity is there for the type, which wants a number: no place reaches it
+ * with a rise to measure, since a block with a target cannot replace a free
+ * ride.
  */
 function loadedPoints(rise: number, entry: PlanBlock): number {
   return entry.loadedShare === undefined

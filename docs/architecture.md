@@ -1376,9 +1376,10 @@ What a real heart, strap and trainer do is
 ### Re-plans during the ride: the vocabulary and the device's validator (#1242)
 
 [ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's slow loop, of which only the
-contract exists: `packages/domain/src/workout/replan.ts`. **Nothing calls it yet.** The instance
-job is #1243 and the device half is #1244, and both import this one module so the vocabulary
-cannot drift between them.
+contract and, since #1243, the instance job exist: `packages/domain/src/workout/replan.ts`, whose
+`decodeProposal` the instance calls (§"Re-plan jobs — #1243"). **Nothing calls `validateProposal`
+yet**: the device half is #1244. Both import this one module so the vocabulary cannot drift between
+them.
 
 | Part | What it owns |
 |---|---|
@@ -1913,6 +1914,34 @@ ended (the hourly sweep), and a job a stopped instance left unended is failed `i
 next start, never run again. ⚠️ **ADR 0046 D-12's kept result is not this table**: the candidate is
 deleted on ack, as #1095 specifies, and the copy another device reads is the write-up the device
 syncs as an item (#776).
+
+#### Re-plan jobs — #1243
+
+[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-10 and D-11: the second job type. A
+device asks with `POST /v1/analysis/replans` (`{ input, templateVersion, source }`, sealed-only like
+every job route), and the job is then read, followed, cancelled and acknowledged through the job
+routes above. **It proposes and does nothing else**: the instance writes no number to anything and
+has no path to a trainer (`analysis/agent-safety.test.ts`), and nothing on the instance starts one.
+
+| Part | What it owns |
+|---|---|
+| `analysis/replan-input.ts` | The input's exact shape, at most 8 KiB: `revision`, `summarySeq`, `currentBlock`, the rider's typed `goals`, the plan's `blocks` as shares with no label, and one summary for each block ridden (seconds, heart rate in beats per minute, seconds in range, mean power as a share, cadence, rescues, an effort check-in). No stream, position, date, name or watt has a key, and no string is free text |
+| `analysis/replan-template.ts` | What the model is told. The moves and reasons are spelled from `@onyourleft/domain`'s lists. Its `version`, `re-plan-1`, is **how a re-plan row is told apart** in `analysis_job.template_version` (a write-up's is `1`); there is no job-type column |
+| `analysis/tools/replan-tools.ts` | `ride_so_far` (the last 12 summaries, from the input), `goals` (#836's free text, cut to 1 000 characters) and `saved_workouts` (the rider's own, by sync key and block index, no name). **No `recent_rides` and no `history_search`**: spike 0022's option H, taken |
+| `analysis/replan-agent.ts` | The loop and its budgets: 4 model turns, 3 tool calls, **45 s counted from when the job was queued**, 6 000 tokens. The answer must be exactly `{ "move", "reason" }` or `{ "keep": true }`; the instance copies `revision` and `summarySeq` from the input and reads the whole with `decodeProposal`. Anything else is no proposal, with no rewrite |
+
+A job's `result` is `{ status: "succeeded", proposal }`, where `proposal` is one `Proposal` or
+`null` when the model kept the workout as it is, or `{ status: "failed", failure }`, where `failure`
+is a job failure or `not-a-proposal`. It carries no text, and a re-plan's stream holds `progress` and
+`result` only. Re-plans have their own start limit, twenty-four an hour per athlete
+(`jobs.ts` §`DEFAULT_REPLAN_STARTS`), and share `job_running` with a write-up. A hosted re-plan runs
+only on the rider's own key, under their recorded consent, masked (`source.ts`, the owner's Q5).
+
+⚠️ **What this does not give.** One worker serves every athlete, so a re-plan queued behind a
+write-up can spend its 45 s waiting and end `out-of-time` with no model asked. The input is kept in
+the job row for the seven days a job with no write-up is kept. The budgets are the issue's proposed
+figures: no multi-turn re-plan was measured (spike 0023 measured a write-up's one model call). And
+the route has no caller in the app until #1244.
 
 ```mermaid
 flowchart TD
