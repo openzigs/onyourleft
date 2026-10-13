@@ -236,6 +236,8 @@ interface BenchOptions {
    * the trainer that issue was measured on.
    */
   readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'minTargetPower'>;
+  /** The same for the `two-trainers` NEO, which `machine` does not reach (#1305). */
+  readonly secondMachine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'minTargetPower'>;
   /**
    * Notify `0xFF` Control Permission Lost BEFORE the Stop's own answer — the
    * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
@@ -301,7 +303,9 @@ function benchWith(options: BenchOptions = {}): Bench {
       ...(which === 'trainer+strap' || which === 'strap'
         ? [hrsStrap({ id: 'strap', name: 'HRM 04B1' })]
         : []),
-      ...(which === 'two-trainers' ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T' })] : []),
+      ...(which === 'two-trainers'
+        ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T', ...options.secondMachine })]
+        : []),
     ],
     ...options.simulator,
   });
@@ -4821,6 +4825,57 @@ describe('no trainer control while a timed-out forget is still running — #718'
       rig.controller.dispose();
     });
 
+    it('a workout target RAISED to the trainer’s minimum goes through while control is held back, as the ease it equals — #1305', async () => {
+      // 30 % of 250 W is 75 W, raised to this machine's 100 W minimum (#1297).
+      // That is the floor itself, which the rule lets through whatever the
+      // machine holds; the workout's own number above it would wait.
+      const rig = twoTrainers({
+        machine: { retainsTargetsThroughStop: true, minTargetPower: watts(100) },
+      });
+      await rig.controller.pair('trainer');
+      rig.permissionLost();
+      await flushMicrotasks(20);
+      await rig.controller.start();
+      expect(
+        rig.controller.startWorkout(
+          {
+            ...twoIntervals,
+            workout: {
+              name: 'Easy',
+              blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.3) }],
+            },
+          },
+          watts(250),
+        ),
+      ).toBe(true);
+      await ride(rig, 2);
+      await flushMicrotasks(20);
+      expect(rig.targetOnTheTrainer()).toBe(100);
+
+      const neo = await neoPairedAsAPowerMeter(rig);
+      timesOutOnce(rig.transport, 'permission');
+      await rig.controller.unpair(neo);
+      rig.written.length = 0;
+
+      // The pause's ease, then the resumed block's raised target: the machine
+      // already holds 100 W, so the second is not "lower than now".
+      await rig.controller.pause();
+      await ride(rig, 2);
+      await flushMicrotasks(20);
+      await rig.controller.resume();
+      await ride(rig, 2);
+      await flushMicrotasks(20);
+
+      expect(rig.written.filter((octets) => octets[0] === TARGET_POWER)).toEqual([
+        [TARGET_POWER, 100, 0],
+        [TARGET_POWER, 100, 0],
+      ]);
+      expect(rig.targetOnTheTrainer()).toBe(100);
+      expect(rig.controller.getSnapshot().workout?.fault).toBeUndefined();
+      expect(rig.controller.getSnapshot().workout?.raisedFromWatts).toBe(75);
+      rig.controller.dispose();
+    });
+
     it('a hand-set target on a trainer the rider did NOT ask for is eased for a stalling rider, and not put back', async () => {
       const rig = twoTrainers({
         machine: { retainsTargetsThroughStop: true, minTargetPower: watts(25) },
@@ -4944,6 +4999,287 @@ describe('a workout target under the trainer’s minimum — #1297', () => {
     const snapshot = rig.controller.getSnapshot().workout;
     expect(snapshot?.holdingWatts).toBe(100);
     expect(snapshot?.fault).toBeUndefined();
+    // #1305: what the block asked, for the screen's "This block asks for …".
+    expect(snapshot?.raisedFromWatts).toBe(75);
+    rig.controller.dispose();
+  });
+
+  /** #1305: a workout of the given blocks, started on a recording ride. */
+  const startOn = async (
+    rig: Bench,
+    blocks: readonly (readonly [lengthSeconds: number, share: number])[],
+  ): Promise<void> => {
+    await rig.controller.start();
+    expect(
+      rig.controller.startWorkout(
+        {
+          id: workoutId('w1'),
+          createdBy: ATHLETE_A,
+          name: 'Blocks',
+          workout: {
+            name: 'Blocks',
+            blocks: blocks.map(([length, share]) => ({
+              kind: 'steady' as const,
+              seconds: seconds(length),
+              target: thresholdShare(share),
+            })),
+          },
+          createdAt: unixSeconds(1),
+          updatedAt: unixSeconds(1),
+        },
+        watts(250),
+      ),
+    ).toBe(true);
+  };
+  const REFUSED_AT_150 =
+    "This trainer's lowest target is 150 W, more than 50 W above what this block asks for, so no target was sent for it.";
+
+  it('is written as the minimum after a harder block even when the minimum is more than 50 W above it — #1305', async () => {
+    // 75 W on a machine reporting a 150 W minimum, the trainer holding 250 W:
+    // 150 W only eases. The first pass wrote nothing here and left 250 W on.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await startOn(rig, [
+      [3, 1.0],
+      [600, 0.3],
+    ]);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    const before = rig.written.length;
+
+    await ride(rig, 4);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[0x05, 150, 0]]);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.holdingWatts).toBe(150);
+    expect(snapshot?.raisedFromWatts).toBe(75);
+    expect(snapshot?.fault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('is not written as a first block on a trainer this app has set no target on, and the screen is given the reason — #1305', async () => {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await ride(rig, 4);
+    await flushMicrotasks(20);
+
+    // Nothing on the wire and nothing on the machine: it is as it was.
+    expect(rig.written.slice(before).filter((bytes) => bytes[0] === 0x05)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.holdingWatts).toBeUndefined();
+    expect(snapshot?.raisedFromWatts).toBeUndefined();
+    expect(snapshot?.fault).toBe(REFUSED_AT_150);
+    rig.controller.dispose();
+  });
+
+  it('is written as the minimum as a first block when a target was set by hand on the ride screen before the workout — #1305', async () => {
+    // The workout's session has had nothing acknowledged. It is told of the
+    // hand-set 200 W by the control client, which the controller hands it.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'confirmed', target: 200 });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await ride(rig, 4);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before).filter((bytes) => bytes[0] === 0x05)).toStrictEqual([
+      [0x05, 150, 0],
+    ]);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.holdingWatts).toBe(150);
+    expect(snapshot?.raisedFromWatts).toBe(75);
+    expect(snapshot?.fault).toBeUndefined();
+    rig.controller.dispose();
+  });
+  // --- #1305's review: a target this app wrote, which the client forgot. ---
+
+  /** The machine takes control away (`0xFF`), and the rider takes it back. */
+  const loseAndRetakeControl = async (rig: Bench): Promise<void> => {
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    await rig.controller.requestTrainerControl();
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
+  };
+  const HIGH_MINIMUM_150 = {
+    machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+  } as const;
+  const targetWritesSince = (rig: Bench, from: number): number[][] =>
+    rig.written.slice(from).filter((bytes) => bytes[0] === 0x05);
+  /** A 75 W block as the first of a workout: what is written, and what the machine holds. */
+  const expectTheMinimumWritten = async (rig: Bench, from: number): Promise<void> => {
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    expect(targetWritesSince(rig, from)).toStrictEqual([[0x05, 150, 0]]);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.fault).toBeUndefined();
+    expect(snapshot?.holdingWatts).toBe(150);
+    expect(snapshot?.raisedFromWatts).toBe(75);
+  };
+
+  it('a hand-set 200 W, control taken away and back, then a workout: the minimum is written over the 200 W — #1305', async () => {
+    // The client says `none` after the `0xFF`, and the machine still holds the
+    // 200 W this app wrote. Refusing here left it on through a 75 W block.
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await loseAndRetakeControl(rig);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('workout A at 250 W, control taken away and back, then workout B replaces it: the minimum is written over the 250 W — #1305', async () => {
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await startOn(rig, [[600, 1.0]]);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    await loseAndRetakeControl(rig);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('the same with workout A ended before B starts: the minimum is written over the 250 W — #1305', async () => {
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await startOn(rig, [[600, 1.0]]);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    await loseAndRetakeControl(rig);
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('a hand-set 200 W, the trainer forgotten and paired again, then a workout: the minimum is written over the 200 W — #1305', async () => {
+    // A new pairing builds a new control client, which knows of no target.
+    // What this app last had acknowledged is kept by device, not by client.
+    const rig = benchWith(HIGH_MINIMUM_150);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+  it('a target one trainer acknowledged is not handed over for another: a second trainer is refused, and the first still gets its minimum — #1305', async () => {
+    // Kept by device. The KICKR acknowledged 200 W; the NEO acknowledged
+    // nothing, so a 75 W block on the NEO's 150 W minimum is a raise onto a
+    // trainer no target is known on, whatever the KICKR once held.
+    const rig = benchWith({
+      devices: 'two-trainers',
+      ...HIGH_MINIMUM_150,
+      secondMachine: HIGH_MINIMUM_150.machine,
+    });
+    const neo = deviceId('neo');
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+
+    const discover = rig.transport.discover.bind(rig.transport);
+    vi.spyOn(rig.transport, 'discover').mockImplementationOnce((request) =>
+      discover({ ...request, namePrefix: 'NEO' }),
+    );
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([neo]);
+    await rig.controller.requestTrainerControl();
+    let before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    expect(targetWritesSince(rig, before)).toStrictEqual([]);
+    expect(rig.bench.device(neo).inspect().ftms?.targetPower).toBeUndefined();
+    expect(rig.controller.getSnapshot().workout?.fault).toBe(REFUSED_AT_150);
+
+    // The KICKR again: what IT acknowledged is still known.
+    rig.controller.endWorkout();
+    await rig.controller.unpair(neo);
+    await flushMicrotasks(20);
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([
+      TRAINER,
+    ]);
+    await rig.controller.requestTrainerControl();
+    before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    expect(rig.bench.device(neo).inspect().ftms?.targetPower).toBeUndefined();
+    rig.controller.dispose();
+  });
+  it('a target is remembered for the trainer that acknowledged it, not for whichever sensor was paired first — #1305', async () => {
+    // The NEO is paired first, as a power meter, so it is the first sensor
+    // this controller holds. The 200 W is the KICKR's.
+    const rig = benchWith({ devices: 'two-trainers', ...HIGH_MINIMUM_150 });
+    const discover = rig.transport.discover.bind(rig.transport);
+    vi.spyOn(rig.transport, 'discover').mockImplementationOnce((request) =>
+      discover({ ...request, namePrefix: 'NEO' }),
+    );
+    await rig.controller.pair('power-meter');
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([
+      deviceId('neo'),
+      TRAINER,
+    ]);
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await loseAndRetakeControl(rig);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
     rig.controller.dispose();
   });
 });
@@ -7491,6 +7827,32 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     });
     rig.controller.dispose();
   }, 30_000);
+
+  it('a hold block on a trainer whose minimum is more than 50 W above its planned share starts AT the minimum, with no refusal — #1305', async () => {
+    // ⚠️ What is built, written down so it is not left to inference. ADR 0048
+    // H3 puts the machine's minimum under the hold's envelope INSIDE the
+    // player, so the session is never asked for less than the minimum and
+    // #1305's refusal never sees a hold block: 100 W planned, 175 W written,
+    // on a trainer this app had set no target on.
+    const rig = benchWith({
+      devices: 'trainer',
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(175) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(holdWorkout(), THRESHOLD, OWN)).toBe(true);
+
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    expect(targetsSent(rig)).toEqual([175]);
+    expect(rig.targetOnTheTrainer()).toBe(175);
+    const snapshot = rig.controller.getSnapshot().workout;
+    expect(snapshot?.fault).toBeUndefined();
+    expect(snapshot?.raisedFromWatts).toBeUndefined();
+    rig.controller.dispose();
+  });
 
   it('no threshold heart rate of the rider’s own: steady, and the screen is told why', async () => {
     const rig = await holding({ own: false });
