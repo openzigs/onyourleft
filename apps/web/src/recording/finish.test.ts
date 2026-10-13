@@ -387,25 +387,34 @@ describe("#1312 — a ride's laps are saved with it", () => {
     expect(written).toBe(2);
   });
 
-  it.each([
-    ['refuses', () => Promise.reject(new Error('the tidy-up failed too'))],
-    ['removes nothing', () => Promise.resolve(false)],
-  ])(
-    'says so when the ride cannot be taken back out because the delete %s',
-    async (_how, deleteActivity) => {
-      const store: RideSaveStore = {
-        ...storeOf(),
-        putLap: () => Promise.reject(new Error('the device is full')),
-        deleteActivity,
-      };
+  it('says so when the ride cannot be taken back out because the delete fails', async () => {
+    const store: RideSaveStore = {
+      ...storeOf(),
+      putLap: () => Promise.reject(new Error('the device is full')),
+      deleteActivity: () => Promise.reject(new Error('the tidy-up failed too')),
+    };
 
-      const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
+    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
 
-      // The original cause, and the fact that part of the ride is still there.
-      expect(outcome).toMatchObject({ status: 'failed', leftBehind: true });
-      if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
-    },
-  );
+    // The original cause, and the fact that part of the ride is still there.
+    expect(outcome).toMatchObject({ status: 'failed', leftBehind: true });
+    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
+  });
+
+  it('says nothing is left behind when the delete finds no ride to remove', async () => {
+    // `false` is "there was no such ride" — another tab deleted it first — and
+    // then "part of the ride was written and could not be removed" is untrue.
+    const store: RideSaveStore = {
+      ...storeOf(),
+      putLap: () => Promise.reject(new Error('the device is full')),
+      deleteActivity: () => Promise.resolve(false),
+    };
+
+    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome).not.toHaveProperty('leftBehind');
+  });
 
   it('says the same when the samples will not go down and the activity cannot be taken back', async () => {
     const store: RideSaveStore = {

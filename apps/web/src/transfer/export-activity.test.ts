@@ -984,16 +984,86 @@ describe('exportActivity — splits that add up to the whole ride (#1312)', () =
     expect(fit.laps.map((lap) => lap.totalElapsedTime)).toEqual([59.5, 59.75]);
   });
 
-  it('puts the sample in the slot a ride’s last lap ended in outside that lap, as the lap’s own averages leave it out', async () => {
+  it('writes no lap of nought seconds for the sample in the slot a ride’s last lap ended in: it goes in that lap’s split', async () => {
     // `recording/laps.ts` §`lapSlots`: a lap owns the slots up to and not
     // including the one it ended in. This one ends in the ride's last slot,
-    // where the ride ends too.
+    // where the ride ends too, so that slot's sample is the ride's and not
+    // the lap's — and has no split of its own to go in. ⚠️ The third pass
+    // wrote one, of nought seconds; the file's lap now holds one sample its
+    // row's averages leave out, and no reader is shown 7.8 m in 0 s.
     const { open, ride } = await seedWithLaps(SAMPLE_COUNT - 1, [[0, SAMPLE_COUNT - 1]]);
 
     const tcx = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+    expect(tcx.laps.map((lap) => lap.points.length)).toEqual([SAMPLE_COUNT]);
+    expect(tcx.laps.map((lap) => lap.totalElapsedTime)).toEqual([SAMPLE_COUNT - 1]);
 
-    expect(tcx.laps.map((lap) => lap.points.length)).toEqual([SAMPLE_COUNT - 1, 1]);
-    expect(tcx.laps[1]?.points[0]?.timestamp).toBe(ride.startedAt + SAMPLE_COUNT - 1);
-    expect(total(tcx.laps.map((lap) => lap.totalElapsedTime))).toBe(SAMPLE_COUNT - 1);
+    const fit = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
+    expect(fit.laps.map((lap) => lap.totalElapsedTime)).toEqual([SAMPLE_COUNT - 1]);
+    expect(fit.records).toHaveLength(SAMPLE_COUNT);
+  });
+
+  it('folds a stretch after the last lap that is shorter than a sample into that lap, sample and all', async () => {
+    // The recording was stopped 0.4 s after *End ride*: the stretch holds the
+    // last slot's sample and lasts less than the sample does.
+    const { open, ride } = await seedWithLaps(SAMPLE_COUNT - 0.6, [[0, SAMPLE_COUNT - 1]]);
+
+    const tcx = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+    expect(tcx.laps.map((lap) => lap.points.length)).toEqual([SAMPLE_COUNT]);
+    // Its time is in the lap's total, so the file still adds up to the ride.
+    expect(tcx.laps.map((lap) => lap.totalElapsedTime)).toEqual([SAMPLE_COUNT - 0.6]);
+
+    const fit = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
+    expect(fit.laps).toHaveLength(1);
+    expect(fit.records).toHaveLength(SAMPLE_COUNT);
+  });
+
+  it.each<ActivityFileFormat>(['fit', 'gpx', 'tcx'])(
+    'exports a ride whose last lap ends AFTER the ride does, in %s',
+    async (format) => {
+      // #1316's fourth review. A lap's mark is the session's clock; the ride
+      // ends at the wall clock's `stop`, which can be behind it. The stretch
+      // "after the last lap" then lasts less than nothing, and until it was
+      // left out the export threw — and the push to an instance is this
+      // export.
+      const { open, ride } = await seedWithLaps(SAMPLE_COUNT - 0.7, [[0, SAMPLE_COUNT]]);
+
+      const file = await exportFrom(open, ride.id, format);
+
+      const laps =
+        format === 'fit'
+          ? decodeFitActivity(file.bytes).activity.laps.map((lap) => lap.totalElapsedTime)
+          : (format === 'gpx'
+              ? decodeGpx(textOf(file.bytes))
+              : decodeTcx(textOf(file.bytes))
+            ).activity.laps.map((lap) => lap.totalElapsedTime);
+      // One lap. FIT states the stored lap's own time; TCX the ride's, which
+      // is what its laps must add up to; GPX states none.
+      expect(laps).toEqual([
+        format === 'fit' ? SAMPLE_COUNT : format === 'tcx' ? SAMPLE_COUNT - 0.7 : undefined,
+      ]);
+    },
+  );
+
+  it('writes a stored lap with no sample in it to FIT, and leaves it out of TCX and GPX with its time in the lap before', async () => {
+    // A whole lap ridden while the recording was paused: a real lap, and no
+    // reading in it (here 0.4 s inside one slot stands in for it).
+    const { open, ride } = await seedWithLaps(SAMPLE_COUNT, [
+      [0, 60],
+      [60, 0.4],
+      [60.4, 59.6],
+    ]);
+
+    const fit = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
+    expect(fit.laps.map((lap) => lap.totalElapsedTime)).toEqual([60, 0.4, 59.6]);
+
+    const text = textOf((await exportFrom(open, ride.id, 'tcx')).bytes);
+    expect(text).not.toMatch(/<Track>\s*<\/Track>/);
+    const tcx = decodeTcx(text).activity;
+    expect(tcx.laps.map((lap) => lap.points.length)).toEqual([60, 60]);
+    expect(tcx.laps.map((lap) => lap.totalElapsedTime)).toEqual([60.4, 59.6]);
+    expect(total(tcx.laps.map((lap) => lap.totalDistance))).toBe(ride.distance);
+
+    const gpx = decodeGpx(textOf((await exportFrom(open, ride.id, 'gpx')).bytes)).activity;
+    expect(gpx.laps.map((lap) => lap.points.length)).toEqual([60, 60]);
   });
 });

@@ -1778,6 +1778,9 @@ describe('a lap’s summary respects the announcements setting — #1312', () =>
       await pump(1);
       expect(region()).not.toMatch(/Lap 1:/);
     }
+    // ⚠️ So the notice says it ITSELF (SC 4.1.3, #1316's fourth review): it is
+    // a status message, and with the region silent nothing else exposes it.
+    expect(lapNoticeRole()).toBe('status');
   });
 
   it('is said with announcements on', async () => {
@@ -1793,8 +1796,20 @@ describe('a lap’s summary respects the announcements setting — #1312', () =>
     expect(
       mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
     ).toMatch(/^Lap 1:/);
+    // And the notice is NOT a second live region: the lap is said once.
+    expect(hudText()).toMatch(/Lap 1: /);
+    expect(lapNoticeRole()).toBeNull();
   });
 });
+
+/** The `role` of the lap notice on the HUD, `null` when it has none, `undefined` when it is not shown. */
+function lapNoticeRole(): string | null | undefined {
+  const label = [...(mounted?.container.querySelectorAll('.oyl-status__label') ?? [])].find(
+    (each) => each.textContent?.startsWith('Lap '),
+  );
+  const notice = label?.closest('.oyl-status');
+  return notice === null || notice === undefined ? undefined : notice.getAttribute('role');
+}
 
 describe('the lap sentence is never said after its notice has gone — #1312', () => {
   it('is taken back once the notice has gone, however long a higher event held the region', async () => {

@@ -4187,6 +4187,13 @@ select.oyl-input {
  * header rule above), so the figures pass under it and not through it.
  */
 .oyl-table--laps th:first-child {
+  /*
+   * An edge of its own, so a figure cut off as it passes under the column
+   * reads as cut off: `04` against `4` with nothing between them looked like
+   * one number. A shadow and not a border, because `border-collapse` leaves a
+   * sticky cell's border behind with the row it was drawn on.
+   */
+  box-shadow: inset -1px 0 0 var(--oyl-color-border);
   left: 0;
   position: sticky;
   z-index: 1;

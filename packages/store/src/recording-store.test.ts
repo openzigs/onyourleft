@@ -880,35 +880,115 @@ describe('the laps of a course a recording has completed (#1312)', () => {
     },
   );
 
+  /**
+   * ⚠️ **Turned round by #1316's fourth review.** The third pass REFUSED to
+   * write a header holding such a lap. The recorder takes a refused header
+   * for a failed checkpoint, and the recording engine can make such a lap by
+   * itself (a moving time that ran backwards over a back-dated pause): so one
+   * lap cost a live ride its header — state, pauses and all — for the rest
+   * of the ride. A lap never decides whether a header is written.
+   */
   it.each([
     ['a distance that is no distance', { distance: Number.NaN }],
     ['a climb below nought', { ascent: -1 }],
     ['a mark at no finite instant', { to: { at: Number.POSITIVE_INFINITY, movingTime: 590 } }],
     ['an end before its start', { to: { at: 1_700_000_005, movingTime: 590 } }],
     ['a moving time that ran backwards', { to: { at: 1_700_000_616, movingTime: 5 } }],
-  ])('refuses to WRITE a lap with %s, and leaves the header as it was', async (_name, fault) => {
-    // What the read path would drop, the write path does not put down.
-    const record = recordingFor(ATHLETE_A, { ...SPAN, courseLaps: [LAPS[0]] });
+  ])(
+    'writes the header WITHOUT its lap list for a lap with %s — state, pauses and all',
+    async (_name, fault) => {
+      const record = recordingFor(ATHLETE_A, { ...SPAN, courseLaps: [LAPS[0]] });
+      await harness.write(async (store) => store.putRecordingSession(record));
+      const next = {
+        ...record,
+        state: 'paused' as const,
+        updatedAt: unixSeconds(1_700_000_690),
+        pauses: [{ from: unixSeconds(1_700_000_650), reason: 'automatic' as const }],
+        courseLaps: [LAPS[0], { ...LAPS[1], ...fault } as (typeof LAPS)[number]],
+      };
+
+      await expect(harness.write(async (store) => store.putRecordingSession(next))).resolves.toBe(
+        record.id,
+      );
+
+      const { header, recovered } = await bothReads(record.id);
+      // Everything recovery needs went down…
+      expect(header?.state).toBe('paused');
+      expect(header?.updatedAt).toBe(1_700_000_690);
+      expect(header?.pauses).toEqual(next.pauses);
+      // …and the lap list did not: all of it, so no lap is renumbered.
+      expect(header).not.toHaveProperty('courseLaps');
+      expect(recovered?.courseLaps).toEqual([]);
+      // Left out of what was WRITTEN, not written and dropped on the way back.
+      const row = await readRaw(async (raw) =>
+        raw.table<Record<string, unknown>, string>(TABLE.recordingSessions).get(record.id),
+      );
+      expect(row).toBeDefined();
+      expect(row).not.toHaveProperty('courseLaps');
+    },
+  );
+
+  it('keeps a lap ridden wholly inside a pause, and one that begins and climbs at nought', async () => {
+    // The boundaries of the rule above, on their right side. A whole lap of
+    // the course ridden while the recording is paused moves for no time at
+    // all: its two moving times are EQUAL, and it is a lap. So is one begun
+    // at a moving time of nought on a course that climbs nothing.
+    const laps = [
+      {
+        from: { at: unixSeconds(1_700_000_000), movingTime: seconds(0) },
+        to: { at: unixSeconds(1_700_000_300), movingTime: seconds(300) },
+        distance: metres(5_000),
+        ascent: metres(0),
+      },
+      {
+        from: { at: unixSeconds(1_700_000_300), movingTime: seconds(300) },
+        to: { at: unixSeconds(1_700_000_306), movingTime: seconds(300) },
+        distance: metres(5_000),
+        ascent: metres(0),
+      },
+      // And one that takes no time on the clock either.
+      {
+        from: { at: unixSeconds(1_700_000_306), movingTime: seconds(300) },
+        to: { at: unixSeconds(1_700_000_306), movingTime: seconds(300) },
+        distance: metres(0),
+        partial: true as const,
+      },
+    ];
+    const record = recordingFor(ATHLETE_A, { ...SPAN, courseLaps: laps });
+
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => store.recoverRecording(ATHLETE_A, record.id),
+    );
+
+    expect(read?.courseLaps).toEqual(laps);
+  });
+
+  it('drops a lap list longer than the recording has seconds for', async () => {
+    // Nothing a rider rode: a second cannot hold two laps of a course. A list
+    // like it is a damaged or a planted row, and reading it is 200 000 rows
+    // written at the save. (701 seconds of recording here.)
+    const still = { fromAt: 1_700_000_006, fromMovingSeconds: 6, toAt: 1_700_000_006 };
+    const lap = { ...still, toMovingSeconds: 6, distanceMetres: 0 };
+    const record = recordingFor(ATHLETE_A, SPAN);
     await harness.write(async (store) => store.putRecordingSession(record));
 
-    await expect(
-      harness.write(async (store) =>
-        store.putRecordingSession({
-          ...record,
-          courseLaps: [LAPS[0], { ...LAPS[1], ...fault } as (typeof LAPS)[number]],
-        }),
-      ),
-    ).rejects.toThrow(/^recording courseLaps\[1\]: /);
-    await expect(
-      harness.write(async (store) =>
-        store.putRecordingSession({
-          ...record,
-          courseLaps: [LAPS[0], { ...LAPS[1], ...fault } as (typeof LAPS)[number]],
-        }),
-      ),
-    ).rejects.toBeInstanceOf(StoreValidationError);
+    await readRaw(async (raw) => {
+      await raw
+        .table(TABLE.recordingSessions)
+        .update(record.id, { courseLaps: Array.from({ length: 702 }, () => lap) });
+    });
+    expect((await bothReads(record.id)).recovered?.courseLaps).toEqual([]);
 
-    expect((await bothReads(record.id)).header?.courseLaps).toEqual([LAPS[0]]);
+    // One fewer is as many as there are seconds, and is read.
+    await readRaw(async (raw) => {
+      await raw
+        .table(TABLE.recordingSessions)
+        .update(record.id, { courseLaps: Array.from({ length: 701 }, () => lap) });
+    });
+    expect((await bothReads(record.id)).recovered?.courseLaps).toHaveLength(701);
   });
 
   it('reads anything but `true` in a lap’s part-lap mark as a whole lap', async () => {

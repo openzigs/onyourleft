@@ -636,9 +636,16 @@ export function GameView(props: GameViewProps): JSX.Element {
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
    * notice's rule, and `undefined` until the rider completes the course with
    * a recording under the ride.
+   *
+   * ⚠️ `status`: whether the notice is itself a status message (SC 4.1.3) —
+   * `true` when the HUD's one region is NOT going to say this lap, which is
+   * with announcements off (`announce.ts`, rank 5e). The lap is gone in ten
+   * seconds and is on no other part of the stage, so with nothing saying it a
+   * screen-reader rider would have no way to it; with announcements on the
+   * region says it, and a second live region would say it twice.
    */
   const [lapNotice, setLapNotice] = useState<
-    { readonly summary: LapSummary; readonly from: number } | undefined
+    { readonly summary: LapSummary; readonly from: number; readonly status: boolean } | undefined
   >(undefined);
   /** How many times this ride has completed its course. @see course-laps.ts */
   const lapsDoneRef = useRef(0);
@@ -1642,7 +1649,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         const laps = trainerPortRef.current?.courseLine?.(crossed);
         const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
         if (summary !== undefined) {
-          setLapNotice({ summary, from: simulation.state.elapsed });
+          setLapNotice({
+            summary,
+            from: simulation.state.elapsed,
+            status: !announcementsRef.current.enabled,
+          });
           lapOwedRef.current = {
             text: summary.sentence,
             until: simulation.state.elapsed + LAP_NOTICE_SECONDS,
@@ -2304,7 +2315,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         lapNotice={
           lapNotice === undefined ||
           (state?.elapsed ?? 0) - lapNotice.from >= LAP_NOTICE_SECONDS ? undefined : (
-            <StatusMessage tone="info" label={lapNotice.summary.label}>
+            <StatusMessage tone="info" label={lapNotice.summary.label} live={lapNotice.status}>
               {lapNotice.summary.text}
             </StatusMessage>
           )

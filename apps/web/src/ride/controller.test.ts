@@ -7020,6 +7020,168 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
     rig.controller.dispose();
   });
 
+  /**
+   * #1316's fourth review, blocking. **A lap is decoration on a recording: it
+   * must never cost the recording its checkpoint.** The engine's moving time
+   * is not monotonic — an automatic pause is back-dated to when the rider
+   * stopped, and a manual one to the wall clock when the session's clock is
+   * ahead of it — so a lap marked in that gap ended at a moving time BELOW
+   * where it began. The store refused the header that held it, and every
+   * header after it: `storage` read `failed` to the end of the ride, the
+   * header on disk froze, and *Start a new ride* was refused after a save
+   * that had worked.
+   */
+  describe('a lap marked while a pause is being back-dated costs the checkpoint nothing', () => {
+    const PART = {
+      kind: 'lap',
+      distance: metres(4),
+      ascent: undefined,
+      partial: true,
+      again: false,
+    } as const;
+    const headerOf = async (rig: Bench) =>
+      harness.read(async (store) =>
+        store.getRecordingSession(ATHLETE_A, rig.sessionIds[0] as RecordingSessionId),
+      );
+
+    it('an automatic pause, back-dated by a tick that arrives after the readings', async () => {
+      const rig = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 6);
+      // The rider is off the bike; nine ticks; then two seconds of readings
+      // land before the next tick does (a throttled tab).
+      rig.bench.rider.set({
+        power: watts(0),
+        cadence: revolutionsPerMinute(0),
+        speed: metresPerSecond(0),
+      });
+      await ride(rig, 9);
+      rig.bench.advance(seconds(1));
+      rig.bench.advance(seconds(1));
+      // The game ride starts in that gap, and is ended at once, four metres on.
+      hud.courseLine?.({ kind: 'started' });
+      const before = rig.controller.getSnapshot().movingSeconds;
+      await rig.controller.tick(rig.bench.now);
+      // The premise: the tick took moving time BACK.
+      expect(rig.controller.getSnapshot().movingSeconds).toBeLessThan(before);
+      const laps = hud.courseLine?.(PART);
+      // The lap that was made moved for no time, not for less than none.
+      expect(laps?.[0]?.movingTime).toBe(0);
+      expect(laps?.[0]?.elapsedTime).toBeGreaterThanOrEqual(0);
+
+      rig.bench.rider.set({
+        power: watts(200),
+        cadence: revolutionsPerMinute(90),
+        speed: metresPerSecond(8),
+      });
+      const storage: string[] = [];
+      for (let second = 0; second < 12; second += 1) {
+        await ride(rig, 1);
+        storage.push(rig.controller.getSnapshot().storage);
+      }
+      expect(new Set(storage)).toEqual(new Set(['ok']));
+      // The header on disk is current: written within the last flush, with
+      // the pause that was back-dated in it.
+      const header = await headerOf(rig);
+      expect(rig.bench.now - (header?.updatedAt ?? 0)).toBeLessThanOrEqual(5);
+      expect(header?.pauses.length).toBeGreaterThan(0);
+      expect(header?.state).toBe(rig.controller.getSnapshot().phase);
+      // And the lap is in it, made right where it was made: it ends at the
+      // moving time it began at.
+      expect(header?.courseLaps).toHaveLength(1);
+      expect(header?.courseLaps?.[0]?.to.movingTime).toBe(header?.courseLaps?.[0]?.from.movingTime);
+
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const after = rig.controller.getSnapshot();
+      expect(after.saveState).toBe('saved');
+      expect(after.storage).toBe('ok');
+      expect(canStartNewRide(after)).toBe(true);
+      rig.controller.dispose();
+    });
+
+    /**
+     * The second route the review read and did not run. Built here, and it
+     * does not exist: `session.pause(at)` ratchets the session's clock to
+     * `at` FIRST and begins the pause at the clock, so a Pause pressed on a
+     * wall clock behind the session's is stamped at the session's own
+     * instant and takes no moving time back. Held, so that it stays so.
+     */
+    it('a manual pause on a wall clock behind the session’s takes no moving time back', async () => {
+      const rig = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 6);
+      // The session's clock is two seconds ahead of the wall clock (a
+      // reading stamped ahead does this); the lap begins there.
+      await rig.controller.tick(unixSeconds(rig.bench.now + 2));
+      hud.courseLine?.({ kind: 'started' });
+      const before = rig.controller.getSnapshot().movingSeconds;
+      // Pause is pressed on the wall clock, which is behind it.
+      await rig.controller.pause();
+      expect(rig.controller.getSnapshot().movingSeconds).toBe(before);
+      const laps = hud.courseLine?.(PART);
+      expect(laps?.[0]?.movingTime).toBe(0);
+
+      await rig.controller.resume();
+      const storage: string[] = [];
+      for (let second = 0; second < 12; second += 1) {
+        await ride(rig, 1);
+        storage.push(rig.controller.getSnapshot().storage);
+      }
+      expect(new Set(storage)).toEqual(new Set(['ok']));
+      const header = await headerOf(rig);
+      expect(rig.bench.now - (header?.updatedAt ?? 0)).toBeLessThanOrEqual(5);
+      expect(header?.pauses.length).toBeGreaterThan(0);
+
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const after = rig.controller.getSnapshot();
+      expect(after.saveState).toBe('saved');
+      expect(canStartNewRide(after)).toBe(true);
+      rig.controller.dispose();
+    });
+  });
+
+  it('keeps a whole lap ridden inside a pause: a lap of no moving time, written, checkpointed and saved', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 5);
+    await rig.controller.pause();
+    hud.courseLine?.({ ...WHOLE, again: true });
+    await ride(rig, 6);
+    // The whole of this lap was ridden with the recording paused.
+    const laps = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(laps?.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([
+      [5, 5],
+      [6, 0],
+    ]);
+    await rig.controller.resume();
+    await ride(rig, 6);
+    // A lap that moved for no time costs the checkpoint nothing…
+    expect(rig.controller.getSnapshot().storage).toBe('ok');
+    const header = await harness.read(async (store) =>
+      store.getRecordingSession(ATHLETE_A, rig.sessionIds[0] as RecordingSessionId),
+    );
+    expect(header?.courseLaps).toHaveLength(2);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    // …and is a row: 6 s on the clock, none of it moving.
+    const saved = await lapsOf('ride-1');
+    expect(saved.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([
+      [5, 5],
+      [6, 0],
+    ]);
+    rig.controller.dispose();
+  });
+
   it('begins no lap of a new recording at a mark the last recording left open', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     const hud = gameTrainerPortOver(rig.controller);
@@ -7325,6 +7487,55 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
 
       expect(await lapsOf('ride-1')).toEqual([]);
       next.controller.dispose();
+    });
+
+    /**
+     * The sequence #1316's fourth review read and did not build. A lap is
+     * checkpointed with the header, at the session's clock; the samples of
+     * the last two seconds are not in a chunk yet (the late tolerance). So a
+     * recovered recorder's clock restarts a second or two BEFORE its last
+     * lap ended — and a header it writes before the clock has moved on would
+     * be stamped earlier than that lap, which the next read takes for a lap
+     * outside its recording and drops the list for.
+     */
+    it('recovered, stopped at once, the save failing, recovered again: the lap that ended in the last second is still there', async () => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 9);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      // One more second: the flush that checkpoints the lap, and the crash.
+      await ride(rig, 1);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0] as RecordingSessionId;
+      const first = await harness.read(async (store) => store.recoverRecording(ATHLETE_A, id));
+      // The premise: the lap is on disk, and ends after the last recovered sample.
+      expect(first?.courseLaps).toHaveLength(1);
+      expect(first?.courseLaps[0]?.to.at ?? 0).toBeGreaterThan(
+        (first?.startedAt ?? 0) + (first?.sampleCount ?? 0) - 1,
+      );
+
+      // Continued and stopped without a second ridden, on a clock no later
+      // than the ride's own, and the save refused.
+      const { port } = savePort({
+        putActivity: () => Promise.reject(new Error('the device is full')),
+      });
+      const next = benchWith({ rideSave: port });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.continueRecovered(id)).toBe(true);
+      next.controller.armStop();
+      await next.controller.confirmStop();
+      expect(next.controller.getSnapshot().saveState).toBe('failed');
+      next.controller.dispose();
+
+      // Recovered a second time, and saved: the lap is a row.
+      const last = benchWith({ rideSave: storeSavePort() });
+      await last.controller.refreshRecoverable();
+      expect(await last.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([9]);
+      last.controller.dispose();
     });
 
     it('continued: the next lap is the third, and all three are saved', async () => {

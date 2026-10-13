@@ -158,6 +158,39 @@ describe('lapSummary — #1312', () => {
     expect(summary?.text).toContain('Your best lap of this ride.');
   });
 
+  it('says a lap with no moving time was ridden while paused, with no time and no comparison', () => {
+    // The whole course ridden with the recording paused: 6 s on the clock,
+    // none of it moving, no reading taken.
+    const paused: LapFigures = {
+      startedAt: unixSeconds(1_700_000_000),
+      elapsedTime: seconds(6),
+      movingTime: seconds(0),
+      distance: metres(5_000),
+    };
+
+    expect(lapSummary([lap(600), paused], 'metric')).toEqual({
+      label: 'Lap 2',
+      text: 'Ridden while the recording was paused.',
+      sentence: 'Lap 2: ridden while the recording was paused.',
+    });
+  });
+
+  it('never calls a lap with no moving time the best, nor compares a later lap with it', () => {
+    const paused = lap(0, { elapsedTime: seconds(6) });
+
+    // Lap 3 follows the paused one: it is compared with lap 1, and the best
+    // is the quicker of the two that have a time.
+    const summary = lapSummary([lap(600), paused, lap(590)], 'metric');
+    expect(summary?.text).toBe(
+      '9:50 · 201 W · 30.5 km/h · 148 bpm. 10 s faster than lap 1. Your best lap of this ride.',
+    );
+
+    // And with only one timed lap there is no best to speak of.
+    expect(lapSummary([paused, lap(600)], 'metric')?.text).toBe(
+      '10:00 · 201 W · 30.0 km/h · 148 bpm.',
+    );
+  });
+
   it('has nothing to show for a part lap, or for no laps', () => {
     expect(lapSummary([lap(600), lap(30, { partial: true })], 'metric')).toBeUndefined();
     expect(lapSummary([], 'metric')).toBeUndefined();

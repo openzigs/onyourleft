@@ -248,6 +248,20 @@ describe('a lap worked out from its own stretch of the recording — #1312', () 
     expect(lapFiguresOf(own, lap, slots.first).averagePower).toBe(155);
   });
 
+  it('never ends a lap before it began: a moving time a back-dated pause took back is no moving time', () => {
+    // #1316's fourth review. The mark that began the lap read 17 s of moving
+    // time; an automatic pause was then back-dated, and the mark that ended
+    // it read 16 s.
+    const lap = riddenLap(mark(17, 17), mark(18, 16), WHOLE);
+
+    expect(lap.to).toEqual(mark(18, 17));
+    expect(lapFiguresOf(SERIES, lap).movingTime).toBe(0);
+    // And on the clock: a mark behind the one before it ends where that began.
+    expect(riddenLap(mark(5, 5), mark(4, 6), WHOLE).to).toEqual(mark(5, 6));
+    // A lap that ran forwards is untouched.
+    expect(riddenLap(mark(4, 4), mark(8, 7), WHOLE).to).toEqual(mark(8, 7));
+  });
+
   it('keeps a part lap’s mark and a climb, and neither where there is none', () => {
     expect(riddenLap(mark(0, 0), mark(4, 4), WHOLE)).toEqual({
       from: mark(0, 0),

@@ -192,7 +192,7 @@ export function fromPersistedRecordingSession(
 
 /**
  * Why a lap of a course cannot be kept, or `undefined` when it can — the one
- * rule the write path refuses by and the read path drops by.
+ * rule the write path leaves a lap list out by and the read path drops it by.
  *
  * Every number finite and none below nought; the lap ending no earlier than
  * it began, on the clock and on the moving time.
@@ -235,7 +235,8 @@ export function courseLapFault(lap: RecordedCourseLap): string | undefined {
  * the second.
  *
  * A lap is also dropped — and the list with it — when it lies outside the
- * recording: before `startedAt`, after the header's own `updatedAt` (a mark
+ * recording, or the list is longer than the recording has seconds for:
+ * before `startedAt`, after the header's own `updatedAt` (a mark
  * is taken on the recorder's clock, and the header is stamped with that
  * clock as it is written, so no real mark is later), or before the lap in
  * front of it ended.
@@ -245,7 +246,10 @@ function fromPersistedCourseLaps(
   startedAt: number,
   updatedAt: number,
 ): readonly RecordedCourseLap[] {
-  if (!Array.isArray(rows)) {
+  // No more laps than the recording has seconds: a second does not hold two
+  // laps of a course, and a list past that is a damaged or a planted row —
+  // one that would otherwise be read here and written as that many rows.
+  if (!Array.isArray(rows) || rows.length > Math.max(0, updatedAt - startedAt) + 1) {
     return [];
   }
   const laps: RecordedCourseLap[] = [];

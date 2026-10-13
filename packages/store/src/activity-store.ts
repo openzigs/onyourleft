@@ -2691,16 +2691,18 @@ export class ActivityStore {
           `${String(record.sampleInterval)}`,
       );
     }
-    // #1312. What the read path would drop, refused here: a lap with a figure
-    // that is no number is a defect in whatever worked it out, and written
-    // down it would cost the recording its whole lap list on the way back.
-    (record.courseLaps ?? []).forEach((lap, index) => {
-      const fault = courseLapFault(lap);
-      if (fault !== undefined) {
-        throw new StoreValidationError(`recording courseLaps[${String(index)}]: ${fault}`);
-      }
-    });
-    const row = toPersistedRecordingSession(record);
+    // #1312. ⚠️ **A lap never decides whether a header is written** (#1316's
+    // fourth review). A header is the recording's state and its pauses, which
+    // recovery cannot do without; a lap is a figure worked out about the
+    // samples. A lap list the read path would drop is LEFT OUT of what is
+    // written — all of it, for the read path's reason: laps are numbered by
+    // where they stand — and the rest of the header goes down as it is. The
+    // third pass refused the write instead, and the recorder took that for a
+    // failed checkpoint: `storage: failed` for the rest of a ride over one
+    // lap whose moving time ran backwards.
+    const laps = record.courseLaps ?? [];
+    const writable = laps.every((lap) => courseLapFault(lap) === undefined);
+    const row = toPersistedRecordingSession(writable ? record : { ...record, courseLaps: [] });
     await this.#db.transaction('rw', [this.#athletes, this.#recordingSessions], async () => {
       await this.#requireAthlete(record.athleteId);
       this.#requireNotOwnedByAnother(

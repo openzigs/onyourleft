@@ -65,6 +65,7 @@ import {
   createRecordingSession,
   restoreRecordingSession,
   seconds,
+  unixSeconds,
   type AutoPausePolicy,
   type RecordingOutcome,
   type RecordingSession,
@@ -415,7 +416,13 @@ function recorderOver(
       startedAt,
       sampleInterval: series.sampleInterval,
       state: storedState(),
-      updatedAt: at,
+      // ⚠️ Never earlier than the last lap's end (#1312). The store reads a
+      // lap that ends after its header was written as a lap outside its
+      // recording, and drops the list. A recorder rebuilt from a checkpoint
+      // restarts its clock at its last RECOVERED slot, which is a second or
+      // two before a lap that ended inside the late tolerance — so until its
+      // clock moves on, `at` is earlier than a lap it already holds.
+      updatedAt: unixSeconds(Math.max(at, courseLaps.at(-1)?.to.at ?? at)),
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
       ...(courseLaps.length === 0 ? {} : { courseLaps }),

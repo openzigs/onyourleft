@@ -70,6 +70,11 @@ import { formatSpeed, measurementText } from '../../units/format';
  */
 export const LAP_NOTICE_SECONDS = 10;
 
+/** What the HUD shows for a whole lap the recording counted no moving time in. */
+const LAP_WHILE_PAUSED = 'Ridden while the recording was paused.';
+/** The same, as it follows `Lap 3: ` in the sentence that is said. */
+const LAP_WHILE_PAUSED_SAID = 'ridden while the recording was paused.';
+
 /** A finished lap, as the HUD shows it and as its one region says it. */
 export interface LapSummary {
   /** The notice's label: which lap. */
@@ -133,6 +138,18 @@ export function lapSummary(laps: readonly LapFigures[], units: UnitSystem): LapS
     return undefined;
   }
   const number = index + 1;
+  if (shownSeconds(lap.movingTime) === 0) {
+    // ⚠️ A whole lap with no moving time: the course was ridden while the
+    // recording was paused (the game runs on; the recorder takes no reading
+    // and counts no time). It has no time to state and none to compare, and
+    // it is NOT a lap in `0:00` that is the best of the ride for ever after
+    // (#1316's fourth review) — so it is said plainly, as what it was.
+    return {
+      label: `Lap ${String(number)}`,
+      text: LAP_WHILE_PAUSED,
+      sentence: `Lap ${String(number)}: ${LAP_WHILE_PAUSED_SAID}`,
+    };
+  }
   const speed = lapAverageSpeed(lap);
   const speedShown = speed === undefined ? undefined : measurementText(formatSpeed(speed, units));
   const shown = [
@@ -152,8 +169,11 @@ export function lapSummary(laps: readonly LapFigures[], units: UnitSystem): LapS
 
   const comparable = (other: LapFigures): boolean =>
     other.partial !== true && other.distance === lap.distance;
+  /** A lap of this course with a time to its name: one to compare with, or to be the best. */
+  const timed = (other: LapFigures): boolean =>
+    comparable(other) && shownSeconds(other.movingTime) > 0;
   let previous = index - 1;
-  while (previous >= 0 && !comparable(laps[previous] as LapFigures)) {
+  while (previous >= 0 && !timed(laps[previous] as LapFigures)) {
     previous -= 1;
   }
   const earlier = laps[previous];
@@ -164,7 +184,7 @@ export function lapSummary(laps: readonly LapFigures[], units: UnitSystem): LapS
   let best: number | undefined;
   let counted = 0;
   laps.forEach((other, at) => {
-    if (!comparable(other)) {
+    if (!timed(other)) {
       return;
     }
     counted += 1;

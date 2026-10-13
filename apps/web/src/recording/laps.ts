@@ -215,7 +215,18 @@ export function courseLap(
 export function riddenLap(from: LapMark, to: LapMark, course: CourseStretch): RecordedCourseLap {
   return {
     from,
-    to,
+    // ⚠️ **A lap never ends before it began, on either clock** (#1316's
+    // fourth review). The recorder's moving time is NOT monotonic: an
+    // automatic pause is back-dated to the instant the rider stopped
+    // (`packages/domain` §`advanceTo`), while a reading may already have
+    // moved the session's clock past that instant — so a mark taken between
+    // that reading and the tick that begins the pause carries moving time the
+    // pause then takes back, and a lap ended just after would move for less
+    // than nothing. Such a lap moved for no time, and says so.
+    to: {
+      at: to.at < from.at ? from.at : to.at,
+      movingTime: to.movingTime < from.movingTime ? from.movingTime : to.movingTime,
+    },
     distance: course.distance,
     ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
     ...(course.partial ? { partial: true as const } : {}),

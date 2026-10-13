@@ -1818,7 +1818,8 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
                 seen: inside(cell) && onTop(cell),
                 // One line: no taller than the row of a lap with no mark.
                 oneLine: cell.getBoundingClientRect().height <= plain + 0.5,
-                opaque: getComputedStyle(cell).backgroundColor,
+                background: getComputedStyle(cell).backgroundColor,
+                edge: getComputedStyle(cell).boxShadow,
               })),
               lapHeading: headings[0] !== undefined && inside(headings[0]) && onTop(headings[0]),
               lastHeading: {
@@ -1845,9 +1846,12 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         expect(seen.names.filter((name) => !name.seen).map((name) => name.text)).toEqual([]);
         expect(seen.names.filter((name) => !name.oneLine).map((name) => name.text)).toEqual([]);
         expect(seen.lapHeading).toBe(true);
-        // A background of its own, or the figures show through the number.
+        // A background of its own that is wholly opaque — `rgb(r, g, b)`, with
+        // no alpha in it at all — or the figures show through the number; and
+        // an edge, so a figure cut off under the column reads as cut off.
         for (const name of seen.names) {
-          expect(name.opaque).not.toMatch(/rgba\(.*, 0\)|transparent/);
+          expect(name.background).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+          expect(name.edge).not.toBe('none');
         }
         console.log(
           `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,

@@ -277,9 +277,10 @@ export type RideSaveOutcome =
       readonly status: 'failed';
       readonly error: Error;
       /**
-       * The save failed part-way AND what it had written could not be taken
-       * back out: the activity is still in the store, without all of its
-       * samples or laps. `true` only then. The checkpoint is kept as for any
+       * The save failed part-way AND taking what it had written back out
+       * failed too (the delete threw): the activity is still in the store,
+       * without all of its samples or laps. `true` only then — not when the
+       * delete answers that there was nothing to remove. The checkpoint is kept as for any
        * failure, so saving again writes the ride a second time — which is why
        * the rider is told ({@link RIDE_LEFT_BEHIND}) rather than left to find
        * two rides.
@@ -358,13 +359,19 @@ async function failedAndTakenBack(
   finished: FinishedRide,
   error: unknown,
 ): Promise<RideSaveOutcome> {
-  const gone = await store
+  // ⚠️ Left behind only when the delete itself FAILED. `false` is the store's
+  // "there was no such ride": nothing is there to list twice — another tab
+  // took it out first — so nothing is said of it.
+  const leftBehind = await store
     .deleteActivity(finished.activity.athleteId, finished.activity.id)
-    .catch(() => false);
+    .then(
+      () => false,
+      () => true,
+    );
   return {
     status: 'failed',
     error: asError(error),
-    ...(gone ? {} : { leftBehind: true as const }),
+    ...(leftBehind ? { leftBehind: true as const } : {}),
   };
 }
 

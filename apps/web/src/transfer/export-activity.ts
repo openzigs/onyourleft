@@ -210,14 +210,8 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   } else {
     bytes = new TextEncoder().encode(
       format === 'gpx'
-        ? // GPX states no total, so a split with no sample in it says nothing.
-          encodeGpx(
-            trackActivityOf(
-              activity,
-              laps.filter((lap) => laps.length === 1 || lap.points.length > 0),
-            ),
-          )
-        : encodeTcx(trackActivityOf(activity, laps)),
+        ? encodeGpx(trackActivityOf(activity, withASampleEach(laps)))
+        : encodeTcx(trackActivityOf(activity, withASampleEach(laps))),
     );
   }
 
@@ -381,15 +375,20 @@ function stretchesOf(stored: readonly LapRecord[], activity: ActivityRecord): re
     stretches.push({ startedAt: lap.startedAt, endsAt, lap });
     cursor = endsAt;
   }
-  // Always one after the last lap, though the ride may end where the lap did:
-  // a lap owns the slots up to and NOT including the one it ended in, so the
-  // sample in that slot is the ride's and not the lap's. With no sample in it
-  // the stretch is not written (`splitsOf`).
-  stretches.push({
-    startedAt: unixSeconds(cursor),
-    endsAt: unixSeconds(Math.max(cursor, activity.startedAt + activity.elapsedTime)),
-    lap: undefined,
-  });
+  // ⚠️ Only when the ride runs on past its last lap. A lap's mark is the
+  // session's clock and the ride's elapsed time ends at the wall clock's
+  // `stop`, which can be BEHIND it: such a ride ends before its last lap
+  // does, and a stretch from one to the other would last less than nothing —
+  // which no duration can say, so the export of that ride threw, in every
+  // format, and with it the push to an instance.
+  const rideEnds = activity.startedAt + activity.elapsedTime;
+  if (rideEnds > cursor) {
+    stretches.push({
+      startedAt: unixSeconds(cursor),
+      endsAt: unixSeconds(rideEnds),
+      lap: undefined,
+    });
+  }
   return stretches;
 }
 
@@ -486,9 +485,19 @@ function splitsOf(
   }
 
   const recordedTotal = recorded.reduce((sum, part) => sum + part, 0);
-  /** A stretch outside the laps with no sample in it: not written. @see folded, below */
-  const empty = (ordinal: number): boolean =>
-    stretches[ordinal]?.lap === undefined && (buckets[ordinal]?.length ?? 0) === 0;
+  /**
+   * A stretch outside the laps that is not written as a split of its own: one
+   * with no sample in it, or shorter than one sample. @see folded, below
+   */
+  const slight = (ordinal: number): boolean => {
+    const stretch = stretches[ordinal];
+    return (
+      stretch !== undefined &&
+      stretch.lap === undefined &&
+      ((buckets[ordinal]?.length ?? 0) === 0 ||
+        stretch.endsAt - stretch.startedAt < streams.sampleInterval)
+    );
+  };
   const outsideSeconds = stretches.reduce(
     (sum, stretch) =>
       stretch.lap === undefined ? sum + (stretch.endsAt - stretch.startedAt) : sum,
@@ -540,24 +549,68 @@ function splitsOf(
     };
   });
 
-  // ⚠️ **No split with nothing in it.** A stretch outside the laps that holds
-  // no sample — a game ride begun half a second into its recording, a
-  // recording stopped a moment after *End ride* — would be a TCX `<Lap>` with
-  // an empty `<Track>`, which a strict reader may refuse, and a FIT lap a
-  // fraction of a second long. It is folded into the split before it: that
-  // split's running totals run on through it, so the splits still add up to
-  // the ride. One at the very start needs nothing: the first split written
-  // counts from the ride's start whatever it is.
+  // ⚠️ **No split with nothing in it, and none shorter than a sample.** A
+  // stretch outside the laps that holds no sample — a game ride begun half a
+  // second into its recording, a recording stopped a moment after *End ride*
+  // — would be a TCX `<Lap>` with an empty `<Track>`, which a strict reader
+  // may refuse, and a FIT lap a fraction of a second long; and one shorter
+  // than a sample that DOES hold one would be a lap of a few metres in no
+  // time at all, which a reader dividing one by the other shows as an
+  // infinite speed. Either is folded into the split before it: that split's
+  // running totals run on through it, and its samples go with it, so the
+  // splits still add up to the ride and hold every sample. One at the very
+  // start with nothing in it needs nothing: the first split written counts
+  // from the ride's start whatever it is.
+  //
+  // ⚠️ **So a file's lap and its stored row agree on the lap's samples in
+  // every case but one, and that one is a single sample.** A lap owns the
+  // slots up to and not including the one it ended in. When the ride ends in
+  // that same slot — or within a sample of it — the slot's one sample is the
+  // ride's and not the lap's, and has no split of its own to go in: the file
+  // puts it in the last lap's split, and the row's averages leave it out. The
+  // third pass gave it a split of nought seconds instead; a lap of nought
+  // seconds in every such ride's file was the worse answer.
   const folded: ExportLap[] = [];
   splits.forEach((split, ordinal) => {
     const before = folded[folded.length - 1];
-    if (!empty(ordinal)) {
+    if (!slight(ordinal) || (before === undefined && split.points.length > 0)) {
       folded.push(split);
     } else if (before !== undefined) {
-      folded[folded.length - 1] = { ...before, rideThrough: split.rideThrough };
+      folded[folded.length - 1] = {
+        ...before,
+        rideThrough: split.rideThrough,
+        points: [...before.points, ...split.points],
+      };
     }
   });
   return folded;
+}
+
+/**
+ * The splits a format that needs a sample in every one of them is given: one
+ * with none is left out, and the split before it runs on through it, so the
+ * ones written still add up to the ride.
+ *
+ * ⚠️ **This is where a STORED lap with no sample goes, in TCX and GPX.** A
+ * whole lap ridden while the recording is paused is a real lap with no
+ * reading in it (the engine takes none while paused). FIT writes it: a lap
+ * message needs no record. TCX would write a `<Lap>` with an empty `<Track>`,
+ * so that lap is not in a TCX file — its time is in the lap before it, and
+ * the file says the ride's totals still. Stated in the PR, with the rest of
+ * what TCX cannot carry.
+ */
+function withASampleEach(laps: readonly ExportLap[]): readonly ExportLap[] {
+  const kept: ExportLap[] = [];
+  for (const lap of laps) {
+    const before = kept[kept.length - 1];
+    if (lap.points.length > 0) {
+      kept.push(lap);
+    } else if (before !== undefined) {
+      kept[kept.length - 1] = { ...before, rideThrough: lap.rideThrough };
+    }
+  }
+  // A ride with no reading in any slot keeps the one shape it always had.
+  return kept.length === 0 ? laps : kept;
 }
 
 function fitInputOf(
