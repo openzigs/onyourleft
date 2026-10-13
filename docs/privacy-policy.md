@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-10-09.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-13.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -174,6 +174,9 @@ ride sent to your own computer** below).
   to your own computer** below.
 - **A ride's numbers sent to your instance, when you ask for an analysis of it** — never a
   picture. See **A ride analysed on your instance** below.
+- **A summary of each block of a workout you are riding, sent to your instance, if you switch
+  that on for the ride** — never a second-by-second reading, a position or a date. See **A workout
+  your instance may suggest changes to** below.
 - **Your own key for a hosted model service, sent to your instance, if you store one there** —
   sealed on this device so that only your instance can open it, and not kept on this device. With
   it, if you agree to that service: **your list of words to mask and your privacy zones**, sent
@@ -507,6 +510,36 @@ closed.
   everything*.
 - **If you cancel:** your instance stops the analysis at its next step, and nothing of it is saved
   on this device.
+
+## A workout your instance may suggest changes to
+
+**Re-plans during the ride, if you switch them on for that ride.** When you choose a workout on the
+Ride screen while signed in to an instance, there is a switch under the list: *Let my instance
+suggest changes to this workout as I ride*. It is off every time. If you turn it on for a ride,
+then each time you finish a block of that workout the app sends your instance a summary of the
+blocks you have ridden so far: how long each lasted, your mean and highest heart rate in it, how
+many seconds your heart rate was inside the range you chose, your mean power as a share of your
+threshold power, your mean cadence, and how many times the target had to be eased. With it go the
+workout's blocks, as shares of your threshold power, and the workout goals you set in Settings,
+except your time-in-range goal, which is not sent. The model on your instance may look up what is
+already there: what you wrote about your goals, and your saved workouts.
+
+- **What it is not sent:** not a second-by-second reading, not where you are, not the date, not
+  your name, not the workout's name or the labels you gave its blocks, and no power in watts.
+- **Where it goes, and how:** to the instance you connected, encrypted end to end to that instance
+  as everything else the app sends it is. It is looked at by a model on your instance's own
+  machine. It is not sent on to any hosted service, whatever key you have stored there.
+- **What comes back, and who decides:** at most one suggested change, chosen from a short fixed
+  list, with one reason from a fixed list. It carries no text. This device checks it against
+  limits of its own, and against your goals, and refuses anything outside them. A change it
+  accepts starts with the next block, never the one you are riding, and until then you can press
+  *Keep the plan* to carry on as you were. The sentence you see about it is written by this app.
+- **What your instance keeps:** the job, with the summaries it was sent, for 7 days, as for an
+  analysis. It is erased with your account there.
+- **What the app keeps:** each change it accepted or refused, the rule that decided, and when,
+  saved with that ride on this device. It is in the account export, and it goes when you delete
+  the ride or use *Erase everything*. It is not yet part of what *Sync now* sends.
+- **If anything goes wrong:** you ride the workout you chose. A change is never applied late.
 
 ## Questions your instance sends to a service you agreed to
 

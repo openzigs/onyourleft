@@ -36,13 +36,20 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  readReplanRecord,
   readWorkoutGoals,
   validateWorkout,
   WorkoutError,
 } from '@onyourleft/domain';
 
 import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
-import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
+import type {
+  GeographicPosition,
+  ReplanRecord,
+  RouteProfile,
+  Workout,
+  WorkoutBlock,
+} from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
 import {
@@ -144,6 +151,8 @@ export interface PersistedRideFacts {
   bestPower?: { duration: number; power: number }[];
   workoutFinished?: boolean;
   ghostRaced?: boolean;
+  /** @see RideFacts.replans — plain JSON, read back by `readReplanRecord`. */
+  replans?: unknown[];
 }
 
 /**
@@ -560,7 +569,24 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   }
   if (facts.workoutFinished !== undefined) row.workoutFinished = facts.workoutFinished;
   if (facts.ghostRaced !== undefined) row.ghostRaced = facts.ghostRaced;
+  if (facts.replans !== undefined) {
+    // Through the reader on the way IN as well: what is written is a copy
+    // holding only the keys a record has, and a record that is not one is
+    // refused here rather than found on the way out.
+    row.replans = facts.replans.map((each, index) => replanRecordOf(each, index));
+  }
   return row;
+}
+
+/** @throws {StoreDecodeError} naming the entry, never its contents. */
+function replanRecordOf(value: unknown, index: number): ReplanRecord {
+  const record = readReplanRecord(value);
+  if (record === undefined) {
+    throw new StoreDecodeError(
+      `activity.rideFacts.replans[${String(index)}]: expected a re-plan record`,
+    );
+  }
+  return record;
 }
 
 /** @throws {StoreDecodeError} */
@@ -572,6 +598,10 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const best = facts.bestPower;
   if (best !== undefined && !Array.isArray(best)) {
     throw new StoreDecodeError('activity.rideFacts.bestPower: expected a list');
+  }
+  const replans: unknown = facts.replans;
+  if (replans !== undefined && !Array.isArray(replans)) {
+    throw new StoreDecodeError('activity.rideFacts.replans: expected a list');
   }
   return {
     ...(facts.ascent === undefined
@@ -616,6 +646,9 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(facts.ghostRaced === undefined
       ? {}
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
+    ...(replans === undefined
+      ? {}
+      : { replans: replans.map((each: unknown, index) => replanRecordOf(each, index)) }),
   };
 }
 

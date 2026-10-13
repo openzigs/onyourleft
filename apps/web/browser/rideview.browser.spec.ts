@@ -854,15 +854,20 @@ const STANDING_NOTICES: readonly {
   // #1240: a workout's heart-rate hold — its notice, with the longest sentence
   // `workout/hold-text.ts` can produce, in the running workout's section.
   { name: 'a heart-rate hold', query: '?workout=hold', labels: ['Heart-rate hold:'] },
+  // #1244: an accepted re-plan waiting for the next block — its sentence, the
+  // longest `workout/replan-text.ts` can produce, and *Keep the plan* under
+  // it, which is a ride control and so is held to the floor with the rest.
+  { name: 'a re-plan waiting', query: '?workout=replan', labels: ['Plan change:'] },
 ];
 
 const EVERY_NOTICE = {
   name: 'every standing notice at once',
   query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
   // One workout on the stub: eased, not also holding (#1240's hold has its own case).
-  labels: STANDING_NOTICES.filter((each) => each.query !== '?workout=hold').flatMap(
-    (each) => each.labels,
-  ),
+  labels: STANDING_NOTICES.filter(
+    // #1244's re-plan has its own case too, for the same reason.
+    (each) => each.query !== '?workout=hold' && each.query !== '?workout=replan',
+  ).flatMap((each) => each.labels),
 };
 
 /** Live-group notices that are not standing IN the column. @see the #692 case */
@@ -897,6 +902,11 @@ for (const viewport of EASED_VIEWPORTS) {
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
         if (state.query.includes('side=lost')) {
           expect(during.map((each) => each.name)).toContain('Stop side camera');
+        }
+        // #1244: the apparatus. *Keep the plan* is on the page, so the lowest
+        // control's margin below is taken over a screen that has it.
+        if (state.query.includes('workout=replan')) {
+          expect(during.map((each) => each.name)).toContain('Keep the plan');
         }
 
         // Published BEFORE anything below is asserted, so a red run still says

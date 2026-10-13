@@ -706,3 +706,63 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   stall relief, a pause, a free ride) is raised or written as before, so on such a trainer the
   refusal lasts only until the first of those. H3 is unchanged: a hold block's envelope starts at
   the machine's minimum inside the player, so the refusal never applies to a hold block. (#1305)
+
+- **2026-10-13** — **D-7, D-9 and D-10 leave the device half of a re-plan to #1244, and the
+  2026-10-12 entry on #1243 leaves it two things to decide: how the device retries, and whether the
+  goal's time-in-range target is sent. The hold on #1244 was lifted by the owner that day**
+  (*"start 1244"*,
+  [recorded on #1244](https://github.com/openzigs/onyourleft/issues/1244#issuecomment-6146412087)).
+  The body above is not edited. #1244 built it; what it decided is below, and each point is **the
+  implementer's choice and the owner's to change**. Every rider-facing string is the owner's to
+  approve before merge, with #1245's.
+  - **The player takes a revision itself, and checks it itself.** D-2 says the player *"reads"* a
+    new plan revision at the next block boundary. `packages/domain/src/workout/player.ts` §`revise`
+    keeps the revised timeline waiting and starts reading it when the block being ridden ends. It
+    compares every segment before that boundary with the plan it is riding and refuses a timeline
+    in which one differs. So D-6's P2 is held twice: by the validator, and by the one thing that
+    asks for a target.
+  - **When a summary is sent.** D-10 says *"At each block boundary, or at most every 3 minutes"*.
+    As built: as a block begins, and no sooner than three minutes after the last request. Nothing
+    is sent inside a long block. A workout of one long block and a cool-down is therefore asked
+    about once, at most.
+  - **Retries: none.** A request that failed is not sent again; the next is the next block. A
+    start the instance refuses for a reason that will not change (`rate_limited`, `analysis_off`,
+    `validation_failed`, a session it no longer accepts) ends the asking for that workout;
+    `job_running` does not. That is at most 20 requests an hour, under the 24 the instance allows,
+    which a refused start still spends.
+  - **A late answer is dropped twice over.** A job still out 60 s after it was asked for, or 30 s
+    before the block ends, is cancelled and no longer listened to; and the validator refuses the
+    same proposal under P5 or P2 if it lands between two ticks. Neither shows anything.
+  - **Nothing is asked, and a job in flight is cancelled, while the ride is paused or the stall
+    rescue holds the target** (P6), without trainer control, without a strap, as the cool-down
+    begins, or in a block of under 30 s.
+  - **The goal's time-in-range target is not sent** (spike 0022's rule R1). A summary carries a
+    block's seconds in range, so the goal is withheld from the job's input until the owner rules.
+    `goal-time-in-range` is still one of D-4's reasons, and a model may still choose it.
+  - **Only the instance's own model is asked.** D-11 allows a hosted model on the rider's own key.
+    The device sends `instance-local` only: a hosted re-plan needs the masking list sent first, as
+    a hosted write-up does, and is not built.
+  - **The switch is per workout, set as it starts, and off every time** (P7). It is offered only
+    where the device is signed in to an instance and the rider has set their own two thresholds
+    (H1). It cannot be turned off during the workout; ending the workout ends the re-plans.
+  - ***Keep the plan* is on the Ride screen only** (D-7's one control). The game says an accepted
+    move through its one region and offers no control. A rider in the game leaves it to keep the
+    plan.
+  - ***Keep the plan* drops the move waiting for the next block** (there is at most one: a job is
+    asked for only as a block begins), and the plan takes a new revision number while keeping the
+    dropped move's P4 times (`replan.ts` §`planNotApplied`). So a proposal computed from the
+    dropped revision is refused under P5, and dropping a move does not buy another one sooner.
+  - **P9's record has a third decision, `not-applied`**, beside `accepted` and `refused`: an
+    accepted move the rider kept the plan from, a pause or the end of the workout discarded (D-8),
+    or the player would not take. Without it the record would say a move was made that was never
+    ridden.
+  - ⚠️ **P9's *"kept with the ride … and synced"* is half built.** The record is kept with the
+    ride on the device (`packages/store` §`RideFacts.replans`) and is in the account export. It is
+    **not synced**: a ride reaches an instance as its activity file, which carries none of a
+    ride's facts, and a synced record needs an item kind of its own. That is a follow-up issue.
+  - **`plan-changed` is said once for each accepted move, with announcements on**, and is held
+    while the workout is in a segment above threshold power or in the last 30 s of one at it
+    (D-12). A move dropped or ridden before it could be said is not said.
+  - **What was not measured.** Every test uses a scripted instance and the #44 simulator. No
+    re-plan was run against a model or a trainer:
+    [validation 0004](../validation/0004-heart-rate-hold-and-re-plans.md) Part B is that. (#1244)

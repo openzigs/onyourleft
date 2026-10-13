@@ -103,7 +103,13 @@
  * not itself accumulate.
  */
 
-import type { SignedActivityRecord, UnixSeconds, WorkoutGoals } from '@onyourleft/domain';
+import {
+  readReplanRecord,
+  type ReplanRecord,
+  type SignedActivityRecord,
+  type UnixSeconds,
+  type WorkoutGoals,
+} from '@onyourleft/domain';
 import {
   SIDE_SESSION_KINDS,
   StoreDecodeError,
@@ -198,6 +204,13 @@ export interface ManifestRideFacts {
   readonly bestPower?: readonly { readonly duration: number; readonly power: number }[];
   readonly workoutFinished?: boolean;
   readonly ghostRaced?: boolean;
+  /**
+   * Every re-plan decision made on the ride — #1244, ADR 0048 P9: each
+   * accepted or refused move, the rule that decided and when, and a move
+   * accepted and then not ridden. Like the two above it is known only to the
+   * ride that recorded it, so this is the only copy that leaves the device.
+   */
+  readonly replans?: readonly ReplanRecord[];
 }
 
 /**
@@ -1112,6 +1125,16 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
         }),
     ...(facts.workoutFinished === undefined ? {} : { workoutFinished: facts.workoutFinished }),
     ...(facts.ghostRaced === undefined ? {} : { ghostRaced: facts.ghostRaced }),
+    ...(facts.replans === undefined
+      ? {}
+      : {
+          // Through the domain's reader, which copies a record's own keys and
+          // no other: a key added to a record later is not exported by accident.
+          replans: facts.replans.flatMap((each) => {
+            const record = readReplanRecord(each);
+            return record === undefined ? [] : [record];
+          }),
+        }),
   };
 }
 

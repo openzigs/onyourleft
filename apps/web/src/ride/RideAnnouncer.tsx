@@ -32,6 +32,7 @@
  * | `RideSnapshot.keepAliveFailed`, when it appears (#647) | `screen-off-risk` | `controller.ts` §`RIDE_MAY_STOP_SPOKEN` |
  * | `TrainerSnapshot.ergHeld`, per press, announcements ON only (#655) | `erg-held` | "Held: …", `TrainerPanel` §`heldSentence` |
  * | `RideWorkoutSnapshot.hold`, when its sentence changes, announcements ON only, at most once a minute (#1240) | `hold-changed` | "Heart-rate hold: …", `workout/hold-text.ts` |
+ * | `RideWorkoutSnapshot.replan.waiting`, once for each accepted re-plan, announcements ON only, never above threshold power (#1244) | `plan-changed` | "Plan change: …", `workout/replan-text.ts` |
  *
  * **When something APPEARS or CHANGES, never when it is first rendered** —
  * #394's rule, kept: a screen a rider navigates back to, with control already
@@ -105,6 +106,8 @@ import {
   NOTHING_ANNOUNCED,
   type HoldAnnounced,
 } from '../workout/hold-text';
+
+import { planChangeAnnouncement } from '../workout/replan-text';
 
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -336,6 +339,13 @@ export function RideAnnouncer({
   });
 
   /**
+   * The accepted re-plan last offered, by its revision — #1244. Seeded from
+   * the first render, so one already waiting when the screen appears is not
+   * announced again (#394's rule).
+   */
+  const planOffered = useRef<number | undefined>(workout?.replan?.waiting?.revision);
+
+  /**
    * One call of the core. ⚠️ The only place this component writes the region,
    * which is the whole of #445: a second writer is a second voice.
    */
@@ -398,6 +408,7 @@ export function RideAnnouncer({
   const elapsedSeconds = workout?.elapsedSeconds;
   const status = workout?.status;
   const holdText = workout?.hold === undefined ? undefined : holdSentence(workout.hold);
+  const waitingPlan = workout?.replan?.waiting;
   const {
     lost,
     releaseFault,
@@ -486,6 +497,20 @@ export function RideAnnouncer({
     if (held.event !== undefined) {
       events.push(held.event);
     }
+    // #1244: an accepted re-plan waiting for the next block, once — and not
+    // in a stretch above threshold power, where it waits for the stretch to
+    // end. Ranked below the hold's sentence, announcements ON only.
+    const plan = planChangeAnnouncement(
+      planOffered.current,
+      waitingPlan,
+      timeline === undefined || elapsedSeconds === undefined
+        ? undefined
+        : { timeline, elapsedSeconds },
+    );
+    planOffered.current = plan.offered;
+    if (plan.event !== undefined) {
+      events.push(plan.event);
+    }
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -518,6 +543,7 @@ export function RideAnnouncer({
     elapsedSeconds,
     status,
     holdText,
+    waitingPlan,
   ]);
 
   return (

@@ -99,8 +99,9 @@
  * ## Room for a re-plan — #1244
  *
  * {@link WorkoutGraphInput.replaced} is what the plan was before a re-plan
- * changed it, drawn as a dotted outline behind the plan that stands. Nothing
- * supplies it yet: #1244 does.
+ * changed it, drawn as a dotted outline behind the plan that stands. #1244
+ * supplies it: `ride/controller.ts` §`RideWorkoutSnapshot.replaced`, from the
+ * moment a move is accepted, so a rider sees both before the block begins.
  *
  * ## No metric trademark
  *
@@ -215,7 +216,7 @@ export interface WorkoutGraphInput {
   /** The threshold the workout was started with, which turns a share into watts. */
   readonly thresholdWatts?: number | undefined;
   readonly trace?: readonly WorkoutTraceSample[] | undefined;
-  /** What a re-plan replaced — #1244's to supply. @see the module note */
+  /** What a re-plan replaced, from its boundary on (#1244). @see the module note */
   readonly replaced?: readonly BlockChartSegment[] | undefined;
   /**
    * The heart-rate hold of the block being ridden, as the screens show it

@@ -217,6 +217,7 @@ describe('#942 — the garage: one card per kind of device, its state in words',
         "discardRecovered": [],
         "dismissResult": 0,
         "endWorkout": 0,
+        "keepThePlan": 0,
         "noteGameRideEnded": [],
         "noteResultAnnounced": 0,
         "pair": [

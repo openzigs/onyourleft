@@ -119,6 +119,14 @@ const SCENES: readonly Scene[] = [
     query: '?workout=running',
     surfaces: RIDE_SCREEN,
   },
+  // #1244: an accepted re-plan waiting for the next block, which is the only
+  // state that puts *Keep the plan* on the screen.
+  {
+    name: 'the Ride screen, a re-plan waiting',
+    page: 'rideview',
+    query: '?workout=replan',
+    surfaces: RIDE_SCREEN,
+  },
   { name: 'the game, sounds on', page: 'ride', query: '?sounds=on', surfaces: ['game-hud'] },
   // #710's review: while paused the HUD's Pause reads Resume — the same
   // element, on the list under that name, and measured here in that state.

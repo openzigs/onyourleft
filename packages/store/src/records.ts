@@ -33,6 +33,7 @@ import type {
   GradePercent,
   Kilograms,
   Metres,
+  ReplanRecord,
   Seconds,
   SegmentSport,
   SegmentVisibility,
@@ -425,6 +426,18 @@ export interface RideFacts {
   readonly workoutFinished?: boolean;
   /** `true` when this ride raced the rider's own ghost and the race settled. */
   readonly ghostRaced?: boolean;
+  /**
+   * Every re-plan decision made during this ride, oldest first — #1244,
+   * ADR 0048 D-6 P9 (the owner's Q8: *"accepted and refused moves kept with
+   * the ride"*): the move, the rule that decided, and the time, and a move
+   * that was accepted and then not ridden. Known only while riding, like
+   * {@link workoutFinished}. Absent for a ride with none.
+   *
+   * Each is one of `@onyourleft/domain` §`ReplanRecord`'s shapes and is read
+   * back through `readReplanRecord`, which reads a record whole or not at
+   * all. It holds a move and a reason from two closed lists, and no text.
+   */
+  readonly replans?: readonly ReplanRecord[];
 }
 
 /** @see {@link ActivityRecord.originalFile} */

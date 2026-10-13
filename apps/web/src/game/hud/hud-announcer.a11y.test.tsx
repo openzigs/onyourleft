@@ -509,3 +509,78 @@ describe('the heart-rate hold, through the game — #1240', () => {
     expect(region()?.textContent).not.toContain('Heart-rate hold');
   });
 });
+
+describe('a re-plan during the ride, through the game — #1244', () => {
+  const SENTENCE = 'Next block shortened by 2 minutes, to fit the duration you chose.';
+  let change: { waiting: { revision: number; sentence: string }; quiet: boolean } | undefined;
+
+  /** A trainer a running workout owns, whose waiting re-plan the test changes between frames. */
+  function replanPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutPlanChange: () => change,
+    };
+  }
+
+  const quietRide = (): void => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+  };
+
+  beforeEach(() => {
+    change = undefined;
+  });
+
+  it('says an accepted move through the one region, once, with announcements on', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(offered).not.toContain('plan-changed');
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+    await pump(10);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(1);
+  });
+
+  it('holds it while the workout is above threshold power, and says it after', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('does not say a move that was already waiting when the ride began', async () => {
+    quietRide();
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    // A second move is said.
+    change = { waiting: { revision: 2, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('says nothing about it with announcements off', async () => {
+    await startRide(replanPort());
+    await pump(4);
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(10);
+    expect(region()?.textContent).not.toContain('Plan change');
+  });
+});

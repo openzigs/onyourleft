@@ -62,6 +62,7 @@ import {
   watts,
   type Metres,
   type RecordedSeries,
+  type ReplanRecord,
   type Seconds,
   type UnixSeconds,
   type Watts,
@@ -104,6 +105,11 @@ export interface RideToSaveInput {
   readonly workoutFinished?: boolean | undefined;
   /** This ride raced the rider's own ghost and the race settled — #947's ghost badge. */
   readonly ghostRaced?: boolean | undefined;
+  /**
+   * Every re-plan decision made on this ride — #1244, ADR 0048 D-6 P9. Kept
+   * with the ride on this device (`packages/store` §`RideFacts.replans`).
+   */
+  readonly replans?: readonly ReplanRecord[] | undefined;
 }
 
 /**
@@ -166,6 +172,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       sampleInterval: series.sampleInterval,
       workoutFinished: input.workoutFinished,
       ghostRaced: input.ghostRaced,
+      replans: input.replans,
     }),
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

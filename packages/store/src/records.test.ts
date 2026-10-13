@@ -286,3 +286,67 @@ describe('athlete, lap and privacy zone encode and decode', () => {
       .toEqual([]);
   });
 });
+
+describe('a ride’s re-plan decisions — #1244, ADR 0048 P9', () => {
+  const ACCEPTED = {
+    decision: 'accepted',
+    move: { kind: 'scale-remaining-intervals', percent: -10 },
+    reason: 'heart-rate-high',
+    revision: 1,
+    at: seconds(1_700_000_300),
+  } as const;
+
+  const withReplans = (replans: readonly unknown[]): ActivityRecord =>
+    ({ ...ACTIVITY, rideFacts: { replans } }) as ActivityRecord;
+
+  it('round-trips through the persisted row', () => {
+    const record = withReplans([ACCEPTED, { decision: 'refused', rule: 'P2', at: seconds(9) }]);
+    expect(fromPersistedActivity(toPersistedActivity(record))).toEqual(record);
+  });
+
+  it('writes a copy that holds only a record’s own keys', () => {
+    const row = toPersistedActivity(withReplans([ACCEPTED]));
+    expect(row.rideFacts?.replans).toEqual([ACCEPTED]);
+    expect(row.rideFacts?.replans?.[0]).not.toBe(ACCEPTED);
+  });
+
+  it.each([
+    ['a key a record does not have', { ...ACCEPTED, text: 'ease off' }],
+    ['a move off the closed list', { ...ACCEPTED, move: { kind: 'set-watts', watts: 400 } }],
+    ['a reason off the closed list', { ...ACCEPTED, reason: 'you look tired' }],
+    ['a decision this build does not know', { decision: 'overridden', at: 1 }],
+    ['no time', { decision: 'refused', rule: 'P2' }],
+    ['a string', 'accepted'],
+  ])('refuses to WRITE a ride whose record has %s', (_, record) => {
+    expect(() => toPersistedActivity(withReplans([record]))).toThrow(StoreDecodeError);
+  });
+
+  it('refuses to READ a row whose record was edited by hand, and names the entry not its text', () => {
+    const row = toPersistedActivity(withReplans([ACCEPTED, ACCEPTED]));
+    const edited = {
+      ...row,
+      rideFacts: { replans: [ACCEPTED, { ...ACCEPTED, note: 'SECRET-WORDS' }] },
+    };
+    let message = '';
+    try {
+      fromPersistedActivity(edited);
+    } catch (error) {
+      expect(error).toBeInstanceOf(StoreDecodeError);
+      message = (error as Error).message;
+    }
+    expect(message).toBe('activity.rideFacts.replans[1]: expected a re-plan record');
+  });
+
+  it('refuses a row whose replans is not a list', () => {
+    const row = toPersistedActivity(ACTIVITY);
+    expect(() =>
+      fromPersistedActivity({ ...row, rideFacts: { replans: 'none' as unknown as unknown[] } }),
+    ).toThrow(/activity.rideFacts.replans: expected a list/);
+  });
+
+  it('leaves a ride with no decisions without the key', () => {
+    const row = toPersistedActivity({ ...ACTIVITY, rideFacts: {} });
+    expect(row.rideFacts).toEqual({});
+    expect(fromPersistedActivity(row).rideFacts).toEqual({});
+  });
+});

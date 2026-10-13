@@ -28,6 +28,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { workoutStub } from '../workouts/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
+import {
+  PLAN_KEPT,
+  REPLAN_SWITCH_HELP,
+  REPLAN_SWITCH_LABEL,
+  REPLAN_UNAVAILABLE,
+} from '../workout/replan-text';
+
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { WorkoutPanel } from './WorkoutPanel';
 
@@ -406,5 +413,174 @@ describe('the running workout as a picture is not this panel’s — #1307', () 
     expect(text).toContain('Holding 150 W.');
     expect(view.container.querySelector('[data-oyl-workout-graph]')).toBeNull();
     expect(view.container.querySelector('[role="img"]')).toBeNull();
+  });
+});
+
+describe('re-plans during the ride — #1244', () => {
+  const SENTENCE =
+    'Next block shortened by 2 minutes, because your heart rate stayed above the range you chose.';
+  const waiting = (overrides: Partial<NonNullable<RideWorkoutSnapshot['replan']>> = {}) =>
+    running({
+      replan: {
+        waiting: { revision: 1, sentence: SENTENCE },
+        kept: false,
+        notice: undefined,
+        ...overrides,
+      },
+    });
+  const theSwitch = (root: ParentNode): HTMLInputElement | undefined =>
+    queryAll<HTMLInputElement>(root, 'input[role="switch"]')[0];
+
+  describe('the per-ride switch', () => {
+    it('is not shown where no re-plan could happen', async () => {
+      const view = await render();
+      expect(theSwitch(view.container)).toBeUndefined();
+      expect(view.container.textContent).not.toContain('instance');
+    });
+
+    it('is shown, off, with what it sends written under it and not behind a disclosure', async () => {
+      const view = await render({ replansAvailable: true });
+      const input = theSwitch(view.container);
+      expect(input?.checked).toBe(false);
+      expect(input?.closest('label')?.textContent).toBe(REPLAN_SWITCH_LABEL);
+      const help = view.container.querySelector(
+        `#${input?.getAttribute('aria-describedby') ?? ''}`,
+      );
+      expect(help?.textContent).toBe(REPLAN_SWITCH_HELP);
+      expect(help?.closest('details')).toBeNull();
+    });
+
+    it('comes after the workouts, so it does not push the Ride control down — #422', async () => {
+      const view = await render({ replansAvailable: true });
+      const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
+      const input = theSwitch(view.container) as HTMLElement;
+      expect(ride.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('is not shown where no workout can be started', async () => {
+      const noControl = await render({
+        replansAvailable: true,
+        trainer: trainer({ hasControl: false }),
+      });
+      expect(theSwitch(noControl.container)).toBeUndefined();
+      noControl.unmount();
+      const noThreshold = await render({ replansAvailable: true, thresholdPower: undefined });
+      expect(theSwitch(noThreshold.container)).toBeUndefined();
+    });
+
+    it('starts a workout with re-plans off unless the rider turned it on', async () => {
+      const started: unknown[] = [];
+      const view = await render({
+        replansAvailable: true,
+        onStart: (_, choices) => {
+          started.push(choices);
+        },
+      });
+      await activateWithKeyboard(buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement);
+      expect(started).toEqual([{}]);
+
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(theSwitch(view.container)?.checked).toBe(true);
+      await activateWithKeyboard(buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement);
+      expect(started).toEqual([{}, { replans: true }]);
+    });
+
+    it('is off again for the next workout: a choice is for one ride', async () => {
+      const props = {
+        trainer: trainer(),
+        port: workoutStub(ATHLETE, [record()]),
+        thresholdPower: watts(250),
+        onStart: () => undefined,
+        onEnd: () => undefined,
+        replansAvailable: true,
+      };
+      const view = await render(props);
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(theSwitch(view.container)?.checked).toBe(true);
+      await view.rerender(<WorkoutPanel {...props} workout={running()} />);
+      await settle();
+      expect(theSwitch(view.container)).toBeUndefined();
+      await view.rerender(<WorkoutPanel {...props} workout={undefined} />);
+      await settle();
+      expect(theSwitch(view.container)?.checked).toBe(false);
+    });
+  });
+
+  describe('Keep the plan', () => {
+    it('shows the sentence, when it starts, and the one control while a move waits', async () => {
+      let kept = 0;
+      const view = await render({
+        workout: waiting(),
+        onKeepPlan: () => {
+          kept += 1;
+        },
+      });
+      expect(view.container.textContent).toContain(
+        `Plan change: ${SENTENCE} It starts with the next block.`,
+      );
+      const button = buttonSaying(view.container, 'Keep the plan');
+      expect(button?.textContent).toBe('Keep the plan');
+      // A ride-time control: the 48 px floor (`design/ride-time-controls.ts`).
+      expect(button?.classList.contains('oyl-button--ride')).toBe(true);
+      await activateWithKeyboard(button as HTMLElement);
+      expect(kept).toBe(1);
+    });
+
+    it('puts the sentence before the control, and both after End workout', async () => {
+      const view = await render({ workout: waiting(), onKeepPlan: () => undefined });
+      const text = view.container.textContent ?? '';
+      expect(text.indexOf('End workout')).toBeLessThan(text.indexOf(SENTENCE));
+      expect(text.indexOf(SENTENCE)).toBeLessThan(text.indexOf('Keep the plan'));
+    });
+
+    it('is not offered when no move is waiting', async () => {
+      const view = await render({
+        workout: waiting({ waiting: undefined }),
+        onKeepPlan: () => undefined,
+      });
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+      expect(view.container.textContent).not.toContain('Plan change');
+    });
+
+    it('is not offered for a workout with no re-plans at all', async () => {
+      const view = await render({ workout: running(), onKeepPlan: () => undefined });
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+    });
+
+    it('answers the press in a live region, and shows the control no more', async () => {
+      const view = await render({
+        workout: waiting({ waiting: undefined, kept: true }),
+        onKeepPlan: () => undefined,
+      });
+      const answer = queryAll(view.container, '[role="status"]').find((each) =>
+        (each.textContent ?? '').includes(PLAN_KEPT),
+      );
+      expect(answer).toBeDefined();
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+    });
+
+    it('does not make the waiting sentence a second live region: the announcer says it', async () => {
+      const view = await render({ workout: waiting(), onKeepPlan: () => undefined });
+      const live = queryAll(view.container, '[role="status"], [aria-live]').filter(
+        (each) =>
+          (each.textContent ?? '').includes(SENTENCE) && !each.hasAttribute('data-oyl-announcer'),
+      );
+      expect(live).toEqual([]);
+    });
+  });
+
+  it('shows the one short line after a request that failed, and nothing else', async () => {
+    const view = await render({
+      workout: waiting({ waiting: undefined, notice: REPLAN_UNAVAILABLE }),
+    });
+    expect(view.container.textContent).toContain(REPLAN_UNAVAILABLE);
+    expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+  });
+
+  it('renders only this module’s own words: nothing but the sentence the snapshot carries', async () => {
+    // The snapshot is the only thing a proposal could reach a screen through,
+    // and `controller.test.ts` §"no model text renders" holds what is in it.
+    const view = await render({ workout: waiting({ waiting: undefined }) });
+    expect(view.container.textContent).not.toContain('because');
   });
 });

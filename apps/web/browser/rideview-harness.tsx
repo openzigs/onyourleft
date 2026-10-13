@@ -96,6 +96,7 @@ import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
 import type { WorkoutBlock } from '@onyourleft/domain';
 import type { WorkoutHold } from '../src/workout/hold-text';
+import { replanSentence } from '../src/workout/replan-text';
 import { raiseRefusedText } from '../src/workout/session';
 import type { WorkoutTraceSample } from '../src/workout/workout-graph';
 import { workoutStub } from '../src/workouts/testing';
@@ -182,6 +183,35 @@ const HOLD_WORKOUT = {
     ],
   },
 };
+
+/**
+ * `rideview.html?workout=replan` — #1244: a workout running with an accepted
+ * re-plan waiting for the next block, so its sentence and *Keep the plan*
+ * stand in the running workout's section and the graph draws what the move
+ * replaced as a dotted outline. Through the stub's snapshot, for
+ * {@link WORKOUT_STATE}'s reason: `ride/controller.test.ts` §"#1244" drives
+ * the real controller; this page measures where the control lands.
+ *
+ * ⚠️ **The longest sentence `workout/replan-text.ts` can produce** — a hold's
+ * range moved, for the longest reason — because the one that binds a fold is
+ * the one that wraps furthest. The picture is a different move (the third
+ * block shortened by two minutes): the sentence is chosen for its length and
+ * the plan for its outline, and this page measures both.
+ */
+const REPLAN_SENTENCE = replanSentence(
+  { kind: 'move-hold-range', block: 2, bpm: -5 },
+  'heart-rate-high',
+  2,
+);
+
+const replanBlocks = (third: number) => [
+  { kind: 'steady' as const, seconds: seconds(300), target: thresholdShare(0.6) },
+  { kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.9) },
+  { kind: 'steady' as const, seconds: seconds(third), target: thresholdShare(0.8) },
+  { kind: 'steady' as const, seconds: seconds(300), target: thresholdShare(0.5) },
+];
+const REPLAN_LOADED = expandWorkout({ name: 'Tempo', blocks: replanBlocks(600) });
+const REPLAN_REVISED = expandWorkout({ name: 'Tempo', blocks: replanBlocks(480) });
 
 /**
  * #1307: the last five minutes the running workout's graph draws, full to its
@@ -594,6 +624,32 @@ function snapshot(): RideSnapshot {
         timeline: expandWorkout(HOLD_WORKOUT.workout),
         thresholdWatts: 250,
         trace: graphTrace(HOLD.target),
+      },
+    };
+  }
+  if (WORKOUT_STATE === 'replan') {
+    return {
+      ...riding,
+      workout: {
+        name: 'Tempo',
+        status: 'running',
+        elapsedSeconds: 312,
+        totalSeconds: REPLAN_REVISED.totalSeconds,
+        holdingWatts: 225,
+        nowRiding: '10 min at 90%',
+        fault: undefined,
+        rescue: undefined,
+        // As the controller hands it over while a move waits: the revised
+        // plan, and what it replaced from the next block on.
+        timeline: REPLAN_REVISED,
+        replaced: REPLAN_LOADED.segments.filter((segment) => segment.block >= 2),
+        replan: {
+          waiting: { revision: 1, sentence: REPLAN_SENTENCE },
+          kept: false,
+          notice: undefined,
+        },
+        thresholdWatts: 250,
+        trace: graphTrace(225),
       },
     };
   }
@@ -1287,6 +1343,12 @@ async function run(): Promise<void> {
     await until('the heart-rate hold', () =>
       [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find(
         (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Heart-rate hold:',
+      ),
+    );
+  } else if (WORKOUT_STATE === 'replan') {
+    await until('Keep the plan', () =>
+      [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
+        (each) => textOf(each) === 'Keep the plan',
       ),
     );
   } else if (

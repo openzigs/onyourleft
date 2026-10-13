@@ -1375,11 +1375,12 @@ What a real heart, strap and trainer do is
 
 ### Re-plans during the ride: the vocabulary and the device's validator (#1242)
 
-[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's slow loop, of which only the
-contract and, since #1243, the instance job exist: `packages/domain/src/workout/replan.ts`, whose
-`decodeProposal` the instance calls (§"Re-plan jobs — #1243"). **Nothing calls `validateProposal`
-yet**: the device half is #1244. Both import this one module so the vocabulary cannot drift between
-them.
+[ADR 0048](adr/0048-workouts-that-change-during-the-ride.md) D-1's slow loop. The contract is
+`packages/domain/src/workout/replan.ts`: the instance job calls its `decodeProposal` (§"Re-plan
+jobs — #1243"), and since #1244 the device calls its `validateProposal` (§"Re-plans during the
+ride: the device half — #1244", below). Both import this one module so the vocabulary cannot drift
+between them. ⚠️ A reviewer who remembers this paragraph saying *"Nothing calls `validateProposal`
+yet"* is reading the old file.
 
 | Part | What it owns |
 |---|---|
@@ -1419,10 +1420,63 @@ How 2's +10 % and a replaced hold are measured is the owner's ruling of the same
 10. An intervals block is neither extended nor shortened.
 11. A proposal must name the latest summary sent.
 
-⚠️ **`check:wiring` does not watch this file.** #1242 expected the gate to report it until #1244;
-the gate's reach into `packages/` is `TRAINER_COMMAND_SEAM`'s five modules, and this is not one.
-Its `@unwired` tag names #1244 and is honest, but it holds nothing up. Whether the validator
-joins the seam is #1244's to decide when it wires it.
+⚠️ **`check:wiring` does not watch this file.** The gate's reach into `packages/` is
+`TRAINER_COMMAND_SEAM`'s five modules, and this is not one. Its `@unwired` tag named #1244 and
+went with it; it never held anything up. **#1244 did not add the validator to the seam**: the
+five are what decides, encodes, paces and addresses a command, and a re-plan reaches none of them.
+What it can reach is the workout player's plan, and what holds that wiring is
+`apps/web/src/workout/replan-port.ts` (a `*-port.ts`, so `WIRE003` watches its four methods) and
+`ride/controller.test.ts` §"#1244", which reads the simulated trainer.
+
+### Re-plans during the ride: the device half (#1244)
+
+ADR 0048 D-5 to D-10 on the device. A rider who switches re-plans on for a ride has a summary of
+each block they finish sent to their instance; at most one proposal comes back; the device's own
+validator accepts or refuses it; an accepted move waits for the next block, is shown and said in a
+sentence the device composes, and can be dropped with *Keep the plan*.
+
+| Part | Where | What it owns |
+|---|---|---|
+| The plan revision | `packages/domain/src/workout/player.ts` §`revise`, §`keepPlan`, §`plan` | the player keeps a revised timeline WAITING and starts reading it at the end of the block being ridden. It compares every segment before that boundary with the plan it is riding and refuses a timeline in which one differs, whatever the validator said. A pause, a lost link, a stop and a new start drop a waiting revision (D-8) |
+| The wire | `apps/web/src/workout/replan-job.ts` | the one builder of the request (`replanInput`, `replanRequest`), the start, and the stream read to its one `result`. A proposal is handed on undecoded. Cancelling is #1102's `cancelJob`. A `departing` boundary (`privacy/boundaries.test.ts`) |
+| The session | `apps/web/src/workout/replan-session.ts` | when a summary is sent, the one job in flight, when it is dropped, the call to `validateProposal`, the hand-over to the player, and P9's record. It holds no trainer and no writer |
+| The words | `apps/web/src/workout/replan-text.ts` | every sentence, label and control name, and when `plan-changed` is said. A sentence is a part for the move and a part for the reason, both this module's |
+| The port | `apps/web/src/workout/replan-port.ts` | what the ride controller asks of the outside: is the device signed in, the sealed session, the rider's typed goals, their saved workouts. `main.tsx` §`buildReplanPort` builds the one production port |
+| The wiring | `apps/web/src/ride/controller.ts` §`startWorkout`, §`beginReplans`, §`keepThePlan` | a session is made only for a workout started with the switch on and the rider's own two thresholds; it is ticked after the workout's own tick; it is stopped after the workout's session, so a release is never behind it |
+| The screens | `ride/WorkoutPanel.tsx`, `ride/RideAnnouncer.tsx`, `game/GameView.tsx` | the per-ride switch (off every time), the waiting sentence and *Keep the plan* on the Ride screen; `plan-changed` through each screen's one region. The game shows no *Keep the plan* |
+| The record | `packages/store` §`RideFacts.replans`, `packages/domain` §`readReplanRecord` | every accepted and refused move, the rule and the time, and a move accepted and not ridden, kept with the ride and in the account export |
+
+**What is sent** is `replan-job.ts` §`replanInput` and nothing else: the plan's revision, the
+summary's number, the block being ridden, the typed goals, the plan's blocks as shares with no
+label, and one summary a block ridden (seconds, mean and highest heart rate, seconds in range for
+a hold block, mean power as a share, mean cadence, a count of rescues). ⚠️ **The goal's
+time-in-range target is withheld** (`goalsToSend`): spike 0022's rule R1, until the owner rules on
+it. Only the instance's own model is asked (`REPLAN_SOURCE`); a hosted re-plan is not built.
+
+**When.** As a block begins, for the blocks ridden so far, and no sooner than three minutes after
+the last request. Never as the cool-down begins, in a block of under thirty seconds, while paused,
+during a stall rescue, without trainer control or without a strap. **Nothing is sent twice**: a
+request that failed is not repeated, and a refusal that will not change (`rate_limited`,
+`analysis_off`, `validation_failed`, a session the instance no longer accepts) ends the asking for
+that workout. That is at most 20 requests an hour, under the instance's 24.
+
+**A late answer is dropped.** A job still out sixty seconds after it was asked for, or thirty
+seconds before the block ends, is cancelled and no longer listened to, and the validator refuses
+the same proposal under P5 or P2 if it arrives between two ticks. Nothing is shown for either.
+
+⚠️ **What this does not give.**
+- **P9's record is not synced.** It is on the device and in the export. A ride's facts
+  (`RideFacts`) are synced by nothing today: a ride goes to an instance as its activity file, which
+  carries none of them. Syncing the record needs an item kind of its own on the instance.
+- **A rider in the game cannot keep the plan** without leaving it for the Ride screen.
+- **The switch is set as the workout starts** and cannot be turned off mid-workout; ending the
+  workout ends the re-plans.
+- **No test here reaches a model or a trainer.** The instance is a scripted one
+  (`replan-testing.ts`) and the trainer the #44 simulator. The round trip on the owner's instance
+  and a real trainer is [validation 0004](validation/0004-heart-rate-hold-and-re-plans.md) Part B.
+- **The template's version is written twice**: `apps/instance` §`REPLAN_TEMPLATE.version` and
+  `replan-job.ts` §`REPLAN_TEMPLATE_VERSION`. If they drift every request is refused
+  `validation_failed`, which is the loaded plan and no re-plans.
 
 ### The camera seam: one port, one consent, and where each guarantee is actually kept
 
@@ -1942,8 +1996,8 @@ only on the rider's own key, under their recorded consent, masked (`source.ts`, 
 ⚠️ **What this does not give.** One worker serves every athlete, so a re-plan queued behind a
 write-up can spend its 45 s waiting and end `out-of-time` with no model asked. The input is kept in
 the job row for the seven days a job with no write-up is kept. The budgets are the issue's proposed
-figures: no multi-turn re-plan was measured (spike 0023 measured a write-up's one model call). And
-the route has no caller in the app until #1244.
+figures: no multi-turn re-plan was measured (spike 0023 measured a write-up's one model call). The
+route's one caller in the app is `apps/web/src/workout/replan-job.ts` §`startReplan`, since #1244.
 
 ```mermaid
 flowchart TD

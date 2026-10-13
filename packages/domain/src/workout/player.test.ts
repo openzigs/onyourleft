@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { revolutionsPerMinute, seconds, watts, type Seconds } from '../quantities';
+import { beatsPerMinute, revolutionsPerMinute, seconds, watts, type Seconds } from '../quantities';
 
 import {
   CADENCE_SILENT_REASON,
@@ -812,5 +812,228 @@ describe('the elapsed clock is reported in seconds', () => {
     subject.start(seconds(0));
     const elapsed: Seconds = subject.tick(seconds(7)).elapsed;
     expect(elapsed).toBe(7);
+  });
+});
+
+describe('a plan revision is read at the next block boundary — #1244, ADR 0048 D-2', () => {
+  /** Three blocks: the one ridden, the one a revision changes, and a last one. */
+  const three = (middle: WorkoutBlock = steady(60, 1.0)) =>
+    expandWorkout(workout([steady(60, 0.6), middle, steady(60, 0.5)]));
+
+  /** A player twenty seconds into the first block, its target acknowledged. */
+  const riding = () => {
+    const p = player(three());
+    p.start(seconds(0));
+    p.acknowledge(watts(wroteWatts(p.tick(seconds(1)).intent)));
+    p.tick(seconds(20));
+    return p;
+  };
+
+  it('writes nothing, and changes nothing, in the block being ridden', () => {
+    const p = riding();
+    expect(p.revise(three(steady(60, 0.8)))).toBe(true);
+    // Every tick to the last second of the block: no ask at all.
+    for (let at = 21; at < 60; at += 1) {
+      expect(p.tick(seconds(at)).intent.kind).toBe('hold');
+    }
+    expect(p.plan().riding.segments[1]?.from).toBe(1.0);
+    expect(p.plan().waiting?.segments[1]?.from).toBe(0.8);
+  });
+
+  it('asks for the revised target at the boundary, and the revision is then the plan', () => {
+    const p = riding();
+    p.revise(three(steady(60, 0.8)));
+    expect(wroteWatts(p.tick(seconds(60)).intent)).toBe(200);
+    expect(p.plan().riding.segments[1]?.from).toBe(0.8);
+    expect(p.plan().waiting).toBeUndefined();
+  });
+
+  it('rides the plan it had when the revision is dropped before the boundary', () => {
+    const p = riding();
+    p.revise(three(steady(60, 0.8)));
+    expect(p.keepPlan()).toBe(true);
+    expect(p.plan().waiting).toBeUndefined();
+    expect(wroteWatts(p.tick(seconds(60)).intent)).toBe(250);
+    // And there is nothing left to drop.
+    expect(p.keepPlan()).toBe(false);
+  });
+
+  it('refuses a revision that changes the block being ridden', () => {
+    const p = riding();
+    const changed = expandWorkout(workout([steady(60, 0.9), steady(60, 1.0), steady(60, 0.5)]));
+    expect(p.revise(changed)).toBe(false);
+    expect(p.plan().waiting).toBeUndefined();
+    for (let at = 21; at < 60; at += 1) {
+      expect(p.tick(seconds(at)).intent.kind).toBe('hold');
+    }
+    expect(wroteWatts(p.tick(seconds(60)).intent)).toBe(250);
+  });
+
+  it('refuses a revision that moves the end of the block being ridden', () => {
+    const p = riding();
+    const shorter = expandWorkout(workout([steady(30, 0.6), steady(60, 1.0), steady(60, 0.5)]));
+    const longer = expandWorkout(workout([steady(90, 0.6), steady(60, 1.0), steady(60, 0.5)]));
+    expect(p.revise(shorter)).toBe(false);
+    expect(p.revise(longer)).toBe(false);
+  });
+
+  it('refuses a revision that changes a block already ridden', () => {
+    const p = player(three());
+    p.start(seconds(0));
+    p.tick(seconds(70));
+    const changed = expandWorkout(workout([steady(60, 0.7), steady(60, 1.0), steady(60, 0.5)]));
+    expect(p.revise(changed)).toBe(false);
+  });
+
+  it('waits for the end of an intervals block, not of the interval being ridden', () => {
+    const intervals: WorkoutBlock = {
+      kind: 'intervals',
+      repeats: 2,
+      hardSeconds: seconds(30),
+      hardTarget: thresholdShare(1.0),
+      easySeconds: seconds(30),
+      easyTarget: thresholdShare(0.5),
+    };
+    const plan = (last: number) => expandWorkout(workout([intervals, steady(60, last)]));
+    const p = player(plan(0.6));
+    p.start(seconds(0));
+    p.tick(seconds(10));
+    expect(p.revise(plan(0.8))).toBe(true);
+    // The interval being ridden ends at 30 s; the block ends at 120 s.
+    p.tick(seconds(31));
+    expect(p.plan().waiting).toBeDefined();
+    p.tick(seconds(119));
+    expect(p.plan().waiting).toBeDefined();
+    p.acknowledge(watts(125));
+    expect(wroteWatts(p.tick(seconds(120)).intent)).toBe(200);
+  });
+
+  describe('a hold block being ridden', () => {
+    const hold = (low: number, high: number, ceiling = 0.8): WorkoutBlock => ({
+      kind: 'heart-rate-hold',
+      seconds: seconds(600),
+      range: { low: beatsPerMinute(low), high: beatsPerMinute(high) },
+      startShare: thresholdShare(0.5),
+      ceilingShare: thresholdShare(ceiling),
+    });
+    const plan = (first: WorkoutBlock) => expandWorkout(workout([first, steady(60, 0.5)]));
+    const ridingHold = () => {
+      const p = player(plan(hold(130, 140)));
+      p.start(seconds(0));
+      p.tick(seconds(10));
+      return p;
+    };
+
+    it.each([
+      ['the bottom of its range', hold(128, 140)],
+      ['the top of its range', hold(130, 142)],
+      ['its ceiling', hold(130, 140, 0.85)],
+    ])('is not revised by a plan that moves %s', (_, revised) => {
+      expect(ridingHold().revise(plan(revised))).toBe(false);
+    });
+
+    it('is not swapped for a steady block at its start share', () => {
+      expect(ridingHold().revise(plan(steady(600, 0.5)))).toBe(false);
+    });
+
+    it('takes a plan in which it is the same hold', () => {
+      expect(ridingHold().revise(plan(hold(130, 140)))).toBe(true);
+    });
+  });
+
+  it('refuses a revision that changes where a ramp being ridden starts or ends up', () => {
+    const ramp = (from: number, to: number): WorkoutBlock => ({
+      kind: 'ramp',
+      seconds: seconds(60),
+      from: thresholdShare(from),
+      to: thresholdShare(to),
+    });
+    const plan = (from: number, to: number) =>
+      expandWorkout(workout([ramp(from, to), steady(60, 0.5)]));
+    const p = player(plan(0.5, 0.8));
+    p.start(seconds(0));
+    p.tick(seconds(10));
+    expect(p.revise(plan(0.5, 0.9))).toBe(false);
+    expect(p.revise(plan(0.6, 0.8))).toBe(false);
+    expect(p.revise(plan(0.5, 0.8))).toBe(true);
+  });
+
+  it('refuses a revision that cuts the block being ridden into blocks of its own', () => {
+    // The same stretches at the same targets, as four blocks instead of one:
+    // the block being ridden would end at 30 s instead of 120 s.
+    const intervals: WorkoutBlock = {
+      kind: 'intervals',
+      repeats: 2,
+      hardSeconds: seconds(30),
+      hardTarget: thresholdShare(1.0),
+      easySeconds: seconds(30),
+      easyTarget: thresholdShare(0.5),
+    };
+    const one = expandWorkout(workout([intervals, steady(60, 0.6)]));
+    const four = expandWorkout(
+      workout([
+        steady(30, 1.0),
+        steady(30, 0.5),
+        steady(30, 1.0),
+        steady(30, 0.5),
+        steady(60, 0.6),
+      ]),
+    );
+    expect(four.segments.slice(0, 4).map((each) => [each.endsAt, each.from])).toEqual(
+      one.segments.slice(0, 4).map((each) => [each.endsAt, each.from]),
+    );
+    const p = player(one);
+    p.start(seconds(0));
+    p.tick(seconds(10));
+    expect(p.revise(four)).toBe(false);
+  });
+
+  it('refuses a revision that has lost the block being ridden', () => {
+    const p = player(three());
+    p.start(seconds(0));
+    p.tick(seconds(70));
+    // The first block as it was, and nothing after it.
+    expect(p.revise(expandWorkout(workout([steady(60, 0.6)])))).toBe(false);
+    expect(p.plan().waiting).toBeUndefined();
+  });
+
+  it('takes no revision while idle, paused or finished', () => {
+    const idle = player(three());
+    expect(idle.revise(three(steady(60, 0.8)))).toBe(false);
+
+    const paused = riding();
+    paused.pause(seconds(25));
+    expect(paused.revise(three(steady(60, 0.8)))).toBe(false);
+
+    const finished = riding();
+    finished.stop();
+    expect(finished.revise(three(steady(60, 0.8)))).toBe(false);
+  });
+
+  it.each([
+    ['a pause', (p: ReturnType<typeof riding>) => p.pause(seconds(25))],
+    ['a lost link', (p: ReturnType<typeof riding>) => p.linkLost(seconds(25))],
+    ['a stop', (p: ReturnType<typeof riding>) => p.stop()],
+    ['a new start', (p: ReturnType<typeof riding>) => p.start(seconds(25))],
+  ])('drops a waiting revision on %s', (_, act) => {
+    const p = riding();
+    p.revise(three(steady(60, 0.8)));
+    act(p);
+    expect(p.plan().waiting).toBeUndefined();
+    expect(p.plan().riding.segments[1]?.from).toBe(1.0);
+  });
+
+  it('replaces a waiting revision with a newer one', () => {
+    const p = riding();
+    p.revise(three(steady(60, 0.8)));
+    expect(p.revise(three(steady(60, 0.7)))).toBe(true);
+    expect(wroteWatts(p.tick(seconds(60)).intent)).toBe(175);
+  });
+
+  it('ends the workout at the revised length', () => {
+    const p = riding();
+    p.revise(expandWorkout(workout([steady(60, 0.6), steady(30, 1.0), steady(60, 0.5)])));
+    expect(p.tick(seconds(149)).status).toBe('running');
+    expect(p.tick(seconds(150)).status).toBe('finished');
   });
 });

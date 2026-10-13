@@ -126,6 +126,7 @@ import {
   type HoldAnnounced,
   type WorkoutHold,
 } from '../workout/hold-text';
+import { planChangeAnnouncement } from '../workout/replan-text';
 import {
   announce,
   INITIAL_ANNOUNCER,
@@ -703,6 +704,12 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const holdSeenRef = useRef<HoldAnnounced>(NOTHING_ANNOUNCED);
   /**
+   * The accepted re-plan last offered to the region, by its revision —
+   * #1244. Set at a ride's start to the one already waiting, which is then
+   * not said (#394's rule: never on first appearance).
+   */
+  const planOfferedRef = useRef<number | undefined>(undefined);
+  /**
    * Whether *"Keep the screen on: …"* has been SPOKEN on this ride while the
    * refusal stands — #647, `GameTrainerPort.recordingMayStop`. Cleared when a
    * ride starts, so a refusal already standing is said once as the ride
@@ -1122,6 +1129,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       gradientFaultRef.current = undefined;
       easedRef.current = undefined;
       holdSeenRef.current = NOTHING_ANNOUNCED;
+      planOfferedRef.current = trainerPortRef.current?.workoutPlanChange?.()?.waiting.revision;
       mayStopSaidRef.current = false;
       gradientRef.current =
         found.control === undefined
@@ -1566,6 +1574,20 @@ export function GameView(props: GameViewProps): JSX.Element {
       // Not in `ALWAYS_SPOKEN`: with announcements off the core drops it.
       if (holdSaid.event !== undefined) {
         events.push(holdSaid.event);
+      }
+      // #1244: an accepted re-plan waiting for the workout's next block —
+      // `plan-changed`, below the hold's sentence, announcements on only, once
+      // for each accepted move and never in a stretch above threshold
+      // (`workout/replan-text.ts`).
+      const planNow = trainerPortRef.current?.workoutPlanChange?.();
+      const planSaid = planChangeAnnouncement(
+        planOfferedRef.current,
+        planNow === undefined || planNow.quiet ? undefined : planNow.waiting,
+        undefined,
+      );
+      planOfferedRef.current = planSaid.offered;
+      if (planSaid.event !== undefined) {
+        events.push(planSaid.event);
       }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,

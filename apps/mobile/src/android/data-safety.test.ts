@@ -839,3 +839,31 @@ describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
     },
   );
 });
+
+describe('re-plans during the ride, sent to the rider’s instance (#1244)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says a block’s summary goes to the instance, only when switched on for that ride',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain('switches on re-plans for a workout they are about to ride (#1244)');
+      expect(why).toContain('off unless switched on, for that ride only');
+      expect(why).toContain('a summary of each block they finish');
+      expect(why).toContain('Never a second-by-second reading, a position or a date');
+      // The instance's own model only: no hosted service is sent a re-plan.
+      expect(why).toContain('to no hosted service, so it does not add to shared');
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('names heart rate on the health row and power and cadence on the fitness row', () => {
+    expect(row('Health and fitness — health info')?.why).toContain(
+      'mean and highest heart rate and the seconds it was inside the range they chose',
+    );
+    expect(row('Health and fitness — fitness info')?.why).toContain(
+      'its mean power as a share of their threshold power, its mean cadence',
+    );
+  });
+});
