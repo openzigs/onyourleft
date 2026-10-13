@@ -384,6 +384,46 @@ describe('the mid-ride controls are usable with gloves on', () => {
   });
 });
 
+describe('Keep the plan, in the game — #1244', () => {
+  const controlNames = (): (string | null)[] =>
+    [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].map(
+      (each) => each.textContent,
+    );
+
+  it('is not on the HUD when no re-plan is waiting', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+    expect(controlNames()).toEqual(['Pause', 'End ride']);
+  });
+
+  it('is a ride-time control after Pause and End ride while one waits, and audits clean', async () => {
+    let pressed = 0;
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...props()}
+          onKeepPlan={() => {
+            pressed += 1;
+          }}
+        />,
+      ),
+    );
+    // After the two a rider presses every ride, which keep their places.
+    expect(controlNames()).toEqual(['Pause', 'End ride', 'Keep the plan']);
+    const keep = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(keep?.tagName).toBe('BUTTON');
+    expect(keep?.classList.contains(RIDE_SIZE_CLASS), keep?.outerHTML).toBe(true);
+    // On a row of its own: not in the row whose width Pause and End ride share.
+    expect(keep?.closest('.oyl-hud__controls')).toBeNull();
+    expect(keep?.closest('.oyl-hud__actions')).not.toBeNull();
+    expect(tabbableElements(document).map((element) => element.textContent)).toContain(
+      'Keep the plan',
+    );
+    keep?.click();
+    expect(pressed).toBe(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+});
+
 describe('the gap says who is ahead, to the eye and to a screen reader (#255)', () => {
   function chasing(botMetres: number, riderMetres: number): React.ReactElement {
     const base = props();

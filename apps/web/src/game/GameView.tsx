@@ -126,7 +126,7 @@ import {
   type HoldAnnounced,
   type WorkoutHold,
 } from '../workout/hold-text';
-import { planChangeAnnouncement } from '../workout/replan-text';
+import { planChangeAnnouncement, planDiscardedAnnouncement } from '../workout/replan-text';
 import {
   announce,
   INITIAL_ANNOUNCER,
@@ -709,6 +709,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * not said (#394's rule: never on first appearance).
    */
   const planOfferedRef = useRef<number | undefined>(undefined);
+  /** The discarded re-plan last said to have been discarded, by its revision — #1244. */
+  const planDiscardedSaidRef = useRef<number | undefined>(undefined);
   /**
    * Whether *"Keep the screen on: …"* has been SPOKEN on this ride while the
    * refusal stands — #647, `GameTrainerPort.recordingMayStop`. Cleared when a
@@ -1130,6 +1132,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       easedRef.current = undefined;
       holdSeenRef.current = NOTHING_ANNOUNCED;
       planOfferedRef.current = trainerPortRef.current?.workoutPlanChange?.()?.waiting.revision;
+      planDiscardedSaidRef.current = trainerPortRef.current?.workoutPlanDiscarded?.();
       mayStopSaidRef.current = false;
       gradientRef.current =
         found.control === undefined
@@ -1589,6 +1592,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (planSaid.event !== undefined) {
         events.push(planSaid.event);
       }
+      // #1244: a waiting move a pause or a lost trainer discarded — its one
+      // sentence, once, through the same kind and the same region.
+      const planDiscarded = planDiscardedAnnouncement(
+        planDiscardedSaidRef.current,
+        trainerPortRef.current?.workoutPlanDiscarded?.(),
+      );
+      planDiscardedSaidRef.current = planDiscarded.said;
+      if (planDiscarded.event !== undefined) {
+        events.push(planDiscarded.event);
+      }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -1993,6 +2006,15 @@ export function GameView(props: GameViewProps): JSX.Element {
               }
         }
         paused={phase === 'paused'}
+        // #1244: *Keep the plan*, only while an accepted re-plan waits for
+        // the workout's next block. The controller's own `keepThePlan`.
+        onKeepPlan={
+          props.trainer?.workoutPlanChange?.() === undefined
+            ? undefined
+            : () => {
+                props.trainer?.keepThePlan?.();
+              }
+        }
         // #400: the mute and the volume, on the ride's own screen — SC 1.4.2.
         // Only for a rider who turned sounds on: there is nothing to mute
         // otherwise, and a control that does nothing is noise on a HUD.

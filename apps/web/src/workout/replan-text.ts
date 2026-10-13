@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The words of a re-plan during the ride — #1244, ADR 0048 D-7 and D-12. The
- * ONE module for them, as `hold-text.ts` is for the heart-rate hold's: the
- * Ride screen shows them and both announcers say them.
+ * The words of a re-plan WHILE IT HAPPENS — #1244, ADR 0048 D-7 and D-12:
+ * the sentences composed from a move and a reason, and the status lines. The
+ * Ride screen shows them and both announcers say them, as `hold-text.ts` is
+ * for the heart-rate hold's.
+ *
+ * ⚠️ **The switch's label, its disclosure and the control's name are NOT
+ * here.** They are `replan-disclosure.ts`'s (#1245), which the privacy policy
+ * is held to word for word: `REPLAN_SWITCH_LABEL`, `replanDisclosure()` and
+ * `REPLAN_KEEP_BUTTON`. This module had copies of two of them and no longer
+ * does, so the owner approves one set of words.
  *
  * ## Every sentence is composed on the device
  *
@@ -42,13 +49,10 @@ import { HARD_SEGMENT_SHARE, HOLD_QUIET_BEFORE_HARD_END_SECONDS } from './hold-t
 /** The label a screen puts before a waiting re-plan's sentence. */
 export const REPLAN_LABEL = 'Plan change';
 
-/** The one ride-time control: drop the waiting move (ADR 0048 D-7). */
-export const KEEP_THE_PLAN = 'Keep the plan';
-
 /** What follows the sentence while the move waits for its boundary. */
 export const REPLAN_STARTS_AT_NEXT_BLOCK = 'It starts with the next block.';
 
-/** What the panel says once the rider has pressed {@link KEEP_THE_PLAN}. */
+/** What the panel says once the rider has pressed *Keep the plan* (`REPLAN_KEEP_BUTTON`). */
 export const PLAN_KEPT = 'The plan stays as it was.';
 
 /**
@@ -59,12 +63,17 @@ export const PLAN_KEPT = 'The plan stays as it was.';
 export const REPLAN_UNAVAILABLE =
   'No re-plan could be asked for just now. The workout carries on as planned.';
 
-/** The per-ride switch (ADR 0048 D-6 P7), off unless the rider turns it on. */
-export const REPLAN_SWITCH_LABEL = 'Let my instance suggest changes to this workout as I ride';
-
-/** What the switch does, under it. */
-export const REPLAN_SWITCH_HELP =
-  'After each block, a summary of that block is sent to your instance. It may suggest one change to the blocks ahead, which this device checks and applies at the next block. You can keep the plan as it was.';
+/**
+ * The one sentence for a waiting move that a pause or a lost trainer
+ * discarded (ADR 0048 D-8). The rider may have read or heard the move's own
+ * sentence, and the graph and the lookahead go back to the plan as it was at
+ * the same moment, so they are told once. It names both causes because the
+ * player drops a waiting move for either and does not say which.
+ *
+ * ⚠️ DRAFT wording, awaiting the owner's approval with the rest.
+ */
+export const REPLAN_DISCARDED =
+  'That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.';
 
 const REASONS: Readonly<Record<ReasonCode, string>> = {
   'heart-rate-high': 'because your heart rate stayed above the range you chose',
@@ -193,16 +202,37 @@ export function planChangeAnnouncement(
   };
 }
 
+/**
+ * Whether a discarded move's one sentence ({@link REPLAN_DISCARDED}) should
+ * be offered to an announcer now, and what to remember: the revision last
+ * said to have been discarded. Once for each discarded move.
+ *
+ * ⚠️ No silence rule, unlike {@link planChangeAnnouncement}: a move is
+ * discarded by a pause or a lost trainer, which is not a moment a rider is
+ * being asked to hold a hard effort, and a sentence held until a stretch ends
+ * would arrive after the ride resumed with nothing to tie it to.
+ */
+export function planDiscardedAnnouncement(
+  said: number | undefined,
+  discarded: number | undefined,
+): { readonly event: PlanChangedEvent | undefined; readonly said: number | undefined } {
+  if (discarded === undefined || discarded === said) {
+    return { event: undefined, said };
+  }
+  return {
+    event: { kind: 'plan-changed', text: `${REPLAN_LABEL}: ${REPLAN_DISCARDED}` },
+    said: discarded,
+  };
+}
+
 /** Every reason clause, for the word scan. */
 export const REPLAN_REASON_TEXTS: readonly string[] = Object.values(REASONS);
 
 /** Every fixed sentence and label of this module, for the word scan. */
 export const REPLAN_FIXED_TEXTS: readonly string[] = [
   REPLAN_LABEL,
-  KEEP_THE_PLAN,
   REPLAN_STARTS_AT_NEXT_BLOCK,
   PLAN_KEPT,
   REPLAN_UNAVAILABLE,
-  REPLAN_SWITCH_LABEL,
-  REPLAN_SWITCH_HELP,
+  REPLAN_DISCARDED,
 ];

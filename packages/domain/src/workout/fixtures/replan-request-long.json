@@ -1,0 +1,710 @@
+{
+  "input": {
+    "revision": 0,
+    "summarySeq": 12,
+    "currentBlock": 63,
+    "goals": {
+      "sessionType": "endurance",
+      "durationMinutes": 60,
+      "holdRange": {
+        "low": 130,
+        "high": 142
+      },
+      "heartRateAbove": 150,
+      "powerCeiling": 0.8,
+      "effortCheckIns": true
+    },
+    "blocks": [
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      },
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      }
+    ],
+    "summaries": [
+      {
+        "block": 34,
+        "seconds": 334,
+        "meanHeartRate": 154,
+        "highestHeartRate": 164,
+        "secondsInRange": 234,
+        "meanPowerShare": 0.534,
+        "meanCadence": 94,
+        "rescues": 1
+      },
+      {
+        "block": 35,
+        "seconds": 335,
+        "meanHeartRate": 155,
+        "highestHeartRate": 165,
+        "meanPowerShare": 0.535,
+        "meanCadence": 95,
+        "rescues": 2
+      },
+      {
+        "block": 36,
+        "seconds": 336,
+        "meanHeartRate": 156,
+        "highestHeartRate": 166,
+        "meanPowerShare": 0.536,
+        "meanCadence": 96,
+        "rescues": 0
+      },
+      {
+        "block": 37,
+        "seconds": 337,
+        "meanHeartRate": 157,
+        "highestHeartRate": 167,
+        "meanPowerShare": 0.537,
+        "meanCadence": 97,
+        "rescues": 1
+      },
+      {
+        "block": 38,
+        "seconds": 338,
+        "meanHeartRate": 158,
+        "highestHeartRate": 168,
+        "meanPowerShare": 0.538,
+        "meanCadence": 98,
+        "rescues": 2
+      },
+      {
+        "block": 39,
+        "seconds": 339,
+        "meanHeartRate": 159,
+        "highestHeartRate": 169,
+        "secondsInRange": 239,
+        "meanPowerShare": 0.539,
+        "meanCadence": 99,
+        "rescues": 0
+      },
+      {
+        "block": 40,
+        "seconds": 340,
+        "meanHeartRate": 120,
+        "highestHeartRate": 130,
+        "meanPowerShare": 0.54,
+        "meanCadence": 80,
+        "rescues": 1
+      },
+      {
+        "block": 41,
+        "seconds": 341,
+        "meanHeartRate": 121,
+        "highestHeartRate": 131,
+        "meanPowerShare": 0.541,
+        "meanCadence": 81,
+        "rescues": 2
+      },
+      {
+        "block": 42,
+        "seconds": 342,
+        "meanHeartRate": 122,
+        "highestHeartRate": 132,
+        "meanPowerShare": 0.542,
+        "meanCadence": 82,
+        "rescues": 0
+      },
+      {
+        "block": 43,
+        "seconds": 343,
+        "meanHeartRate": 123,
+        "highestHeartRate": 133,
+        "meanPowerShare": 0.543,
+        "meanCadence": 83,
+        "rescues": 1
+      },
+      {
+        "block": 44,
+        "seconds": 344,
+        "meanHeartRate": 124,
+        "highestHeartRate": 134,
+        "secondsInRange": 244,
+        "meanPowerShare": 0.544,
+        "meanCadence": 84,
+        "rescues": 2
+      },
+      {
+        "block": 45,
+        "seconds": 345,
+        "meanHeartRate": 125,
+        "highestHeartRate": 135,
+        "meanPowerShare": 0.545,
+        "meanCadence": 85,
+        "rescues": 0
+      },
+      {
+        "block": 46,
+        "seconds": 346,
+        "meanHeartRate": 126,
+        "highestHeartRate": 136,
+        "meanPowerShare": 0.546,
+        "meanCadence": 86,
+        "rescues": 1
+      },
+      {
+        "block": 47,
+        "seconds": 347,
+        "meanHeartRate": 127,
+        "highestHeartRate": 137,
+        "meanPowerShare": 0.547,
+        "meanCadence": 87,
+        "rescues": 2
+      },
+      {
+        "block": 48,
+        "seconds": 348,
+        "meanHeartRate": 128,
+        "highestHeartRate": 138,
+        "meanPowerShare": 0.548,
+        "meanCadence": 88,
+        "rescues": 0
+      },
+      {
+        "block": 49,
+        "seconds": 349,
+        "meanHeartRate": 129,
+        "highestHeartRate": 139,
+        "secondsInRange": 249,
+        "meanPowerShare": 0.549,
+        "meanCadence": 89,
+        "rescues": 1
+      },
+      {
+        "block": 50,
+        "seconds": 350,
+        "meanHeartRate": 130,
+        "highestHeartRate": 140,
+        "meanPowerShare": 0.5,
+        "meanCadence": 90,
+        "rescues": 2
+      },
+      {
+        "block": 51,
+        "seconds": 351,
+        "meanHeartRate": 131,
+        "highestHeartRate": 141,
+        "meanPowerShare": 0.501,
+        "meanCadence": 91,
+        "rescues": 0
+      },
+      {
+        "block": 52,
+        "seconds": 352,
+        "meanHeartRate": 132,
+        "highestHeartRate": 142,
+        "meanPowerShare": 0.502,
+        "meanCadence": 92,
+        "rescues": 1
+      },
+      {
+        "block": 53,
+        "seconds": 353,
+        "meanHeartRate": 133,
+        "highestHeartRate": 143,
+        "meanPowerShare": 0.503,
+        "meanCadence": 93,
+        "rescues": 2
+      },
+      {
+        "block": 54,
+        "seconds": 354,
+        "meanHeartRate": 134,
+        "highestHeartRate": 144,
+        "secondsInRange": 254,
+        "meanPowerShare": 0.504,
+        "meanCadence": 94,
+        "rescues": 0
+      },
+      {
+        "block": 55,
+        "seconds": 355,
+        "meanHeartRate": 135,
+        "highestHeartRate": 145,
+        "meanPowerShare": 0.505,
+        "meanCadence": 95,
+        "rescues": 1
+      },
+      {
+        "block": 56,
+        "seconds": 356,
+        "meanHeartRate": 136,
+        "highestHeartRate": 146,
+        "meanPowerShare": 0.506,
+        "meanCadence": 96,
+        "rescues": 2
+      },
+      {
+        "block": 57,
+        "seconds": 357,
+        "meanHeartRate": 137,
+        "highestHeartRate": 147,
+        "meanPowerShare": 0.507,
+        "meanCadence": 97,
+        "rescues": 0
+      },
+      {
+        "block": 58,
+        "seconds": 358,
+        "meanHeartRate": 138,
+        "highestHeartRate": 148,
+        "meanPowerShare": 0.508,
+        "meanCadence": 98,
+        "rescues": 1
+      },
+      {
+        "block": 59,
+        "seconds": 359,
+        "meanHeartRate": 139,
+        "highestHeartRate": 149,
+        "secondsInRange": 259,
+        "meanPowerShare": 0.509,
+        "meanCadence": 99,
+        "rescues": 2
+      },
+      {
+        "block": 60,
+        "seconds": 360,
+        "meanHeartRate": 140,
+        "highestHeartRate": 150,
+        "meanPowerShare": 0.51,
+        "meanCadence": 80,
+        "rescues": 0
+      },
+      {
+        "block": 61,
+        "seconds": 361,
+        "meanHeartRate": 141,
+        "highestHeartRate": 151,
+        "meanPowerShare": 0.511,
+        "meanCadence": 81,
+        "rescues": 1
+      },
+      {
+        "block": 62,
+        "seconds": 362,
+        "meanHeartRate": 142,
+        "highestHeartRate": 152,
+        "meanPowerShare": 0.512,
+        "meanCadence": 82,
+        "rescues": 2
+      }
+    ]
+  },
+  "templateVersion": "re-plan-1",
+  "source": "instance-local"
+}

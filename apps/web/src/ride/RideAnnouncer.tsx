@@ -107,7 +107,7 @@ import {
   type HoldAnnounced,
 } from '../workout/hold-text';
 
-import { planChangeAnnouncement } from '../workout/replan-text';
+import { planChangeAnnouncement, planDiscardedAnnouncement } from '../workout/replan-text';
 
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -344,6 +344,8 @@ export function RideAnnouncer({
    * announced again (#394's rule).
    */
   const planOffered = useRef<number | undefined>(workout?.replan?.waiting?.revision);
+  /** The discarded re-plan last said to have been discarded — #1244. Seeded the same way. */
+  const planDiscardedSaid = useRef<number | undefined>(workout?.replan?.discarded);
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -409,6 +411,7 @@ export function RideAnnouncer({
   const status = workout?.status;
   const holdText = workout?.hold === undefined ? undefined : holdSentence(workout.hold);
   const waitingPlan = workout?.replan?.waiting;
+  const discardedPlan = workout?.replan?.discarded;
   const {
     lost,
     releaseFault,
@@ -511,6 +514,13 @@ export function RideAnnouncer({
     if (plan.event !== undefined) {
       events.push(plan.event);
     }
+    // #1244: a waiting move a pause or a lost trainer discarded: one
+    // sentence, once, announcements ON only as the move's own was.
+    const dropped = planDiscardedAnnouncement(planDiscardedSaid.current, discardedPlan);
+    planDiscardedSaid.current = dropped.said;
+    if (dropped.event !== undefined) {
+      events.push(dropped.event);
+    }
     if (
       preference.enabled &&
       lead !== 'never' &&
@@ -544,6 +554,7 @@ export function RideAnnouncer({
     status,
     holdText,
     waitingPlan,
+    discardedPlan,
   ]);
 
   return (

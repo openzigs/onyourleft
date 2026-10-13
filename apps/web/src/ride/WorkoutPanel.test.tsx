@@ -29,11 +29,11 @@ import { workoutStub } from '../workouts/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import {
-  PLAN_KEPT,
-  REPLAN_SWITCH_HELP,
   REPLAN_SWITCH_LABEL,
-  REPLAN_UNAVAILABLE,
-} from '../workout/replan-text';
+  replanDisclosure,
+  replanDisclosureSentences,
+} from '../workout/replan-disclosure';
+import { PLAN_KEPT, REPLAN_DISCARDED, REPLAN_UNAVAILABLE } from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { WorkoutPanel } from './WorkoutPanel';
@@ -438,16 +438,59 @@ describe('re-plans during the ride — #1244', () => {
       expect(view.container.textContent).not.toContain('instance');
     });
 
-    it('is shown, off, with what it sends written under it and not behind a disclosure', async () => {
+    /** The disclosure's sentences as the panel shows them, in order. */
+    const shownDisclosure = (root: ParentNode): readonly string[] =>
+      queryAll(root, '[data-oyl-replan-disclosure] p').map((each) => each.textContent ?? '');
+
+    it('is shown, off, named as the owner named it, with #1245’s whole disclosure under it', async () => {
       const view = await render({ replansAvailable: true });
       const input = theSwitch(view.container);
       expect(input?.checked).toBe(false);
-      expect(input?.closest('label')?.textContent).toBe(REPLAN_SWITCH_LABEL);
-      const help = view.container.querySelector(
+      expect(input?.closest('label')?.textContent).toBe('Re-plan during the ride');
+      expect(REPLAN_SWITCH_LABEL).toBe('Re-plan during the ride');
+      // Every sentence of `replanDisclosure()`, in its order, BEFORE the
+      // switch is on — the same strings the privacy policy is held to.
+      const disclosure = replanDisclosure();
+      expect(shownDisclosure(view.container)).toEqual(replanDisclosureSentences(disclosure));
+      expect(shownDisclosure(view.container)).toHaveLength(9);
+    });
+
+    it('describes the switch by the headline, and hides none of it behind a disclosure widget', async () => {
+      const view = await render({ replansAvailable: true });
+      const input = theSwitch(view.container);
+      const described = view.container.querySelector(
         `#${input?.getAttribute('aria-describedby') ?? ''}`,
       );
-      expect(help?.textContent).toBe(REPLAN_SWITCH_HELP);
-      expect(help?.closest('details')).toBeNull();
+      expect(described?.textContent).toBe(replanDisclosure().headline);
+      const block = view.container.querySelector('[data-oyl-replan-disclosure]');
+      expect(block?.closest('details')).toBeNull();
+      // There BEFORE the switch is on: not hidden, and nothing in it hidden.
+      expect(theSwitch(view.container)?.checked).toBe(false);
+      expect(block?.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+      expect(block?.querySelector('details, [hidden], [aria-hidden="true"]')).toBeNull();
+      // After the switch, so a rider reads on from the control.
+      expect(
+        (input as HTMLElement).compareDocumentPosition(block as Element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('stops saying "This is off" once it is on, and keeps every other sentence', async () => {
+      const view = await render({ replansAvailable: true });
+      const disclosure = replanDisclosure();
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(theSwitch(view.container)?.checked).toBe(true);
+      expect(shownDisclosure(view.container)).toEqual(
+        replanDisclosureSentences(disclosure).filter((each) => each !== disclosure.offUntilOn),
+      );
+      expect(view.container.textContent).not.toContain('This is off');
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(view.container.textContent).toContain(disclosure.offUntilOn);
+    });
+
+    it('shows none of the disclosure where there is no switch', async () => {
+      const view = await render();
+      expect(shownDisclosure(view.container)).toEqual([]);
     });
 
     it('comes after the workouts, so it does not push the Ride control down — #422', async () => {
@@ -566,6 +609,33 @@ describe('re-plans during the ride — #1244', () => {
           (each.textContent ?? '').includes(SENTENCE) && !each.hasAttribute('data-oyl-announcer'),
       );
       expect(live).toEqual([]);
+    });
+  });
+
+  describe('a waiting move a pause or a lost trainer discarded', () => {
+    it('says so in one sentence, with no control and no waiting sentence', async () => {
+      const view = await render({
+        workout: waiting({ waiting: undefined, discarded: 1 }),
+        onKeepPlan: () => undefined,
+      });
+      expect(view.container.textContent).toContain(`Plan change: ${REPLAN_DISCARDED}`);
+      expect(view.container.textContent).not.toContain(SENTENCE);
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+    });
+
+    it('is not a second live region: the announcer says it', async () => {
+      const view = await render({ workout: waiting({ waiting: undefined, discarded: 1 }) });
+      const live = queryAll(view.container, '[role="status"], [aria-live]').filter(
+        (each) =>
+          (each.textContent ?? '').includes(REPLAN_DISCARDED) &&
+          !each.hasAttribute('data-oyl-announcer'),
+      );
+      expect(live).toEqual([]);
+    });
+
+    it('says nothing of it when no move was discarded', async () => {
+      const view = await render({ workout: waiting() });
+      expect(view.container.textContent).not.toContain(REPLAN_DISCARDED);
     });
   });
 

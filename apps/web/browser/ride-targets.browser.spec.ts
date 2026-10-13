@@ -143,6 +143,18 @@ const SCENES: readonly Scene[] = [
     query: '?room=race',
     surfaces: ['game-hud'],
   },
+  // #1244: a workout in the game with an accepted re-plan waiting, which is
+  // the only state that puts *Keep the plan* on the HUD. ⚠️ Without
+  // `trainer=workout`: that adds *Trainer notice* to the row *Pause* is in,
+  // a 72 px control that is not on the list and so keeps its floor when the
+  // listed ones are stripped, holding the whole row at 72. `ride.browser.spec.ts`
+  // §"#1244" measures the state WITH it, which is the one a rider is in.
+  {
+    name: 'the game, a re-plan waiting',
+    page: 'ride',
+    query: '?graph=replan',
+    surfaces: ['game-hud'],
+  },
   // #940: the pre-ride chooser, whose *Ride* starts the ride. `ride.html`
   // stops at the chooser with `?picker=chooser`, and `&notices=all` stands the
   // tallest stack of notices above *Ride*, so it is measured both ways.

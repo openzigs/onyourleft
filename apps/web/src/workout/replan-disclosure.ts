@@ -34,6 +34,12 @@
  * - **The record of each decision (P9) stays on the device**, with the ride
  *   and in the export. It is not synced
  *   ([#1315](https://github.com/openzigs/onyourleft/issues/1315)).
+ * - **A long workout's request holds only the most recent summaries that
+ *   fit** the instance's 8 KB input budget, and the text says so.
+ *
+ * Since #1244 merged this file in, each of those is held to #1244's own code
+ * by a test, not only pinned as a sentence: `replan-disclosure.test.ts`
+ * §"what the text says of this device, held to its code".
  *
  * ## The rulings the wording is bound by (#1233, 2026-10-09)
  *
@@ -85,13 +91,21 @@ export interface ReplanDisclosure {
   readonly offUntilOn: string;
 }
 
-/** When a request leaves, and what one block's summary carries: `BLOCK_SUMMARY_KEYS`, less `effort`. */
+/**
+ * When a request leaves, and what one block's summary carries: `BLOCK_SUMMARY_KEYS`, less `effort`.
+ *
+ * Its last sentence is #1244's: a request is held to the instance's 8 KB
+ * input budget by leaving out the oldest summaries (`replan-job.ts`
+ * §`replanInputWithin`), so "each block you have ridden so far" is not the
+ * whole truth of a long workout, and the text says so.
+ */
 const WHAT_IS_SENT =
   'While it is on, as each block of the workout begins, and never more often than every 3 ' +
   'minutes, this device sends your instance a summary of each block you have ridden so far: ' +
   'how long the block lasted, your mean and highest heart rate, how long your heart rate was ' +
   'inside the range you chose, your mean power as a share of your threshold power, your mean ' +
-  'cadence, and how many times the target had to be eased.';
+  'cadence, and how many times the target had to be eased. In a long workout with more blocks ' +
+  'than fit in one request, only the most recent are sent.';
 
 /** The plan's blocks, key by key (`replan-input.ts` §`BLOCK_FIGURES` and a hold's `range`). */
 const THE_BLOCKS =

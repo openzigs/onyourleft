@@ -153,6 +153,8 @@ export interface PersistedRideFacts {
   ghostRaced?: boolean;
   /** @see RideFacts.replans — plain JSON, read back by `readReplanRecord`. */
   replans?: unknown[];
+  /** @see RideFacts.replansDropped */
+  replansDropped?: number;
 }
 
 /**
@@ -569,24 +571,49 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   }
   if (facts.workoutFinished !== undefined) row.workoutFinished = facts.workoutFinished;
   if (facts.ghostRaced !== undefined) row.ghostRaced = facts.ghostRaced;
-  if (facts.replans !== undefined) {
-    // Through the reader on the way IN as well: what is written is a copy
-    // holding only the keys a record has, and a record that is not one is
-    // refused here rather than found on the way out.
-    row.replans = facts.replans.map((each, index) => replanRecordOf(each, index));
-  }
+  // Through the reader on the way IN as well: what is written is a copy
+  // holding only the keys a record has.
+  //
+  // ⚠️ **A record that does not read is DROPPED and COUNTED; it never stops
+  // the ride being saved** (#1244's review). This is an audit trail beside a
+  // ride, and the ride is worth more than its audit trail: refusing the write
+  // would lose an hour's recording to one entry nothing can show anyway.
+  const kept = replanRecordsOf(facts.replans, facts.replansDropped);
+  if (kept.replans !== undefined) row.replans = [...kept.replans];
+  if (kept.replansDropped !== undefined) row.replansDropped = kept.replansDropped;
   return row;
 }
 
-/** @throws {StoreDecodeError} naming the entry, never its contents. */
-function replanRecordOf(value: unknown, index: number): ReplanRecord {
-  const record = readReplanRecord(value);
-  if (record === undefined) {
-    throw new StoreDecodeError(
-      `activity.rideFacts.replans[${String(index)}]: expected a re-plan record`,
-    );
+/**
+ * A ride's re-plan records as they are kept: each one that reads, in order,
+ * and a count of those that did not. Used on the way in and on the way out,
+ * so a record no build can read is skipped at both and stops neither.
+ * Whatever is not a list holds no record, and is counted as one.
+ *
+ * It names nothing of an unreadable record: not its text, not its place.
+ */
+function replanRecordsOf(
+  replans: unknown,
+  droppedBefore: unknown,
+): { readonly replans?: readonly ReplanRecord[]; readonly replansDropped?: number } {
+  const before =
+    typeof droppedBefore === 'number' && Number.isSafeInteger(droppedBefore) && droppedBefore > 0
+      ? droppedBefore
+      : 0;
+  if (replans === undefined) {
+    return before === 0 ? {} : { replansDropped: before };
   }
-  return record;
+  const listed: readonly unknown[] = Array.isArray(replans) ? replans : [replans];
+  const read = listed.flatMap((each) => {
+    const record = readReplanRecord(each);
+    return record === undefined ? [] : [record];
+  });
+  const dropped = before + (listed.length - read.length);
+  return {
+    // The key stays for a ride that had records, even when none could be read.
+    replans: read,
+    ...(dropped === 0 ? {} : { replansDropped: dropped }),
+  };
 }
 
 /** @throws {StoreDecodeError} */
@@ -599,10 +626,9 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   if (best !== undefined && !Array.isArray(best)) {
     throw new StoreDecodeError('activity.rideFacts.bestPower: expected a list');
   }
-  const replans: unknown = facts.replans;
-  if (replans !== undefined && !Array.isArray(replans)) {
-    throw new StoreDecodeError('activity.rideFacts.replans: expected a list');
-  }
+  // ⚠️ Never a throw: an unreadable re-plan record must not make the ride
+  // unreadable. @see replanRecordsOf
+  const replans = replanRecordsOf(facts.replans, facts.replansDropped);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -646,9 +672,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(facts.ghostRaced === undefined
       ? {}
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
-    ...(replans === undefined
-      ? {}
-      : { replans: replans.map((each: unknown, index) => replanRecordOf(each, index)) }),
+    ...replans,
   };
 }
 

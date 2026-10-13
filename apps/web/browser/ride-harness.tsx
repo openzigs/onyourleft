@@ -99,6 +99,7 @@ import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
+import { replanSentence } from '../src/workout/replan-text';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
@@ -542,29 +543,47 @@ const RACE_PORTS =
  *   window, so the lane is power against the confirmed target. `paused` is
  *   that workout paused: the trainer holds its 50 W minimum, and the newest
  *   sample (175 W) is from before the ease.
+ * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
+ *   its next block — the ramp shortened by two minutes — so the strip draws
+ *   what the move replaced as a dotted outline and the HUD's actions show
+ *   *Keep the plan*, which no other state of this page does.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
 const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
 /** `paused`: the plain workout paused — the trainer eased to its 50 W minimum. */
 const GRAPH_PAUSED = GRAPH_KIND === 'paused';
+/** `replan`: an accepted re-plan waiting for the next block — #1244. */
+const GRAPH_REPLAN = GRAPH_KIND === 'replan';
+const graphPlan = (rampSeconds: number) =>
+  expandWorkout({
+    name: 'Hold',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+      { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
+      {
+        kind: 'ramp',
+        seconds: seconds(rampSeconds),
+        from: thresholdShare(0.7),
+        to: thresholdShare(0.4),
+      },
+    ],
+  });
+/** The sentence the HUD's region is offered while {@link GRAPH_REPLAN}'s move waits. */
+const REPLAN_WAITING = {
+  revision: 1,
+  sentence: replanSentence({ kind: 'shorten-block', block: 2, minutes: 2 }, 'goal-duration', 2),
+};
 const GRAPH: WorkoutGraphInput | undefined =
-  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLAN
     ? {
         ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
         elapsedSeconds: 900,
-        timeline: expandWorkout({
-          name: 'Hold',
-          blocks: [
-            { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
-            { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
-            {
-              kind: 'ramp',
-              seconds: seconds(600),
-              from: thresholdShare(0.7),
-              to: thresholdShare(0.4),
-            },
-          ],
-        }),
+        // As the controller hands it over while a move waits: the REVISED
+        // plan, and what it replaced from the next block on.
+        timeline: graphPlan(GRAPH_REPLAN ? 480 : 600),
+        ...(GRAPH_REPLAN
+          ? { replaced: graphPlan(600).segments.filter((segment) => segment.block >= 2) }
+          : {}),
         // In a hold the trainer holds what the hold last asked: 167 W.
         holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
         hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
@@ -597,6 +616,9 @@ const GRAPH: WorkoutGraphInput | undefined =
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   runningWorkout: () => GRAPH,
+  // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
+  workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
+  keepThePlan: () => undefined,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,

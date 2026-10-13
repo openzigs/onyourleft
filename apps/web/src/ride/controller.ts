@@ -356,10 +356,15 @@ export interface RideWorkoutSnapshot {
    */
   readonly trace?: readonly WorkoutTraceSample[] | undefined;
   /**
-   * What the last accepted re-plan replaced, from its boundary on, for the
-   * graph to draw beside the plan that stands — #1307's seam, filled by #1244
+   * What a re-plan replaced, from its boundary on, for the graph to draw
+   * beside the plan that stands — #1307's seam, filled by #1244
    * (`workout/replan-session.ts` §`ReplanState.replaced`). `undefined` until a
-   * move is accepted, and again when the rider keeps the plan.
+   * move is accepted. While a move waits it is what THAT move replaces. When
+   * the rider keeps the plan, or a pause or a lost trainer discards the move,
+   * its outline goes with it — at the same moment as {@link timeline} goes
+   * back — and what is left is the outline of the last move that reached the
+   * plan, if one did: that plan did change, and stays drawn as changed for
+   * the rest of the workout.
    */
   readonly replaced?: readonly WorkoutSegment[] | undefined;
   /**
@@ -406,6 +411,13 @@ export interface RideReplanSnapshot {
   readonly kept: boolean;
   /** One short line after a request that failed (`replan-text.ts` §`REPLAN_UNAVAILABLE`). */
   readonly notice: string | undefined;
+  /**
+   * The revision of a waiting move that a pause or a lost trainer discarded
+   * in this block (ADR 0048 D-8): the screen says `REPLAN_DISCARDED` and the
+   * announcers say it once. Set in the same snapshot in which
+   * {@link RideWorkoutSnapshot.timeline} goes back to the plan being ridden.
+   */
+  readonly discarded?: number | undefined;
 }
 
 /** What a rider chose for one workout as they started it. */
@@ -2632,7 +2644,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       replan:
         replan === undefined
           ? undefined
-          : { waiting: replan.waiting, kept: replan.kept, notice: replan.notice },
+          : {
+              waiting: replan.waiting,
+              kept: replan.kept,
+              notice: replan.notice,
+              discarded: replan.discarded,
+            },
     };
   };
 
@@ -3322,7 +3339,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         options.replan !== undefined &&
         heartRateHold !== undefined
       ) {
-        void beginReplans(
+        // ⚠️ Caught: anything `beginReplans` throws after its two reads — a
+        // plan the session cannot load, a port that throws where it should
+        // answer — is "no re-plans for this ride", never an unhandled
+        // rejection. The workout started above and does not depend on it.
+        beginReplans(
           started,
           options.replan,
           {
@@ -3331,7 +3352,9 @@ export function createRideController(options: RideControllerOptions): RideContro
             assumed: heartRateHold.assumed,
           },
           connection.powerRange,
-        );
+        ).catch(() => {
+          started.replan = undefined;
+        });
       }
       // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
       // pairing and requesting control both advance the real clock without one

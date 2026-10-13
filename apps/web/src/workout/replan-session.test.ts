@@ -27,7 +27,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { JobSession } from '../ride-analysis/instance-job';
 
+import { REPLAN_INPUT_BYTE_BUDGET } from './replan-job';
 import {
+  PERMANENT_REFUSALS,
   REPLAN_ASK_INTERVAL_SECONDS,
   REPLAN_MAXIMUM_BLOCKS,
   createReplanSession,
@@ -141,6 +143,8 @@ function rig(options: RigOptions = {}) {
       player.pause(seconds(now));
       session.tick(seconds(now));
     },
+    /** The ride's clock now, for acting on the player between two of the session's ticks. */
+    clock: () => seconds(now),
     resume: () => {
       player.resume(seconds(now));
     },
@@ -264,6 +268,55 @@ describe('what is sent, and when', () => {
     expect(summary?.rescues).toBe(1);
   });
 
+  it('counts the reading of the tick that crosses a boundary once, in the block that has begun', async () => {
+    const r = rig();
+    await r.ride(299);
+    // The reading the boundary's own tick carries, and no other tick does.
+    r.facts.heartRate = 180;
+    r.facts.power = 400;
+    r.facts.cadence = 120;
+    await r.ride(1);
+    r.facts.heartRate = 140;
+    r.facts.power = 150;
+    r.facts.cadence = 90;
+    const [first] = inputOf(r.scripted).summaries as Record<string, unknown>[];
+    // Not in the block that had just ended: its figures are its own 299 readings.
+    expect(first).toEqual({
+      block: 0,
+      seconds: 300,
+      meanHeartRate: 140,
+      highestHeartRate: 140,
+      meanPowerShare: 0.6,
+      meanCadence: 90,
+      rescues: 0,
+    });
+    r.scripted.answer(null);
+    await r.ride(600);
+    const second = (inputOf(r.scripted, 1).summaries as Record<string, unknown>[])[1];
+    // In the block that began with it, once: 1 reading of 180 among 600.
+    expect(second?.highestHeartRate).toBe(180);
+    expect(second?.seconds).toBe(600);
+    expect(second?.meanHeartRate).toBe(Math.round((180 + 599 * 140) / 600));
+    expect(second?.meanPowerShare).toBe(Math.round(((400 + 599 * 150) / 600 / 250) * 1000) / 1000);
+  });
+
+  it('gives the time up to the boundary to the block that ended, whatever its last reading', async () => {
+    const hold: WorkoutBlock = {
+      kind: 'heart-rate-hold',
+      seconds: seconds(300),
+      range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+      startShare: thresholdShare(0.5),
+      ceilingShare: thresholdShare(0.8),
+    };
+    const r = rig({
+      workout: { name: 'Hold', blocks: [hold, steady(600, 0.6), steady(300, 0.5)] },
+    });
+    await r.ride(300);
+    const [summary] = inputOf(r.scripted).summaries as Record<string, unknown>[];
+    // All 300 seconds in range, the last one among them.
+    expect(summary?.secondsInRange).toBe(300);
+  });
+
   it('asks no sooner than three minutes after the last request', async () => {
     const short: Workout = {
       name: 'Short blocks',
@@ -319,6 +372,59 @@ describe('what is sent, and when', () => {
     const over = rig({ workout: many(REPLAN_MAXIMUM_BLOCKS + 1) });
     await over.ride(300);
     expect(over.scripted.requests).toEqual([]);
+  });
+
+  describe('a long workout is bounded to the instance’s 8 KB, not refused', () => {
+    const bytesOf = (value: unknown): number =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    const efforts = (hard: number, easy: number): WorkoutBlock => ({
+      kind: 'intervals',
+      repeats: 1,
+      hardSeconds: seconds(60),
+      hardTarget: thresholdShare(hard),
+      easySeconds: seconds(60),
+      easyTarget: thresholdShare(easy),
+    });
+    /** 63 two-minute blocks and a cool-down: the longest plan the instance reads. */
+    const long = (hard: number, easy: number): Workout => ({
+      name: 'Long',
+      blocks: [...Array.from({ length: 63 }, () => efforts(hard, easy)), steady(300, 0.5)],
+    });
+
+    it('sends the most recent summaries that fit, and goes on asking', async () => {
+      const r = rig({ workout: long(0.95, 0.55) });
+      // Fifty blocks: 100 minutes.
+      await r.ride(50 * 120);
+      const starts = r.scripted.starts();
+      // One request every second block (240 s apart): asking never stopped.
+      expect(starts).toHaveLength(25);
+      expect(r.session.state().notice).toBeUndefined();
+      for (const start of starts) {
+        expect(bytesOf(start.input)).toBeLessThanOrEqual(REPLAN_INPUT_BYTE_BUDGET);
+      }
+      const last = inputOf(r.scripted, starts.length - 1);
+      const sent = (last.summaries as { block: number }[]).map((each) => each.block);
+      // The last request left as block 49 began, with blocks 0 to 48 ridden:
+      // fewer than those 49 are in it, the newest last, none missing between.
+      expect(last.currentBlock).toBe(49);
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent.length).toBeLessThan(49);
+      expect(sent.at(-1)).toBe(48);
+      expect(sent).toEqual(Array.from({ length: sent.length }, (_, at) => 49 - sent.length + at));
+      // The plan is still sent whole.
+      expect(last.blocks).toHaveLength(64);
+      // And an early request, with room for all of it, left none out.
+      expect((inputOf(r.scripted, 2).summaries as unknown[]).length).toBe(5);
+    });
+
+    it('asks nothing, and says nothing, when the plan leaves no room for one summary', async () => {
+      // The same plan with figures written out long: the blocks alone pass 8 KB.
+      const r = rig({ workout: long(0.9512345678901234, 0.5512345678901234) });
+      expect(bytesOf(r.player.plan().riding.workout.blocks)).toBeGreaterThan(8_000);
+      await r.ride(10 * 120);
+      expect(r.scripted.requests).toEqual([]);
+      expect(r.session.state().notice).toBeUndefined();
+    });
   });
 
   it('does not ask without trainer control, or without a heart-rate strap', async () => {
@@ -427,6 +533,47 @@ describe('Keep the plan', () => {
     expect(r.session.keepThePlan()).toBe(false);
     expect(r.session.state().kept).toBe(false);
     expect(r.session.records()).toEqual([]);
+  });
+
+  it('keeps nothing, and does not say the plan stayed, once the move’s block has begun', async () => {
+    const r = rig();
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT));
+    await r.ride(599);
+    // The player crosses the boundary; the session has not been ticked yet.
+    r.wait(1);
+    r.player.tick(r.clock());
+    expect(r.player.plan().waiting).toBeUndefined();
+    // A screen is already shown no waiting move and no control, and the
+    // outline of what the move replaced stays: it is the plan now.
+    expect(r.session.state().waiting).toBeUndefined();
+    expect(r.session.state().discarded).toBeUndefined();
+    expect(r.session.state().replaced?.map((each) => each.block)).toEqual([2, 3, 4]);
+    expect(r.session.keepThePlan()).toBe(false);
+    expect(r.session.state().kept).toBe(false);
+    expect(r.session.records().filter((each) => each.decision === 'not-applied')).toEqual([]);
+    // The move is the plan.
+    expect(r.player.plan().riding.totalSeconds).toBe(2280);
+  });
+
+  it('takes the kept move’s outline away, and leaves an earlier applied move’s where it was', async () => {
+    const r = rig();
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT));
+    await r.ride(600);
+    // The first move reached the plan: its outline stands.
+    const first = r.session.state().replaced;
+    expect(first?.map((each) => each.block)).toEqual([2, 3, 4]);
+    // A second move, for the block after next, waits; its own outline is shown.
+    r.scripted.answer(
+      proposal({ kind: 'shorten-block', block: 3, minutes: 1 }, { revision: 1, summarySeq: 2 }),
+    );
+    await r.flush();
+    expect(r.session.state().waiting?.revision).toBe(2);
+    expect(r.session.state().replaced?.map((each) => each.block)).toEqual([3, 4]);
+    // Kept: the second outline goes, and the first is back.
+    expect(r.session.keepThePlan()).toBe(true);
+    expect(r.session.state().replaced).toBe(first);
   });
 });
 
@@ -587,6 +734,74 @@ describe('a pause and a stall rescue', () => {
     expect(inputOf(r.scripted, 1).revision).toBe(2);
   });
 
+  describe('a waiting move a pause or a lost trainer discards — D-8', () => {
+    const waitingMove = async () => {
+      const r = rig();
+      await r.ride(300);
+      r.scripted.answer(proposal(SHORTEN_NEXT));
+      await r.flush();
+      expect(r.session.state().waiting?.revision).toBe(1);
+      expect(r.session.state().replaced).toBeDefined();
+      return r;
+    };
+
+    it.each([
+      ['a pause', (r: Awaited<ReturnType<typeof waitingMove>>) => r.player.pause(r.clock())],
+      [
+        'a lost trainer',
+        (r: Awaited<ReturnType<typeof waitingMove>>) => r.player.linkLost(r.clock()),
+      ],
+    ])(
+      'says so at the moment of %s, before any tick: no sentence, no control, no outline',
+      async (_, act) => {
+        const r = await waitingMove();
+        act(r);
+        // No tick of the session has run: this is the snapshot a screen draws
+        // in the same instant the player's plan went back.
+        expect(r.player.plan().waiting).toBeUndefined();
+        expect(r.session.state()).toEqual({
+          waiting: undefined,
+          discarded: 1,
+          kept: false,
+          notice: undefined,
+          replaced: undefined,
+        });
+        // Nothing is left to keep the plan from.
+        expect(r.session.keepThePlan()).toBe(false);
+      },
+    );
+
+    it('says it once: the same revision on every later tick of that block, and not after it', async () => {
+      const r = await waitingMove();
+      r.pause();
+      expect(r.session.state().discarded).toBe(1);
+      expect(r.session.records().filter((each) => each.decision === 'not-applied')).toHaveLength(1);
+      r.resume();
+      await r.ride(100);
+      // Still the one discarded move, by its number: an announcer says a number once.
+      expect(r.session.state().discarded).toBe(1);
+      expect(r.session.state().kept).toBe(false);
+      await r.ride(500);
+      // The block it was discarded in has ended.
+      expect(r.session.state().discarded).toBeUndefined();
+      expect(r.session.records().filter((each) => each.decision === 'not-applied')).toHaveLength(1);
+    });
+
+    it('is not said of a move the rider kept the plan from', async () => {
+      const r = await waitingMove();
+      r.session.keepThePlan();
+      expect(r.session.state().discarded).toBeUndefined();
+      expect(r.session.state().kept).toBe(true);
+    });
+
+    it('is not said of a move that reached the plan', async () => {
+      const r = await waitingMove();
+      await r.ride(600);
+      expect(r.session.state()).toMatchObject({ waiting: undefined, discarded: undefined });
+      expect(r.session.state().replaced).toBeDefined();
+    });
+  });
+
   it('cancels a job in flight when the stall rescue takes the target', async () => {
     const r = rig();
     await r.ride(300);
@@ -687,13 +902,90 @@ describe('every failure is the plan already on the device', () => {
     },
   );
 
-  it('asks again at the next boundary after job_running: a write-up was in the way', async () => {
-    const r = rig();
-    r.scripted.startAnswer = { status: 409, body: { error: { code: 'job_running' } } };
+  it('ends the asking for exactly the refusals the instance’s start names as permanent', () => {
+    expect([...PERMANENT_REFUSALS].sort()).toEqual([
+      'analysis_off',
+      'rate_limited',
+      'unauthenticated',
+      'validation_failed',
+    ]);
+  });
+
+  it.each([
+    [
+      'job_running: a write-up was in the way',
+      { status: 409, body: { error: { code: 'job_running' } } },
+    ],
+    ['unavailable', { status: 503, body: { error: { code: 'unavailable' } } }],
+    ['a 502 the tunnel relayed, with no body', { status: 502, body: null }],
+    ['a 500 with a page of HTML', { status: 500, body: '<html>Bad gateway</html>' }],
+    ['a code nobody foresaw', { status: 418, body: { error: { code: 'teapot' } } }],
+    ['a code that is not one', { status: 400, body: { error: { code: 'RATE LIMITED!' } } }],
+  ])(
+    'asks again at the next block boundary, and never sooner, after %s',
+    async (_, startAnswer) => {
+      const r = rig();
+      r.scripted.startAnswer = startAnswer;
+      await r.ride(300);
+      expect(r.scripted.starts()).toHaveLength(1);
+      expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+      r.scripted.startAnswer = undefined;
+      // The whole of the block it failed in: nothing is sent again.
+      await r.ride(599);
+      expect(r.scripted.starts()).toHaveLength(1);
+      // The next block begins.
+      await r.ride(1);
+      expect(r.scripted.starts()).toHaveLength(2);
+    },
+  );
+
+  it('asks again at the next block boundary after a session that threw as it was opened', async () => {
+    let throws = true;
+    const scriptedSession = { current: undefined as JobSession | undefined };
+    const r = rig({
+      session: () =>
+        throws
+          ? Promise.reject(new Error('no keys'))
+          : Promise.resolve(scriptedSession.current as JobSession),
+    });
+    scriptedSession.current = r.scripted.session;
     await r.ride(300);
-    r.scripted.startAnswer = undefined;
-    await r.ride(600);
-    expect(r.scripted.starts()).toHaveLength(2);
+    expect(r.scripted.requests).toEqual([]);
+    expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+    throws = false;
+    await r.ride(599);
+    expect(r.scripted.requests).toEqual([]);
+    await r.ride(1);
+    expect(r.scripted.starts()).toHaveLength(1);
+  });
+
+  it('is never a storm: an instance that fails every time is asked at most 20 times in an hour', async () => {
+    // 62 one-minute blocks and a cool-down: a boundary every 60 seconds.
+    const r = rig({
+      workout: {
+        name: 'Minutes',
+        blocks: [...Array.from({ length: 62 }, () => steady(60, 0.6)), steady(300, 0.5)],
+      },
+    });
+    r.scripted.startAnswer = { status: 502, body: null };
+    const sentAt: number[] = [];
+    for (let second = 1; second <= 3600; second += 1) {
+      const before = r.scripted.starts().length;
+      await r.ride(1);
+      if (r.scripted.starts().length > before) sentAt.push(second);
+    }
+    expect(sentAt.length).toBeGreaterThan(10);
+    expect(sentAt.length).toBeLessThanOrEqual(20);
+    // Under the instance's own 24 an hour, which a refused start still spends.
+    expect(sentAt.length).toBeLessThan(24);
+    for (let index = 1; index < sentAt.length; index += 1) {
+      expect((sentAt[index] ?? 0) - (sentAt[index - 1] ?? 0)).toBeGreaterThanOrEqual(
+        REPLAN_ASK_INTERVAL_SECONDS,
+      );
+    }
+    // Each at a block boundary, and no two for one boundary.
+    expect(sentAt.every((second) => second % 60 === 0)).toBe(true);
+    expect(new Set(sentAt).size).toBe(sentAt.length);
   });
 
   it('sends nothing when there is no sealed session, and asks nothing more', async () => {
@@ -708,6 +1000,18 @@ describe('every failure is the plan already on the device', () => {
     await r.ride(310);
     expect(r.scripted.requests).toEqual([]);
     expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+  });
+
+  it('asks nothing more once this device holds no sign-in the instance would take', async () => {
+    let asked = 0;
+    const r = rig({
+      session: () => {
+        asked += 1;
+        return Promise.resolve({ kind: 'closed', text: 'Signed out.' });
+      },
+    });
+    await r.ride(1500);
+    expect(asked).toBe(1);
   });
 });
 

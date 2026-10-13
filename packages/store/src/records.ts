@@ -436,8 +436,19 @@ export interface RideFacts {
    * Each is one of `@onyourleft/domain` §`ReplanRecord`'s shapes and is read
    * back through `readReplanRecord`, which reads a record whole or not at
    * all. It holds a move and a reason from two closed lists, and no text.
+   *
+   * ⚠️ **A record that does not read is dropped, never the ride.** On the way
+   * in and on the way out the store keeps each record that reads, skips one
+   * that does not, and counts it in {@link replansDropped}. A ride is never
+   * refused, and never unreadable, for its audit trail (#1244's review).
    */
   readonly replans?: readonly ReplanRecord[];
+  /**
+   * How many of this ride's re-plan records could not be kept or read back:
+   * written by a build that knew a move this one does not, or edited by
+   * hand. Absent when none was. A count and nothing of the records.
+   */
+  readonly replansDropped?: number;
 }
 
 /** @see {@link ActivityRecord.originalFile} */

@@ -85,6 +85,9 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
+  // #1244: *Keep the plan* in the game too, while an accepted re-plan waits,
+  // so a rider does not leave the game to refuse a change.
+  { surface: 'game-hud', name: 'Keep the plan', match: 'exact' },
   // #940: the trainer game's pre-ride chooser, `game/StageChooser.tsx`. Its
   // *Ride* starts the ride, so it is *Start* in the ruling's four. A PREFIX,
   // because it is named after the route ("Ride Box Hill").

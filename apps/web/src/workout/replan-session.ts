@@ -26,23 +26,35 @@
  * the validator refuses: each leaves the plan as it is. At most
  * {@link REPLAN_UNAVAILABLE} is shown, and a refused proposal shows nothing.
  *
- * ## One job, never a retry
+ * ## One job, and never a storm
  *
  * - **At most one job in flight.** A job is asked for only as a block
  *   begins, and one still out thirty seconds before the block ends is
  *   dropped, so none is out when the next could be asked for.
  * - **No job is started or left running while the ride is paused or the
  *   stall rescue holds the target** (P6).
- * - **Nothing is ever sent twice.** A request that failed is not repeated:
- *   the next one is the next block boundary, and at least
- *   {@link REPLAN_ASK_INTERVAL_SECONDS} after the last. That is at most 20 an
- *   hour, under the instance's own limit of 24 (`apps/instance` §`jobs.ts`
+ * - **Nothing is ever sent twice, and a failure is never followed at once.**
+ *   A request that failed is not repeated: the next one is the next block
+ *   boundary, and at least {@link REPLAN_ASK_INTERVAL_SECONDS} after the
+ *   last, whatever the last one's fate. That is at most 20 an hour, under
+ *   the instance's own limit of 24 (`apps/instance` §`jobs.ts`
  *   §`DEFAULT_REPLAN_STARTS`), which a refused start still spends.
- * - **A request the instance refuses for a reason that will not change**
- *   (`rate_limited`, `analysis_off`, `validation_failed`, a session it no
- *   longer accepts) **ends the asking for this workout.** `job_running` — a
- *   write-up is running on the same worker — does not: the next boundary may
- *   ask.
+ * - **A request the instance refuses with one of {@link PERMANENT_REFUSALS}**
+ *   — a reason that will not change during this workout — **ends the asking
+ *   for it**, and so does a sign-in this device no longer holds. **Anything
+ *   else does not**: `job_running` (a write-up on the same worker),
+ *   `unavailable`, a 5xx the tunnel relayed with no code, an answer this
+ *   build cannot read, a session that threw as it was opened. Each is the
+ *   plan as it stands and one short line, and the next boundary may ask.
+ *   The list is of what is known to be permanent, so an answer nobody
+ *   foresaw waits for the next block rather than switching re-plans off.
+ *
+ * ## What is sent is bounded
+ *
+ * `replan-job.ts` §`replanInputWithin` holds a request to the instance's 8 KB
+ * input budget by leaving out the oldest summaries, so a long workout is
+ * asked about with less history rather than refused `validation_failed`. A
+ * plan too long for even one summary to fit beside it is not asked about.
  *
  * ## A late answer is dropped, and this is why it is not `useAnalysis.ts`
  *
@@ -101,10 +113,11 @@ import { cancelJob, type JobSession } from '../ride-analysis/instance-job';
 
 import {
   followReplan,
-  replanInput,
+  replanInputWithin,
   replanRequest,
   startReplan,
   type BlockSummary,
+  type ReplanInput,
 } from './replan-job';
 import { REPLAN_UNAVAILABLE, replanSentence, type WaitingReplan } from './replan-text';
 
@@ -125,8 +138,21 @@ const MAXIMUM_RESCUES = 1_000;
 /** The longest one tick is counted as, so a stalled tab does not count a minute as in range. */
 const LONGEST_TICK_SECONDS = 5;
 
-/** The refusals after which the next boundary may ask again. Every other ends the asking. */
-const TRY_AGAIN_CODES: readonly string[] = ['job_running'];
+/**
+ * The refusals that end the asking for this workout: each is a reason that
+ * will not change before it ends (`apps/instance` §`analysis/routes.ts`, the
+ * re-plan start's `errors`). `unauthenticated` is a session the instance no
+ * longer accepts; `validation_failed` is a request this build will build the
+ * same way again; `rate_limited` is the hour's allowance spent, and asking
+ * again would only spend the next; `analysis_off` is an instance with no
+ * model. **Every other answer is tried again at the next block boundary.**
+ */
+export const PERMANENT_REFUSALS: readonly string[] = [
+  'unauthenticated',
+  'validation_failed',
+  'rate_limited',
+  'analysis_off',
+];
 
 /** The ride as it is now, read by the session whenever it needs it. */
 export interface ReplanRideFacts {
@@ -178,7 +204,19 @@ export interface ReplanState {
   readonly kept: boolean;
   /** {@link REPLAN_UNAVAILABLE}, after a request that failed. */
   readonly notice: string | undefined;
-  /** What the last accepted move replaced, from its boundary on, for the graph. */
+  /**
+   * The revision of a waiting move that a pause or a lost trainer discarded
+   * in the block being ridden (ADR 0048 D-8), for the one sentence that says
+   * so. `undefined` once that block has ended, or another move is accepted.
+   */
+  readonly discarded: number | undefined;
+  /**
+   * What a re-plan replaced, from its boundary on, for the graph: the
+   * waiting move's while one waits, else that of the last move that REACHED
+   * the plan. So a move the rider kept the plan from, or one that was
+   * discarded, takes its own outline away with it and leaves the outline of
+   * an earlier applied move, if there was one, where it was.
+   */
   readonly replaced: readonly WorkoutSegment[] | undefined;
 }
 
@@ -263,20 +301,31 @@ function gatheringFor(timeline: WorkoutTimeline, block: number, elapsed: number)
   };
 }
 
+/**
+ * Count the time from the last tick up to `until` as in or out of the hold's
+ * range, by the heart rate read now. Time only: no reading is added to a
+ * mean, a highest or a count.
+ */
+function gatherTime(into: Gathering, facts: ReplanRideFacts, until: number): void {
+  const step = Math.min(LONGEST_TICK_SECONDS, Math.max(0, until - into.lastElapsed));
+  into.lastElapsed = until;
+  if (
+    into.range !== undefined &&
+    facts.heartRate !== undefined &&
+    facts.heartRate >= into.range.low &&
+    facts.heartRate <= into.range.high
+  ) {
+    into.secondsInRange += step;
+  }
+}
+
+/** One tick of the block being ridden: its time, and one reading of each figure. */
 function gather(into: Gathering, facts: ReplanRideFacts): void {
-  const step = Math.min(LONGEST_TICK_SECONDS, Math.max(0, facts.elapsed - into.lastElapsed));
-  into.lastElapsed = facts.elapsed;
+  gatherTime(into, facts, facts.elapsed);
   if (facts.heartRate !== undefined) {
     into.heartRateSum += facts.heartRate;
     into.heartRateCount += 1;
     into.highestHeartRate = Math.max(into.highestHeartRate, facts.heartRate);
-    if (
-      into.range !== undefined &&
-      facts.heartRate >= into.range.low &&
-      facts.heartRate <= into.range.high
-    ) {
-      into.secondsInRange += step;
-    }
   }
   if (facts.power !== undefined) {
     into.powerSum += facts.power;
@@ -372,6 +421,8 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
   /** What the last move that reached the plan replaced. */
   let replaced: readonly WorkoutSegment[] | undefined;
   let kept = false;
+  /** The revision of a waiting move a pause or a lost trainer discarded. @see ReplanState.discarded */
+  let discarded: number | undefined;
   let notice: string | undefined;
 
   const summaries: BlockSummary[] = [];
@@ -442,9 +493,41 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
         revision: waiting.plan.revision,
         at: options.clock(),
       });
+      if (why === 'paused') {
+        discarded = waiting.plan.revision;
+      }
     }
     waiting = undefined;
     changed();
+  };
+
+  /**
+   * What a screen is shown of the waiting move, read against the PLAYER now
+   * and not against the last tick. The player drops a waiting revision the
+   * moment a ride pauses or the trainer is lost, and the screen's plan is
+   * the player's (`ride/controller.ts` §`workoutSnapshot`), so the sentence,
+   * the control, the dotted outline and the plan ahead all change in the
+   * same snapshot. {@link reconcile} writes the record on the next tick.
+   */
+  const shown = (): Pick<ReplanState, 'waiting' | 'discarded' | 'replaced'> => {
+    if (waiting === undefined) {
+      return { waiting: undefined, discarded, replaced };
+    }
+    const plan = options.plan();
+    if (plan.waiting === waiting.timeline) {
+      return {
+        waiting: { revision: waiting.plan.revision, sentence: waiting.sentence },
+        discarded: undefined,
+        replaced: waiting.replaced,
+      };
+    }
+    if (plan.riding === waiting.timeline) {
+      // Its boundary has passed: it is the plan, and nothing waits.
+      return { waiting: undefined, discarded: undefined, replaced: waiting.replaced };
+    }
+    // The player no longer holds it, and no press of *Keep the plan* did that
+    // (`keepThePlan` reconciles at once): a pause or a lost trainer.
+    return { waiting: undefined, discarded: waiting.plan.revision, replaced };
   };
 
   /** A proposal arrived in time to be read. The validator decides; nothing here does. */
@@ -502,6 +585,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
     }
     latest = decided.plan;
     kept = false;
+    discarded = undefined;
     waiting = {
       plan: decided.plan,
       timeline,
@@ -511,17 +595,22 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
     changed();
   };
 
-  const run = async (from: Flight, input: Parameters<typeof replanRequest>[0]): Promise<void> => {
+  const run = async (from: Flight, input: ReplanInput): Promise<void> => {
     let opened: JobSession;
     try {
       opened = await options.session();
     } catch {
-      opened = { kind: 'closed', text: '' };
+      // Nothing is known about the sign-in: the next boundary may ask.
+      if (!from.abort.signal.aborted) {
+        failed(from, false);
+      }
+      return;
     }
     if (from.abort.signal.aborted) {
       return;
     }
     if (opened.kind !== 'open') {
+      // This device holds no sign-in the instance would take.
       failed(from, true);
       return;
     }
@@ -541,7 +630,8 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       failed(
         from,
         started.kind === 'refused' &&
-          !(started.code !== undefined && TRY_AGAIN_CODES.includes(started.code)),
+          started.code !== undefined &&
+          PERMANENT_REFUSALS.includes(started.code),
       );
       return;
     }
@@ -571,15 +661,19 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
 
   const ask = (now: Seconds, where: Where): void => {
     const seq = (summary?.seq ?? 0) + 1;
-    summary = { seq, sentAt: now };
-    const input = replanInput({
+    const input = replanInputWithin({
       revision: latest.revision,
       summarySeq: seq,
       currentBlock: where.block,
       goals,
       blocks: planWorkout(latest).blocks,
-      summaries: summaries.slice(-REPLAN_MAXIMUM_BLOCKS),
+      summaries,
     });
+    if (input === undefined) {
+      // The plan leaves no room for a summary beside it: nothing is sent.
+      return;
+    }
+    summary = { seq, sentAt: now };
     const leaving: Flight = {
       abort: new AbortController(),
       sentAt: now,
@@ -616,12 +710,15 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       if (gathering === undefined) {
         gathering = gatheringFor(timeline, where.block, beganAt);
       } else if (gathering.block !== where.block) {
-        // The last second of the block that has just ended is its own.
-        gather(gathering, { ...facts, elapsed: beganAt });
+        // The time up to the boundary is the ended block's own. The READING
+        // of this tick is not: it is counted once, below, in the block that
+        // has begun, so no sample is in two blocks' means.
+        gatherTime(gathering, facts, beganAt);
         summaries.push(summaryOf(gathering, beganAt, athlete.thresholdPower));
         gathering = gatheringFor(timeline, where.block, beganAt);
         boundary = true;
         kept = false;
+        discarded = undefined;
         // No job is out here: the last thirty seconds of a block drop one.
         changed();
       }
@@ -656,11 +753,13 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       if (stopped || waiting === undefined) {
         return false;
       }
-      options.keepPlan();
+      const dropped = options.keepPlan();
       reconcile('kept');
-      kept = true;
+      // `false`: the player was no longer holding it (its boundary had just
+      // passed), so nothing was kept and nothing says the plan stayed.
+      kept = dropped;
       changed();
-      return true;
+      return dropped;
     },
 
     stop(): void {
@@ -682,15 +781,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       notice = undefined;
     },
 
-    state: () => ({
-      waiting:
-        waiting === undefined
-          ? undefined
-          : { revision: waiting.plan.revision, sentence: waiting.sentence },
-      kept,
-      notice,
-      replaced: waiting?.replaced ?? replaced,
-    }),
+    state: () => ({ ...shown(), kept, notice }),
 
     records: () => records,
 

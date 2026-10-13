@@ -211,6 +211,8 @@ export interface ManifestRideFacts {
    * ride that recorded it, so this is the only copy that leaves the device.
    */
   readonly replans?: readonly ReplanRecord[];
+  /** How many of the ride's re-plan records could not be read (`RideFacts.replansDropped`). */
+  readonly replansDropped?: number;
 }
 
 /**
@@ -1135,6 +1137,7 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
             return record === undefined ? [] : [record];
           }),
         }),
+    ...(facts.replansDropped === undefined ? {} : { replansDropped: facts.replansDropped }),
   };
 }
 

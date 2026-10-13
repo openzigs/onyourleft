@@ -598,6 +598,37 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     expect(gameTrainerPortOver(undefined).workoutPlanChange?.()).toBeUndefined();
   });
 
+  it('hands *Keep the plan* to the controller’s own keepThePlan, and reads a discarded move off it — #1244', () => {
+    let kept = 0;
+    let discarded: number | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: {
+          status: 'running',
+          rescue: undefined,
+          replan: { waiting: undefined, discarded },
+        },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+      keepThePlan: () => {
+        kept += 1;
+      },
+    });
+    port.keepThePlan?.();
+    expect(kept).toBe(1);
+    expect(port.workoutPlanDiscarded?.()).toBeUndefined();
+    discarded = 3;
+    expect(port.workoutPlanDiscarded?.()).toBe(3);
+    // No controller: nothing to keep a plan from, and no throw.
+    const none = gameTrainerPortOver(undefined);
+    expect(() => none.keepThePlan?.()).not.toThrow();
+    expect(none.workoutPlanDiscarded?.()).toBeUndefined();
+  });
+
   it('hands a game ride’s outcome to the ride controller, and to nothing without one — #1042', () => {
     const noted: (string | undefined)[] = [];
     const port = gameTrainerPortOver({

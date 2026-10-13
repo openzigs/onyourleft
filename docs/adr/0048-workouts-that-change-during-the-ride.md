@@ -767,3 +767,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   - **What was not measured.** Every test uses a scripted instance and the #44 simulator. No
     re-plan was run against a model or a trainer:
     [validation 0004](../validation/0004-heart-rate-hold-and-re-plans.md) Part B is that. (#1244)
+
+- **2026-10-13** — **After #1244's review, five points of the entry above changed before it
+  merged, and they are recorded as changes and not written over it.** Each is still the
+  implementer's choice and the owner's to change.
+  - **Retries: at the next block, for everything not known to be permanent.** The entry above
+    ended the asking for any refusal but `job_running`. As built now, a list of PERMANENT refusals
+    ends it — `unauthenticated`, `validation_failed`, `rate_limited`, `analysis_off`, and a sign-in
+    the device no longer holds — and every other answer (`job_running`, `unavailable`, a 5xx a
+    tunnel relayed with no code, a session that threw as it was opened) is asked again at the next
+    block boundary, never sooner and never less than three minutes after the last. Still at most 20
+    an hour.
+  - **A request is held to the instance's 8 KB input budget.** The plan's blocks and the goals are
+    sent whole; the oldest summaries are left out when all do not fit. D-10's *"per-block
+    summaries"* is therefore *the most recent ones that fit* in a long workout, and #1245's
+    disclosure says so.
+  - ***Keep the plan* is in the game too.** The entry above left a rider in the game to leave it.
+    The HUD's actions now show the control while a move waits, calling the same `keepThePlan`. The
+    HUD still shows no sentence: that is
+    [#1324](https://github.com/openzigs/onyourleft/issues/1324).
+  - **A waiting move a pause or a lost link discards (D-8) is said, once.** D-7 has a dropped
+    *proposal* shown as nothing. A move that was ACCEPTED, shown and perhaps spoken is a different
+    thing to take away in silence, so one sentence composed on the device says it went, at the
+    moment the plan ahead goes back. The wording is the owner's to approve with the rest.
+  - **A re-plan record that does not read is dropped and counted, never the ride.** The entry
+    above had the store refuse to write, and to read, a ride holding such a record. P9's record is
+    an audit trail beside a ride; the store now keeps each record that reads, counts the rest in
+    `RideFacts.replansDropped`, and saves and reads the ride either way.
+  - **#1245's wording is the one set of words.** The switch is *Re-plan during the ride* with
+    #1245's disclosure under it; this issue's own label, help line, policy section and Data Safety
+    sentences are gone. Two things were added to #1245's text in place, because they are true and
+    it did not say them: a long workout's most recent summaries, and that the switch is offered
+    only with the rider's own two thresholds set. (#1244)

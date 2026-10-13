@@ -3401,6 +3401,32 @@ a.oyl-button {
 }
 
 /*
+ * #1244: the re-plan switch under the workout chooser's list, with #1245's
+ * disclosure under it. The switch has to be on the screen where a rider
+ * chooses a workout, and the column is short: at 1280×800 inside the Android
+ * shell the fold is at 768, and with a list's 1rem either side the switch
+ * ended 47.3 px above it on a Mac, under §4f's 50 px floor. So where the
+ * switch follows the list, the list gives up its two margins and the switch's
+ * row sits 8 px under the control that starts a workout (#669's spacing
+ * between two controls). `rideview.browser.spec.ts` §"#1244" publishes the
+ * margin and holds the floor, and its control puts the nine sentences first.
+ *
+ * Scoped by `:has()` to a list the switch follows: a rider with no instance
+ * has no switch, and their chooser is laid out as it always was.
+ */
+.oyl-ride__group--trainer ul:has(+ .oyl-workout-replans) {
+  margin-block: 0;
+}
+
+.oyl-workout-replans {
+  margin-block-start: var(--oyl-space-sm);
+}
+
+.oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
+  margin-block-start: var(--oyl-space-xs);
+}
+
+/*
  * The native controls, styled — and still native. #307's third criterion, and
  * the ⚠️ attached to it: *"without replacing them. They are `<select>` and
  * `<nav>` for a reason; styling must not cost the keyboard and screen-reader

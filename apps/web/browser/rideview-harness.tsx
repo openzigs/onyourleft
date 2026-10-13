@@ -109,11 +109,27 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
 const ATHLETE = athleteId('harness');
 const PATIENCE_MS = 10_000;
 
+/**
+ * `rideview.html?replans=available` — #1244, #1245: the state in which the
+ * workout chooser shows the per-ride switch, *Re-plan during the ride*, with
+ * #1245's whole disclosure under it. A re-plan can be offered only to a rider
+ * who is signed in to an instance (the stub controller says so) and has set
+ * their own threshold heart rate as well as power (the rider below has), so
+ * this is the only state that puts the switch on the page.
+ *
+ * ⚠️ Not the default, on purpose: every other case of this page measures the
+ * chooser a rider with no instance sees, which is most riders, and nine more
+ * sentences under it would change what those cases have always measured.
+ */
+const REPLANS_AVAILABLE =
+  new URLSearchParams(window.location.search).get('replans') === 'available';
+
 const RIDER: AthleteRecord = {
   id: ATHLETE,
   displayName: 'Harness',
   createdAt: unixSeconds(1),
   thresholdPower: watts(250),
+  ...(REPLANS_AVAILABLE ? { thresholdHeartRate: beatsPerMinute(170) } : {}),
 };
 
 const WORKOUT: WorkoutRecord = {
@@ -212,6 +228,28 @@ const replanBlocks = (third: number) => [
 ];
 const REPLAN_LOADED = expandWorkout({ name: 'Tempo', blocks: replanBlocks(600) });
 const REPLAN_REVISED = expandWorkout({ name: 'Tempo', blocks: replanBlocks(480) });
+
+/**
+ * Which moment of a re-plan this page shows, by `?workout=`:
+ *
+ * - `replan` — a move WAITING: its sentence, *Keep the plan*, the outline.
+ * - `replan-applied` — its block has begun: no sentence, the outline stays.
+ * - `replan-kept` — the rider pressed *Keep the plan*: *"The plan stays as it
+ *   was."*, the loaded plan, no outline.
+ * - `replan-discarded` — a pause or a lost trainer dropped it: its one
+ *   sentence (`replan-text.ts` §`REPLAN_DISCARDED`), the loaded plan, no
+ *   outline.
+ */
+const REPLAN_STATE: 'waiting' | 'applied' | 'kept' | 'discarded' | undefined =
+  WORKOUT_STATE === 'replan'
+    ? 'waiting'
+    : WORKOUT_STATE === 'replan-applied'
+      ? 'applied'
+      : WORKOUT_STATE === 'replan-kept'
+        ? 'kept'
+        : WORKOUT_STATE === 'replan-discarded'
+          ? 'discarded'
+          : undefined;
 
 /**
  * #1307: the last five minutes the running workout's graph draws, full to its
@@ -627,29 +665,40 @@ function snapshot(): RideSnapshot {
       },
     };
   }
-  if (WORKOUT_STATE === 'replan') {
+  if (REPLAN_STATE !== undefined) {
+    // As the controller hands each over. While a move WAITS the plan is
+    // already the revised one, with what it replaced from the next block on.
+    // Once it has been APPLIED both stay, with nothing waiting. KEPT and
+    // DISCARDED are the loaded plan again, with no outline: the move never
+    // reached the plan.
+    const revised = REPLAN_STATE === 'waiting' || REPLAN_STATE === 'applied';
+    const timeline = revised ? REPLAN_REVISED : REPLAN_LOADED;
+    const applied = REPLAN_STATE === 'applied';
     return {
       ...riding,
       workout: {
         name: 'Tempo',
         status: 'running',
-        elapsedSeconds: 312,
-        totalSeconds: REPLAN_REVISED.totalSeconds,
-        holdingWatts: 225,
-        nowRiding: '10 min at 90%',
+        // Applied: 12 seconds into the block the move shortened.
+        elapsedSeconds: applied ? 912 : 312,
+        totalSeconds: timeline.totalSeconds,
+        holdingWatts: applied ? 200 : 225,
+        nowRiding: applied ? '8 min at 80%' : '10 min at 90%',
         fault: undefined,
         rescue: undefined,
-        // As the controller hands it over while a move waits: the revised
-        // plan, and what it replaced from the next block on.
-        timeline: REPLAN_REVISED,
-        replaced: REPLAN_LOADED.segments.filter((segment) => segment.block >= 2),
+        timeline,
+        ...(revised
+          ? { replaced: REPLAN_LOADED.segments.filter((segment) => segment.block >= 2) }
+          : {}),
         replan: {
-          waiting: { revision: 1, sentence: REPLAN_SENTENCE },
-          kept: false,
+          waiting:
+            REPLAN_STATE === 'waiting' ? { revision: 1, sentence: REPLAN_SENTENCE } : undefined,
+          kept: REPLAN_STATE === 'kept',
           notice: undefined,
+          discarded: REPLAN_STATE === 'discarded' ? 1 : undefined,
         },
         thresholdWatts: 250,
-        trace: graphTrace(225),
+        trace: graphTrace(applied ? 200 : 225),
       },
     };
   }
@@ -754,6 +803,20 @@ export interface RideViewMeasurement {
       }
     | undefined;
   /**
+   * #1244, #1245: the re-plan switch's disclosure, if the chooser shows one —
+   * its box, each sentence it shows in order, where its headline is, whether
+   * a `<details>` holds any of it, and whether the switch is checked.
+   */
+  readonly replanDisclosure:
+    | {
+        readonly box: Box;
+        readonly sentences: readonly string[];
+        readonly headline: Box | undefined;
+        readonly inDisclosure: boolean;
+        readonly switchedOn: boolean;
+      }
+    | undefined;
+  /**
    * #692: every standing notice in the live and trainer groups — its label
    * (the words a rider reads first), its box, and whether it is the topmost
    * thing at its own centre. Found by `.oyl-status`, so a notice this page
@@ -838,6 +901,10 @@ declare global {
       readonly restoreFullHeightShell: () => void;
       /** #605: open *How the target comes back*, as a rider's press does. */
       readonly openEasedDetail: () => void;
+      /** #1244: press the re-plan switch. @see pressReplanSwitch */
+      readonly pressReplanSwitch: () => void;
+      /** #1244's control. @see disclosureBeforeTheSwitch */
+      readonly disclosureBeforeTheSwitch: () => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
       /** #692's control: the screen as it was laid out before #692. @see asBefore692 */
@@ -934,6 +1001,7 @@ function measure(): RideViewMeasurement {
     cardBackground: card === null ? '' : window.getComputedStyle(card).backgroundColor,
     eased: easedNotice(),
     keepScreenOn: keepScreenOnNotice(),
+    replanDisclosure: replanDisclosureShown(),
     notices: standingNotices(),
     metrics: metricGrid === null ? undefined : boxOf(metricGrid),
     metricsTopRow: topRowOf(metricGrid),
@@ -1175,6 +1243,54 @@ function asBefore692(): void {
 }
 
 /** #647's notice, found by its label — the words a rider reads first. */
+function replanDisclosureShown(): RideViewMeasurement['replanDisclosure'] {
+  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
+  if (block === null) {
+    return undefined;
+  }
+  const paragraphs = [...block.querySelectorAll('p')];
+  const headline = paragraphs[0];
+  const input = document.querySelector<HTMLInputElement>(
+    '.oyl-ride__group--trainer input[role="switch"]',
+  );
+  return {
+    box: boxOf(block),
+    sentences: paragraphs.map(textOf),
+    headline: headline === undefined ? undefined : boxOf(headline),
+    inDisclosure: block.closest('details') !== null || block.querySelector('details') !== null,
+    switchedOn: input?.checked === true,
+  };
+}
+
+/** #1244: press the re-plan switch, as a rider does. */
+function pressReplanSwitch(): void {
+  const input = document.querySelector<HTMLInputElement>(
+    '.oyl-ride__group--trainer input[role="switch"]',
+  );
+  if (input === null) {
+    throw new Error('rideview harness: no re-plan switch on the page');
+  }
+  flushSync(() => {
+    input.click();
+  });
+}
+
+/**
+ * #1244's control: the disclosure as it would be BEFORE the switch, which is
+ * the order a reader might expect and the one that pushes the switch down the
+ * column by nine sentences. On the live elements, as the other controls are.
+ */
+function disclosureBeforeTheSwitch(): void {
+  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
+  const label = document
+    .querySelector('.oyl-ride__group--trainer input[role="switch"]')
+    ?.closest('label');
+  if (block === null || label === null || label === undefined) {
+    throw new Error('rideview harness: no re-plan switch and disclosure to reorder');
+  }
+  label.before(block);
+}
+
 function keepScreenOnElement(): Element | undefined {
   return [...document.querySelectorAll('.oyl-ride__group--live .oyl-status')].find(
     (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Keep the screen on:',
@@ -1311,7 +1427,7 @@ async function run(): Promise<void> {
       <StrictMode>
         <AppShell
           capabilities={NO_BLUETOOTH}
-          rideController={stubRideController(snapshot()).controller}
+          rideController={stubRideController(snapshot(), REPLANS_AVAILABLE).controller}
           workouts={workoutStub(ATHLETE, [WORKOUT])}
           analysis={stubAnalysis(ATHLETE, [], RIDER)}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
@@ -1345,10 +1461,16 @@ async function run(): Promise<void> {
         (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Heart-rate hold:',
       ),
     );
-  } else if (WORKOUT_STATE === 'replan') {
+  } else if (REPLAN_STATE === 'waiting') {
     await until('Keep the plan', () =>
       [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
         (each) => textOf(each) === 'Keep the plan',
+      ),
+    );
+  } else if (REPLAN_STATE !== undefined) {
+    await until('the running workout', () =>
+      [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
+        (each) => textOf(each) === 'End workout',
       ),
     );
   } else if (
@@ -1391,6 +1513,8 @@ async function run(): Promise<void> {
     constrain,
     restoreFullHeightShell,
     openEasedDetail,
+    pressReplanSwitch,
+    disclosureBeforeTheSwitch,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,
@@ -1409,6 +1533,8 @@ run().catch((error: unknown) => {
     constrain,
     restoreFullHeightShell,
     openEasedDetail,
+    pressReplanSwitch,
+    disclosureBeforeTheSwitch,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,

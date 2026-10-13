@@ -35,7 +35,7 @@ import {
   toPersistedPrivacyZone,
   type PersistedActivity,
 } from './persisted';
-import type { ActivityRecord, LapRecord, PrivacyZoneRecord } from './records';
+import type { ActivityRecord, LapRecord, PrivacyZoneRecord, RideFacts } from './records';
 import { DEFAULT_VISIBILITY, parseVisibility, VISIBILITIES } from './visibility';
 
 const ATHLETE = athleteId('athlete-a');
@@ -310,38 +310,66 @@ describe('a ride’s re-plan decisions — #1244, ADR 0048 P9', () => {
     expect(row.rideFacts?.replans?.[0]).not.toBe(ACCEPTED);
   });
 
-  it.each([
+  const UNREADABLE: readonly (readonly [string, unknown])[] = [
     ['a key a record does not have', { ...ACCEPTED, text: 'ease off' }],
     ['a move off the closed list', { ...ACCEPTED, move: { kind: 'set-watts', watts: 400 } }],
     ['a reason off the closed list', { ...ACCEPTED, reason: 'you look tired' }],
     ['a decision this build does not know', { decision: 'overridden', at: 1 }],
     ['no time', { decision: 'refused', rule: 'P2' }],
     ['a string', 'accepted'],
-  ])('refuses to WRITE a ride whose record has %s', (_, record) => {
-    expect(() => toPersistedActivity(withReplans([record]))).toThrow(StoreDecodeError);
+  ];
+
+  it.each(UNREADABLE)(
+    'WRITES a ride whose record has %s: the record is dropped and counted, the ride is kept',
+    (_, record) => {
+      const row = toPersistedActivity(withReplans([ACCEPTED, record, ACCEPTED]));
+      expect(row.rideFacts).toEqual({ replans: [ACCEPTED, ACCEPTED], replansDropped: 1 });
+      // And everything else about the ride is the ride's.
+      expect({ ...row, rideFacts: undefined }).toEqual({
+        ...toPersistedActivity(ACTIVITY),
+        rideFacts: undefined,
+      });
+    },
+  );
+
+  it.each(UNREADABLE)(
+    'READS a row whose record has %s: the record is skipped and counted, the ride is read',
+    (_, record) => {
+      const row = toPersistedActivity(withReplans([ACCEPTED]));
+      const edited = { ...row, rideFacts: { replans: [record, ACCEPTED] } };
+      expect(fromPersistedActivity(edited)).toEqual({
+        ...ACTIVITY,
+        rideFacts: { replans: [ACCEPTED], replansDropped: 1 },
+      });
+    },
+  );
+
+  it('reads a row whose replans is not a list as a ride with no record, and counts it', () => {
+    const row = toPersistedActivity(ACTIVITY);
+    expect(
+      fromPersistedActivity({ ...row, rideFacts: { replans: 'none' as unknown as unknown[] } }),
+    ).toEqual({ ...ACTIVITY, rideFacts: { replans: [], replansDropped: 1 } });
   });
 
-  it('refuses to READ a row whose record was edited by hand, and names the entry not its text', () => {
-    const row = toPersistedActivity(withReplans([ACCEPTED, ACCEPTED]));
+  it('adds what it skips on the way out to what was dropped on the way in', () => {
+    const row = toPersistedActivity(withReplans([ACCEPTED, 'nonsense']));
+    expect(row.rideFacts?.replansDropped).toBe(1);
     const edited = {
       ...row,
-      rideFacts: { replans: [ACCEPTED, { ...ACCEPTED, note: 'SECRET-WORDS' }] },
+      rideFacts: { ...row.rideFacts, replans: [ACCEPTED, { ...ACCEPTED, note: 'SECRET-WORDS' }] },
     };
-    let message = '';
-    try {
-      fromPersistedActivity(edited);
-    } catch (error) {
-      expect(error).toBeInstanceOf(StoreDecodeError);
-      message = (error as Error).message;
-    }
-    expect(message).toBe('activity.rideFacts.replans[1]: expected a re-plan record');
+    const read = fromPersistedActivity(edited);
+    expect(read.rideFacts).toEqual({ replans: [ACCEPTED], replansDropped: 2 });
+    expect(JSON.stringify(read)).not.toContain('SECRET-WORDS');
   });
 
-  it('refuses a row whose replans is not a list', () => {
-    const row = toPersistedActivity(ACTIVITY);
-    expect(() =>
-      fromPersistedActivity({ ...row, rideFacts: { replans: 'none' as unknown as unknown[] } }),
-    ).toThrow(/activity.rideFacts.replans: expected a list/);
+  it('keeps a count it was handed only when it is a count', () => {
+    for (const count of [-1, 1.5, Number.NaN, 'two']) {
+      const facts = { replans: [ACCEPTED], replansDropped: count } as unknown as RideFacts;
+      expect(toPersistedActivity({ ...ACTIVITY, rideFacts: facts }).rideFacts).toEqual({
+        replans: [ACCEPTED],
+      });
+    }
   });
 
   it('leaves a ride with no decisions without the key', () => {

@@ -19,6 +19,7 @@ import {
   type WorkoutBlock,
 } from '@onyourleft/domain';
 import { athleteId as toAthleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
+import type { JSX } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -26,9 +27,15 @@ import {
   DEFAULT_ANNOUNCEMENTS,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { workoutStub } from '../workouts/testing';
-import type { WaitingReplan } from '../workout/replan-text';
+import {
+  REPLAN_SWITCH_LABEL,
+  replanDisclosure,
+  replanDisclosureSentences,
+} from '../workout/replan-disclosure';
+import { REPLAN_DISCARDED, type WaitingReplan } from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { WorkoutPanel } from './WorkoutPanel';
@@ -79,6 +86,7 @@ const SECOND: WaitingReplan = {
 const riding = (
   elapsedSeconds: number,
   waiting: WaitingReplan | undefined,
+  discarded?: number,
 ): RideWorkoutSnapshot => ({
   name: 'Efforts',
   status: 'running',
@@ -90,7 +98,7 @@ const riding = (
   fault: undefined,
   rescue: undefined,
   timeline: TIMELINE,
-  replan: { waiting, kept: false, notice: undefined },
+  replan: { waiting, kept: false, notice: undefined, discarded },
 });
 
 function storageWith(enabled: boolean): PreferenceStorage {
@@ -100,6 +108,19 @@ function storageWith(enabled: boolean): PreferenceStorage {
     setItem: () => undefined,
   };
 }
+
+/**
+ * The panel where the Ride screen puts it: in the page's `main`, under its
+ * `h1` and the group's `h2`, so the whole-document audit judges the panel and
+ * not the absence of a page around it.
+ */
+const onTheRideScreen = (panel: JSX.Element): JSX.Element => (
+  <main>
+    <h1>Ride</h1>
+    <h2>Trainer</h2>
+    {panel}
+  </main>
+);
 
 let mounted: Mounted | undefined;
 afterEach(() => {
@@ -112,30 +133,31 @@ const region = (): string =>
 
 /** Ride the panel through snapshots; the announcer's clock is the workout's here. */
 async function ride(
-  steps: readonly (readonly [number, WaitingReplan | undefined])[],
+  steps: readonly (readonly [number, WaitingReplan | undefined, number?])[],
   storage: PreferenceStorage,
 ): Promise<string[]> {
   let clock = 0;
-  const panel = (elapsed: number, waiting: WaitingReplan | undefined) => (
-    <WorkoutPanel
-      trainer={trainer}
-      workout={riding(elapsed, waiting)}
-      port={workoutStub(ATHLETE, [record])}
-      thresholdPower={watts(250)}
-      onStart={() => undefined}
-      onEnd={() => undefined}
-      onKeepPlan={() => undefined}
-      announcements={storage}
-      announcerClock={() => clock}
-    />
-  );
+  const panel = (elapsed: number, waiting: WaitingReplan | undefined, discarded?: number) =>
+    onTheRideScreen(
+      <WorkoutPanel
+        trainer={trainer}
+        workout={riding(elapsed, waiting, discarded)}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        onKeepPlan={() => undefined}
+        announcements={storage}
+        announcerClock={() => clock}
+      />,
+    );
   const heard: string[] = [];
-  for (const [index, [at, waiting]] of steps.entries()) {
+  for (const [index, [at, waiting, discarded]] of steps.entries()) {
     clock = at;
     if (index === 0) {
-      mounted = await mount(panel(at, waiting));
+      mounted = await mount(panel(at, waiting, discarded));
     } else {
-      await mounted?.rerender(panel(at, waiting));
+      await mounted?.rerender(panel(at, waiting, discarded));
     }
     await settle();
     heard.push(region());
@@ -224,5 +246,125 @@ describe('a re-plan on the Ride screen — #1244', () => {
     expect(shown).toBeDefined();
     expect(shown?.getAttribute('role')).toBeNull();
     expect(shown?.getAttribute('aria-live')).toBeNull();
+  });
+});
+
+describe('a waiting move a pause or a lost trainer discarded, on the Ride screen — #1244', () => {
+  const DISCARDED = `Plan change: ${REPLAN_DISCARDED}`;
+
+  it('says so once, after the move’s own sentence, and not again while the line stands', async () => {
+    const heard = await ride(
+      [
+        [100, undefined],
+        [110, FIRST],
+        [120, undefined, 1],
+        [130, undefined, 1],
+        [140, undefined, 1],
+      ],
+      storageWith(true),
+    );
+    expect(heard).toEqual(['', `Plan change: ${SENTENCE}`, DISCARDED, DISCARDED, DISCARDED]);
+    // One node: the discard's sentence was written once, over the move's.
+    expect(document.querySelectorAll('[data-oyl-announcer="ride"] span')).toHaveLength(1);
+    // And it is on the screen, with no control beside it.
+    expect(document.body.textContent).toContain(REPLAN_DISCARDED);
+    expect(
+      [...document.querySelectorAll('button')].some((each) => each.textContent === 'Keep the plan'),
+    ).toBe(false);
+  });
+
+  it('says it above threshold power too: a pause is not a moment to hold a sentence for', async () => {
+    const heard = await ride(
+      [
+        [590, undefined],
+        [620, undefined, 1],
+      ],
+      storageWith(true),
+    );
+    expect(heard.at(-1)).toBe(DISCARDED);
+  });
+
+  it('says nothing with announcements off, and still shows it', async () => {
+    const heard = await ride(
+      [
+        [100, undefined],
+        [110, undefined, 1],
+      ],
+      storageWith(false),
+    );
+    expect(heard).toEqual(['', '']);
+    expect(document.body.textContent).toContain(REPLAN_DISCARDED);
+  });
+
+  it('does not say a discard that already stood when the screen appeared', async () => {
+    const heard = await ride(
+      [
+        [100, undefined, 1],
+        [110, undefined, 1],
+      ],
+      storageWith(true),
+    );
+    expect(heard).toEqual(['', '']);
+  });
+
+  it('audits clean', async () => {
+    await ride([[100, undefined, 1]], storageWith(true));
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+});
+
+describe('the switch and its disclosure, where a workout is chosen — #1244, #1245', () => {
+  const chooser = () =>
+    onTheRideScreen(
+      <WorkoutPanel
+        trainer={trainer}
+        workout={undefined}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        replansAvailable
+        announcements={storageWith(true)}
+      />,
+    );
+  const theSwitch = (): HTMLInputElement | null =>
+    document.querySelector<HTMLInputElement>('input[role="switch"]');
+
+  it('audits clean with the switch off, and again with it on', async () => {
+    mounted = await mount(chooser());
+    await settle();
+    expect(theSwitch()?.checked).toBe(false);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await activateWithKeyboard(theSwitch() as HTMLElement);
+    expect(theSwitch()?.checked).toBe(true);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('is a switch named by its label and described by the disclosure’s headline', async () => {
+    mounted = await mount(chooser());
+    await settle();
+    const input = theSwitch();
+    expect(input?.closest('label')?.textContent).toBe(REPLAN_SWITCH_LABEL);
+    expect(input?.getAttribute('aria-checked') ?? String(input?.checked)).toBe('false');
+    const described = document.getElementById(input?.getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent).toBe(replanDisclosure().headline);
+    // In the tab order, and reached before the text that describes it ends.
+    expect(tabbableElements(document)).toContain(input);
+  });
+
+  it('shows every sentence as text a screen reader meets in order, none in a live region', async () => {
+    mounted = await mount(chooser());
+    await settle();
+    const block = document.querySelector('[data-oyl-replan-disclosure]');
+    const sentences = replanDisclosureSentences(replanDisclosure());
+    let from = 0;
+    for (const sentence of sentences) {
+      const at = (block?.textContent ?? '').indexOf(sentence, from);
+      expect(at, sentence).toBeGreaterThanOrEqual(from);
+      from = at + sentence.length;
+    }
+    expect(block?.closest('[role="status"], [aria-live]')).toBeNull();
+    expect(block?.querySelector('[role="status"], [aria-live]')).toBeNull();
   });
 });

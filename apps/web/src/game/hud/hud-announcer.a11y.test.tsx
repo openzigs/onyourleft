@@ -513,6 +513,8 @@ describe('the heart-rate hold, through the game — #1240', () => {
 describe('a re-plan during the ride, through the game — #1244', () => {
   const SENTENCE = 'Next block shortened by 2 minutes, to fit the duration you chose.';
   let change: { waiting: { revision: number; sentence: string }; quiet: boolean } | undefined;
+  let discarded: number | undefined;
+  let kept: number;
 
   /** A trainer a running workout owns, whose waiting re-plan the test changes between frames. */
   function replanPort(): GameTrainerPort {
@@ -528,8 +530,19 @@ describe('a re-plan during the ride, through the game — #1244', () => {
           true,
         ),
       workoutPlanChange: () => change,
+      workoutPlanDiscarded: () => discarded,
+      keepThePlan: () => {
+        kept += 1;
+        // As the controller does: the move is dropped, and nothing waits.
+        change = undefined;
+      },
     };
   }
+
+  const keepButton = (): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(document, '.oyl-hud__actions button').find(
+      (each) => each.textContent === 'Keep the plan',
+    );
 
   const quietRide = (): void => {
     chooseAnnouncements({
@@ -541,6 +554,64 @@ describe('a re-plan during the ride, through the game — #1244', () => {
 
   beforeEach(() => {
     change = undefined;
+    discarded = undefined;
+    kept = 0;
+  });
+
+  it('puts Keep the plan on the HUD only while a move waits, and the press reaches the port', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(keepButton()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    await settle();
+    const button = keepButton();
+    expect(button).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    expect(kept).toBe(1);
+    await pump(4);
+    await settle();
+    // Nothing waits any more, so there is nothing to keep the plan from.
+    expect(keepButton()).toBeUndefined();
+  });
+
+  it('offers it while the sentence is being held above threshold power: the control does not wait to be said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    await settle();
+    expect(offered).not.toContain('plan-changed');
+    expect(keepButton()).toBeDefined();
+  });
+
+  it('says once that a pause or a lost trainer discarded the waiting move', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    change = undefined;
+    discarded = 1;
+    expect(await pumpUntil(/dropped/, 20)).toBe(
+      'Plan change: That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.',
+    );
+    await pump(20);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(2);
+  });
+
+  it('does not say a discard that already stood when the ride began', async () => {
+    quietRide();
+    discarded = 4;
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
   });
 
   it('says an accepted move through the one region, once, with announcements on', async () => {

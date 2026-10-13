@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { beatsPerMinute, seconds, thresholdShare, type WorkoutBlock } from '@onyourleft/domain';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import {
+  beatsPerMinute,
+  seconds,
+  thresholdShare,
+  type WorkoutBlock,
+  type WorkoutGoals,
+} from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
   followReplan,
   goalsToSend,
   replanInput,
+  replanInputWithin,
   replanRequest,
+  REPLAN_INPUT_BYTE_BUDGET,
+  REPLAN_MAXIMUM_SUMMARIES,
   REPLAN_SOURCE,
   REPLAN_TEMPLATE_VERSION,
   startReplan,
+  type BlockSummary,
 } from './replan-job';
 import { scriptedReplans } from './replan-testing';
 
@@ -51,6 +64,82 @@ const INSTANCE_BLOCK_KEYS: Readonly<Record<WorkoutBlock['kind'], readonly string
   'free-ride': ['kind', 'seconds'],
   'heart-rate-hold': ['ceilingShare', 'kind', 'range', 'seconds', 'startShare'],
 };
+
+/** Every typed goal set, the withheld one among them. */
+const EVERY_GOAL: WorkoutGoals = {
+  sessionType: 'endurance',
+  durationMinutes: 60,
+  holdRange: { low: beatsPerMinute(130), high: beatsPerMinute(142) },
+  heartRateAbove: beatsPerMinute(150),
+  powerCeiling: thresholdShare(0.8),
+  timeInRangeMinutes: 30,
+  effortCheckIns: true,
+};
+
+/**
+ * What the two golden requests are built from, as the device holds it: blocks
+ * with the rider's labels, goals with the withheld target, and summaries. The
+ * files are `packages/domain/src/workout/fixtures/replan-request*.json`, and
+ * `apps/instance` §`replan-jobs.test.ts` posts the same two files to the
+ * instance's own start. A change to the builder that changes what leaves is
+ * red here until the file is regenerated, and then red there if the instance
+ * does not take it.
+ */
+const GOLDEN_FROM = {
+  revision: 1,
+  summarySeq: 3,
+  currentBlock: 3,
+  goals: EVERY_GOAL,
+  blocks: BLOCKS,
+  summaries: [
+    {
+      block: 0,
+      seconds: 300,
+      meanHeartRate: 118,
+      highestHeartRate: 131,
+      meanPowerShare: 0.52,
+      meanCadence: 88,
+      rescues: 0,
+    },
+    // A block with no strap reading and no cadence: absent, never a zero.
+    { block: 1, seconds: 300, meanPowerShare: 0.655, rescues: 1 },
+    { block: 2, seconds: 480, meanHeartRate: 151, highestHeartRate: 163, rescues: 0 },
+  ],
+} satisfies Parameters<typeof replanInput>[0];
+
+/** The longest plan the instance reads, every kind of block in it, 63 of its 64 blocks ridden. */
+const LONG_BLOCKS: readonly WorkoutBlock[] = Array.from(
+  { length: 64 },
+  (_, index) => BLOCKS[index % BLOCKS.length] as WorkoutBlock,
+);
+const LONG_SUMMARIES: readonly BlockSummary[] = Array.from({ length: 63 }, (_, index) => ({
+  block: index,
+  seconds: 300 + index,
+  meanHeartRate: 120 + (index % 40),
+  highestHeartRate: 130 + (index % 40),
+  ...(index % BLOCKS.length === 4 ? { secondsInRange: 200 + index } : {}),
+  meanPowerShare: 0.5 + (index % 50) / 1000,
+  meanCadence: 80 + (index % 20),
+  rescues: index % 3,
+}));
+const LONG_FROM = {
+  revision: 0,
+  summarySeq: 12,
+  currentBlock: 63,
+  goals: EVERY_GOAL,
+  blocks: LONG_BLOCKS,
+  summaries: LONG_SUMMARIES,
+} satisfies Parameters<typeof replanInput>[0];
+
+const golden = (file: string): unknown =>
+  JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(`../../../../packages/domain/src/workout/fixtures/${file}`, import.meta.url),
+      ),
+      'utf8',
+    ),
+  );
 
 const input = () =>
   replanInput({
@@ -101,6 +190,38 @@ describe('what a re-plan request carries — the one builder', () => {
     expect(goals).toEqual({ timeInRangeMinutes: 20 });
   });
 
+  it('sends every goal the privacy policy names, each under its own key, and the range as two numbers', () => {
+    expect(goalsToSend(EVERY_GOAL)).toStrictEqual({
+      sessionType: 'endurance',
+      durationMinutes: 60,
+      holdRange: { low: 130, high: 142 },
+      heartRateAbove: 150,
+      powerCeiling: 0.8,
+      effortCheckIns: true,
+    });
+    expect(Object.keys(goalsToSend(EVERY_GOAL))).not.toContain('timeInRangeMinutes');
+  });
+
+  it('names each goal it sends, so a goal added later is not sent until it is named', () => {
+    // A goal a later build adds, and a key smuggled into the range.
+    const later = {
+      ...EVERY_GOAL,
+      restingHeartRate: 48,
+      note: 'ease off',
+      holdRange: { low: beatsPerMinute(130), high: beatsPerMinute(142), label: 'Zone 2' },
+    } as unknown as WorkoutGoals;
+    const sent = goalsToSend(later);
+    expect(Object.keys(sent).sort()).toEqual([
+      'durationMinutes',
+      'effortCheckIns',
+      'heartRateAbove',
+      'holdRange',
+      'powerCeiling',
+      'sessionType',
+    ]);
+    expect(JSON.stringify(sent)).not.toMatch(/restingHeartRate|note|ease off|Zone 2|label/);
+  });
+
   it('copies a summary key by key, so a figure added to one later is not sent by accident', () => {
     const extra = { block: 0, seconds: 10, rescues: 0, position: { latitude: 51.5, longitude: 0 } };
     const built = replanInput({
@@ -130,6 +251,82 @@ describe('what a re-plan request carries — the one builder', () => {
     expect(
       [...keys].filter((key) => /watt|date|name|id$|label|latitude|longitude/i.test(key)),
     ).toEqual([]);
+  });
+});
+
+describe('what is sent is held to the instance’s budget — replanInputWithin', () => {
+  it('sends every summary when they fit', () => {
+    const from = { ...GOLDEN_FROM };
+    expect(replanInputWithin(from)).toStrictEqual(replanInput(from));
+  });
+
+  it('leaves out the OLDEST summaries of a long workout, and stays inside 8 KB', () => {
+    const built = replanInputWithin(LONG_FROM);
+    if (built === undefined) throw new Error('nothing was built');
+    const bytes = (value: unknown): number =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    expect(REPLAN_INPUT_BYTE_BUDGET).toBe(8 * 1024);
+    // All 63 would not fit: that is the request the instance refuses.
+    expect(bytes(replanInput(LONG_FROM))).toBeGreaterThan(REPLAN_INPUT_BYTE_BUDGET);
+    expect(bytes(built)).toBeLessThanOrEqual(REPLAN_INPUT_BYTE_BUDGET);
+    // The most recent ones, in order, ending with the block just ridden.
+    const kept = built.summaries.map((each) => each.block);
+    expect(kept.length).toBeGreaterThan(10);
+    expect(kept.length).toBeLessThan(LONG_FROM.summaries.length);
+    expect(kept).toEqual(LONG_FROM.summaries.slice(-kept.length).map((each) => each.block));
+    expect(kept.at(-1)).toBe(62);
+    // As many as fit: one more would not.
+    const oneMore = replanInput({
+      ...LONG_FROM,
+      summaries: LONG_FROM.summaries.slice(-(kept.length + 1)),
+    });
+    expect(bytes(oneMore)).toBeGreaterThan(REPLAN_INPUT_BYTE_BUDGET);
+    // The plan and the goals are sent whole whatever is left out.
+    expect(built.blocks).toHaveLength(64);
+    expect(built.goals).toStrictEqual(goalsToSend(EVERY_GOAL));
+  });
+
+  it('never sends more summaries than the instance reads', () => {
+    const many = Array.from({ length: 80 }, (_, index) => ({
+      block: 0,
+      seconds: index,
+      rescues: 0,
+    }));
+    const built = replanInputWithin({ ...GOLDEN_FROM, summaries: many });
+    expect(built?.summaries).toHaveLength(REPLAN_MAXIMUM_SUMMARIES);
+    expect(built?.summaries.at(-1)?.seconds).toBe(79);
+  });
+
+  it('builds nothing when no summary fits beside the plan, or there is none', () => {
+    expect(replanInputWithin(LONG_FROM, 2_000)).toBeUndefined();
+    expect(replanInputWithin({ ...GOLDEN_FROM, summaries: [] })).toBeUndefined();
+  });
+});
+
+describe('the golden requests: one file the device’s suite and the instance’s both read', () => {
+  it('is exactly what the builder produces for an ordinary workout', () => {
+    const built = replanInputWithin(GOLDEN_FROM);
+    if (built === undefined) throw new Error('nothing was built');
+    expect(JSON.parse(JSON.stringify(replanRequest(built)))).toStrictEqual(
+      golden('replan-request.json'),
+    );
+  });
+
+  it('is exactly what the builder produces for a long workout, bounded', () => {
+    const built = replanInputWithin(LONG_FROM);
+    if (built === undefined) throw new Error('nothing was built');
+    expect(JSON.parse(JSON.stringify(replanRequest(built)))).toStrictEqual(
+      golden('replan-request-long.json'),
+    );
+  });
+
+  it('holds this build’s template version and source', () => {
+    for (const file of ['replan-request.json', 'replan-request-long.json']) {
+      expect(golden(file)).toMatchObject({
+        templateVersion: REPLAN_TEMPLATE_VERSION,
+        source: REPLAN_SOURCE,
+      });
+    }
   });
 });
 

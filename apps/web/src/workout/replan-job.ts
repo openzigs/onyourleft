@@ -58,6 +58,15 @@ import type { JobSession } from '../ride-analysis/instance-job';
  * §`replan-template.ts` §`REPLAN_TEMPLATE.version`), which is how it tells a
  * re-plan from a write-up. A request naming any other is refused
  * `validation_failed`, which is the static plan.
+ *
+ * ⚠️ **Written twice, and held together by one file.** `apps/web` and
+ * `apps/instance` may not import each other, so this and the instance's own
+ * are two constants. `packages/domain/src/workout/fixtures/replan-request.json`
+ * is a request exactly as {@link replanRequest} builds it: `replan-job.test.ts`
+ * fails when the builder stops producing it, and `apps/instance`
+ * §`replan-golden.test.ts` fails when the instance's own start stops taking
+ * it. So this constant, a key or a limit drifting on either side is a red
+ * test on that side, not a feature that refuses every request.
  */
 export const REPLAN_TEMPLATE_VERSION = 're-plan-1';
 
@@ -102,14 +111,24 @@ export interface ReplanRequest {
 }
 
 /**
- * The goals as they are sent: every typed goal but the time-in-range target.
+ * The goals as they are sent: each typed goal NAMED, as {@link blockToSend}
+ * names a block's keys, and the time-in-range target not among them. So a
+ * goal added to `WorkoutGoals` later is not sent until this says so, and the
+ * privacy policy's list of the goals that leave is this list.
  *
  * @see the file comment — spike 0022's rule R1, withheld until the owner rules.
  */
 export function goalsToSend(goals: WorkoutGoals): WorkoutGoals {
-  const sent: { -readonly [Goal in keyof WorkoutGoals]: WorkoutGoals[Goal] } = { ...goals };
-  delete sent.timeInRangeMinutes;
-  return sent;
+  return {
+    ...(goals.sessionType === undefined ? {} : { sessionType: goals.sessionType }),
+    ...(goals.durationMinutes === undefined ? {} : { durationMinutes: goals.durationMinutes }),
+    ...(goals.holdRange === undefined
+      ? {}
+      : { holdRange: { low: goals.holdRange.low, high: goals.holdRange.high } }),
+    ...(goals.heartRateAbove === undefined ? {} : { heartRateAbove: goals.heartRateAbove }),
+    ...(goals.powerCeiling === undefined ? {} : { powerCeiling: goals.powerCeiling }),
+    ...(goals.effortCheckIns === undefined ? {} : { effortCheckIns: goals.effortCheckIns }),
+  };
 }
 
 /**
@@ -178,6 +197,46 @@ export function replanInput(from: {
     blocks: from.blocks.map(blockToSend),
     summaries: from.summaries.map(summaryToSend),
   };
+}
+
+/**
+ * The most a re-plan's input may be, serialised, in bytes (`apps/instance`
+ * §`replan-input.ts` §`REPLAN_INPUT_BYTE_BUDGET`). An input over it is refused
+ * `validation_failed`, which would end the asking for the workout.
+ */
+export const REPLAN_INPUT_BYTE_BUDGET = 8 * 1024;
+
+/** The most summaries one input may carry (`apps/instance` §`MAXIMUM_INPUT_SUMMARIES`). */
+export const REPLAN_MAXIMUM_SUMMARIES = 64;
+
+const bytesOf = (input: ReplanInput): number =>
+  new TextEncoder().encode(JSON.stringify(input)).byteLength;
+
+/**
+ * {@link replanInput}, held to what the instance reads: at most
+ * {@link REPLAN_MAXIMUM_SUMMARIES} summaries and {@link REPLAN_INPUT_BYTE_BUDGET}
+ * bytes. The plan's blocks and the goals are always sent whole; when the
+ * summaries do not all fit, **the oldest are left out and the most recent
+ * sent**, so a long workout is asked about with less history rather than not
+ * at all. The instance takes any one or more of them (`replan-input.ts`
+ * §`readReplanInput`: a list that is not empty).
+ *
+ * `undefined` when not even the latest summary fits beside the plan, or
+ * there is none: nothing is sent then.
+ */
+export function replanInputWithin(
+  from: Parameters<typeof replanInput>[0],
+  budget: number = REPLAN_INPUT_BYTE_BUDGET,
+): ReplanInput | undefined {
+  let summaries = from.summaries.slice(-REPLAN_MAXIMUM_SUMMARIES);
+  while (summaries.length > 0) {
+    const input = replanInput({ ...from, summaries });
+    if (bytesOf(input) <= budget) {
+      return input;
+    }
+    summaries = summaries.slice(1);
+  }
+  return undefined;
 }
 
 /** The ONE builder of a re-plan request. The instance refuses any key it does not name. */

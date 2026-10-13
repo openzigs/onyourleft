@@ -15,10 +15,13 @@ import { describe, expect, it } from 'vitest';
 
 import { PRIORITY, ALWAYS_SPOKEN } from '../game/hud/announce';
 
+import * as disclosureModule from './replan-disclosure';
+import * as textModule from './replan-text';
 import {
-  KEEP_THE_PLAN,
   planChangeAnnouncement,
   planChangeMayBeSpoken,
+  planDiscardedAnnouncement,
+  REPLAN_DISCARDED,
   REPLAN_FIXED_TEXTS,
   REPLAN_REASON_TEXTS,
   replanSentence,
@@ -147,8 +150,26 @@ describe('a re-plan’s one sentence', () => {
     }
   });
 
-  it('names the one control as ADR 0048 D-7 does', () => {
-    expect(KEEP_THE_PLAN).toBe('Keep the plan');
+  it('holds no second copy of the switch’s label, its help or the control’s name — #1245 owns them', () => {
+    // One set of words for the owner to approve: `replan-disclosure.ts`'s.
+    const mine = new Set<unknown>(Object.values(textModule).flat());
+    for (const theirs of [
+      disclosureModule.REPLAN_SWITCH_LABEL,
+      disclosureModule.REPLAN_KEEP_BUTTON,
+      disclosureModule.HOLD_SENDS_NOTHING,
+      ...disclosureModule.replanDisclosureSentences(disclosureModule.replanDisclosure()),
+    ]) {
+      expect(mine.has(theirs), `"${theirs}" is also in replan-text.ts`).toBe(false);
+    }
+    expect(Object.keys(textModule).filter((name) => /SWITCH|KEEP_THE_PLAN/.test(name))).toEqual([]);
+  });
+
+  it('has one sentence for a waiting move a pause or a lost trainer discarded', () => {
+    expect(REPLAN_DISCARDED).toBe(
+      'That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.',
+    );
+    expect(REPLAN_DISCARDED.match(/[.!?]/g)).toHaveLength(1);
+    expect(REPLAN_FIXED_TEXTS).toContain(REPLAN_DISCARDED);
   });
 });
 
@@ -211,6 +232,16 @@ describe('when a re-plan is spoken', () => {
     expect(hard.offered).toBeUndefined();
     const after = planChangeAnnouncement(hard.offered, waiting, { timeline, elapsedSeconds: 540 });
     expect(after.event).toBeDefined();
+  });
+
+  it('says a discarded move once, with its label, and each discarded move on its own', () => {
+    const first = planDiscardedAnnouncement(undefined, 3);
+    expect(first.event).toEqual({ kind: 'plan-changed', text: `Plan change: ${REPLAN_DISCARDED}` });
+    expect(first.said).toBe(3);
+    expect(planDiscardedAnnouncement(first.said, 3)).toEqual({ event: undefined, said: 3 });
+    expect(planDiscardedAnnouncement(first.said, 5).event).toBeDefined();
+    // Nothing discarded: nothing said, and what was said is remembered.
+    expect(planDiscardedAnnouncement(3, undefined)).toEqual({ event: undefined, said: 3 });
   });
 
   it('offers nothing when no move is waiting', () => {

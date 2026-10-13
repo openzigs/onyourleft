@@ -67,18 +67,25 @@
  *
  * - **The per-ride switch**, in the chooser, off every time the chooser is
  *   shown (P7). Offered only where a re-plan could happen at all
- *   ({@link WorkoutPanelProps.replansAvailable}), with what it sends written
- *   under it and never behind a disclosure: it is what leaves the device.
+ *   ({@link WorkoutPanelProps.replansAvailable}), with **the whole of
+ *   #1245's disclosure** (`workout/replan-disclosure.ts` §`replanDisclosure`)
+ *   written under it, there before it is switched on and never behind a
+ *   disclosure widget: it is what leaves the device. The switch's label and
+ *   every sentence are that module's, which the privacy policy is held to
+ *   word for word, so the screen and the policy cannot say two things. Its
+ *   last sentence, *"This is off. …"*, is shown only while the switch is off.
  *   ⚠️ After the list of workouts, not before it: `rideview.browser.spec.ts`
  *   holds the control that starts a workout above the fold (#422), and the
- *   switch must not push it down.
+ *   switch and its nine sentences must not push it down.
  * - ***Keep the plan***, while an accepted move waits for the next block: the
  *   sentence first, then the one 48 px control
  *   (`design/ride-time-controls.ts`). It is not offered at any other time,
  *   because there is nothing to keep the plan from.
  *
- * Every word of both is `workout/replan-text.ts`'s, composed on this device.
- * `RideAnnouncer` says the sentence; nothing here is `live` but the answer to
+ * A move's sentence and the status lines are `workout/replan-text.ts`'s,
+ * composed on this device; the control's name is `replan-disclosure.ts`'s.
+ * `RideAnnouncer` says the sentence, and the one that says a pause or a lost
+ * trainer discarded a waiting move; nothing here is `live` but the answer to
  * the rider's own press, *"The plan stays as it was."* (#445's rule).
  *
  * ## Colour carries nothing
@@ -112,12 +119,15 @@ import {
 } from '../workout/rescue-text';
 import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
 import {
-  KEEP_THE_PLAN,
+  REPLAN_KEEP_BUTTON,
+  REPLAN_SWITCH_LABEL,
+  replanDisclosure,
+} from '../workout/replan-disclosure';
+import {
   PLAN_KEPT,
+  REPLAN_DISCARDED,
   REPLAN_LABEL,
   REPLAN_STARTS_AT_NEXT_BLOCK,
-  REPLAN_SWITCH_HELP,
-  REPLAN_SWITCH_LABEL,
 } from '../workout/replan-text';
 import { durationText, workoutRow } from '../workouts/library';
 
@@ -206,6 +216,9 @@ export interface WorkoutPanelProps {
   readonly keepAliveFailed?: boolean | undefined;
 }
 
+/** The id the re-plan switch's `aria-describedby` names: the disclosure's headline. */
+const REPLAN_DISCLOSURE_HEADLINE_ID = 'oyl-replan-disclosure-headline';
+
 export function WorkoutPanel({
   trainer,
   workout,
@@ -231,6 +244,7 @@ export function WorkoutPanel({
    * made for one ride is not carried into the next.
    */
   const [replans, setReplans] = useState(false);
+  const disclosure = replanDisclosure();
   const loaded = workout !== undefined;
   useEffect(() => {
     if (loaded) setReplans(false);
@@ -374,10 +388,18 @@ export function WorkoutPanel({
             </StatusMessage>
             {onKeepPlan === undefined ? null : (
               <Button variant="secondary" size="ride" type="button" onClick={onKeepPlan}>
-                {KEEP_THE_PLAN}
+                {REPLAN_KEEP_BUTTON}
               </Button>
             )}
           </>
+        )}
+        {workout.replan?.discarded === undefined ? null : (
+          // A pause or a lost trainer discarded the waiting move (D-8). One
+          // sentence, in the snapshot in which the plan ahead and the graph
+          // went back. Not `live`: `RideAnnouncer` says it, once.
+          <StatusMessage tone="info" label={REPLAN_LABEL}>
+            {REPLAN_DISCARDED}
+          </StatusMessage>
         )}
         {workout.replan?.kept !== true ? null : (
           // The answer to the rider's own press, so it is `live` (#445).
@@ -519,22 +541,40 @@ export function WorkoutPanel({
         thresholdPower === undefined ||
         saved.length === 0 ? null : (
           // #1244: the per-ride switch, only where a workout can be started
-          // and a re-plan could happen. What it sends is written under it.
-          <>
+          // and a re-plan could happen. #1245's disclosure is written under
+          // it, whole, whether the switch is off or on.
+          <div className="oyl-workout-replans">
             <label>
               <input
                 type="checkbox"
                 role="switch"
                 checked={replans}
-                aria-describedby="oyl-replan-switch-help"
+                aria-describedby={REPLAN_DISCLOSURE_HEADLINE_ID}
                 onChange={(event) => {
                   setReplans(event.target.checked);
                 }}
               />
               {REPLAN_SWITCH_LABEL}
             </label>
-            <p id="oyl-replan-switch-help">{REPLAN_SWITCH_HELP}</p>
-          </>
+            {/*
+              ⚠️ The switch is DESCRIBED by the headline alone, which says
+              what switching it on does in one sentence. The paragraphs are
+              ordinary text straight after it, in reading order: nine
+              sentences as one accessible description would be read out in
+              one breath on every focus, with no way to move through them.
+            */}
+            <div data-oyl-replan-disclosure="">
+              <p id={REPLAN_DISCLOSURE_HEADLINE_ID}>
+                <strong>{disclosure.headline}</strong>
+              </p>
+              {disclosure.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+              <p>{disclosure.notNeeded}</p>
+              {/* True only while it is off (`ReplanDisclosure.offUntilOn`). */}
+              {replans ? null : <p>{disclosure.offUntilOn}</p>}
+            </div>
+          </div>
         )}
       </section>
     );

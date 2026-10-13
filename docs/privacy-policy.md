@@ -82,8 +82,9 @@ model looks up, masked first. A ride analysis never sends it a picture. Nothing 
 with, the operator's key is never used for you, and nothing is sent until you have stored a key and
 agreed. It is described under **Questions your instance sends to a service you agreed to** below.
 
-**The fifth thing you can switch on: re-plans during a ride.** If you are signed in to an instance
-and choose a workout on the Ride screen, you can switch on *Re-plan during the ride* for that ride.
+**The fifth thing you can switch on: re-plans during a ride.** If you are signed in to an instance,
+have set your own threshold power and threshold heart rate, and choose a workout on the Ride screen,
+you can switch on *Re-plan during the ride* for that ride.
 While it is on, as each block begins, and never more often than every 3 minutes, this device sends
 your instance a summary of each block you have ridden so far — never a second-by-second recording,
 and never where you are — sealed so that only your instance can open it, with the workout's blocks
@@ -600,13 +601,14 @@ to help you ride at the effort you chose. It needs no instance, and nothing abou
 device unless you sync the ride afterwards.
 
 **Re-plans during a ride are separate, and off unless you switch them on for that ride.** If you
-are signed in to an instance, the workout panel on the Ride screen has a switch, *Re-plan during the
-ride*, when you choose a workout. It is off at the start of every ride. This is what you are shown
+are signed in to an instance and have set your own threshold power and threshold heart rate, the
+workout panel on the Ride screen has a switch, *Re-plan during the ride*, when you choose a workout
+with a trainer this app controls. It is off at the start of every ride. This is what you are shown
 beside it:
 
 > **This sends a summary of each block you ride to your instance, during the ride.**
 >
-> While it is on, as each block of the workout begins, and never more often than every 3 minutes, this device sends your instance a summary of each block you have ridden so far: how long the block lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased.
+> While it is on, as each block of the workout begins, and never more often than every 3 minutes, this device sends your instance a summary of each block you have ridden so far: how long the block lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased. In a long workout with more blocks than fit in one request, only the most recent are sent.
 >
 > With it go the blocks of the workout as it stands and which one you are riding: the kind of each block, how long it lasts, how many times an interval repeats, its power targets as shares of your threshold power and, for a heart-rate hold, the range you chose in beats per minute. So do your workout goals: the kind of session, its length, the heart-rate range you chose and the heart rate you chose not to go above, both in beats per minute, the most power as a share of your threshold power, and whether you want to be asked how hard it feels. The time you want to spend in your range is not sent.
 >
@@ -623,7 +625,8 @@ beside it:
 > This is off. It is off at the start of every ride, and stays off until you switch it on for that ride.
 
 - **What is sent:** one request each time, and this is the whole of it. The summaries: for each
-  block you have ridden so far, which block it was, how long it lasted, your mean and highest heart
+  block you have ridden so far — or, in a long workout with more blocks than fit in one request,
+  for the most recent of them — which block it was, how long it lasted, your mean and highest heart
   rate in beats per minute, the seconds your heart rate was inside the range you chose (for a
   heart-rate hold), your mean power as a share of your threshold power, your mean cadence, and how
   many times the target had to be eased. The workout's blocks as they stand: each one's kind, its
