@@ -39,7 +39,6 @@ import {
   REPLAN_OFF_BUTTON,
   REPLAN_UNAVAILABLE,
   REPLANS_OFF,
-  REPLANS_ON_BADGE,
 } from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
@@ -500,11 +499,19 @@ describe('re-plans during the ride — #1244', () => {
       expect(shownDisclosure(view.container)).toEqual([]);
     });
 
-    it('comes after the workouts, so it does not push the Ride control down — #422', async () => {
+    it('comes BEFORE the workouts, with the headline; the other eight sentences come after them — #1329', async () => {
       const view = await render({ replansAvailable: true });
       const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
       const input = theSwitch(view.container) as HTMLElement;
-      expect(ride.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const follows = (a: Element, b: Element) =>
+        (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      expect(follows(input, ride)).toBe(true);
+      const headline = view.container.querySelector('#oyl-replan-disclosure-headline') as Element;
+      expect(follows(input, headline)).toBe(true);
+      expect(follows(headline, ride)).toBe(true);
+      const rest = queryAll(view.container, '[data-oyl-replan-disclosure="rest"] p');
+      expect(rest).toHaveLength(8);
+      expect(follows(ride, rest[0] as Element)).toBe(true);
     });
 
     it('is not shown where no workout can be started', async () => {
@@ -688,40 +695,15 @@ describe('re-plans during the ride — #1244', () => {
   });
 
   describe('the switch’s state where Ride is pressed, and at the start of every ride', () => {
-    const onLine = (root: ParentNode): string | undefined =>
-      queryAll(root, '[data-oyl-replans-on]')[0]?.textContent ?? undefined;
-
-    it('says beside the heading that it is on, only while it is on', async () => {
+    it('says nothing beside the heading: the switch is above the list, so there is no "on" badge — #1329', async () => {
       const view = await render({ replansAvailable: true });
-      expect(onLine(view.container)).toBeUndefined();
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
-      expect(onLine(view.container)).toBe(REPLANS_ON_BADGE);
-      // Text, in a paragraph of its own, before the first control that starts a workout.
-      const badge = queryAll(view.container, '[data-oyl-replans-on]')[0] as HTMLElement;
-      expect(badge.tagName).toBe('P');
-      const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
-      expect(badge.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
-      expect(onLine(view.container)).toBeUndefined();
-    });
-
-    it('leaves the heading’s own name alone: the badge is beside the heading, not in it', async () => {
-      const view = await render({ replansAvailable: true });
-      const heading = () => view.container.querySelector('h3');
-      expect(heading()?.textContent).toBe('Ride a workout');
-      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
-      // ⚠️ Still exactly this: a heading is what a screen-reader user moves by.
-      expect(heading()?.textContent).toBe('Ride a workout');
-      expect(heading()?.getAttribute('aria-label')).toBeNull();
-      expect(heading()?.querySelector('[data-oyl-replans-on]')).toBeNull();
-      // Straight after the heading, on its line: the heading's next sibling.
-      expect(heading()?.nextElementSibling?.textContent).toBe(REPLANS_ON_BADGE);
-      expect(heading()?.parentElement?.classList.contains('oyl-workout-heading')).toBe(true);
-    });
-
-    it('never says it where there is no switch', async () => {
-      const view = await render();
-      expect(onLine(view.container)).toBeUndefined();
+      expect(queryAll(view.container, '[data-oyl-replans-on]')).toEqual([]);
+      expect(view.container.textContent).not.toContain('Re-plans on');
+      // The heading is a plain heading, with nothing beside it.
+      const heading = view.container.querySelector('h3');
+      expect(heading?.textContent).toBe('Ride a workout');
+      expect(heading?.nextElementSibling?.classList.contains('oyl-workout-replans')).toBe(true);
     });
 
     it('is off again when a ride starts, and when one ends, though no workout was started', async () => {
@@ -740,7 +722,6 @@ describe('re-plans during the ride — #1244', () => {
       await view.rerender(<WorkoutPanel {...props} workout={undefined} rideInProgress />);
       await settle();
       expect(theSwitch(view.container)?.checked).toBe(false);
-      expect(onLine(view.container)).toBeUndefined();
       // Switched on during the ride, with no workout started; the ride ends.
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
       expect(theSwitch(view.container)?.checked).toBe(true);

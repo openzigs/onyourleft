@@ -853,3 +853,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `goal-time-in-range` and `effort-check-in`: the move is said alone, and P9's record carries
   `reasonNotShown`. Four reasons can still be said: `heart-rate-high`, `heart-rate-low`,
   `cadence-falling` and `goal-duration`. (#1244)
+
+- **2026-10-13** — **The switch is above the list, and *"Re-plans on"* is gone.** The owner ruled on
+  #1329 that *Re-plan during the ride* sits ABOVE the list of workouts, so a rider sees it and what
+  it sends before choosing one. D-7's consequence *"While it is on, 'Re-plans on' is said beside the
+  chooser's heading, because the switch itself is under the list"* no longer holds: the reason went
+  with the move, and the badge and its string were removed. The disclosure's headline sits under the
+  switch and its other eight sentences under the list, in their order, because nine sentences above
+  the list would push *Ride* off a landscape tablet's screen; no word of the wording changed. The
+  first *Ride* now ends about 4 px above the fold at 1280×800 in the shell (it was about 98), so the
+  browser gate holds it on the screen and not to the 50 px floor, which is for the owner to
+  confirm. (#1329)

@@ -827,15 +827,13 @@ export interface RideViewMeasurement {
    * its box, each sentence it shows in order, where its headline is, whether
    * a `<details>` holds any of it, and whether the switch is checked.
    */
-  /**
-   * #1244: the line above the list that says the re-plan switch is on, if it
-   * is shown; and the line that says re-plans were switched off mid-workout.
-   */
-  readonly replansOnLine: { readonly box: Box; readonly text: string } | undefined;
+  /** #1244: the line that says re-plans were switched off mid-workout. */
   readonly replansOffLine: { readonly box: Box; readonly text: string } | undefined;
   readonly replanDisclosure:
     | {
         readonly box: Box;
+        /** The block under the list: the disclosure's other eight sentences. */
+        readonly rest: Box;
         readonly sentences: readonly string[];
         readonly headline: Box | undefined;
         readonly inDisclosure: boolean;
@@ -929,8 +927,8 @@ declare global {
       readonly openEasedDetail: () => void;
       /** #1244: press the re-plan switch. @see pressReplanSwitch */
       readonly pressReplanSwitch: () => void;
-      /** #1244's control. @see disclosureBeforeTheSwitch */
-      readonly disclosureBeforeTheSwitch: () => void;
+      /** #1244's control. @see restOfDisclosureAboveTheList */
+      readonly restOfDisclosureAboveTheList: () => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
       /** #692's control: the screen as it was laid out before #692. @see asBefore692 */
@@ -1028,9 +1026,6 @@ function measure(): RideViewMeasurement {
     eased: easedNotice(),
     keepScreenOn: keepScreenOnNotice(),
     replanDisclosure: replanDisclosureShown(),
-    replansOnLine: lineOf(
-      document.querySelector('.oyl-ride__group--trainer [data-oyl-replans-on]'),
-    ),
     replansOffLine: lineOf(
       [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find((each) =>
         textOf(each).includes('Re-plans are off'),
@@ -1282,20 +1277,37 @@ function lineOf(element: Element | null): { readonly box: Box; readonly text: st
 }
 
 function replanDisclosureShown(): RideViewMeasurement['replanDisclosure'] {
-  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
-  if (block === null) {
+  // #1329: two blocks, the headline above the list and the rest under it.
+  const blocks = [
+    ...document.querySelectorAll('.oyl-ride__group--trainer [data-oyl-replan-disclosure]'),
+  ];
+  const first = blocks[0];
+  const last = blocks.at(-1);
+  if (first === undefined || last === undefined) {
     return undefined;
   }
-  const paragraphs = [...block.querySelectorAll('p')];
+  const paragraphs = blocks.flatMap((block) => [...block.querySelectorAll('p')]);
   const headline = paragraphs[0];
   const input = document.querySelector<HTMLInputElement>(
     '.oyl-ride__group--trainer input[role="switch"]',
   );
+  const from = boxOf(first);
+  const to = boxOf(last);
   return {
-    box: boxOf(block),
+    box: {
+      left: Math.min(from.left, to.left),
+      top: from.top,
+      right: Math.max(from.right, to.right),
+      bottom: to.bottom,
+      width: Math.max(from.right, to.right) - Math.min(from.left, to.left),
+      height: to.bottom - from.top,
+    },
+    rest: to,
     sentences: paragraphs.map(textOf),
     headline: headline === undefined ? undefined : boxOf(headline),
-    inDisclosure: block.closest('details') !== null || block.querySelector('details') !== null,
+    inDisclosure: blocks.some(
+      (block) => block.closest('details') !== null || block.querySelector('details') !== null,
+    ),
     switchedOn: input?.checked === true,
   };
 }
@@ -1314,19 +1326,22 @@ function pressReplanSwitch(): void {
 }
 
 /**
- * #1244's control: the disclosure as it would be BEFORE the switch, which is
- * the order a reader might expect and the one that pushes the switch down the
- * column by nine sentences. On the live elements, as the other controls are.
+ * #1329's control: the rest of the disclosure ABOVE the list, straight under
+ * the headline, which is where reading it in one piece would put it, and
+ * which pushes the first *Ride* down the column by eight sentences. On the
+ * live elements, as the other controls are.
  */
-function disclosureBeforeTheSwitch(): void {
-  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
-  const label = document
-    .querySelector('.oyl-ride__group--trainer input[role="switch"]')
-    ?.closest('label');
-  if (block === null || label === null || label === undefined) {
-    throw new Error('rideview harness: no re-plan switch and disclosure to reorder');
+function restOfDisclosureAboveTheList(): void {
+  const rest = document.querySelector(
+    '.oyl-ride__group--trainer [data-oyl-replan-disclosure="rest"]',
+  );
+  const headline = document.querySelector(
+    '.oyl-ride__group--trainer [data-oyl-replan-disclosure="headline"]',
+  );
+  if (rest === null || headline === null) {
+    throw new Error('rideview harness: no re-plan disclosure to reorder');
   }
-  label.before(block);
+  headline.after(rest);
 }
 
 function keepScreenOnElement(): Element | undefined {
@@ -1565,7 +1580,7 @@ async function run(): Promise<void> {
     restoreFullHeightShell,
     openEasedDetail,
     pressReplanSwitch,
-    disclosureBeforeTheSwitch,
+    restOfDisclosureAboveTheList,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,
@@ -1585,7 +1600,7 @@ run().catch((error: unknown) => {
     restoreFullHeightShell,
     openEasedDetail,
     pressReplanSwitch,
-    disclosureBeforeTheSwitch,
+    restOfDisclosureAboveTheList,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,

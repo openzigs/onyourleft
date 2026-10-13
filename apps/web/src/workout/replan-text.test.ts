@@ -25,7 +25,6 @@ import {
   REPLAN_FIXED_TEXTS,
   REPLAN_OFF_BUTTON,
   REPLANS_OFF,
-  REPLANS_ON_BADGE,
   REPLAN_REASON_TEXTS,
   replanSentence,
 } from './replan-text';
@@ -130,8 +129,7 @@ describe('a re-plan’s one sentence', () => {
     expect(REPLANS_OFF).toBe(
       'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
     );
-    expect(REPLANS_ON_BADGE).toBe('Re-plans on');
-    for (const text of [REPLAN_OFF_BUTTON, REPLANS_OFF, REPLANS_ON_BADGE]) {
+    for (const text of [REPLAN_OFF_BUTTON, REPLANS_OFF]) {
       expect(REPLAN_FIXED_TEXTS).toContain(text);
     }
   });
