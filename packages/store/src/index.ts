@@ -181,6 +181,8 @@ export {
 export type {
   NewRecordingChunk,
   NewRecordingSession,
+  RecordedCourseLap,
+  RecordedLapMark,
   RecordingChunkRecord,
   RecordingFootprint,
   RecordingSessionRecord,

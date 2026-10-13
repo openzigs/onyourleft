@@ -76,6 +76,13 @@ export const ERASE_REMOVES: readonly string[] = [
   // because they are separately recoverable: the export now carries the laps
   // inside each activity file and the signed record in a `.record.json` beside
   // it (ADR 0019), so a rider who reads this line has somewhere to go.
+  //
+  // ⚠️ **True of where each lap began and how long it lasted, and since #1312
+  // not of everything a lap holds.** A course lap's climb and its part-lap
+  // mark are in no file (#1321), its averages are not stated in one (they can
+  // be worked out again from the lap's samples), and an import writes no lap
+  // row at all (#1320) — so export everything, erase, import gives the rides
+  // back with no lap table. This line is the rider's warning of exactly that.
   'the laps and splits of every ride',
   // ⚠️ And this one is the irreversible half. ADR 0014 D-7: the signing key
   // cannot be backed up, so a record destroyed here can never be minted again,

@@ -60,6 +60,12 @@ erDiagram
         number  movingTime       "Seconds"
         number  distance         "Metres"
         number  averagePower     "Watts, optional"
+        number  maxPower         "Watts, optional (#1312)"
+        number  averageHeartRate "BeatsPerMinute, optional (#1312)"
+        number  maxHeartRate     "BeatsPerMinute, optional (#1312)"
+        number  averageCadence   "RevolutionsPerMinute, optional (#1312)"
+        number  ascent           "Metres climbed, optional (#1312)"
+        boolean partial          "true only: the rider stopped part-way round (#1312)"
     }
     PRIVACY_ZONE {
         string  id         PK
@@ -97,6 +103,7 @@ erDiagram
         string  state                    "recording | paused | stopped"
         number  updatedAt                "UnixSeconds — what the recovery list orders by"
         string  pauses                   "the intervals that keep a pause apart from a dropout"
+        string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"

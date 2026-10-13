@@ -51,7 +51,7 @@
  * possible outcome for a recovery path.
  */
 
-import type { RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
+import type { Metres, RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
 import type { StreamChannels } from './streams';
@@ -78,6 +78,34 @@ export const RECORDING_STORED_STATES: readonly RecordingStoredState[] = [
   'paused',
   'stopped',
 ];
+
+/** One end of a lap: the instant, and the recording's own moving time at it. */
+export interface RecordedLapMark {
+  readonly at: UnixSeconds;
+  readonly movingTime: Seconds;
+}
+
+/**
+ * A lap of a course ridden during a recording, as the recording holds it
+ * before there is an activity for a lap row to belong to (#1312).
+ *
+ * ⚠️ **Where it began and ended, and what the course says of it — and no
+ * average.** A lap's power, heart rate and cadence are worked out from the
+ * recording's samples when the ride is saved, because until then a slot can
+ * still take a late reading. What is here is the part the samples cannot give
+ * back: nothing in the eight channels says where the line of a course was, how
+ * long its road is or how much it climbs.
+ */
+export interface RecordedCourseLap {
+  readonly from: RecordedLapMark;
+  readonly to: RecordedLapMark;
+  /** The course's road over the lap: a whole lap's length, or as far as the rider got. */
+  readonly distance: Metres;
+  /** Metres climbed over it, where the course can say. */
+  readonly ascent?: Metres | undefined;
+  /** The rider stopped before the line. Absent for a whole lap. */
+  readonly partial?: true | undefined;
+}
 
 /** The small indexed row: one per recording. */
 export interface RecordingSessionRecord {
@@ -121,6 +149,19 @@ export interface RecordingSessionRecord {
    * crash can lose the link is the same window that already loses the discard.
    */
   readonly savedAs?: ActivityId | undefined;
+  /**
+   * The laps of a course completed so far, in the order they were ridden —
+   * #1312.
+   *
+   * ⚠️ **Optional, so it is not a migration**, by {@link savedAs}'s rule: a
+   * header written before it reads back with it absent, which is a recording
+   * with no laps.
+   *
+   * On the header for {@link pauses}' reason, and because it is the only place
+   * a crash leaves them: without it a ride recovered after a reload is saved
+   * with its samples and none of its laps.
+   */
+  readonly courseLaps?: readonly RecordedCourseLap[] | undefined;
 }
 
 /** What `putRecordingSession` accepts. Identical; named for symmetry with `NewActivity`. */
@@ -184,6 +225,8 @@ export interface RecoveredRecording {
   readonly channels: StreamChannels;
   readonly pauses: readonly RecordedPause[];
   readonly state: RecordingStoredState;
+  /** The header's laps of a course, none for a recording with none. @see RecordingSessionRecord.courseLaps */
+  readonly courseLaps: readonly RecordedCourseLap[];
   /**
    * How many chunk rows made up the recovered prefix.
    *

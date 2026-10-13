@@ -22,6 +22,7 @@ import {
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
+import { lapId } from '@onyourleft/store';
 import type {
   ActivityRecord,
   AthleteRecord,
@@ -60,6 +61,7 @@ import {
   type RideAnalysisInput,
   type RideAnalysisOptions,
 } from '@onyourleft/analysis';
+import { lapsToSave, riddenLap } from '../recording/laps';
 import { rideSummaryBody } from './ride-summary';
 
 const TEMPLATE = 'ride-analysis/1';
@@ -643,6 +645,124 @@ describe('sections', () => {
     expect(input.sections).toStrictEqual([]);
     expect(input.whole).toStrictEqual({});
     expect(input.ride.distanceKilometres).toBe(120);
+  });
+});
+
+describe('a game ride’s course laps (#1312): the first rides whose laps are stored at all', () => {
+  /**
+   * Forty minutes as `recording/finish.ts` saves them: two minutes before the
+   * rider left the line, two whole laps, a part lap, and whatever was recorded
+   * after *End ride*. The lap rows are `lapsToSave`'s own, so they carry
+   * everything a course lap states — a climb, a best power, the part-lap mark.
+   */
+  async function courseRide(part: { readonly seconds: number }): Promise<Saved> {
+    const ride = rideFor(ATHLETE_A, {
+      hasPosition: false,
+      routeId: undefined,
+      elapsedTime: seconds(2400),
+      movingTime: seconds(2400),
+    });
+    const streams = streamSetFor(ride, {
+      sampleCount: 2400,
+      channels: ['power', 'heartRate', 'cadence', 'speed'],
+    });
+    const mark = (offset: number) => ({
+      at: unixSeconds(ride.startedAt + offset),
+      movingTime: seconds(offset),
+    });
+    const course = { distance: metres(5_000), ascent: metres(137.5), partial: false };
+    let minted = 0;
+    const laps = lapsToSave(
+      [
+        riddenLap(mark(120), mark(820), course),
+        riddenLap(mark(820), mark(1500), course),
+        riddenLap(mark(1500), mark(1500 + part.seconds), {
+          distance: metres(2_345.6),
+          ascent: metres(61.5),
+          partial: true,
+        }),
+      ],
+      streams,
+      ride.id,
+      () => lapId(`course-lap-${String((minted += 1))}`),
+    );
+    return saved(ride, streams, { laps });
+  }
+
+  it('gives each lap a section, with the time before the first line and after the last in the laps beside them', async () => {
+    const from = await courseRide({ seconds: 400 });
+    // The premise: the rows read back are course laps, figures and all.
+    expect(from.laps.map((lap) => lap.partial)).toStrictEqual([undefined, undefined, true]);
+    expect(from.laps[0]).toMatchObject({ ascent: 137.5, distance: 5_000 });
+    expect(from.laps[0]?.maxPower).toBeGreaterThan(0);
+
+    const input = inputFor(from);
+
+    expect(input.sections.map((section) => section.kind)).toStrictEqual(['lap', 'lap', 'lap']);
+    expect(input.sections.map((section) => section.laps)).toStrictEqual([
+      { first: 1, last: 1 },
+      { first: 2, last: 2 },
+      { first: 3, last: 3 },
+    ]);
+    // From the ride's start to the second line (820 s); the second lap
+    // (680 s); the part lap and the rest of the recording (900 s). Nothing of
+    // the ride is in no section, and none of it in two.
+    expect(input.sections.map((section) => section.minutes)).toStrictEqual([13.7, 11.3, 15]);
+  });
+
+  it('counts a part lap too short to be a section of its own in the section of the lap before', async () => {
+    const from = await courseRide({ seconds: 60 });
+    // The part lap begins 15 s short of the last sample's five minutes.
+    const shortened = {
+      ...from,
+      streams:
+        from.streams === undefined
+          ? undefined
+          : {
+              ...from.streams,
+              sampleCount: 1560,
+              channels: Object.fromEntries(
+                Object.entries(from.streams.channels).map(([channel, samples]) => [
+                  channel,
+                  samples.slice(0, 1560),
+                ]),
+              ),
+            },
+    };
+
+    const input = inputFor(shortened);
+
+    expect(input.sections.map((section) => section.laps)).toStrictEqual([
+      { first: 1, last: 1 },
+      { first: 2, last: 3 },
+    ]);
+  });
+
+  it('sends nothing a lap states: the same input whether its rows carry their figures or not', async () => {
+    const from = await courseRide({ seconds: 400 });
+    const input = inputFor(from);
+
+    // ⚠️ The whole of the claim "nothing new leaves the device". A lap row
+    // now holds a climb, a best power, a heart rate and a part-lap mark where
+    // it held four fields; the input is byte for byte what the same laps give
+    // with nothing on them but their number and where they began.
+    const bare = from.laps.map((lap) => ({ ordinal: lap.ordinal, startedAt: lap.startedAt }));
+    expect(JSON.stringify(input)).toBe(
+      JSON.stringify(inputFor({ ...from, laps: [] }, { laps: bare })),
+    );
+
+    const found = walk(input);
+    expect(
+      found.keys.filter((key) =>
+        /ascent|partial|maxPower|maxHeartRate|averageCadence|lapId/i.test(key),
+      ),
+    ).toStrictEqual([]);
+    // Neither lap's climb nor the part lap's distance, as a number anywhere.
+    expect(
+      found.numbers.filter((number) => [137.5, 61.5, 2_345.6, 2.3456].includes(number)),
+    ).toStrictEqual([]);
+    expect(leaksIn(input, locatedIn(from))).toStrictEqual({ keys: [], numbers: [] });
+    expect(coordinatesIn(input)).toStrictEqual([]);
   });
 });
 

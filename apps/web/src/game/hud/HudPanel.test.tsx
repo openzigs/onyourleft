@@ -309,6 +309,63 @@ describe('the HUD is four panels (#423)', () => {
     expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
     expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
   });
+
+  describe('the lap that has just ended — #1312', () => {
+    const lap = <p id="lap">Lap 2: 9:52 · 201 W.</p>;
+    const standing = (expanded: boolean) => ({
+      content: <p id="road">The road is not reaching your trainer</p>,
+      expanded,
+      onToggle: () => undefined,
+    });
+
+    it('takes the notice cell when nothing else has it', async () => {
+      mounted = await mount(<HudPanel {...base} lapNotice={lap} />);
+
+      const slot = mounted.container.querySelector('.oyl-hud > .oyl-hud__notices');
+      expect(slot?.querySelector('#lap')?.textContent).toBe('Lap 2: 9:52 · 201 W.');
+      expect(slot?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+    });
+
+    it('gives way to a fault or a safety notice: the cell holds one notice well and two badly', async () => {
+      mounted = await mount(
+        <HudPanel
+          {...base}
+          notices={[
+            <p key="fault" id="said">
+              Trainer lost
+            </p>,
+          ]}
+          lapNotice={lap}
+        />,
+      );
+
+      expect(mounted.container.querySelector('#said')).not.toBeNull();
+      expect(mounted.container.querySelector('#lap')).toBeNull();
+    });
+
+    it('gives way to a standing notice that is open, and not to one put away', async () => {
+      mounted = await mount(<HudPanel {...base} standingNotice={standing(true)} lapNotice={lap} />);
+      expect(mounted.container.querySelector('#lap')).toBeNull();
+      mounted.unmount();
+
+      mounted = await mount(
+        <HudPanel {...base} standingNotice={standing(false)} lapNotice={lap} />,
+      );
+      expect(mounted.container.querySelector('#lap')).not.toBeNull();
+      // The cell is open for the lap, and the road notice is still clipped in it.
+      const slot = mounted.container.querySelector('.oyl-hud__notices');
+      expect(slot?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+      expect(mounted.container.querySelector('#road')?.parentElement?.className).toBe(
+        'oyl-visually-hidden',
+      );
+    });
+
+    it('renders no slot when there is no lap to show', async () => {
+      mounted = await mount(<HudPanel {...base} lapNotice={undefined} />);
+
+      expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
+    });
+  });
 });
 
 /**

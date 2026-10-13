@@ -1094,3 +1094,44 @@ describe('the ride’s moving time — #1111', () => {
     expect(field === undefined ? undefined : readingTier(field)).toBe('secondary');
   });
 });
+
+describe('the lap in progress — #1312', () => {
+  const onLap = (lap: number): HudInput => {
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+    return {
+      ...input,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(8), distance: metres(total * (lap - 1) + 100) },
+      },
+    };
+  };
+  const strip = (input: HudInput) => profileReading(input.state, input.profile, input.lapSeconds);
+
+  it('says the lap’s time beside which lap the rider is on, in the strip’s own sentence', () => {
+    const first = strip({ ...onLap(1), lapSeconds: 65 });
+    expect(first.text).toMatch(/^\d+% of lap 1 · 1:05$/);
+    expect(first.label).toMatch(/^Route profile, \d+ per cent of lap 1, lap time 1:05$/);
+    expect(strip({ ...onLap(3), lapSeconds: 7 }).text).toMatch(/of lap 3 · 0:07$/);
+    // An hour-long lap keeps its hour.
+    expect(strip({ ...onLap(2), lapSeconds: 3_725 }).text).toMatch(/of lap 2 · 1:02:05$/);
+  });
+
+  it('states no lap time, and never a nought, when nothing is being recorded', () => {
+    const reading = strip(onLap(2));
+    expect(reading.text).toMatch(/^\d+% of lap 2$/);
+    expect(reading.label).toMatch(/^Route profile, \d+ per cent of lap 2$/);
+  });
+
+  it('states none on a route that is not a loop: there is no lap to be on', () => {
+    const reading = strip({ ...baseInput(), lapSeconds: 65 });
+    expect(reading.text).toBe('0% complete');
+    expect(reading.label).toBe('Route profile, 0 per cent complete');
+  });
+
+  it('adds no field: a ride on a loop has the readings every other ride has, in their places', () => {
+    const looped = hudReadings({ ...onLap(2), lapSeconds: 65 }).map((reading) => reading.key);
+    expect(looped).toEqual(hudReadings(baseInput()).map((reading) => reading.key));
+  });
+});
