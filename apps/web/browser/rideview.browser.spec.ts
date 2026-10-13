@@ -1062,10 +1062,11 @@ for (const viewport of IN_THE_SHELL) {
  * ## What is held
  *
  * At every tablet, both ways up, inside the shell with the #439 insets on the
- * engine: the SWITCH, its HEADLINE and the control that starts a workout are
- * on the screen with no scrolling and clear of {@link FOLD_MARGIN_PIXELS},
- * with all nine sentences in the document, in order. The 1280×800 claim is
- * {@link TABLET_IN_THE_SHELL}'s: insets 36/32, a fold at 768.
+ * engine: the SWITCH and its HEADLINE are on the screen with no scrolling and
+ * clear of {@link FOLD_MARGIN_PIXELS}, and the control that starts a workout
+ * is on the screen and clear of {@link FIRST_RIDE_FLOOR_PIXELS}, which is
+ * less and says why, with all nine sentences in the document, in order. The
+ * 1280×800 claim is {@link TABLET_IN_THE_SHELL}'s: insets 36/32, a fold at 768.
  *
  * ## What is only published
  *
@@ -1080,20 +1081,31 @@ for (const viewport of IN_THE_SHELL) {
  */
 const REPLANS_AVAILABLE = '?replans=available';
 /**
- * ⚠️ #1329, FOR THE OWNER: how far above the fold the first *Ride* must end
- * when the switch and its headline are above the list. It is 0 — on the
- * screen, no scrolling — and NOT {@link FOLD_MARGIN_PIXELS}. Measured at
- * {@link TABLET_IN_THE_SHELL} (fold at 768): the first *Ride* ended 98 px above
- * the fold with the switch under the list, and 20 px above it on a Mac (CI's
- * fonts are wider, and put it 22 px BELOW the fold when the headline took
- * three lines and the headline was set at the body size) with the switch and
- * its headline above. The switch's row is 44 px and the headline two lines
- * of the small size, in a column 360 px wide; the 50 px floor needs about
- * 30 px more than the column has without moving something that is not this
- * pass's (the ERG note above the chooser is 74 px of it). The switch and its
- * headline are held to the full {@link FOLD_MARGIN_PIXELS}.
+ * ⚠️ #1329, INTERIM AND FOR THE OWNER: how far above the fold the first
+ * *Ride* must end when the switch and its headline are above the list. It is
+ * 15, a floor set from a measurement, and NOT {@link FOLD_MARGIN_PIXELS}, which
+ * is what the owner's ruling asks for. The ruling is not met until this
+ * constant is deleted and the three assertions below use the 50 px one.
+ *
+ * Measured at {@link TABLET_IN_THE_SHELL} (fold at 768), on the CI runner's
+ * fonts and on a Mac: the first *Ride* ended 104.4 px (Mac 98) above the fold
+ * with the switch under the list, and 19.2 px (Mac 20.0) with the switch and
+ * its headline above. So the 50 px floor is about 31 px short, and a margin
+ * under 50 at a device viewport is unproven on the device
+ * ({@link FOLD_MARGIN_PIXELS}): the tablet check for it is on #733.
+ *
+ * Why 15 and not 0: at 0 nothing held the spacing. A list margin of 1rem
+ * moved the first *Ride* 8 px and every case stayed green. At 15 that, the
+ * switch block's margin and the headline's size each turn these cases red.
+ *
+ * The room is not in the chooser. It is in the trainer card above it, which
+ * is not this pass's to change. Measured on a Mac, with no word changed: the
+ * card's paragraph gaps trimmed give 44.0 px; its ERG range sentence (74 px,
+ * three lines) at the small size gives 61.1 px; both give 85.1 px, or 68.8 px
+ * with the headline back at the body size. The switch and its headline are
+ * held to the full {@link FOLD_MARGIN_PIXELS}.
  */
-const FIRST_RIDE_FLOOR_PIXELS = 0;
+const FIRST_RIDE_FLOOR_PIXELS = 15;
 const REPLAN_SWITCH = 'Re-plan during the ride';
 const REPLAN_HEADLINE =
   'This sends a summary of each block you ride to your instance, during the ride.';
@@ -1403,8 +1415,8 @@ test(`#740 — the control — the Held line above the form puts End ERG under t
   const note = `End ERG ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px with the Held line above the form`;
   testInfo.annotations.push({ type: '#740 control', description: note });
   console.log(`#740 — the control — ${note}`);
-  expect(fixed, note).toBeGreaterThanOrEqual(FIRST_RIDE_FLOOR_PIXELS);
-  expect(reverted, note).toBeLessThan(FIRST_RIDE_FLOOR_PIXELS);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
 
 /**
@@ -1951,8 +1963,8 @@ test(`#1042 — the control — the card after the readings puts Done under the 
   const note = `Done ${fixed.toFixed(1)} px → ${reverted.toFixed(1)} px with the card after the readings`;
   testInfo.annotations.push({ type: '#1042 control', description: note });
   console.log(`#1042 — the control — ${note}`);
-  expect(fixed, note).toBeGreaterThanOrEqual(FIRST_RIDE_FLOOR_PIXELS);
-  expect(reverted, note).toBeLessThan(FIRST_RIDE_FLOOR_PIXELS);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
 
 /**

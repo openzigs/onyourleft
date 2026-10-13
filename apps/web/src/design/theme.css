@@ -1490,7 +1490,7 @@ h3:first-child {
 }
 
 .oyl-empty-state > p {
-  margin-block: 0;
+  margin-block: var(--oyl-space-xs) 0;
 }
 
 .oyl-empty-state > .oyl-empty-state__action {

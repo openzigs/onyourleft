@@ -860,7 +860,5 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   chooser's heading, because the switch itself is under the list"* no longer holds: the reason went
   with the move, and the badge and its string were removed. The disclosure's headline sits under the
   switch and its other eight sentences under the list, in their order, because nine sentences above
-  the list would push *Ride* off a landscape tablet's screen; no word of the wording changed. The
-  first *Ride* now ends about 20 px above the fold at 1280×800 in the shell (it was about 98), so the
-  browser gate holds it on the screen and not to the 50 px floor, which is for the owner to
-  confirm. (#1329)
+  the list would push *Ride* off a landscape tablet's screen; no word of the wording changed.
+  (#1329)
