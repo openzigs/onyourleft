@@ -161,6 +161,14 @@ export interface WorkoutTraceSample {
   readonly heartRate: number | undefined;
   /** The range a running heart-rate hold is keeping to, or `undefined` outside one. */
   readonly range: { readonly low: number; readonly high: number } | undefined;
+  /**
+   * The target a running heart-rate hold was asking for at this second, in
+   * watts — its OWN target, before any stall-rescue relief
+   * (`@onyourleft/domain` §`HoldStatus.target`). `undefined` outside a running
+   * hold. Beside {@link target} it is how {@link heldInstead} tells a target
+   * the hold set from one the trainer holds instead of it.
+   */
+  readonly asked?: number | undefined;
 }
 
 /** What the graph is drawn from: a subset of `RideWorkoutSnapshot`, and assignable from it. */
@@ -177,6 +185,14 @@ export interface WorkoutGraphInput {
   readonly trace?: readonly WorkoutTraceSample[] | undefined;
   /** What a re-plan replaced — #1244's to supply. @see the module note */
   readonly replaced?: readonly BlockChartSegment[] | undefined;
+  /**
+   * The heart-rate hold of the block being ridden, as the screens show it
+   * (`hold-text.ts` §`WorkoutHold`): `target` is the hold's own, and a
+   * `reason` of `ineligible` is a hold that is OFF, riding the plan.
+   */
+  readonly hold?: { readonly reason: string; readonly target: number } | undefined;
+  /** A stall rescue in force — the target is eased. Only its presence is read. */
+  readonly rescue?: object | undefined;
 }
 
 /**
@@ -288,12 +304,61 @@ function shareAt(segment: { from: number; to: number } & BlockChartSegment, at: 
   return segment.from + (segment.to - segment.from) * along;
 }
 
+/** What {@link heldInstead} reports. */
+export interface HeldInstead {
+  /** What the trainer confirmed it holds. */
+  readonly heldWatts: number;
+  /** What was asked for now, in whole watts. */
+  readonly plannedWatts: number;
+  /** Who asked: the plan's block, or a running heart-rate hold. */
+  readonly by: 'plan' | 'hold';
+}
+
+/** Whether a heart-rate hold is setting the target now. An `ineligible` hold is off. */
+function holdRunning(
+  input: WorkoutGraphInput,
+): input is WorkoutGraphInput & { readonly hold: { readonly target: number } } {
+  return input.hold !== undefined && input.hold.reason !== 'ineligible';
+}
+
 /**
- * What the trainer confirmed, when that is NOT what the plan asks for now —
- * a target raised to the machine's minimum (#1297), a write it refused, an
- * eased target, a heart-rate hold's own. `undefined` while the two agree, in
- * a free ride, before any target is confirmed, and with no threshold to
- * compare in.
+ * Whether the trainer has been STUCK on `holdingWatts` for
+ * {@link HELD_GRACE_SECONDS} while the hold asked for something else, by the
+ * trace: every sample back from the newest confirms that same target, carries
+ * what the hold asked, and the two disagree — and the run reaches that far.
+ *
+ * ⚠️ "Stuck", not merely "different". A hold that is ramping decides a new
+ * target every second, and the sample for that second is taken while its
+ * write is still on its way: confirmed and asked disagree in EVERY sample of
+ * a ramp, for as long as the ramp lasts. What tells that from a clamp or a
+ * refusal is that the confirmed target is moving. Found by the real
+ * controller (`ride/controller.test.ts` §"a hold's own target is never
+ * marked"), which a difference-only rule failed.
+ */
+function holdMismatchHasLasted(input: WorkoutGraphInput, holdingWatts: number): boolean {
+  const samples = windowed(input);
+  let since: number | undefined;
+  for (let index = samples.length - 1; index >= 0; index -= 1) {
+    const sample = samples[index];
+    if (
+      sample === undefined ||
+      !finite(sample.target) ||
+      !finite(sample.asked) ||
+      sample.target !== holdingWatts ||
+      Math.abs(sample.target - sample.asked) <= HELD_TOLERANCE_WATTS
+    ) {
+      break;
+    }
+    since = sample.at;
+  }
+  return since !== undefined && input.elapsedSeconds - since >= HELD_GRACE_SECONDS;
+}
+
+/**
+ * What the trainer confirmed, when that is NOT what it was asked for now — a
+ * target raised to the machine's minimum (#1297), a write it refused, an
+ * eased target. `undefined` while the two agree, in a free ride, before any
+ * target is confirmed, and with no threshold to compare in.
  *
  * ⚠️ On a ramp the plan moves every second and the confirmation trails it, so
  * a ramp is judged against its whole span rather than this instant: only a
@@ -302,10 +367,34 @@ function shareAt(segment: { from: number; to: number } & BlockChartSegment, at: 
  * ⚠️ And not in the first {@link HELD_GRACE_SECONDS} seconds of a block, when
  * the trainer still holds the block before because the new write has not been
  * acknowledged yet.
+ *
+ * ## ⚠️ A heart-rate hold's own target is not "held instead"
+ *
+ * The owner's ruling on #1307: a target the hold itself set is the workout
+ * doing what it was asked, however far it is from the block's start share.
+ * So while a hold is running ({@link WorkoutGraphInput.hold}, not
+ * `ineligible`) the confirmed target is compared with **the hold's own
+ * target** and never with the block's share — and the two are told apart
+ * like this:
+ *
+ * 1. Confirmed within {@link HELD_TOLERANCE_WATTS} of the hold's target: the
+ *    hold set it. Nothing is reported.
+ * 2. Otherwise, with a stall rescue in force ({@link WorkoutGraphInput.rescue}):
+ *    an EASE. The hold's target is by definition the one before the relief,
+ *    so the difference is the relief. Reported at once.
+ * 3. Otherwise, only once the trainer has been STUCK on that target for
+ *    {@link HELD_GRACE_SECONDS} while the hold asked for another, by the
+ *    trace ({@link WorkoutTraceSample.asked} against `target`, second by
+ *    second): a floor the hold's envelope did not know, or a write the
+ *    trainer goes on refusing. A hold that is ramping is a step behind in
+ *    every sample and is NOT reported: its confirmed target is moving.
+ *
+ * ⚠️ What this CANNOT see: a single refused write inside a hold. The player
+ * puts the hold back to where it was when a write does not land
+ * (`player.ts` §`holdCheckpoint`), so the hold's target and the confirmed one
+ * agree again and there is nothing to tell apart.
  */
-export function heldInstead(
-  input: WorkoutGraphInput,
-): { readonly heldWatts: number; readonly plannedWatts: number } | undefined {
+export function heldInstead(input: WorkoutGraphInput): HeldInstead | undefined {
   const { holdingWatts, thresholdWatts } = input;
   if (
     holdingWatts === undefined ||
@@ -324,6 +413,16 @@ export function heldInstead(
     // The write for this block may still be on its way. @see HELD_GRACE_SECONDS
     return undefined;
   }
+  if (holdRunning(input)) {
+    const asked = input.hold.target;
+    if (!Number.isFinite(asked) || Math.abs(holdingWatts - asked) <= HELD_TOLERANCE_WATTS) {
+      return undefined;
+    }
+    if (input.rescue === undefined && !holdMismatchHasLasted(input, holdingWatts)) {
+      return undefined;
+    }
+    return { heldWatts: holdingWatts, plannedWatts: Math.round(asked), by: 'hold' };
+  }
   const low = Math.min(segment.from, segment.to) * thresholdWatts;
   const high = Math.max(segment.from, segment.to) * thresholdWatts;
   if (holdingWatts >= low - HELD_TOLERANCE_WATTS && holdingWatts <= high + HELD_TOLERANCE_WATTS) {
@@ -332,6 +431,7 @@ export function heldInstead(
   return {
     heldWatts: holdingWatts,
     plannedWatts: Math.round(shareAt(segment, input.elapsedSeconds) * thresholdWatts),
+    by: 'plan',
   };
 }
 
@@ -370,6 +470,11 @@ function planLane(input: WorkoutGraphInput): PlanLanePaths {
     held === undefined || input.thresholdWatts === undefined
       ? undefined
       : Math.max(0, held.heldWatts / input.thresholdWatts);
+  // What a running hold asks is one height, not the block's share.
+  const askedShare =
+    held?.by === 'hold' && input.thresholdWatts !== undefined
+      ? Math.max(0, held.plannedWatts / input.thresholdWatts)
+      : undefined;
   const segments = input.timeline.segments;
   const replaced = input.replaced ?? [];
   // The scale's top is this workout's own hardest target — and what the
@@ -383,7 +488,7 @@ function planLane(input: WorkoutGraphInput): PlanLanePaths {
         Number.isFinite(segment.from) ? (segment.from ?? 0) : 0,
         Number.isFinite(segment.to) ? (segment.to ?? 0) : 0,
       ),
-    heldShare ?? 0,
+    Math.max(heldShare ?? 0, askedShare ?? 0),
   );
   const topShare =
     hardest > 0 ? Math.max(hardest, FREE_RIDE_DRAWN_SHARE) / PLAN_FILL_SHARE : CHART_TOP_SHARE;
@@ -407,7 +512,19 @@ function planLane(input: WorkoutGraphInput): PlanLanePaths {
   }
   return {
     toCome: blockChartPaths(toCome, scale),
-    asked: riding === undefined ? '' : outlineOf(blockChartPaths([riding], scale)),
+    asked:
+      riding === undefined
+        ? ''
+        : outlineOf(
+            blockChartPaths(
+              [
+                askedShare === undefined
+                  ? riding
+                  : ({ ...riding, from: askedShare, to: askedShare } as BlockChartSegment),
+              ],
+              scale,
+            ),
+          ),
     heldArea,
     heldEdge,
     done: outlineOf(blockChartPaths(before, scale)),
@@ -702,28 +819,27 @@ export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
   };
 }
 
-/** The Ride screen's key to the lanes, under the graph. */
-export const GRAPH_KEY_PLAN =
-  'Top: the whole workout. The outlined part is ridden, the filled part is to come, and the ' +
-  'line marks where you are.';
-export const GRAPH_KEY_HEART_RATE =
-  'Middle: your heart rate, with the range you chose shaded between dashed edges.';
-export const GRAPH_KEY_TRACE =
-  'Bottom: the last 5 minutes. The shaded steps are the target the trainer confirmed, and the ' +
-  'line is your power.';
+/**
+ * What the graph says under itself on the Ride screen — the owner's ruling on
+ * #1307: the lanes carry titles, so the paragraph that walked them top to
+ * bottom is gone. What is left explains the two marks a title cannot: the
+ * dashed outline at the now line, and the dotted one a re-plan leaves.
+ */
 export const GRAPH_KEY_REPLACED = 'The dotted outline is the plan before it was changed.';
 
+/** Who asked for the target the trainer does not hold, as the sentences say it. */
+const ASKER: Readonly<Record<HeldInstead['by'], string>> = {
+  plan: 'the plan',
+  hold: 'the heart-rate hold',
+};
+
 /**
- * The key's sentence for the two shapes drawn at the now line while the
- * trainer holds something the plan did not ask — the key names every mark
- * that is drawn. At 0 W there is no step to shade, and the sentence says so
- * rather than pointing at a shape that is not there.
+ * The sentence for the two shapes drawn at the now line while the trainer
+ * holds something it was not asked. At 0 W there is no step to shade, and the
+ * sentence says so rather than pointing at a shape that is not there.
  */
-export function graphKeyHeld(held: {
-  readonly heldWatts: number;
-  readonly plannedWatts: number;
-}): string {
-  const asked = `At the line, the dashed outline is what the plan asks for now, ${String(
+export function graphKeyHeld(held: HeldInstead): string {
+  const asked = `At the line, the dashed outline is what ${ASKER[held.by]} asks for now, ${String(
     held.plannedWatts,
   )} W.`;
   return held.heldWatts > 0
@@ -731,16 +847,12 @@ export function graphKeyHeld(held: {
     : `${asked} The trainer confirmed ${String(held.heldWatts)} W instead, so nothing is shaded.`;
 }
 
-/** Everything the key says for a workout, in order. */
+/** Everything said under the graph, or an empty string when there is nothing to explain. */
 export function workoutGraphKey(input: WorkoutGraphInput): string {
   const held = heldInstead(input);
-  const hold = windowed(input).some((sample) => sample.range !== undefined);
   return [
-    GRAPH_KEY_PLAN,
     ...(held === undefined ? [] : [graphKeyHeld(held)]),
     ...((input.replaced ?? []).length > 0 ? [GRAPH_KEY_REPLACED] : []),
-    ...(hold ? [GRAPH_KEY_HEART_RATE] : []),
-    GRAPH_KEY_TRACE,
   ].join(' ');
 }
 
@@ -786,7 +898,7 @@ export function workoutGraphLabels(input: WorkoutGraphInput): {
   const hold = windowed(input).some((sample) => sample.range !== undefined);
   const target = finite(last?.target)
     ? `Target ${String(last.target)} W` +
-      (held === undefined ? '' : ` (plan asks ${String(held.plannedWatts)} W)`)
+      (held === undefined ? '' : ` (${held.by} asks ${String(held.plannedWatts)} W)`)
     : 'No target';
   const power = finite(last?.power)
     ? `You ${String(Math.round(last.power))} W`
@@ -812,18 +924,21 @@ export function workoutGraphLabels(input: WorkoutGraphInput): {
 
 /**
  * The HUD strip's one line: the numbers that matter for the lane it drew. In
- * a heart-rate hold, heart rate and the range; otherwise the confirmed target
- * and how long is left of the block.
+ * a heart-rate hold, heart rate, the range and the confirmed target the hold
+ * has set; otherwise the confirmed target and how long is left of the block.
  */
 export function workoutStripText(input: WorkoutGraphInput): string {
   const last = newest(input);
+  const target = finite(last?.target) ? `Target ${String(last.target)} W` : 'No target';
   if (last?.range !== undefined) {
     const range = `range ${String(last.range.low)}–${String(last.range.high)}`;
-    return finite(last.heartRate)
-      ? `${String(Math.round(last.heartRate))} bpm, ${range}`
-      : `No heart rate, ${range}`;
+    // ⚠️ "— bpm", the HUD's own mark for a reading that is not there
+    // (`hud/fields.ts`), and not "No heart rate": measured in the pinned
+    // Chromium, "No heart rate, range 130–140 · Target 167 W" is 271.5 px in a
+    // 270 px strip. The image's name still says it in words.
+    const heartRate = finite(last.heartRate) ? String(Math.round(last.heartRate)) : '—';
+    return `${heartRate} bpm, ${range} · ${target}`;
   }
-  const target = finite(last?.target) ? `Target ${String(last.target)} W` : 'No target';
   const left = leftInBlock(input);
   return left === undefined ? target : `${target} · ${left} left in block`;
 }
@@ -848,8 +963,9 @@ export function workoutGraphText(input: WorkoutGraphInput): string {
     parts.push(
       held === undefined
         ? `Target the trainer last confirmed: ${String(input.holdingWatts)} W.`
-        : `Target the trainer last confirmed: ${String(held.heldWatts)} W, where the plan asks ` +
-            `for ${String(held.plannedWatts)} W.`,
+        : `Target the trainer last confirmed: ${String(held.heldWatts)} W, where ${
+            ASKER[held.by]
+          } asks for ${String(held.plannedWatts)} W.`,
     );
   }
   const last = newest(input);

@@ -3136,6 +3136,149 @@ a.oyl-button {
 }
 
 /*
+ * THE WORKOUT'S GRAPH ON THE RIDE SCREEN — #1307, the owner's ruling of
+ * 2026-10-12.
+ *
+ * The graph is a group of its own, after the trainer group in the document
+ * (`RideView.tsx`). Where it is drawn is decided here, and only while it is
+ * there (`:has`), so a ride with no workout has the grid it always had.
+ *
+ * - **One column** (a phone): in document order, under the trainer group.
+ * - **Two columns, upright** (a tablet on its end): under the trainer group
+ *   in ITS column — the Live group spans both rows beside them. There is
+ *   height to spare upright.
+ * - **Three columns** (76rem and up — 1280×800): under the readings, across
+ *   the Live group's two columns. ⚠️ Not under the trainer group: that
+ *   column's height changes with a notice (*Eased*, a heart-rate hold), and
+ *   at 1280×800 the notice put most of the graph under the fold. The Live
+ *   group's height does not change with the workout.
+ * - **Two columns, landscape** (60rem to 76rem — 1024×768): under BOTH
+ *   groups, across the whole width. The Live group is one column there, its
+ *   four readings are two rows, and what is left under the clock is about
+ *   110 px by 430: not room for three lanes a rider can read.
+ *
+ * In landscape the lanes stand SIDE BY SIDE, because what there is to spare
+ * is width.
+ *
+ * ⚠️ **`position: sticky; bottom`, in landscape.** At 1024×768 the page is
+ * taller than the screen whenever a notice stands in the trainer group, and
+ * the graph's natural place is then under the fold — the defect the ruling is
+ * about. So it is pinned to the bottom of the screen when the page is taller
+ * than it: it is ALWAYS wholly on screen, and where the room has run out it
+ * covers the foot of the column above it until the page is scrolled.
+ * `rideview.browser.spec.ts` §"#1307" holds that it covers no control and no
+ * notice at 1280×800 and 1024×768, and publishes what it does cover; a notice
+ * is drawn over it rather than under it (below). While
+ * it is there the reading cards tighten on the two-column layout — the step
+ * #692 takes for a standing notice, for the same reason — which is what
+ * leaves the Live column clear of it.
+ */
+.oyl-ride__group--graph .oyl-workout-graph__frame {
+  margin-top: 0;
+}
+
+@media (min-width: 48rem) and (min-height: 60rem) and (max-width: 59.99rem) {
+  /* Upright: row 1 is as tall as the trainer group, and the Live group spans
+     both rows beside it and the graph. */
+  .oyl-ride:has(> .oyl-ride__group--graph) {
+    grid-template-rows: auto 1fr;
+  }
+
+  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--live {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--trainer {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--graph {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+@media (min-width: 60rem) {
+  .oyl-ride__group--graph {
+    background: var(--oyl-color-canvas);
+    bottom: var(--oyl-safe-bottom);
+    grid-column: 1 / -1;
+    position: sticky;
+    z-index: 1;
+  }
+
+  /* ⚠️ A notice is never under the pinned graph. With every standing notice
+     up at once the Live column is far taller than the screen, and the graph,
+     pinned, lay over *Device full* — `rideview.browser.spec.ts` §"#692"
+     caught it. A notice is the thing that says something is wrong, so it is
+     drawn OVER the graph, and it is the picture that loses a strip. */
+  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-status {
+    position: relative;
+    z-index: 2;
+  }
+
+  /* The lanes side by side, their drawings on one line whatever a caption
+     wraps to. */
+  .oyl-ride__group--graph .oyl-workout-graph__lanes {
+    align-items: flex-end;
+    display: flex;
+    gap: var(--oyl-space-lg);
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__lane {
+    flex: 1 1 0;
+    margin-top: 0;
+    min-width: 0;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__svg {
+    height: 3.5rem;
+  }
+
+  /* The plan lane has no scale, and side by side it shares no axis with the
+     others: its drawing takes the gutter. */
+  .oyl-ride__group--graph [data-oyl-lane='plan'] .oyl-workout-graph__well {
+    padding-left: 0;
+  }
+}
+
+@media (min-width: 60rem) and (max-width: 75.99rem) {
+  .oyl-ride:has(> .oyl-ride__group--graph) {
+    row-gap: var(--oyl-space-sm);
+  }
+
+  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-metric-grid {
+    gap: var(--oyl-space-sm);
+    margin: var(--oyl-space-sm) 0;
+  }
+
+  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-metric {
+    padding: var(--oyl-space-sm);
+  }
+}
+
+@media (min-width: 76rem) {
+  .oyl-ride:has(> .oyl-ride__group--graph) {
+    grid-template-areas:
+      'live live trainer'
+      'graph graph trainer'
+      'sensors sensors trainer'
+      'other other other';
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  .oyl-ride__group--graph {
+    grid-area: graph;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__svg {
+    height: 5rem;
+  }
+}
+
+/*
  * #647's "Keep the screen on", beside the Live group's heading — #693's
  * review.
  *

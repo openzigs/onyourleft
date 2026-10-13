@@ -2524,6 +2524,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         hold === undefined || hold.reason === 'ineligible'
           ? undefined
           : { low: hold.range.low, high: hold.range.high },
+      // What a running hold asked for this second — its own target, before
+      // any stall-rescue relief — so the graph can tell a target the hold set
+      // from one the trainer holds instead (`workout-graph.ts` §`heldInstead`).
+      asked: hold === undefined || hold.reason === 'ineligible' ? undefined : hold.target,
     });
   };
 

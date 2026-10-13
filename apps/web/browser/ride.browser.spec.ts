@@ -3006,6 +3006,9 @@ interface GraphSight {
     readonly fontSize: number;
     /** How much wider the line is than its box: over 0 is text cut off. */
     readonly overflow: number;
+    /** How wide the text itself is, and the box it has to fit. */
+    readonly inkWidth: number;
+    readonly boxWidth: number;
   };
   readonly marks: readonly { readonly name: string; readonly box: Box; readonly paint: string }[];
   /** Every background painted by the strip or anything in it. */
@@ -3049,6 +3052,12 @@ async function graphOnTheHud(page: Page): Promise<GraphSight | undefined> {
         colour: textStyle.color,
         fontSize: Number.parseFloat(textStyle.fontSize),
         overflow: text.scrollWidth - text.clientWidth,
+        inkWidth: (() => {
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          return range.getBoundingClientRect().width;
+        })(),
+        boxWidth: text.clientWidth,
       },
       marks: [...strip.querySelectorAll('path')].map((path) => {
         const style = getComputedStyle(path);
@@ -3102,12 +3111,25 @@ const STRIP_FIXTURES = [
   {
     graph: 'hold',
     lane: 'heart-rate',
-    text: '140 bpm, range 130–140',
+    // The owner's ruling: in a hold the line gives the target the hold set too.
+    text: '140 bpm, range 130–140 · Target 167 W',
     named: 'with a chosen range of 130–140 bpm',
     // Dashed: what is asked. Solid: what the rider is doing.
     asked: 'oyl-workout-strip__range',
     doing: 'oyl-workout-strip__heart-rate',
     absent: /target|power/,
+  },
+  {
+    // A strap gone quiet: no line to draw. ⚠️ "— bpm", not "No heart rate":
+    // that form measured 271.5 px in this 270 px strip, which is why it is
+    // not what the strip writes.
+    graph: 'hold-silent',
+    lane: 'heart-rate',
+    text: '— bpm, range 130–140 · Target 167 W',
+    named: 'No heart rate, with a chosen range of 130–140 bpm',
+    asked: 'oyl-workout-strip__range',
+    doing: undefined,
+    absent: /target|power|strip__heart-rate/,
   },
   {
     graph: 'plain',
@@ -3147,8 +3169,10 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   expect(graph.marks.filter((each) => fixture.absent.test(each.name))).toEqual([]);
   expect(laneBox.height).toBeGreaterThanOrEqual(36);
   expect(mark(fixture.asked).paint).toBe(HUD_INK_MUTED);
-  expect(mark(fixture.doing).paint).toBe(HUD_INK);
-  for (const name of [fixture.asked, fixture.doing]) {
+  if (fixture.doing !== undefined) {
+    expect(mark(fixture.doing).paint).toBe(HUD_INK);
+  }
+  for (const name of [fixture.asked, ...(fixture.doing === undefined ? [] : [fixture.doing])]) {
     const { box } = mark(name);
     // Each uses a real share of the lane, across nearly all of its width.
     expect(box.height, name).toBeGreaterThanOrEqual(10);
@@ -3178,6 +3202,8 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   // One line of text, whole, at a size the rest of the HUD's small text is.
   expect(graph.text.content).toBe(fixture.text);
   expect(graph.text.overflow).toBeLessThanOrEqual(0);
+  // Measured, not assumed: the text itself against the box it is in.
+  expect(graph.text.inkWidth).toBeLessThanOrEqual(graph.text.boxWidth);
   expect(graph.text.fontSize).toBeGreaterThanOrEqual(12);
   expect(graph.text.box.height).toBeLessThanOrEqual(20);
   // In order, and none over another: the lane, the bar, the line.
@@ -3211,7 +3237,7 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
         expect(Math.abs(graph.strip.height - plan.height)).toBeLessThanOrEqual(0.5);
         expect(Math.abs(graph.strip.width - plan.width)).toBeLessThanOrEqual(0.5);
         console.log(
-          `#1307 the workout strip (${fixture.graph}) — ${viewport.name}: ${graph.strip.width.toFixed(1)} × ${graph.strip.height.toFixed(1)} px, the route plan’s ${plan.width.toFixed(1)} × ${plan.height.toFixed(1)}; its lane ${(graph.laneBox?.height ?? 0).toFixed(1)} px tall`,
+          `#1307 the workout strip (${fixture.graph}) — ${viewport.name}: ${graph.strip.width.toFixed(1)} × ${graph.strip.height.toFixed(1)} px, the route plan’s ${plan.width.toFixed(1)} × ${plan.height.toFixed(1)}; its lane ${(graph.laneBox?.height ?? 0).toFixed(1)} px tall; its line “${graph.text.content}” is ${graph.text.inkWidth.toFixed(1)} px of ${graph.text.boxWidth.toFixed(1)}`,
         );
 
         // Every panel is where it was with the route plan, both ways.

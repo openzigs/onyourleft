@@ -536,13 +536,15 @@ const RACE_PORTS =
  * Paired with `?trainer=workout`, whose route panel it is drawn in.
  *
  * - `hold`: in a heart-rate hold, so the strip's one lane is heart rate
- *   against its range.
+ *   against its range. `hold-silent` is the same hold with a strap gone
+ *   quiet, so the strip writes "— bpm" and draws no heart-rate line.
  * - `plain`: the same plan with no hold and a target that STEPS inside the
  *   window, so the lane is power against the confirmed target.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
+const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
 const GRAPH: WorkoutGraphInput | undefined =
-  GRAPH_KIND === 'hold' || GRAPH_KIND === 'plain'
+  GRAPH_HOLD || GRAPH_KIND === 'plain'
     ? {
         elapsedSeconds: 900,
         timeline: expandWorkout({
@@ -558,15 +560,19 @@ const GRAPH: WorkoutGraphInput | undefined =
             },
           ],
         }),
-        holdingWatts: GRAPH_KIND === 'hold' ? 165 : 175,
+        // In a hold the trainer holds what the hold last asked: 167 W.
+        holdingWatts: GRAPH_HOLD ? 167 : 175,
+        hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
         thresholdWatts: 250,
         trace: Array.from({ length: 300 }, (_, index) =>
-          GRAPH_KIND === 'hold'
+          GRAPH_HOLD
             ? {
                 at: 601 + index,
                 target: 175 - Math.floor(index / 60) * 2,
+                asked: 175 - Math.floor(index / 60) * 2,
                 power: 170 + Math.round(8 * Math.sin(index / 9)),
-                heartRate: 128 + Math.round(index / 25),
+                // `hold-silent`: a strap gone quiet.
+                heartRate: GRAPH_KIND === 'hold' ? 128 + Math.round(index / 25) : undefined,
                 range: { low: 130, high: 140 },
               }
             : {

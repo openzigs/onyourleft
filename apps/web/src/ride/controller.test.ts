@@ -7444,6 +7444,93 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     rig.controller.dispose();
   });
 
+  it('a hold’s own target is never marked as held instead, at any snapshot — #1307', async () => {
+    // The owner's ruling: a target the hold itself set is the workout doing
+    // what it was asked. ⚠️ EVERY snapshot the screen is handed, because the
+    // state that used to be marked wrongly is also the one that lasts a
+    // second: a new hold target on its way to the trainer.
+    const rig = await holding();
+    const seen: { holding: number | undefined; asked: number | undefined; marked: boolean }[] = [];
+    const stop = rig.controller.subscribe(() => {
+      const workout = rig.controller.getSnapshot().workout;
+      if (workout?.hold === undefined) return;
+      seen.push({
+        holding: workout.holdingWatts,
+        asked: workout.hold.target,
+        marked: heldInstead(workout) !== undefined,
+      });
+    });
+    // ⚠️ A second at a time, letting each acknowledgement land before the
+    // next tick, as a trainer does. `ride(rig, 360)` in one call ticks with
+    // the write still outstanding for many seconds on end — a trainer that
+    // has stopped answering, which IS marked, and rightly.
+    for (let second = 0; second < 6 * 60; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    await flushMicrotasks(20);
+    stop();
+
+    // The apparatus: the hold moved the target well away from the block's
+    // start (40 % of 250 W, 100 W) — what the old rule compared against…
+    const held = seen.map((each) => each.holding).filter((each) => each !== undefined);
+    expect(Math.max(...held)).toBeGreaterThan(100 + 10);
+    // …and a snapshot was seen with the trainer a step behind the hold.
+    expect(seen.some((each) => each.asked !== undefined && each.holding !== each.asked)).toBe(true);
+    // Not one of them was marked, and the graph's words say nothing of a plan.
+    expect(seen.filter((each) => each.marked)).toEqual([]);
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    expect(workoutGraphText(workout)).not.toContain('asks for');
+    // The newest sample says what the hold asked and what the trainer confirmed.
+    const last = workout.trace?.at(-1);
+    expect(last?.asked).toBe(workout.hold?.target);
+    expect(last?.target).toBe(rig.targetOnTheTrainer());
+    rig.controller.dispose();
+  });
+
+  it('an ease inside a hold IS marked: the stall rescue, against the hold’s own target — #1307', async () => {
+    const rig = await holding();
+    for (let second = 0; second < 3 * 60; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const before = rig.controller.getSnapshot().workout;
+    expect(before?.rescue).toBeUndefined();
+    expect(before === undefined ? 'none' : heldInstead(before)).toBeUndefined();
+
+    // The rider stops pedalling: the stall rescue eases the target.
+    for (const rpm of [80, 60, 40, 20, 8, 5, 4, 4, 4]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const eased = rig.controller.getSnapshot().workout;
+    if (eased === undefined) throw new Error('no workout');
+    expect(eased.rescue).toBeDefined();
+    // The hold is still the block's, with its own target from before the relief.
+    expect(eased.hold?.reason).not.toBe('ineligible');
+    expect(eased.holdingWatts).toBe(rig.targetOnTheTrainer());
+    expect(eased.holdingWatts).toBeLessThan((eased.hold?.target ?? 0) - 2);
+    expect(heldInstead(eased)).toEqual({
+      heldWatts: eased.holdingWatts,
+      plannedWatts: eased.hold?.target,
+      by: 'hold',
+    });
+    expect(workoutGraphText(eased)).toContain('where the heart-rate hold asks for');
+    rig.controller.dispose();
+  });
+
+  it('gives the graph nothing a hold asked while the hold is off — #1307', async () => {
+    const rig = await holding({ strap: false });
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((each) => each.asked === undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
   it('trainer receives the hold’s targets: every one inside the envelope, and the heart rate ends inside the range', async () => {
     const rig = await holding();
     await ride(rig, 12 * 60);
@@ -7652,7 +7739,7 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     expect(rig.targetOnTheTrainer()).toBe(100);
     // And the graph, drawn from that snapshot, says both numbers.
     if (workout === undefined) throw new Error('no workout');
-    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75 });
+    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75, by: 'plan' });
     rig.controller.dispose();
   });
 
@@ -7713,7 +7800,7 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     const workout = rig.controller.getSnapshot().workout;
     if (workout === undefined) throw new Error('no workout');
     expect(workout.elapsedSeconds).toBeGreaterThanOrEqual(6 + HELD_GRACE_SECONDS);
-    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75 });
+    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75, by: 'plan' });
     expect(workoutGraphText(workout)).toContain(
       'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
     );

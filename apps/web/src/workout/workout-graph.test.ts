@@ -7,15 +7,18 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { expandWorkout, seconds, thresholdShare, type WorkoutBlock } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  expandWorkout,
+  seconds,
+  thresholdShare,
+  type WorkoutBlock,
+} from '@onyourleft/domain';
 
 import { blockChartPaths, CHART_WIDTH } from '../workouts/block-chart';
 
 import {
-  GRAPH_KEY_HEART_RATE,
-  GRAPH_KEY_PLAN,
   GRAPH_KEY_REPLACED,
-  GRAPH_KEY_TRACE,
   graphKeyHeld,
   HEART_RATE_LANE_HEIGHT,
   HELD_GRACE_SECONDS,
@@ -215,6 +218,7 @@ describe('a block the trainer holds at something else — #1297, #1301, #1305', 
     expect(heldInstead(input({ elapsedSeconds: 1500, holdingWatts: 140 }))).toEqual({
       heldWatts: 140,
       plannedWatts: 125,
+      by: 'plan',
     });
   });
 
@@ -223,6 +227,7 @@ describe('a block the trainer holds at something else — #1297, #1301, #1305', 
     expect(heldInstead(input({ elapsedSeconds: 700, holdingWatts: 150 }))).toEqual({
       heldWatts: 150,
       plannedWatts: 250,
+      by: 'plan',
     });
   });
 
@@ -261,7 +266,7 @@ describe('a block the trainer holds at something else — #1297, #1301, #1305', 
     // Still 150 W once the grace has run: that is a refusal.
     expect(
       heldInstead(input({ elapsedSeconds: 600 + HELD_GRACE_SECONDS, holdingWatts: 150 })),
-    ).toEqual({ heldWatts: 150, plannedWatts: 250 });
+    ).toEqual({ heldWatts: 150, plannedWatts: 250, by: 'plan' });
     // And nothing is drawn or said for it inside the grace.
     const inside = input({ elapsedSeconds: 601, holdingWatts: 150 });
     expect(workoutGraphPaths(inside).plan.asked).toBe('');
@@ -698,38 +703,179 @@ describe('the numbers written on the lanes — #1307', () => {
   });
 });
 
-describe('the key names every mark that is drawn — #1307', () => {
+describe('what is said under the graph — #1307', () => {
   const range = { low: 130, high: 140 };
 
-  it('is the plan and the last minutes for a plain workout', () => {
-    expect(workoutGraphKey(input())).toBe(`${GRAPH_KEY_PLAN} ${GRAPH_KEY_TRACE}`);
-  });
-
-  it('adds the heart-rate lane while it is drawn', () => {
-    expect(workoutGraphKey(input({ trace: [sample(300, { range })] }))).toBe(
-      `${GRAPH_KEY_PLAN} ${GRAPH_KEY_HEART_RATE} ${GRAPH_KEY_TRACE}`,
-    );
+  it('is nothing for a plain workout or a hold: the lanes carry their own titles', () => {
+    expect(workoutGraphKey(input())).toBe('');
+    expect(workoutGraphKey(input({ trace: [sample(300, { range })] }))).toBe('');
   });
 
   it('says what the dashed outline and the shaded step at the line are, with both numbers', () => {
     const raised = input({ elapsedSeconds: 1500, holdingWatts: 140 });
     expect(workoutGraphKey(raised)).toBe(
-      `${GRAPH_KEY_PLAN} At the line, the dashed outline is what the plan asks for now, 125 W. ` +
-        `The shaded step is what the trainer confirmed instead, 140 W. ${GRAPH_KEY_TRACE}`,
+      'At the line, the dashed outline is what the plan asks for now, 125 W. ' +
+        'The shaded step is what the trainer confirmed instead, 140 W.',
     );
   });
 
   it('does not point at a shaded step that is not there: 0 W', () => {
-    expect(graphKeyHeld({ heldWatts: 0, plannedWatts: 225 })).toBe(
+    expect(graphKeyHeld({ heldWatts: 0, plannedWatts: 225, by: 'plan' })).toBe(
       'At the line, the dashed outline is what the plan asks for now, 225 W. The trainer ' +
         'confirmed 0 W instead, so nothing is shaded.',
     );
   });
 
-  it('says what the dotted outline is once a re-plan supplies one', () => {
-    expect(workoutGraphKey(input({ replaced: timeline.segments }))).toBe(
-      `${GRAPH_KEY_PLAN} ${GRAPH_KEY_REPLACED} ${GRAPH_KEY_TRACE}`,
+  it('names the heart-rate hold as the one asking, inside a hold', () => {
+    expect(graphKeyHeld({ heldWatts: 100, plannedWatts: 119, by: 'hold' })).toBe(
+      'At the line, the dashed outline is what the heart-rate hold asks for now, 119 W. The ' +
+        'shaded step is what the trainer confirmed instead, 100 W.',
     );
+  });
+
+  it('says what the dotted outline is once a re-plan supplies one, and only that', () => {
+    expect(workoutGraphKey(input({ replaced: timeline.segments }))).toBe(GRAPH_KEY_REPLACED);
+  });
+});
+
+describe('a heart-rate hold’s own target is not held instead — #1307, the owner’s ruling', () => {
+  const range = { low: 130, high: 140 };
+  /** One 30-minute hold block that starts at 50 % (125 W of 250 W). */
+  const holdTimeline = expandWorkout({
+    name: 'hold',
+    blocks: [
+      {
+        kind: 'heart-rate-hold',
+        seconds: seconds(1800),
+        range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+        startShare: thresholdShare(0.5),
+        ceilingShare: thresholdShare(0.8),
+      },
+    ],
+  });
+  /** The hold asked `asked` and the trainer confirmed `target`, each second from `from`. */
+  const seconds_ = (from: number, to: number, target: number, asked: number) =>
+    Array.from({ length: to - from + 1 }, (_, index) =>
+      sample(from + index, { target, asked, range, heartRate: 142 }),
+    );
+  const inHold = (overrides: Partial<WorkoutGraphInput> = {}): WorkoutGraphInput =>
+    input({
+      timeline: holdTimeline,
+      elapsedSeconds: 600,
+      holdingWatts: 119,
+      hold: { reason: 'lowered', target: 119 },
+      trace: seconds_(590, 600, 119, 119),
+      ...overrides,
+    });
+
+  it('marks nothing while the trainer holds what the hold set, however far from the block’s share', () => {
+    // 119 W where the block started at 125 W: the old rule called this held instead.
+    const held = inHold();
+    expect(heldInstead(held)).toBeUndefined();
+    expect(workoutGraphPaths(held).plan.asked).toBe('');
+    expect(workoutGraphPaths(held).plan.heldArea).toBe('');
+    expect(workoutGraphLabels(held).trace.reading).toBe('Target 119 W · You 148 W');
+    expect(workoutGraphText(held)).toContain('Target the trainer last confirmed: 119 W.');
+    expect(workoutGraphText(held)).not.toContain('asks for');
+    expect(workoutGraphKey(held)).toBe('');
+    // The control: the same numbers with NO hold running are held instead.
+    expect(heldInstead(inHold({ hold: undefined }))).toEqual({
+      heldWatts: 119,
+      plannedWatts: 125,
+      by: 'plan',
+    });
+  });
+
+  it('judges a hold that is OFF by the plan, as any block', () => {
+    // `ineligible`: the block rides its planned 125 W. 140 W is the machine's minimum.
+    expect(
+      heldInstead(inHold({ holdingWatts: 140, hold: { reason: 'ineligible', target: 125 } })),
+    ).toEqual({ heldWatts: 140, plannedWatts: 125, by: 'plan' });
+  });
+
+  it('does not mark the second it takes a new hold target to be acknowledged', () => {
+    // The hold lowered its target to 109 W two seconds ago; the trainer still says 119 W.
+    const moving = inHold({
+      hold: { reason: 'lowered', target: 109 },
+      trace: [...seconds_(590, 598, 119, 119), ...seconds_(599, 600, 119, 109)],
+    });
+    expect(heldInstead(moving)).toBeUndefined();
+  });
+
+  it('does not mark a hold that is ramping: a step behind in every sample, and moving', () => {
+    // The hold raises its target 3 W every second; each second's sample is
+    // taken while that second's write is still on its way.
+    const ramping = inHold({
+      holdingWatts: 139,
+      hold: { reason: 'raised', target: 142 },
+      trace: Array.from({ length: 11 }, (_, index) =>
+        sample(590 + index, {
+          target: 109 + index * 3,
+          asked: 112 + index * 3,
+          range,
+          heartRate: 120,
+        }),
+      ),
+    });
+    expect(heldInstead(ramping)).toBeUndefined();
+  });
+
+  it('marks an EASE inside a hold at once: a stall rescue is in force', () => {
+    // The hold's own target is the one before the relief; the trainer was eased to 60 W.
+    const eased = inHold({
+      holdingWatts: 60,
+      rescue: { kind: 'floor' },
+      trace: [...seconds_(590, 599, 119, 119), ...seconds_(600, 600, 60, 119)],
+    });
+    expect(heldInstead(eased)).toEqual({ heldWatts: 60, plannedWatts: 119, by: 'hold' });
+    expect(workoutGraphLabels(eased).trace.reading).toBe(
+      'Target 60 W (hold asks 119 W) · You 148 W',
+    );
+    expect(workoutGraphText(eased)).toContain(
+      'Target the trainer last confirmed: 60 W, where the heart-rate hold asks for 119 W.',
+    );
+    // The outline is drawn at what the HOLD asks — 119 W — not the block's 125 W.
+    const { plan } = workoutGraphPaths(eased);
+    const top = (d: string): number => Math.min(...points(d).map(([, y]) => y));
+    expect(top(plan.asked)).toBeCloseTo(100 - (119 / 125) * 85, 1);
+    expect(top(plan.heldEdge)).toBeCloseTo(100 - (60 / 125) * 85, 1);
+    // Without the rescue the same one-second difference is a write on its way.
+    expect(heldInstead({ ...eased, rescue: undefined })).toBeUndefined();
+  });
+
+  it('marks a difference that has LASTED: a floor the hold did not know, or a refusal', () => {
+    // The hold has asked 90 W for ten seconds and the trainer has said 100 W throughout.
+    const clamped = inHold({
+      holdingWatts: 100,
+      hold: { reason: 'lowered', target: 90 },
+      trace: seconds_(590, 600, 100, 90),
+    });
+    expect(heldInstead(clamped)).toEqual({ heldWatts: 100, plannedWatts: 90, by: 'hold' });
+    // Exactly at the grace: the mismatch began 3 s ago.
+    const justLong = inHold({
+      holdingWatts: 100,
+      hold: { reason: 'lowered', target: 90 },
+      trace: [...seconds_(590, 596, 100, 100), ...seconds_(597, 600, 100, 90)],
+    });
+    expect(heldInstead(justLong)?.by).toBe('hold');
+    const notYet = inHold({
+      holdingWatts: 100,
+      hold: { reason: 'lowered', target: 90 },
+      trace: [...seconds_(590, 597, 100, 100), ...seconds_(598, 600, 100, 90)],
+    });
+    expect(heldInstead(notYet)).toBeUndefined();
+  });
+
+  it('needs the trace to say the difference lasted: with no `asked` in it, nothing is marked', () => {
+    expect(
+      heldInstead(
+        inHold({
+          holdingWatts: 100,
+          hold: { reason: 'lowered', target: 90 },
+          trace: [sample(600, { target: 100, range })],
+        }),
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -805,12 +951,20 @@ describe('the HUD’s strip: one lane, a bar and a line of text — #1307', () =
     );
   });
 
-  it('says heart rate and the range in a hold, and that there is no heart rate', () => {
+  it('says no target in a hold where the trainer confirmed none', () => {
+    expect(
+      workoutStripText(
+        input({ trace: [sample(300, { heartRate: 136, range, target: undefined })] }),
+      ),
+    ).toBe('136 bpm, range 130–140 · No target');
+  });
+
+  it('says heart rate, the range and the target in a hold, and that there is no heart rate', () => {
     expect(workoutStripText(input({ trace: [sample(300, { heartRate: 136.4, range })] }))).toBe(
-      '136 bpm, range 130–140',
+      '136 bpm, range 130–140 · Target 150 W',
     );
     expect(workoutStripText(input({ trace: [sample(300, { range })] }))).toBe(
-      'No heart rate, range 130–140',
+      '— bpm, range 130–140 · Target 150 W',
     );
   });
 

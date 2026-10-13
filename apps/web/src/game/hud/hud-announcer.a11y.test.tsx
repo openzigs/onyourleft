@@ -471,7 +471,7 @@ describe('the heart-rate hold, through the game — #1240', () => {
       'Heart rate: 128 bpm, with a chosen range of 130–140 bpm.',
     );
     expect(strip?.querySelector('.oyl-workout-strip__range')).not.toBeNull();
-    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140');
+    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140 · Target 100 W');
     expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).toBeNull();
     expect(formatViolations(auditAccessibility(document))).toBe('');
 

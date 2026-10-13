@@ -244,16 +244,33 @@ describe('the running workout’s graph — #1307', () => {
     }
   });
 
-  it('says what every mark is under the graph on the Ride screen', () => {
-    for (const workout of [input(), input({ trace: trace(RANGE) }), everything()]) {
+  it('says nothing under the graph unless a mark needs explaining: the lanes carry titles', () => {
+    for (const workout of [input(), input({ trace: trace(RANGE) })]) {
       const root = rendered(<WorkoutGraph workout={workout} />);
-      expect(root.querySelector('.oyl-workout-graph__key')?.textContent).toBe(
-        workoutGraphKey(workout),
-      );
+      expect(root.querySelector('.oyl-workout-graph__key')).toBeNull();
+      // No paragraph at all outside the image — not an empty one.
+      expect(root.querySelectorAll('p:not([role="img"] p)')).toHaveLength(0);
+      expect(root.textContent).not.toMatch(/Top:|Middle:|Bottom:/);
     }
-    // The key is outside the image: it is read, where the marks are not.
-    const root = rendered(<WorkoutGraph workout={input()} />);
-    expect(root.querySelector('.oyl-workout-graph__key')?.closest('[role="img"]')).toBeNull();
+  });
+
+  it('explains the dashed outline, and the dotted one, under the graph while each is drawn', () => {
+    const held = input({ holdingWatts: 180 });
+    const root = rendered(<WorkoutGraph workout={held} />);
+    const key = root.querySelector('.oyl-workout-graph__key');
+    expect(key?.textContent).toBe(
+      'At the line, the dashed outline is what the plan asks for now, 150 W. The shaded step ' +
+        'is what the trainer confirmed instead, 180 W.',
+    );
+    // Outside the image: it is read, where the marks are not.
+    expect(key?.closest('[role="img"]')).toBeNull();
+    const both = rendered(<WorkoutGraph workout={everything()} />);
+    expect(both.querySelector('.oyl-workout-graph__key')?.textContent).toBe(
+      workoutGraphKey(everything()),
+    );
+    expect(workoutGraphKey(everything())).toContain(
+      'The dotted outline is the plan before it was changed.',
+    );
   });
 
   it('is at most a fixed number of shapes for a workout at MAXIMUM_SEGMENTS', () => {
@@ -361,7 +378,7 @@ describe('the HUD’s strip as markup — #1307', () => {
     expect(classes).toContain('oyl-workout-strip__range');
     expect(classes).toContain('oyl-workout-strip__heart-rate');
     expect(classes.filter((name) => /target|power/.test(name))).toEqual([]);
-    expect(textOf(root, 'p')).toEqual(['134 bpm, range 130–140']);
+    expect(textOf(root, 'p')).toEqual(['134 bpm, range 130–140 · Target 150 W']);
   });
 });
 

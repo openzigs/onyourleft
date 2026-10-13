@@ -23,7 +23,6 @@ import {
   routeProfile,
   seconds,
   thresholdShare,
-  watts,
   type RoutePoint,
 } from '@onyourleft/domain';
 import { athleteId } from '@onyourleft/store';
@@ -33,8 +32,9 @@ import { auditAccessibility, formatViolations } from '../a11y/audit';
 import { CONTRAST_REQUIREMENTS } from '../design/tokens';
 import { HudPanel } from '../game/hud/HudPanel';
 import { atStartLine } from '../game/simulation';
-import type { RideWorkoutSnapshot, TrainerSnapshot } from '../ride/controller';
-import { WorkoutPanel } from '../ride/WorkoutPanel';
+import type { RideWorkoutSnapshot } from '../ride/controller';
+import { ridingSnapshot, stubRideController } from '../ride/testing';
+import { RideView } from '../views/RideView';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { workoutStub } from '../workouts/testing';
 
@@ -49,23 +49,6 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
 });
-
-const trainer: TrainerSnapshot = {
-  paired: true,
-  controllable: true,
-  controlChoice: { kind: 'none' },
-  canSetPower: true,
-  canSimulate: false,
-  powerRange: undefined,
-  hasControl: true,
-  target: { kind: 'none' },
-  requested: undefined,
-  lost: undefined,
-  refusal: undefined,
-  releaseFault: undefined,
-  ergRescue: undefined,
-  ergHeld: undefined,
-};
 
 const RANGE = { low: beatsPerMinute(130), high: beatsPerMinute(140) };
 const HOLD: WorkoutHold = { reason: 'lowered', range: RANGE, target: 140 };
@@ -101,27 +84,21 @@ const workout = (held: boolean): RideWorkoutSnapshot => ({
   }),
 });
 
-function onRideScreen(panel: React.ReactElement): React.ReactElement {
+/**
+ * The Ride screen itself, since the graph is its own group there (#1307's
+ * third pass) and not the workout panel's: what is audited is the page a
+ * rider has, with the graph where the document puts it.
+ */
+const panel = (snapshot: RideWorkoutSnapshot): React.ReactElement => {
+  const stub = stubRideController(ridingSnapshot());
+  stub.set({ workout: snapshot });
   return (
     <main>
       <h1>Ride</h1>
-      <h2>Trainer</h2>
-      {panel}
+      <RideView controller={stub.controller} workouts={workoutStub(ATHLETE, [])} />
     </main>
   );
-}
-
-const panel = (snapshot: RideWorkoutSnapshot): React.ReactElement =>
-  onRideScreen(
-    <WorkoutPanel
-      trainer={trainer}
-      workout={snapshot}
-      port={workoutStub(ATHLETE, [])}
-      thresholdPower={watts(250)}
-      onStart={() => undefined}
-      onEnd={() => undefined}
-    />,
-  );
+};
 
 function route(): ReturnType<typeof routeProfile> {
   const points: RoutePoint[] = [];
@@ -225,7 +202,7 @@ describe.each([
     const strip = document.querySelector('[data-oyl-workout-graph="hud"]');
     expect(strip?.querySelector('p')?.getAttribute('aria-hidden')).toBe('true');
     expect(strip?.querySelector('p')?.textContent).toBe(
-      held ? '142 bpm, range 130–140' : 'Target 150 W · 5:00 left in block',
+      held ? '142 bpm, range 130–140 · Target 142 W' : 'Target 150 W · 5:00 left in block',
     );
     // Every image on the HUD has a name, and no two share one.
     expect(named.every((name) => name !== null && name !== '')).toBe(true);

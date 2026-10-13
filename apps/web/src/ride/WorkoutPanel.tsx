@@ -91,7 +91,6 @@ import {
   workoutRescueHeadline,
 } from '../workout/rescue-text';
 import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
-import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
@@ -355,13 +354,11 @@ export function WorkoutPanel({
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
         {/*
-          #1307: the same workout as a picture — the plan, where the rider is
-          in it, and the last few minutes of target and power. LAST, after
-          every control and every sentence (#605's order: press, wrong, read),
-          and it replaces none of them. `workout/workout-graph.ts` says what
-          each part is.
+          #1307: the same workout as a picture is NOT drawn here. It is the
+          Ride screen's own group, after this one (`views/RideView.tsx`), so a
+          landscape tablet can put it under the readings, where there is room
+          for it on screen, rather than at the foot of this narrow column.
         */}
-        <WorkoutGraph workout={workout} />
       </section>
     );
   }

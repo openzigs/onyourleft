@@ -162,7 +162,7 @@ function Drawn({ workout }: WorkoutGraphProps): JSX.Element {
   return (
     <div className="oyl-workout-graph" data-oyl-workout-graph="panel">
       <div role="img" aria-label={text} className="oyl-workout-graph__frame">
-        <div aria-hidden="true">
+        <div aria-hidden="true" className="oyl-workout-graph__lanes">
           <div className="oyl-workout-graph__lane" data-oyl-lane="plan">
             <Caption label={labels.plan} />
             <div className="oyl-workout-graph__well">
@@ -235,7 +235,7 @@ function Drawn({ workout }: WorkoutGraphProps): JSX.Element {
           </div>
         </div>
       </div>
-      <p className="oyl-muted oyl-workout-graph__key">{key}</p>
+      {key === '' ? null : <p className="oyl-muted oyl-workout-graph__key">{key}</p>}
     </div>
   );
 }

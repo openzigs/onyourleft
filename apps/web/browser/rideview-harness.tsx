@@ -301,6 +301,8 @@ function fixtureWorkout(fixture: GraphFixture): NonNullable<RideSnapshot['workou
       power: Math.round(power + 7 * Math.sin(at / 5)),
       heartRate: fixture.heartRate?.(at),
       range: fixture.hold === undefined ? undefined : fixture.hold.range,
+      // A hold that is running asked for exactly what the trainer confirmed.
+      asked: fixture.hold === undefined ? undefined : target,
     });
   }
   return {
