@@ -33,9 +33,19 @@
  * | `heart-rate-low` | … below the bottom of that range |
  * | `cadence-falling` | the latest two summaries with a cadence differ by {@link CADENCE_FALL_RPM} or more, the later the lower |
  * | `goal-duration` | the goals sent hold a duration |
- * | `on-plan` | the latest summary sent counts no eased target, and its mean heart rate is not outside a range the rider chose for it |
+ * | `on-plan` | never: see below |
  * | `goal-time-in-range` | never: the device withholds that goal, so no model was given it |
  * | `effort-check-in` | never: the device sends no effort check-in |
+ *
+ * ⚠️ **`on-plan` — *"because the workout is going to plan"* — is never said**
+ * (#1244's fourth review). To see that a workout is going to plan a device
+ * has to set the rider's power against the target, and that is the figure
+ * of how well the plan is being followed which spike 0022's rule R1 keeps
+ * off the ride path. This module first said it when the block just ridden
+ * had no eased target and a heart rate inside any chosen range, which held
+ * for a block ridden at a third of its target and for a summary with no
+ * reading in it at all. A premise the device may not compute is one it
+ * cannot see, and this module's rule is that such a reason is not said.
  *
  * *"The range the rider chose"* for a block is the block's own range when it
  * is a heart-rate hold, and otherwise the goals' range, when they hold one.
@@ -48,8 +58,15 @@ import type { ReplanInput } from './replan-job';
 /** How far mean cadence must fall between two blocks to be called falling, in rpm. */
 export const CADENCE_FALL_RPM = 5;
 
-/** The reasons this device can never see the premise of, because it sends nothing for them. */
-export const REASONS_NEVER_SHOWN: readonly ReasonCode[] = ['goal-time-in-range', 'effort-check-in'];
+/**
+ * The reasons this device can never see the premise of: two it sends nothing
+ * for, and `on-plan`, whose premise it may not compute (rule R1, above).
+ */
+export const REASONS_NEVER_SHOWN: readonly ReasonCode[] = [
+  'goal-time-in-range',
+  'effort-check-in',
+  'on-plan',
+];
 
 interface Range {
   readonly low: number;
@@ -98,10 +115,6 @@ export function reasonPremiseHolds(reason: ReasonCode, sent: ReplanInput): boole
     case 'goal-duration':
       return sent.goals.durationMinutes !== undefined;
     case 'on-plan':
-      return (
-        latest.rescues === 0 &&
-        !(range !== undefined && mean !== undefined && (mean > range.high || mean < range.low))
-      );
     case 'goal-time-in-range':
     case 'effort-check-in':
       return false;

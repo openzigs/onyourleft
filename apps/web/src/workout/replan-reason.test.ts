@@ -121,14 +121,24 @@ describe('a reason is said only when the device holds its premise', () => {
     expect(reasonPremiseHolds('goal-duration', sent())).toBe(false);
   });
 
-  it('on-plan: the block just ridden counts no eased target and is not outside a chosen range', () => {
-    expect(reasonPremiseHolds('on-plan', sent())).toBe(true);
-    expect(reasonPremiseHolds('on-plan', afterHold(135))).toBe(true);
-    expect(reasonPremiseHolds('on-plan', sent({ summaries: [summary({ rescues: 1 })] }))).toBe(
-      false,
-    );
-    expect(reasonPremiseHolds('on-plan', afterHold(150))).toBe(false);
-    expect(reasonPremiseHolds('on-plan', afterHold(120))).toBe(false);
+  it('on-plan is never said, however well the block went: seeing it means setting power against the target — R1', () => {
+    // The cases the first definition said yes to, and the two the review measured.
+    expect(reasonPremiseHolds('on-plan', sent())).toBe(false);
+    expect(reasonPremiseHolds('on-plan', afterHold(135))).toBe(false);
+    // A block ridden at a third of what it asked for.
+    expect(
+      reasonPremiseHolds('on-plan', sent({ summaries: [summary({ meanPowerShare: 0.3 })] })),
+    ).toBe(false);
+    // And one ridden exactly as asked: the device still may not work that out.
+    expect(
+      reasonPremiseHolds(
+        'on-plan',
+        sent({
+          summaries: [summary({ meanPowerShare: 0.6, meanHeartRate: 135, meanCadence: 90 })],
+        }),
+      ),
+    ).toBe(false);
+    expect(REASONS_NEVER_SHOWN).toContain('on-plan');
   });
 
   it.each(['goal-time-in-range', 'effort-check-in'] as const)(
@@ -151,12 +161,31 @@ describe('a reason is said only when the device holds its premise', () => {
     }
   });
 
-  it('has an answer for every reason code, and says some and withholds others', () => {
-    const answers = new Map<ReasonCode, boolean>(
-      REASON_CODES.map((reason) => [reason, reasonPremiseHolds(reason, afterHold(141))]),
+  it('has an answer for every reason code: three it never says, and four it says when it holds them', () => {
+    expect(REASONS_NEVER_SHOWN).toStrictEqual(['goal-time-in-range', 'effort-check-in', 'on-plan']);
+    // A request that holds every premise this device can see.
+    const everything = sent({
+      goals: { durationMinutes: 60 },
+      blocks: [STEADY, HOLD, STEADY],
+      currentBlock: 2,
+      summaries: [
+        summary({ meanCadence: 95 }),
+        summary({ block: 1, meanHeartRate: 141, meanCadence: 85 }),
+      ],
+    });
+    const said = REASON_CODES.filter((reason: ReasonCode) =>
+      reasonPremiseHolds(reason, everything),
     );
-    expect(answers.size).toBe(REASON_CODES.length);
-    expect([...answers.values()].filter(Boolean)).toEqual([true]);
-    expect(answers.get('heart-rate-high')).toBe(true);
+    expect([...said].sort()).toStrictEqual(['cadence-falling', 'goal-duration', 'heart-rate-high']);
+    // heart-rate-low is the fourth: the same block ridden under its range.
+    expect(
+      reasonPremiseHolds(
+        'heart-rate-low',
+        sent({ blocks: [HOLD, STEADY, STEADY], summaries: [summary({ meanHeartRate: 120 })] }),
+      ),
+    ).toBe(true);
+    for (const never of REASONS_NEVER_SHOWN) {
+      expect(said).not.toContain(never);
+    }
   });
 });

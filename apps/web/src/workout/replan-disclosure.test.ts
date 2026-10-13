@@ -506,9 +506,9 @@ describe('what the text says of this device, held to its code (#1244)', () => {
     );
   });
 
-  it('"It gives the reason only when this device can see it in what it sent": two reasons it never can', () => {
+  it('"It gives the reason only when this device can see it in what it sent": three reasons it never can', () => {
     // `replan-reason.test.ts` holds every reason both ways.
-    expect(REASONS_NEVER_SHOWN).toStrictEqual(['goal-time-in-range', 'effort-check-in']);
+    expect(REASONS_NEVER_SHOWN).toStrictEqual(['goal-time-in-range', 'effort-check-in', 'on-plan']);
     expect(POLICY).toContain(
       'It gives the reason only when this device can see it in what it sent; otherwise it says the change alone.',
     );

@@ -3423,14 +3423,30 @@ a.oyl-button {
 }
 
 /* #1244: "Re-plans on", beside the chooser's heading while the switch under
-   the list is on. Floated to the end of the heading's own line, at body
-   size and weight, so it takes no line of its own and the first *Ride* is
-   where it was. `rideview.browser.spec.ts` §"#1244 — many saved workouts"
-   holds both. */
+   the list is on: a paragraph AFTER the `h3`, not inside it, on the
+   heading's own line and at its end, so it takes no line of its own and the
+   first *Ride* is where it was. The row takes the heading's place in the
+   flow: it has the heading's margin and the heading inside it has none, and
+   the paragraph keeps the heading's line height so the row is no taller
+   with it than without. `rideview.browser.spec.ts` §"#1244 — many saved
+   workouts" holds that nothing moved. */
+.oyl-workout-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+.oyl-workout-heading > h3 {
+  margin: 0;
+}
+
 .oyl-workout-replans-on {
-  float: inline-end;
   font-size: var(--oyl-font-size-md);
-  font-weight: 400;
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
 }
 
 /* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on

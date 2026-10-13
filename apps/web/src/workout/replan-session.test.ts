@@ -462,7 +462,8 @@ describe('an accepted move waits for the next block', () => {
 
     expect(r.session.state().waiting).toEqual({
       revision: 1,
-      sentence: 'Next block shortened by 2 minutes, because the workout is going to plan.',
+      // `on-plan`, the rig's reason, is one the device never says (rule R1).
+      sentence: 'Next block shortened by 2 minutes.',
     });
     expect(r.player.plan().waiting?.totalSeconds).toBe(2280);
     expect(r.player.plan().riding.totalSeconds).toBe(2400);
@@ -475,6 +476,7 @@ describe('an accepted move waits for the next block', () => {
         reason: 'on-plan',
         revision: 1,
         at: START + 300,
+        reasonNotShown: true,
       },
     ]);
   });
@@ -1207,6 +1209,10 @@ describe('a reason is said only when this device holds its premise — #1244’s
   it.each([
     ['effort-check-in', 'this device sends no effort check-in'],
     ['goal-time-in-range', 'this device withholds that goal'],
+    [
+      'on-plan',
+      'seeing it would mean setting power against the target, which rule R1 keeps off the ride',
+    ],
   ])('never says %s: %s', async (reason) => {
     const r = rig({ goals: { timeInRangeMinutes: 20, effortCheckIns: true } });
     await r.ride(300);

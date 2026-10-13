@@ -773,11 +773,20 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       }
       gather(gathering, facts);
 
-      // ⚠️ Without control or a strap as well as in a rescue (P6): a job out
-      // when the link or control goes is cancelled HERE, so its answer is
-      // not accepted seconds after control returns, from summaries of a
-      // block that was interrupted. D-8 drops a waiting move on a lost link;
-      // this is the same rule for a move that has not arrived yet.
+      // ⚠️ Without trainer control, or with no strap PAIRED, as well as in a
+      // rescue (P6): a job out when control goes — a lost trainer link takes
+      // control with it — is cancelled HERE, so its answer is not accepted
+      // seconds after control returns, from summaries of a block that was
+      // interrupted. D-8 drops a waiting move on a lost link; this is the
+      // same rule for a move that has not arrived yet.
+      //
+      // ⚠️ The strap's half is narrower than that. `heartRatePaired` is H1's
+      // word: a heart-rate sensor is in the list of paired devices. A strap
+      // that goes QUIET, or drops its own link, is still paired, so a job
+      // out then is NOT cancelled and its answer is read; only unpairing
+      // the strap cancels it. The heart-rate hold deals with a silent strap
+      // itself, and a summary of a block with no reading carries no heart
+      // rate rather than a made-up one.
       if (
         flight !== undefined &&
         (facts.rescue ||

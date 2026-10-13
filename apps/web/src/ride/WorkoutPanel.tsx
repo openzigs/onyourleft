@@ -525,23 +525,27 @@ export function WorkoutPanel({
   function chooser(): JSX.Element {
     return (
       <section>
-        <h3>
-          Ride a workout
-          {/*
-            #1244's review: the switch is UNDER the list, with what it sends,
-            so a rider with many workouts presses *Ride* with it out of
-            sight. While it is on, two words say so HERE, on the heading's
-            own line, above the first *Ride* — floated to the line's end so
-            nothing under it moves when the switch is pressed. Nothing is
-            shown while it is off, which is the default and sends nothing.
-          */}
+        {/*
+          #1244's review: the switch is UNDER the list, with what it sends,
+          so a rider with many workouts presses *Ride* with it out of sight.
+          While it is on, two words say so HERE, on the heading's own line,
+          above the first *Ride*, at the line's end, so nothing under it
+          moves when the switch is pressed. Nothing is shown while it is
+          off, which is the default and sends nothing.
+
+          ⚠️ BESIDE the heading, not inside it (the fourth review): inside
+          the `h3` the heading's name became "Ride a workout Re-plans on",
+          and a heading is what a screen-reader user navigates by. It is a
+          paragraph straight after the heading, so it is read next.
+        */}
+        <div className="oyl-workout-heading">
+          <h3>Ride a workout</h3>
           {replansAvailable === true && replans ? (
-            <span className="oyl-workout-replans-on" data-oyl-replans-on="">
-              {' '}
+            <p className="oyl-workout-replans-on" data-oyl-replans-on="">
               {REPLANS_ON_BADGE}
-            </span>
+            </p>
           ) : null}
-        </h3>
+        </div>
         {loadFault === undefined ? null : (
           <StatusMessage tone="warning" live>
             {loadFault}

@@ -8684,9 +8684,7 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
 
       scripted.answer(proposal(EASE));
       await flushMicrotasks(20);
-      expect(replanOf(rig)?.waiting?.sentence).toBe(
-        'Targets before the cool-down lowered by 10%, because the workout is going to plan.',
-      );
+      expect(replanOf(rig)?.waiting?.sentence).toBe('Targets before the cool-down lowered by 10%.');
       // The whole of the block being ridden: the trainer holds what the
       // loaded plan asked, and not one more target is written.
       let seconds = 0;
@@ -9156,6 +9154,8 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       const kept = (await savedRide('ride-1'))?.rideFacts?.replans ?? [];
       expect(kept.map((each) => each.decision)).toEqual(['accepted', 'not-applied']);
       expect(kept[0]).toMatchObject({ move: EASE, reason: 'on-plan', revision: 1 });
+      // `on-plan` is never said: the record keeps the reason and says so.
+      expect(kept[0]).toHaveProperty('reasonNotShown', true);
       expect(kept[1]).toMatchObject({ why: 'ended', revision: 1 });
       // Every record the session made is one the store reads: none was dropped.
       expect((await savedRide('ride-1'))?.rideFacts?.replansDropped).toBeUndefined();
@@ -9652,7 +9652,7 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       scripted.answer(proposal(SWAP));
       await flushMicrotasks(20);
       expect(replanOf(rig)?.waiting?.sentence).toBe(
-        'Next block swapped for one from your saved workouts, because the workout is going to plan.',
+        'Next block swapped for one from your saved workouts.',
       );
       while (elapsedOf(rig) < 299) {
         await rideOn(rig, 1);

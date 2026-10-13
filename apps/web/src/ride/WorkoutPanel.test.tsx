@@ -694,16 +694,29 @@ describe('re-plans during the ride — #1244', () => {
     it('says beside the heading that it is on, only while it is on', async () => {
       const view = await render({ replansAvailable: true });
       expect(onLine(view.container)).toBeUndefined();
-      expect(view.container.querySelector('h3')?.textContent).toBe('Ride a workout');
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
-      expect(onLine(view.container)?.trim()).toBe(REPLANS_ON_BADGE);
-      // On the heading's own line, so before the first control that starts a workout.
+      expect(onLine(view.container)).toBe(REPLANS_ON_BADGE);
+      // Text, in a paragraph of its own, before the first control that starts a workout.
       const badge = queryAll(view.container, '[data-oyl-replans-on]')[0] as HTMLElement;
-      expect(badge.closest('h3')?.textContent).toBe('Ride a workout Re-plans on');
+      expect(badge.tagName).toBe('P');
       const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
       expect(badge.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
       expect(onLine(view.container)).toBeUndefined();
+    });
+
+    it('leaves the heading’s own name alone: the badge is beside the heading, not in it', async () => {
+      const view = await render({ replansAvailable: true });
+      const heading = () => view.container.querySelector('h3');
+      expect(heading()?.textContent).toBe('Ride a workout');
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      // ⚠️ Still exactly this: a heading is what a screen-reader user moves by.
+      expect(heading()?.textContent).toBe('Ride a workout');
+      expect(heading()?.getAttribute('aria-label')).toBeNull();
+      expect(heading()?.querySelector('[data-oyl-replans-on]')).toBeNull();
+      // Straight after the heading, on its line: the heading's next sibling.
+      expect(heading()?.nextElementSibling?.textContent).toBe(REPLANS_ON_BADGE);
+      expect(heading()?.parentElement?.classList.contains('oyl-workout-heading')).toBe(true);
     });
 
     it('never says it where there is no switch', async () => {
