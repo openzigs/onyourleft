@@ -381,8 +381,43 @@ describe("#1312 — a ride's laps are saved with it", () => {
     expect(outcome.status).toBe('failed');
     if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
     expect(deleted).toStrictEqual([ACTIVITY]);
+    // Taken back, so nothing is said to be left behind.
+    expect(outcome).not.toHaveProperty('leftBehind');
     // It stopped at the lap that failed.
     expect(written).toBe(2);
+  });
+
+  it.each([
+    ['refuses', () => Promise.reject(new Error('the tidy-up failed too'))],
+    ['removes nothing', () => Promise.resolve(false)],
+  ])(
+    'says so when the ride cannot be taken back out because the delete %s',
+    async (_how, deleteActivity) => {
+      const store: RideSaveStore = {
+        ...storeOf(),
+        putLap: () => Promise.reject(new Error('the device is full')),
+        deleteActivity,
+      };
+
+      const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
+
+      // The original cause, and the fact that part of the ride is still there.
+      expect(outcome).toMatchObject({ status: 'failed', leftBehind: true });
+      if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
+    },
+  );
+
+  it('says the same when the samples will not go down and the activity cannot be taken back', async () => {
+    const store: RideSaveStore = {
+      ...storeOf(),
+      putStreamSet: () => Promise.reject(new Error('the device is full')),
+      deleteActivity: () => Promise.reject(new Error('the tidy-up failed too')),
+    };
+
+    expect(await saveFinishedRide(store, rideToSave(input()))).toMatchObject({
+      status: 'failed',
+      leftBehind: true,
+    });
   });
 
   it('and through the real store that leaves no ride and no lap behind', async () => {

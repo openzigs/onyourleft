@@ -35,6 +35,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
+import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
@@ -247,7 +248,16 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
 });
+
+/** The rider has turned spoken announcements on — off is the default. */
+function turnAnnouncementsOn(): void {
+  localStorage.setItem(
+    ANNOUNCEMENTS_STORAGE_KEY,
+    JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true }),
+  );
+}
 
 async function clickThrough(element: HTMLElement | undefined): Promise<void> {
   await act(async () => {
@@ -971,6 +981,8 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
   });
 
   it('records a lap each time the rider completes a loop, says it on the HUD, and saves a part lap as one (#1312)', async () => {
+    // The lap is SAID only to a rider who chose announcements (third pass).
+    turnAnnouncementsOn();
     /** 300 flat metres out and back, so its ends meet and it is honestly a loop. */
     const circuit = (): RidableRoute => {
       const points: RoutePoint[] = [];
@@ -1744,6 +1756,43 @@ describe('a second game ride in one mount begins with no lap of the first — #1
     // first's, and not once the odometer passes the first ride's two laps.
     const second = await pumpUntilLaps(events, 1);
     expect(second).toBeLessThanOrEqual(first + 4);
+  });
+});
+
+describe('a lap’s summary respects the announcements setting — #1312', () => {
+  it('is shown and not said with announcements off, which is the default', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+    const region = (): string =>
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+
+    await pumpUntilLaps(events, 1);
+
+    // The notice is on the HUD, and the region is offered the sentence…
+    expect(hudText()).toMatch(/Lap 1: /);
+    expect(offered).toContain('lap-ended');
+    // …and does not say it, now or for as long as the notice is shown.
+    for (let frames = 0; frames < 8; frames += 1) {
+      await pump(1);
+      expect(region()).not.toMatch(/Lap 1:/);
+    }
+  });
+
+  it('is said with announcements on', async () => {
+    held.on = false;
+    turnAnnouncementsOn();
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+
+    await pumpUntilLaps(events, 1);
+    await pump(2);
+
+    expect(
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
+    ).toMatch(/^Lap 1:/);
   });
 });
 

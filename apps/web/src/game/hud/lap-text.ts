@@ -17,7 +17,9 @@
  * ## Said twice over, once each way
  *
  * The lap is SHOWN as a notice for {@link LAP_NOTICE_SECONDS} of ride and
- * SAID once through the HUD's one region (`announce.ts`, `lap-ended`). The
+ * SAID once through the HUD's one region (`announce.ts`, `lap-ended`) to a
+ * rider who has announcements on — it respects that setting, since the third
+ * pass. The
  * comparison is words — *faster*, *slower*, *best* — never a colour or an
  * arrow, so nothing about a lap is carried by colour alone (SC 1.4.1).
  *
@@ -36,7 +38,15 @@
  * ride's page marks, except where two laps differ by less than the second the
  * page shows them to. (In a recording of two courses the page marks the one
  * lap with the highest average speed; the HUD says which lap of THIS course
- * is the best.)
+ * is the best, and says "of this course" rather than "of this ride" when
+ * it does.)
+ *
+ * ⚠️ **"The same course" is "the same length", to the float.** A lap carries
+ * no identity of the course it was ridden on: its distance is
+ * `profile.totalDistance` passed through unchanged, so one course always
+ * compares equal with itself, and two different courses of exactly one length
+ * would be taken for one. An identity on the lap is the sturdier rule, and it
+ * is #1318's to add with laps that have no course at all.
  *
  * ⚠️ **No score and no trademarked name** (docs/agents/scope-and-ip.md §6):
  * plain averages, plainly named.
@@ -170,15 +180,29 @@ export function lapSummary(laps: readonly LapFigures[], units: UnitSystem): LapS
     best = undefined;
   }
   const bestLap = best === undefined ? undefined : laps[best];
+  // ⚠️ "Of this ride" only where that is true (#1316's third review). The
+  // best is the best of THIS course; with one course ridden that is the best
+  // of the ride, and with two it is not — the ride's page marks one lap of
+  // the whole ride, by average speed. So a recording with whole laps of
+  // another course says "of this course" and "on this course" instead.
+  const oneCourse = laps.every((other) => other.partial === true || comparable(other));
+  const which = String((best ?? index) + 1);
   const standing =
     best === undefined || bestLap === undefined
       ? undefined
       : best === index
-        ? { text: 'Your best lap of this ride.', sentence: 'Your best lap of this ride.' }
-        : {
-            text: `Best: lap ${String(best + 1)}, ${formatDuration(bestLap.movingTime)}.`,
-            sentence: `Your best is lap ${String(best + 1)}, ${spokenDuration(bestLap.movingTime)}.`,
-          };
+        ? oneCourse
+          ? { text: 'Your best lap of this ride.', sentence: 'Your best lap of this ride.' }
+          : { text: 'Your best lap of this course.', sentence: 'Your best lap of this course.' }
+        : oneCourse
+          ? {
+              text: `Best: lap ${which}, ${formatDuration(bestLap.movingTime)}.`,
+              sentence: `Your best is lap ${which}, ${spokenDuration(bestLap.movingTime)}.`,
+            }
+          : {
+              text: `Best on this course: lap ${which}, ${formatDuration(bestLap.movingTime)}.`,
+              sentence: `Your best on this course is lap ${which}, ${spokenDuration(bestLap.movingTime)}.`,
+            };
 
   const label = `Lap ${String(number)}`;
   return {

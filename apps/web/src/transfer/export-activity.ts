@@ -341,6 +341,12 @@ interface ExportLap {
    * ride — {@link trackActivityOf}.
    */
   readonly rideThrough: { readonly elapsedTime: number; readonly distance: number };
+  /**
+   * The one split of a ride with no stored laps. ⚠️ Its totals go into a
+   * file as the activity's own, untouched — what such a ride has always
+   * exported as, to the byte (`trackActivityOf`).
+   */
+  readonly wholeRide?: true;
   readonly points: readonly TrackPoint[];
 }
 
@@ -375,14 +381,15 @@ function stretchesOf(stored: readonly LapRecord[], activity: ActivityRecord): re
     stretches.push({ startedAt: lap.startedAt, endsAt, lap });
     cursor = endsAt;
   }
-  const rideEnds = activity.startedAt + activity.elapsedTime;
-  if (rideEnds > cursor) {
-    stretches.push({
-      startedAt: unixSeconds(cursor),
-      endsAt: unixSeconds(rideEnds),
-      lap: undefined,
-    });
-  }
+  // Always one after the last lap, though the ride may end where the lap did:
+  // a lap owns the slots up to and NOT including the one it ended in, so the
+  // sample in that slot is the ride's and not the lap's. With no sample in it
+  // the stretch is not written (`splitsOf`).
+  stretches.push({
+    startedAt: unixSeconds(cursor),
+    endsAt: unixSeconds(Math.max(cursor, activity.startedAt + activity.elapsedTime)),
+    lap: undefined,
+  });
   return stretches;
 }
 
@@ -445,6 +452,7 @@ function splitsOf(
         movingTime: activity.movingTime,
         distance: activity.distance,
         rideThrough: whole,
+        wholeRide: true,
         points,
       },
     ];
@@ -478,9 +486,12 @@ function splitsOf(
   }
 
   const recordedTotal = recorded.reduce((sum, part) => sum + part, 0);
-  const outside = stretches.filter((stretch) => stretch.lap === undefined);
-  const outsideSeconds = outside.reduce(
-    (sum, stretch) => sum + (stretch.endsAt - stretch.startedAt),
+  /** A stretch outside the laps with no sample in it: not written. @see folded, below */
+  const empty = (ordinal: number): boolean =>
+    stretches[ordinal]?.lap === undefined && (buckets[ordinal]?.length ?? 0) === 0;
+  const outsideSeconds = stretches.reduce(
+    (sum, stretch) =>
+      stretch.lap === undefined ? sum + (stretch.endsAt - stretch.startedAt) : sum,
     0,
   );
   const movedOutside = Math.max(
@@ -490,7 +501,7 @@ function splitsOf(
 
   let recordedThrough = 0;
   let through = { elapsedTime: 0, distance: 0 };
-  return stretches.map((stretch, ordinal) => {
+  const splits = stretches.map((stretch, ordinal): ExportLap => {
     const last = ordinal === stretches.length - 1;
     const duration = stretch.endsAt - stretch.startedAt;
     recordedThrough += recorded[ordinal] ?? 0;
@@ -528,6 +539,25 @@ function splitsOf(
       points: buckets[ordinal] ?? [],
     };
   });
+
+  // ⚠️ **No split with nothing in it.** A stretch outside the laps that holds
+  // no sample — a game ride begun half a second into its recording, a
+  // recording stopped a moment after *End ride* — would be a TCX `<Lap>` with
+  // an empty `<Track>`, which a strict reader may refuse, and a FIT lap a
+  // fraction of a second long. It is folded into the split before it: that
+  // split's running totals run on through it, so the splits still add up to
+  // the ride. One at the very start needs nothing: the first split written
+  // counts from the ride's start whatever it is.
+  const folded: ExportLap[] = [];
+  splits.forEach((split, ordinal) => {
+    const before = folded[folded.length - 1];
+    if (!empty(ordinal)) {
+      folded.push(split);
+    } else if (before !== undefined) {
+      folded[folded.length - 1] = { ...before, rideThrough: split.rideThrough };
+    }
+  });
+  return folded;
 }
 
 function fitInputOf(
@@ -628,7 +658,21 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
     // the tenths add up to the ride's total and not to a rounding of it. A
     // course lap's own distance — the game's road — is therefore not in a TCX
     // file; FIT has a session total, and its laps keep theirs.
+    //
+    // ⚠️ **And a ride with NO stored laps is written exactly as it always
+    // was**: the activity's own totals, handed to the codec as they are.
+    // Rounding them here first is not the same thing — 38613.35 is a hair
+    // under the half as a float, so the codec's `toFixed(1)` writes `38613.3`
+    // and `Math.round(x * 10) / 10` gives `38613.4` (#1316's third review).
     laps: laps.map((lap, ordinal) => {
+      if (lap.wholeRide === true) {
+        return {
+          startTime: lap.startedAt,
+          totalElapsedTime: lap.elapsedTime,
+          totalDistance: lap.distance,
+          points: lap.points,
+        };
+      }
       const before = laps[ordinal - 1]?.rideThrough ?? { elapsedTime: 0, distance: 0 };
       return {
         startTime: lap.startedAt,

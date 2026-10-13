@@ -331,9 +331,9 @@ describe('priority is an ORDER, not a politeness', () => {
       'side-camera-lost',
       'room-lost',
       'room-race',
-      // #1312: and a lap of the course, as it ends.
-      'lap-ended',
     ]);
+    // #1312, third pass: a lap's summary is NOT one of them.
+    expect(ALWAYS_SPOKEN).not.toContain('lap-ended');
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
@@ -411,9 +411,13 @@ describe('a lap of the course, as it ends — #1312', () => {
     }
   });
 
-  it('is said with announcements OFF: a notice shown for a few seconds is a status', () => {
-    const { said } = run([{ now: 0, events: [lap] }], { ...DEFAULT_ANNOUNCEMENTS });
-    expect(said).toEqual(['Lap 2: 9 minutes 52 seconds.']);
+  it('respects the announcements setting: said with them on, not with them off', () => {
+    expect(run([{ now: 0, events: [lap] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
+      undefined,
+    ]);
+    expect(run([{ now: 0, events: [lap] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual([
+      'Lap 2: 9 minutes 52 seconds.',
+    ]);
   });
 
   it('gives way to a climb in the same window, and is not said in place of it', () => {

@@ -137,7 +137,12 @@ export function LapsTable({ laps, units }: LapsTableProps): JSX.Element {
   );
   return (
     <>
-      <ScrollTable className="oyl-table" caption="Laps, in the order they were ridden">
+      {/* `oyl-table--laps`: the Lap column stays put while the figures scroll
+          under it (`theme.css`), so a figure can be tied to its lap by eye. */}
+      <ScrollTable
+        className="oyl-table oyl-table--laps"
+        caption="Laps, in the order they were ridden"
+      >
         <thead>
           <tr>
             <th scope="col">Lap</th>

@@ -4175,6 +4175,35 @@ select.oyl-input {
   vertical-align: top;
 }
 
+/*
+ * The lap table's first column stays where it is while the rest scrolls —
+ * #1312. A ride with every figure has eleven columns, which is wider than the
+ * ride page's column at any width this app is laid out at, so the table is
+ * read scrolled; and scrolled, the Lap column was gone, and with it which lap
+ * a figure is and which lap is the best. A screen reader always had the row's
+ * header (`th scope="row"`); this is the same for the eye.
+ *
+ * Both cells of the column already have an opaque surface of their own (the
+ * header rule above), so the figures pass under it and not through it.
+ */
+.oyl-table--laps th:first-child {
+  left: 0;
+  position: sticky;
+  z-index: 1;
+}
+
+/*
+ * And its marks on one line where there is room for that: `3 · Best lap`
+ * broken over three lines made the best lap's row three times the height of
+ * the others. Below 40rem the column stays as narrow as its longest word,
+ * because there a third of the screen is too much to keep still.
+ */
+@media (min-width: 40rem) {
+  .oyl-table--laps tbody th {
+    white-space: nowrap;
+  }
+}
+
 /* Sort controls, and the ride detail view's series toggles. */
 .oyl-library-controls {
   display: flex;

@@ -164,6 +164,7 @@ import type {
 } from './recording';
 import {
   chunkChannelEncoding,
+  courseLapFault,
   decodedChunkChannels,
   fromPersistedRecordingSession,
   persistedChunkBytes,
@@ -2690,6 +2691,15 @@ export class ActivityStore {
           `${String(record.sampleInterval)}`,
       );
     }
+    // #1312. What the read path would drop, refused here: a lap with a figure
+    // that is no number is a defect in whatever worked it out, and written
+    // down it would cost the recording its whole lap list on the way back.
+    (record.courseLaps ?? []).forEach((lap, index) => {
+      const fault = courseLapFault(lap);
+      if (fault !== undefined) {
+        throw new StoreValidationError(`recording courseLaps[${String(index)}]: ${fault}`);
+      }
+    });
     const row = toPersistedRecordingSession(record);
     await this.#db.transaction('rw', [this.#athletes, this.#recordingSessions], async () => {
       await this.#requireAthlete(record.athleteId);

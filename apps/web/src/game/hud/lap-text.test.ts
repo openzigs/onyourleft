@@ -95,9 +95,30 @@ describe('lapSummary — #1312', () => {
     expect(summary?.label).toBe('Lap 4');
     expect(summary?.text).toContain('10 s slower than lap 1.');
     // And the best is the best of THIS course. Lap 2 was quicker and faster
-    // (1 km at 36 km/h), and it was another road.
-    expect(summary?.text).toContain('Best: lap 1, 10:00.');
-    expect(summary?.sentence).toContain('Your best is lap 1, 10 minutes.');
+    // (1 km at 36 km/h), and it was another road — so the notice says which
+    // course it means, and does not say "lap 1 is your best" of the ride.
+    expect(summary?.text).toContain('Best on this course: lap 1, 10:00.');
+    expect(summary?.sentence).toContain('Your best on this course is lap 1, 10 minutes.');
+    expect(summary?.text).not.toMatch(/(^|\. )Best: lap/);
+  });
+
+  it('calls a lap the best of this COURSE, not of the ride, when another course was ridden too', () => {
+    const laps = [lap(100, { distance: metres(1_000) }), lap(600), lap(590)];
+
+    const summary = lapSummary(laps, 'metric');
+
+    // Lap 1 was the faster ride (36 km/h against 30.5), on another road: the
+    // ride's page marks IT the best lap of the ride.
+    expect(summary?.text).toContain('10 s faster than lap 2. Your best lap of this course.');
+    expect(summary?.sentence).toContain('Your best lap of this course.');
+    expect(summary?.text).not.toContain('of this ride');
+    expect(summary?.sentence).not.toContain('of this ride');
+  });
+
+  it('still says "of this ride" when the only other road was a part lap', () => {
+    const laps = [lap(600), lap(30, { distance: metres(400), partial: true }), lap(590)];
+
+    expect(lapSummary(laps, 'metric')?.text).toContain('Your best lap of this ride.');
   });
 
   it('says nothing about a best lap with one whole lap of this course, whatever else was ridden', () => {

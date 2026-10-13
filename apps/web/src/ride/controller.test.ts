@@ -5554,6 +5554,28 @@ describe('a finished ride becomes an activity, and only then lets the checkpoint
     rig.controller.dispose();
   });
 
+  it('says so when a failed save could not take back what it had written', async () => {
+    // #1316's third review: the tidy-up's own failure used to be swallowed,
+    // so the rider was told only "the device is full" about a ride that was
+    // still in the library, and the retry wrote a second one.
+    const { port } = savePort({
+      putStreamSet: () => Promise.reject(new Error('the device is full')),
+      deleteActivity: () => Promise.reject(new Error('and the delete failed')),
+    });
+    const rig = benchWith({ rideSave: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    expect(rig.controller.getSnapshot().saveState).toBe('failed');
+    expect(rig.controller.getSnapshot().saveError).toBe(
+      'the device is full; part of the ride was written and could not be removed, so saving it again may list it twice',
+    );
+    rig.controller.dispose();
+  });
+
   it('KEEPS the checkpoint when the save fails, and says why', async () => {
     const { port } = savePort({
       putStreamSet: () => Promise.reject(new Error('the device is full')),
@@ -6967,6 +6989,64 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
     rig.controller.dispose();
   });
 
+  it('ends a lap at a line crossed while the recording is paused: the pause is in its elapsed time and not its moving time', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 5);
+    await rig.controller.pause();
+    await ride(rig, 3);
+    // The game rolls the rider over the line three seconds into the pause.
+    const afterOne = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(afterOne?.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([[8, 5]]);
+    await ride(rig, 2);
+    await rig.controller.resume();
+    await ride(rig, 4);
+    const afterTwo = hud.courseLine?.({ ...WHOLE, again: true });
+    // One lap each, and not one lap two laps long.
+    expect(afterTwo?.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([
+      [8, 5],
+      [6, 4],
+    ]);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect((await lapsOf('ride-1')).map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([
+      [8, 5],
+      [6, 4],
+    ]);
+    rig.controller.dispose();
+  });
+
+  it('begins no lap of a new recording at a mark the last recording left open', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    // Recording 1 is stopped with a lap open: the game ride goes on without it.
+    await rig.controller.start();
+    await ride(rig, 3);
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await ride(rig, 20);
+
+    // Recording 2 starts part-way round that same lap.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    expect(hud.rideLapSeconds?.()).toBeUndefined();
+    await ride(rig, 5);
+    // The line: the lap it ends began in ANOTHER recording, so it is no lap
+    // of this one — not 29 s long on one clock and 5 s on the other.
+    expect(hud.courseLine?.({ ...WHOLE, again: true })).toBeUndefined();
+    await ride(rig, 6);
+    const laps = hud.courseLine?.({ ...WHOLE, again: true });
+    expect(laps?.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([[6, 6]]);
+    rig.controller.dispose();
+  });
+
   it('saves no laps for a ride that never completed the course, and none of one ride’s with the next', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     const hud = gameTrainerPortOver(rig.controller);
@@ -7113,6 +7193,137 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       expect(second?.averagePower).toBe(
         Math.round(inLap.reduce((sum, sample) => sum + sample, 0) / inLap.length),
       );
+      next.controller.dispose();
+    });
+
+    /** Rewrite one stored header's lap list behind the store's back, as a damaged disk would. */
+    const plantLaps = async (id: RecordingSessionId, laps: unknown): Promise<void> => {
+      await harness.discard();
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(harness.databaseName);
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        request.onerror = () => {
+          reject(request.error ?? new Error('the database did not open'));
+        };
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction('recordingSessions', 'readwrite');
+          const rows = transaction.objectStore('recordingSessions');
+          const read = rows.get(id);
+          read.onsuccess = () => {
+            const row = read.result as Record<string, unknown> | undefined;
+            if (row === undefined) {
+              reject(new Error(`no header for ${id}`));
+              return;
+            }
+            // The premise: the header really did hold this ride's laps.
+            expect(row['courseLaps']).toHaveLength(2);
+            rows.put({ ...row, courseLaps: laps });
+          };
+          transaction.oncomplete = () => {
+            resolve();
+          };
+          transaction.onerror = () => {
+            reject(transaction.error ?? new Error('the header was not rewritten'));
+          };
+        });
+      } finally {
+        database.close();
+      }
+    };
+
+    /**
+     * #1316's third review, blocking. A lap list that would not decode threw
+     * out of `listRecordingSessions`, which decodes EVERY header: the rider
+     * was offered no ride at all, and the damaged one's samples could not be
+     * saved. A lap is worked out about the samples; it must never cost them.
+     */
+    it('a damaged lap list hides no ride: both are offered, and the damaged one is saved without its laps', async () => {
+      const healthy = await crashedMidRide();
+      const damaged = await crashedMidRide();
+      const stored = await harness.read(async (store) =>
+        store.getRecordingSession(ATHLETE_A, damaged),
+      );
+      const [first, second] = stored?.courseLaps ?? [];
+      if (first === undefined || second === undefined) {
+        throw new Error('the crashed ride had no laps in its header');
+      }
+      // One figure of one lap is no number, as the row holds it.
+      await plantLaps(damaged, [
+        {
+          fromAt: first.from.at,
+          fromMovingSeconds: first.from.movingTime,
+          toAt: first.to.at,
+          toMovingSeconds: first.to.movingTime,
+          distanceMetres: Number.NaN,
+        },
+        {
+          fromAt: second.from.at,
+          fromMovingSeconds: second.from.movingTime,
+          toAt: second.to.at,
+          toMovingSeconds: second.to.movingTime,
+          distanceMetres: second.distance,
+        },
+      ]);
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(
+        next.controller
+          .getSnapshot()
+          .recoverable.map((ride) => ride.id)
+          .sort(),
+      ).toEqual([healthy, damaged].sort());
+
+      // The damaged one: every sample, and no lap row from a list that did
+      // not read — not even the lap beside the damaged one, which would be
+      // listed under a number that is not its own.
+      expect(await next.controller.saveRecovered(damaged)).toBe('saved');
+      expect(await lapsOf('ride-1')).toEqual([]);
+      const streams = await harness.read(async (store) =>
+        store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(streams?.sampleCount).toBeGreaterThanOrEqual(25);
+
+      // And the healthy one is still there to save, laps and all.
+      expect(await next.controller.saveRecovered(healthy)).toBe('saved');
+      expect((await lapsOf('ride-2')).map((lap) => lap.movingTime)).toEqual([10, 7]);
+      next.controller.dispose();
+    });
+
+    it('a lap that lies outside the recording is not saved as a row', async () => {
+      const id = await crashedMidRide();
+      const stored = await harness.read(async (store) => store.getRecordingSession(ATHLETE_A, id));
+      const [first, second] = stored?.courseLaps ?? [];
+      if (first === undefined || second === undefined) {
+        throw new Error('the crashed ride had no laps in its header');
+      }
+      // Well formed, and nowhere near the ride: a start in the year 287 000.
+      await plantLaps(id, [
+        {
+          fromAt: first.from.at,
+          fromMovingSeconds: first.from.movingTime,
+          toAt: first.to.at,
+          toMovingSeconds: first.to.movingTime,
+          distanceMetres: first.distance,
+        },
+        {
+          fromAt: 9_000_000_000_000,
+          fromMovingSeconds: second.from.movingTime,
+          toAt: 9_000_000_000_000,
+          toMovingSeconds: second.to.movingTime,
+          distanceMetres: second.distance,
+        },
+      ]);
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+      expect(await lapsOf('ride-1')).toEqual([]);
       next.controller.dispose();
     });
 

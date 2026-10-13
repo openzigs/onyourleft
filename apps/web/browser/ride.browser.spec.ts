@@ -3359,7 +3359,7 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
  * #647's own control above, where the same measurement is red for a pair.
  */
 const LAP_NOTICE_SEEN =
-  'Lap 3: 59:59 · 342 W · 36.0 km/h · 168 bpm. 124 s faster than lap 2. Your best lap of this ride.';
+  'Lap 3: 59:59 · 342 W · 36.0 km/h · 168 bpm. 124 s slower than lap 2. Best on this course: lap 2, 57:55.';
 
 async function lapOnTheHud(page: Page): Promise<{
   readonly notice: string | undefined;

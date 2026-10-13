@@ -275,6 +275,12 @@ function pointOfFitRecord(record: FitRecord): TrackPoint {
  * ride exported with its laps would come back a hair shorter than the same
  * ride exported with none. A thousandth is finer than either XML format is
  * written to and far coarser than the error.
+ *
+ * ⚠️ **This applies to EVERY file with lap totals, not only this client's
+ * own.** A lap from somewhere else that states `12345.678912` metres is
+ * stored as `12345.679`: under half a millimetre, and under half a
+ * millisecond for a time. A file written to tenths, as this client's are,
+ * reads back exactly as it did.
  */
 function summed(parts: readonly (number | undefined)[]): number {
   const total = parts.reduce<number>((sum, part) => (part === undefined ? sum : sum + part), 0);

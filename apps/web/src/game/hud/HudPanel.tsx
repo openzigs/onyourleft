@@ -207,8 +207,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * badly: #585 and #647 each measured a pair of notices running over the
    * rider or pushing *End ride* off the stage. A lap is the one notice that
    * is nothing to act on, so it is the one that gives way; its sentence is
-   * still said by the HUD's one region, and its figures are on the ride's
-   * page afterwards. Decided here rather than in `GameView` so that the rule
+   * still said by the HUD's one region to a rider with announcements on
+   * (`announce.ts`, rank 5e — with them off a lap that gives way is neither
+   * shown nor said), and its figures are on the ride's page afterwards. Decided here rather than in `GameView` so that the rule
    * reads the notices that ARE rendered, not a second list of their
    * conditions. `browser/ride.browser.spec.ts` §"#1312" measures it alone at
    * every overlay viewport.

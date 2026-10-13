@@ -108,7 +108,12 @@ import {
   recoverRecorder,
 } from '../recording/recorder';
 import { recoverableRides, type RecoverableRide } from '../recording/recovery';
-import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
+import {
+  RIDE_LEFT_BEHIND,
+  rideToSave,
+  saveFinishedRide,
+  type RideSaveStore,
+} from '../recording/finish';
 import {
   lapFiguresOf,
   lapSlots,
@@ -2430,7 +2435,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
-    saveError = outcome.status === 'failed' ? outcome.error.message : undefined;
+    saveError =
+      outcome.status !== 'failed'
+        ? undefined
+        : outcome.leftBehind === true
+          ? `${outcome.error.message}; ${RIDE_LEFT_BEHIND}`
+          : outcome.error.message;
     savedActivityId = outcome.status === 'saved' ? outcome.id : undefined;
     // #1042: the card's facts are the activity the save WROTE, read off the
     // record rather than recomputed — so the card and the library agree.

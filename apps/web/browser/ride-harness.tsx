@@ -623,8 +623,9 @@ const GRAPH: WorkoutGraphInput | undefined =
  *
  * The laps are the port's — the recording's, in the product — and the third
  * is the WIDEST notice a ride short of an hour-long lap produces: every
- * figure, a three-digit difference from the lap before, and the longer of the
- * two ways the comparison with the best lap ends.
+ * figure, a three-digit difference from the lap before, and the longest of
+ * the four ways the comparison with the best lap ends — the one a recording
+ * of two courses gives (`lap-text.ts` §"of this course").
  */
 const LAP = new URLSearchParams(window.location.search).get('lap');
 const LAP_ENDED = LAP === 'ended';
@@ -658,12 +659,13 @@ function harnessLap(moving: number): LapFigures {
 }
 
 /**
- * Lap 3 is the one just ended: 59:59, 124 s faster than lap 2 and the best of
- * the three — the longer of the notice's two endings.
+ * Lap 3 is the one just ended: 59:59, 124 s slower than lap 2, which is the
+ * best lap of this course — and lap 1 was another course, so the notice ends
+ * the longest way it can: `Best on this course: lap 2, 57:55.`
  */
 const HARNESS_LAPS: readonly LapFigures[] = [
-  harnessLap(3_800),
-  harnessLap(3_723),
+  { ...harnessLap(3_800), distance: metres(12_000) },
+  harnessLap(3_475),
   harnessLap(3_599),
 ];
 

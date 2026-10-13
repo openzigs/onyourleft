@@ -12,7 +12,14 @@
  * went wrong.
  */
 
-import { metres, seconds, unixSeconds, type RecordedPause } from '@onyourleft/domain';
+import {
+  seconds,
+  unixSeconds,
+  type Metres,
+  type RecordedPause,
+  type Seconds,
+  type UnixSeconds,
+} from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId } from './ids';
@@ -20,7 +27,6 @@ import { decoded, decodedNumber, decodedString } from './persisted';
 import {
   RECORDING_STORED_STATES,
   type RecordedCourseLap,
-  type RecordedLapMark,
   type RecordingSessionRecord,
   type RecordingStoredState,
 } from './recording';
@@ -150,64 +156,119 @@ export function toPersistedRecordingSession(
 export function fromPersistedRecordingSession(
   row: PersistedRecordingSession,
 ): RecordingSessionRecord {
+  const startedAt = decoded(
+    'recordingSession.startedAt',
+    decodedNumber('recordingSession.startedAt', row.startedAt),
+    unixSeconds,
+  );
+  const updatedAt = decoded(
+    'recordingSession.updatedAt',
+    decodedNumber('recordingSession.updatedAt', row.updatedAt),
+    unixSeconds,
+  );
+  const courseLaps =
+    row.courseLaps === undefined
+      ? undefined
+      : fromPersistedCourseLaps(row.courseLaps, startedAt, updatedAt);
   return {
     id: recordingSessionId(decodedString('recordingSession.id', row.id)),
     athleteId: athleteId(decodedString('recordingSession.athleteId', row.athleteId)),
-    startedAt: decoded(
-      'recordingSession.startedAt',
-      decodedNumber('recordingSession.startedAt', row.startedAt),
-      unixSeconds,
-    ),
+    startedAt,
     sampleInterval: decoded(
       'recordingSession.sampleInterval',
       decodedNumber('recordingSession.sampleInterval', row.sampleIntervalSeconds),
       seconds,
     ),
     state: parseRecordingState(row.state),
-    updatedAt: decoded(
-      'recordingSession.updatedAt',
-      decodedNumber('recordingSession.updatedAt', row.updatedAt),
-      unixSeconds,
-    ),
+    updatedAt,
     pauses: fromPersistedPauses(row.pauses),
     savedAs:
       row.savedAs === undefined
         ? undefined
         : activityId(decodedString('recordingSession.savedAs', row.savedAs)),
-    ...(row.courseLaps === undefined
-      ? {}
-      : { courseLaps: fromPersistedCourseLaps(row.courseLaps) }),
+    ...(courseLaps === undefined || courseLaps.length === 0 ? {} : { courseLaps }),
   };
 }
 
-/** @throws {StoreDecodeError} */
-function fromPersistedCourseLaps(rows: unknown): readonly RecordedCourseLap[] {
-  if (!Array.isArray(rows)) {
-    throw new StoreDecodeError(
-      `recordingSession.courseLaps: expected an array, found ${typeof rows as string}`,
-    );
+/**
+ * Why a lap of a course cannot be kept, or `undefined` when it can — the one
+ * rule the write path refuses by and the read path drops by.
+ *
+ * Every number finite and none below nought; the lap ending no earlier than
+ * it began, on the clock and on the moving time.
+ */
+export function courseLapFault(lap: RecordedCourseLap): string | undefined {
+  const numbers: readonly (readonly [string, unknown])[] = [
+    ['from.at', lap.from.at],
+    ['from.movingTime', lap.from.movingTime],
+    ['to.at', lap.to.at],
+    ['to.movingTime', lap.to.movingTime],
+    ['distance', lap.distance],
+    ...(lap.ascent === undefined ? [] : [['ascent', lap.ascent] as const]),
+  ];
+  for (const [name, value] of numbers) {
+    // (`Number.isFinite` is false of anything that is not a number at all.)
+    if (!Number.isFinite(value) || (value as number) < 0) {
+      return `${name} must be a number that is not below nought`;
+    }
   }
-  return (rows as PersistedCourseLap[]).map((lap, index) => {
-    /** One number of one lap, through `decodedNumber` and then its unit. */
-    const quantity = <T>(name: string, value: unknown, unit: (value: number) => T): T => {
-      const field = `recordingSession.courseLaps[${String(index)}].${name}`;
-      return decoded(field, decodedNumber(field, value), unit);
-    };
-    const mark = (end: 'from' | 'to', at: unknown, moving: unknown): RecordedLapMark => ({
-      at: quantity(`${end}.at`, at, unixSeconds),
-      movingTime: quantity(`${end}.movingTime`, moving, seconds),
-    });
-    return {
-      from: mark('from', lap.fromAt, lap.fromMovingSeconds),
-      to: mark('to', lap.toAt, lap.toMovingSeconds),
-      distance: quantity('distance', lap.distanceMetres, metres),
-      ...(lap.ascentMetres === undefined
-        ? {}
-        : { ascent: quantity('ascent', lap.ascentMetres, metres) }),
+  if (lap.to.at < lap.from.at || lap.to.movingTime < lap.from.movingTime) {
+    return 'a lap must not end before it began';
+  }
+  return undefined;
+}
+
+/**
+ * The header's laps of a course — or NONE, when the list or any lap in it
+ * does not read.
+ *
+ * ⚠️ **Lenient, where every other field of this row is refused.** A lap is
+ * something worked out ABOUT a recording's samples, and this row is read on
+ * the recovery path: `listRecordingSessions` decodes every header of the
+ * athlete, so a throw here over one damaged figure in one lap hid every
+ * recoverable ride and left that ride's samples on disk with no way to save
+ * them (#1316's third review). A ride saved with no lap table has lost a
+ * table; a ride that cannot be recovered has lost the ride.
+ *
+ * ⚠️ **All of the list or none of it.** Laps are numbered by where they stand
+ * in it, so a list with its second lap taken out would call the third lap
+ * the second.
+ *
+ * A lap is also dropped — and the list with it — when it lies outside the
+ * recording: before `startedAt`, after the header's own `updatedAt` (a mark
+ * is taken on the recorder's clock, and the header is stamped with that
+ * clock as it is written, so no real mark is later), or before the lap in
+ * front of it ended.
+ */
+function fromPersistedCourseLaps(
+  rows: unknown,
+  startedAt: number,
+  updatedAt: number,
+): readonly RecordedCourseLap[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const laps: RecordedCourseLap[] = [];
+  let cursor = startedAt;
+  for (const row of rows as (PersistedCourseLap | null)[]) {
+    if (row === null || typeof row !== 'object') {
+      return [];
+    }
+    const lap: RecordedCourseLap = {
+      from: { at: row.fromAt as UnixSeconds, movingTime: row.fromMovingSeconds as Seconds },
+      to: { at: row.toAt as UnixSeconds, movingTime: row.toMovingSeconds as Seconds },
+      distance: row.distanceMetres as Metres,
+      ...(row.ascentMetres === undefined ? {} : { ascent: row.ascentMetres as Metres }),
       // Only `true` is a part lap; anything else stored there is a whole one.
-      ...(lap.partial === true ? { partial: true as const } : {}),
+      ...(row.partial === true ? { partial: true as const } : {}),
     };
-  });
+    if (courseLapFault(lap) !== undefined || lap.from.at < cursor || lap.to.at > updatedAt) {
+      return [];
+    }
+    laps.push(lap);
+    cursor = lap.to.at;
+  }
+  return laps;
 }
 
 /** @throws {StoreDecodeError} */

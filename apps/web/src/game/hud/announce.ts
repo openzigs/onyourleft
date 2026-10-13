@@ -34,7 +34,7 @@
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
- * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | **yes** — #1312 |
+ * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -159,14 +159,17 @@
  * event behind a higher one is dropped, so `GameView` offers it on every call
  * for as long as its notice is on the HUD, until it comes back as `kind`
  * (#647's "owed" rule): said ONCE, and never after the notice has gone.
- * ⚠️ **In {@link ALWAYS_SPOKEN}**, for the side camera's reason: the lap is
- * shown as a notice for a few seconds and then gone, which makes it a status
- * message (SC 4.1.3), and this region is the only thing on the stage that
- * speaks. Behind a switch that is off by default it would be silent for
- * exactly the rider who cannot see the notice. The owner may reverse this:
- * it is the membership of one array.
+ * ⚠️ **Not in {@link ALWAYS_SPOKEN}** (#1316's third pass; the first pass had
+ * it there). A lap's summary is a reading about the ride, like #647's and
+ * #1240's sentences beside it, not a fault or a thing to act on — so it
+ * respects the rider's announcements setting, and with announcements off it
+ * is shown and not said. The case for the other answer: the notice is gone
+ * after a few seconds, which makes it a status message (SC 4.1.3), and this
+ * region is the only thing on the stage that speaks. The owner has not ruled;
+ * reversing this is one entry in that array and its line in
+ * `announce.test.ts`.
  *
- * ## ⚠️ Seven kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -276,12 +279,10 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
-  // #1312: a lap shown for a few seconds is a status message. Rank 5e.
-  'lap-ended',
 ];
 
 /**
- * What the announcer does with announcements off: the seven status kinds and
+ * What the announcer does with announcements off: the six status kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {
