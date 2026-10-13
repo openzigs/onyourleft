@@ -394,3 +394,17 @@ describe('what a stalled rider sees first — #605', () => {
     expect(follows(notice, holding)).toBe(true);
   });
 });
+
+describe('the running workout as a picture is not this panel’s — #1307', () => {
+  it('draws no graph: the Ride screen draws it, in a group after this one', async () => {
+    // `views/RideView.test.tsx` §"#1307" holds where it IS drawn. Here: the
+    // panel keeps every sentence it had and holds no picture, so nothing
+    // stands between *End workout* and the sentences under it.
+    const view = await render({ workout: running() });
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Now: 10 min at 60%');
+    expect(text).toContain('Holding 150 W.');
+    expect(view.container.querySelector('[data-oyl-workout-graph]')).toBeNull();
+    expect(view.container.querySelector('[role="img"]')).toBeNull();
+  });
+});

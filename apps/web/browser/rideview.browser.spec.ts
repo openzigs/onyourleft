@@ -1615,3 +1615,794 @@ test(`#1042 — the control — the card after the readings puts Done under the 
   expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
 });
+
+/**
+ * #1307 — the running workout's graph on the Ride screen.
+ *
+ * Since the owner's ruling of 2026-10-12 the graph is a group of its own,
+ * after the trainer group in the document, and `theme.css` §"THE WORKOUT'S
+ * GRAPH ON THE RIDE SCREEN" decides where it is drawn:
+ *
+ * - landscape: under the readings — across the Live group's two columns at
+ *   1280×800, across the whole width under both groups at 1024×768 — with
+ *   its lanes SIDE BY SIDE;
+ * - upright: under the trainer group in its column, lanes stacked.
+ *
+ * It is in the page's own flow at every size. Two claims need a browser:
+ *
+ * 1. **At 1280×800 the whole graph is on screen without scrolling**, in the
+ *    states whose notice used to push it under the fold.
+ * 2. **At 1024×768 it lies over NO text** — no control, no notice, no trainer
+ *    or workout sentence — and the page scrolls to it. It may be under the
+ *    fold there. ⚠️ A third pass pinned it to the bottom of the screen
+ *    (`position: sticky`), and with the *Eased* notice standing it lay over
+ *    "Holding 0 W.": a picture must never cover a sentence that says what the
+ *    trainer holds.
+ *
+ * The fixtures (`rideview-harness.tsx` §`GRAPH_FIXTURES`): a hold that is
+ * running, a target raised to the trainer's minimum, a target that steps, and
+ * — `?workout=eased` — a trainer holding 0 W where the plan asks 225 W.
+ */
+interface GraphBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface GraphLane {
+  readonly name: string;
+  readonly box: GraphBox;
+  readonly caption: GraphBox;
+  readonly captionText: readonly string[];
+  readonly captionFontSize: number;
+  readonly svg: GraphBox;
+  readonly well: GraphBox;
+  readonly marks: readonly {
+    readonly name: string;
+    readonly box: GraphBox;
+    readonly paint: string;
+  }[];
+  readonly chips: readonly {
+    readonly text: string;
+    readonly box: GraphBox;
+    readonly fontSize: number;
+    readonly colour: string;
+  }[];
+}
+
+async function graphOnTheRideScreen(page: Page) {
+  return page.evaluate(() => {
+    const boxOf = (element: Element): GraphBox => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const group = document.querySelector('.oyl-ride__group--graph');
+    const frame = group?.querySelector('[data-oyl-workout-graph="panel"] [role="img"]');
+    const live = document.querySelector('.oyl-ride__group--live');
+    const trainer = document.querySelector('.oyl-ride__group--trainer');
+    const clock = document.querySelector('.oyl-ride__clock');
+    const end = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent === 'End workout',
+    );
+    if (!group || !frame || !live || !trainer || !clock || !end) return undefined;
+    const key = group.querySelector('.oyl-workout-graph__key');
+    /** How far down a group's own content reaches: its box is stretched to its grid row. */
+    const contentBottom = (element: Element): number =>
+      Math.max(...[...element.children].map((child) => child.getBoundingClientRect().bottom));
+    const lanes: GraphLane[] = [...frame.querySelectorAll('[data-oyl-lane]')].map((lane) => {
+      const caption = lane.querySelector('.oyl-workout-graph__caption');
+      const svg = lane.querySelector('svg');
+      const well = lane.querySelector('.oyl-workout-graph__well');
+      if (!caption || !svg || !well) throw new Error('a lane is missing a part');
+      return {
+        name: lane.getAttribute('data-oyl-lane') ?? '',
+        box: boxOf(lane),
+        caption: boxOf(caption),
+        captionText: [...caption.querySelectorAll('span')].map((each) => each.textContent ?? ''),
+        captionFontSize: Number.parseFloat(getComputedStyle(caption).fontSize),
+        svg: boxOf(svg),
+        well: boxOf(well),
+        marks: [...svg.querySelectorAll('path')].map((path) => {
+          const style = getComputedStyle(path);
+          return {
+            name: path.getAttribute('class') ?? '',
+            box: boxOf(path),
+            paint: style.stroke === 'none' ? style.fill : style.stroke,
+          };
+        }),
+        chips: [...well.querySelectorAll('.oyl-workout-graph__scale')].map((chip) => {
+          const style = getComputedStyle(chip);
+          return {
+            text: chip.textContent ?? '',
+            box: boxOf(chip),
+            fontSize: Number.parseFloat(style.fontSize),
+            colour: style.color,
+          };
+        }),
+      };
+    });
+    const groupBox = boxOf(group);
+    // Everything on the Ride screen that carries text of its own — a
+    // control, a notice, a sentence, a heading, a reading — and that the
+    // graph's group lies over by more than a pixel.
+    const overText = [...document.querySelectorAll('.oyl-ride *')]
+      .filter((element) => !group.contains(element))
+      .filter((element) =>
+        [...element.childNodes].some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+        ),
+      )
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          Math.min(rect.bottom, groupBox.bottom) - Math.max(rect.top, groupBox.top) > 1 &&
+          Math.min(rect.right, groupBox.right) - Math.max(rect.left, groupBox.left) > 1
+        );
+      })
+      .map((element) => (element.textContent ?? '').trim().slice(0, 40));
+    // How wide each LINE of the sentence under the graph is, top to bottom.
+    const keyLines: number[] = [];
+    if (key !== null) {
+      const range = document.createRange();
+      range.selectNodeContents(key);
+      for (const rect of range.getClientRects()) {
+        keyLines.push(rect.width);
+      }
+    }
+    const reading = frame.querySelector('.oyl-workout-graph__reading');
+    return {
+      name: frame.getAttribute('aria-label') ?? '',
+      group: groupBox,
+      groupText: group.textContent ?? '',
+      frame: boxOf(frame),
+      frameBackground: getComputedStyle(frame).backgroundColor,
+      readingColour: reading ? getComputedStyle(reading).color : '',
+      // Whether anything in the frame is wider than the frame.
+      frameOverflow: frame.scrollWidth - frame.clientWidth,
+      live: boxOf(live),
+      liveContentBottom: contentBottom(live),
+      clock: boxOf(clock),
+      trainer: boxOf(trainer),
+      trainerContentBottom: contentBottom(trainer),
+      end: boxOf(end),
+      key: key === null ? undefined : boxOf(key),
+      keyText: key?.textContent ?? '',
+      keyFontSize: key === null ? 0 : Number.parseFloat(getComputedStyle(key).fontSize),
+      lanes,
+      overText,
+      keyLines,
+      position: getComputedStyle(group).position,
+      // Document order: live, trainer, the graph, sensors.
+      order: [...document.querySelectorAll('.oyl-ride > .oyl-ride__group')].map((each) =>
+        [...each.classList].find((name) => name.startsWith('oyl-ride__group--')),
+      ),
+      // What the panel's own sentences say, to hold the graph to them.
+      trainerText: trainer.textContent ?? '',
+      rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      theme: document.documentElement.dataset.theme,
+      viewportHeight: window.innerHeight,
+      scrollY: window.scrollY,
+      sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+}
+
+type GraphSeen = NonNullable<Awaited<ReturnType<typeof graphOnTheRideScreen>>>;
+
+/** How tall `theme.css` makes each lane's drawing where the lanes are STACKED, in rem. */
+const LANE_REM: Readonly<Record<string, number>> = { plan: 3.5, 'heart-rate': 4, trace: 5.5 };
+
+/** Landscape puts the lanes side by side; `theme.css` draws that line at 60rem. */
+const lanesSideBySide = (viewport: Viewport): boolean => viewport.width >= 960;
+
+/** What holds of the graph in EVERY state: where it is, and that each lane is legible. */
+function expectGraphLaidOut(seen: GraphSeen, viewport: Viewport): void {
+  expect(seen.name).toContain('Workout graph.');
+  // After the trainer group in the document, wherever it is drawn.
+  expect(seen.order).toEqual([
+    'oyl-ride__group--live',
+    'oyl-ride__group--trainer',
+    'oyl-ride__group--graph',
+    'oyl-ride__group--sensors',
+  ]);
+  // No wider than the screen, and nothing in it wider than it.
+  expect(seen.frame.width).toBeGreaterThan(200);
+  expect(seen.frame.left).toBeGreaterThanOrEqual(seen.group.left - 1);
+  expect(seen.frame.right).toBeLessThanOrEqual(seen.group.right + 1);
+  expect(seen.frame.right).toBeLessThanOrEqual(viewport.width);
+  expect(seen.sideways).toBeLessThanOrEqual(0);
+  expect(seen.frameOverflow).toBeLessThanOrEqual(0);
+  // ⚠️ The paragraph that walked the lanes top to bottom is gone (the owner's
+  // ruling): the lanes carry titles.
+  expect(seen.groupText).not.toMatch(/Top:|Middle:|Bottom:/);
+  // In the page's own flow, at every size: never pinned over what is above it.
+  expect(seen.position).toBe('static');
+  // What is said under the graph, when anything is, is under it and legible.
+  if (seen.keyLines.length > 1) {
+    // Two lines of a length, not one line and a last "W." on its own.
+    expect(seen.keyLines.at(-1) ?? 0).toBeGreaterThan((seen.keyLines[0] ?? 0) * 0.4);
+  }
+  if (seen.key !== undefined) {
+    if (viewport.width >= 1216) {
+      // ⚠️ Three columns: BESIDE the frame, in a column of its own, so that it
+      // adds nothing to the group's height however many lines it takes.
+      expect(seen.key.left).toBeGreaterThanOrEqual(seen.frame.right);
+      expect(seen.key.right).toBeLessThanOrEqual(seen.group.right + 1);
+      expect(Math.abs(seen.key.top - seen.frame.top)).toBeLessThanOrEqual(1);
+      expect(seen.key.width).toBeGreaterThan(150);
+    } else {
+      expect(seen.key.top).toBeGreaterThanOrEqual(seen.frame.bottom);
+    }
+    expect(seen.key.bottom).toBeLessThanOrEqual(seen.group.bottom + 1);
+    expect(seen.keyFontSize).toBeGreaterThanOrEqual(12);
+  }
+  const sideBySide = lanesSideBySide(viewport);
+  let above = seen.frame.top;
+  let before = seen.frame.left;
+  for (const lane of seen.lanes) {
+    // A caption — what the lane is and its numbers — then the drawing, in order.
+    expect(lane.captionText).toHaveLength(2);
+    expect(
+      lane.captionText.every((text) => text.length > 0),
+      lane.name,
+    ).toBe(true);
+    expect(lane.captionFontSize, lane.name).toBeGreaterThanOrEqual(12);
+    expect(lane.svg.top, lane.name).toBeGreaterThanOrEqual(lane.caption.bottom - 1);
+    expect(lane.caption.left, lane.name).toBeGreaterThanOrEqual(seen.frame.left);
+    expect(lane.caption.right, lane.name).toBeLessThanOrEqual(seen.frame.right);
+    expect(lane.caption.top, lane.name).toBeGreaterThanOrEqual(seen.frame.top);
+    // Wide enough to read as a drawing, in the narrowest lane of the fullest state.
+    expect(lane.svg.width, lane.name).toBeGreaterThan(100);
+    if (sideBySide) {
+      // Side by side, left to right, none over another, and every drawing the
+      // same height on one line — whatever a caption wraps to.
+      expect(lane.box.left, lane.name).toBeGreaterThanOrEqual(before - 1);
+      expect(
+        Math.abs(lane.svg.bottom - (seen.lanes[0]?.svg.bottom ?? 0)),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      // 4rem where the fold is the owner's tablet's (three columns), 5rem at 1024.
+      expect(
+        Math.abs(lane.svg.height - (viewport.width >= 1216 ? 4 : 5) * seen.rem),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      before = lane.box.right;
+    } else {
+      // Stacked: one above another, each its own height, sharing a left edge.
+      expect(lane.caption.top, lane.name).toBeGreaterThanOrEqual(above - 1);
+      expect(
+        Math.abs(lane.svg.height - (LANE_REM[lane.name] ?? 0) * seen.rem),
+        lane.name,
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(lane.svg.left - (seen.lanes[0]?.svg.left ?? 0)),
+        lane.name,
+      ).toBeLessThanOrEqual(0.5);
+      above = lane.svg.bottom;
+    }
+    for (const mark of lane.marks) {
+      expect(mark.box.left, mark.name).toBeGreaterThanOrEqual(lane.svg.left - 2);
+      expect(mark.box.right, mark.name).toBeLessThanOrEqual(lane.svg.right + 2);
+      expect(mark.box.top, mark.name).toBeGreaterThanOrEqual(lane.svg.top - 2);
+      expect(mark.box.bottom, mark.name).toBeLessThanOrEqual(lane.svg.bottom + 2);
+    }
+    for (const chip of lane.chips) {
+      expect(chip.fontSize, chip.text).toBeGreaterThanOrEqual(12);
+      // In the gutter LEFT of the drawing: a number never covers a mark.
+      expect(chip.box.left, chip.text).toBeGreaterThanOrEqual(lane.well.left - 1);
+      expect(chip.box.right, chip.text).toBeLessThanOrEqual(lane.svg.left);
+      expect(chip.box.top, chip.text).toBeGreaterThanOrEqual(lane.caption.bottom - 1);
+      expect(chip.box.bottom, chip.text).toBeLessThanOrEqual(seen.frame.bottom);
+    }
+    expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(seen.frame.bottom);
+  }
+  if (sideBySide) {
+    expect(before).toBeLessThanOrEqual(seen.frame.right + 1);
+  } else {
+    // Upright: under the trainer group, in its column, below *End workout*.
+    expect(seen.frame.left).toBeGreaterThanOrEqual(seen.trainer.left - 1);
+    expect(seen.frame.right).toBeLessThanOrEqual(seen.trainer.right + 1);
+    expect(seen.frame.top).toBeGreaterThanOrEqual(seen.trainerContentBottom - 1);
+    expect(seen.frame.top).toBeGreaterThanOrEqual(seen.end.bottom);
+    // DIRECTLY under it — its last margin and the grid’s gap, 40 px — and not pushed
+    // down the column by the taller Live group beside them.
+    expect(seen.frame.top - seen.trainerContentBottom).toBeLessThanOrEqual(3 * seen.rem);
+  }
+}
+
+const laneOf = (seen: GraphSeen, name: string): GraphLane => {
+  const lane = seen.lanes.find((each) => each.name === name);
+  if (lane === undefined) {
+    throw new Error(`no ${name} lane — drew: ${seen.lanes.map((each) => each.name).join(', ')}`);
+  }
+  return lane;
+};
+
+const markOf = (lane: GraphLane, name: string): GraphBox => {
+  const found = lane.marks.find((each) => each.name === name);
+  if (found === undefined) {
+    throw new Error(
+      `no ${name} in the ${lane.name} lane — drew: ${lane.marks.map((each) => each.name).join(', ')}`,
+    );
+  }
+  return found.box;
+};
+
+const namesOf = (lane: GraphLane): readonly string[] => lane.marks.map((each) => each.name);
+
+async function openGraph(page: Page, viewport: Viewport, state: string): Promise<GraphSeen> {
+  await open(page, viewport, `?workout=${state}`);
+  const seen = await graphOnTheRideScreen(page);
+  if (seen === undefined) {
+    throw new Error(`the Ride screen drew no workout graph for ?workout=${state}`);
+  }
+  return seen;
+}
+
+for (const viewport of EASED_VIEWPORTS) {
+  test(`the running workout’s graph is drawn, each lane with its numbers — #1307 — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const seen = await openGraph(page, viewport, 'running');
+    expectGraphLaidOut(seen, viewport);
+    expect(seen.name).toContain('Target the trainer last confirmed: 225 W.');
+    // Two lanes outside a hold, each with its numbers.
+    expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'trace']);
+    expect(laneOf(seen, 'plan').captionText).toEqual(['Whole workout', '5:12 of 12:00']);
+    expect(laneOf(seen, 'trace').captionText[0]).toBe('Last 5 min');
+    expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^Target 225 W · You \d+ W$/);
+    // Nothing needs explaining, so nothing is said under the graph.
+    expect(seen.key).toBeUndefined();
+    // Drawn: the plan ridden and to come, now, the target and the power.
+    const plan = laneOf(seen, 'plan');
+    const trace = laneOf(seen, 'trace');
+    expect(markOf(plan, 'oyl-workout-graph__done').height).toBeGreaterThan(2);
+    expect(markOf(plan, 'oyl-workout-graph__now').height).toBeGreaterThan(2);
+    expect(markOf(trace, 'oyl-workout-graph__target').height).toBeGreaterThan(2);
+    expect(markOf(trace, 'oyl-workout-graph__power').height).toBeGreaterThan(2);
+    // ⚠️ The plan's bars use the lane: this workout's only target is 90 % of
+    // threshold, and it is drawn 85 % of the lane tall — not 72 %, which is
+    // what the block chart's fixed 125 % scale made of it.
+    expect(markOf(plan, 'oyl-workout-graph__done').height / plan.svg.height).toBeGreaterThan(0.8);
+    // No unexplained mark: the threshold rule is not drawn, and nothing is held instead.
+    expect(namesOf(plan)).not.toContain('oyl-block-chart__rule');
+    expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+    // The scale's two ends are written beside the last lane, top above bottom.
+    expect(trace.chips.map((chip) => chip.text)).toEqual(['280 W', '170 W']);
+    expect(trace.chips[0]?.box.bottom ?? 0).toBeLessThan(trace.chips[1]?.box.top ?? 0);
+    console.log(
+      `#1307 the workout graph — ${viewport.name}: ${seen.frame.width.toFixed(1)} × ${seen.frame.height.toFixed(1)} px at y = ${seen.frame.top.toFixed(1)}`,
+    );
+  });
+}
+
+/**
+ * The ruling: on the owner's tablet the whole graph is on screen, without
+ * scrolling — in the states whose notice used to push it under the fold, and
+ * in the four the third review added.
+ *
+ * ⚠️ **At `TABLET_IN_THE_SHELL`, not at a bare 1280×800.** This file's header
+ * records the device: 1280×800 with the system bars OVER the page, so the
+ * fold is `height − bottom inset`, 768. The fourth pass asserted this at the
+ * bare viewport, where the eased state passed with its sentence 8 px under
+ * the system bar and the raised one 28 px.
+ */
+const LANDSCAPE_STATES = [
+  'running',
+  'holding',
+  'hold',
+  'eased',
+  'raised',
+  'paused',
+  'paused-hold',
+  'refused',
+  'lost',
+] as const;
+
+for (const state of LANDSCAPE_STATES) {
+  test(`the whole graph is on screen without scrolling — #1307 — ?workout=${state} — ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    const viewport = TABLET_IN_THE_SHELL;
+    const insets = insetsOf(viewport);
+    const fold = viewport.height - insets.bottom;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    expect(seen.viewportHeight).toBe(viewport.height);
+    // The apparatus: this IS the device's fold, not the window's edge.
+    expect(fold).toBe(768);
+    // ⚠️ The GROUP: the frame, every lane in it, and the sentence beside it.
+    expect(seen.group.top).toBeGreaterThanOrEqual(insets.top);
+    expect(seen.group.bottom).toBeLessThanOrEqual(fold);
+    if (seen.key !== undefined) {
+      expect(seen.key.bottom).toBeLessThanOrEqual(fold);
+    }
+    for (const lane of seen.lanes) {
+      expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(fold);
+      if (seen.key === undefined) {
+        // Every caption on ONE line — in a hold too, where there are three.
+        // (Beside a sentence the lanes are narrower and a long caption wraps.)
+        expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
+          1.7 * lane.captionFontSize,
+        );
+      }
+    }
+    // Larger than it was in the trainer's 360 px column.
+    expect(seen.group.width).toBeGreaterThan(700);
+    // Under the readings: from the Live group's left edge, under all of it,
+    // ending left of the trainer group — and over nothing.
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(seen.group.right).toBeLessThanOrEqual(seen.trainer.left);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.overText).toEqual([]);
+    console.log(
+      `#1307 the graph on screen — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)}, ${(fold - seen.group.bottom).toFixed(1)} px clear of the fold at ${String(fold)}`,
+    );
+  });
+}
+
+/**
+ * ⚠️ On wider fonts. The three captions of a PAUSED hold are the longest
+ * there are, and what fits on a Mac did not fit on the CI runner, whose fonts
+ * are wider: one layout wrapped the plan lane's caption there, and another
+ * left the heart-rate lane 98 px of drawing. Both were green where they were
+ * written. So the same case is measured again and again with the captions'
+ * letters spaced further apart, until a caption wraps:
+ *
+ * - it must NOT wrap as it is, nor at 0.02em (about 4 % wider) — a margin;
+ * - at every width it fits, every lane must still have a drawing over 110 px
+ *   wide. That is the heart-rate lane's floor in `theme.css`, which only
+ *   binds once the other captions have taken the spare width.
+ *
+ * ⚠️ A SEARCH, not one fixed width. Three fixed widths were written first,
+ * and each was right for one machine's fonts and wrong for the other's.
+ * Measured on a Mac: the captions fit up to 0.09em and wrap at 0.11em.
+ */
+test(`a paused hold’s three captions stay on one line each on wider fonts — #1307 — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, '?workout=paused-hold');
+  const fitted: number[] = [];
+  let narrowest = Infinity;
+  for (const spacing of [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14]) {
+    await page.evaluate((em) => {
+      const id = 'oyl-test-wider-captions';
+      const style = document.getElementById(id) ?? document.createElement('style');
+      style.id = id;
+      style.textContent = `.oyl-workout-graph__caption { letter-spacing: ${String(em)}em; }`;
+      document.head.append(style);
+    }, spacing);
+    const seen = await graphOnTheRideScreen(page);
+    if (seen === undefined) throw new Error('no workout graph');
+    expect(seen.lanes).toHaveLength(3);
+    if (seen.lanes.some((lane) => lane.caption.height > 1.7 * lane.captionFontSize)) {
+      break;
+    }
+    fitted.push(spacing);
+    for (const lane of seen.lanes) {
+      expect(lane.svg.width, `${lane.name} at ${String(spacing)}em`).toBeGreaterThan(110);
+      narrowest = Math.min(narrowest, lane.svg.width);
+    }
+    expect(seen.frameOverflow).toBeLessThanOrEqual(0);
+    expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height - insetsOf(viewport).bottom);
+  }
+  // As it is, and 4 % wider. The search went on past that, or it found nothing.
+  expect(fitted.slice(0, 2)).toEqual([0, 0.02]);
+  expect(fitted.length).toBeLessThan(8);
+  console.log(
+    `#1307 a paused hold’s captions — ${viewport.name}: one line each up to ${String(fitted.at(-1))}em of letter-spacing; narrowest drawing ${narrowest.toFixed(1)} px`,
+  );
+});
+
+/**
+ * The same states at the 4:3 shell size this suite assumes (1024×720, fold
+ * 688): published, not asserted. Under the fold there is accepted — the
+ * owner's ruling is for 1280×800 — and this is here so that what "under the
+ * fold" means there is a number in every run and not a guess.
+ */
+test(`where the graph is at the 4:3 shell size, state by state — #1307 — ${SMALL_TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}) => {
+  const viewport = SMALL_TABLET_IN_THE_SHELL;
+  const fold = viewport.height - insetsOf(viewport).bottom;
+  for (const state of LANDSCAPE_STATES) {
+    const seen = await openGraph(page, viewport, state);
+    // In the flow and over nothing, here as everywhere.
+    expect(seen.overText).toEqual([]);
+    expect(seen.position).toBe('static');
+    console.log(
+      `#1307 the graph at the 4:3 shell — ?workout=${state}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)}, fold at ${String(fold)}: ${seen.group.top >= fold ? 'wholly under the fold' : `${(fold - seen.group.top).toFixed(1)} px of it on screen`}`,
+    );
+  }
+});
+
+/**
+ * 1024×768: two columns, and no room on screen for the graph once a notice
+ * stands. It is under both groups, in the flow, and may be under the fold.
+ * What is held is that it lies over nothing, and that it can be scrolled to.
+ */
+for (const state of LANDSCAPE_STATES) {
+  test(`the graph lies over no text, and the page scrolls to it — #1307 — ?workout=${state} — ${SMALL_TABLET.name}`, async ({
+    page,
+  }) => {
+    const viewport = SMALL_TABLET;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    // ⚠️ No control, no notice, no sentence, no heading, no reading.
+    expect(seen.overText).toEqual([]);
+    // Under BOTH groups — below the last thing either of them says — and
+    // across both columns.
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.trainerContentBottom);
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(seen.group.right - seen.trainer.right)).toBeLessThanOrEqual(1);
+    expect(seen.group.width).toBeGreaterThan(700);
+    // The page scrolls to it: brought to the foot of the screen, all of it is on screen…
+    const scrolled = await page.evaluate(() => {
+      const group = document.querySelector('.oyl-ride__group--graph');
+      group?.scrollIntoView({ block: 'end' });
+      const rect = group?.getBoundingClientRect();
+      return { top: rect?.top ?? -1, bottom: rect?.bottom ?? Infinity, scrollY: window.scrollY };
+    });
+    expect(scrolled.top).toBeGreaterThanOrEqual(0);
+    expect(scrolled.bottom).toBeLessThanOrEqual(viewport.height + SUBPIXEL_TOLERANCE);
+    // …and, scrolled, it still lies over nothing.
+    expect((await graphOnTheRideScreen(page))?.overText).toEqual([]);
+    console.log(
+      `#1307 the graph in the flow — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)} of ${String(viewport.height)} (${seen.group.bottom > viewport.height ? `${(seen.group.bottom - viewport.height).toFixed(1)} px under the fold` : 'on screen'}); scrolled ${scrolled.scrollY.toFixed(0)} px to bring it on`,
+    );
+  });
+}
+
+/** The states, one by one, at the owner's tablet both ways up. */
+const GRAPH_STATE_VIEWPORTS: readonly Viewport[] = [
+  TABLET_IN_THE_SHELL,
+  TABLET_UPRIGHT_IN_THE_SHELL,
+];
+
+for (const viewport of GRAPH_STATE_VIEWPORTS) {
+  test.describe(`the running workout’s graph, state by state — #1307 — ${viewport.name}`, () => {
+    test('a trainer eased to 0 W: the plan’s height stays drawn, and 0 W is not on the lane’s bottom line', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'eased');
+      expectGraphLaidOut(seen, viewport);
+      const plan = laneOf(seen, 'plan');
+      const trace = laneOf(seen, 'trace');
+      // What the plan asks for the rest of the block: an outline, at the
+      // height of the part already ridden, from now to the end.
+      const asked = markOf(plan, 'oyl-workout-graph__asked');
+      const done = markOf(plan, 'oyl-workout-graph__done');
+      const now = markOf(plan, 'oyl-workout-graph__now');
+      expect(asked.height).toBeGreaterThan(plan.svg.height * 0.8);
+      expect(Math.abs(asked.top - done.top)).toBeLessThanOrEqual(1.5);
+      expect(asked.left).toBeGreaterThanOrEqual((now.left + now.right) / 2 - 2);
+      expect(asked.right).toBeGreaterThan(plan.svg.right - 3);
+      // At 0 W there is no step to shade.
+      expect(namesOf(plan).filter((name) => name.includes('held'))).toEqual([]);
+      // The 0 W target is a step with a height, its edge clear of the lane's bottom line.
+      const edge = markOf(trace, 'oyl-workout-graph__target-edge');
+      expect(trace.well.bottom - edge.bottom).toBeGreaterThanOrEqual(4);
+      expect(markOf(trace, 'oyl-workout-graph__target').height).toBeGreaterThanOrEqual(4);
+      expect(trace.captionText[1]).toMatch(/^Target 0 W \(plan asks 225 W\) · You \d+ W$/);
+      expect(trace.chips.at(-1)?.text).toBe('0 W');
+      // The one sentence under the graph, and nothing else.
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 225\u00a0W. The trainer confirmed 0\u00a0W instead, so nothing is shaded.',
+      );
+    });
+
+    test('a target raised to the trainer’s minimum: what it holds, shaded, over what the plan asks, outlined — and the blocks to come as planned', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'raised');
+      expectGraphLaidOut(seen, viewport);
+      const plan = laneOf(seen, 'plan');
+      const asked = markOf(plan, 'oyl-workout-graph__asked');
+      const held = markOf(plan, 'oyl-workout-graph__held');
+      const edge = markOf(plan, 'oyl-workout-graph__held-edge');
+      // 100 W held where 75 W is asked: the shaded step is the taller, over the same stretch.
+      expect(held.height).toBeGreaterThan(asked.height + 2);
+      expect(Math.abs(held.left - asked.left)).toBeLessThanOrEqual(2);
+      expect(Math.abs(held.right - asked.right)).toBeLessThanOrEqual(2);
+      expect(Math.abs(edge.top - held.top)).toBeLessThanOrEqual(2);
+      // The block still to come is filled, as the plan asks, to the lane's end,
+      // and taller than either: 60 % against 30 %.
+      const toCome = plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-'));
+      expect(toCome).toHaveLength(1);
+      expect(toCome[0]?.box.left ?? 0).toBeGreaterThanOrEqual(asked.right - 2);
+      expect(toCome[0]?.box.right ?? 0).toBeGreaterThan(plan.svg.right - 3);
+      expect(toCome[0]?.box.height ?? 0).toBeGreaterThan(held.height + 4);
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(
+        /^Target 100 W \(plan asks 75 W\) · You \d+ W$/,
+      );
+      expect(seen.name).toContain(
+        'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
+      );
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 75\u00a0W. The shaded step is what the trainer confirmed instead, 100\u00a0W.',
+      );
+    });
+
+    test('a target that steps: the steps use the lane, and the plan shows every interval', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'stepped');
+      expectGraphLaidOut(seen, viewport);
+      const trace = laneOf(seen, 'trace');
+      // 138 W and 263 W inside the window: the target's edge spans most of the lane.
+      const edge = markOf(trace, 'oyl-workout-graph__target-edge');
+      expect(edge.height / trace.svg.height).toBeGreaterThan(0.5);
+      expect(edge.width).toBeGreaterThan(trace.svg.width * 0.95);
+      expect(markOf(trace, 'oyl-workout-graph__power').height / trace.svg.height).toBeGreaterThan(
+        0.5,
+      );
+      expect(trace.captionText[1]).toMatch(/^Target 263 W · You \d+ W$/);
+      const [top, bottom] = trace.chips.map((chip) => Number.parseInt(chip.text, 10));
+      expect(top ?? 0).toBeGreaterThanOrEqual(263);
+      expect(bottom ?? Infinity).toBeLessThanOrEqual(138);
+      expect(bottom ?? 0).toBeGreaterThan(90);
+      // An ordinary block: nothing is marked as held instead, and nothing is said.
+      const plan = laneOf(seen, 'plan');
+      expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.name).not.toContain('asks for');
+      expect(seen.key).toBeUndefined();
+      // The hardest interval is 85 % of the lane.
+      const bands = plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-'));
+      expect(Math.max(...bands.map((mark) => mark.box.height)) / plan.svg.height).toBeGreaterThan(
+        0.8,
+      );
+    });
+
+    test('a heart-rate hold that is running: three lanes, heart rate against its range — and the hold’s own target is NOT marked as held instead', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'holding');
+      expectGraphLaidOut(seen, viewport);
+      expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'heart-rate', 'trace']);
+      const lane = laneOf(seen, 'heart-rate');
+      const band = markOf(lane, 'oyl-workout-graph__range');
+      const line = markOf(lane, 'oyl-workout-graph__heart-rate');
+      // The band is a band, not a hairline, and the line moves through it.
+      expect(band.height).toBeGreaterThanOrEqual(12);
+      expect(band.width).toBeGreaterThan(lane.svg.width * 0.95);
+      expect(line.height).toBeGreaterThan(band.height);
+      expect(markOf(lane, 'oyl-workout-graph__range-edge').height).toBeGreaterThanOrEqual(12);
+      expect(lane.captionText[0]).toBe('Heart rate');
+      expect(lane.captionText[1]).toMatch(/^1[34]\d bpm$/);
+      // The range's two edges, in bpm, each written beside its own edge of the band.
+      expect(lane.chips.map((chip) => chip.text)).toEqual(['140', '130']);
+      const middleOf = (chip: { readonly box: GraphBox } | undefined): number =>
+        ((chip?.box.top ?? 0) + (chip?.box.bottom ?? 0)) / 2;
+      expect(Math.abs(middleOf(lane.chips[0]) - band.top)).toBeLessThanOrEqual(2);
+      expect(Math.abs(middleOf(lane.chips[1]) - band.bottom)).toBeLessThanOrEqual(2);
+      expect(seen.name).toMatch(/Heart rate: 1[34]\d bpm, with a chosen range of 130–140 bpm\./);
+      // The target the hold set, easing in the lane underneath.
+      expect(
+        markOf(laneOf(seen, 'trace'), 'oyl-workout-graph__target-edge').height,
+      ).toBeGreaterThan(4);
+      // ⚠️ The owner's ruling. The hold holds 119 W where the block started at
+      // 125 W: that is the workout doing what it was asked. No dashed outline,
+      // no shaded step, no "(plan asks …)", no clause in the name, no sentence.
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^Target 119 W · You \d+ W$/);
+      expect(seen.name).toContain('Target the trainer last confirmed: 119 W.');
+      expect(seen.name).not.toContain('asks for');
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('paused: the caption says what the trainer holds NOW, as the panel does, and nothing is marked', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'paused');
+      expectGraphLaidOut(seen, viewport);
+      // The panel's own sentence, and the graph's caption: one number.
+      expect(seen.trainerText).toContain('Holding 50 W.');
+      expect(laneOf(seen, 'trace').captionText[1]).toBe('Paused · Target 50 W · You 0 W');
+      // ⚠️ Not the newest sample's 225 W, which is what is still DRAWN.
+      expect(seen.groupText).not.toContain('225');
+      expect(markOf(laneOf(seen, 'trace'), 'oyl-workout-graph__target').height).toBeGreaterThan(2);
+      expect(seen.name).toContain('Workout graph. Paused.');
+      expect(seen.name).toContain('Target the trainer last confirmed: 50 W.');
+      expect(seen.name).not.toContain('asks for');
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('paused inside a heart-rate hold: the same, with the heart rate now', async ({ page }) => {
+      const seen = await openGraph(page, viewport, 'paused-hold');
+      expectGraphLaidOut(seen, viewport);
+      expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'heart-rate', 'trace']);
+      expect(seen.trainerText).toContain('Holding 50 W.');
+      expect(laneOf(seen, 'trace').captionText[1]).toBe('Paused · Target 50 W · You 0 W');
+      expect(laneOf(seen, 'heart-rate').captionText[1]).toBe('124 bpm');
+      expect(seen.name).not.toContain('asks for');
+      expect(namesOf(laneOf(seen, 'plan')).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(seen.key).toBeUndefined();
+    });
+
+    test('a block whose target was not sent: outlined at what the plan asks, nothing shaded, and said so', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'refused');
+      expectGraphLaidOut(seen, viewport);
+      // The panel's own sentence for it (#1305).
+      expect(seen.trainerText).toContain('so no target was sent for it');
+      const plan = laneOf(seen, 'plan');
+      expect(markOf(plan, 'oyl-workout-graph__asked').height).toBeGreaterThan(4);
+      expect(namesOf(plan).filter((name) => name.includes('held'))).toEqual([]);
+      // No confirmed target anywhere in the last lane either: only the power.
+      const trace = laneOf(seen, 'trace');
+      expect(namesOf(trace).filter((name) => name.includes('target'))).toEqual([]);
+      expect(markOf(trace, 'oyl-workout-graph__power').width).toBeGreaterThan(10);
+      expect(trace.captionText[1]).toMatch(/^No target sent \(plan asks 75 W\) · You \d+ W$/);
+      expect(seen.name).toContain('No target was sent for this block, which asks for 75 W.');
+      expect(seen.name).not.toContain('confirmed');
+      expect(seen.keyText).toBe(
+        'At the line, the dashed outline is what the plan asks for now, 75 W. No target was sent for it, so nothing is shaded.',
+      );
+    });
+
+    test('control lost: no target is stated, nothing is "confirmed instead", and the plan lane is the plan', async ({
+      page,
+    }) => {
+      const seen = await openGraph(page, viewport, 'lost');
+      expectGraphLaidOut(seen, viewport);
+      // The panel says it can no longer vouch for the number…
+      expect(seen.trainerText).toContain('The trainer was last set to 150 W.');
+      expect(seen.trainerText).not.toContain('Holding 150 W.');
+      // …and the graph states no target: 150 W where the plan asks 250 W is
+      // NOT drawn or said as something the trainer confirmed instead.
+      expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^No target · You \d+ W$/);
+      const plan = laneOf(seen, 'plan');
+      expect(namesOf(plan).filter((name) => /asked|held/.test(name))).toEqual([]);
+      expect(
+        plan.marks.filter((mark) => mark.name.startsWith('oyl-block-chart__band-')).length,
+      ).toBe(1);
+      expect(seen.key).toBeUndefined();
+      expect(seen.name).toContain('Target the trainer last confirmed: 150 W.');
+      expect(seen.name).not.toContain('asks for');
+    });
+  });
+}
+
+test('the running workout’s graph in the dark theme: the frame, the numbers and the marks are the dark palette’s — #1307', async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const seen = await openGraph(page, TABLET, 'holding');
+  expect(seen.theme).toBe('dark');
+  expectGraphLaidOut(seen, TABLET);
+  // `tokens.ts` §DARK_COLOUR_TOKENS: surface, ink, inkMuted, accent, surfaceRaised.
+  const SURFACE = 'rgb(25, 32, 31)';
+  const INK = 'rgb(228, 235, 233)';
+  const INK_MUTED = 'rgb(169, 183, 181)';
+  expect(seen.frameBackground).toBe(SURFACE);
+  expect(seen.readingColour).toBe(INK);
+  const paints = new Map(
+    seen.lanes.flatMap((lane) => lane.marks.map((mark) => [mark.name, mark.paint] as const)),
+  );
+  expect(paints.get('oyl-workout-graph__now')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__heart-rate')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__target-edge')).toBe(INK);
+  expect(paints.get('oyl-workout-graph__range-edge')).toBe(INK_MUTED);
+  expect(paints.get('oyl-workout-graph__done')).toBe(INK_MUTED);
+  expect(paints.get('oyl-workout-graph__power')).toBe('rgb(108, 201, 189)');
+  expect(paints.get('oyl-workout-graph__range')).toBe('rgb(34, 42, 41)');
+  for (const chip of seen.lanes.flatMap((lane) => lane.chips)) {
+    expect(chip.colour, chip.text).toBe(INK_MUTED);
+  }
+});

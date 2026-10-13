@@ -364,6 +364,12 @@ export function WorkoutPanel({
               ? `Holding ${String(workout.holdingWatts)} W.${raisedText(workout)}`
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
+        {/*
+          #1307: the same workout as a picture is NOT drawn here. It is the
+          Ride screen's own group, after this one (`views/RideView.tsx`), so a
+          landscape tablet can put it under the readings, where there is room
+          for it on screen, rather than at the foot of this narrow column.
+        */}
       </section>
     );
   }

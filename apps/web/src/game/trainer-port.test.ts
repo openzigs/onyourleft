@@ -488,6 +488,56 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     expect(gameTrainerPortOver(undefined).workoutRescue()).toBeUndefined();
   });
 
+  it('hands the game the running workout’s own snapshot object for its graph — #1307', () => {
+    const timeline = { segments: [], totalSeconds: 600 };
+    let workout:
+      | {
+          status: string;
+          rescue: undefined;
+          elapsedSeconds: number;
+          holdingWatts: number | undefined;
+          timeline: typeof timeline;
+        }
+      | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: { ...NO_CONTROL, hasControl: true }, workout }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.runningWorkout?.()).toBeUndefined();
+    workout = {
+      status: 'running',
+      rescue: undefined,
+      elapsedSeconds: 30,
+      holdingWatts: 150,
+      timeline,
+    };
+    // ⚠️ `toBe`: the same object, so the graph's memo holds between ticks.
+    expect(port.runningWorkout?.()).toBe(workout);
+    workout = { ...workout, status: 'paused' };
+    expect(port.runningWorkout?.()).toBe(workout);
+    // A finished workout gives the route plan its place back.
+    workout = { ...workout, status: 'finished' };
+    expect(port.runningWorkout?.()).toBeUndefined();
+    expect(gameTrainerPortOver(undefined).runningWorkout?.()).toBeUndefined();
+  });
+
+  it('draws no graph from a source that does not say what the graph reads — #1307', () => {
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: { status: 'running', rescue: undefined },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.runningWorkout?.()).toBeUndefined();
+  });
+
   it('reads a running workout’s heart-rate hold off the controller, on every call — #1240', () => {
     let hold: WorkoutHold | undefined = undefined;
     const port = gameTrainerPortOver({

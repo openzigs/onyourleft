@@ -30,8 +30,11 @@ import {
   beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   routeProfile,
+  seconds,
+  thresholdShare,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -40,7 +43,9 @@ import { AppShell } from '../../shell/AppShell';
 import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
+import { auditAccessibility, formatViolations } from '../../a11y/audit';
 import type { WorkoutHold } from '../../workout/hold-text';
+import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import type { GameRenderer } from '../port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 
@@ -444,6 +449,37 @@ describe('the heart-rate hold, through the game — #1240', () => {
     hold = undefined;
     await pump(2);
     expect(document.body.textContent).not.toContain('Hold 130–140 bpm');
+  });
+
+  it('draws the running workout on the HUD where the route plan is, from the port — #1307', async () => {
+    const workout: WorkoutGraphInput = {
+      elapsedSeconds: 450,
+      timeline: expandWorkout({
+        name: 'Hold',
+        blocks: [{ kind: 'steady', seconds: seconds(1800), target: thresholdShare(0.4) }],
+      }),
+      holdingWatts: 100,
+      thresholdWatts: 250,
+      trace: [{ at: 450, target: 100, power: 104, heartRate: 128, range: { low: 130, high: 140 } }],
+    };
+    let running: WorkoutGraphInput | undefined = workout;
+    await startRide({ ...holdingPort(), runningWorkout: () => running });
+    await pump(2);
+    const strip = document.querySelector('.oyl-hud__route [data-oyl-workout-graph="hud"]');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.getAttribute('aria-label')).toContain(
+      'Heart rate: 128 bpm, with a chosen range of 130–140 bpm.',
+    );
+    expect(strip?.querySelector('.oyl-workout-strip__range')).not.toBeNull();
+    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140 · Target 100 W');
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    // The workout ends: the route plan has its place back.
+    running = undefined;
+    await pump(2);
+    expect(document.querySelector('[data-oyl-workout-graph]')).toBeNull();
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).not.toBeNull();
   });
 
   it('says a CHANGED sentence through the one region with announcements on, and never the first one', async () => {

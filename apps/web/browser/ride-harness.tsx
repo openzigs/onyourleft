@@ -77,9 +77,12 @@ import {
   buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   kilograms,
   routeProfile,
+  seconds,
+  thresholdShare,
   watts,
   type RoutePoint,
   type RouteProfile,
@@ -97,6 +100,7 @@ import {
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
@@ -526,8 +530,73 @@ const RACE_PORTS =
         },
       };
 
+/**
+ * `?graph=hold` and `?graph=plain`: the running workout as the HUD's strip
+ * reads it (#1307). Fixed numbers, so two loads measure the same picture.
+ * Paired with `?trainer=workout`, whose route panel it is drawn in.
+ *
+ * - `hold`: in a heart-rate hold, so the strip's one lane is heart rate
+ *   against its range. `hold-silent` is the same hold with a strap gone
+ *   quiet, so the strip writes "— bpm" and draws no heart-rate line.
+ * - `plain`: the same plan with no hold and a target that STEPS inside the
+ *   window, so the lane is power against the confirmed target. `paused` is
+ *   that workout paused: the trainer holds its 50 W minimum, and the newest
+ *   sample (175 W) is from before the ease.
+ */
+const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
+const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
+/** `paused`: the plain workout paused — the trainer eased to its 50 W minimum. */
+const GRAPH_PAUSED = GRAPH_KIND === 'paused';
+const GRAPH: WorkoutGraphInput | undefined =
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED
+    ? {
+        ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
+        elapsedSeconds: 900,
+        timeline: expandWorkout({
+          name: 'Hold',
+          blocks: [
+            { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+            { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
+            {
+              kind: 'ramp',
+              seconds: seconds(600),
+              from: thresholdShare(0.7),
+              to: thresholdShare(0.4),
+            },
+          ],
+        }),
+        // In a hold the trainer holds what the hold last asked: 167 W.
+        holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
+        hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
+        thresholdWatts: 250,
+        trace: Array.from({ length: 300 }, (_, index) =>
+          GRAPH_HOLD
+            ? {
+                at: 601 + index,
+                target: 175 - Math.floor(index / 60) * 2,
+                asked: 175 - Math.floor(index / 60) * 2,
+                power: 170 + Math.round(8 * Math.sin(index / 9)),
+                // `hold-silent`: a strap gone quiet.
+                heartRate: GRAPH_KIND === 'hold' ? 128 + Math.round(index / 25) : undefined,
+                range: { low: 130, high: 140 },
+              }
+            : {
+                at: 601 + index,
+                // The write for the 70 % block lands a second after it starts,
+                // then an ease to 140 W for a minute and back: three steps.
+                target: index >= 120 && index < 180 ? 140 : 175,
+                power:
+                  (index >= 126 && index < 186 ? 142 : 173) + Math.round(8 * Math.sin(index / 9)),
+                heartRate: undefined,
+                range: undefined,
+              },
+        ),
+      }
+    : undefined;
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  runningWorkout: () => GRAPH,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,

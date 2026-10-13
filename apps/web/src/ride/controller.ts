@@ -68,6 +68,7 @@ import {
   type Watts,
   type WorkoutBlock,
   type WorkoutRescue,
+  type WorkoutSegment,
 } from '@onyourleft/domain';
 import {
   deviceProvides,
@@ -121,6 +122,7 @@ import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
 import { blockText } from '../workouts/library';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
+import { withTraceSample, type WorkoutTraceSample } from '../workout/workout-graph';
 
 /** Which channel each metric on the screen reads from. */
 const METRIC_CAPABILITY: Readonly<Record<RideMetricId, MeasurementCapability>> = {
@@ -331,6 +333,53 @@ export interface RideWorkoutSnapshot {
    * whole lookahead, with {@link elapsedSeconds} as the one clock.
    */
   readonly timeline: WorkoutTimeline;
+  /**
+   * The threshold the workout was started with, in watts — #1307. What turns a
+   * segment's share into the watts the plan asks for, so the graph can tell a
+   * target the trainer holds from the one the plan asked
+   * (`workout/workout-graph.ts` §`heldInstead`). Optional, like {@link hold},
+   * so a fixture with no graph in it need not say.
+   */
+  readonly thresholdWatts?: number | undefined;
+  /**
+   * The last few minutes, one sample a second of the workout's own clock —
+   * #1307: the target the trainer ACKNOWLEDGED, the rider's power and heart
+   * rate where each is live, and a running hold's range. Kept HERE, above the
+   * router, so the Ride screen's graph and the game's are drawn from one
+   * record and neither loses it when the rider changes screen. Bounded
+   * (`workout-graph.ts` §`TRACE_MAX_SAMPLES`), read by the graph only, and it
+   * decides no write.
+   */
+  readonly trace?: readonly WorkoutTraceSample[] | undefined;
+  /**
+   * What a re-plan replaced, for the graph to draw beside the plan that
+   * stands — #1307's seam for #1244, which is what will set it. Nothing sets
+   * it today.
+   */
+  readonly replaced?: readonly WorkoutSegment[] | undefined;
+  /**
+   * Whether this app has control of the trainer NOW — #1307. With
+   * {@link holdingWatts} it is the one source of "what the trainer holds":
+   * the two facts the panel's own "Holding … W." line is written from, read
+   * live, so the graph cannot state a target from a sample taken before a
+   * pause or a lost link. `false`: {@link holdingWatts} is only the last
+   * write, and the graph states no target.
+   */
+  readonly hasControl?: boolean | undefined;
+  /**
+   * The rider's power and heart rate NOW, each `undefined` when its reading
+   * is not live — #1307. The numbers the graph writes beside its lanes; the
+   * trace is what it draws, and is not sampled while the ride is paused.
+   */
+  readonly live?:
+    { readonly power: number | undefined; readonly heartRate: number | undefined } | undefined;
+  /**
+   * Whether no target is being sent for the block being ridden, because it
+   * would be a large raise (#1305) — the session's `raiseRefused`, the fact
+   * behind the sentence in {@link fault}. So the graph draws no confirmed
+   * target for a block the trainer was never sent (#1307).
+   */
+  readonly refused?: boolean | undefined;
 }
 
 /** Everything the view renders, and nothing it has to derive. */
@@ -2433,6 +2482,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     readonly timeline: WorkoutTimeline;
     /** What the heart-rate hold was given, so the screen can say why one is off (#1240). */
     readonly heartRateHold: HeartRateHoldContext | undefined;
+    /** The threshold the session was given, for the graph (#1307). */
+    readonly thresholdWatts: number;
+    /** The graph's last few minutes (#1307). @see RideWorkoutSnapshot.trace */
+    trace: readonly WorkoutTraceSample[];
   }
 
   /** Whether a heart-rate strap is paired — in any state: a quiet strap is silence, not "none". */
@@ -2481,6 +2534,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       timeline: workout.timeline,
       holdingWatts: state.holding,
       raisedFromWatts: state.raisedFrom,
+      // #1307: the graph's one source for what the trainer holds, and the
+      // readings it writes, all live — see each field.
+      hasControl: control()?.hasControl() === true,
+      live: { power: liveReading('power', clock), heartRate: liveReading('heart-rate', clock) },
+      refused: state.raiseRefused,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.
@@ -2491,6 +2549,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       fault: state.lastFault,
       rescue: state.player.rescue,
       hold: holdOf(workout, segment),
+      thresholdWatts: workout.thresholdWatts,
+      trace: workout.trace,
     };
   };
 
@@ -2520,6 +2580,49 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     workout.session.tick(rideSeconds(at));
+    sampleForGraph(workout, at);
+  };
+
+  /** A channel's reading if it is live at `at`, by the rule the metric grid shows it under. */
+  const liveReading = (capability: MeasurementCapability, at: UnixSeconds): number | undefined => {
+    const state = metricStateFor(latest.get(capability), true, at, staleAfterSeconds);
+    return state.kind === 'live' ? state.value : undefined;
+  };
+
+  /**
+   * One sample for the workout's graph — #1307. After the session's tick, so
+   * it is this second's state; only while the workout is running, so a
+   * finished workout adds nothing; and it READS: what the trainer
+   * acknowledged, never what was asked, and a reading that is not live as
+   * nothing rather than as a zero.
+   *
+   * ⚠️ The guard's `paused` half is a belt nothing exercises: a paused RIDE
+   * does not tick the workout at all, and a workout paused by a lost link is
+   * resumed by the tick before this reads it. `controller.test.ts` holds the
+   * `finished` half.
+   */
+  const sampleForGraph = (current: WorkoutInProgress, at: UnixSeconds): void => {
+    const state = current.session.state();
+    if (state.player.status !== 'running') {
+      return;
+    }
+    const hold = state.player.hold;
+    current.trace = withTraceSample(current.trace, {
+      at: state.player.elapsed,
+      // No control, no confirmed target: `holding` outlives a lost link (the
+      // panel says "last set to"), and the graph's lane is the confirmed one.
+      target: control()?.hasControl() === true ? state.holding : undefined,
+      power: liveReading('power', at),
+      heartRate: liveReading('heart-rate', at),
+      range:
+        hold === undefined || hold.reason === 'ineligible'
+          ? undefined
+          : { low: hold.range.low, high: hold.range.high },
+      // What a running hold asked for this second — its own target, before
+      // any stall-rescue relief — so the graph can tell a target the hold set
+      // from one the trainer holds instead (`workout-graph.ts` §`heldInstead`).
+      asked: hold === undefined || hold.reason === 'ineligible' ? undefined : hold.target,
+    });
   };
 
   /**
@@ -3046,7 +3149,14 @@ export function createRideController(options: RideControllerOptions): RideContro
         heartRateStrap: heartRateStrapPaired,
         onChange: changed,
       });
-      workout = { record, session, timeline, heartRateHold };
+      workout = {
+        record,
+        session,
+        timeline,
+        heartRateHold,
+        thresholdWatts: thresholdPower,
+        trace: [],
+      };
       // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
       // pairing and requesting control both advance the real clock without one
       // — so anchoring there started every workout already seconds old, and the

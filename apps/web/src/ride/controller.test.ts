@@ -111,6 +111,16 @@ import {
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
+import {
+  HELD_GRACE_SECONDS,
+  heldInstead,
+  TRACE_MAX_SAMPLES,
+  workoutGraphKey,
+  workoutGraphLabels,
+  workoutGraphPaths,
+  workoutGraphText,
+  workoutStripText,
+} from '../workout/workout-graph';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
@@ -7733,6 +7743,191 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     return state.kind === 'live' ? state.value : undefined;
   };
 
+  it('gives the graph the hold’s range, the heart rate and the target it set — #1307', async () => {
+    const rig = await holding();
+    await ride(rig, 6 * 60);
+    await flushMicrotasks(20);
+
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    const last = trace.at(-1);
+    expect(last?.range).toEqual({ low: 130, high: 140 });
+    expect(last?.heartRate).toBe(heartRateNow(rig));
+    expect(last?.heartRate).toBeGreaterThan(80);
+    // The hold has been moving the target, and the trace has more than one of them.
+    expect(new Set(trace.map((each) => each.target)).size).toBeGreaterThan(1);
+    rig.controller.dispose();
+  });
+
+  it('gives the graph no heart rate once the strap has gone quiet, never its last one — #1307', async () => {
+    const rig = await holding();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().workout?.trace?.at(-1)?.heartRate).toBe(heartRateNow(rig));
+    expect(heartRateNow(rig)).toBeGreaterThan(0);
+
+    await rig.controller.unpair(STRAP);
+    await ride(rig, METRIC_STALE_AFTER_SECONDS + 2);
+    const last = rig.controller.getSnapshot().workout?.trace?.at(-1);
+    expect(last?.heartRate).toBeUndefined();
+    // Power is still live beside it: one channel going quiet is one gap.
+    expect(last?.power).toBeGreaterThan(0);
+    rig.controller.dispose();
+  });
+
+  it('gives the graph no range while the hold is off for want of a strap — #1307', async () => {
+    const rig = await holding({ strap: false });
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((each) => each.range === undefined)).toBe(true);
+    expect(trace.every((each) => each.heartRate === undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('a hold’s own target is never marked as held instead, at any snapshot — #1307', async () => {
+    // The owner's ruling: a target the hold itself set is the workout doing
+    // what it was asked. ⚠️ EVERY snapshot the screen is handed, because the
+    // state that used to be marked wrongly is also the one that lasts a
+    // second: a new hold target on its way to the trainer.
+    const rig = await holding();
+    const seen: { holding: number | undefined; asked: number | undefined; marked: boolean }[] = [];
+    const stop = rig.controller.subscribe(() => {
+      const workout = rig.controller.getSnapshot().workout;
+      if (workout?.hold === undefined) return;
+      seen.push({
+        holding: workout.holdingWatts,
+        asked: workout.hold.target,
+        marked: heldInstead(workout) !== undefined,
+      });
+    });
+    // ⚠️ A second at a time, letting each acknowledgement land before the
+    // next tick, as a trainer does. `ride(rig, 360)` in one call ticks with
+    // the write still outstanding for many seconds on end — a trainer that
+    // has stopped answering, which IS marked, and rightly.
+    for (let second = 0; second < 6 * 60; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    await flushMicrotasks(20);
+    stop();
+
+    // The apparatus: the hold moved the target well away from the block's
+    // start (40 % of 250 W, 100 W) — what the old rule compared against…
+    const held = seen.map((each) => each.holding).filter((each) => each !== undefined);
+    expect(Math.max(...held)).toBeGreaterThan(100 + 10);
+    // …and a snapshot was seen with the trainer a step behind the hold.
+    expect(seen.some((each) => each.asked !== undefined && each.holding !== each.asked)).toBe(true);
+    // Not one of them was marked, and the graph's words say nothing of a plan.
+    expect(seen.filter((each) => each.marked)).toEqual([]);
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    expect(workoutGraphText(workout)).not.toContain('asks for');
+    // The newest sample says what the hold asked and what the trainer confirmed.
+    const last = workout.trace?.at(-1);
+    expect(last?.asked).toBe(workout.hold?.target);
+    expect(last?.target).toBe(rig.targetOnTheTrainer());
+    rig.controller.dispose();
+  });
+
+  it('an eased hold is marked for as long as the rescue lasts, and no number is put in the hold’s mouth — #1307', async () => {
+    const rig = await holding();
+    for (let second = 0; second < 3 * 60; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const before = rig.controller.getSnapshot().workout;
+    expect(before?.rescue).toBeUndefined();
+    expect(before === undefined ? 'none' : heldInstead(before)).toBeUndefined();
+
+    // The rider stops pedalling: the stall rescue eases the target, a relief
+    // step first and then the floor. EVERY snapshot is read.
+    const seen: {
+      kind: string;
+      marked: ReturnType<typeof heldInstead>;
+      holding: number | undefined;
+      name: string;
+    }[] = [];
+    const stop = rig.controller.subscribe(() => {
+      const workout = rig.controller.getSnapshot().workout;
+      if (workout?.rescue === undefined || workout.hold === undefined) return;
+      seen.push({
+        kind: workout.rescue.kind,
+        marked: heldInstead(workout),
+        holding: workout.holdingWatts,
+        name: workoutGraphText(workout),
+      });
+    });
+    for (const rpm of [80, 60, 40, 20, 8, 5, 4, 4, 4, 4, 4, 4]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    stop();
+    // The apparatus: the rescue was seen in a RELIEF step as well as at the floor.
+    expect(new Set(seen.map((each) => each.kind))).toEqual(new Set(['relief', 'floor']));
+    // In every one of them the hold is marked as eased, at what the trainer
+    // holds, and nothing is said to have been asked by it.
+    for (const each of seen) {
+      expect(each.marked).toEqual({
+        heldWatts: each.holding,
+        plannedWatts: undefined,
+        by: 'hold',
+        why: 'eased',
+      });
+      expect(each.name).toContain('The heart-rate hold is eased.');
+      expect(each.name).not.toContain('asks for');
+    }
+    rig.controller.dispose();
+  });
+
+  it('paused inside a hold: every text says what the trainer holds now, not the hold’s last line — #1307’s third review', async () => {
+    const rig = await holding();
+    for (let second = 0; second < 90; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const before = rig.controller.getSnapshot().workout;
+    if (before === undefined) throw new Error('no workout');
+    expect(workoutStripText(before)).toMatch(/^\d+ bpm, range 130–140 · Target \d+ W$/);
+    const held = before.holdingWatts;
+
+    await rig.controller.pause();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    const paused = rig.controller.getSnapshot().workout;
+    if (paused === undefined) throw new Error('no workout');
+    // The apparatus: paused, eased on the machine, and the snapshot carries
+    // no hold while the newest sample still carries its range and target.
+    expect(paused.status).toBe('paused');
+    expect(paused.holdingWatts).toBe(rig.targetOnTheTrainer());
+    expect(paused.holdingWatts).not.toBe(held);
+    expect(paused.trace?.at(-1)?.range).toEqual({ low: 130, high: 140 });
+    expect(paused.trace?.at(-1)?.target).toBeGreaterThan(0);
+    expect(paused.trace?.at(-1)?.target).not.toBe(paused.holdingWatts);
+    const now = `Target ${String(paused.holdingWatts)} W`;
+    expect(workoutStripText(paused)).toBe(`Paused · ${now}`);
+    expect(workoutGraphLabels(paused).trace.reading.startsWith(`Paused · ${now} · `)).toBe(true);
+    expect(workoutGraphText(paused)).toContain('Workout graph. Paused.');
+    expect(workoutGraphText(paused)).toContain(
+      `Target the trainer last confirmed: ${String(paused.holdingWatts)} W.`,
+    );
+    expect(workoutGraphText(paused)).not.toContain('asks');
+    expect(heldInstead(paused)).toBeUndefined();
+    expect(workoutGraphKey(paused)).toBe('');
+    rig.controller.dispose();
+  });
+
+  it('gives the graph nothing a hold asked while the hold is off — #1307', async () => {
+    const rig = await holding({ strap: false });
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((each) => each.asked === undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
   it('trainer receives the hold’s targets: every one inside the envelope, and the heart rate ends inside the range', async () => {
     const rig = await holding();
     await ride(rig, 12 * 60);
@@ -7889,6 +8084,469 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     await flushMicrotasks(20);
     expect(targetsSent(rig, before)).not.toContain(200);
     expect(rig.controller.getSnapshot().trainer.refusal).toBeDefined();
+    rig.controller.dispose();
+  });
+});
+
+// --- The running workout's graph (#1307) -------------------------------------
+
+describe('#1307 — what the workout’s graph is drawn from, through the real controller', () => {
+  const savedWorkout = (blocks: readonly WorkoutBlock[]): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name: 'Test',
+    workout: { name: 'Test', blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+  const steadyWorkout = (): WorkoutRecord =>
+    savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }]);
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith(options);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('carries the threshold the workout was started with', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.thresholdWatts).toBe(250);
+    rig.controller.dispose();
+  });
+
+  it('samples once a second of the workout’s own clock: the acknowledged target and live power', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual([]);
+
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+
+    const workout = rig.controller.getSnapshot().workout;
+    const trace = workout?.trace ?? [];
+    // One per tick, each later than the last, and the newest is this second.
+    // (Not 1…6: this bench's simulator advances its clock a second on a write.)
+    const times = trace.map((each) => each.at);
+    expect(times).toHaveLength(6);
+    expect(times).toEqual([...new Set(times)].sort((a, b) => a - b));
+    expect(times.at(-1)).toBe(workout?.elapsedSeconds);
+    const last = trace.at(-1);
+    // What the TRAINER holds, read back off the machine, and the screen's own figure.
+    expect(last?.target).toBe(rig.targetOnTheTrainer());
+    expect(last?.target).toBe(workout?.holdingWatts);
+    const power = metric(rig, 'power');
+    expect(power.kind).toBe('live');
+    expect(last?.power).toBe(power.kind === 'live' ? power.value : undefined);
+    // No strap and no hold: neither is invented.
+    expect(last?.heartRate).toBeUndefined();
+    expect(last?.range).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('records a target raised to the trainer’s minimum as the minimum — #1297', async () => {
+    // 30 % of 250 W is 75 W; this machine's minimum is 100 W.
+    const rig = await riding({ machine: { minTargetPower: watts(100) } });
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.3) }]),
+      watts(250),
+    );
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    const workout = rig.controller.getSnapshot().workout;
+    expect(workout?.trace?.at(-1)?.target).toBe(100);
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    // And the graph, drawn from that snapshot, says both numbers.
+    if (workout === undefined) throw new Error('no workout');
+    expect(heldInstead(workout)).toEqual({
+      heldWatts: 100,
+      plannedWatts: 75,
+      by: 'plan',
+      why: 'different',
+    });
+    rig.controller.dispose();
+  });
+
+  it('does not call an ordinary block change a different target: the write is on its way — #1307', async () => {
+    // 60 % then 100 % of 250 W: 150 W, then 250 W. For about a second after
+    // the boundary the trainer truthfully still holds 150 W.
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(1) },
+      ]),
+      watts(250),
+    );
+    // ⚠️ EVERY snapshot the screen is handed, not one a tick: the state this
+    // is about lasts for one acknowledgement, between two ticks' reads.
+    const seen: { at: number; holding: number | undefined; held: boolean; name: string }[] = [];
+    const stop = rig.controller.subscribe(() => {
+      const workout = rig.controller.getSnapshot().workout;
+      if (workout === undefined) return;
+      seen.push({
+        at: workout.elapsedSeconds,
+        holding: workout.holdingWatts,
+        held: heldInstead(workout) !== undefined,
+        name: workoutGraphText(workout),
+      });
+    });
+    for (let tick = 0; tick < 16; tick += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    stop();
+    // The apparatus: the boundary was crossed, the old target was seen on the
+    // far side of it, and the new one was acknowledged.
+    const after = seen.filter((each) => each.at >= 6);
+    expect(after.some((each) => each.holding === 150)).toBe(true);
+    expect(seen.at(-1)?.holding).toBe(250);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    // And at no tick did the graph mark it, or its name say it.
+    expect(seen.filter((each) => each.held)).toEqual([]);
+    expect(seen.filter((each) => each.name.includes('where the plan asks'))).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('still marks a block the trainer will not take, once the grace has run — #1305', async () => {
+    // A 30 % block (75 W) after a 60 % one, on a machine whose minimum is 100 W.
+    const rig = await riding({ machine: { minTargetPower: watts(100) } });
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.3) },
+      ]),
+      watts(250),
+    );
+    await ride(rig, 14);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    expect(workout.elapsedSeconds).toBeGreaterThanOrEqual(6 + HELD_GRACE_SECONDS);
+    expect(heldInstead(workout)).toEqual({
+      heldWatts: 100,
+      plannedWatts: 75,
+      by: 'plan',
+      why: 'different',
+    });
+    expect(workoutGraphText(workout)).toContain(
+      'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
+    );
+    rig.controller.dispose();
+  });
+
+  /** What the graph says and marks, from one snapshot — every text there is. */
+  const said = (rig: Bench) => {
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    const power = metric(rig, 'power');
+    return {
+      workout,
+      caption: workoutGraphLabels(workout).trace.reading,
+      strip: workoutStripText(workout),
+      key: workoutGraphKey(workout),
+      name: workoutGraphText(workout),
+      marked: heldInstead(workout),
+      plan: workoutGraphPaths(workout).plan,
+      livePower: power.kind === 'live' ? power.value : undefined,
+    };
+  };
+
+  it('in a pause every text says what the trainer holds and the power NOW — #1307’s third review', async () => {
+    // 90 % of 250 W is 225 W; the pause eases this machine to its 50 W minimum.
+    const rig = await riding({ machine: { minTargetPower: watts(50) } });
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.9) }]),
+      watts(250),
+    );
+    for (let second = 0; second < 9; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const running = said(rig);
+    expect(running.workout.holdingWatts).toBe(225);
+    expect(running.caption).toBe(`Target 225 W · You ${String(running.livePower)} W`);
+
+    await rig.controller.pause();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    const paused = said(rig);
+    // The apparatus: paused, eased on the machine itself, and the newest
+    // sample is still the one from before the ease.
+    expect(paused.workout.status).toBe('paused');
+    expect(rig.targetOnTheTrainer()).toBe(50);
+    expect(paused.workout.holdingWatts).toBe(50);
+    expect(paused.workout.trace?.at(-1)?.target).toBe(225);
+    expect(paused.livePower).toBeDefined();
+    // Every text: what the trainer holds, and the power the grid shows.
+    expect(paused.caption).toBe(`Paused · Target 50 W · You ${String(paused.livePower)} W`);
+    expect(paused.strip).toBe('Paused · Target 50 W');
+    expect(paused.name).toContain('Workout graph. Paused.');
+    expect(paused.name).toContain('Target the trainer last confirmed: 50 W.');
+    expect(paused.name).toContain(`Your power: ${String(paused.livePower)} W.`);
+    for (const text of [paused.caption, paused.strip, paused.name]) {
+      expect(text).not.toContain('225');
+      expect(text).not.toContain('asks');
+    }
+    // And no mark: no sentence, no dashed outline, no shaded step.
+    expect(paused.key).toBe('');
+    expect(paused.marked).toBeUndefined();
+    expect([paused.plan.asked, paused.plan.heldArea, paused.plan.heldEdge]).toEqual(['', '', '']);
+
+    // Riding again: the block's target comes back, and so does its caption.
+    await rig.controller.resume();
+    for (let second = 0; second < 4; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const resumed = said(rig);
+    expect(resumed.workout.status).toBe('running');
+    expect(resumed.caption).toBe(`Target 225 W · You ${String(resumed.livePower)} W`);
+    rig.controller.dispose();
+  });
+
+  it('after control is lost, past a block change and the grace: no mark, no sentence, "No target" — #1307’s third review', async () => {
+    // 150 W for 6 s, then 250 W.
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(600), target: thresholdShare(1) },
+      ]),
+      watts(250),
+    );
+    for (let second = 0; second < 3; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    expect(said(rig).workout.holdingWatts).toBe(150);
+    const writes = rig.written.length;
+
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    for (let second = 0; second < 14; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const lost = said(rig);
+    // The apparatus: no control, nothing written since, in the second block
+    // past its grace, and the last write (150 W) still on the snapshot.
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    expect(lost.workout.hasControl).toBe(false);
+    expect(rig.written.slice(writes).filter((bytes) => bytes[0] === 0x05)).toEqual([]);
+    expect(lost.workout.elapsedSeconds).toBeGreaterThanOrEqual(6 + HELD_GRACE_SECONDS);
+    expect(lost.workout.holdingWatts).toBe(150);
+    // Nothing is "confirmed instead" of a target that was never sent.
+    expect(lost.marked).toBeUndefined();
+    expect(lost.key).toBe('');
+    expect([lost.plan.asked, lost.plan.heldArea, lost.plan.heldEdge]).toEqual(['', '', '']);
+    expect(lost.plan.toCome.bands.join('')).not.toBe('');
+    expect(lost.caption).toBe(`No target · You ${String(lost.livePower)} W`);
+    expect(lost.strip.startsWith('No target · ')).toBe(true);
+    expect(lost.name).toContain('Target the trainer last confirmed: 150 W.');
+    expect(lost.name).not.toContain('asks for');
+    rig.controller.dispose();
+  });
+
+  it('a block whose target is not sent is drawn as not sent — #1305', async () => {
+    // 30 % of 250 W is 75 W, on a machine whose minimum is 150 W and which
+    // this app has set no target on: the session sends nothing.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.3) }]),
+      watts(250),
+    );
+    for (let second = 0; second < 5; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const refused = said(rig);
+    // The apparatus: the panel's own sentence, and nothing on the machine.
+    expect(refused.workout.fault).toContain('so no target was sent for it');
+    expect(refused.workout.refused).toBe(true);
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(refused.marked).toEqual({
+      heldWatts: undefined,
+      plannedWatts: 75,
+      by: 'plan',
+      why: 'not-sent',
+    });
+    expect(refused.caption).toBe(
+      `No target sent (plan asks 75 W) · You ${String(refused.livePower)} W`,
+    );
+    expect(refused.strip).toBe('No target sent · 9:55 left in block');
+    expect(refused.name).toContain('No target was sent for this block, which asks for 75 W.');
+    expect(refused.name).not.toContain('confirmed');
+    expect(refused.plan.asked).not.toBe('');
+    expect([refused.plan.heldArea, refused.plan.heldEdge]).toEqual(['', '']);
+    rig.controller.dispose();
+  });
+
+  it('a clamp inside a ramp is marked, by the session’s own word — #1305', async () => {
+    // 80 % down to 20 % of 250 W over two minutes, on a machine whose minimum
+    // is 100 W: the plan goes under it 80 s in.
+    const rig = await riding({ machine: { minTargetPower: watts(100) } });
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'ramp', seconds: seconds(120), from: thresholdShare(0.8), to: thresholdShare(0.2) },
+      ]),
+      watts(250),
+    );
+    while ((rig.controller.getSnapshot().workout?.elapsedSeconds ?? 0) < 100) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const clamped = said(rig);
+    expect(clamped.workout.status).toBe('running');
+    expect(rig.targetOnTheTrainer()).toBe(100);
+    expect(clamped.workout.raisedFromWatts).toBeLessThan(100);
+    // 100 W is inside what this ramp ever asks (50 W to 200 W): the numbers
+    // alone would say nothing.
+    expect(clamped.marked).toEqual({
+      heldWatts: 100,
+      plannedWatts: clamped.workout.raisedFromWatts,
+      by: 'plan',
+      why: 'different',
+    });
+    expect(clamped.plan.asked).not.toBe('');
+    expect(clamped.plan.heldArea).not.toBe('');
+    rig.controller.dispose();
+  });
+
+  it('gives the graph no power once the trainer’s readings have gone quiet, never its last one — #1307', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    for (let second = 0; second < 4; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    expect(said(rig).workout.trace?.at(-1)?.power).toBeGreaterThan(0);
+    expect(said(rig).workout.live?.power).toBeGreaterThan(0);
+
+    // The trainer goes on being connected and stops notifying.
+    rig.bench
+      .device(TRAINER)
+      .script({ kind: 'notification-dropout', duration: seconds(METRIC_STALE_AFTER_SECONDS + 20) });
+    for (let second = 0; second < METRIC_STALE_AFTER_SECONDS + 4; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const quiet = said(rig);
+    expect(metric(rig, 'power').kind).not.toBe('live');
+    expect(quiet.workout.trace?.at(-1)?.power).toBeUndefined();
+    expect(quiet.workout.live?.power).toBeUndefined();
+    expect(quiet.caption.endsWith('· No power reading')).toBe(true);
+    expect(quiet.name).not.toContain('Your power');
+    rig.controller.dispose();
+  });
+
+  it('adds nothing while the ride is paused (the tick is not called), and carries on after', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 3);
+    await rig.controller.pause();
+    await ride(rig, 1);
+    const paused = rig.controller.getSnapshot().workout?.trace ?? [];
+    await ride(rig, 20);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('paused');
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual(paused);
+
+    await rig.controller.resume();
+    await ride(rig, 3);
+    const after = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(after.length).toBeGreaterThan(paused.length);
+    // The workout's clock, so the pause leaves no gap and no step back.
+    const times = after.map((each) => each.at);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(new Set(times).size).toBe(times.length);
+    rig.controller.dispose();
+  });
+
+  it('samples no target once trainer control is lost: the last write is not a confirmed target — #1307', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    expect(rig.controller.getSnapshot().workout?.trace?.at(-1)?.target).toBeDefined();
+
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    const before = rig.controller.getSnapshot().workout?.trace?.length ?? 0;
+    await ride(rig, 4);
+
+    const after = (rig.controller.getSnapshot().workout?.trace ?? []).slice(before);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((each) => each.target === undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('adds nothing once the workout has finished', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(3), target: thresholdShare(0.6) }]),
+      watts(250),
+    );
+    await ride(rig, 6);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('finished');
+    const finished = rig.controller.getSnapshot().workout?.trace;
+    expect(finished?.length).toBeGreaterThan(0);
+
+    // The ride goes on, and so does the tick. `toBe`: not one sample replaced.
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().workout?.trace).toBe(finished);
+    rig.controller.dispose();
+  });
+
+  it('is bounded however long the workout runs', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(3600), target: thresholdShare(0.6) }]),
+      watts(250),
+    );
+    await ride(rig, TRACE_MAX_SAMPLES + 40);
+    const trace = rig.controller.getSnapshot().workout?.trace ?? [];
+    expect(trace.length).toBe(TRACE_MAX_SAMPLES);
+    expect(trace.at(-1)?.at).toBe(rig.controller.getSnapshot().workout?.elapsedSeconds);
+    rig.controller.dispose();
+  });
+
+  it('starts a new workout with an empty trace', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 4);
+    expect(rig.controller.getSnapshot().workout?.trace?.length).toBe(4);
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    expect(rig.controller.getSnapshot().workout?.trace).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('writes nothing to the trainer for it', async () => {
+    // The same ride with and without anyone reading the trace: the wire is the
+    // wire. What is asserted is that sampling is not a write — a steady block
+    // is one Set Target Power however many samples are taken.
+    const rig = await riding();
+    const before = rig.written.length;
+    rig.controller.startWorkout(steadyWorkout(), watts(250));
+    await ride(rig, 30);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().workout?.trace?.length).toBe(30);
+    expect(rig.written.slice(before).filter((write) => write[0] === 0x05)).toHaveLength(1);
     rig.controller.dispose();
   });
 });

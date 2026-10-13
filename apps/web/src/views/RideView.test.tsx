@@ -62,6 +62,7 @@ import type { RecordingCheckpointStore } from '../recording/recorder';
 import { accessibleName } from '../a11y/audit';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
+import { workoutGraphText } from '../workout/workout-graph';
 import { RideView } from './RideView';
 
 let mounted: Mounted | undefined;
@@ -1161,5 +1162,107 @@ describe('#1240 — the Ride screen builds the heart-rate hold context from the 
     expect(stub.calls.startWorkoutWith).toStrictEqual([
       { thresholdPower: 250, heartRateHold: undefined },
     ]);
+  });
+});
+
+/**
+ * #1307: the running workout's graph is the Ride screen's own group, after
+ * the trainer group — `theme.css` §"THE WORKOUT'S GRAPH ON THE RIDE SCREEN"
+ * decides where it is drawn, and `browser/rideview.browser.spec.ts` measures
+ * that. ⚠️ jsdom does no layout: what is held here is the document.
+ */
+describe('#1307 — the running workout’s graph, in a group of its own', () => {
+  const workout = (
+    overrides: Partial<NonNullable<ReturnType<typeof ridingSnapshot>['workout']>> = {},
+  ): NonNullable<ReturnType<typeof ridingSnapshot>['workout']> => ({
+    name: 'Sweet spot',
+    status: 'running',
+    elapsedSeconds: 150,
+    totalSeconds: 600,
+    holdingWatts: 150,
+    nowRiding: '10 min at 60%',
+    fault: undefined,
+    rescue: undefined,
+    thresholdWatts: 250,
+    trace: [{ at: 150, target: 150, power: 152, heartRate: undefined, range: undefined }],
+    timeline: expandWorkout({
+      name: 'Sweet spot',
+      blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
+    }),
+    ...overrides,
+  });
+
+  const riding = (running: ReturnType<typeof workout> | undefined) => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ workout: running });
+    return stub;
+  };
+
+  const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+  const after = (earlier: Element | null | undefined, later: Element | null | undefined): boolean =>
+    earlier !== null &&
+    earlier !== undefined &&
+    later !== null &&
+    later !== undefined &&
+    (earlier.compareDocumentPosition(later) & FOLLOWING) === FOLLOWING;
+
+  it('draws the graph from the snapshot the sentences are written from', async () => {
+    const running = workout();
+    await show(riding(running));
+    const graph = document.querySelector(
+      '.oyl-ride__group--graph [data-oyl-workout-graph="panel"] [role="img"]',
+    );
+    expect(graph?.getAttribute('aria-label')).toBe(workoutGraphText(running));
+    expect(graph?.getAttribute('aria-label')).toContain(
+      'Target the trainer last confirmed: 150 W.',
+    );
+    expect(graph?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
+      '0.2500',
+    );
+    expect(graph?.querySelector('.oyl-workout-graph__power')).not.toBeNull();
+    expect(queryAll(document, '[data-oyl-workout-graph]')).toHaveLength(1);
+  });
+
+  it('puts it after the trainer group and before Sensors: every control and sentence first', async () => {
+    await show(riding(workout()));
+    const group = document.querySelector('.oyl-ride__group--graph');
+    const trainer = document.querySelector('.oyl-ride__group--trainer');
+    // A direct child of the grid: `theme.css` places it by that.
+    expect(group?.parentElement?.classList.contains('oyl-ride')).toBe(true);
+    expect(trainer?.contains(group ?? null)).toBe(false);
+    expect(after(document.querySelector('.oyl-ride__group--live'), group)).toBe(true);
+    expect(after(trainer, group)).toBe(true);
+    expect(after(group, document.querySelector('.oyl-ride__group--sensors'))).toBe(true);
+    // The workout's own control and sentences are before it, where they were.
+    expect(after(buttonNamed('End workout'), group)).toBe(true);
+    const sentences = queryAll(document, '.oyl-ride__group--trainer p').map(
+      (each) => each.textContent ?? '',
+    );
+    expect(sentences).toContain('Now: 10 min at 60%');
+    expect(sentences).toContain('Holding 150 W.');
+    // And it adds nothing to the tab order.
+    expect(queryAll(group ?? document, 'button, a, input, select, [tabindex]')).toEqual([]);
+  });
+
+  it('draws what the trainer holds when that is not what the plan asks — #1297', async () => {
+    // 60 % of 250 W is 150 W; the trainer confirmed 180 W.
+    await show(riding(workout({ holdingWatts: 180 })));
+    expect(
+      document.querySelector('.oyl-ride__group--graph [role="img"]')?.getAttribute('aria-label'),
+    ).toContain('Target the trainer last confirmed: 180 W, where the plan asks for 150 W.');
+  });
+
+  it('draws no graph, and no empty group, with no workout or a finished one', async () => {
+    await show(riding(undefined));
+    expect(document.querySelector('.oyl-ride__group--graph')).toBeNull();
+    mounted?.unmount();
+    await show(riding(workout({ status: 'finished' })));
+    expect(document.querySelector('.oyl-ride__group--graph')).toBeNull();
+    expect(document.querySelector('[data-oyl-workout-graph]')).toBeNull();
+  });
+
+  it('keeps drawing it while the workout is paused', async () => {
+    await show(riding(workout({ status: 'paused' })));
+    expect(document.querySelector('.oyl-ride__group--graph [role="img"]')).not.toBeNull();
   });
 });

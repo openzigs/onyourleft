@@ -70,6 +70,7 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
@@ -330,6 +331,27 @@ function LiveRide({
           }}
         />
       </div>
+
+      {/*
+        #1307: the running workout as a picture — the plan, where the rider is
+        in it, and the last few minutes. A group of its own, AFTER the trainer
+        group in the document: every control and every sentence of the workout
+        comes first (#605's order: press, wrong, read), and the picture is
+        read after the sentences it repeats. It holds no control, so it adds
+        nothing to the tab order.
+
+        ⚠️ Where it is DRAWN is `theme.css` §"THE WORKOUT'S GRAPH ON THE RIDE
+        SCREEN": on a landscape tablet under the readings on the left, where
+        it is on screen without scrolling (the owner's ruling on #1307 — at
+        the foot of the trainer column a notice pushed it under the fold);
+        upright, under the trainer group in its column. Shown exactly while
+        `WorkoutPanel` shows a workout as running: loaded and not finished.
+      */}
+      {snapshot.workout !== undefined && snapshot.workout.status !== 'finished' ? (
+        <div className="oyl-ride__group oyl-ride__group--graph">
+          <WorkoutGraph workout={snapshot.workout} />
+        </div>
+      ) : null}
 
       <div className="oyl-ride__group oyl-ride__group--sensors">
         <h2>Sensors</h2>

@@ -216,7 +216,16 @@ export interface PlayerState {
 export interface HoldStatus {
   readonly reason: HoldReason;
   readonly range: HeartRateRange;
-  /** The hold's own target, before any stall-rescue relief. */
+  /**
+   * The hold's own target.
+   *
+   * ⚠️ During a stall rescue this IS the eased number, not the target from
+   * before the relief: by H9 the player hands the eased target to the hold
+   * (`hold.rescued(target)`) and this reads `hold.current()` after it. Until
+   * #1307's review this comment said "before any stall-rescue relief", which
+   * the code has never done; a screen that wants "what the hold asked before
+   * it was eased" cannot have it from here.
+   */
   readonly target: Watts;
 }
 
