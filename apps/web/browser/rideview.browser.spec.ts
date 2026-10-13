@@ -2059,24 +2059,34 @@ for (const state of LANDSCAPE_STATES) {
  * the first layout of them wrapped the plan lane's, and the second left the
  * heart-rate lane 98 px of drawing; both were green on the Mac they were
  * written on. So the same case is measured with every caption's letters
- * spaced 0.03em apart, about 5 % wider: on a Mac that is roughly the
+ * spaced 0.02em apart, about 4 % wider: on a Mac that is nearly the
  * runner's fonts, and on the runner it is that much wider again.
  *
  * Measured on a Mac, for whoever changes this: the captions stay on one line
  * each up to 0.07em and wrap at 0.08em, and without the heart-rate lane's
- * floor its drawing is 106 px here where with it it is 112.
+ * floor its drawing is 108 px here where with it it is 112.
  */
 test(`a paused hold’s three captions stay on one line each on wider fonts — #1307 — ${TABLET_IN_THE_SHELL.name}`, async ({
   page,
 }) => {
   const viewport = TABLET_IN_THE_SHELL;
   await open(page, viewport, '?workout=paused-hold');
-  const plain = await graphOnTheRideScreen(page);
-  await page.addStyleTag({ content: '.oyl-workout-graph__caption { letter-spacing: 0.03em; }' });
+  /** How wide the longest caption's own TEXT is — not its lane, which may have no room to grow. */
+  const readingWidth = (): Promise<number> =>
+    page.evaluate(
+      () =>
+        document
+          .querySelector('[data-oyl-lane="trace"] .oyl-workout-graph__reading')
+          ?.getBoundingClientRect().width ?? 0,
+    );
+  const before = await readingWidth();
+  await page.addStyleTag({ content: '.oyl-workout-graph__caption { letter-spacing: 0.02em; }' });
   const seen = await graphOnTheRideScreen(page);
-  if (seen === undefined || plain === undefined) throw new Error('no workout graph');
-  // The apparatus: the captions really are wider than they were.
-  expect(laneOf(seen, 'trace').box.width).toBeGreaterThan(laneOf(plain, 'trace').box.width + 3);
+  if (seen === undefined) throw new Error('no workout graph');
+  // The apparatus: the caption's text really is wider than it was. 29
+  // characters at 0.02em of a 12.8 px face is 7 px, whatever the face.
+  expect(before).toBeGreaterThan(100);
+  expect(await readingWidth()).toBeGreaterThan(before + 5);
   expect(seen.lanes).toHaveLength(3);
   for (const lane of seen.lanes) {
     expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
