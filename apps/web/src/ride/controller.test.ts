@@ -236,6 +236,8 @@ interface BenchOptions {
    * the trainer that issue was measured on.
    */
   readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'minTargetPower'>;
+  /** The same for the `two-trainers` NEO, which `machine` does not reach (#1305). */
+  readonly secondMachine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'minTargetPower'>;
   /**
    * Notify `0xFF` Control Permission Lost BEFORE the Stop's own answer — the
    * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
@@ -301,7 +303,9 @@ function benchWith(options: BenchOptions = {}): Bench {
       ...(which === 'trainer+strap' || which === 'strap'
         ? [hrsStrap({ id: 'strap', name: 'HRM 04B1' })]
         : []),
-      ...(which === 'two-trainers' ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T' })] : []),
+      ...(which === 'two-trainers'
+        ? [ftmsTrainer({ id: 'neo', name: 'NEO 2T', ...options.secondMachine })]
+        : []),
     ],
     ...options.simulator,
   });
@@ -5201,6 +5205,77 @@ describe('a workout target under the trainer’s minimum — #1297', () => {
     await rig.controller.pair('trainer');
     await rig.controller.requestTrainerControl();
     expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+  it('a target one trainer acknowledged is not handed over for another: a second trainer is refused, and the first still gets its minimum — #1305', async () => {
+    // Kept by device. The KICKR acknowledged 200 W; the NEO acknowledged
+    // nothing, so a 75 W block on the NEO's 150 W minimum is a raise onto a
+    // trainer no target is known on, whatever the KICKR once held.
+    const rig = benchWith({
+      devices: 'two-trainers',
+      ...HIGH_MINIMUM_150,
+      secondMachine: HIGH_MINIMUM_150.machine,
+    });
+    const neo = deviceId('neo');
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await rig.controller.unpair(TRAINER);
+    await flushMicrotasks(20);
+
+    const discover = rig.transport.discover.bind(rig.transport);
+    vi.spyOn(rig.transport, 'discover').mockImplementationOnce((request) =>
+      discover({ ...request, namePrefix: 'NEO' }),
+    );
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([neo]);
+    await rig.controller.requestTrainerControl();
+    let before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    expect(targetWritesSince(rig, before)).toStrictEqual([]);
+    expect(rig.bench.device(neo).inspect().ftms?.targetPower).toBeUndefined();
+    expect(rig.controller.getSnapshot().workout?.fault).toBe(REFUSED_AT_150);
+
+    // The KICKR again: what IT acknowledged is still known.
+    rig.controller.endWorkout();
+    await rig.controller.unpair(neo);
+    await flushMicrotasks(20);
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([
+      TRAINER,
+    ]);
+    await rig.controller.requestTrainerControl();
+    before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    expect(rig.bench.device(neo).inspect().ftms?.targetPower).toBeUndefined();
+    rig.controller.dispose();
+  });
+  it('a target is remembered for the trainer that acknowledged it, not for whichever sensor was paired first — #1305', async () => {
+    // The NEO is paired first, as a power meter, so it is the first sensor
+    // this controller holds. The 200 W is the KICKR's.
+    const rig = benchWith({ devices: 'two-trainers', ...HIGH_MINIMUM_150 });
+    const discover = rig.transport.discover.bind(rig.transport);
+    vi.spyOn(rig.transport, 'discover').mockImplementationOnce((request) =>
+      discover({ ...request, namePrefix: 'NEO' }),
+    );
+    await rig.controller.pair('power-meter');
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.id)).toStrictEqual([
+      deviceId('neo'),
+      TRAINER,
+    ]);
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(200));
+    await loseAndRetakeControl(rig);
     const before = rig.written.length;
     await startOn(rig, [[600, 0.3]]);
 

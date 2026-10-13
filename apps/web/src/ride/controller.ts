@@ -1363,6 +1363,16 @@ export function createRideController(options: RideControllerOptions): RideContro
    * entry cannot raise a target above that. A different trainer has a
    * different id and starts with nothing. A page reload starts with nothing
    * too: what the machine kept across it is not something this app can know.
+   *
+   * ⚠️ **"The same trainer has the same id" is true of the simulator and
+   * not measured on a browser.** A dropped link keeps the grant, so the id
+   * should hold. A FORGET withdraws the grant, and on Web Bluetooth a device
+   * chosen again after that may come back under a new id (@see
+   * pairedAgainBeforeForgetLanded). Then nothing is found here, the block is
+   * refused and the trainer keeps what it held: a trainer no target is known
+   * on, which is no worse than before this map existed. There is no fallback
+   * by name, on purpose: a name is not an identity, and a wrong match would
+   * hand one trainer's target over for another.
    */
   const lastAcknowledgedTarget = new Map<DeviceId, Watts>();
   /**
