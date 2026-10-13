@@ -204,9 +204,9 @@ describe('what the About page claims about the network — #404, then #408', () 
     expect(link?.textContent).toBe('connect to an instance');
   });
 
-  it('names what a private room and a sync send, before Sync ships — #778, #1195', async () => {
-    // Rooms shipped (#784, #785), and #1195 is blocked by #778: the page says
-    // what a room and a sync send before a rider can be surprised by either.
+  it('names what a private room and a sync send, both of which it offers — #778, #1195, #1327', async () => {
+    // Rooms shipped (#784, #785) and so did sync (#1195): the page says what a
+    // room and a sync send, so that a rider is surprised by neither.
     const text = (await aboutText()).replace(/\s+/g, ' ');
     expect(text).toContain('the route of a room you make, your power and cadence while you ride');
     expect(text).toContain('the weight you declare as you join, and a race’s result');

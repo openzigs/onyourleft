@@ -154,8 +154,9 @@ export function AboutView(): JSX.Element {
             internet address and device or browser type, as any server sees them — and nothing else
             of yours when you connect: no ride, route, position or heart rate.
           </p>
-          {/* #778, second pass: rooms shipped (#784, #785), and sync's disclosure
-            comes before sync does (#1195); #1327: sync is offered now, and it says so. `AboutView.test.tsx` pins it. */}
+          {/* #778, second pass: rooms shipped (#784, #785), and so did sync (#1195),
+            whose disclosure was here before it was. #1327: the sentence no longer
+            says sync is not offered yet. `AboutView.test.tsx` pins it. */}
           <p>
             A private room you make or join sends that instance the route of a room you make, your
             power and cadence while you ride, the weight you declare as you join, and a race&rsquo;s
