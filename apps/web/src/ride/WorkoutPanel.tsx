@@ -109,6 +109,17 @@ const STATUS_TEXT: Readonly<Record<RideWorkoutSnapshot['status'], string>> = {
   finished: 'Finished',
 };
 
+/**
+ * Why the trainer holds more than the block asks, after "Holding … W."
+ * (#1305): the session raised the block's target to the trainer's minimum
+ * (#1297), and "Now: …" still words the block as the workout wrote it.
+ */
+function raisedText(workout: RideWorkoutSnapshot): string {
+  return workout.raisedFromWatts === undefined
+    ? ''
+    : ` This block asks for ${String(workout.raisedFromWatts)} W, which is less than the lowest target this trainer accepts.`;
+}
+
 export interface WorkoutPanelProps {
   readonly trainer: TrainerSnapshot;
   readonly workout: RideWorkoutSnapshot | undefined;
@@ -350,7 +361,7 @@ export function WorkoutPanel({
           {workout.holdingWatts === undefined
             ? 'The trainer has not confirmed a target yet.'
             : trainer.hasControl
-              ? `Holding ${String(workout.holdingWatts)} W.`
+              ? `Holding ${String(workout.holdingWatts)} W.${raisedText(workout)}`
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
         {/*

@@ -180,6 +180,23 @@ describe('while one is running', () => {
     expect(text).toContain('Holding 150 W');
   });
 
+  it('says why the trainer holds more than the block asks, when the target was raised — #1305', async () => {
+    const view = await render({
+      workout: running({ holdingWatts: 100, raisedFromWatts: 75, nowRiding: '10 min at 30%' }),
+    });
+    const text = view.container.textContent ?? '';
+    expect(text).toContain(
+      'Holding 100 W. This block asks for 75 W, which is less than the lowest target this trainer accepts.',
+    );
+  });
+
+  it('says nothing about a raise when the workout’s own number was written — #1305', async () => {
+    const view = await render({ workout: running() });
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Holding 150 W.');
+    expect(text).not.toContain('This block asks for');
+  });
+
   it('says the trainer has not confirmed rather than quoting a number it has not', async () => {
     // ⚠️ `TrainerPanel.tsx`'s rule, applied here: the word "Holding" is the
     // guarantee, and it may not appear before the machine has answered.
