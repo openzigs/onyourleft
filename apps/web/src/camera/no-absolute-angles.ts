@@ -217,6 +217,44 @@ function textsOf(parsed: ts.SourceFile): readonly { line: number; text: string }
 }
 
 /**
+ * The outermost `+` chains made only of string literals, each as the parts it
+ * joins: Prettier wraps a long sentence into `'a ' + 'b'`, and a phrase split
+ * across that wrap renders whole (#1245's review).
+ */
+function concatenatedTextsOf(
+  parsed: ts.SourceFile,
+): readonly { line: number; parts: readonly string[] }[] {
+  const found: { line: number; parts: readonly string[] }[] = [];
+  const leaves = (node: ts.Expression): readonly string[] | undefined => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return [node.text];
+    }
+    if (ts.isParenthesizedExpression(node)) {
+      return leaves(node.expression);
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = leaves(node.left);
+      const right = left && leaves(node.right);
+      return left && right ? [...left, ...right] : undefined;
+    }
+    return undefined;
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const parts = leaves(node);
+      if (parts) {
+        const { line } = parsed.getLineAndCharacterOfPosition(node.getStart(parsed));
+        found.push({ line: line + 1, parts });
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return found;
+}
+
+/**
  * JSX text as React renders it: a line break and the white space around it
  * vanish, the lines that are left are joined with one space, and a line with
  * no break is kept as written. The rule is JSX's own, the one Babel and
@@ -384,6 +422,15 @@ export function renderedTextFindings<Rule>(
     const rule = ruleBroken(text);
     if (rule !== undefined) {
       findings.push({ line, text: text.trim(), rule });
+    }
+  }
+  // A sentence wrapped across a `+` chain is read whole, with every piece that
+  // is a finding of its own taken out, as the elements below are.
+  for (const { line, parts } of concatenatedTextsOf(parsed)) {
+    const rest = parts.map((part) => (ruleBroken(part) !== undefined ? '\u0000' : part)).join('');
+    const rule = ruleBroken(rest);
+    if (rule !== undefined) {
+      findings.push({ line, text: rest, rule });
     }
   }
   // A word split across elements: the element is read whole with every piece

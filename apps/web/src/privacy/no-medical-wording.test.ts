@@ -156,10 +156,23 @@ describe('the scan itself can fire', () => {
     expect(medicalWordingIn('x.tsx', 'const e = <p>heart<br />condition</p>;')).toHaveLength(1);
   });
 
+  it.each([
+    ["const s = 'your safe ' + 'heart rate';", 'safe heart rate'],
+    ["const s = 'Not for a heart ' + 'condition.';", 'heart condition'],
+    ["const s = 'The hold protects ' + 'your heart.';", 'protects your heart'],
+    ["const s = 'a ' + 'car' + 'diac';", 'cardiac'],
+  ] as const)('reads a sentence wrapped across a + chain: %s', (source, word) => {
+    expect(medicalWordingIn('x.ts', source)).toStrictEqual([expect.objectContaining({ word })]);
+  });
+
+  it('does not fold a + chain that holds a value', () => {
+    expect(medicalWordingIn('x.ts', "const s = 'safe heart ' + n + ' rate';")).toStrictEqual([]);
+  });
+
   it('reads a phrase parted by a hyphen, a line break or a non-breaking space', () => {
     expect(bannedWordIn('a heart-condition')).toBe('heart condition');
     expect(bannedWordIn('safe\nheart rate')).toBe('safe heart rate');
-    expect(bannedWordIn('it protects  your heart')).toBe('protects your heart');
+    expect(bannedWordIn('it protects your heart')).toBe('protects your heart');
   });
 
   it.each([

@@ -21,7 +21,9 @@
  * text and every piece of JSX text, and then every JSX element **whole**, so
  * a word split across elements (`<p>car<b>diac</b></p>`) is read as the word
  * it renders. Character references in JSX are decoded, and **invisible
- * characters are removed before anything is matched** (`visibleText` of
+ * characters are removed before anything is matched** (a sentence wrapped
+ * across a `+` chain of literals is read whole, as Prettier wraps long ones;
+ *`visibleText` of
  * `@onyourleft/analysis`): a soft hyphen or a zero-width space inside a word
  * renders as nothing and would otherwise split it. An identifier and a comment
  * are never in scope, which is why this file's prose can name the words.
