@@ -1084,12 +1084,14 @@ const REPLANS_AVAILABLE = '?replans=available';
  * when the switch and its headline are above the list. It is 0 — on the
  * screen, no scrolling — and NOT {@link FOLD_MARGIN_PIXELS}. Measured at
  * {@link TABLET_IN_THE_SHELL} (fold at 768): the first *Ride* ended 98 px above
- * the fold with the switch under the list, and 3.7 px above it with the switch
- * and its two-line headline above. The switch's row is 44 px and the headline
- * 50, in a column 360 px wide; the 50 px floor needs about 46 px more than the
- * column has without moving something that is not this pass's (the ERG note
- * above the chooser is 74 px of it). The switch and its headline are held to
- * the full {@link FOLD_MARGIN_PIXELS}.
+ * the fold with the switch under the list, and 20 px above it on a Mac (CI's
+ * fonts are wider, and put it 22 px BELOW the fold when the headline took
+ * three lines and the headline was set at the body size) with the switch and
+ * its headline above. The switch's row is 44 px and the headline two lines
+ * of the small size, in a column 360 px wide; the 50 px floor needs about
+ * 30 px more than the column has without moving something that is not this
+ * pass's (the ERG note above the chooser is 74 px of it). The switch and its
+ * headline are held to the full {@link FOLD_MARGIN_PIXELS}.
  */
 const FIRST_RIDE_FLOOR_PIXELS = 0;
 const REPLAN_SWITCH = 'Re-plan during the ride';

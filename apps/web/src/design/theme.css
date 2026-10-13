@@ -3430,6 +3430,11 @@ a.oyl-button {
 }
 
 .oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
+  /* The headline is the one sentence above the list, and the column is short
+     (#1329): small and close-set, so it takes two lines and not three where
+     the fonts are wider. It stays bold, and its wording is the approved one. */
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.3;
   margin-block: 0;
 }
 
